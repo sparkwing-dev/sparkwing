@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"os/signal"
+	"strings"
 
 	flag "github.com/spf13/pflag"
 
@@ -42,6 +44,8 @@ func run(args []string) error {
 	apiURL := fs.String("api-url", "", "public API URL injected into the dashboard (default: same origin)")
 	requireLogin := fs.Bool("require-login", false,
 		"require controller-backed browser sessions; needs --controller or a profile with controller.url. Leave off for laptop-local dev.")
+	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
+		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For; empty ignores forwarded headers")
 
 	profileName := fs.String("profile", "", "storage profile name from ~/.config/sparkwing/profiles.yaml whose surfaces the dashboard reads")
 	stateSpec := fs.String("state-spec", "", "inline state backend spec, e.g. postgres://user:pw@host/db or s3://bucket/prefix")
@@ -49,6 +53,10 @@ func run(args []string) error {
 	artifactsSpec := fs.String("artifacts-spec", "", "inline artifact backend spec; only consulted when state is object-store-backed")
 
 	_ = fs.Parse(args)
+	trustedProxyCIDRs, err := parseTrustedProxyCIDRs(*trustedProxyCIDRsRaw)
+	if err != nil {
+		return fmt.Errorf("--trusted-proxy-cidrs: %w", err)
+	}
 
 	paths, err := swpaths.DefaultPaths()
 	if err != nil {
@@ -88,6 +96,7 @@ func run(args []string) error {
 			Token:             *token,
 			APIURL:            *apiURL,
 			RequireLogin:      *requireLogin,
+			TrustedProxyCIDRs: trustedProxyCIDRs,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
@@ -110,14 +119,15 @@ func run(args []string) error {
 			c = client.New(*controllerURL, nil)
 		}
 		opts := web.HandlerOptions{
-			Backend:       backend.NewClientBackend(c, logStore),
-			Paths:         paths,
-			ControllerURL: *controllerURL,
-			LogsURL:       *logsURL,
-			CacheURL:      *cacheURL,
-			Token:         *token,
-			APIURL:        *apiURL,
-			RequireLogin:  *requireLogin,
+			Backend:           backend.NewClientBackend(c, logStore),
+			Paths:             paths,
+			ControllerURL:     *controllerURL,
+			LogsURL:           *logsURL,
+			CacheURL:          *cacheURL,
+			Token:             *token,
+			APIURL:            *apiURL,
+			RequireLogin:      *requireLogin,
+			TrustedProxyCIDRs: trustedProxyCIDRs,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
@@ -125,7 +135,31 @@ func run(args []string) error {
 		return err
 	}
 
-	return web.Serve(ctx, paths, *addr)
+	return web.Serve(ctx, paths, *addr, trustedProxyCIDRs)
+}
+
+func parseTrustedProxyCIDRs(raw string) ([]netip.Prefix, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	prefixes := make([]netip.Prefix, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		prefix, err := netip.ParsePrefix(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR %q: %w", part, err)
+		}
+		if prefix.Addr().Is4In6() {
+			if prefix.Bits() < 96 {
+				return nil, fmt.Errorf("IPv4-mapped CIDR %q must use prefix length /96 through /128", part)
+			}
+			prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-96)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
 }
 
 func validateLoginBackend(requireLogin bool, controllerURL string) error {

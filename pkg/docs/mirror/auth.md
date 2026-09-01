@@ -80,6 +80,16 @@ now fails at startup instead of silently serving an unauthenticated dashboard.
 The controller URL must be an absolute `http` or `https` URL without embedded
 credentials, a query, or a fragment.
 
+Login throttling uses the TCP peer address and ignores forwarded headers by
+default. When a reverse proxy fronts `sparkwing-web`, pass its egress networks
+as `--trusted-proxy-cidrs=<CIDR,...>` or set the chart's
+`web.trustedProxyCIDRs`. Sparkwing accepts `X-Forwarded-For` only from a trusted
+peer and walks append-style chains from right to left until it reaches the
+nearest untrusted address. Values to its left are ignored. A malformed entry in
+the trusted suffix or an untrusted immediate peer falls back to the TCP peer.
+IPv4-mapped CIDRs with prefix lengths `/96` through `/128` normalize to IPv4;
+broader mapped prefixes fail startup. List proxy networks, not client networks.
+
 The login, first-admin, and logout forms carry a CSRF token in both a
 `SameSite=Strict` cookie and a hidden field. Sparkwing rejects a missing,
 cross-origin, or mismatched token with `403` before it calls the controller.

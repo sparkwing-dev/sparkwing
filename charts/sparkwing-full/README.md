@@ -210,6 +210,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `web.cache.url` | Cache the services panel probes. Probe-only; empty and no bundled cache leaves it off the panel. | (auto-computed from sub-chart) |
 | `web.tokenSecret.name` | Secret holding the controller-bearer token. | `""` |
 | `web.requireLogin` | Gate the dashboard behind /login (first visit offers first-admin signup). | `false` |
+| `web.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. | `[]` |
 
 ### Security and volume ownership
 

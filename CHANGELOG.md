@@ -68,6 +68,15 @@ code change to unlock.
   The `default` branch token requires dispatch metadata that controller
   webhook and local trigger claims do not supply.
 
+### Security
+
+- **web:** Login throttling now ignores forwarded client addresses unless the
+  connecting proxy matches an explicit trusted CIDR. Trusted append-style proxy
+  chains use the nearest untrusted address. Malformed entries in the trusted
+  suffix or an untrusted immediate peer use the TCP peer address. Configure
+  `--trusted-proxy-cidrs` or the chart's `web.trustedProxyCIDRs` to retain
+  per-client buckets behind a reverse proxy.
+
 ## [v0.38.2] - 2026-09-01
 
 ### Added

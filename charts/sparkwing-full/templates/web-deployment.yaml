@@ -84,6 +84,9 @@ spec:
             {{- if .Values.web.requireLogin }}
             - "--require-login"
             {{- end }}
+            {{- with .Values.web.trustedProxyCIDRs }}
+            - {{ printf "--trusted-proxy-cidrs=%s" (join "," .) | quote }}
+            {{- end }}
           env:
             - name: SPARKWING_HOME
               value: /tmp/sparkwing

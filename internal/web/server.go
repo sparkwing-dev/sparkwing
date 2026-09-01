@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -88,10 +89,11 @@ type HandlerOptions struct {
 	Version       string
 	ExtraServices []HealthService
 
-	RequireLogin bool
+	RequireLogin      bool
+	TrustedProxyCIDRs []netip.Prefix
 }
 
-func Serve(ctx context.Context, paths swpaths.Paths, addr string) error {
+func Serve(ctx context.Context, paths swpaths.Paths, addr string, trustedProxyCIDRs []netip.Prefix) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
@@ -106,7 +108,10 @@ func Serve(ctx context.Context, paths swpaths.Paths, addr string) error {
 	}
 	defer func() { _ = st.Close() }()
 	return ServeWithOptions(ctx,
-		HandlerOptions{Backend: backend.NewStoreBackend(st, paths, nil), Paths: paths},
+		HandlerOptions{
+			Backend: backend.NewStoreBackend(st, paths, nil), Paths: paths,
+			TrustedProxyCIDRs: trustedProxyCIDRs,
+		},
 		addr)
 }
 
@@ -194,9 +199,9 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	router.HandleFunc("GET /login", loginPageHandler(opts))
 	loginLimiter := newRateLimiter(loginRateBurst, loginRateWindow)
 	router.Handle("POST /login",
-		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, loginSubmitHandler(opts))))
+		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, loginSubmitHandler(opts))))
 	router.Handle("POST /login/bootstrap",
-		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, bootstrapSubmitHandler(opts))))
+		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, bootstrapSubmitHandler(opts))))
 	router.Handle("POST /logout", csrfFormMiddleware(logoutHandler(opts)))
 	if opts.ControllerURL != "" {
 		router.Handle("/api/v1/gitcache/", gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false)))
