@@ -110,6 +110,4 @@ func TestSecrets_NoCipherStoresPlaintext(t *testing.T) {
 	}
 }
 
-// Sanity: CreateRun is needed by some other tests in this package; we
-// don't use it here, but the import bookkeeping must reference store.
 var _ = context.Background

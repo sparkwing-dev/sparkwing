@@ -23,32 +23,21 @@ type Constraint interface {
 	isConstraint()
 }
 
-// fieldMeta is the resolved per-field metadata the SchemaBuilder
-// produces from chained constraint calls. The resolution chain reads
-// it directly -- no map-of-any indirection -- so steps and the
-// describe-tree view can branch on typed fields cheaply.
-//
-// Some fields stay any-typed because the constraint constructors
-// can't know the target field's Go type at call time (the user
-// writes Default(5) and the framework only learns "field Replicas is
-// int" later). SchemaBuilder.Build is the single point where those
-// late checks happen.
 type fieldMeta struct {
-	Name   string       // Go struct field name (also the schema key)
-	Flag   string       // CLI flag name (struct tag override or kebab-cased Name)
-	Desc   string       // help text from struct tag
-	GoType reflect.Type // declared type of the struct field
+	Name   string
+	Flag   string
+	Desc   string
+	GoType reflect.Type
 
 	Required     bool
 	RequiredWhen Predicate
 	HasDefault   bool
 	Default      any
 	HasComputed  bool
-	Computed     reflect.Value // func(T) FieldType
+	Computed     reflect.Value
 	DependsOn    []string
 	Bind         string
 
-	// Value validators -- evaluated after resolution against the bound value.
 	HasOneOf  bool
 	OneOf     []any
 	HasMin    bool
@@ -56,7 +45,7 @@ type fieldMeta struct {
 	HasMax    bool
 	Max       any
 	HasCustom bool
-	Custom    reflect.Value // func(T) error
+	Custom    reflect.Value
 }
 
 type requiredConstraint struct{}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -173,15 +174,6 @@ func TestArtifactUpload_AbsolutePath(t *testing.T) {
 	}
 }
 
-// TestResolveGitRepo_AutoClonesWhenMissing covers the split-brain
-// recovery path: a name is in repoNames (config persisted) but the
-// bare-repo dir is missing (disk was wiped or never cloned at
-// registration time). resolveGitRepo should clone on demand from a
-// reachable URL rather than returning "registered but not cloned"
-// forever.
-//
-// The test uses a local upstream bare repo as the registered URL so
-// no SSH / network is required.
 func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 	root := t.TempDir()
 
@@ -226,10 +218,6 @@ func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 	}
 }
 
-// TestResolveGitRepo_AutoCloneFailureKeepsSeedHint verifies that a
-// failed auto-clone (bad URL / no network) still returns an error
-// pointing at the /sync/seed recovery path, so the operator's
-// playbook stays valid.
 func TestResolveGitRepo_AutoCloneFailureKeepsSeedHint(t *testing.T) {
 	root := t.TempDir()
 	oldRepoDir := repoDir
@@ -257,7 +245,7 @@ func TestResolveGitRepo_AutoCloneFailureKeepsSeedHint(t *testing.T) {
 	}
 }
 
-func TestSyncSeed_ImportsOnlyRequestedSeedRef(t *testing.T) {
+func TestSyncSeed_ImportsOnlyRequestedWorkspaceRef(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")
 	runGit(t, src, "init")
@@ -292,22 +280,168 @@ func TestSyncSeed_ImportsOnlyRequestedSeedRef(t *testing.T) {
 		namesFile = oldNamesFile
 	})
 
+	seed := func(workspace bool) {
+		f, err := os.Open(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+		path := "/sync/seed?repo=https://git.example.com/acme/widgets.git&sha=" + wanted
+		if workspace {
+			path += "&workspace=1"
+		}
+		req := httptest.NewRequest(http.MethodPost, path, f)
+		w := httptest.NewRecorder()
+		handleSyncSeed(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("workspace=%v status = %d: %s", workspace, w.Code, w.Body.String())
+		}
+	}
+	seed(false)
+	seed(true)
+
+	bareRepo := filepath.Join(repoDir, repoHash("https://git.example.com/acme/widgets.git")+".git")
+	runGit(t, bareRepo, "cat-file", "-e", wanted+"^{commit}")
+	workspaceRefs := strings.Fields(runGit(t, bareRepo, "for-each-ref", "--format=%(refname)", "refs/sparkwing-workspace/"))
+	if len(workspaceRefs) != 1 || !strings.HasSuffix(workspaceRefs[0], "/"+wanted) {
+		t.Fatalf("workspace refs = %v", workspaceRefs)
+	}
+	if out, err := exec.Command("git", "-C", bareRepo, "show-ref", "--verify", "refs/sparkwing-seed/"+wanted).CombinedOutput(); err != nil {
+		t.Fatalf("ordinary seed ref was removed: %v: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", bareRepo, "show-ref", "--verify", "refs/sparkwing-workspace-incoming/"+wanted).CombinedOutput(); err == nil {
+		t.Fatalf("workspace import ref was retained: %s", out)
+	}
+	if out, err := exec.Command("git", "-C", bareRepo, "cat-file", "-e", private+"^{commit}").CombinedOutput(); err == nil {
+		t.Fatalf("private commit was imported unexpectedly: %s", out)
+	}
+}
+
+func TestSyncSeed_PrunesRejectedWorkspaceObject(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	runGit(t, source, "init")
+	if err := os.WriteFile(filepath.Join(source, "blob"), []byte("not a commit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.TrimSpace(runGit(t, source, "hash-object", "-w", "blob"))
+	ref := "refs/sparkwing-seed/" + sha
+	runGit(t, source, "update-ref", ref, sha)
+	bundle := filepath.Join(root, "blob.bundle")
+	runGit(t, source, "bundle", "create", bundle, ref)
+
+	oldRepoDir := repoDir
+	oldNamesFile := namesFile
+	repoDir = filepath.Join(root, "cache")
+	namesFile = filepath.Join(root, "names.json")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		repoDir = oldRepoDir
+		namesFile = oldNamesFile
+	})
+
 	f, err := os.Open(bundle)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	req := httptest.NewRequest(http.MethodPost, "/sync/seed?repo=https://git.example.com/acme/widgets.git&sha="+wanted, f)
-	w := httptest.NewRecorder()
-	handleSyncSeed(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	request := httptest.NewRequest(http.MethodPost,
+		"/sync/seed?workspace=1&repo=https://git.example.com/acme/widgets.git&sha="+sha, f)
+	response := httptest.NewRecorder()
+	handleSyncSeed(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", response.Code, response.Body.String())
 	}
-
 	bareRepo := filepath.Join(repoDir, repoHash("https://git.example.com/acme/widgets.git")+".git")
-	runGit(t, bareRepo, "cat-file", "-e", wanted+"^{commit}")
-	if out, err := exec.Command("git", "-C", bareRepo, "cat-file", "-e", private+"^{commit}").CombinedOutput(); err == nil {
-		t.Fatalf("private commit was imported unexpectedly: %s", out)
+	if out, err := exec.Command("git", "-C", bareRepo, "cat-file", "-e", sha).CombinedOutput(); err == nil {
+		t.Fatalf("rejected workspace object survived cleanup: %s", out)
+	}
+}
+
+func TestRetainWorkspaceSeedRejectsNewSnapshotAtCapacity(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo.git")
+	runGit(t, repo, "init", "--bare")
+	source := filepath.Join(t.TempDir(), "source")
+	runGit(t, source, "init")
+	runGit(t, source, "config", "user.email", "sparkwing@example.invalid")
+	runGit(t, source, "config", "user.name", "Sparkwing Test")
+	var shas []string
+	for i := range 3 {
+		if err := os.WriteFile(filepath.Join(source, "value"), []byte{byte('0' + i)}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, source, "add", "value")
+		runGit(t, source, "commit", "-m", string(rune('a'+i)))
+		sha := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
+		shas = append(shas, sha)
+		runGit(t, repo, "fetch", source, sha)
+		seedRef := "refs/sparkwing-workspace-incoming/" + sha
+		if i == 2 {
+			runGit(t, repo, "update-ref", "refs/sparkwing-seed/"+sha, sha)
+		}
+		runGit(t, repo, "update-ref", seedRef, sha)
+		err := retainWorkspaceSeed(repo, seedRef, sha, 2)
+		if i < 2 && err != nil {
+			t.Fatal(err)
+		}
+		if i == 2 && (err == nil || !strings.Contains(err.Error(), "limit 2")) {
+			t.Fatalf("third retain error = %v, want capacity rejection", err)
+		}
+	}
+	refs := strings.Fields(runGit(t, repo, "for-each-ref", "--format=%(refname)", "refs/sparkwing-workspace/"))
+	if len(refs) != 2 {
+		t.Fatalf("workspace refs = %v, want cap 2", refs)
+	}
+	for _, sha := range shas[:2] {
+		if !slices.ContainsFunc(refs, func(ref string) bool { return strings.HasSuffix(ref, "/"+sha) }) {
+			t.Fatalf("admitted snapshot %s was evicted: %v", sha, refs)
+		}
+	}
+	for _, sha := range shas {
+		if out, err := exec.Command("git", "-C", repo, "show-ref", "--verify", "refs/sparkwing-workspace-incoming/"+sha).CombinedOutput(); err == nil {
+			t.Fatalf("workspace import ref %s retained: %s", sha, out)
+		}
+	}
+	if out, err := exec.Command("git", "-C", repo, "show-ref", "--verify", "refs/sparkwing-seed/"+shas[2]).CombinedOutput(); err != nil {
+		t.Fatalf("ordinary seed ref was removed on workspace rejection: %v: %s", err, out)
+	}
+	runGit(t, repo, "update-ref", "-d", "refs/sparkwing-seed/"+shas[2])
+	pruneUnreachableSeedObjects(repo)
+	if out, err := exec.Command("git", "-C", repo, "cat-file", "-e", shas[2]+"^{commit}").CombinedOutput(); err == nil {
+		t.Fatalf("rejected workspace object remained after its ordinary ref was removed: %s", out)
+	}
+}
+
+func TestRetainWorkspaceSeedRefreshesOneRefPerSnapshot(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo.git")
+	runGit(t, repo, "init", "--bare")
+	source := filepath.Join(t.TempDir(), "source")
+	runGit(t, source, "init")
+	runGit(t, source, "config", "user.email", "sparkwing@example.invalid")
+	runGit(t, source, "config", "user.name", "Sparkwing Test")
+	if err := os.WriteFile(filepath.Join(source, "value"), []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, source, "add", "value")
+	runGit(t, source, "commit", "-m", "same")
+	sha := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
+	runGit(t, repo, "fetch", source, sha)
+	seedRef := "refs/sparkwing-workspace-incoming/" + sha
+	runGit(t, repo, "update-ref", "refs/sparkwing-seed/"+sha, sha)
+	for range 3 {
+		runGit(t, repo, "update-ref", seedRef, sha)
+		if err := retainWorkspaceSeed(repo, seedRef, sha, 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refs := strings.Fields(runGit(t, repo, "for-each-ref", "--format=%(refname)", "refs/sparkwing-workspace/"))
+	if len(refs) != 1 || !strings.HasSuffix(refs[0], "/"+sha) {
+		t.Fatalf("workspace refs = %v, want one refreshed ref", refs)
+	}
+	if out, err := exec.Command("git", "-C", repo, "show-ref", "--verify", "refs/sparkwing-seed/"+sha).CombinedOutput(); err != nil {
+		t.Fatalf("ordinary seed ref was removed on workspace success: %v: %s", err, out)
 	}
 }
 
@@ -318,7 +452,7 @@ func runGit(t *testing.T, dir string, args ...string) string {
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", append([]string{"-c", "commit.gpgSign=false"}, args...)...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

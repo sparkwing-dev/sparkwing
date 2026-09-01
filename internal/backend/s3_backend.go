@@ -17,19 +17,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// DefaultLiveTTL bounds how long the dashboard's parsed run snapshot
-// is reused before it re-reads the object store. Live S3 runs append
-// to state.ndjson over time; a non-zero TTL turns the cache into a
-// poll-with-jitter freshness window. Set to zero to disable caching.
 const DefaultLiveTTL = 2 * time.Second
 
-// S3Backend serves the dashboard from runs/<id>/state.ndjson dumps in
-// an ArtifactStore. State entries are cached with a short TTL so live
-// runs (Mode 2 NDJSON appends) appear with sub-second latency without
-// hammering the bucket on every request.
 type S3Backend struct {
 	store    storage.ArtifactStore
-	logStore storage.LogStore // nil means logs render as empty
+	logStore storage.LogStore
 	liveTTL  time.Duration
 
 	mu    sync.Mutex
@@ -49,8 +41,6 @@ type runState struct {
 	events []store.Event
 }
 
-// NewS3Backend binds an S3Backend to the given artifact store. logStore
-// is optional. The artifact store must support List.
 func NewS3Backend(art storage.ArtifactStore, logStore storage.LogStore) *S3Backend {
 	return &S3Backend{
 		store:    art,
@@ -60,13 +50,10 @@ func NewS3Backend(art storage.ArtifactStore, logStore storage.LogStore) *S3Backe
 	}
 }
 
-// SetLiveTTL overrides DefaultLiveTTL. A zero or negative value
-// disables caching (every read parses the object store fresh).
 func (b *S3Backend) SetLiveTTL(d time.Duration) { b.liveTTL = d }
 
 var _ Backend = (*S3Backend)(nil)
 
-// SetCapabilities overrides the default S3-only capabilities body.
 func (b *S3Backend) SetCapabilities(c Capabilities) { b.caps = c }
 
 func (b *S3Backend) Capabilities(context.Context) (Capabilities, error) {
@@ -81,7 +68,6 @@ func (b *S3Backend) Capabilities(context.Context) (Capabilities, error) {
 	return b.caps, nil
 }
 
-// stateKey mirrors orchestrator.dumpRunState's output path.
 func stateKey(runID string) string {
 	return "runs/" + runID + "/state.ndjson"
 }
@@ -131,9 +117,6 @@ func (b *S3Backend) ListNodes(ctx context.Context, runID string) ([]*store.Node,
 	return st.nodes, nil
 }
 
-// ListEventsAfter returns events with seq > afterSeq. Mode 2 state
-// dumps interleave event envelopes alongside run/node rows; older
-// final-only dumps carry no events and yield an empty slice.
 func (b *S3Backend) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
 	st, err := b.loadState(ctx, runID)
 	if err != nil {
@@ -172,9 +155,6 @@ func (b *S3Backend) StreamNodeLog(ctx context.Context, runID, nodeID string) (io
 	return b.logStore.Stream(ctx, runID, nodeID)
 }
 
-// loadState fetches + parses runs/<id>/state.ndjson with a short TTL
-// cache so live Mode 2 runs (NDJSON appended over time) appear in the
-// dashboard within liveTTL of an update.
 func (b *S3Backend) loadState(ctx context.Context, runID string) (*runState, error) {
 	b.mu.Lock()
 	if entry, ok := b.cache[runID]; ok {
@@ -212,11 +192,6 @@ func (b *S3Backend) loadState(ctx context.Context, runID string) (*runState, err
 	return st, nil
 }
 
-// parseStateNDJSON decodes the dump format the orchestrator writes
-// and the s3state backend appends to over the lifetime of a run.
-// Replay semantics: last-write-wins for run/node records (Mode 2
-// re-PUTs the whole envelope log on each flush), accumulating for
-// events.
 func parseStateNDJSON(rc io.Reader) (*runState, error) {
 	type envelope struct {
 		Kind string          `json:"kind"`
@@ -270,14 +245,10 @@ func parseStateNDJSON(rc io.Reader) (*runState, error) {
 	return st, nil
 }
 
-// runIDFromStateKey parses state keys through the layout owner's
-// single definition in pkg/storage/s3state.
 func runIDFromStateKey(key string) (string, bool) {
 	return s3state.RunIDFromStateKey(key)
 }
 
-// applyRunFilter mirrors store.ListRuns' SQL semantics in memory:
-// filter, sort newest-first, then limit.
 func applyRunFilter(runs []*store.Run, f store.RunFilter) []*store.Run {
 	pipelineSet := toSet(f.Pipelines)
 	statusSet := toSet(f.Statuses)

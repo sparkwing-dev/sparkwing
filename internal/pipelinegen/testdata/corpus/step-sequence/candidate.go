@@ -25,9 +25,6 @@ func (GenStepSequence) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, r
 
 type genStepSequenceJob struct{ sw.Base }
 
-// Work builds the job's inner DAG. compile returns a typed value that
-// sign and package read back with StepGet, so the version is computed
-// once and shared across the steps.
 func (j *genStepSequenceJob) Work(w *sw.Work) (*sw.WorkStep, error) {
 	compile := sw.Step(w, "compile", func(ctx context.Context) (string, error) {
 		version := "v1.4.2"

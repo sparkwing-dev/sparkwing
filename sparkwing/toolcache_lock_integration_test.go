@@ -17,8 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// contentionMessage is what golangci-lint prints when it refuses to run
-// beside another instance.
 const contentionMessage = "parallel golangci-lint is running"
 
 func TestLintWithoutSerialRunnersFailsWhileAnotherRunHoldsTheLock(t *testing.T) {
@@ -60,11 +58,6 @@ func TestLintWithSerialRunnersWaitsForTheLockThenRuns(t *testing.T) {
 	}
 }
 
-// lintFixture returns a seeded worktree and a private temp directory to
-// use as the child's TMPDIR. golangci-lint's parallel-runner lock is one
-// file per temp directory and a scoped GOLANGCI_LINT_CACHE does not move
-// it, so a private TMPDIR is what makes these tests contend with their
-// own held lock rather than with a real gate linting alongside them.
 func lintFixture(t *testing.T) (dir, tmp string) {
 	t.Helper()
 	if testing.Short() {
@@ -78,10 +71,6 @@ func lintFixture(t *testing.T) (dir, tmp string) {
 	return seedLintWorktree(t, filepath.Join(t.TempDir(), "wt")), t.TempDir()
 }
 
-// holdLintLock takes the flock golangci-lint takes, on the path a child
-// with TMPDIR=tmp will look at. A zero hold keeps it until the returned
-// release runs; otherwise it is released after hold elapses. Release is
-// idempotent so a deferred call after an early release is harmless.
 func holdLintLock(t *testing.T, tmp string, hold time.Duration) (release func()) {
 	t.Helper()
 	f, err := os.OpenFile(filepath.Join(tmp, "golangci-lint.lock"), os.O_CREATE|os.O_RDWR, 0o600)
@@ -104,10 +93,6 @@ func holdLintLock(t *testing.T, tmp string, hold time.Duration) (release func())
 	return release
 }
 
-// lintWithLockTmp runs golangci-lint in dir the way a gate's lint step
-// does, with flags spliced in and TMPDIR pointed at the private lock
-// directory. Findings are expected, so a non-zero exit is returned
-// rather than failing the test.
 func lintWithLockTmp(t *testing.T, dir, tmp, flags string) (string, error) {
 	t.Helper()
 	useWorkDir(t, dir)

@@ -1,7 +1,3 @@
-// `sparkwing configure profiles test` -- one-shot health check for the selected
-// profile. Probes controller reachability, auth, logs, and gitcache
-// so operators can distinguish "my CLI is wrong" from "the controller
-// is down" without running four curl commands by hand.
 package main
 
 import (
@@ -24,12 +20,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
-// profileProbeResult is one row in the health report. Kept private to
-// this file because the same struct feeds both the table rendering
-// and the JSON output with identical field names.
 type profileProbeResult struct {
 	Name      string `json:"name"`
-	Status    string `json:"status"` // "ok" | "warn" | "fail" | "skip"
+	Status    string `json:"status"`
 	Target    string `json:"target,omitempty"`
 	Detail    string `json:"detail,omitempty"`
 	LatencyMS int64  `json:"latency_ms,omitempty"`
@@ -102,21 +95,6 @@ func runProfilesTest(args []string) error {
 	return nil
 }
 
-// interpretHealthBody reads a GET /health response and folds it into
-// the probe result: non-200 → fail; 200 with "degraded" → warn +
-// joined problems; 200 + ok → no-op. Returns the decoded body (so
-// callers can inspect extra fields like auth) and true if the caller
-// should stop (status was set to fail or warn).
-//
-// A 200 body that is not the JSON contract is not itself a fault: the
-// status stands on its own. A body that could not be read is, though --
-// the operator asked this command for the service's own account of
-// itself and did not get one, so it fails rather than reporting health
-// it never saw.
-//
-// The shape and the degraded rule live in internal/health so this
-// command and the dashboard's services panel cannot drift into
-// disagreeing about the same service at the same moment.
 func interpretHealthBody(r *profileProbeResult, resp *http.Response) (health.Response, bool) {
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
@@ -142,9 +120,6 @@ func interpretHealthBody(r *profileProbeResult, resp *http.Response) (health.Res
 	return body, false
 }
 
-// probeController GETs <controller>/api/v1/health. The route is
-// explicitly unauthenticated (k8s livenessProbes can't carry bearer
-// tokens), so a 200 here without a token is expected.
 func probeController(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "controller", Target: prof.ControllerURL()}
 	if prof.ControllerURL() == "" {
@@ -174,9 +149,6 @@ func probeController(ctx context.Context, prof *profile.Profile) profileProbeRes
 	return r
 }
 
-// probeAuth GETs /api/v1/runs?limit=1 with the profile's token. A 200
-// means the token authenticates; 401/403 means a bad token; 5xx
-// implies a controller issue already surfaced by probeController.
 func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "auth"}
 	if prof.ControllerURL() == "" {
@@ -221,10 +193,6 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	return r
 }
 
-// probeLogs reports the profile's logs backend. Logs route through the
-// controller unless the profile declares an explicit logs: backend, so
-// reachability is covered by the controller probe; this only describes
-// where log bodies land.
 func probeLogs(_ context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "logs", Target: profile.SpecString(prof.Logs)}
 	if prof.Logs == nil {
@@ -242,11 +210,6 @@ func probeLogs(_ context.Context, prof *profile.Profile) profileProbeResult {
 	return r
 }
 
-// probeGitcache discovers the cache pod URL via the controller's
-// /api/v1/services endpoint, then probes its /health. Missing
-// controller or no announced cache pod => warn. interpretHealthBody
-// surfaces background-fetch failures / cache-dir-unwritable problems
-// to the operator as warnings.
 func probeGitcache(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "gitcache"}
 	if !prof.HasController() {
@@ -282,9 +245,6 @@ func probeGitcache(ctx context.Context, prof *profile.Profile) profileProbeResul
 	return r
 }
 
-// whoamiResp mirrors pkg/controller.whoamiResp. Duplicated (rather
-// than imported) to keep the CLI binary from dragging the controller
-// package and its storage deps.
 type whoamiResp struct {
 	Principal   string   `json:"principal"`
 	Kind        string   `json:"kind"`

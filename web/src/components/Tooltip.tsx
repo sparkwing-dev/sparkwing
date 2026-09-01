@@ -25,8 +25,6 @@ export default function Tooltip({ content, children }: TooltipProps) {
     const tipWidth = tipRef.current?.offsetWidth || 200;
     const tipHeight = tipRef.current?.offsetHeight || 60;
     const cx = rect.left + rect.width / 2;
-    // Flip below the trigger when there isn't enough room above for
-    // the tooltip + arrow + a few pixels of breathing room.
     const flip = rect.top - tipHeight - 12 < 8;
     const y = flip ? rect.bottom + 6 : rect.top - 6;
     let x = cx;
@@ -61,8 +59,6 @@ export default function Tooltip({ content, children }: TooltipProps) {
       : pos.align === "right"
         ? "mr-3 ml-auto"
         : "mx-auto";
-  // When flipped, the arrow sits above the bubble pointing up; with
-  // the default direction it sits below pointing down.
   const arrow = (
     <div
       className={`w-2 h-2 bg-[#1e293b] border-${pos.flip ? "t" : "b"} border-${pos.flip ? "l" : "r"} border-[var(--border)] rotate-45 ${pos.flip ? "-mb-1" : "-mt-1"} ${arrowAlign}`}

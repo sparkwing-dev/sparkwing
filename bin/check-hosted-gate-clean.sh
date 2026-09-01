@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+release_tag=""
+if [ "${1:-}" = "--release-self-pin" ]; then
+  if [ "$#" -ne 4 ]; then
+    echo "usage: $0 [--release-self-pin <tag> <expected-patch-oid>] <expected-head>" >&2
+    exit 2
+  fi
+  release_tag="$2"
+  expected_patch_oid="$3"
+  shift 3
+fi
 if [ "$#" -ne 1 ]; then
-  echo "usage: $0 <expected-head>" >&2
+  echo "usage: $0 [--release-self-pin <tag> <expected-patch-oid>] <expected-head>" >&2
   exit 2
 fi
 
@@ -14,8 +24,53 @@ if [ "$actual_head" != "$expected_head" ]; then
 fi
 
 status="$(git status --porcelain --untracked-files=all)"
-if [ -n "$status" ]; then
+if [ -z "$release_tag" ] && [ -n "$status" ]; then
   echo "hosted gate changed the checked-out tree or index:" >&2
   printf '%s\n' "$status" >&2
   exit 1
+fi
+if [ -n "$release_tag" ]; then
+  if ! [[ "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+    echo "invalid release self-pin tag: $release_tag" >&2
+    exit 2
+  fi
+  mod="testdata/k8s-e2e/repo/.sparkwing/go.mod"
+  sum="testdata/k8s-e2e/repo/.sparkwing/go.sum"
+  fallback="pkg/scaffold/version.go"
+  snapshot=".apidiff/pkg_scaffold.txt"
+  pipeline_mod=".sparkwing/go.mod"
+  pipeline_sum=".sparkwing/go.sum"
+  expected_status="$(printf ' M %s\nM  %s\nM  %s\n M %s\n M %s\n M %s' "$snapshot" "$pipeline_mod" "$pipeline_sum" "$fallback" "$mod" "$sum")"
+  if [ "$status" != "$expected_status" ]; then
+    echo "hosted gate changed files outside the release self-pin allowance:" >&2
+    printf '%s\n' "$status" >&2
+    exit 1
+  fi
+  if ! awk -v module='github.com/sparkwing-dev/sparkwing' -v expected="$release_tag" \
+    '($1 == "require" && $2 == module && $3 == expected) || ($1 == module && $2 == expected) { found = 1 } END { exit !found }' "$mod"; then
+    echo "release fixture does not pin $release_tag" >&2
+    exit 1
+  fi
+  if ! grep -Fxq "const FallbackSDKVersion = \"$release_tag\"" "$fallback"; then
+    echo "release scaffold fallback does not pin $release_tag" >&2
+    exit 1
+  fi
+  if ! grep -Fxq "const FallbackSDKVersion = \"$release_tag\"" "$snapshot"; then
+    echo "release scaffold snapshot does not pin $release_tag" >&2
+    exit 1
+  fi
+  if ! awk -v module='github.com/sparkwing-dev/sparkwing' -v expected="$release_tag" \
+    '($1 == "require" && $2 == module && $3 == expected) || ($1 == module && $2 == expected) { found = 1 } END { exit !found }' "$pipeline_mod"; then
+    echo "release pipeline does not pin $release_tag" >&2
+    exit 1
+  fi
+  if grep -Eq '^[[:space:]]*(replace[[:space:]]+)?github.com/sparkwing-dev/sparkwing([[:space:]]|$).*=>' "$pipeline_mod"; then
+    echo "release pipeline retains the local sparkwing self-replace" >&2
+    exit 1
+  fi
+  actual_patch_oid="$(git diff HEAD --binary -- "$snapshot" "$pipeline_mod" "$pipeline_sum" "$fallback" "$mod" "$sum" | git hash-object --stdin)"
+  if [ "$actual_patch_oid" != "$expected_patch_oid" ]; then
+    echo "release self-pin patch changed during the hosted gate" >&2
+    exit 1
+  fi
 fi

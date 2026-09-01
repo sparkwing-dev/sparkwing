@@ -253,9 +253,6 @@ func TestLogger_WritesThroughContext(t *testing.T) {
 	}
 }
 
-// recordingEmitter captures full LogRecords so tests can assert on
-// event/level/msg together. Used across the sparkwing_test package
-// (sanity_test.go, fs_test.go).
 type recordingEmitter struct {
 	records []sparkwing.LogRecord
 }

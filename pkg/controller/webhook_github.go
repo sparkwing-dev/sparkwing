@@ -17,9 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// webhookBodyLimit caps the raw body size for /webhooks/github. 1 MiB
-// is enough for any realistic GitHub push payload and keeps the HMAC
-// verification read bounded.
 const webhookBodyLimit = 1 << 20
 
 // WithGitHubWebhookSecret installs the shared secret used to verify
@@ -49,14 +46,6 @@ type githubPushPayload struct {
 	} `json:"head_commit"`
 }
 
-// handleGitHubWebhook receives a GitHub webhook delivery for the
-// pipeline named in the URL path. Auth is HMAC-SHA256 over the raw
-// body; GitHub cannot carry a bearer token.
-//
-// Events: "ping" -> pong; "push" on a refs/heads/ branch -> enqueue
-// a trigger; "pull_request" on the opened/synchronize/reopened actions
-// -> enqueue a trigger against the PR head; anything else -> 202
-// ignored. Tag pushes and branch deletions are ignored.
 func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	if s.githubWebhookSecret == "" {
 		writeError(w, http.StatusServiceUnavailable,
@@ -146,7 +135,7 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 	g := &sparkwing.Git{
 		Branch: branch,
 		SHA:    payload.After,
-		Repo:   repoName,
+		Repo:   payload.Repository.FullName,
 	}
 
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
@@ -212,9 +201,6 @@ type githubPullRequestPayload struct {
 	} `json:"repository"`
 }
 
-// defaultPullRequestActions are the pull_request actions that dispatch
-// a run. Other actions (labeled, closed, edited, ...) are acknowledged
-// and ignored so a build only fires when the diff itself changed.
 var defaultPullRequestActions = map[string]struct{}{
 	"opened":      {},
 	"synchronize": {},
@@ -260,7 +246,7 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	g := &sparkwing.Git{
 		Branch: payload.PullRequest.Head.Ref,
 		SHA:    payload.PullRequest.Head.SHA,
-		Repo:   repoName,
+		Repo:   payload.Repository.FullName,
 	}
 	trigger.PullRequest = sparkwing.PullRequestFromEnv(triggerEnv)
 
@@ -281,6 +267,9 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	pendingStatus := s.reserveGitHubCommitStatus(r.Context(), runID, "pending")
+	dispatchAccepted := false
+	defer func() { pendingStatus(dispatchAccepted) }()
 	if err := s.dispatcher.Dispatch(r.Context(), RunRequest{
 		RunID:    runID,
 		Pipeline: pipeline,
@@ -290,6 +279,7 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	dispatchAccepted = true
 
 	s.logger.Info(
 		"github pull_request webhook accepted",
@@ -309,9 +299,6 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	})
 }
 
-// verifyGitHubSignature checks the "sha256=<hex>" signature header
-// against an HMAC-SHA256 of body with secret. Returns false on any
-// shape mismatch so callers always reject ambiguous requests.
 func verifyGitHubSignature(header string, body []byte, secret string) bool {
 	expectedHex, ok := strings.CutPrefix(header, "sha256=")
 	if !ok {

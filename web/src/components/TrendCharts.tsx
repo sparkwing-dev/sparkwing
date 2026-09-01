@@ -58,9 +58,15 @@ export default function TrendCharts({
   }, [pipeline, hours]);
 
   useEffect(() => {
-    refresh();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refresh();
+    });
     const i = setInterval(refresh, 30_000);
-    return () => clearInterval(i);
+    return () => {
+      cancelled = true;
+      clearInterval(i);
+    };
   }, [refresh]);
 
   if (points.length < 2) {
@@ -78,7 +84,7 @@ export default function TrendCharts({
 
   return (
     <div className="space-y-4">
-      {/* Duration chart: avg + p95 */}
+      {                               }
       <div>
         <div className="text-xs font-medium text-[var(--muted)] mb-2">
           Duration
@@ -118,7 +124,7 @@ export default function TrendCharts({
         </ResponsiveContainer>
       </div>
 
-      {/* Queue wait chart */}
+      {                      }
       <div>
         <div className="text-xs font-medium text-[var(--muted)] mb-2">
           Queue Wait
@@ -149,7 +155,7 @@ export default function TrendCharts({
         </ResponsiveContainer>
       </div>
 
-      {/* Success rate stacked bar */}
+      {                              }
       <div>
         <div className="text-xs font-medium text-[var(--muted)] mb-2">
           Success Rate

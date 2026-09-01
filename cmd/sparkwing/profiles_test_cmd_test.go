@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// errReader fails partway through a body, the shape a truncated
-// response takes: the status line and headers arrived, the body did
-// not.
 type errReader struct{ prefix string }
 
 func (r *errReader) Read(p []byte) (int, error) {
@@ -30,12 +27,6 @@ func healthResponse(status int, body io.Reader) *http.Response {
 	}
 }
 
-// The three verdicts this command reaches from a 200: a body it read
-// and understood, a body from a service outside the contract, and a
-// body it could not read at all. The last one is a failure -- an
-// operator ran `profiles test` to be told how the service is doing, and
-// reporting it healthy on a body that never arrived answers a question
-// nobody asked.
 func TestInterpretHealthBody(t *testing.T) {
 	cases := []struct {
 		name       string

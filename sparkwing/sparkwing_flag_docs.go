@@ -39,16 +39,6 @@ type SparkwingFlagDoc struct {
 	Hot bool
 }
 
-// sparkwingFlagDocs is the canonical documentation source for
-// sparkwing-owned flags. The order here is the order help renderers
-// walk; group boundaries determine section breaks. Adding a flag
-// here surfaces it in `sparkwing run --help` AND every per-pipeline
-// footer simultaneously.
-//
-// Subsumes `cmd/sparkwing/help_registry.go`'s runFlagSpecs (which
-// derives from this list). All sparkwing-owned flags are prefixed
-// `sw-` so pipeline authors have the full unprefixed namespace for
-// their typed Inputs flags.
 var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-cd", Short: "C", Argument: "PATH", Desc: "Run as if started in PATH", Group: "System"},
 	{Name: "sw-ref", Argument: "REF", Desc: "Run the pipeline at REF (branch/tag/SHA) instead of the working tree", Group: "System", Hot: true},
@@ -61,6 +51,7 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-dry-run", Desc: "Run each step's dry-run probe instead of its real action", Group: "System", Hot: true},
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
 	{Name: "sw-index", Argument: "PATH", Desc: "Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it)", Group: "System"},
+	{Name: "sw-run-handle-file", Argument: "PATH", Desc: "Atomically publish the accepted run's machine-readable handle to PATH", Group: "System"},
 	{Name: "profile", Argument: "NAME", Desc: "Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop)", Group: "System", Hot: true},
 	{Name: "target", Argument: "TARGET", Desc: "Run against the named pipeline deployment target (e.g. dev, prod)", Group: "System", Hot: true},
 }

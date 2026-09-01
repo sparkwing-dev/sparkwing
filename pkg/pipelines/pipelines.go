@@ -139,10 +139,6 @@ func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// pipelineKnownYAMLFields returns the set of YAML keys Pipeline
-// declares. The custom UnmarshalYAML bypasses decoder-level
-// KnownFields strictness (node.Decode doesn't inherit it), so we
-// re-implement the check here against this canonical set.
 func pipelineKnownYAMLFields() map[string]struct{} {
 	return map[string]struct{}{
 		"name": {}, "entrypoint": {}, "description": {},

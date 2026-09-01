@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// TestWaitForListenerOrExit_FailsFastOnEarlyExit ensures a supervisor
-// that exits during startup is reported immediately, not after the full
-// generous deadline.
 func TestWaitForListenerOrExit_FailsFastOnEarlyExit(t *testing.T) {
 	exited := make(chan struct{})
 	close(exited)
@@ -30,9 +27,6 @@ func TestWaitForListenerOrExit_FailsFastOnEarlyExit(t *testing.T) {
 	}
 }
 
-// TestWaitForListenerOrExit_TimesOutWhenAliveButSilent verifies the
-// generous-deadline path: a live process that never binds trips the
-// timeout, not the early-exit path.
 func TestWaitForListenerOrExit_TimesOutWhenAliveButSilent(t *testing.T) {
 	exited := make(chan struct{})
 	err := waitForListenerOrExit("127.0.0.1:1", exited, 300*time.Millisecond)
@@ -64,8 +58,6 @@ func TestDashboardIsNewer(t *testing.T) {
 	}
 }
 
-// TestProbeDashboardVersion_FallsBackToAddr checks the handshake reaches
-// a dashboard by its bind address when dev.env is absent.
 func TestProbeDashboardVersion_FallsBackToAddr(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/version", func(w http.ResponseWriter, r *http.Request) {
@@ -84,9 +76,6 @@ func TestProbeDashboardVersion_FallsBackToAddr(t *testing.T) {
 	}
 }
 
-// TestProbeDashboardVersion_MissingEndpoint returns ok=false for an
-// older dashboard that predates the version endpoint (404), so start
-// treats it as replaceable.
 func TestProbeDashboardVersion_MissingEndpoint(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
@@ -96,9 +85,6 @@ func TestProbeDashboardVersion_MissingEndpoint(t *testing.T) {
 	}
 }
 
-// TestTailFileFrom_OnlyNewInstanceLines is the deadline-message source
-// guarantee: the tail after a recorded offset excludes the previous
-// instance's log lines.
 func TestTailFileFrom_OnlyNewInstanceLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dashboard.log")
 	prev := "old request line 1\nold request line 2\n"
@@ -125,8 +111,6 @@ func TestTailFileFrom_OnlyNewInstanceLines(t *testing.T) {
 	}
 }
 
-// TestTailFileFrom_EmptyWhenNoNewOutput returns empty when the new
-// instance wrote nothing past the offset.
 func TestTailFileFrom_EmptyWhenNoNewOutput(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dashboard.log")
 	if err := os.WriteFile(path, []byte("only old lines\n"), 0o644); err != nil {
@@ -137,11 +121,6 @@ func TestTailFileFrom_EmptyWhenNoNewOutput(t *testing.T) {
 	}
 }
 
-// TestResolveDashboardPaths_Precedence pins the order the dashboard
-// resolves its state directory in, which is the order it had when it
-// read the environment itself: an explicit --home beats SPARKWING_HOME,
-// and SPARKWING_HOME beats the default. Routing the last two through
-// DefaultPaths has to leave both answers byte-identical.
 func TestResolveDashboardPaths_Precedence(t *testing.T) {
 	env := t.TempDir()
 	explicit := t.TempDir()
@@ -170,10 +149,6 @@ func TestResolveDashboardPaths_Precedence(t *testing.T) {
 	}
 }
 
-// TestResolveDashboardPaths_UnsetHomeStaysOutOfTheRealHome is what the
-// direct environment read used to defeat: with nothing set, a test
-// binary got the developer's own ~/.sparkwing and the dashboard created
-// its pid and log files there.
 func TestResolveDashboardPaths_UnsetHomeStaysOutOfTheRealHome(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", "")
 

@@ -34,8 +34,6 @@ interface PostResult {
   duration: number;
 }
 
-// Group consecutive parallel jobs together for visual layout.
-// Sequential jobs become single-item groups.
 interface JobGroup {
   jobs: PipelineJobResult[];
   parallel: boolean;
@@ -46,11 +44,9 @@ function groupJobs(jobs: PipelineJobResult[]): JobGroup[] {
   let i = 0;
   while (i < jobs.length) {
     if (jobs[i].rollback) {
-      // Rollback jobs get their own group
       groups.push({ jobs: [jobs[i]], parallel: false });
       i++;
     } else if (jobs[i].parallel) {
-      // Collect consecutive parallel jobs
       const pJobs: PipelineJobResult[] = [];
       while (i < jobs.length && jobs[i].parallel && !jobs[i].rollback) {
         pJobs.push(jobs[i]);
@@ -72,8 +68,6 @@ function formatDuration(ns: number): string {
   return `${s.toFixed(1)}s`;
 }
 
-// "adopted" nodes (cached + coalesced) share a dashed border
-// so operators see at a glance which nodes took output from elsewhere.
 const statusColors: Record<
   string,
   { bg: string; border: string; text: string; dot: string }
@@ -163,7 +157,6 @@ export default function PipelineView({ result }: { result: PipelineResult }) {
       const tgtNodes = container.querySelectorAll<HTMLElement>(
         `[data-group="${i + 1}"]`,
       );
-      // Use the worst status from each group for edge color
       const srcStatus = groups[i].jobs.some((j) => j.status === "failed")
         ? "failed"
         : groups[i].jobs[0]?.status || "skipped";
@@ -200,7 +193,7 @@ export default function PipelineView({ result }: { result: PipelineResult }) {
 
   return (
     <div>
-      {/* DAG */}
+      {         }
       <div
         ref={containerRef}
         className="relative flex items-start gap-12 overflow-x-auto pb-4 mb-4"
@@ -225,13 +218,13 @@ export default function PipelineView({ result }: { result: PipelineResult }) {
           })}
         </svg>
 
-        {/* Job groups as columns */}
+        {                           }
         {groups.map((group, groupIdx) => (
           <div
             key={groupIdx}
             className="flex flex-col items-center gap-2 shrink-0"
           >
-            {/* Group label for parallel groups */}
+            {                                     }
             {group.parallel && (
               <div className="text-[10px] text-[var(--muted)] uppercase tracking-wider mb-0.5">
                 parallel
@@ -265,7 +258,7 @@ export default function PipelineView({ result }: { result: PipelineResult }) {
         ))}
       </div>
 
-      {/* Post handlers */}
+      {                   }
       {result.posts && result.posts.length > 0 && (
         <div className="flex items-center gap-2 mb-4 text-xs text-[var(--muted)]">
           <span>post:</span>
@@ -280,7 +273,7 @@ export default function PipelineView({ result }: { result: PipelineResult }) {
         </div>
       )}
 
-      {/* Summary bar */}
+      {                 }
       <div className="flex items-center gap-4 text-xs text-[var(--muted)] mb-4">
         <span>
           Total:{" "}
@@ -295,7 +288,7 @@ export default function PipelineView({ result }: { result: PipelineResult }) {
         )}
       </div>
 
-      {/* Selected job details */}
+      {                          }
       {selectedJob && (
         <div>
           <div className="flex items-center gap-2 mb-2">

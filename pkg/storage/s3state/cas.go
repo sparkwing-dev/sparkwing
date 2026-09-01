@@ -17,24 +17,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// casMaxRetries bounds a contended read-modify-CAS loop before giving up.
 const casMaxRetries = 16
 
-// maxAncestorDepth bounds the parent-run walk EnqueueTrigger uses for
-// cycle detection, guarding against a corrupted parent chain.
 const maxAncestorDepth = 64
 
-// notSupported wraps ErrNotSupported for a control-plane operation the
-// backend cannot perform, either because the endpoint lacks conditional
-// writes or the feature is unavailable in this mode.
 func notSupported(op string) error {
 	return fmt.Errorf("%w: %s requires conditional-write support (object-store CAS), Mode 3 (Postgres), or Mode 4 (hosted controller)", ErrNotSupported, op)
 }
 
-// cas returns the backend's ConditionalWriter when the artifact store
-// implements it and the live endpoint enforces write preconditions. A
-// false ok means the caller must surface ErrNotSupported. A non-nil err
-// is a transport fault probing the endpoint and propagates unchanged.
 func (b *Backend) cas(ctx context.Context) (cw storage.ConditionalWriter, ok bool, err error) {
 	cw, implemented := storage.Conditional(b.art)
 	if !implemented {
@@ -47,10 +37,6 @@ func (b *Backend) cas(ctx context.Context) (cw storage.ConditionalWriter, ok boo
 	return cw, supported, nil
 }
 
-// seg hex-encodes an identifier into a single path-safe key segment.
-// Node IDs and pause reasons are caller-supplied and may carry slashes
-// or other characters an object key cannot; hex keeps the segment
-// reversible-free and collision-free without constraining the input.
 func seg(s string) string { return hex.EncodeToString([]byte(s)) }
 
 func dispatchPrefix(runID, nodeID string) string {
@@ -61,8 +47,6 @@ func dispatchKey(runID, nodeID string, seq int) string {
 	return fmt.Sprintf("%s%020d.json", dispatchPrefix(runID, nodeID), seq)
 }
 
-// seqFromDispatchKey extracts the seq from a dispatch record key,
-// returning false for any key that does not match the layout.
 func seqFromDispatchKey(key string) (int, bool) {
 	const suffix = ".json"
 	if !strings.HasSuffix(key, suffix) {
@@ -94,8 +78,6 @@ func approvalKey(runID, nodeID string) string {
 	return "runs/" + runID + "/approval/" + seg(nodeID) + ".json"
 }
 
-// isApprovalKey reports whether key is a runs/<id>/approval/<seg>.json
-// record, used to filter a full-bucket scan for ListPendingApprovals.
 func isApprovalKey(key string) bool {
 	parts := strings.Split(key, "/")
 	return len(parts) == 4 && parts[0] == "runs" && parts[2] == "approval" && strings.HasSuffix(parts[3], ".json")
@@ -107,16 +89,10 @@ func childTriggerKey(parentRunID, parentNodeID, pipeline string) string {
 	return "triggers/child/" + seg(parentRunID) + "/" + seg(parentNodeID) + "/" + seg(pipeline) + ".json"
 }
 
-// childTriggerIndex is the canonical idempotency record a spawning node
-// writes once per (parentRunID, parentNodeID, pipeline); a repeated
-// enqueue reads it back instead of minting a duplicate child run.
 type childTriggerIndex struct {
 	TriggerID string `json:"trigger_id"`
 }
 
-// getRecord reads and JSON-decodes the object at key, returning its
-// current ETag for a follow-on PutIfMatch. storage.ErrNotFound when the
-// object is absent.
 func getRecord(ctx context.Context, cw storage.ConditionalWriter, key string, v any) (storage.ETag, error) {
 	rc, etag, err := cw.GetWithETag(ctx, key)
 	if err != nil {
@@ -133,8 +109,6 @@ func getRecord(ctx context.Context, cw storage.ConditionalWriter, key string, v 
 	return etag, nil
 }
 
-// listKeys returns every key under prefix, translating the
-// list-unsupported sentinel into a feature-scoped ErrNotSupported.
 func (b *Backend) listKeys(ctx context.Context, prefix, feature string) ([]string, error) {
 	keys, err := b.art.List(ctx, prefix)
 	if err != nil {
@@ -200,8 +174,6 @@ func (b *Backend) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) e
 	return fmt.Errorf("WriteNodeDispatch: seq contention for %s/%s after %d attempts", d.RunID, d.NodeID, casMaxRetries)
 }
 
-// nextDispatchSeq returns one past the highest existing seq for the
-// node, mirroring the MAX(seq)+1 assignment the SQL store performs.
 func (b *Backend) nextDispatchSeq(ctx context.Context, runID, nodeID string) (int, error) {
 	keys, err := b.listKeys(ctx, dispatchPrefix(runID, nodeID), "dispatch tracking")
 	if err != nil {
@@ -411,9 +383,6 @@ func (b *Backend) ReleaseDebugPause(ctx context.Context, runID, nodeID, released
 	return nil
 }
 
-// releasePauseRecord stamps released_at on one open pause via a CAS
-// loop. Reports false (without error) when the pause is already
-// released or vanished, so a concurrent release is not double-counted.
 func (b *Backend) releasePauseRecord(ctx context.Context, cw storage.ConditionalWriter, key, releasedBy, kind string) (bool, error) {
 	for attempt := 0; attempt < casMaxRetries; attempt++ {
 		var p store.DebugPause
@@ -692,6 +661,9 @@ func (b *Backend) EnqueueTriggerWithEnv(
 		tg.GithubRepo = name
 	} else if parentRunID != "" {
 		if parent, perr := b.GetRun(ctx, parentRunID); perr == nil && parent != nil {
+			if strings.HasPrefix(parent.TriggerSource, "pipeline-working-tree@") {
+				tg.TriggerSource = parent.TriggerSource
+			}
 			tg.Repo = parent.Repo
 			tg.RepoURL = parent.RepoURL
 			tg.GitBranch = firstNonEmpty(branch, parent.GitBranch)
@@ -730,10 +702,6 @@ func (b *Backend) EnqueueTriggerWithEnv(
 	return runID, nil
 }
 
-// ancestorPipelines returns the pipeline names of runID and its parent
-// chain, oldest-walk bounded by maxAncestorDepth. A missing run record
-// stops the walk: cycle detection is best-effort over the records the
-// bucket actually holds.
 func (b *Backend) ancestorPipelines(ctx context.Context, runID string) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
@@ -755,8 +723,6 @@ func (b *Backend) ancestorPipelines(ctx context.Context, runID string) ([]string
 	return out, nil
 }
 
-// triggerRunID mints a run ID for an enqueued trigger, matching the
-// shape the local store's EnqueueTrigger produces.
 func triggerRunID() string {
 	now := time.Now().UTC()
 	return fmt.Sprintf("run-%s-%08x", now.Format("20060102-150405"), now.UnixNano()&0xFFFFFFFF)
@@ -769,7 +735,6 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// githubSplit returns owner+repo from an "owner/repo" slug.
 func githubSplit(slug string) (owner, repo string) {
 	i := strings.IndexByte(slug, '/')
 	if i <= 0 || i == len(slug)-1 {

@@ -11,8 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-// otherInstall writes a stand-in for a second sparkwing binary that
-// exists but is not the one running this test.
 func otherInstall(t *testing.T) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), installsite.ExeName())
@@ -22,14 +20,6 @@ func otherInstall(t *testing.T) string {
 	return p
 }
 
-// TestVersionMemoryIsScopedToTheInstall covers two installs on one machine
-// that used to stamp one shared last-version file, so the record read as an
-// upgrade every time the other binary ran and the evidence described
-// whichever process looked at it last. Each install now keeps its own
-// stamp: seeding one install's history, announcing its transition, and
-// re-stamping must never touch or be touched by the other's, and
-// alternating invocations must go quiet once each install has announced
-// its own transition -- the shared record re-announced forever.
 func TestVersionMemoryIsScopedToTheInstall(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
@@ -74,9 +64,6 @@ func TestVersionMemoryIsScopedToTheInstall(t *testing.T) {
 	}
 }
 
-// TestVersionMemorySurvivesMultipleHomes keeps the per-install scoping
-// from collapsing homes together: the same install under two
-// SPARKWING_HOMEs stamps each home separately.
 func TestVersionMemorySurvivesMultipleHomes(t *testing.T) {
 	exe := otherInstall(t)
 	pendingUpgradeNotice = ""
@@ -93,10 +80,6 @@ func TestVersionMemorySurvivesMultipleHomes(t *testing.T) {
 	}
 }
 
-// TestInstallClaimVerbIsGone pins the removal of the hidden
-// `_install-claim` verb, which could rename binaries across the
-// machine. Detection is read-only now; a reintroduced mutating verb
-// should have to fight this test.
 func TestInstallClaimVerbIsGone(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	err := runSparkwing([]string{"_install-claim"})

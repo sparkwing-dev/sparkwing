@@ -48,12 +48,177 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.38.2] - 2026-09-01
+
+### Added
+
+- **cli:** `runs find` and `runs failures` now apply repository, branch, and
+  commit filters in the run store before ordering and limiting results.
+- **cli:** `sparkwing run --sw-run-handle-file PATH` atomically publishes the
+  accepted run ID before planning or node execution.
+
+### Fixed
+
+- **orchestrator:** Each detached local run now executes with the environment
+  captured by its own submission instead of the resident consumer's startup
+  environment.
+
+## [v0.38.1] - 2026-09-01
+### Fixed
+
+- **release:** Hosted image builds now refresh their Alpine package layer on
+  every workflow attempt, preventing a cached OpenSSH revision from failing the
+  final vulnerability scan after Alpine has published its security update.
+
+## [v0.38.0] - 2026-08-31
+### Changed
+
+- **release (Breaking):** `sparkwing run kind-e2e` and its hosted workflow have
+  been replaced by the opt-in `sparkwing run k8s-e2e` acceptance path. The new
+  path requires an explicit Kubernetes context, image prefix and tag, and exact
+  namespace/release cleanup allow-list; it never creates or deletes cluster
+  infrastructure. See the
+  [migration guide](docs/migrations/_unreleased.md#kubernetes-acceptance-testing).
+
+### Fixed
+
+- **admission:** A cache-dominant run now folds the nodes that actually
+  executed into their capacity profiles; only the run-level rollup, whose
+  wall time measured the cache, stays excluded. Previously such a run
+  recorded nothing, so a pipeline whose runs usually cache well -- a merge
+  gate rebuilding a small delta -- never accumulated the samples that retire
+  the still-measuring charge, and its few live nodes were priced at carried
+  prior figures or the half-machine cold-start default indefinitely.
+
+- **orchestrator:** A run's failure line now names only the nodes that
+  genuinely failed and counts its cancellations (`nodes failed: [wingd
+  compile]; 72 more cancelled with the run`). Cancelled nodes were folded
+  into the failed list, so a run aborted by a lost daemon read as a
+  catastrophic all-node failure instead of two failures and their
+  collateral.
+
+- **controller:** GitHub webhook runs retain the full `owner/repository`
+  identity when they enter the runner. Remote retries can reconstruct and fetch
+  the original source instead of failing with a missing repository URL.
+
+## [v0.37.4] - 2026-08-30
+### Added
+
+- **wingd:** `sparkwing daemon restart --force` replaces an answering daemon
+  even when it already serves the installed build. Existing holders reattach
+  to the successor, and an absent daemon stays stopped.
+
+## [v0.37.3] - 2026-08-30
+### Added
+
+- **cli:** `sparkwing pipeline trigger --working-tree` now freezes tracked
+  edits and untracked non-ignored files into an immutable Git snapshot, seeds
+  it before admission, and runs it remotely without an origin push. Remote
+  runners can clone source through the controller's admin-authenticated,
+  read-only Git proxy using outbound HTTPS only. Login-enabled dashboard
+  ingress accepts machine bearers on that proxy, direct-cache writes use only
+  the cache token, exact bytes are restored after Git checkout, retries and
+  same-repository children retain desktop placement, and each repository admits
+  at most 128 distinct workspace refs without evicting admitted work.
+
+- **controller:** Pull-request webhook runs now publish best-effort GitHub
+  commit statuses under `sparkwing/<pipeline>` when `GITHUB_TOKEN` is set.
+  `SPARKWING_DASHBOARD_URL` optionally adds a run-detail link. GitHub delivery
+  errors are logged and never change webhook admission or the run result.
+  Overlapping deliveries for the same commit and pipeline suppress terminal
+  updates from superseded runs so they cannot overwrite the current result.
+  Programs serving `Server.Handler` directly must call `Server.Shutdown`.
+
+- **store:** `JoinProfileKey`, `SplitProfileKey`, and `DisplayProfileKey`
+  expose the capacity-profile key encoding, so a program reading
+  `runs stats -o json` or the capacity API can decode a stored key into its
+  repo and pipeline halves.
+
+### Fixed
+
+- **admission:** The daemon supervisor now treats a completed protocol handshake
+  as proof of liveness. Health checks no longer request a full queue snapshot, so
+  a large admission queue cannot make its own supervisor replace the serving
+  daemon and disconnect every active lease.
+
+- **admission:** Linked worktrees now share their repository's canonical
+  capacity profile. v0.37.2 keyed a checkout by its origin remote (or borrowed
+  object store) but left worktrees on the repository's directory name, so a
+  worktree and its main checkout split onto two profiles and each re-learned
+  what the other already knew. A worktree resolves through the shared config
+  and object store in its common git dir, a submodule through its own gitdir
+  config and object store, and both fall back to the directory name as before
+  when the repo names no remote.
+
+- **cli:** `runs stats` learned the v0.37.2 profile-key encoding. The capacity
+  table, drift lines, reset summaries, and doctor's poisoned-profile warning
+  print keys as repo/pipeline again instead of the stored length-prefixed
+  form, and `--reset --pipeline` accepts the bare pipeline name, the displayed
+  repo/pipeline form, or the stored key -- a bare name matched nothing under
+  the new encoding, leaving doctor's suggested reset the only working spelling.
+  A reset reaches every stored encoding of the name it is given, since a
+  pre-v0.37.2 row and its encoded successor display identically and the
+  survivor would otherwise keep pricing runs behind a success message.
+
+- **web:** The capacity dashboard prints profile keys as repo/pipeline instead
+  of the stored length-prefixed encoding, matching the CLI table.
+
+- **exec:** A no-progress timeout on Linux and macOS now sends `SIGQUIT` before
+  terminating the command session, making Go goroutine dumps available through
+  `runs logs`. Core-file generation is disabled for the diagnostic-enabled
+  session, ordinary cancellation remains immediate, diagnostic output is capped
+  at 16 MiB, and a process tree that ignores `SIGQUIT` is force-killed after ten
+  seconds.
+
 ### Security
 
-- **controller:** First-admin creation now requires an admin bearer token when
-  controller authentication is enabled. The unauthenticated first-visit signup
-  remains available only while controller authentication is disabled.
+- **web (Breaking):** Login-required dashboards now refuse to start without a
+  controller session backend. Login, first-admin, and logout forms enforce
+  same-origin CSRF tokens; post-login redirects accept encoded same-origin
+  paths only; unsafe browser API mutations require the live session's CSRF
+  header; browser cookies never cross the service-bearer proxy boundary; and
+  controller-side session revocation takes effect on the next protected data
+  request instead of after a 60-second web cache. Transient session-backend
+  failures return `502` without deleting browser cookies. See the
+  [migration guide](docs/migrations/v0.37.3.md#dashboard-browser-session-hardening).
 
+## [v0.37.2] - 2026-08-28
+### Fixed
+
+- **admission:** A checkout is now identified by the repository it holds -- its
+  origin remote, or the object store it borrows from when it has no remote --
+  rather than by the directory it sits in, so two checkouts of one repository
+  share one capacity profile. A pipeline that clones into a fresh directory per run previously
+  recorded each run under a new key, so its node measurements never reached the
+  sample count that retires the cold-start charge and every run was priced at
+  half the host per node. Linked worktrees are unchanged, and a checkout with no
+  origin keeps its directory name.
+
+- **admission:** macOS hosts now charge external memory pressure when the
+  kernel reports no memory available. A `kern.memorystatus_level` of zero was
+  classified as an unread sensor rather than as a reading, and an unread
+  dimension charges nothing, so the host with nothing left granted its full
+  capacity -- the inverse of the guard at the one point it exists to act.
+  Linux already treated a zero available-memory reading as measured, so the
+  same exhausted host refused work there and admitted it here. A level the
+  kernel never populated still reports unmeasured: that sysctl fails rather
+  than answering zero, which is what separates the two.
+
+## [v0.37.1] - 2026-08-28
+### Fixed
+
+- **release:** Release builds now pin Go 1.26.6 across every binary and image
+  runner, and container runtimes use the patched Alpine 3.24 base. Maintainers
+  can rebuild an existing immutable tag after a
+  publication-only failure; the recovery path validates and checks out that
+  exact tag while preserving the original canonical-gate result.
+- **orchestrator:** The default dispatch watchdog now accounts for declared
+  node timeouts, retry attempts, retry backoff, dependency paths, and failure
+  recovery before classifying a run as wedged. Explicit
+  `SPARKWING_DISPATCH_WAIT_TIMEOUT` values remain exact operator overrides.
+
+## [v0.37.0] - 2026-08-28
 ### Fixed
 
 - **docs:** Trigger filter documentation now distinguishes declarative
@@ -68,7 +233,7 @@ code change to unlock.
   server-side proxy adds that credential only after validating the user's
   session cookie. Clients that sent a bearer token directly to a login-gated
   dashboard proxy must use a browser session or call the controller API
-  directly. See the [migration guide](docs/migrations/_unreleased.md#authenticated-dashboard-proxy-sessions).
+  directly. See the [migration guide](docs/migrations/v0.37.0.md#authenticated-dashboard-proxy-sessions).
 - **release:** Pull requests, main, and release tags now run the canonical
   pre-commit and release-boundary gates in hosted CI. Artifact builds and
   publication wait for the tagged commit to pass, and verification jobs hold
@@ -87,12 +252,45 @@ code change to unlock.
   homes without following symlinks or removing cached binaries' execute bit.
   Windows continues to use inherited DACLs; doctor reports that ACL privacy as
   unverified instead of presenting a false clean bill.
+- **Helm:** The full self-host chart now sends its runner to the bundled
+  controller without an extra values override. The logs service enables
+  controller-backed auth only when a token Secret is configured, and the
+  runner no longer points no-repository triggers at a binary absent from its
+  image. Helm rejects trigger pools with no gitcache and incomplete Secret
+  references, treats configured runner and cache Secrets as required, and
+  keeps long component names unique while parent service URLs remain aligned
+  with runner-bundle names. The current chart defaults still do not identify a
+  compatible public image set; operators must pin repositories and tags for
+  every enabled image until that release blocker is cleared.
+- **release:** Container publication now builds `sparkwing-runner` from its
+  dedicated image contract, preserving the entrypoint, Go toolchain, and SSH
+  client the Helm workload requires. The image also includes the split Alpine
+  `git-daemon` package, so repository fixtures and other daemon-mode Git
+  workloads do not fail after scheduling.
+- **release:** The Kubernetes golden-path proof can target either a disposable
+  local Kind cluster or an explicit existing-cluster context with caller-supplied
+  image coordinates. Existing-cluster runs require an exact namespace/release
+  cleanup allow-list, use a ConfigMap-backed Git fixture instead of a node host
+  mount, and leave cluster infrastructure intact.
+- **chart:** Controller, web, and runner home volumes are now assigned to the configured
+  non-root UID by a short CHOWN-only init container before startup, so their
+  private Sparkwing homes work on root-owned PVC and `emptyDir` mounts without
+  weakening the application containers. Operators whose storage driver already
+  sets ownership can disable the corresponding `volumePermissions.enabled`;
+  this is also required by Restricted Pod Security and by custom images that
+  do not contain `/bin/chown`.
 - **s3 state:** The local SQLite outbox now retains a queued state or artifact
   write when replay reaches a non-transient object-store error, and `Drain`
   returns that error. The background drainer emits one structured warning for
   a stalled FIFO head, another only when the head or error changes, and one
   recovery notice when replay resumes. The row previously disappeared even
   though its staged write had never reached the bucket.
+
+### Security
+
+- **controller:** First-admin creation now requires an admin bearer token when
+  controller authentication is enabled. The unauthenticated first-visit signup
+  remains available only while controller authentication is disabled.
 
 ## [v0.36.0] - 2026-08-26
 ### Changed

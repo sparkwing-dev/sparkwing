@@ -22,12 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// ListOpts configures `sparkwing runs list`.
-// readBackendFor opens the read backend a `runs` command should consult:
-// the profile-resolved backend when --profile was passed, otherwise the
-// legacy cwd-backends.yaml flow. Centralizes the branch so list/status/
-// logs stay consistent. Mirror is never engaged here -- reads are
-// single-source (the mirror is a write-side concern).
 func readBackendFor(ctx context.Context, paths Paths, p *profile.Profile) (backend.Backend, io.Closer, error) {
 	if p != nil {
 		return OpenReadBackendForProfile(ctx, paths, p)
@@ -42,29 +36,16 @@ type ListOpts struct {
 	Since     time.Duration
 	JSON      bool
 
-	// Profile, when non-nil, routes the read through the resolved
-	// storage profile's backend (--profile NAME) instead of the legacy
-	// cwd backends.yaml.
 	Profile *profile.Profile
 
-	// Quiet prints only ids, one per line (JSON-quoted with JSON).
 	Quiet bool
 
-	// Filter holds the cooked client-side filter set built from the
-	// CLI's --branch / --sha / --error / --search / --started-after
-	// / --finished-before / `!`-prefixed exclusion flags. Empty
-	// CompiledFilter is a no-op.
 	Filter CompiledFilter
 
-	// ByPipeline pivots the filtered run set into one row per
-	// pipeline with a status sparkline across the last
-	// SparklineLen runs (mirrors the dashboard's "By pipeline"
-	// view). When set, Pivot configures the rendering.
 	ByPipeline bool
 	Pivot      PivotOpts
 }
 
-// ListJobs prints or emits recent runs filtered by opts.
 func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -79,10 +60,15 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 		_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
 	}
 
+	clientFilter := opts.Filter
+	clientFilter.Branches = nil
+	clientFilter.SHAPrefixes = nil
 	filter := store.RunFilter{
-		Limit:     listFetchLimit(opts),
-		Pipelines: opts.Pipelines,
-		Statuses:  opts.Statuses,
+		Limit:          listFetchLimitForFilter(opts.Limit, clientFilter),
+		Pipelines:      opts.Pipelines,
+		Statuses:       opts.Statuses,
+		GitBranches:    opts.Filter.Branches,
+		GitSHAPrefixes: opts.Filter.SHAPrefixes,
 	}
 	if opts.Since > 0 {
 		filter.Since = time.Now().Add(-opts.Since)
@@ -91,7 +77,7 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if err != nil {
 		return err
 	}
-	runs = applyClientFilters(runs, opts.Filter)
+	runs = applyClientFilters(runs, clientFilter)
 	if opts.ByPipeline {
 		opts.Pivot.JSON = opts.JSON
 		opts.Pivot.Quiet = opts.Quiet
@@ -106,22 +92,21 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	return renderRunList(runs, opts, out, admissionStatus)
 }
 
-// listFetchLimit returns the server-side LIMIT to use. When any
-// client-side filter is active we over-fetch (cap at 1000) so the
-// post-filter pass can still hit the requested Limit. Cheap because
-// runs is SQLite-local.
 func listFetchLimit(opts ListOpts) int {
-	if !opts.Filter.HasAny() {
-		return opts.Limit
+	return listFetchLimitForFilter(opts.Limit, opts.Filter)
+}
+
+func listFetchLimitForFilter(limit int, filter CompiledFilter) int {
+	if !filter.HasAny() {
+		return limit
 	}
 	const overFetch = 1000
-	if opts.Limit <= 0 || opts.Limit > overFetch {
+	if limit <= 0 || limit > overFetch {
 		return overFetch
 	}
 	return overFetch
 }
 
-// renderRunList prints quiet/JSON/table output.
 func renderRunList(
 	runs []*store.Run,
 	opts ListOpts,
@@ -134,9 +119,7 @@ func renderRunList(
 			for _, r := range runs {
 				ids = append(ids, r.ID)
 			}
-			// One quoted id per line, matching the plain form below:
-			// quiet output is a list too, and a single-line array of
-			// ids truncates to invalid JSON exactly like any other.
+
 			return writeNDJSON(out, ids)
 		}
 		for _, r := range runs {
@@ -146,9 +129,6 @@ func renderRunList(
 	}
 
 	if opts.JSON {
-		// The table below prints no args, but -o json emits the whole
-		// row. Redact here rather than at the two call sites so the
-		// local and controller-backed list paths cannot drift.
 		return writeNDJSON(out, store.RedactedRuns(runs))
 	}
 
@@ -175,51 +155,25 @@ func renderRunList(
 	return tw.Flush()
 }
 
-// StatusOpts configures `sparkwing runs status`.
 type StatusOpts struct {
 	JSON   bool
-	Follow bool // poll until the run reaches a terminal state
+	Follow bool
 
-	// Steps forces per-step rows under every node in plain output.
-	// JSON output always carries steps when the run has them; this
-	// flag is for human-readable mode only.
 	Steps bool
 
-	// Profile, when non-nil, routes the read through the resolved
-	// storage profile's backend (--profile NAME).
 	Profile *profile.Profile
 }
 
-// nodeWithSteps wraps store.Node with its per-step state for the
-// JSON output of `runs status` and `runs receipt`. Annotations
-// already live on store.Node; this adds the inner per-step view
-// that the dashboard renders on Summary + step DAG.
 type nodeWithSteps struct {
 	*store.Node
 	Steps []*store.NodeStep `json:"steps,omitempty"`
 
-	// LogExcerpt is the masked, bounded tail of the failing command's
-	// output for a node that failed with captured output -- the same
-	// excerpt the node's error text carries, minus the headline and
-	// marker, so a JSON consumer gets the output without parsing an
-	// error string. Both fields are absent together when the node did
-	// not fail or failed without any output to excerpt; absence is the
-	// honest report, and Error still describes the failure.
 	LogExcerpt          string `json:"log_excerpt,omitempty"`
 	LogExcerptTruncated *bool  `json:"log_excerpt_truncated,omitempty"`
 
-	// LogExcerptUnavailable marks the one case where absence is not a
-	// statement: the lookup could not read far enough (or at all) to
-	// know whether this node published an excerpt. Never set together
-	// with LogExcerpt.
 	LogExcerptUnavailable bool `json:"log_excerpt_unavailable,omitempty"`
 }
 
-// withFailureExcerpts stamps each node's published excerpt onto the
-// JSON node view. Nodes with no excerpt (succeeded, skipped, cancelled,
-// upstream-failed, or failed without captured output) are untouched --
-// except a failed node the index could not speak for, which is marked
-// unavailable rather than left looking like a node with no output.
 func withFailureExcerpts(nodes []nodeWithSteps, ix failureExcerptIndex) []nodeWithSteps {
 	for i := range nodes {
 		if nodes[i].Node == nil {
@@ -238,7 +192,6 @@ func withFailureExcerpts(nodes []nodeWithSteps, ix failureExcerptIndex) []nodeWi
 	return nodes
 }
 
-// groupStepsByNode buckets a flat NodeStep list by node id.
 func groupStepsByNode(steps []*store.NodeStep) map[string][]*store.NodeStep {
 	idx := make(map[string][]*store.NodeStep, len(steps))
 	for _, s := range steps {
@@ -247,9 +200,6 @@ func groupStepsByNode(steps []*store.NodeStep) map[string][]*store.NodeStep {
 	return idx
 }
 
-// joinStepsByNode wraps each store.Node with its per-step state so
-// the JSON output of `runs status` / `runs receipt` carries the
-// inner Work DAG inline. Annotations already live on store.Node.
 func joinStepsByNode(nodes []*store.Node, steps []*store.NodeStep) []nodeWithSteps {
 	idx := groupStepsByNode(steps)
 	out := make([]nodeWithSteps, 0, len(nodes))
@@ -259,7 +209,6 @@ func joinStepsByNode(nodes []*store.Node, steps []*store.NodeStep) []nodeWithSte
 	return out
 }
 
-// JobStatus prints DAG + per-node state. Follow re-renders on poll.
 func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -371,11 +320,6 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 	if p := runLogPath(run); p != "" {
 		line := p
 		if _, err := os.Stat(p); err != nil {
-			// The path is the executing machine's, and this reader may
-			// not be that machine (a cluster pod without a logs backend
-			// records its pod-local directory, which a laptop reading
-			// with --profile sees verbatim). Say so instead of letting
-			// the operator run `ls` on someone else's filesystem.
 			line += color.Dim(" (not present on this machine)")
 		}
 		fmt.Fprintf(out, "%s %s\n", label("log_path: "), line)
@@ -414,13 +358,6 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 	return nil
 }
 
-// runLogPath returns the log directory the run recorded on its
-// invocation snapshot at run_start (see buildRunInvocation). The path
-// belongs to whichever machine executed the run, which is not
-// necessarily the one reading it here. Empty for runs whose logs never
-// touched a filesystem, and for runs that predate the field -- both
-// cases drop the line rather than guessing a path under this reader's
-// sparkwing home.
 func runLogPath(run *store.Run) string {
 	if run == nil {
 		return ""
@@ -533,12 +470,6 @@ func runCanDisplayAdmissionWait(run *store.Run) bool {
 	return run.Status == "running" && run.FinishedAt == nil
 }
 
-// renderNodesWithSteps prints the node table, then per-node step
-// rows when the node has any non-success/skipped step, any
-// annotations or summary, or when force=true (the --steps flag).
-// Annotation lines render with an "@" prefix so they're visually
-// distinct from log lines; markdown summaries render under a
-// "summary:" sub-heading with each line indented.
 func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[string][]*store.NodeStep, force bool) {
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "  "+color.Dim("ID\tSTATUS\tOUTCOME\tDURATION\tDEPS"))
@@ -592,9 +523,6 @@ func renderNodesWithSteps(out io.Writer, nodes []*store.Node, stepsByNode map[st
 	}
 }
 
-// writeIndentedSummary prints a "summary:" sub-heading then the
-// pretty-rendered markdown body indented under it. Trailing blank
-// lines are trimmed so the block doesn't pad the table out.
 func writeIndentedSummary(out io.Writer, prefix, md string) {
 	fmt.Fprintf(out, "%s%s\n", prefix, color.Dim("summary:"))
 	logpretty.RenderMarkdownSummary(out, prefix+"  ", md)
@@ -645,10 +573,6 @@ func formatStepDuration(s *store.NodeStep) string {
 	return "--"
 }
 
-// renderApprovalsSection prints a compact block of approval-gate
-// state for a run: who is pending, who approved/denied, and what
-// timeout policy the gate carries. Skipped entirely when the run
-// has no gates.
 func renderApprovalsSection(out io.Writer, approvals []*store.Approval) {
 	if len(approvals) == 0 {
 		return
@@ -690,46 +614,29 @@ func renderApprovalsSection(out io.Writer, approvals []*store.Approval) {
 	}
 }
 
-// LogsOpts configures `sparkwing runs logs`.
 type LogsOpts struct {
 	Node   string
 	JSON   bool
 	Follow bool
 
-	// Format: "json", "pretty", "plain", or "" (auto).
 	Format string
 
-	// Line filters; Tail wins over Head when both set.
 	Tail  int
 	Head  int
-	Lines string // "A:B" inclusive 1-indexed
+	Lines string
 	Grep  string
 
-	// Tree merges descendant-run logs (local mode only).
 	Tree bool
 
-	// Since filters by node StartedAt; node-level granularity.
 	Since time.Duration
 
-	// EventsOnly filters output to the run-level envelope events
-	// (run_start, run_plan, node_start, node_end, run_summary,
-	// run_finish, plan_warn, etc.) -- the same NDJSON the dispatcher
-	// streams to stdout today. exec_line records are excluded since
-	// they're really tagged body output. Mutually exclusive with
-	// NoEvents.
 	EventsOnly bool
 
-	// NoEvents filters output to per-node body output only -- the
-	// legacy behavior of `runs logs`. Useful as an explicit opt-out
-	// when scripts depend on the legacy shape.
 	NoEvents bool
 
-	// Profile, when non-nil, routes the read through the resolved
-	// storage profile's backend (--profile NAME).
 	Profile *profile.Profile
 }
 
-// applyClientFilters is the local-mode equivalent of pkg/logs filters.
 func (o LogsOpts) applyClientFilters(data []byte) []byte {
 	if o.Tail == 0 && o.Head == 0 && o.Lines == "" && o.Grep == "" {
 		return data
@@ -776,7 +683,6 @@ func (o LogsOpts) applyClientFilters(data []byte) []byte {
 	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
-// parseLinesRange1 returns (0,0) on parse error.
 func parseLinesRange1(spec string) (int, int) {
 	i := strings.IndexByte(spec, ':')
 	if i < 0 {
@@ -810,19 +716,6 @@ func parseInt(s string) (int, error) {
 	return n, nil
 }
 
-// JobLogs streams a run's logs. Empty Node = all nodes in sequence.
-//
-// Dispatches by backend kind:
-//
-//   - Local SQLite: reads the tee'd _envelope.ndjson plus per-node
-//     body files under paths.RunDir. Includes merged lifecycle +
-//     exec_line stream and --tree descendant-run merging.
-//   - S3 / controller (any non-local Backend): reads per-node body
-//     output via Backend.ReadNodeLog and lifecycle events via
-//     Backend.ListEventsAfter. The merged envelope-style stream that
-//     the local path produces is not synthesized -- run-level events
-//     are available via `runs logs --events-only` or via `runs
-//     status`; per-node bodies are the default. --tree is local-only.
 func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -914,15 +807,11 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	return followLogs(ctx, st, paths, runID, target, opts, out)
 }
 
-// envelopeExists returns true when the run has an envelope file. Old
-// runs predating the tee fall back to per-node reads.
 func envelopeExists(paths Paths, runID string) bool {
 	_, err := os.Stat(paths.EnvelopeLog(runID))
 	return err == nil
 }
 
-// writeLogsFromEnvelope streams the run's _envelope.ndjson, optionally
-// filtered to events-only, then renders per opts.Format.
 func writeLogsFromEnvelope(paths Paths, runID string, opts LogsOpts, out io.Writer) error {
 	path := paths.EnvelopeLog(runID)
 	f, err := os.Open(path)
@@ -947,10 +836,6 @@ func writeLogsFromEnvelope(paths Paths, runID string, opts LogsOpts, out io.Writ
 	return renderJSONLStream(bytes.NewReader(data), opts, out)
 }
 
-// filterEventsOnly drops lines whose Event is empty or "exec_line".
-// exec_line is technically an envelope record (the dispatcher emits
-// it) but it carries body output, not a state transition; the
-// `--events-only` user wants the bracketing events for grepping.
 func filterEventsOnly(data []byte) []byte {
 	if len(data) == 0 {
 		return data
@@ -975,8 +860,6 @@ func filterEventsOnly(data []byte) []byte {
 	return out
 }
 
-// followFromEnvelope tails _envelope.ndjson until the run terminates,
-// applying the same filters as the non-follow path on the fly.
 func followFromEnvelope(ctx context.Context, st *store.Store, paths Paths, runID string, opts LogsOpts, out io.Writer) error {
 	path := paths.EnvelopeLog(runID)
 	jsonOut := opts.JSON || opts.Format == "json"
@@ -1039,9 +922,6 @@ func followFromEnvelope(ctx context.Context, st *store.Store, paths Paths, runID
 	}
 }
 
-// drainEnvelopeAfterTerminal flushes any remaining bytes once the run
-// reaches a terminal state. Mirrors followFromEnvelope's per-tick drain
-// but runs once.
 func drainEnvelopeAfterTerminal(path string, offset int64, partial []byte, opts LogsOpts, out io.Writer) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -1145,9 +1025,6 @@ func writeFile(path string, opts LogsOpts, out io.Writer) error {
 	return err
 }
 
-// renderJSONLStream parses r as JSONL records and renders per Format:
-// json (passthrough), plain (ANSI-stripped one-liners), pretty (default).
-// Unparseable lines pass through raw.
 func renderJSONLStream(r io.Reader, opts LogsOpts, out io.Writer) error {
 	wantJSON := opts.JSON || opts.Format == "json"
 	wantPlain := opts.Format == "plain"
@@ -1179,8 +1056,6 @@ func renderJSONLStream(r io.Reader, opts LogsOpts, out io.Writer) error {
 	return sc.Err()
 }
 
-// emitFollowChunk writes one tick's worth of whole lines. Fresh
-// renderer state per call so node_start banners aren't re-emitted.
 func emitFollowChunk(data []byte, wantJSON, wantPlain bool, out io.Writer) error {
 	if wantJSON {
 		_, err := out.Write(data)
@@ -1214,10 +1089,6 @@ func emitFollowChunk(data []byte, wantJSON, wantPlain bool, out io.Writer) error
 	return sc.Err()
 }
 
-// formatPlain renders one record as an ANSI-stripped line. The
-// node[/step] prefix mirrors the dashboard's inline view -- agents
-// can split on the bracketed segment to group lines by step
-// without regex against ad-hoc body output.
 func formatPlain(rec sparkwing.LogRecord) string {
 	ts := rec.TS.Format(time.RFC3339Nano)
 	lvl := rec.Level
@@ -1243,9 +1114,6 @@ func formatPlain(rec sparkwing.LogRecord) string {
 	return prefix + " " + msg
 }
 
-// followLogs tails each node's log file until the run terminates and
-// every target file has drained. Partial tails carry across ticks so
-// JSONL records aren't sliced mid-line.
 func followLogs(ctx context.Context, st *store.Store, paths Paths, runID string, target []*store.Node, opts LogsOpts, out io.Writer) error {
 	offsets := make(map[string]int64, len(target))
 	partials := make(map[string][]byte, len(target))
@@ -1313,12 +1181,6 @@ func followLogs(ctx context.Context, st *store.Store, paths Paths, runID string,
 	}
 }
 
-// writeLogsTreeLocal merges a root run and every descendant run's
-// per-node logs into one chronological stream prefixed with the
-// short run id. Remote mode does not support --tree today (no
-// RunAndAwait child relationship is currently surfaced through
-// a single controller endpoint); the CLI guards against that at the
-// flag layer.
 func writeLogsTreeLocal(paths Paths, rootID string, opts LogsOpts, out io.Writer) error {
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
@@ -1385,7 +1247,6 @@ func writeLogsTreeLocal(paths Paths, rootID string, opts LogsOpts, out io.Writer
 	return nil
 }
 
-// descendantRunIDs BFS-walks ParentRunID from rootID.
 func descendantRunIDs(ctx context.Context, st *store.Store, rootID string) ([]string, error) {
 	order := []string{rootID}
 	seen := map[string]bool{rootID: true}
@@ -1409,7 +1270,6 @@ func descendantRunIDs(ctx context.Context, st *store.Store, rootID string) ([]st
 	return order, nil
 }
 
-// shortRunID returns the trailing random suffix of a run id.
 func shortRunID(id string) string {
 	idx := strings.LastIndex(id, "-")
 	if idx < 0 || idx == len(id)-1 {
@@ -1418,7 +1278,6 @@ func shortRunID(id string) string {
 	return id[idx+1:]
 }
 
-// JobErrors prints failed nodes only; suppresses upstream-failed.
 func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -1434,11 +1293,6 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 		return err
 	}
 
-	// Only the JSON shape carries excerpts, and only a run with a
-	// failure has any to fetch: the human output prints Error alone, so
-	// scanning the event stream for it would be pure cost. The unscanned
-	// zero value claims nothing either way, which is what the human path
-	// wants -- it renders no excerpt and no unavailability.
 	var excerpts failureExcerptIndex
 	if asJSON {
 		excerpts = failureExcerptsFor(ctx, st, runID, failedNodeIDs(nodes))
@@ -1446,7 +1300,6 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 	failed := failedNodeReports(nodes, excerpts)
 
 	if asJSON {
-		// NDJSON: one failing node per line.
 		return writeNDJSON(out, failed)
 	}
 	if len(failed) == 0 {
@@ -1459,11 +1312,6 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 	return nil
 }
 
-// failedNodeReport is one row of `runs errors`. Error is the human-
-// readable failure text (which already embeds a bounded excerpt);
-// LogExcerpt is the same excerpt as structured data for consumers that
-// would otherwise have to parse the error string. Both excerpt fields
-// are absent together for a node that failed without captured output.
 type failedNodeReport struct {
 	Node                string `json:"node"`
 	Outcome             string `json:"outcome"`
@@ -1471,15 +1319,9 @@ type failedNodeReport struct {
 	LogExcerpt          string `json:"log_excerpt,omitempty"`
 	LogExcerptTruncated *bool  `json:"log_excerpt_truncated,omitempty"`
 
-	// LogExcerptUnavailable marks a failure whose excerpt could not be
-	// looked up, as opposed to one that never had an excerpt to look
-	// up. See nodeWithSteps.
 	LogExcerptUnavailable bool `json:"log_excerpt_unavailable,omitempty"`
 }
 
-// failedNodeReports selects the nodes that own a failure and attaches
-// each one's published excerpt. Cancelled and upstream-failed nodes are
-// not failures of their own and never appear.
 func failedNodeReports(nodes []*store.Node, ix failureExcerptIndex) []failedNodeReport {
 	var out []failedNodeReport
 	for _, n := range nodes {
@@ -1499,7 +1341,6 @@ func failedNodeReports(nodes []*store.Node, ix failureExcerptIndex) []failedNode
 	return out
 }
 
-// filterNodesBySince drops never-started or too-old nodes.
 func filterNodesBySince(nodes []*store.Node, since time.Duration) []*store.Node {
 	if since <= 0 {
 		return nodes
@@ -1518,7 +1359,6 @@ func filterNodesBySince(nodes []*store.Node, since time.Duration) []*store.Node 
 	return out
 }
 
-// sparkwingFailedStr mirrors sparkwing.Failed.
 const sparkwingFailedStr = "failed"
 
 func isTerminalStatus(s string) bool {
@@ -1529,7 +1369,6 @@ func isTerminalStatus(s string) bool {
 	return false
 }
 
-// formatStartedAt prints "21:52:12 (3s ago)" or "2026-04-18 (2d ago)".
 func formatStartedAt(t time.Time) string {
 	age := time.Since(t)
 	if age > 24*time.Hour {
@@ -1561,14 +1400,6 @@ func formatRunDuration(r *store.Run) string {
 	return "running (" + time.Since(r.StartedAt).Round(100*time.Millisecond).String() + ")"
 }
 
-// staleHeartbeatThreshold is how long a "running" node can go without a
-// heartbeat before status flags it as stale. Local in-process runs
-// don't refresh last_heartbeat after the initial stamp -- the node
-// either completes or the process dies -- so the threshold also
-// covers the "orphaned local run" case where the sparkwing process
-// crashed and left the row hanging in "running". The value is
-// intentionally generous (well above the cluster heartbeat cadence
-// of 5s) so a slow runner pause doesn't false-positive.
 const staleHeartbeatThreshold = 30 * time.Second
 
 func formatNodeDuration(n *store.Node) string {
@@ -1637,17 +1468,12 @@ func prettyJSON(raw []byte) (string, bool) {
 	return string(b), true
 }
 
-// writeJSON encodes v to out with pretty indentation. It is for the
-// single-object shapes -- one run, one receipt -- where the whole
-// answer is one record and indentation costs a reader nothing.
 func writeJSON(out io.Writer, v any) error {
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }
 
-// writeNDJSON streams a listing as newline-delimited JSON, one record
-// per line. See internal/ndjson for why list output is lines.
 func writeNDJSON[T any](out io.Writer, records []T) error {
 	return ndjson.Write(out, records)
 }
@@ -1674,15 +1500,6 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out 
 	return writeJSON(out, payload)
 }
 
-// RunStatus reads one run's terminal status through the same backend
-// `runs status` rendered it from.
-//
-// The scriptable exit contract used to be derived from local SQLite
-// no matter which store the status came from, so on any machine that
-// had not itself run the pipeline -- the normal case for a shared
-// bucket, and for every CI step that shells out to `runs status` --
-// the command printed a correct status read from the bucket and then
-// exited 1 because the run was absent locally.
 func RunStatus(ctx context.Context, paths Paths, p *profile.Profile, runID string) (string, error) {
 	if err := paths.EnsureRoot(); err != nil {
 		return "", err

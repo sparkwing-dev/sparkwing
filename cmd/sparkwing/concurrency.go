@@ -1,7 +1,3 @@
-// `sparkwing cluster concurrency` -- inspect a concurrency namespace's
-// holders and queue. The dashboard reads the same /api/v1/concurrency/
-// {key}/state endpoint; this subcommand reuses it so an operator can
-// tell wedged work from work waiting for budget without a browser.
 package main
 
 import (
@@ -22,9 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
-// concState mirrors the controller's GET /api/v1/concurrency/{key}/state
-// response. Kept local so the CLI binary doesn't import the controller's
-// storage deps (same convention as agentView).
 type concState struct {
 	Key               string       `json:"key"`
 	Capacity          int          `json:"capacity"`
@@ -94,10 +87,6 @@ func runConcurrency(args []string) error {
 	return nil
 }
 
-// fetchConcurrencyState calls GET /api/v1/concurrency/{key}/state with
-// bearer auth. Goes direct rather than through the typed client to avoid
-// widening the public client surface for one dashboard-facing GET (same
-// rationale as fetchAgents).
 func fetchConcurrencyState(ctx context.Context, baseURL, token, namespace string) (*concState, error) {
 	u := strings.TrimRight(baseURL, "/") + "/api/v1/concurrency/" + neturl.PathEscape(namespace) + "/state"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -172,9 +161,6 @@ func renderConcurrencyState(w io.Writer, st *concState) {
 	_ = tw.Flush()
 }
 
-// scopeFromKey reports the scope a concurrency key encodes. The key
-// scheme (scope-tag prefix) is owned by the orchestrator; this defers
-// to its parser so the CLI label can't drift from the producer.
 func scopeFromKey(key string) string {
 	return orchestrator.ScopeLabelFromKey(key)
 }

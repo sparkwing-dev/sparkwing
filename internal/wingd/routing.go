@@ -5,10 +5,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// routeLocked turns ledger events into frames addressed to connections.
-// A grant or promotion whose owning connection is gone is released at
-// once so its capacity is not stranded, which can cascade into further
-// events; the loop drains them all. The caller holds d.mu.
 func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 	var out []delivery
 	queueChanged := false
@@ -223,8 +219,6 @@ func waiterResources(waiter admission.WaiterState) map[string]struct{} {
 	return resources
 }
 
-// cancelWaiterLocked removes a queued run whose connection died. The caller
-// holds d.mu.
 func (d *Daemon) cancelWaiterLocked(runID string) []admission.Event {
 	return d.ledger.CancelWaiter(runID)
 }
@@ -249,12 +243,6 @@ func (d *Daemon) waiterCountLocked() int {
 	return len(d.ledger.Snapshot().Waiters)
 }
 
-// soleRunUnderLoadLocked reports whether the liveness floor -- not ordinary
-// headroom -- is what let this run in: a finalizable host run whose charge
-// exceeds the currently grantable cores, which can only be granted when the
-// box is otherwise idle of sparkwing work. That is the signal the client
-// narrates as "admitted as sole run; additional runs will queue". The caller
-// holds d.mu.
 func (d *Daemon) soleRunUnderLoadLocked(c *conn) bool {
 	return c.finalizable && d.headroomInit &&
 		c.resources.Cores > 0 && c.resources.Cores > d.appliedCores

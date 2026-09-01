@@ -1,9 +1,3 @@
-// Client-side filters for `sparkwing runs list`. The store's SQL
-// only narrows on pipeline / status / since today; everything else
-// (branch / sha / error / free-form search / explicit excludes /
-// finished-window) runs as a post-fetch pass here so the CLI can
-// ship parity with the dashboard filter bar without a controller
-// schema change.
 package orchestrator
 
 import (
@@ -15,17 +9,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// SearchTerms is the parsed shape of `--search "deploy -canary"`.
-// `Include` matches AND (each term must appear); `Exclude` is
-// reject-on-match.
 type SearchTerms struct {
 	Include []string
 	Exclude []string
 }
 
-// ParseSearch splits the raw search query on whitespace; a leading
-// `-` on a term marks it as exclude. Empty query returns a zero
-// SearchTerms.
 func ParseSearch(raw string) SearchTerms {
 	var out SearchTerms
 	for _, tok := range strings.Fields(raw) {
@@ -38,10 +26,6 @@ func ParseSearch(raw string) SearchTerms {
 	return out
 }
 
-// ParseLooseDuration accepts time.ParseDuration plus the `d` and
-// `w` suffixes the dashboard filter bar uses ("7d", "2w"). A bare
-// number is rejected -- callers must supply a unit so "7" doesn't
-// silently mean "7 nanoseconds".
 func ParseLooseDuration(v string) (time.Duration, error) {
 	if v == "" {
 		return 0, errors.New("empty duration")
@@ -76,8 +60,6 @@ func scaleDuration(value time.Duration, factor int64, raw string) (time.Duration
 	return value * time.Duration(factor), nil
 }
 
-// SplitExcludes splits a repeatable filter slice into the include
-// and exclude lists based on the `!` prefix convention.
 func SplitExcludes(values []string) (include, exclude []string) {
 	for _, v := range values {
 		if strings.HasPrefix(v, "!") {
@@ -89,15 +71,6 @@ func SplitExcludes(values []string) (include, exclude []string) {
 	return include, exclude
 }
 
-// ParseLooseDate accepts the same shapes the dashboard filter bar
-// does:
-//
-//   - "today", "yesterday" (start-of-day local)
-//   - "24h", "7d", "5m", "1h", etc. (Go duration → now-d)
-//   - ISO date "2026-05-10" → start of that day local
-//   - RFC3339 timestamp → exact
-//
-// Returns the absolute time on success.
 func ParseLooseDate(raw string) (time.Time, error) {
 	v := strings.TrimSpace(strings.ToLower(raw))
 	if v == "" {
@@ -128,8 +101,6 @@ func ParseLooseDate(raw string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unrecognized date %q (try today, yesterday, 24h, 7d, or 2026-05-10)", raw)
 }
 
-// CompiledFilter is the cooked filter set the post-fetch pass uses.
-// Built once from ListOpts; applied with Matches per run.
 type CompiledFilter struct {
 	Branches       []string
 	BranchExcludes []string
@@ -145,8 +116,6 @@ type CompiledFilter struct {
 	FinishedBefore time.Time
 }
 
-// HasAny reports whether any client-side filter is active. When
-// false the caller can skip the matching pass entirely.
 func (f CompiledFilter) HasAny() bool {
 	if len(f.Branches)+len(f.BranchExcludes)+len(f.SHAPrefixes)+len(f.SHAExcludes) > 0 {
 		return true
@@ -169,7 +138,6 @@ func (f CompiledFilter) HasAny() bool {
 	return false
 }
 
-// Matches returns true when r passes every active filter.
 func (f CompiledFilter) Matches(r *store.Run) bool {
 	if len(f.Branches) > 0 && !containsString(f.Branches, r.GitBranch) {
 		return false
@@ -244,8 +212,6 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 	return false
 }
 
-// applyClientFilters narrows runs in place per the CompiledFilter.
-// Order-preserving so renderRunList still gets newest-first input.
 func applyClientFilters(runs []*store.Run, f CompiledFilter) []*store.Run {
 	if !f.HasAny() {
 		return runs

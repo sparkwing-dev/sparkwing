@@ -1,10 +1,5 @@
 "use client";
 
-// ApprovalPane renders the "awaiting approval" banner for a node whose
-// status is approval_pending. Shows the prompt message, a multiline
-// comment textarea, and two buttons. Clicking Approve / Deny hits
-// POST /api/v1/runs/{run}/approvals/{node} and the parent page re-
-// fetches to pick up the resolution.
 
 import { useEffect, useState } from "react";
 import { type Approval, getApproval, resolveApproval } from "@/lib/api";
@@ -13,8 +8,6 @@ import { fmtAgo, fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 interface Props {
   runID: string;
   nodeID: string;
-  // onResolved fires after a successful resolve so the parent page can
-  // trigger its normal run-detail refresh without a full reload.
   onResolved?: (a: Approval) => void;
 }
 
@@ -91,8 +84,8 @@ export default function ApprovalPane({ runID, nodeID, onResolved }: Props) {
         <span className="text-sm font-medium text-yellow-300">
           Awaiting approval
         </span>
-        {/* An approval can sit pending for days -- say which day it
-          was asked for, not just how long ago. */}
+        {
+                                                  }
         <span
           className="text-xs font-mono text-[var(--muted)]"
           title={`Requested ${fmtFullDate(appr.requested_at)}`}

@@ -1,9 +1,11 @@
 # Default values for sparkwing-full.
 #
 # Override with `helm install ... --set key=value` or `-f
-# my-values.yaml`. The minimum-viable override is nothing -- a bare
-# `helm install` produces a working single-instance stack assuming
-# the cluster has a default StorageClass.
+# my-values.yaml`. This chart version has no compatible public image
+# default: a bare install is not a runnable release. Build or mirror a
+# mutually compatible image set and explicitly set image.repository
+# and image.tag for every enabled component until a corrected release
+# is published.
 #
 # Sections, in roughly the order operators care about:
 #   1. controller.*               -- the orchestrator
@@ -26,12 +28,9 @@ controller:
   replicas: 1
 
   image:
-    # Default assumes images publish to GHCR under sparkwing-dev. If
-    # you mirror images internally, point this at your registry.
-    # NOTE: GHCR publishing is in flight. Until container images are
-    # published, build the binary locally with
-    # `go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest`
-    # or point at your own mirror.
+    # Registry-layout fallback only. The current appVersion is not a
+    # compatible public image contract; set repository and tag to an
+    # image built or mirrored with the other enabled components.
     repository: ghcr.io/sparkwing-dev/sparkwing-controller
     tag: "" # falls back to .Chart.AppVersion when empty
     pullPolicy: IfNotPresent
@@ -59,6 +58,17 @@ controller:
     name: ""
     key: webhook-secret
 
+  # GitHub commit statuses for pull_request webhook runs. The token
+  # needs commit-status write access to every repository whose webhook
+  # reaches this controller. Empty name disables status reporting.
+  githubStatusToken:
+    name: ""
+    key: token
+
+  # Query-free HTTP(S) dashboard base URL used for commit-status run links.
+  # Empty or invalid keeps reporting enabled but omits the target URL.
+  dashboardURL: ""
+
   # Secrets-store encryption key. When set, the controller encrypts
   # secret values stored in the state DB at rest. Without it, the
   # controller logs a WARNING at startup and stores plaintext.
@@ -71,8 +81,7 @@ controller:
   # State DB lives on a PVC. Single-instance, so RWO is fine.
   storage:
     # "pvc" mounts a PersistentVolumeClaim at /data.
-    # "emptyDir" runs ephemeral (state lost on pod restart -- only
-    # useful for kind / CI smoke tests).
+    # "emptyDir" runs ephemeral (state lost on pod restart).
     type: pvc
     pvc:
       size: 5Gi
@@ -113,6 +122,8 @@ web:
   replicas: 1
 
   image:
+    # Pin this with the controller and runner-bundle images; the
+    # appVersion fallback is not a runnable public release default.
     repository: ghcr.io/sparkwing-dev/sparkwing-web
     tag: ""
     pullPolicy: IfNotPresent
@@ -254,6 +265,11 @@ containerSecurityContext:
   capabilities:
     drop: ["ALL"]
 
+# safety: Mounted roots must belong to the runtime UID before SPARKWING_HOME becomes owner-only.
+# The init requires /bin/chown and violates Restricted Pod Security; disable it only for pre-owned storage.
+volumePermissions:
+  enabled: true
+
 # -----------------------------------------------------------------------
 # 7. Sub-chart: sparkwing-runner-bundle. All values nested here are
 #    forwarded as the sub-chart's `.Values`. Defaults below override
@@ -270,12 +286,12 @@ sparkwing-runner-bundle:
 
   controller:
     # Wire the bundled runner at the bundled controller's Service.
-    # Empty here means "the chart will inject the in-cluster
-    # service URL via templates/_helpers.tpl". If you want the
-    # runner to claim from a *different* controller, override.
+    # An explicit URL still wins when the runner should claim from a
+    # different controller.
     url: ""
+    bundled: true
     # The controller-token Secret the runner mounts. Empty =
-    # unauthenticated to the controller (fine for kind / dev;
+    # unauthenticated to the controller (fine for isolated development;
     # not for shared installs). Pre-create with:
     #   kubectl create secret generic sparkwing-token \
     #     --from-literal=token=<token>

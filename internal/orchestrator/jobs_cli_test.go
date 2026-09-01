@@ -496,9 +496,6 @@ func TestJobStatus_ShowsLogPath(t *testing.T) {
 	}
 }
 
-// A run whose invocation carries no log_path (logs written to a
-// controller or object store, or a run predating the field) must drop
-// the line rather than point at this reader's own sparkwing home.
 func TestJobStatus_OmitsLogPathWhenRunHasNone(t *testing.T) {
 	p := newPaths(t)
 	ctx := context.Background()
@@ -542,11 +539,6 @@ func TestJobStatus_OmitsLogPathWhenRunHasNone(t *testing.T) {
 	}
 }
 
-// The recorded path is the executing machine's. A cluster pod with no
-// logs backend records its own pod-local directory, and a laptop
-// reading that run back gets the string verbatim -- so the text output
-// says the directory is not here rather than inviting an `ls` against
-// someone else's filesystem. JSON still reports it as recorded.
 func TestJobStatus_MarksLogPathAbsentOnThisMachine(t *testing.T) {
 	p := newPaths(t)
 	ctx := context.Background()

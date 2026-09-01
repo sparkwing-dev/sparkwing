@@ -2,8 +2,6 @@ package wingd
 
 import "testing"
 
-// procStatIOWaitHeavy is a /proc/stat aggregate line from a box parked on
-// I/O: 100 ticks of real execution against 900 of idle and iowait.
 const procStatIOWaitHeavy = "cpu  60 0 40 400 500 0 0 0 0 0\ncpu0 60 0 40 400 500 0 0 0\nintr 12345\n"
 
 func TestParseProcStatCPU_ExcludesIdleAndIOWaitFromBusy(t *testing.T) {
@@ -41,8 +39,6 @@ func TestParseProcStatCPU_RejectsNonNumericField(t *testing.T) {
 	}
 }
 
-// TestBusyCoresFromTotals_ScalesTheBusyShareAcrossCores works 250 busy ticks
-// of a 1000-tick span, a quarter of eight cores.
 func TestBusyCoresFromTotals_ScalesTheBusyShareAcrossCores(t *testing.T) {
 	t.Parallel()
 	prev := cpuTotals{busy: 100, total: 1000}

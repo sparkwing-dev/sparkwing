@@ -3,7 +3,7 @@
 export default function FeaturesPage() {
   return (
     <div className="flex-1 overflow-y-auto">
-      {/* Hero */}
+      {          }
       <div className="bg-gradient-to-b from-indigo-500/10 to-transparent px-8 py-16 text-center">
         <h1 className="text-4xl font-bold mb-4">
           CI/CD pipelines in <span className="text-indigo-400">Go</span>
@@ -20,7 +20,7 @@ export default function FeaturesPage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-8 pb-16">
-        {/* Why */}
+        {         }
         <section className="py-12">
           <h2 className="text-2xl font-bold mb-8 text-center">Why Sparkwing</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -64,7 +64,7 @@ export default function FeaturesPage() {
           </div>
         </section>
 
-        {/* Comparison */}
+        {                }
         <section className="py-12 border-t border-[var(--border)]">
           <h2 className="text-2xl font-bold mb-8 text-center">How Sparkwing Compares</h2>
           <div className="overflow-x-auto">
@@ -105,7 +105,7 @@ export default function FeaturesPage() {
           </div>
         </section>
 
-        {/* Code examples */}
+        {                   }
         <section className="py-12 border-t border-[var(--border)]">
           <h2 className="text-2xl font-bold mb-8 text-center">Real Examples</h2>
 
@@ -187,7 +187,7 @@ func JobBuildChanged() {
           </div>
         </section>
 
-        {/* Features list */}
+        {                   }
         <section className="py-12 border-t border-[var(--border)]">
           <h2 className="text-2xl font-bold mb-8 text-center">Every Feature</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">

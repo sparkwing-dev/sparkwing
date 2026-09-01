@@ -11,27 +11,14 @@ import (
 	"sync"
 )
 
-// Config sets a new ledger's fixed host capacity and optional token
-// generation. Totals are the machine's full budget; the dynamic
-// load-sensed value is fed later through [Ledger.SetHeadroom].
 type Config struct {
-	// TotalCores is the host CPU budget in cores; fractional values are
-	// allowed. Must be finite and non-negative.
 	TotalCores float64
-	// TotalMemoryBytes is the host memory budget.
+
 	TotalMemoryBytes uint64
-	// TokenGen mints re-attach tokens for new leases. Nil uses a
-	// cryptographically random generator. Generated tokens must be
-	// non-empty; duplicates are retried.
+
 	TokenGen func() string
 }
 
-// Ledger is the unified admission ledger. It is pure state plus
-// transitions: no clocks, no goroutines, no I/O. All methods are safe
-// for concurrent use; mutations serialize on an internal lock and each
-// returns the events it produced. Every transition re-asserts the ledger
-// invariants and panics on violation -- an invariant break is a bug the
-// caller must treat as fatal, never a condition to log and continue.
 type Ledger struct {
 	mu                 sync.Mutex
 	totalMilliCores    int64
@@ -118,8 +105,6 @@ func semResource(key string) resource { return resource("semaphore:" + key) }
 
 const maxMilliCores = int64(1) << 50
 
-// New constructs an empty ledger with the given host capacity. Headroom
-// starts equal to the totals.
 func New(cfg Config) (*Ledger, error) {
 	mc, err := toMilliCores(cfg.TotalCores)
 	if err != nil {
@@ -161,18 +146,6 @@ func toMilliCores(cores float64) (int64, error) {
 	return int64(m), nil
 }
 
-// Submit decides one admission request. The outcome is exactly one of:
-// granted (with a fresh lease, superseding holders where
-// [PolicyCancelOthers] claims required it), queued (holding nothing),
-// failed or skipped (a blocked [PolicyFail] / [PolicySkip] claim, checked
-// in claim order), or an error for requests that are malformed
-// ([ErrInvalidRequest]), can never fit ([ErrNeverAdmissible]), or name a
-// participant already tracked ([ErrDuplicateID]).
-//
-// A fail or skip claim is judged at submit time against its semaphore's
-// instantaneous budget and FIFO queue; once a request queues on other
-// resources, its fail and skip claims hold their FIFO position like queue
-// claims.
 func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -226,10 +199,6 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 	return Decision{Kind: DecisionQueued, Position: position}, []Event{ev}, nil
 }
 
-// ReplaceWaiter updates an existing queued participant before it is
-// granted. The waiter keeps its FIFO arrival, but its resource demand is
-// the latest request. If the new demand now fits, eligible waiters are
-// promoted.
 func (l *Ledger) ReplaceWaiter(req Request) ([]Event, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -259,8 +228,6 @@ func (l *Ledger) ReplaceWaiter(req Request) ([]Event, error) {
 	return nil, ErrUnknownMember
 }
 
-// CancelWaiter removes a queued request and promotes any waiter unblocked by
-// the removal. Surviving waiters keep their original admission sequence.
 func (l *Ledger) CancelWaiter(id string) []Event {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -278,9 +245,6 @@ func (l *Ledger) CancelWaiter(id string) []Event {
 	return nil
 }
 
-// Attach joins memberID to a live lease, drawing zero new budget. The
-// lease stays alive until every member, the original requester included,
-// has released.
 func (l *Ledger) Attach(id LeaseID, memberID string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -301,11 +265,6 @@ func (l *Ledger) Attach(id LeaseID, memberID string) error {
 	return nil
 }
 
-// Release removes memberID from the lease. When the last member leaves,
-// every resource the lease held is freed, a released event is emitted,
-// and eligible waiters are promoted. Releasing a superseded hold frees
-// no semaphore budget (its budget was already reassigned at eviction)
-// but still frees the lease's host resources.
 func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -338,9 +297,6 @@ func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 	return events, nil
 }
 
-// Reattach resolves a re-attach token to its live lease, for clients
-// reclaiming their admission after a daemon takeover or reconnect. It
-// mutates nothing.
 func (l *Ledger) Reattach(token string) (LeaseID, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -352,9 +308,6 @@ func (l *Ledger) Reattach(token string) (LeaseID, error) {
 	return id, nil
 }
 
-// LeaseByID returns the full lease (ID plus re-attach token) for a live
-// lease ID, for delivering credentials to a promoted waiter. The second
-// return is false when the lease is not live.
 func (l *Ledger) LeaseByID(id LeaseID) (Lease, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -366,10 +319,6 @@ func (l *Ledger) LeaseByID(id LeaseID) (Lease, bool) {
 	return Lease{ID: le.id, Token: le.token}, true
 }
 
-// SetHeadroom injects the load-sensed available host capacity. The
-// effective host budget for new admissions is the minimum of the totals
-// and the headroom. Shrinking headroom never evicts existing grants; it
-// only gates new ones. Raising it promotes eligible waiters.
 func (l *Ledger) SetHeadroom(cores float64, memoryBytes uint64) ([]Event, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -385,12 +334,6 @@ func (l *Ledger) SetHeadroom(cores float64, memoryBytes uint64) ([]Event, error)
 	return events, nil
 }
 
-// ResizeTotals replaces the fixed host capacity after a daemon restore
-// on a machine with different effective limits. It preserves current
-// grants and waiters. Soft-core grants may overcommit the new core
-// total, exactly as the ledger's own invariant permits them to
-// overcommit the current one; hard grants may not. If the new totals
-// cannot represent the current state, it returns [ErrInvalidResize].
 func (l *Ledger) ResizeTotals(cores float64, memoryBytes uint64) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -473,7 +416,6 @@ func (l *Ledger) ownerAdmissionRank(ownerID string) uint64 {
 	return l.leases[leaseID].admit
 }
 
-// ProvesOwner reports whether token's canonical top-level owner is ownerID.
 func (l *Ledger) ProvesOwner(token, ownerID string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -490,14 +432,10 @@ func (l *Ledger) ProvesOwner(token, ownerID string) bool {
 	return canonicalOwnerID == ownerID
 }
 
-// trimCores renders a millicore count as cores for an operator-facing
-// refusal, dropping a trailing ".0" so whole core counts read cleanly.
 func trimCores(milli int64) string {
 	return strconv.FormatFloat(float64(milli)/1000.0, 'f', -1, 64)
 }
 
-// gibibytes renders a byte count in GiB to one decimal, the unit an
-// operator sizes a machine in.
 func gibibytes(b uint64) string {
 	return strconv.FormatFloat(math.Round(float64(b)/float64(1<<30)*10)/10, 'f', -1, 64) + "GiB"
 }
@@ -554,24 +492,11 @@ func (s spec) fifoResources() []resource {
 	return rs
 }
 
-// fifoBlocked reports whether a fresh arrival must queue behind the
-// existing waiters rather than backfill ahead of them. It touches a
-// blocked resource when an earlier waiter is either currently runnable or
-// starved on that resource by holders younger than the waiter; a resource
-// held only against older holders is left open for backfill.
 func (l *Ledger) fifoBlocked(s spec) bool {
 	_, blocked := l.scanWaiters(false, s)
 	return anyIn(blocked, s.fifoResources())
 }
 
-// scanWaiters walks queued waiters in admission order and computes the set
-// of resources on which promotion is blocked. A waiter that does not fit
-// blocks only the resources on which holders younger than it are what keep
-// it from fitting, so a later waiter can backfill a resource that only
-// older holders occupy. A waiter that touches an already-blocked resource
-// yields all its resources to preserve per-resource FIFO order. When
-// findFit is set, the index of the first waiter that both fits and is not
-// blocked is returned; otherwise the accumulated blocked set is returned.
 func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool) {
 	blocked := map[resource]bool{}
 	var protected []*waiter
@@ -611,10 +536,6 @@ func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool
 	return -1, blocked
 }
 
-// violatesReservation reports whether admitting candidate would consume
-// capacity needed by a protected waiter after its blockers release. Younger
-// leases that cannot coexist with the waiter because they hold a conflicting
-// semaphore are excluded: they must release before the waiter can run.
 func (l *Ledger) violatesReservation(candidate spec, protected []*waiter) bool {
 	for _, w := range protected {
 		for _, r := range w.spec.fifoResources() {
@@ -738,11 +659,6 @@ func specsCompete(a, b spec) bool {
 	return false
 }
 
-// starvedByYounger reports whether waiter w cannot currently claim
-// resource r, yet would fit if holders admitted after w arrived were set
-// aside. When true, younger backfilled holders -- not older ones w queued
-// behind -- are what keep w from running, so w's claim on r is protected
-// and later waiters must not backfill past it.
 func (l *Ledger) starvedByYounger(w spec, r resource) bool {
 	demand, used, usedOlder, capacity, ok := l.resourceBudget(w, r)
 	if !ok {
@@ -751,10 +667,6 @@ func (l *Ledger) starvedByYounger(w spec, r resource) bool {
 	return !fitsCost(used, demand, capacity) && fitsCost(usedOlder, demand, capacity)
 }
 
-// resourceBudget returns waiter w's demand on resource r, the live cost
-// against it, the cost owed only to holders no younger than w, and r's
-// effective capacity. ok is false for a resource w does not weigh on
-// (a cancel_others claim, or a semaphore w does not queue on).
 func (l *Ledger) resourceBudget(w spec, r resource) (demand, used, usedOlder, capacity int64, ok bool) {
 	switch r {
 	case resourceCores:
@@ -797,9 +709,6 @@ func (l *Ledger) resourceBudget(w spec, r resource) (demand, used, usedOlder, ca
 	}
 }
 
-// fitsCost reports whether a demand of cost fits in capacity given used,
-// comparing by subtraction so a large declared cost cannot overflow the
-// sum into a false fit.
 func fitsCost(used, cost, capacity int64) bool {
 	return used <= capacity && cost <= capacity-used
 }
@@ -856,18 +765,6 @@ func touchesAny(s spec, set map[resource]bool) bool {
 	return false
 }
 
-// hostFits reports whether a spec's host cores and memory fit right now.
-// With no positive resource grant in the ledger, the FIFO head is admitted
-// against the machine total even when external pressure has collapsed the
-// current headroom. Zero-cost orchestration leases do not suppress that
-// liveness floor: they represent connected runs, not admitted work. Once any
-// host or semaphore resource is held, ordinary headroom accounting applies on
-// both host dimensions. Semaphore capacity remains independently enforced.
-//
-// Memory remains a hard safety budget between admitted runs. A soft CPU
-// request uses cores as backpressure: it limits additional admissions once
-// the host is already overcommitted, but it never turns a memory-fitting head
-// run into a permanent CPU-only wait.
 func (l *Ledger) hostFits(s spec) bool {
 	if l.resourcesIdle() {
 		return true
@@ -883,10 +780,6 @@ func (l *Ledger) hostFits(s spec) bool {
 	return coresOK && memoryOK
 }
 
-// resourcesIdle distinguishes an empty resource ledger from one containing only
-// zero-cost run-registration leases. The latter keep connections and run
-// finalization alive, but hold no capacity and therefore must not prevent the
-// queue head from bootstrapping under external pressure.
 func (l *Ledger) resourcesIdle() bool {
 	if l.usedMilliCores != 0 || l.usedMemory != 0 {
 		return false
@@ -901,9 +794,6 @@ func (l *Ledger) resourcesIdle() bool {
 	return true
 }
 
-// coresFitSoft applies ordinary CPU headroom once hostFits has handled the
-// truly empty ledger. A memory-only grant is admitted work, so it must not
-// reopen the empty-ledger liveness floor.
 func (l *Ledger) coresFitSoft(s spec) bool {
 	if s.milliCores == 0 {
 		return true
@@ -961,9 +851,6 @@ func (l *Ledger) semEffectiveCapacity(key string, incoming int) int {
 	return 1
 }
 
-// semBudgetFits compares by subtraction (cost <= capacity-used) rather
-// than summing used+cost, so a huge declared cost cannot overflow the
-// sum into a false fit.
 func (l *Ledger) semBudgetFits(c claim) bool {
 	used := l.semUsed(c.key)
 	eff := l.semEffectiveCapacity(c.key, c.capacity)
@@ -1085,11 +972,6 @@ func (l *Ledger) dropHold(key string, id LeaseID) {
 	}
 }
 
-// promote grants waiters until no further waiter is admissible. Each pass
-// scans in admission order and grants the highest-ranked waiter that fits and is not
-// blocked: a waiter that does not fit is backfilled past only while older
-// holders are what block it, and once holders younger than it are the
-// blocker its resources are protected so no later waiter starves it.
 func (l *Ledger) promote() []Event {
 	var events []Event
 	for {

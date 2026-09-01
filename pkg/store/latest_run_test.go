@@ -20,9 +20,6 @@ func openStore(t *testing.T) *store.Store {
 	return s
 }
 
-// seedRun inserts a run with the given pipeline + status + started_at,
-// optionally finished at a relative offset. Centralizes the boilerplate
-// so each test case reads as data, not setup.
 func seedRun(t *testing.T, s *store.Store, id, pipeline, status string, startedAgo, finishedAgo time.Duration) {
 	t.Helper()
 	ctx := context.Background()
@@ -42,8 +39,6 @@ UPDATE runs SET status = ?, error = '', finished_at = ? WHERE id = ?`,
 	}
 }
 
-// TestGetLatestRun_ReturnsNewest verifies that multiple successful runs
-// of the same pipeline resolve to the newest one.
 func TestGetLatestRun_ReturnsNewest(t *testing.T) {
 	s := openStore(t)
 	seedRun(t, s, "old", "build", "success", 2*time.Hour, 90*time.Minute)
@@ -59,8 +54,6 @@ func TestGetLatestRun_ReturnsNewest(t *testing.T) {
 	}
 }
 
-// TestGetLatestRun_FiltersStatus proves a failing run doesn't count
-// when the caller asks for {"success"}.
 func TestGetLatestRun_FiltersStatus(t *testing.T) {
 	s := openStore(t)
 	seedRun(t, s, "older-success", "deploy", "success", 1*time.Hour, 45*time.Minute)
@@ -75,8 +68,6 @@ func TestGetLatestRun_FiltersStatus(t *testing.T) {
 	}
 }
 
-// TestGetLatestRun_NotFound returns ErrNotFound when the pipeline has
-// no runs at all.
 func TestGetLatestRun_NotFound(t *testing.T) {
 	s := openStore(t)
 	_, err := s.GetLatestRun(context.Background(), "never-ran", []string{"success"}, 0)
@@ -85,9 +76,6 @@ func TestGetLatestRun_NotFound(t *testing.T) {
 	}
 }
 
-// TestGetLatestRun_MaxAgeRespected proves the freshness bound filters
-// stale runs. Seeded run finished 90 minutes ago; a 1h maxAge excludes
-// it. A 2h maxAge includes it.
 func TestGetLatestRun_MaxAgeRespected(t *testing.T) {
 	s := openStore(t)
 	seedRun(t, s, "stale", "build", "success", 2*time.Hour, 90*time.Minute)
@@ -105,8 +93,6 @@ func TestGetLatestRun_MaxAgeRespected(t *testing.T) {
 	}
 }
 
-// TestGetLatestRun_EmptyStatusesMatchesAny proves that passing nil
-// statuses returns the newest regardless of outcome.
 func TestGetLatestRun_EmptyStatusesMatchesAny(t *testing.T) {
 	s := openStore(t)
 	seedRun(t, s, "older-success", "mix", "success", 1*time.Hour, 45*time.Minute)
@@ -121,8 +107,6 @@ func TestGetLatestRun_EmptyStatusesMatchesAny(t *testing.T) {
 	}
 }
 
-// TestGetLatestRun_RejectsEmptyPipeline guards against accidental
-// "match anything" queries from callers that forgot to pass a name.
 func TestGetLatestRun_RejectsEmptyPipeline(t *testing.T) {
 	s := openStore(t)
 	if _, err := s.GetLatestRun(context.Background(), "", nil, 0); err == nil {

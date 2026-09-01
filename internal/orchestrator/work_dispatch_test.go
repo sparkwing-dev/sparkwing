@@ -15,8 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// multiStepWork emits step boundary events and threads typed output
-// between steps via sw.StepGet + step.Needs.
 type multiStepWorkJob struct {
 	sparkwing.Base
 	sparkwing.Produces[workOut]
@@ -53,8 +51,6 @@ func (workMultiPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
-// failingWorkJob fails its terminal step; the node should report
-// failed and the run should fail.
 type failingWorkJob struct{ sparkwing.Base }
 
 func (failingWorkJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -70,7 +66,6 @@ func (workFailPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.No
 	return nil
 }
 
-// jobFnPipe registers a single-closure Job via JobFn through sw.Job.
 type jobFnPipe struct{ sparkwing.Base }
 
 var jobFnRan atomic.Bool

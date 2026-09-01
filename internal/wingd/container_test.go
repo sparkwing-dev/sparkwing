@@ -7,9 +7,6 @@ import (
 	"time"
 )
 
-// writeCgroupV2 lays a cgroup v2 fixture tree under a fresh root: a
-// /proc/self/cgroup pointing at "/" and the given control files directly
-// under the unified mount. An empty file value is omitted.
 func writeCgroupV2(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -242,8 +239,6 @@ func TestContainerSensorFor_Gate(t *testing.T) {
 	}
 }
 
-// fakeHostSampler is a stand-in host reading for gate tests; the value is
-// never sampled.
 type fakeHostSampler struct{}
 
 func (fakeHostSampler) Sample() (HostStat, error) { return HostStat{}, nil }

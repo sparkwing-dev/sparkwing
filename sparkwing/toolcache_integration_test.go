@@ -12,13 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Two worktrees of one repo hold the same module path, the same
-// relative file path, and identical bytes -- only the absolute prefix
-// differs. That is the input golangci-lint's content-keyed cache
-// cannot tell apart: sharing one cache between them makes the second
-// run report the first worktree's file path (and, once that worktree
-// is deleted, a path that no longer exists). Each run gets its own
-// ToolCacheDir here, so each must report the tree it actually linted.
 func TestToolCacheDir_LintReportsTheWorktreeItRanIn(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs golangci-lint twice")
@@ -47,8 +40,6 @@ func TestToolCacheDir_LintReportsTheWorktreeItRanIn(t *testing.T) {
 	}
 }
 
-// seedLintWorktree writes a minimal module carrying one finding the
-// default linter set reports, and returns the worktree root.
 func seedLintWorktree(t *testing.T, dir string) string {
 	t.Helper()
 	pkgDir := filepath.Join(dir, "pkg", "sample")
@@ -67,9 +58,6 @@ func seedLintWorktree(t *testing.T, dir string) string {
 	return dir
 }
 
-// lintWithScopedCache runs golangci-lint in dir with the cache
-// ToolCacheDir hands that worktree, the way a gate's lint step does,
-// and returns the combined output.
 func lintWithScopedCache(t *testing.T, dir string) string {
 	t.Helper()
 	useWorkDir(t, dir)
@@ -81,23 +69,11 @@ func lintWithScopedCache(t *testing.T, dir string) string {
 	return out
 }
 
-// lintWithCache runs golangci-lint in dir against an explicit cache
-// directory and returns the combined output, so a caller can hand it a
-// cache some other worktree filled. Findings are expected, so a
-// non-zero exit is not a test failure. --no-config pins the default
-// linter set regardless of what sits above the temp dir, and
-// --path-mode abs makes the reported location unambiguous. TMPDIR is
-// private because golangci-lint's parallel-runner lock is one file per
-// temp directory: on the shared default this run is refused by any
-// gate linting alongside it, and the refusal reads as a test failure.
 func lintWithCache(t *testing.T, dir, cache string) string {
 	t.Helper()
 	return lintWithCacheConfig(t, dir, cache, "")
 }
 
-// lintWithCacheConfig is lintWithCache with an explicit config file, so a
-// caller can exercise the exclusion rules a real repo carries rather than
-// the default set.
 func lintWithCacheConfig(t *testing.T, dir, cache, config string) string {
 	t.Helper()
 

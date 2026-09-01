@@ -19,9 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// runWorkerCLI implements `sparkwing-runner worker --controller URL [--poll DUR]`.
-// Polls the controller for triggers and runs each pipeline in-
-// process. Ctrl-C gracefully drains.
 func runWorkerCLI(args []string) error {
 	fs := flag.NewFlagSet("worker", flag.ExitOnError)
 	controllerURL := fs.String("controller", "", "controller base URL (required)")
@@ -105,8 +102,6 @@ func runWorkerCLI(args []string) error {
 		logger.Info("artifact store", "url", *artifactStoreURL)
 	}
 
-	// The pull-through proxy lives on the cache pod, so the gitcache
-	// URL the runner pod already carries is the proxy base.
 	proxyFallback := os.Getenv("SPARKWING_GITCACHE_URL")
 
 	switch *runnerKind {
@@ -164,13 +159,6 @@ func runWorkerCLI(args []string) error {
 	return RunWorker(ctx, opts)
 }
 
-// buildWarmPoolFactory wraps a K8sRunner factory with the warm-pool
-// Runner. Per trigger, each claim gets a fresh pool Runner (the K8s
-// fallback inside it also closes over the trigger via the inner
-// factory, so fallbacks pick up the right per-trigger identity if
-// any field depends on it). Laptop use of --runner warm against a
-// local controller works too: the K8s factory fails startup if it
-// can't reach a cluster, which is the right signal.
 func buildWarmPoolFactory(
 	controllerURL, token string,
 	cfg warmpool.Config,

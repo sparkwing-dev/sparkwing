@@ -8,17 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-// The embedded set is what the dashboard serves at /docs and what the product
-// site is generated from, so every page in it is on its way to a network. This
-// is the mechanical half of that check: patterns a machine can decide, run in
-// the same tier as the rest of the suite. It cannot judge whether a paragraph
-// reveals how someone's infrastructure is arranged -- that stays a human read.
-//
-// Two patterns are pinned narrower than they look. The ticket one names the
-// tracker actually in use rather than a general LETTERS-DIGITS shape, which
-// these pages are full of: HTTP-404, RFC-3339 and SHA-256 are not tickets. The
-// sibling-tool one lists names rather than matching the family suffix, because
-// sparkwing's own daemon is `sparkwing wingd`.
 var scrubPatterns = []struct {
 	name    string
 	pattern *regexp.Regexp
@@ -63,14 +52,6 @@ var scrubPatterns = []struct {
 	},
 }
 
-// knownScrubHits are the matches already in the set when this check was
-// written. They are recorded rather than accepted: a new match anywhere fails
-// immediately, and a recorded one that has been cleaned fails too, so the list
-// can only shrink.
-//
-// Empty: every recorded hit has been cleaned. The map stays so any
-// future deliberate exemption is recorded here rather than silently
-// weakening the pattern.
 var knownScrubHits = map[string][]string{}
 
 func TestEmbeddedDocsCarryNothingPrivate(t *testing.T) {
@@ -95,8 +76,6 @@ func TestEmbeddedDocsCarryNothingPrivate(t *testing.T) {
 	}
 }
 
-// A recorded hit that no longer appears is a line nobody is reading, and it
-// would quietly excuse the next page that happens to reproduce it.
 func TestEveryRecordedScrubHitStillAppears(t *testing.T) {
 	for slug, hits := range knownScrubHits {
 		body, err := docs.ReadRaw(slug)
@@ -112,8 +91,6 @@ func TestEveryRecordedScrubHitStillAppears(t *testing.T) {
 	}
 }
 
-// The set is clean apart from the recorded hits, so the check above cannot
-// fail today. These cases pin what it looks for.
 func TestScrubPatternsMatchWhatTheyClaimTo(t *testing.T) {
 	cases := []struct {
 		name  string

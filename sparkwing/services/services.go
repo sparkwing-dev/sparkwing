@@ -41,11 +41,8 @@ var ErrDockerUnavailable = docker.ErrDockerUnavailable
 // DefaultReadyTimeout is used when a Service leaves ReadyTimeout zero.
 const DefaultReadyTimeout = 30 * time.Second
 
-// readyPollInterval is how often WithServices re-runs ReadyCmd while
-// waiting for a service to come up.
 const readyPollInterval = 500 * time.Millisecond
 
-// fallbackReadyWait is the crude sleep used when no ReadyCmd is set.
 const fallbackReadyWait = 2 * time.Second
 
 // Service describes a sidecar container to spin up via `docker run -d
@@ -153,9 +150,6 @@ func WithServices(ctx context.Context, services []Service, fn func(context.Conte
 	return fn(ctx)
 }
 
-// waitReady polls svc.ReadyCmd (via docker exec) until it exits 0 or
-// ReadyTimeout is hit. Empty ReadyCmd falls back to a fixed short
-// sleep.
 func waitReady(ctx context.Context, svc *Service) error {
 	if svc.ReadyCmd == "" {
 		timer := time.NewTimer(fallbackReadyWait)
@@ -193,8 +187,6 @@ func waitReady(ctx context.Context, svc *Service) error {
 	}
 }
 
-// deriveName produces a stable base name from an image reference,
-// sanitized to the charset docker accepts in container names.
 func deriveName(image string) string {
 	name := image
 	if i := strings.Index(name, "@"); i >= 0 {
@@ -216,8 +208,6 @@ func deriveName(image string) string {
 	return name
 }
 
-// sanitize keeps only characters docker allows in container names
-// ([a-zA-Z0-9_.-]); anything else becomes a dash.
 func sanitize(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -235,7 +225,6 @@ func sanitize(s string) string {
 	return b.String()
 }
 
-// randomSuffix returns a 6-char hex string from crypto/rand.
 func randomSuffix() (string, error) {
 	var buf [3]byte
 	if _, err := rand.Read(buf[:]); err != nil {

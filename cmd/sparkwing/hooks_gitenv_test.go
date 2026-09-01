@@ -41,12 +41,6 @@ func TestDispatch_UnbindsFromTheRepositoryThatLaunchedIt(t *testing.T) {
 	}
 }
 
-// TestHooksGate_AStepIsShownWhatTheCommitCarries is the converse of the
-// staging test below: severing the ambient binding must not leave a check
-// scoped to the staged diff looking at an empty change. Only a commit of
-// already-staged content hands the hook the repository's own index; the other
-// forms compose the commit in a lock file, and reading the repository's index
-// under those reports nothing.
 func TestHooksGate_AStepIsShownWhatTheCommitCarries(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -78,10 +72,6 @@ func TestHooksGate_AStepIsShownWhatTheCommitCarries(t *testing.T) {
 	}
 }
 
-// newGateIndexFixture installs the managed hooks over a repository with two
-// tracked files dirty in the worktree, behind a sparkwing that records what a
-// staged-diff check is shown when it asks for the gate's index, and what index
-// the step inherited without asking.
 func newGateIndexFixture(t *testing.T) (f *chainFixture, gateView, inherited string) {
 	t.Helper()
 	f = newChainFixture(t)
@@ -116,12 +106,6 @@ func readLines(t *testing.T, path string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// TestHooksGate_AStepStagingElsewhereLeavesTheGatedRepository drives a real
-// partial commit, which is the path where git hands the hook an absolute
-// index. The gate is a plain script rather than the real binary on purpose:
-// what has to hold is that the hook file protects whatever it runs, including
-// a sparkwing too old to unbind itself and the third-party tools a pipeline
-// calls.
 func TestHooksGate_AStepStagingElsewhereLeavesTheGatedRepository(t *testing.T) {
 	t.Run("the managed hook keeps the step's work out of the commit", func(t *testing.T) {
 		f, elsewhere := newStagingFixture(t)
@@ -165,10 +149,6 @@ func TestHooksGate_AStepStagingElsewhereLeavesTheGatedRepository(t *testing.T) {
 	})
 }
 
-// newStagingFixture is a gated repository with one commit behind it, a
-// sparkwing on PATH that stages a second repository the way any suite that
-// builds a scratch checkout does, and two dirty files so the commit under
-// test can name just one of them.
 func newStagingFixture(t *testing.T) (*chainFixture, string) {
 	t.Helper()
 	f := newChainFixture(t)

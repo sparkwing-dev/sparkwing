@@ -56,10 +56,6 @@ func (r Run) SecretArgNames() []string {
 	return decodeStringSlice(r.Invocation[InvocationSecretArgsKey])
 }
 
-// decodeStringSlice reads a []string that may have round-tripped
-// through JSON as []any. The in-process orchestrator path hands over
-// the original []string; anything read back out of the database or off
-// the wire arrives as []any.
 func decodeStringSlice(v any) []string {
 	switch typed := v.(type) {
 	case []string:
@@ -110,8 +106,6 @@ func (r Run) RedactedForDisplay() Run {
 		secret[n] = struct{}{}
 	}
 
-	// Collect the plaintext values before overwriting them so the
-	// reproducer rewrite still knows what to look for.
 	values := make(map[string]string, len(names))
 	for k, v := range r.Args {
 		if _, ok := secret[k]; ok && v != "" {
@@ -158,11 +152,6 @@ func RedactInvocation(inv map[string]any) map[string]any {
 	return redactInvocation(inv, secret, values)
 }
 
-// redactInvocation rewrites the args sub-map and the reproducer
-// command. The copy is shallow apart from those two entries: every
-// other key (flags, hints, profile, backends, hashes) is carried over
-// by reference, which is safe because callers treat the result as
-// read-only and the redacted entries are the only ones replaced.
 func redactInvocation(inv map[string]any, secret map[string]struct{}, values map[string]string) map[string]any {
 	if len(inv) == 0 {
 		return inv
@@ -178,9 +167,7 @@ func redactInvocation(inv map[string]any, secret map[string]struct{}, values map
 		out[k] = v
 	}
 	if len(args) > 0 {
-		// Any value present here but not in Run.Args still needs
-		// covering -- the two maps are written together but a
-		// hand-built invocation could disagree.
+
 		redacted := make(map[string]string, len(args))
 		for k, v := range args {
 			if _, ok := secret[k]; ok && v != "" {
@@ -199,13 +186,6 @@ func redactInvocation(inv map[string]any, secret map[string]struct{}, values map
 	return out
 }
 
-// redactReproducer rewrites `--name=value` to `--name=***` for each
-// secret arg. The match is anchored on the flag name rather than on
-// the bare value so a secret that happens to equal a common token
-// ("true", "1") cannot shred unrelated parts of the command.
-//
-// Longest value first so a secret that is a prefix of another does not
-// leave a tail behind.
 func redactReproducer(repro string, values map[string]string) string {
 	if len(values) == 0 {
 		return repro
@@ -228,9 +208,6 @@ func redactReproducer(repro string, values map[string]string) string {
 	return repro
 }
 
-// invocationArgs reads the invocation's args sub-map, which arrives as
-// map[string]string in process and map[string]any after a JSON round
-// trip.
 func invocationArgs(inv map[string]any) map[string]string {
 	switch typed := inv["args"].(type) {
 	case map[string]string:

@@ -22,9 +22,6 @@ func (GenRuntimeBranch) Examples() []sw.Example {
 }
 
 func (GenRuntimeBranch) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-	// Anti-pattern: branching the DAG on the host environment makes
-	// Plan() non-deterministic. Express this as a job-level SkipIf,
-	// Requires label, or a pipeline guard instead.
 	if os.Getenv("DEPLOY_ENV") == "prod" {
 		sw.Job(plan, "deploy-prod", &genRBJob{})
 	} else {

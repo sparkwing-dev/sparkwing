@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -17,15 +18,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// remoteChildMarker tells a re-entered RunNodeOnce to skip
-// shouldRunRemote and run locally against the source the parent
-// already cloned, breaking the otherwise-infinite clone+compile
-// recursion.
 const remoteChildMarker = "SPARKWING_REMOTE_CHILD"
 
-// shouldRunRemote decides between in-process execution and the remote
-// clone+compile path. Triggers carrying repo_url or GitHub metadata provide
-// enough source information to compile a missing pipeline from disk.
 func shouldRunRemote(trigger *store.Trigger) bool {
 	if os.Getenv(remoteChildMarker) == "1" {
 		return false
@@ -36,11 +30,6 @@ func shouldRunRemote(trigger *store.Trigger) bool {
 	return remoteTriggerSourceURLRaw(trigger) != ""
 }
 
-// runNodeRemote is RunNodeOnce's fallback for pipelines not baked
-// into the calling runner binary. Clones the repo, builds (or fetches
-// from /bin/<hash> cache) the pipeline binary, then execs it with
-// `run-node <runID> <nodeID>`. The child writes terminal state to the
-// controller; we just surface its outcome.
 func runNodeRemote(
 	ctx context.Context,
 	trigger *store.Trigger,
@@ -81,12 +70,20 @@ func runNodeRemote(
 		return runner.Result{}, fmt.Errorf("create private work directory: %w", err)
 	}
 
-	sparkwingDir, err := bincache.FetchPipelineSource(gcURL, repoURL, branch, trigger.GitSHA, workDir)
+	fetchSource := bincache.FetchPipelineSourceWithToken
+	if strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") {
+		fetchSource = bincache.FetchPipelineWorkspaceSourceWithToken
+	}
+	sparkwingDir, err := fetchSource(gcURL, controllerURL, token, repoURL, branch, trigger.GitSHA, workDir)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("fetch source: %w", err)
 	}
 
-	binary, err := resolveRemoteBinary(sparkwingDir, gcURL, bincache.CacheToken(), logger)
+	binaryCacheURL := gcURL
+	if bincache.ControllerGitcacheToken(gcURL, controllerURL, token) != "" {
+		binaryCacheURL = ""
+	}
+	binary, err := resolveRemoteBinary(sparkwingDir, binaryCacheURL, bincache.CacheToken(), logger)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
 	}
@@ -141,8 +138,6 @@ func remoteTriggerSourceURLRaw(trigger *store.Trigger) string {
 	return trigger.RepoURL
 }
 
-// resolveRemoteBinary tries local disk, then remote /bin/<hash>, then
-// compile+upload, mirroring the trigger loop's build/upload dance.
 type remoteBinary struct {
 	path  string
 	lease *bincache.Lease

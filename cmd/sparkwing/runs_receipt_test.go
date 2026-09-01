@@ -14,11 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestRunJobsReceipt_LocalEmitsJSON exercises the local-mode CLI
-// path end-to-end: seed a finished run + node, invoke runJobsReceipt,
-// confirm valid receipt JSON lands on stdout. Mirrors the no-test
-// pattern of runJobsGet -- the verb is small but the contract (CLI
-// = canonical receipt shape) is load-bearing.
 func TestRunJobsReceipt_LocalEmitsJSON(t *testing.T) {
 	dir := t.TempDir()
 	paths := orchestrator.PathsAt(dir)
@@ -76,8 +71,6 @@ func TestRunJobsReceipt_LocalEmitsJSON(t *testing.T) {
 	}
 }
 
-// TestRunJobsReceipt_RejectsBadOutput pins the explicit error path:
-// receipts only support -o json today.
 func TestRunJobsReceipt_RejectsBadOutput(t *testing.T) {
 	dir := t.TempDir()
 	paths := orchestrator.PathsAt(dir)
@@ -98,8 +91,6 @@ func TestReceiptHelpMatchesLocalCost(t *testing.T) {
 	}
 }
 
-// captureStdout swaps os.Stdout for a pipe so the verb's
-// json.Encoder writes can be inspected. Restores on cleanup.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()

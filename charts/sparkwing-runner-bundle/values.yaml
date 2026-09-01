@@ -1,9 +1,10 @@
 # Default values for sparkwing-runner-bundle.
 #
 # Override anything below with `helm install ... --set key=value` or
-# `-f my-values.yaml`. The minimum-viable override is `controller.url`;
-# everything else has a working default for a kind / single-node test
-# cluster.
+# `-f my-values.yaml`. This chart version has no compatible public image
+# default. In addition to controller.url, explicitly set repository and
+# tag for every enabled image to a mutually compatible build or mirror
+# until a corrected release is published.
 #
 # Sections, in roughly the order operators care about:
 #   1. controller.*          -- where to claim work from
@@ -25,10 +26,16 @@ controller:
   #     (in-cluster controller, e.g. enterprise self-host)
   url: ""
 
-  # Auth token used by both the runner and the logs service when
-  # talking to the controller. Reference an existing Secret created
-  # out-of-band; the chart does NOT create the secret itself (so you
-  # can rotate it without `helm upgrade`).
+  # Set by the sparkwing-full parent chart so an empty URL resolves
+  # to that release's in-cluster controller Service. Standalone
+  # installs should leave this false and set url explicitly.
+  bundled: false
+
+  # Auth token the runner uses for controller claims and log writes.
+  # Configuring it also enables the logs service's controller-backed
+  # validation of incoming bearer tokens. Reference an existing
+  # Secret created out-of-band; the chart does NOT create the secret
+  # itself (so you can rotate it without `helm upgrade`).
   tokenSecret:
     # Name of the Secret in the install namespace.
     name: ""
@@ -46,9 +53,9 @@ runner:
   replicas: 2
 
   image:
-    # Image registry path. Default assumes images publish to GHCR
-    # under sparkwing-dev. If you mirror images internally, point
-    # this at your registry.
+    # Registry-layout fallback only. Pin repository and tag with the
+    # cache and logs images; appVersion is not a runnable public
+    # release default for this chart version.
     repository: ghcr.io/sparkwing-dev/sparkwing-runner
     tag: "" # falls back to .Chart.AppVersion when empty
     pullPolicy: IfNotPresent
@@ -118,15 +125,17 @@ runner:
 #    means runners never egress for a clone.
 # -----------------------------------------------------------------------
 cache:
-  # Set to false to skip the cache entirely (e.g. if you're providing
-  # your own git mirror). Runners will hit upstream Git directly,
-  # which works but loses the gitcache speedup.
+  # Set to false for a node-only pool or when runner.extraEnv supplies
+  # SPARKWING_GITCACHE_URL for an external gitcache. Trigger claiming
+  # requires a gitcache and the chart rejects a missing URL instead of
+  # starting a runner that exits immediately.
   enabled: true
 
   # RWO PVC -- replicas: 1 is the only safe value.
   replicas: 1
 
   image:
+    # Pin this with runner and logs to one compatible revision.
     repository: ghcr.io/sparkwing-dev/sparkwing-cache
     tag: "" # falls back to .Chart.AppVersion
     pullPolicy: IfNotPresent
@@ -166,12 +175,12 @@ cache:
   # repos.
   repos: ""
 
-  # Optional ssh-key Secret for cloning private repos over SSH. The
-  # cache will mount it read-only at /etc/ssh-key if the Secret
-  # exists; if it doesn't, the volume is `optional: true` and the
-  # cache falls back to https.
+  # Optional ssh-key Secret for cloning private repos over SSH. Leave
+  # the name empty to clone without it. Once configured, the Secret is
+  # required so a misspelled name cannot silently degrade private
+  # repository access.
   sshKeySecret:
-    name: ssh-key
+    name: ""
 
   storage:
     # Persistence is recommended -- a fresh cache pod takes minutes
@@ -210,6 +219,7 @@ logs:
   replicas: 1
 
   image:
+    # Pin this with runner and cache to one compatible revision.
     repository: ghcr.io/sparkwing-dev/sparkwing-logs
     tag: "" # falls back to .Chart.AppVersion
     pullPolicy: IfNotPresent
@@ -268,6 +278,9 @@ rbac:
 # -----------------------------------------------------------------------
 imagePullSecrets: []
 # - name: ghcr-pull-secret
+
+volumePermissions:
+  enabled: true
 
 # -----------------------------------------------------------------------
 # 7. Pod-level security defaults. Applied uniformly across runner +

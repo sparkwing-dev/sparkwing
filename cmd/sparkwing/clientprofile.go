@@ -1,9 +1,3 @@
-// Client-command profile resolution. Shared by every human-driven
-// subcommand that talks to a remote controller or logs service
-// (tokens, users, runs retry/cancel/prune/logs, gc, fleet-worker,
-// cluster-mode web). Each subcommand registers `--profile <name>` via
-// addProfileFlag, then calls resolveProfile to fetch the connection
-// info.
 package main
 
 import (
@@ -16,16 +10,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
-// addProfileFlag registers a `--profile <name>` flag on fs. The
-// returned pointer is populated after fs.Parse.
 func addProfileFlag(fs *flag.FlagSet) *string {
 	return fs.String("profile", "",
 		"profile name from ~/.config/sparkwing/profiles.yaml")
 }
 
-// resolveProfile loads the profile selected by `--profile`. On failure it
-// prints a hint and returns an error so callers can exit without additional
-// formatting.
 func resolveProfile(name string) (*profile.Profile, error) {
 	path, err := profile.DefaultPath()
 	if err != nil {
@@ -46,10 +35,6 @@ func resolveProfile(name string) (*profile.Profile, error) {
 	return p, nil
 }
 
-// requireController fails fast when a command needs a controller URL
-// but the resolved profile lacks one. Not applicable to every
-// command -- some (runs logs) have local-only paths when no profile
-// is active -- but common enough to centralize.
 func requireController(p *profile.Profile, cmd string) error {
 	if p.ControllerURL() == "" {
 		return fmt.Errorf("%s: profile %q has no controller URL", cmd, p.Name)

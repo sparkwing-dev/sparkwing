@@ -1,6 +1,3 @@
-// Hand-rolled help + flag-validation framework. Each leaf command
-// declares its shape as a Command in help_registry.go; its handler
-// calls parseAndCheck to parse flags + validate dependencies.
 package main
 
 import (
@@ -16,8 +13,6 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
-// FlagType is the typed-binding hint bindFlags reads. Empty = untyped
-// (bindFlags skips it so handlers can register manually with pflag).
 type FlagType string
 
 const (
@@ -29,14 +24,12 @@ const (
 	FlagStringSlice FlagType = "stringSlice"
 )
 
-// FlagSpec is metadata for one CLI flag. The handler still owns the
-// pflag registration; FlagSpec feeds help, dep-checking, and completion.
 type FlagSpec struct {
 	Name     string
 	Short    string
-	Argument string // "<name>" for value-taking flags, "" for booleans
+	Argument string
 	Desc     string
-	Group    string // "Input", "Filter", "Output", "System", "Other"
+	Group    string
 
 	Required      bool
 	RequiredWhen  string
@@ -45,22 +38,16 @@ type FlagSpec struct {
 
 	Default string
 
-	// Type opts a flag into auto-registration via bindFlags.
 	Type         FlagType
 	DefaultValue any
 
-	// Hidden flags are parsed/validated but absent from help and completion.
 	Hidden bool
 
-	// Hot marks the flag as part of the default --help / tab-completion
-	// surface. When any flag on a command is Hot, the default help
-	// renders only Hot flags (plus --help / --help-all). --help-all
-	// bypasses the filter and shows everything.
 	Hot bool
 }
 
 type PosArg struct {
-	Name     string // includes brackets, e.g. "<pipeline>"
+	Name     string
 	Desc     string
 	Required bool
 }
@@ -70,9 +57,6 @@ type Example struct {
 	Command string
 }
 
-// SubcommandRef is one row of a group's COMMANDS listing. It is
-// always derived from the registry by filterSubcommands, never
-// authored: see Command.SubcommandOrder.
 type SubcommandRef struct {
 	Name     string
 	Synopsis string
@@ -83,22 +67,6 @@ type Command struct {
 	Synopsis    string
 	Description string
 
-	// SubcommandOrder is a display-order hint for this group's
-	// children, not the child list. The list itself is derived from
-	// the registry, so a group's help can neither name a command the
-	// CLI does not dispatch nor omit one it does -- the two used to be
-	// separate facts and had drifted in both directions.
-	//
-	// A name here that resolves to nothing is ignored, and a
-	// registered child missing from it is still listed (appended in
-	// registry order), so the hint can only ever reorder a correct
-	// listing. TestSubcommandOrderMatchesRegistry fails on either kind
-	// of staleness so it does not quietly accumulate.
-	//
-	// It exists because the order is editorial and the registry cannot
-	// express it: the root menu leads with `info` because that is the
-	// command an agent should run first, and `runs` leads with
-	// `submit` / `list` rather than alphabetically.
 	SubcommandOrder    []string
 	SubcommandOptional bool
 
@@ -108,9 +76,8 @@ type Command struct {
 	GroupOrder  []string
 	UsageSuffix string
 
-	// Hidden = omit from COMMANDS listing + tab-complete; still dispatchable.
 	Hidden bool
-	// HideFromComplete = visible in --help, suppressed from tab-complete.
+
 	HideFromComplete bool
 }
 
@@ -122,21 +89,8 @@ var helpFlag = FlagSpec{
 	Hot:   true,
 }
 
-// errHelpRequested = the user passed -h / --help; handlers should bail.
 var errHelpRequested = errors.New("help requested")
 
-// parseAndCheck injects --help, parses args, and validates flag deps.
-// wantsHelp reports whether args contain a bare help request.
-//
-// It is checked before parsing, because parsing can swallow the
-// request: a value-taking flag consumes whatever follows it, so
-// `pipeline new --template --help` binds --help as the template name
-// and then fails on a missing --name. Someone reaching for --help does
-// not know the flag grammar yet -- that is why they are asking -- so it
-// cannot be the thing they have to get right first.
-//
-// Everything after a `--` terminator is an operand, not a flag, so a
-// pipeline argument that happens to be spelled --help is left alone.
 func wantsHelp(args []string) bool {
 	for _, a := range args {
 		if a == "--" {
@@ -149,8 +103,6 @@ func wantsHelp(args []string) bool {
 	return false
 }
 
-// declaredFlags is the set of long flag names this command documents,
-// used to let a command reclaim a retired global spelling.
 func (c Command) declaredFlags() map[string]bool {
 	if len(c.Flags) == 0 {
 		return nil
@@ -165,13 +117,6 @@ func (c Command) declaredFlags() map[string]bool {
 func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	fs.SetOutput(io.Discard)
 
-	// A command that declares a flag in its own registry entry owns
-	// that spelling, retired global or not. `pipeline new --on` names
-	// the sparkwing.yaml `on:` key it writes, which is the whole reason
-	// to spell it that way; the retired `--on` addressed a profile, so
-	// the two never take the same values and a stale invocation lands on
-	// this command's own "unknown trigger" error rather than a wrong
-	// scaffold.
 	if err := checkRetiredWhereFlags(args, cmd.declaredFlags()); err != nil {
 		return err
 	}
@@ -239,9 +184,6 @@ func PrintHelp(cmd Command, w io.Writer) {
 }
 
 func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
-	// The listing drives USAGE too: a group whose only child is
-	// Hidden offers no subcommand to type, so it must not advertise
-	// one.
 	visible := visibleSubcommands(cmd)
 
 	if cmd.Synopsis != "" {
@@ -375,23 +317,10 @@ func visibleSubcommands(parent Command) []SubcommandRef {
 	return filterSubcommands(parent, false)
 }
 
-// completableSubcommands additionally drops HideFromComplete entries.
 func completableSubcommands(parent Command) []SubcommandRef {
 	return filterSubcommands(parent, true)
 }
 
-// filterSubcommands derives a group's listing from the registry:
-// every Command registered directly under parent.Path, named and
-// described by that Command itself, ordered by parent.SubcommandOrder
-// with anything it omits appended in registry order.
-//
-// Deriving is the point. The listing used to be authored alongside
-// the registry as a second copy of the same facts, and a second copy
-// drifts: `configure` advertised an `xrepo` that had no Command,
-// `sparkwing --help` omitted the registered `examples` group, `run`
-// hid its `config` child, and seventy synopses had been reworded on
-// one side only. A reader cannot tell a stale listing from a true
-// one, so the listing has to be incapable of being stale.
 func filterSubcommands(parent Command, dropHideFromComplete bool) []SubcommandRef {
 	kids := childCommands(parent.Path)
 	byName := make(map[string]*Command, len(kids))
@@ -407,10 +336,7 @@ func filterSubcommands(parent Command, dropHideFromComplete bool) []SubcommandRe
 			return
 		}
 		emitted[name] = true
-		// Hidden children are dispatchable but deliberately off the
-		// offered surface -- listing one would put a "do not use this"
-		// entry in the place a reader goes to choose what to use (the
-		// same call runCommands makes). Deriving must not undo that.
+
 		if c.Hidden {
 			return
 		}
@@ -431,9 +357,6 @@ func filterSubcommands(parent Command, dropHideFromComplete bool) []SubcommandRe
 	return out
 }
 
-// childCommands returns the Commands registered directly under path
-// -- one argv word deeper, not the whole subtree -- in allCommands
-// order.
 func childCommands(path string) []*Command {
 	prefix := path + " "
 	var out []*Command
@@ -447,8 +370,6 @@ func childCommands(path string) []*Command {
 	return out
 }
 
-// commandLeafName is a command's final path word: the token a user
-// types to reach it from its parent.
 func commandLeafName(path string) string {
 	if i := strings.LastIndex(path, " "); i >= 0 {
 		return path[i+1:]
@@ -465,8 +386,6 @@ func hasFlagNamed(flags []FlagSpec, name string) bool {
 	return false
 }
 
-// FlagValues holds typed pointers returned by bindFlags. Missing keys
-// panic -- programmer error, not user error.
 type FlagValues map[string]any
 
 func (v FlagValues) String(name string) string {
@@ -517,8 +436,6 @@ func (v FlagValues) StringSlice(name string) []string {
 	return *p
 }
 
-// bindFlags registers each typed flag with fs. Untyped specs are skipped.
-// Panics on misconfiguration (unknown FlagType, DefaultValue type mismatch).
 func bindFlags(cmd Command, fs *flag.FlagSet) FlagValues {
 	out := FlagValues{}
 	for _, f := range cmd.Flags {
@@ -599,8 +516,6 @@ func defaultAs[T any](f FlagSpec, fallback T) T {
 	return v
 }
 
-// handleParentHelp matches help only as the first arg so subcommands
-// keep their own --help (`tokens create --help` routes to that handler).
 func handleParentHelp(cmd Command, args []string) bool {
 	if len(args) == 0 {
 		return false
@@ -613,8 +528,6 @@ func handleParentHelp(cmd Command, args []string) bool {
 	return false
 }
 
-// renderHelp picks JSON vs prose based on raw args (FlagSet may not
-// have --json/--output declared by the time we get here).
 func renderHelp(cmd Command, args []string, w io.Writer) {
 	if wantsJSONHelp(args) {
 		enc := json.NewEncoder(w)
@@ -625,11 +538,6 @@ func renderHelp(cmd Command, args []string, w io.Writer) {
 	PrintHelp(cmd, w)
 }
 
-// visibleFlagsForHelp returns the flag set rendered for a help/completion
-// surface. `hotOnly=true` filters to Hot flags only (tab-completion
-// uses this for a curated menu); `hotOnly=false` returns every non-
-// Hidden flag for the full --help output. The helpFlag is always
-// appended when missing.
 func visibleFlagsForHelp(cmd Command, hotOnly bool) []FlagSpec {
 	hasHot := false
 	if hotOnly {

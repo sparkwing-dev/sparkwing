@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-// corruptRegistry points the machine at a repos.yaml that will not parse,
-// which is the state a half-finished concurrent append leaves behind.
 func (f *chainFixture) corruptRegistry(t *testing.T) {
 	t.Helper()
 	path := filepath.Join(f.root, "repos.yaml")
@@ -18,8 +16,6 @@ func (f *chainFixture) corruptRegistry(t *testing.T) {
 	t.Setenv("SPARKWING_REPOS", path)
 }
 
-// armedFleet registers one checkout and arms its gate, so the survey has a
-// fleet where every declared gate really does fire.
 func armedFleet(t *testing.T) {
 	t.Helper()
 	f := newChainFixture(t)
@@ -32,10 +28,6 @@ func armedFleet(t *testing.T) {
 	})
 }
 
-// The negative control this whole surface turns on: a registry that cannot be
-// read must not produce the output of a fleet whose gates all fire. Both
-// answers used to be an empty list, so a repos.yaml with one stray character
-// reported a clean machine and every ungated repo on it went unmentioned.
 func TestHooksSurvey_UnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T) {
 	armedFleet(t)
 	gatedOut := captureStdout(t, func() {
@@ -72,10 +64,6 @@ func TestHooksSurvey_UnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T)
 	}
 }
 
-// -o json is the form a script reads, and a clean stream there is the
-// machine-readable spelling of "every repo is fine". An unreadable
-// registry must not print one -- it exits non-zero having written
-// nothing, so a caller never mistakes silence for an answer.
 func TestHooksSurvey_UnreadableRegistryEmitsNoJSONRecords(t *testing.T) {
 	f := newChainFixture(t)
 	f.asProcessEnv(t)
@@ -93,9 +81,6 @@ func TestHooksSurvey_UnreadableRegistryEmitsNoJSONRecords(t *testing.T) {
 	}
 }
 
-// The registry is also what install --fleet and fire --fleet enumerate. An
-// empty sweep there reports a fleet swept and every gate proven, having
-// touched nothing.
 func TestFleetSweeps_RefuseAnUnreadableRegistry(t *testing.T) {
 	for name, run := range map[string]func() error{
 		"install": func() error { return installFleet(installOptions{}) },
@@ -118,9 +103,6 @@ func TestFleetSweeps_RefuseAnUnreadableRegistry(t *testing.T) {
 	}
 }
 
-// doctor keeps reporting the rest of the sweep, so the registry failure has to
-// travel as its own finding. Without it the ungated list is empty on a machine
-// nobody looked at, which is the same field a fully gated fleet leaves empty.
 func TestDoctorDiagnose_CarriesTheReasonTheGateSurveyDidNotRun(t *testing.T) {
 	f := newChainFixture(t)
 	f.asProcessEnv(t)

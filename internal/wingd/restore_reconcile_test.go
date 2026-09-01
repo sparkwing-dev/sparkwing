@@ -14,8 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
-// writeLedgerState hand-writes a daemon state file under home, standing
-// in for what an earlier daemon persisted before dying.
 func writeLedgerState(t *testing.T, home string, blob []byte) string {
 	t.Helper()
 	dir := filepath.Join(home, "wingd")
@@ -51,10 +49,6 @@ func holderRunIDs(t *testing.T, home string) map[string]bool {
 	return ids
 }
 
-// TestStartup_PreservesRestoredLeasesAboveSmallerBudget pins restart safety:
-// the daemon cannot know whether a restored holder is leaked or still running,
-// so a smaller startup budget must tighten new admission without silently
-// dropping arbitration for any existing run.
 func TestStartup_PreservesRestoredLeasesAboveSmallerBudget(t *testing.T) {
 	home := shortHome(t)
 	writeLedgerState(t, home, marshalState(t, admission.Snapshot{
@@ -98,10 +92,6 @@ func TestStartup_PreservesRestoredLeasesAboveSmallerBudget(t *testing.T) {
 	}
 }
 
-// TestStartup_SoftOvercommittedStateRestoresAndServes reproduces the
-// other field wedge: soft-core grants legally overcommitted the core
-// total, the daemon persisted that state, and the next start must
-// restore every lease and serve rather than refuse the snapshot.
 func TestStartup_SoftOvercommittedStateRestoresAndServes(t *testing.T) {
 	home := shortHome(t)
 	writeLedgerState(t, home, marshalState(t, admission.Snapshot{

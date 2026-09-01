@@ -23,10 +23,15 @@ require github.com/sparkwing-dev/sparkwing v0.1.0
 ` + selfReplaceComment + selfReplaceLine + `
 `
 
-// refuseUnpinnedGate stands in for this repo's pre-commit gate: it
-// refuses a `.sparkwing/go.mod` with no local replace, which is what
-// the real gate does by failing to build the pipeline module against a
-// pin whose tag does not exist yet.
+const fakeKubernetesE2EPipelinesGoMod = `module sparkwing-k8s-e2e-pipelines
+
+go 1.26.0
+
+require github.com/sparkwing-dev/sparkwing v0.1.0
+
+replace github.com/sparkwing-dev/sparkwing => ../../../..
+`
+
 const refuseUnpinnedGate = `#!/bin/sh
 if git show ":.sparkwing/go.mod" | grep -q 'replace github.com/sparkwing-dev/sparkwing => \.\.'; then
 	exit 0
@@ -55,9 +60,6 @@ func gitRun(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// seedReleaseRepo builds a throwaway repo shaped like sparkwing (root
-// module plus a nested `.sparkwing` pipelines module on a local
-// replace) with a bare origin to push to, and returns its path.
 func seedReleaseRepo(t *testing.T) string {
 	t.Helper()
 	base := t.TempDir()
@@ -73,6 +75,13 @@ func seedReleaseRepo(t *testing.T) string {
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), fakePipelinesGoMod)
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.sum"), "")
 	writeFile(t, filepath.Join(repo, ".sparkwing", "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n\nfunc main() {}\n")
+	fixtureModuleDir := filepath.Join(repo, filepath.FromSlash(kubernetesE2EPipelineModuleRel))
+	if err := os.MkdirAll(fixtureModuleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(fixtureModuleDir, "go.mod"), fakeKubernetesE2EPipelinesGoMod)
+	writeFile(t, filepath.Join(fixtureModuleDir, "go.sum"), "")
+	writeFile(t, filepath.Join(fixtureModuleDir, "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n\nfunc main() {}\n")
 	if err := os.MkdirAll(filepath.Join(repo, "pkg", "scaffold"), 0o755); err != nil {
 		t.Fatal(err)
 	}

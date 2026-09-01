@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// TestController_QueueStateViewUnifiesKeys proves the controller serves its
-// admission state in the local daemon's QueueState shape: one capacity row per
-// concurrency key, its active holder, and a queued waiter behind it, so
-// `sparkwing queue --profile` renders it with the one queue renderer.
 func TestController_QueueStateViewUnifiesKeys(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()

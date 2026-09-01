@@ -50,15 +50,6 @@ func DetectDialect(dsn string) Dialect {
 	return DialectSQLite
 }
 
-// forUpdateSkipLocked returns the row-locking suffix to append to a
-// SELECT used as the read half of a claim/reap transaction. SQLite
-// serializes writers at the database level and needs no suffix; on
-// Postgres the suffix is " FOR UPDATE SKIP LOCKED" so concurrent
-// claimants pick disjoint rows without blocking on each other.
-//
-// Append to the SELECT before any closing parenthesis; do not insert
-// between SELECT and FROM. Composes with `LIMIT` and `ORDER BY`
-// clauses by appearing after them.
 func (s *Store) forUpdateSkipLocked() string {
 	if s.dialect == DialectPostgres {
 		return " FOR UPDATE SKIP LOCKED"
@@ -66,12 +57,6 @@ func (s *Store) forUpdateSkipLocked() string {
 	return ""
 }
 
-// insertionOrderColumn returns the column to ORDER BY when callers
-// want rows in insertion (storage) order. SQLite exposes the implicit
-// `rowid`; Postgres exposes `ctid`, the physical tuple identifier.
-// Both are stable for read-only ordering within a transaction. Use
-// for display ordering where deterministic semantic ordering is not
-// available.
 func (s *Store) insertionOrderColumn() string {
 	if s.dialect == DialectPostgres {
 		return "ctid"
@@ -79,10 +64,6 @@ func (s *Store) insertionOrderColumn() string {
 	return "rowid"
 }
 
-// forUpdate returns the row-locking suffix for the read half of a
-// transaction that serializes on a specific known row (as opposed to
-// the first-eligible-row pattern handled by forUpdateSkipLocked).
-// SQLite returns empty for the same reason as above.
 func (s *Store) forUpdate() string {
 	if s.dialect == DialectPostgres {
 		return " FOR UPDATE"
@@ -90,10 +71,6 @@ func (s *Store) forUpdate() string {
 	return ""
 }
 
-// rewritePh rewrites `?` placeholders to `$1`, `$2`, ... when dialect
-// is Postgres. SQLite (and any unrecognized dialect) returns q
-// unchanged. Question marks inside single-quoted SQL string literals
-// are skipped so embedded JSON or regex literals survive.
 func rewritePh(dialect Dialect, q string) string {
 	if dialect != DialectPostgres {
 		return q
@@ -144,10 +121,6 @@ func (s *Store) queryRowNoCtx(q string, args ...any) *sql.Row {
 	return s.db.QueryRow(rewritePh(s.dialect, q), args...)
 }
 
-// storeTx wraps the underlying *sql.Tx so transactional queries get
-// the same placeholder rewriting that *Store does on the bare
-// connection. Its method names match the *sql.Tx surface so call
-// sites only change the variable type, not the call shape.
 type storeTx struct {
 	tx      *sql.Tx
 	dialect Dialect
@@ -188,9 +161,6 @@ func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) *s
 	return t.tx.QueryRowContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
-// itoa formats small positive integers without going through strconv;
-// keeps the placeholder rewriter allocation-light on the hot query
-// path.
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

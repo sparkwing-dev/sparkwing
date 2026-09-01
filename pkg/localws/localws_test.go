@@ -234,10 +234,6 @@ func TestRun_ArtifactsEndpoint(t *testing.T) {
 	}
 }
 
-// startLocalws starts Run on a pre-built ephemeral-port listener and
-// returns the bound address once the server is live. Handing the
-// listener to Run avoids the close-then-rebind window that flakes
-// under -parallel: the port is held continuously from pick to serve.
 func startLocalws(t *testing.T, opts Options) string {
 	t.Helper()
 	if reason := web.BundleSkipReason(); reason != "" {
@@ -310,9 +306,6 @@ func startLocalws(t *testing.T, opts Options) string {
 	}
 }
 
-// pickListener reserves a 127.0.0.1 ephemeral port and returns the
-// open listener. Caller hands it to Run via Options.Listener; Run
-// takes ownership and closes it on shutdown.
 func pickListener(t *testing.T) net.Listener {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

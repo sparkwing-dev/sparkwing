@@ -11,3 +11,5 @@ func guardedSessionSupport() error { return errGuardedSessionUnsupported }
 func sessionIdentity(int) (int, string, error) { return 0, "", errGuardedSessionUnsupported }
 
 func signalGuardSession(int, bool) error { return errGuardedSessionUnsupported }
+
+func signalDiagnosticSession(int) error { return errGuardedSessionUnsupported }

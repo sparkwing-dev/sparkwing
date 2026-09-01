@@ -9,11 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// TestQueueState_NamesBudgetSource checks the daemon reports which
-// setting its budget came from. An operator reading the queue to find out
-// why admission is capped is often not the person who spawned the daemon,
-// so a budget with no source attached is one they can neither trust nor
-// revoke.
 func TestQueueState_NamesBudgetSource(t *testing.T) {
 	home := shortHome(t)
 	budget, err := wingd.ParseBudget("50%,ignore-external")
@@ -48,11 +43,6 @@ func TestQueueState_NamesBudgetSource(t *testing.T) {
 	}
 }
 
-// TestQueueState_UnsetBudgetIsReported is the negative control at the
-// daemon boundary: with no budget configured, the queue state must still
-// carry a budget row saying so. Reporting nothing leaves a reader unable
-// to tell an unbudgeted machine from a daemon that simply never mentioned
-// its budget, and those want opposite responses.
 func TestQueueState_UnsetBudgetIsReported(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home})
@@ -72,10 +62,6 @@ func TestQueueState_UnsetBudgetIsReported(t *testing.T) {
 	}
 }
 
-// TestQueueState_UnrecordedBudgetSourceIsNotGuessed checks a daemon whose
-// budget came in without a recorded source says unknown rather than
-// naming one. A view that guesses sends an operator to edit a setting
-// that would not change the budget.
 func TestQueueState_UnrecordedBudgetSourceIsNotGuessed(t *testing.T) {
 	home := shortHome(t)
 	budget, err := wingd.ParseBudget("4")

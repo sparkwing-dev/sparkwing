@@ -10,19 +10,10 @@ import (
 	"time"
 )
 
-// busyProneDSN mirrors Open's DSN but with busy_timeout(0): a write that
-// meets a held write lock fails immediately with SQLITE_BUSY instead of
-// busy-waiting. It isolates the heartbeat's own retry from the DSN-level
-// busy_timeout that would otherwise absorb the contention.
 func busyProneDSN(path string) string {
 	return fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(0)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", path)
 }
 
-// TestHeartbeatConcurrencySlot_RetriesTransientBusy holds the write lock
-// on a separate connection, fires a heartbeat against a busy_timeout(0)
-// store so the first attempt sees an un-absorbed SQLITE_BUSY, then frees
-// the lock mid-flight. Success can only come from the heartbeat's own
-// bounded retry; without it the heartbeat would lapse a live lease.
 func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	ctx := context.Background()
@@ -86,10 +77,6 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	}
 }
 
-// TestHeartbeatConcurrencySlot_LostHolderDoesNotRetry confirms a
-// non-busy terminal outcome (the holder row is gone) short-circuits:
-// ErrLockHeld must surface immediately rather than spin the retry, so an
-// expired or reassigned holder is not kept alive by the busy budget.
 func TestHeartbeatConcurrencySlot_LostHolderDoesNotRetry(t *testing.T) {
 	s := openStoreT(t)
 	ctx := context.Background()

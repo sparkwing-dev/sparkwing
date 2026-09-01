@@ -9,29 +9,13 @@ import (
 	"testing"
 )
 
-// A `sw.` or `sparkwing.` qualifier is a promise that the thing after
-// the dot exists. Prose has no compiler, so the promise is unchecked
-// everywhere it matters most: the doc an agent reads before writing any
-// code.
-//
-// This is not hypothetical. A scaffold comment named `ExecIn` and
-// `BashIn`, which the SDK has never exported, and every agent in a
-// six-config trial searched the docs for those spellings, found
-// nothing, and fell back to reading the whole SDK reference. The
-// generated SDK reference separately carried `sparkwing.CacheKeyFns`,
-// an English plural of `CacheKeyFn` that reads as a symbol and does not
-// resolve.
-//
-// migrations/ and proposals/ are exempt: naming a removed API is their
-// subject matter.
 func TestDocsNameOnlySymbolsThatExist(t *testing.T) {
 	root := repoRoot(t)
 	syms := exportedSymbols(t, filepath.Join(root, "sparkwing"))
 	if len(syms) < 100 {
 		t.Fatalf("harvested only %d SDK symbols; the scan would pass vacuously", len(syms))
 	}
-	// The SDK's own doc comments are the source of the generated
-	// reference, so they are checked as part of it.
+
 	qualified := regexp.MustCompile(`\b(?:sw|sparkwing)\.([A-Z]\w*)`)
 
 	var docFiles []string
@@ -76,10 +60,6 @@ func TestDocsNameOnlySymbolsThatExist(t *testing.T) {
 	}
 }
 
-// exportedSymbols harvests exported identifiers from Go source rather
-// than from `go doc`, whose output shape drops grouped consts and
-// struct fields -- a lossy harvest here means a test that passes
-// because it never saw the symbol, which is worse than no test.
 func exportedSymbols(t *testing.T, dir string) map[string]bool {
 	t.Helper()
 	patterns := []*regexp.Regexp{

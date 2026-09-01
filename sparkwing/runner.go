@@ -79,9 +79,6 @@ func (r *RunnerInfo) HasLabel(term string) bool {
 	return false
 }
 
-// runnerCtxKey is the typed key for storing *RunnerInfo on a
-// context.Context. Set by internal/sparkwingruntime.WithRunner; read
-// by Runner.
 type runnerCtxKey struct{}
 
 // Runner returns the RunnerInfo the orchestrator installed for the

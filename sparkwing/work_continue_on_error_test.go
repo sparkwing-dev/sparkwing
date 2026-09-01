@@ -8,10 +8,6 @@ import (
 	"testing/synctest"
 )
 
-// TestRunWork_DefaultFailFastCancelsSiblings pins the prior
-// behavior: a sibling that errors cancels the runCtx, so other
-// in-flight siblings exit with ctx.Err. Default for steps with no
-// failure-handling flags.
 func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		siblingEntered := make(chan struct{})
@@ -42,10 +38,6 @@ func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
 	})
 }
 
-// TestRunWork_ContinueOnErrorKeepsSiblingsAlive verifies that a
-// failure on a step marked ContinueOnError does NOT cancel siblings.
-// Both errored and successful siblings get a chance to complete.
-// Run-level rollup still reports the failure.
 func TestRunWork_ContinueOnErrorKeepsSiblingsAlive(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		siblingEntered := make(chan struct{})
@@ -76,9 +68,6 @@ func TestRunWork_ContinueOnErrorKeepsSiblingsAlive(t *testing.T) {
 	})
 }
 
-// TestRunWork_OptionalMasksRollup pins the Optional contract: a
-// failing-but-optional step keeps siblings alive (ContinueOnError
-// implied) AND does not contribute to the Job's rollup outcome.
 func TestRunWork_OptionalMasksRollup(t *testing.T) {
 	w := NewWork()
 	Step(w, "best-effort", func(ctx context.Context) error {
@@ -93,10 +82,6 @@ func TestRunWork_OptionalMasksRollup(t *testing.T) {
 	}
 }
 
-// TestRunWork_ContinueOnErrorLetsDependentsRun pins the cascade
-// rule: a ContinueOnError step's dependents still dispatch (mirrors
-// Plan-layer Job.ContinueOnError). Without the flag, dependents
-// cascade-skip and never run.
 func TestRunWork_ContinueOnErrorLetsDependentsRun(t *testing.T) {
 	w := NewWork()
 	var downstreamRan atomic.Bool
@@ -114,9 +99,6 @@ func TestRunWork_ContinueOnErrorLetsDependentsRun(t *testing.T) {
 	}
 }
 
-// TestRunWork_DefaultCascadeSkipsDependents pins the inverse of the
-// ContinueOnError dependent rule. Without the flag, dep-cascade
-// applies and downstream never runs.
 func TestRunWork_DefaultCascadeSkipsDependents(t *testing.T) {
 	w := NewWork()
 	var downstreamRan atomic.Bool
@@ -134,9 +116,6 @@ func TestRunWork_DefaultCascadeSkipsDependents(t *testing.T) {
 	}
 }
 
-// TestWorkStep_OptionalImpliesContinueOnError pins the convenience:
-// Optional() sets both fields so the surface stays consistent with
-// Job.Optional at the Plan layer.
 func TestWorkStep_OptionalImpliesContinueOnError(t *testing.T) {
 	w := NewWork()
 	s := Step(w, "x", func(context.Context) error { return nil }).Optional()

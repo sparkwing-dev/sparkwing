@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// changelogPairRepo lays out the two files the release rewrite has to keep in
-// step, seeded with different content so a test cannot pass by them starting
-// equal.
 func changelogPairRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -24,9 +21,6 @@ func changelogPairRepo(t *testing.T) string {
 	return dir
 }
 
-// TestWriteChangelogPairLeavesBothCopiesIdentical asserts here what the guard
-// test in pkg/docs asserts about the committed tree, against what the rewrite
-// produces rather than against what someone remembered to sync afterwards.
 func TestWriteChangelogPairLeavesBothCopiesIdentical(t *testing.T) {
 	dir := changelogPairRepo(t)
 	rolled := "# Changelog\n\n## [Unreleased]\n\n## [v9.9.9] - 2026-01-01\n\n- a thing\n"
@@ -52,9 +46,6 @@ func TestWriteChangelogPairLeavesBothCopiesIdentical(t *testing.T) {
 	}
 }
 
-// The embedded copy must be rewritten, not merely left alone when it happens to
-// be absent or stale. Seeding it with different content is what makes this
-// meaningful.
 func TestWriteChangelogPairOverwritesAStaleEmbeddedCopy(t *testing.T) {
 	dir := changelogPairRepo(t)
 
@@ -79,8 +70,6 @@ func TestWriteChangelogPairOverwritesAStaleEmbeddedCopy(t *testing.T) {
 	}
 }
 
-// A missing embedded copy is an error rather than a silent skip: the guard test
-// reads that path and a release that cannot write it must say so.
 func TestWriteChangelogPairFailsWhenTheEmbeddedDirIsMissing(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "CHANGELOG.md"), []byte("root\n"), 0o644); err != nil {

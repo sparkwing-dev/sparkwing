@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
-// gitRepo is a real checkout with one commit. Fire drives git itself, so a
-// stub would only prove the stub -- and for the same reason the machine's own
-// git configuration is shut out, since a global core.hooksPath on the box
-// running the tests would otherwise decide what the fixtures observe.
 func gitRepo(t *testing.T) string {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
@@ -26,8 +22,7 @@ func gitRepo(t *testing.T) string {
 		t.Fatal(err)
 	}
 	runGit(t, repo, "add", "seed.txt")
-	// safety: an empty override keeps every hook out of the seed commit, so the
-	// fixture is built without running anything the box happens to have armed.
+
 	runGit(t, repo, "-c", "core.hooksPath="+t.TempDir(), "commit", "-q", "-m", "seed")
 	return repo
 }
@@ -43,9 +38,6 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// installGate writes a managed pre-commit hook into hooksDir. selfTest picks
-// whether it carries the guard, which is the difference between a gate a
-// driver can make refuse and one written before the guard existed.
 func installGate(t *testing.T, hooksDir string, selfTest bool) string {
 	t.Helper()
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
@@ -65,17 +57,12 @@ func installGate(t *testing.T, hooksDir string, selfTest bool) string {
 
 var preCommit = []string{"pre-commit"}
 
-// pointGitAt sets the checkout's real core.hooksPath and returns the stub that
-// reports the same answer, so what Fire is told and what git does cannot drift
-// apart inside a fixture.
 func pointGitAt(t *testing.T, repo, hooksDir string) githooks.Git {
 	t.Helper()
 	runGit(t, repo, "config", "core.hooksPath", hooksDir)
 	return stubGit(hooksDir, "")
 }
 
-// The check that settles enforcement: the gate refuses a commit, and HEAD is
-// where it was.
 func TestFire_RefusedWhenTheRepoRunsItsOwnGate(t *testing.T) {
 	repo := gitRepo(t)
 	hooks := filepath.Join(repo, ".git", "hooks")
@@ -100,8 +87,6 @@ func TestFire_RefusedWhenTheRepoRunsItsOwnGate(t *testing.T) {
 	}
 }
 
-// The negative control the whole command exists for: a repo whose hooks are
-// shadowed inspects as fully installed and accepts the commit anyway.
 func TestFire_AcceptedWhenAHooksPathOverrideShadowsTheInstalledGate(t *testing.T) {
 	repo := gitRepo(t)
 	hooks := filepath.Join(repo, ".git", "hooks")
@@ -117,8 +102,6 @@ func TestFire_AcceptedWhenAHooksPathOverrideShadowsTheInstalledGate(t *testing.T
 	}
 }
 
-// The other half of the same negative control: a repo pointed at a sibling's
-// hooks is flagged rather than counted as armed.
 func TestFire_BorrowedWhenTheGateThatRefusesLivesInAnotherRepo(t *testing.T) {
 	repo := gitRepo(t)
 	sibling := t.TempDir()
@@ -145,8 +128,6 @@ func TestFire_AcceptedWhenNoGateIsInstalledAtAll(t *testing.T) {
 	}
 }
 
-// A managed gate written before the guard existed cannot be asked to refuse,
-// and reading that as a pass is exactly the false all-clear the command is for.
 func TestFire_UnprovableWhenTheInstalledGatePredatesTheSelfTest(t *testing.T) {
 	repo := gitRepo(t)
 	hooks := filepath.Join(repo, ".git", "hooks")
@@ -164,10 +145,6 @@ func TestFire_UnprovableWhenTheInstalledGatePredatesTheSelfTest(t *testing.T) {
 	}
 }
 
-// A hand-written hook is never executed to find out what it does. The fixture
-// names the guard variable so that only the marker check stands between it and
-// being run: a hook that looks provable is exactly the one a laxer check would
-// execute.
 func TestFire_UnprovableWithoutRunningAHookSparkwingDidNotWrite(t *testing.T) {
 	repo := gitRepo(t)
 	hooks := filepath.Join(repo, ".git", "hooks")
@@ -197,8 +174,6 @@ func TestFire_UndeclaredWhenNoPipelineAsksForACommitGate(t *testing.T) {
 	}
 }
 
-// Everything the attempt does happens in a throwaway worktree, so the repo's
-// branches, index and working tree come out as they went in.
 func TestFire_LeavesTheRepoUntouched(t *testing.T) {
 	repo := gitRepo(t)
 	hooks := filepath.Join(repo, ".git", "hooks")
@@ -218,8 +193,6 @@ func TestFire_LeavesTheRepoUntouched(t *testing.T) {
 	}
 }
 
-// The guard can stop a commit and nothing else. A variable that could let one
-// through would be a bypass with an environment variable for a key.
 func TestSelfTestScript_OnlyEverRefuses(t *testing.T) {
 	got := githooks.SelfTestScript()
 	if !strings.Contains(got, "exit 1") {

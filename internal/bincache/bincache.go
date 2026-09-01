@@ -1,16 +1,3 @@
-// Package bincache wraps the sparkwing-cache HTTP endpoints that
-// distribute compiled .sparkwing/ pipeline binaries and archived
-// source trees.
-//
-// Endpoints:
-//
-//   - GET /archive?repo=URL&branch=B returns a gzipped tarball of the
-//     repo at the branch's HEAD. FetchPipelineSource extracts it and
-//     returns the path to the extracted .sparkwing/ dir.
-//   - GET /bin/<hash> returns a precompiled binary matching the
-//     source hash. TryBinary downloads it to dest.
-//   - PUT /bin/<hash> uploads a freshly-compiled binary. UploadBinary
-//     does the PUT (authed via a bearer token).
 package bincache
 
 import (
@@ -40,32 +27,34 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-// ErrMiss is the sentinel for 404 from /bin/<hash>.
 var ErrMiss = errors.New("remote binary cache: miss")
 
 var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
-// CacheURL returns the sparkwing-cache base URL from
-// SPARKWING_GITCACHE_URL, stripped of trailing slashes. Empty means
-// "no cache available".
+// SeedRef returns the only ref namespace accepted by the cache seed importer.
+func SeedRef(sha string) string {
+	return "refs/sparkwing-seed/" + sha
+}
+
 func CacheURL() string {
 	return strings.TrimRight(os.Getenv("SPARKWING_GITCACHE_URL"), "/")
 }
 
-// CacheToken returns the bearer used for PUT /bin/<hash>. Empty
-// disables uploads.
 func CacheToken() string {
 	return os.Getenv("SPARKWING_CACHE_TOKEN")
 }
 
-// TryBinary fetches /bin/<hash> from the cache server into dest.
-// Returns ErrMiss on 404.
 func TryBinary(gcURL, hash, dest string) error {
 	req, err := http.NewRequest(http.MethodGet, gcURL+"/bin/"+hash, nil)
 	if err != nil {
 		return err
 	}
-	cli := &http.Client{Timeout: 30 * time.Second}
+	cli := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := cli.Do(req)
 	if err != nil {
 		return err
@@ -97,8 +86,6 @@ func TryBinary(gcURL, hash, dest string) error {
 	return os.Rename(tmp, dest)
 }
 
-// UploadBinary PUTs a compiled binary to /bin/<hash>. Empty token
-// sends the request unauthenticated.
 func UploadBinary(gcURL, token, hash, src string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
@@ -111,7 +98,12 @@ func UploadBinary(gcURL, token, hash, src string) error {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	cli := &http.Client{Timeout: 60 * time.Second}
+	cli := &http.Client{
+		Timeout: 60 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := cli.Do(req)
 	if err != nil {
 		return err
@@ -124,19 +116,51 @@ func UploadBinary(gcURL, token, hash, src string) error {
 	return nil
 }
 
-// FetchPipelineSource lands the given git repo's source tree at the
-// trigger's exact SHA (or the branch tip if no SHA is empty) under
-// parentDir/<name> via sparkwing-cache's git smart-HTTP endpoint, and
-// returns the path to the cloned tree's .sparkwing subdirectory.
-//
-// Cluster runners need a real .git so the SDK's git helpers work
-// without env-var stamping. depth=1 keeps the on-disk footprint small.
-//
-// Pinning to a non-empty sha requires
-// uploadpack.allowReachableSHA1InWant on the cache pod's bare mirrors.
-// The repo is registered idempotently with the cache pod first so a
-// cold cache backfills from the canonical SSH URL on the first request.
 func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
+	return fetchPipelineSource(gcURL, "", repoSSH, branch, sha, parentDir, false)
+}
+
+// FetchPipelineSourceWithToken authenticates cache reads only when gcURL is the controller's proxy.
+func FetchPipelineSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
+	bearer := ControllerGitcacheToken(gcURL, controllerURL, token)
+	return fetchPipelineSource(gcURL, bearer, repoSSH, branch, sha, parentDir, false)
+}
+
+// FetchPipelineWorkspaceSourceWithToken materializes workspace blobs without checkout transformations.
+func FetchPipelineWorkspaceSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
+	bearer := ControllerGitcacheToken(gcURL, controllerURL, token)
+	return fetchPipelineSource(gcURL, bearer, repoSSH, branch, sha, parentDir, true)
+}
+
+// ControllerGitcacheToken returns token only for the controller's exact cache-proxy origin and path.
+func ControllerGitcacheToken(gcURL, controllerURL, token string) string {
+	if token == "" {
+		return ""
+	}
+	cache, cacheErr := parseCacheEndpoint(gcURL)
+	controller, controllerErr := parseCacheEndpoint(controllerURL)
+	if cacheErr != nil || controllerErr != nil ||
+		!strings.EqualFold(cache.Scheme, controller.Scheme) ||
+		!strings.EqualFold(cache.Host, controller.Host) {
+		return ""
+	}
+	wantPath := strings.TrimRight(controller.Path, "/") + "/api/v1/gitcache"
+	if strings.TrimRight(cache.Path, "/") != wantPath {
+		return ""
+	}
+	return token
+}
+
+func parseCacheEndpoint(raw string) (*neturl.URL, error) {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+		u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+		return nil, errors.New("invalid cache endpoint")
+	}
+	return u, nil
+}
+
+func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool) (sparkwingDir string, err error) {
 	if gcURL == "" {
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
 	}
@@ -152,7 +176,7 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 		return "", fmt.Errorf("FetchPipelineSource: cannot derive repo name from %q", repoSSH)
 	}
 
-	if err := registerRepoWithCache(gcURL, name, repoSSH); err != nil {
+	if err := registerRepoWithCache(gcURL, token, name, repoSSH); err != nil {
 		return "", fmt.Errorf("git register: %w", err)
 	}
 
@@ -166,11 +190,20 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 	}
 
 	if sha != "" {
-		if err := fetchExactSHA(cloneURL, sha, workTree); err != nil {
+		if err := fetchExactSHA(gcURL, cloneURL, token, sha, workTree); err != nil {
 			return "", err
 		}
+		workspaceCommit, inspectErr := isWorkspaceSnapshotCommit(workTree, sha)
+		if inspectErr != nil {
+			return "", inspectErr
+		}
+		if rawWorkspace || workspaceCommit {
+			if err := restoreRawCheckout(workTree, sha); err != nil {
+				return "", err
+			}
+		}
 	} else {
-		if err := shallowCloneBranch(cloneURL, branch, workTree); err != nil {
+		if err := shallowCloneBranch(gcURL, cloneURL, token, branch, workTree); err != nil {
 			return "", err
 		}
 	}
@@ -182,23 +215,21 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 	return "", fmt.Errorf("cloned tree has no .sparkwing directory under %s", workTree)
 }
 
-// fetchExactSHA fetches just the requested SHA at depth 1 and checks
-// it out. Requires uploadpack.allowReachableSHA1InWant on the server.
-func fetchExactSHA(cloneURL, sha, dest string) error {
+func fetchExactSHA(gcURL, cloneURL, token, sha, dest string) error {
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}
 	runIn := func(args ...string) ([]byte, error) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dest
-		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		cmd.Env = gitHTTPEnv(gcURL, token)
 		return cmd.CombinedOutput()
 	}
 	steps := [][]string{
 		{"init", "--quiet"},
 		{"remote", "add", "origin", cloneURL},
 		{"fetch", "--depth", "1", "origin", sha},
-		{"checkout", "--quiet", "FETCH_HEAD"},
+		{"-c", "core.attributesFile=/dev/null", "checkout", "--quiet", "FETCH_HEAD"},
 	}
 	for _, step := range steps {
 		if out, err := runIn(step...); err != nil {
@@ -209,9 +240,78 @@ func fetchExactSHA(cloneURL, sha, dest string) error {
 	return nil
 }
 
-// shallowCloneBranch runs `git clone --depth 1 --single-branch
-// --branch B URL DEST` for the no-SHA fallback path.
-func shallowCloneBranch(cloneURL, branch, dest string) error {
+func isWorkspaceSnapshotCommit(repoDir, sha string) (bool, error) {
+	out, err := exec.Command("git", "-C", repoDir, "cat-file", "commit", sha).Output()
+	if err != nil {
+		return false, fmt.Errorf("inspect workspace commit: %w", err)
+	}
+	header, message, ok := bytes.Cut(out, []byte("\n\n"))
+	if !ok {
+		return false, fmt.Errorf("inspect workspace commit: malformed identity")
+	}
+	parents := 0
+	author := false
+	for _, line := range bytes.Split(header, []byte{'\n'}) {
+		if bytes.HasPrefix(line, []byte("parent ")) {
+			parents++
+		}
+		if bytes.HasPrefix(line, []byte("author Sparkwing <workspace@sparkwing.dev> ")) {
+			author = true
+		}
+	}
+	return author && parents == 1 && string(message) == "sparkwing working-tree snapshot\n", nil
+}
+
+func restoreRawCheckout(repoDir, sha string) error {
+	out, err := exec.Command("git", "-C", repoDir, "ls-tree", "-rz", "--full-tree", sha).Output()
+	if err != nil {
+		return fmt.Errorf("inspect workspace tree: %w", err)
+	}
+	for _, raw := range bytes.Split(out, []byte{0}) {
+		if len(raw) == 0 {
+			continue
+		}
+		metadata, name, ok := bytes.Cut(raw, []byte{'\t'})
+		fields := bytes.Fields(metadata)
+		if !ok || len(fields) != 3 || string(fields[1]) != "blob" {
+			return fmt.Errorf("inspect workspace tree: malformed blob entry")
+		}
+		rel := filepath.Clean(filepath.FromSlash(string(name)))
+		if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("inspect workspace tree: unsafe path %q", name)
+		}
+		blob, blobErr := exec.Command("git", "-C", repoDir, "cat-file", "blob", string(fields[2])).Output()
+		if blobErr != nil {
+			return fmt.Errorf("read workspace blob %q: %w", name, blobErr)
+		}
+		path := filepath.Join(repoDir, rel)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("replace workspace path %q: %w", name, err)
+		}
+		switch string(fields[0]) {
+		case "100644":
+			err = os.WriteFile(path, blob, 0o644)
+			if err == nil {
+				err = os.Chmod(path, 0o644)
+			}
+		case "100755":
+			err = os.WriteFile(path, blob, 0o755)
+			if err == nil {
+				err = os.Chmod(path, 0o755)
+			}
+		case "120000":
+			err = os.Symlink(string(blob), path)
+		default:
+			return fmt.Errorf("workspace tree contains unsupported mode %s for %q", fields[0], name)
+		}
+		if err != nil {
+			return fmt.Errorf("restore workspace path %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func shallowCloneBranch(gcURL, cloneURL, token, branch, dest string) error {
 	cmd := exec.Command(
 		"git", "clone",
 		"--depth", "1",
@@ -219,7 +319,7 @@ func shallowCloneBranch(cloneURL, branch, dest string) error {
 		"--branch", branch,
 		cloneURL, dest,
 	)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = gitHTTPEnv(gcURL, token)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git clone %s (branch %s): %w: %s",
@@ -228,10 +328,7 @@ func shallowCloneBranch(cloneURL, branch, dest string) error {
 	return nil
 }
 
-// registerRepoWithCache POSTs /git/register so the cache pod knows the
-// canonical SSH URL for `name`. Idempotent for matching URL; only a
-// name conflict errors.
-func registerRepoWithCache(gcURL, name, repoURL string) error {
+func registerRepoWithCache(gcURL, token, name, repoURL string) error {
 	q := neturl.Values{}
 	q.Set("name", name)
 	q.Set("repo", repoURL)
@@ -240,13 +337,21 @@ func registerRepoWithCache(gcURL, name, repoURL string) error {
 	if err != nil {
 		return err
 	}
-	cli := &http.Client{Timeout: 30 * time.Second}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	cli := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := cli.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
@@ -254,22 +359,39 @@ func registerRepoWithCache(gcURL, name, repoURL string) error {
 	return nil
 }
 
-// RefreshRepo POSTs /git/refresh on the cache so a freshly-pushed SHA
-// is mirrored before the runner tries to fetch it. Best-effort: the
-// caller supplies a short timeout and logs / continues on failure
-// (the trigger-loop fetch retry will catch the residual race). Returns
-// nil if the cache acks 2xx, an error otherwise. Empty repoURL is a
-// programmer error and returns immediately.
-//
-// The dispatcher (cmd/sparkwing/run_dispatch.go dispatchRemote) calls
-// this before CreateTrigger to close the
-//
-//	git push origin main
-//	sparkwing run X --on prod   # immediately
-//
-// race that surfaces as "fatal: remote error: upload-pack: not our
-// ref <sha>" when the cache's 30s background-fetch loop hasn't
-// caught up yet.
+func gitHTTPEnv(gcURL, token string) []string {
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	count, countIndex := 0, -1
+	for i, value := range env {
+		if strings.HasPrefix(value, "GIT_CONFIG_COUNT=") {
+			_, _ = fmt.Sscanf(strings.TrimPrefix(value, "GIT_CONFIG_COUNT="), "%d", &count)
+			countIndex = i
+		}
+	}
+	entries := 1
+	if token != "" {
+		entries++
+	}
+	countValue := fmt.Sprintf("GIT_CONFIG_COUNT=%d", count+entries)
+	if countIndex >= 0 {
+		env[countIndex] = countValue
+	} else {
+		env = append(env, countValue)
+	}
+	if token != "" {
+		env = append(env,
+			fmt.Sprintf("GIT_CONFIG_KEY_%d=http.%s.extraHeader", count, strings.TrimRight(gcURL, "/")+"/"),
+			fmt.Sprintf("GIT_CONFIG_VALUE_%d=Authorization: Bearer %s", count, token),
+		)
+		count++
+	}
+	env = append(env,
+		fmt.Sprintf("GIT_CONFIG_KEY_%d=http.%s.followRedirects", count, strings.TrimRight(gcURL, "/")+"/"),
+		fmt.Sprintf("GIT_CONFIG_VALUE_%d=false", count),
+	)
+	return env
+}
+
 func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
 	if gcURL == "" {
 		return fmt.Errorf("RefreshRepo: gitcache URL required")
@@ -286,12 +408,15 @@ func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
@@ -299,9 +424,6 @@ func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
 	return nil
 }
 
-// SeedRepo creates a git bundle from repoDir and uploads it to
-// sparkwing-cache. It is the fallback when the cache cannot clone the
-// origin itself.
 func SeedRepo(ctx context.Context, gcURL, token, repoURL, repoDir, sha string) error {
 	if gcURL == "" {
 		return fmt.Errorf("SeedRepo: gitcache URL required")
@@ -321,34 +443,23 @@ func SeedRepo(ctx context.Context, gcURL, token, repoURL, repoDir, sha string) e
 	}
 	defer func() { _ = os.Remove(bundle) }()
 
-	f, err := os.Open(bundle)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
+	return SeedBundle(ctx, gcURL, token, repoURL, bundle, sha)
+}
 
-	q := neturl.Values{}
-	q.Set("repo", repoURL)
-	q.Set("sha", sha)
-	url := strings.TrimRight(gcURL, "/") + "/sync/seed?" + q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, f)
-	if err != nil {
-		return err
+// SeedBundle imports a prebuilt Git bundle into the cache under sha.
+func SeedBundle(ctx context.Context, gcURL, token, repoURL, bundle, sha string) error {
+	if strings.TrimSpace(gcURL) == "" {
+		return fmt.Errorf("SeedBundle: gitcache URL required")
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	return seedBundle(ctx, strings.TrimRight(gcURL, "/")+"/sync/seed", token, repoURL, bundle, sha, false)
+}
+
+// SeedWorkspaceBundle imports a bounded-retention working-tree bundle.
+func SeedWorkspaceBundle(ctx context.Context, gcURL, token, repoURL, bundle, sha string) error {
+	if strings.TrimSpace(gcURL) == "" {
+		return fmt.Errorf("SeedWorkspaceBundle: gitcache URL required")
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return nil
+	return seedBundle(ctx, strings.TrimRight(gcURL, "/")+"/sync/seed", token, repoURL, bundle, sha, true)
 }
 
 func createRepoBundle(ctx context.Context, repoDir, sha string) (string, error) {
@@ -370,7 +481,7 @@ func createRepoBundle(ctx context.Context, repoDir, sha string) (string, error) 
 	}
 	_ = os.Remove(path)
 
-	ref := "refs/sparkwing-seed/" + sha
+	ref := SeedRef(sha)
 	if out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "update-ref", ref, sha).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git seed ref: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -395,8 +506,6 @@ func validateGitObject(sha string) (string, error) {
 	return sha, nil
 }
 
-// RefreshRepoViaController asks a controller to proxy a refresh to its
-// configured cache.
 func RefreshRepoViaController(ctx context.Context, controllerURL, token, repoURL string) error {
 	if controllerURL == "" {
 		return fmt.Errorf("RefreshRepoViaController: controller URL required")
@@ -416,12 +525,15 @@ func RefreshRepoViaController(ctx context.Context, controllerURL, token, repoURL
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
@@ -429,8 +541,6 @@ func RefreshRepoViaController(ctx context.Context, controllerURL, token, repoURL
 	return nil
 }
 
-// SeedRepoViaController uploads a git bundle through the controller to
-// its configured cache.
 func SeedRepoViaController(ctx context.Context, controllerURL, token, repoURL, repoDir, sha string) error {
 	if controllerURL == "" {
 		return fmt.Errorf("SeedRepoViaController: controller URL required")
@@ -450,29 +560,70 @@ func SeedRepoViaController(ctx context.Context, controllerURL, token, repoURL, r
 	}
 	defer func() { _ = os.Remove(bundle) }()
 
+	return SeedBundleViaController(ctx, controllerURL, token, repoURL, bundle, sha)
+}
+
+// SeedBundleViaController imports a prebuilt Git bundle through the controller.
+func SeedBundleViaController(ctx context.Context, controllerURL, token, repoURL, bundle, sha string) error {
+	if strings.TrimSpace(controllerURL) == "" {
+		return fmt.Errorf("SeedBundleViaController: controller URL required")
+	}
+	return seedBundle(ctx, strings.TrimRight(controllerURL, "/")+"/api/v1/gitcache/seed", token, repoURL, bundle, sha, false)
+}
+
+// SeedWorkspaceBundleViaController imports a bounded-retention working-tree bundle through the controller.
+func SeedWorkspaceBundleViaController(ctx context.Context, controllerURL, token, repoURL, bundle, sha string) error {
+	if strings.TrimSpace(controllerURL) == "" {
+		return fmt.Errorf("SeedWorkspaceBundleViaController: controller URL required")
+	}
+	return seedBundle(ctx, strings.TrimRight(controllerURL, "/")+"/api/v1/gitcache/seed", token, repoURL, bundle, sha, true)
+}
+
+func seedBundle(ctx context.Context, endpoint, token, repoURL, bundle, sha string, workspace bool) error {
+	var err error
+	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
+	if err != nil {
+		return fmt.Errorf("seed bundle: invalid repo URL: %w", err)
+	}
+	sha, err = validateGitObject(sha)
+	if err != nil {
+		return err
+	}
 	f, err := os.Open(bundle)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-
-	q := neturl.Values{}
-	q.Set("repo", repoURL)
-	q.Set("sha", sha)
-	url := strings.TrimRight(controllerURL, "/") + "/api/v1/gitcache/seed?" + q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, f)
+	info, err := f.Stat()
 	if err != nil {
 		return err
 	}
+	if info.Size() > 500<<20 {
+		return fmt.Errorf("git bundle is %d bytes; limit is %d bytes", info.Size(), int64(500<<20))
+	}
+	q := neturl.Values{}
+	q.Set("repo", repoURL)
+	q.Set("sha", sha)
+	if workspace {
+		q.Set("workspace", "1")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"?"+q.Encode(), f)
+	if err != nil {
+		return err
+	}
+	req.ContentLength = info.Size()
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
@@ -480,9 +631,6 @@ func SeedRepoViaController(ctx context.Context, controllerURL, token, repoURL, r
 	return nil
 }
 
-// RepoNameFromURL returns the friendly name registered with the cache
-// pod for a given repo URL. Strips trailing .git and returns the path
-// component after the final "/" or ":". Empty for malformed input.
 func RepoNameFromURL(repoURL string) string {
 	repoURL = strings.TrimSpace(repoURL)
 	repoURL = strings.TrimSuffix(repoURL, "/")
@@ -493,8 +641,6 @@ func RepoNameFromURL(repoURL string) string {
 	return repoURL
 }
 
-// RepoURLFromGitHub converts a "owner/repo" full_name into an SSH URL.
-// SSH so the cache can reach private repos via its deploy key.
 func RepoURLFromGitHub(fullName string) string {
 	if fullName == "" {
 		return ""
@@ -505,19 +651,6 @@ func RepoURLFromGitHub(fullName string) string {
 	return "git@github.com:" + fullName + ".git"
 }
 
-// SparkwingHome honors SPARKWING_HOME if set, otherwise ~/.sparkwing.
-//
-// It defers to internal/paths rather than reading the environment
-// itself so the one place that knows the home layout also owns the
-// test-sandbox redirect described there. This package resolved the home
-// on its own until now, which meant a test binary that forgot
-// SPARKWING_HOME compiled into -- and, once the LRU prune landed,
-// evicted from -- the developer's real ~/.sparkwing/cache/pipelines.
-//
-// paths.DefaultPaths only fails when os.UserHomeDir does, so the
-// fallback keeps this function's existing signature and its existing
-// answer in that case: the relative ".sparkwing" that joining an empty
-// home produced before.
 func SparkwingHome() string {
 	p, err := paths.DefaultPaths()
 	if err != nil {
@@ -526,29 +659,16 @@ func SparkwingHome() string {
 	return p.Root
 }
 
-// ErrMissingGoSum is returned by CompilePipeline when `go build`
-// fails because go.sum doesn't list every module that go.mod requires.
-// Recoverable by `go mod download`.
 var ErrMissingGoSum = errors.New("missing go.sum entries")
 
-// CompileError wraps a `go build` failure with the combined stdout +
-// stderr of the build. Callers that want to surface the real toolchain
-// output (e.g. the warm-runner's trigger loop, which streams it into
-// the run's logs) extract the bytes via errors.As; callers that only
-// want the terse wrapper string (`compile .sparkwing/: <exit>`) keep
-// working unchanged.
 type CompileError struct {
-	Output []byte // combined stdout + stderr captured during `go build`
-	Err    error  // underlying error (typically *exec.ExitError)
+	Output []byte
+	Err    error
 }
 
 func (e *CompileError) Error() string { return fmt.Sprintf("compile .sparkwing/: %v", e.Err) }
 func (e *CompileError) Unwrap() error { return e.Err }
 
-// lockedBuffer is a mutex-guarded bytes.Buffer. exec.Cmd drains
-// stdout and stderr from separate goroutines; when both target the
-// same buffer (as CompilePipeline does to interleave them in capture
-// order), the writes need serialization or the race detector trips.
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -572,20 +692,6 @@ func (lb *lockedBuffer) Bytes() []byte {
 	return append([]byte(nil), lb.buf.Bytes()...)
 }
 
-// CompilePipeline `go build`s sparkwingDir -> dest. Stdout + stderr
-// stream to the parent's stderr (so pod logs still show progress);
-// both are also captured into a buffer so a failure returns a
-// *CompileError with the toolchain output. Missing-go.sum is
-// detected up front and surfaced as ErrMissingGoSum so callers can
-// retry after `go mod download`.
-//
-// If `.sparkwing/.resolved.mod` exists, compile is invoked with
-// `-modfile=<path>` so the overlay's resolved versions take precedence
-// over the git-tracked go.mod. When a `go.work` is in scope, the
-// overlay is skipped (the toolchain refuses `-modfile` in workspace
-// mode); the workspace's module resolution wins, and a single-line
-// warning is written to stderr so the operator knows sparks pinning
-// is dormant for this build.
 func CompilePipeline(sparkwingDir, dest string) error {
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf(
@@ -596,12 +702,7 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	// -trimpath keeps the build directory out of the output. Without
-	// it two checkouts of one commit compile to different bytes, so a
-	// cache key shared between them would be a lie: the second checkout
-	// would run a binary carrying the first one's absolute paths. The
-	// cost is that panics and runtime.Caller report module-relative
-	// paths rather than paths on this machine.
+
 	args := []string{"build", "-trimpath"}
 	env := os.Environ()
 	overlay := overlayModfilePath(sparkwingDir)
@@ -647,8 +748,6 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	return nil
 }
 
-// overlayModfilePath returns the path to `.sparkwing/.resolved.mod`
-// if present as a regular file, else "".
 func overlayModfilePath(sparkwingDir string) string {
 	p := filepath.Join(sparkwingDir, ".resolved.mod")
 	fi, err := os.Stat(p)
@@ -658,10 +757,6 @@ func overlayModfilePath(sparkwingDir string) string {
 	return p
 }
 
-// goWorkInScope walks up from sparkwingDir looking for a `go.work`
-// file, the same way `go build` discovers workspace mode. Returns the
-// path + true on hit, "" + false otherwise. Honors GOWORK if set
-// ("off" disables; an explicit path is used as-is when readable).
 func goWorkInScope(sparkwingDir string) (string, bool) {
 	switch env := os.Getenv("GOWORK"); env {
 	case "off":
@@ -687,12 +782,6 @@ func goWorkInScope(sparkwingDir string) (string, bool) {
 	}
 }
 
-// goWorkCovers reports whether the workspace at workPath lists moduleDir
-// in its `use` directives. When it does not, `go build .` inside moduleDir
-// would resolve against the workspace and fail because the workspace's
-// main modules do not contain the package -- so the caller ignores such a
-// workspace and builds the module standalone. A parse failure is treated
-// as not-covering, the conservative choice.
 func goWorkCovers(workPath, moduleDir string) bool {
 	raw, err := os.ReadFile(workPath)
 	if err != nil {
@@ -723,9 +812,6 @@ func goWorkCovers(workPath, moduleDir string) bool {
 	return false
 }
 
-// withGoworkOff returns env with any GOWORK entry replaced by GOWORK=off,
-// so a build ignores an enclosing workspace that does not cover the
-// module being built.
 func withGoworkOff(env []string) []string {
 	out := make([]string, 0, len(env)+1)
 	for _, e := range env {
@@ -737,28 +823,10 @@ func withGoworkOff(env []string) []string {
 	return append(out, "GOWORK=off")
 }
 
-// PipelineCacheKey returns a 16-char hex fingerprint of the pipeline
-// module contents plus every local replace target. Hashes for the
-// host's platform; cross-compile callers use
-// PipelineCacheKeyForPlatform.
-//
-// Format: aaaaaaaa-bbbbbbbb (8-8 split).
 func PipelineCacheKey(sparkwingDir string) (string, error) {
 	return PipelineCacheKeyForPlatform(sparkwingDir, runtime.GOOS, runtime.GOARCH)
 }
 
-// PipelineCacheKeyForPlatform is PipelineCacheKey with explicit
-// GOOS/GOARCH inputs (runtime.GOOS/GOARCH are baked at host-build time
-// and don't reflect post-Setenv changes).
-//
-// Local replace targets are folded in by content, not by version: a
-// module replaced to a filesystem path (via the pipeline's go.mod or an
-// in-scope go.work) carries no version the key could pin, so the whole
-// directory is hashed. All files are hashed, not just Go source, so
-// editing an embedded asset (a replaced template registry's manifests)
-// invalidates the compiled binary. With no local replace targets and no
-// covering workspace the walk is skipped entirely and the key stays a
-// hash of the module tree, go.mod, and the overlays.
 func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
 	parts, err := keyParts(sparkwingDir, goos, goarch)
 	if err != nil {
@@ -767,21 +835,14 @@ func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, err
 	return foldKey(parts), nil
 }
 
-// KeyPart is one labeled input to the cache key. Splitting the key into
-// named parts is what lets `sparkwing cache explain` say which input
-// changed, instead of reporting that an opaque hash moved.
 type KeyPart struct {
-	Label  string // what this input is, e.g. "module tree" or a module path
-	Digest string // sha256 of this part alone, for comparing across builds
-	Detail string // human note: file counts, sizes, what was excluded
-	// material is the exact bytes folded into the key. Parts carry it so
-	// the explanation and the key are computed from one source and
-	// cannot drift apart.
+	Label  string
+	Digest string
+	Detail string
+
 	material []byte
 }
 
-// foldKey concatenates the parts' material in order and takes the
-// leading 16 hex digits, split for readability.
 func foldKey(parts []KeyPart) string {
 	h := sha256.New()
 	for _, p := range parts {
@@ -796,9 +857,6 @@ func digestOf(b []byte) string {
 	return fmt.Sprintf("%x", sum[:])[:12]
 }
 
-// ExplainCacheKey returns the key together with the inputs that produced
-// it, so an operator can see why a rebuild happened without reading the
-// source of this package.
 func ExplainCacheKey(sparkwingDir string) (string, []KeyPart, error) {
 	parts, err := keyParts(sparkwingDir, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
@@ -807,9 +865,6 @@ func ExplainCacheKey(sparkwingDir string) (string, []KeyPart, error) {
 	return foldKey(parts), parts, nil
 }
 
-// keyParts builds the ordered inputs to the cache key. The concatenated
-// material is the hashed preimage, so changing what is appended here
-// changes the key.
 func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
 	var parts []KeyPart
 	add := func(label, detail string, material []byte) {
@@ -856,9 +911,7 @@ func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
 		}
 		last = t
 		var buf bytes.Buffer
-		// Only the label reaches the digest. The directory is read for
-		// content below but never recorded, so the same module at a
-		// different path still yields the same key.
+
 		fmt.Fprintf(&buf, "replace:%s\n", t.Label)
 		stats, err := hashDirIntoCounted(&buf, t.Dir, allFiles)
 		if err != nil {
@@ -892,9 +945,6 @@ func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
 	return parts, nil
 }
 
-// ExecReplace runs the target as the foreground child and propagates its exit
-// code. Keeping this process resident lets callers retain process-scoped
-// authorities that must not reach the child.
 func ExecReplace(bin string, args []string, dir string, env []string) error {
 	if dir != "" {
 		if err := os.Chdir(dir); err != nil {
@@ -908,8 +958,6 @@ type fileFilter func(name string) bool
 
 func allFiles(string) bool { return true }
 
-// goMajorMinor returns runtime.Version()'s "go1.26" prefix, stripping
-// the patch component.
 func goMajorMinor() string {
 	v := runtime.Version()
 	dots := 0
@@ -924,14 +972,10 @@ func goMajorMinor() string {
 	return v
 }
 
-// HashStats describes what a directory contributed to the key. It is
-// reported by `sparkwing cache explain` so the exclusion of gitignored
-// files is visible rather than a silent surprise when an edit fails to
-// trigger a rebuild.
 type HashStats struct {
-	Files   int   // files hashed
-	Bytes   int64 // their total size
-	Ignored int   // files skipped because git ignores them
+	Files   int
+	Bytes   int64
+	Ignored int
 }
 
 func (s HashStats) String() string {
@@ -942,7 +986,6 @@ func (s HashStats) String() string {
 	return base
 }
 
-// humanSize renders a byte count compactly for explain output.
 func humanSize(n int64) string {
 	const unit = 1024
 	if n < unit {
@@ -956,7 +999,6 @@ func humanSize(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGT"[exp])
 }
 
-// hashDirIntoCounted is hashDirInto with a report of what it covered.
 func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter) (HashStats, error) {
 	var stats HashStats
 	files, err := walkHashable(dir, keep)
@@ -987,11 +1029,6 @@ func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter) (HashStats, er
 	return stats, nil
 }
 
-// walkHashable lists the files under dir that keep admits, in the
-// lexical order [filepath.WalkDir] guarantees, so the digest a caller
-// builds from them is stable. Reading contents is deferred to the
-// caller because the ignore check is one batched call over the whole
-// list, and skipping a file is far cheaper than opening it.
 func walkHashable(dir string, keep fileFilter) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -1014,19 +1051,11 @@ func walkHashable(dir string, keep fileFilter) ([]string, error) {
 	return files, err
 }
 
-// replaceTarget is one local module folded into the cache key. Label is
-// the module identity recorded in the digest; Dir is where that module
-// happens to live on this machine and is read for content but never
-// written into the key. Keeping the two apart is what lets two
-// checkouts of one commit agree on a key from different paths.
 type replaceTarget struct {
 	Label string
 	Dir   string
 }
 
-// replaceLabel renders a replaced module's identity. The version is
-// part of it because `replace foo v1.2.3 => ./foo` and a blanket
-// `replace foo => ./foo` are different directives and must not collide.
 func replaceLabel(old module.Version) string {
 	if old.Version == "" {
 		return old.Path
@@ -1034,11 +1063,6 @@ func replaceLabel(old module.Version) string {
 	return old.Path + "@" + old.Version
 }
 
-// moduleLabelOf reads the module path declared by dir's own go.mod. A
-// workspace `use` directive names a directory rather than a module, so
-// this is how such a target acquires a portable identity. Use.ModulePath
-// is deliberately not consulted: it is documented as the path found in a
-// comment and is not reliably populated.
 func moduleLabelOf(dir string) (string, error) {
 	p := filepath.Join(dir, "go.mod")
 	data, err := os.ReadFile(p)
@@ -1052,9 +1076,6 @@ func moduleLabelOf(dir string) (string, error) {
 	return path, nil
 }
 
-// localReplaceTargets returns every local-path replace directive in
-// go.mod, labeled by the module it replaces. Remote replaces are
-// ignored (the go.mod hash already covers them).
 func localReplaceTargets(goModPath string) ([]replaceTarget, error) {
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
@@ -1084,23 +1105,6 @@ func isLocalPath(p string) bool {
 	return strings.HasPrefix(p, ".") || strings.HasPrefix(p, "/")
 }
 
-// localWorkspaceTargets returns the local modules an in-scope go.work
-// contributes to the pipeline build -- its `use` modules and any
-// filesystem-path `replace` targets -- along with a normalized summary
-// of the workspace's own build-affecting directives. It mirrors
-// CompilePipeline's workspace decision: a workspace that does not cover
-// sparkwingDir is ignored (the build disables it via GOWORK=off), and
-// sparkwingDir itself is excluded because the caller already hashes it.
-// When no workspace applies, both results are empty and the caller's
-// no-replace fast path is untouched.
-//
-// The summary is normalized rather than a hash of the file's bytes so
-// that comments, directive order, and the spelling of a `use` path --
-// all of which differ between two checkouts of one commit -- do not
-// perturb the key. It enumerates every field [modfile.WorkFile] carries
-// (Go, Toolchain, Godebug, Use, Replace); hashing raw bytes covered
-// those by accident, so anything omitted here silently stops
-// invalidating the cache.
 func localWorkspaceTargets(sparkwingDir string) (targets []replaceTarget, summary string, err error) {
 	work, ok := goWorkInScope(sparkwingDir)
 	if !ok || !goWorkCovers(work, sparkwingDir) {
@@ -1180,8 +1184,7 @@ func localWorkspaceTargets(sparkwingDir string) (targets []replaceTarget, summar
 				continue
 			}
 			targets = append(targets, replaceTarget{Label: label, Dir: abs})
-			// The replacement's location is deliberately omitted; its
-			// contents are hashed through the target instead.
+
 			replaces = append(replaces, label+" => local")
 			continue
 		}

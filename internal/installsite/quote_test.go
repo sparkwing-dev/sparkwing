@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// TestRetireRemedy pins the guarded Unix action and undo. Both refuse an
-// existing target, including a dangling symlink, so repeating either command
-// cannot overwrite a file that appeared after the report was rendered.
 func TestRetireRemedy(t *testing.T) {
 	cases := []struct {
 		goos, path, action, undo string
@@ -50,9 +47,6 @@ func TestRetireRemedy(t *testing.T) {
 	}
 }
 
-// TestRetireRemedyRefusesACollision executes the rendered Unix command against
-// real files. A pre-existing .superseded file is not an invitation to replace
-// it, and once the collision is removed the same guidance remains reversible.
 func TestRetireRemedyRefusesACollision(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cash $ and quote'", "sparkwing")
@@ -123,9 +117,6 @@ func TestRetireRemedyRefusesACollision(t *testing.T) {
 	}
 }
 
-// TestRetireRemedyWindowsIsGuidanceNotAUniversalCommand covers legal Windows
-// path characters that cmd.exe and PowerShell interpret differently. The path
-// must be reported exactly, but Sparkwing must not offer an unsafe paste.
 func TestRetireRemedyWindowsIsGuidanceNotAUniversalCommand(t *testing.T) {
 	path := "C:\\Tools\\cash$ percent% bang! tick` amp& quote'\\sparkwing.exe"
 	got := retireRemedy("windows", path)
@@ -145,8 +136,6 @@ func TestRetireRemedyWindowsIsGuidanceNotAUniversalCommand(t *testing.T) {
 	}
 }
 
-// TestShellQuote covers the quoting layer directly, including the empty
-// string, which must still render as a shell word.
 func TestShellQuote(t *testing.T) {
 	cases := []struct {
 		in, want string

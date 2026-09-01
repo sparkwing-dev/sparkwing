@@ -41,7 +41,6 @@ func (cachedBuild) run(ctx context.Context) (cachedBuildOut, error) {
 	return cachedBuildOut{Tag: "v-cached"}, nil
 }
 
-// hooksPipe exercises BeforeRun + AfterRun.
 type hooksPipe struct{ sparkwing.Base }
 
 type hooksCounters struct {
@@ -89,7 +88,7 @@ func (beforeFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 
 type afterFiresOnFailure struct{ sparkwing.Base }
 
-var afterOnFailureErr atomic.Value // stores error
+var afterOnFailureErr atomic.Value
 
 func (afterFiresOnFailure) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "boom", func(ctx context.Context) error {
@@ -100,8 +99,6 @@ func (afterFiresOnFailure) Plan(ctx context.Context, plan *sparkwing.Plan, _ spa
 	return nil
 }
 
-// hookOrdering: verifies hooks fire around Run in the expected
-// sequence. Uses a recording slice protected by a mutex.
 type hookOrderingPipe struct{ sparkwing.Base }
 
 var hookOrderingLog struct {
@@ -301,9 +298,6 @@ func TestHooks_Ordering(t *testing.T) {
 	}
 }
 
-// wrapWithCacheKey returns a Pipeline whose plan attaches a constant
-// CacheKey to the first node. Used by the cache tests above since
-// cachedPipe itself doesn't declare a key by default.
 func wrapWithCacheKey(p *cachedPipe) sparkwing.Pipeline[sparkwing.NoInputs] {
 	return wrapWithSpecificKey(p, func(ctx context.Context) sparkwing.CacheKey {
 		return sparkwing.Key("cache-test", "static")
@@ -330,8 +324,6 @@ func (w *planWrapper) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwi
 	return nil
 }
 
-// errorSentinel lets us store an error in an atomic.Value (which
-// requires a consistent concrete type across all stores).
 type errorSentinel struct{ err error }
 
 func countCacheRows(t *testing.T, st *store.Store) int {

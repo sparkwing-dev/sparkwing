@@ -6,21 +6,37 @@ Expand the name of the chart.
 {{- end }}
 
 {{/*
+Create the untruncated fully qualified app-name base. Component helpers
+truncate this base before adding their suffix so long names stay distinct.
+*/}}
+{{- define "sparkwing-runner-bundle.fullnameBase" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Create a default fully qualified app name. Truncated at 63 chars to
 satisfy DNS label constraints; suffix-trimmed so we never end on a
 hyphen (DNS labels aren't allowed to).
 */}}
 {{- define "sparkwing-runner-bundle.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- include "sparkwing-runner-bundle.fullnameBase" . | trunc 63 | trimSuffix "-" }}
 {{- end }}
-{{- end }}
+
+{{/* Reserve the suffix so long component names remain valid and distinct. */}}
+{{- define "sparkwing-runner-bundle.componentFullname" -}}
+{{- $suffix := printf "-%s" .component -}}
+{{- $baseLimit := sub 63 (len $suffix) | int -}}
+{{- $base := include "sparkwing-runner-bundle.fullnameBase" .root | trunc $baseLimit | trimSuffix "-" -}}
+{{- printf "%s%s" $base $suffix -}}
 {{- end }}
 
 {{/*
@@ -89,15 +105,15 @@ Services, PVCs). Component suffix keeps the three workloads
 distinct under one release.
 */}}
 {{- define "sparkwing-runner-bundle.runner.fullname" -}}
-{{- printf "%s-runner" (include "sparkwing-runner-bundle.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "runner") }}
 {{- end }}
 
 {{- define "sparkwing-runner-bundle.cache.fullname" -}}
-{{- printf "%s-cache" (include "sparkwing-runner-bundle.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "cache") }}
 {{- end }}
 
 {{- define "sparkwing-runner-bundle.logs.fullname" -}}
-{{- printf "%s-logs" (include "sparkwing-runner-bundle.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "logs") }}
 {{- end }}
 
 {{/*
@@ -109,6 +125,29 @@ Usage: {{ include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.ima
 {{- define "sparkwing-runner-bundle.image" -}}
 {{- $tag := default .root.Chart.AppVersion .img.tag -}}
 {{- printf "%s:%s" .img.repository $tag -}}
+{{- end }}
+
+{{/*
+Resolve the controller URL. The parent chart cannot pass a value that
+contains its computed release name, so its bundled marker asks this
+sub-chart to reproduce the parent Service's default name. An explicit
+URL always wins, including for parent installs with naming overrides.
+*/}}
+{{- define "sparkwing-runner-bundle.controllerURL" -}}
+{{- if .Values.controller.url -}}
+{{- .Values.controller.url -}}
+{{- else if .Values.controller.bundled -}}
+{{- $parentName := "sparkwing-full" -}}
+{{- $parentFullname := printf "%s-%s" .Release.Name $parentName -}}
+{{- if contains $parentName .Release.Name -}}
+{{- $parentFullname = .Release.Name -}}
+{{- end -}}
+{{- $controllerSuffix := "-controller" -}}
+{{- $parentBaseLimit := sub 63 (len $controllerSuffix) | int -}}
+{{- $parentFullname = $parentFullname | trunc $parentBaseLimit | trimSuffix "-" -}}
+{{- $controllerName := printf "%s%s" $parentFullname $controllerSuffix -}}
+{{- printf "http://%s.%s.svc.cluster.local" $controllerName .Release.Namespace -}}
+{{- end -}}
 {{- end }}
 
 {{/*

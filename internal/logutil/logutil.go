@@ -1,4 +1,3 @@
-// Package logutil provides structured logging initialization for all sparkwing services.
 package logutil
 
 import (
@@ -8,8 +7,6 @@ import (
 	"strings"
 )
 
-// Init configures structured logging for the calling service.
-// Safe to call multiple times (idempotent).
 func Init() {
 	var handler slog.Handler
 	opts := &slog.HandlerOptions{Level: level()}
@@ -40,8 +37,6 @@ func level() slog.Level {
 	}
 }
 
-// bridgeWriter routes log.Printf calls through slog with level detection.
-// Messages prefixed with known keywords get routed to the appropriate level.
 type bridgeWriter struct {
 	logger *slog.Logger
 }

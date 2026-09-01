@@ -8,11 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestReapTimedOutApprovals_ResolvesElapsedApprovals covers the bug
-// the reaper was added for: an approval whose timeout_ms has elapsed
-// but whose dispatching orchestrator went silent without resolving
-// it. The reaper writes ApprovalResolutionTimedOut so a re-attached
-// orchestrator can apply its on_timeout policy.
 func TestReapTimedOutApprovals_ResolvesElapsedApprovals(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -51,8 +46,6 @@ func TestReapTimedOutApprovals_ResolvesElapsedApprovals(t *testing.T) {
 	}
 }
 
-// TestReapTimedOutApprovals_LeavesInsideWindow verifies the reaper
-// doesn't touch approvals whose timeout hasn't elapsed yet.
 func TestReapTimedOutApprovals_LeavesInsideWindow(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -77,9 +70,6 @@ func TestReapTimedOutApprovals_LeavesInsideWindow(t *testing.T) {
 	}
 }
 
-// TestReapTimedOutApprovals_IgnoresResolved verifies the reaper skips
-// approvals that have already been resolved (human action, prior
-// orchestrator action, idempotent re-runs).
 func TestReapTimedOutApprovals_IgnoresResolved(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()

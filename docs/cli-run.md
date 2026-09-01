@@ -53,6 +53,7 @@ the default for managed git hooks.
 | `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
+| `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
 | `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
 

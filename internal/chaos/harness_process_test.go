@@ -20,8 +20,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-const actorHelperMode = "SPARKWING_CHAOS_ACTOR_HELPER"
-const actorHelperReadyFD = "SPARKWING_CHAOS_ACTOR_READY_FD"
+const (
+	actorHelperMode    = "SPARKWING_CHAOS_ACTOR_HELPER"
+	actorHelperReadyFD = "SPARKWING_CHAOS_ACTOR_READY_FD"
+)
 
 func TestWatchActorHelperProcess(t *testing.T) {
 	switch os.Getenv(actorHelperMode) {
@@ -419,8 +421,7 @@ func TestActorCleanupSeparatesOutputDrainFromProcessGroupFailure(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("helper did not exit")
 	}
-	// safety: scanned is never closed, so the drain phase is the only one that
-	// can fail and the assertion below cannot pass for the wrong reason.
+
 	a := &actor{runID: "drain-only", cmd: cmd, group: group, stdout: stdout, scanned: make(chan struct{})}
 	err = h.cleanupActor(a)
 	if !errors.Is(err, errActorDrain) {
@@ -469,9 +470,6 @@ func TestProcessGuardAcceptsSoakScaleLeaderAnchors(t *testing.T) {
 	}
 }
 
-// TestProcessGuardAcceptsSoakScaleDescendantZombieBurst pins the burst the
-// nightly soak actually produces: one daemon kill makes every live actor fork a
-// replacement at once, and the losers are zombies until each actor's wait runs.
 func TestProcessGuardAcceptsSoakScaleDescendantZombieBurst(t *testing.T) {
 	requireProcessGroups(t)
 	h, journal := soakScaleHarness(t)
@@ -620,9 +618,6 @@ func newProcessHarness(t *testing.T) (*Harness, *Journal) {
 	return &Harness{cfg: Config{Settle: time.Second}, t: t, jr: journal}, journal
 }
 
-// soakScaleHarness configures the harness exactly as the nightly soak does, so
-// a guard regression that only appears at that actor count is caught here
-// rather than by a 30-minute run.
 func soakScaleHarness(t *testing.T) (*Harness, *Journal) {
 	t.Helper()
 	journal, err := NewJournal(filepath.Join(t.TempDir(), "journal.jsonl"))

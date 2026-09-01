@@ -17,51 +17,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// NodeExecutor owns everything that has to be decided about one node
-// before and after its body runs: the cache lookup, the concurrency
-// slot, host admission, SkipIf, the node's logs and metrics, and its
-// terminal row. Stateless beyond Backends.
-//
-// It is reached three ways: as the dispatcher's runner, where a local
-// run hands each body to a spawner and a library embedder's run keeps
-// the body here; as the `run-node` entrypoint a spawned process or a
-// pod re-enters; and from replay.
 type NodeExecutor struct {
 	backends Backends
 	labels   []string
 
-	// spawn, when set, executes the node body somewhere else once this
-	// executor has finished the coordination it owns -- the cache
-	// lookup, the concurrency slot, host admission, SkipIf. Local runs
-	// set it to the process-per-node runner; the coordination stays
-	// here because that is where the store handles and the slot
-	// bookkeeping live, and because a cache hit must resolve without
-	// starting anything at all.
 	spawn runner.Runner
 }
 
-// NewNodeExecutor builds an executor over Backends; lifecycle is
-// caller-owned. It advertises a "local" label by default so jobs
-// declaring WhenRunner("local") dispatch through it.
 func NewNodeExecutor(backends Backends) *NodeExecutor {
 	return &NodeExecutor{backends: backends, labels: []string{"local"}}
 }
 
-// AdvertisedLabels implements runner.LabelAdvertiser. The default set
-// is ["local"]; callers wiring a node executor with additional
-// capabilities (a USB-attached device, a specific OS) can override
-// via SetLabels before the orchestrator dispatch loop starts.
 func (r *NodeExecutor) AdvertisedLabels() []string {
 	out := make([]string, len(r.labels))
 	copy(out, r.labels)
 	return out
 }
 
-// SetLabels replaces the advertised label set. Intended for callers
-// that wire a NodeExecutor outside NewNodeExecutor's defaults
-// (host-side runners with hardware affinity, test fixtures pinning a
-// custom label set). The orchestrator's WhenRunner evaluation reads
-// the labels via AdvertisedLabels.
 func (r *NodeExecutor) SetLabels(labels []string) {
 	if len(labels) == 0 {
 		r.labels = nil
@@ -81,9 +53,6 @@ var (
 	_ runner.LabelAdvertiser = (*NodeExecutor)(nil)
 )
 
-// runJobBody executes the node's materialized Work as a step DAG.
-// Returns the typed output of the *WorkStep the Job's Work returned
-// (nil for untyped Jobs).
 func runJobBody(ctx context.Context, node *sparkwing.JobNode) (any, error) {
 	w := node.Work()
 	if w == nil {
@@ -98,12 +67,6 @@ func runJobBody(ctx context.Context, node *sparkwing.JobNode) (any, error) {
 	return nil, nil
 }
 
-// wrapNodeError prefixes err with the node ID so dispatch-level
-// failure messages identify the failing node by default. Authors who
-// already include the node ID (or any "<id>:" prefix) keep their
-// richer message intact -- the check is a literal prefix match, which
-// favors false-negatives (double-wraps for unusual prefixes) over
-// false-positives.
 func wrapNodeError(nodeID string, err error) error {
 	if err == nil {
 		return nil
@@ -114,8 +77,6 @@ func wrapNodeError(nodeID string, err error) error {
 	return fmt.Errorf("%s: %w", nodeID, err)
 }
 
-// stateMetricsSink adapts StateBackend to nodemetrics.Sink. Errors
-// are dropped: losing a sample is better than failing the node.
 type stateMetricsSink struct {
 	backend StateBackend
 	runID   string
@@ -130,8 +91,6 @@ func (s stateMetricsSink) Push(ctx context.Context, sample nodemetrics.Sample) e
 	})
 }
 
-// RunNode executes one node to a terminal outcome. ctx carries the
-// ref resolver and propagates cancellation to job + hooks + SkipIf.
 func (r *NodeExecutor) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	node := req.Node
 	if node == nil {
@@ -194,18 +153,11 @@ func (r *NodeExecutor) executeNodeWithAdmission(ctx context.Context, req runner.
 	return r.executeNode(nodeCtx, req.RunID, req.Node, req.Delegate)
 }
 
-// WithSpawner routes node bodies through spawner instead of running
-// them here. Coordination is unaffected: everything a node needs
-// decided before it runs is still decided by this executor.
 func (r *NodeExecutor) WithSpawner(spawner runner.Runner) *NodeExecutor {
 	r.spawn = spawner
 	return r
 }
 
-// executeNode runs the job with modifiers + hooks and persists state,
-// or hands it to the configured spawner. Either way the output comes
-// back as the node's marshaled JSON, which is the only form a
-// downstream node can read it in.
 func (r *NodeExecutor) executeNode(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
 	if r.spawn != nil {
 		return r.executeNodeElsewhere(ctx, runID, node, delegate)
@@ -213,12 +165,6 @@ func (r *NodeExecutor) executeNode(ctx context.Context, runID string, node *spar
 	return r.executeNodeInProcess(ctx, runID, node, delegate)
 }
 
-// executeNodeElsewhere hands the node to the spawner and flattens its
-// Result back into the (output, error) shape the coordination paths
-// expect. The spawned process wrote the node's terminal row from
-// inside itself, so the only thing persisted here is what that process
-// cost: knowable solely out here, after the reap, and dropped with the
-// rest of the Result by the flattening if it were not written first.
 func (r *NodeExecutor) executeNodeElsewhere(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
 	res := r.spawn.RunNode(ctx, runner.Request{
 		RunID:    runID,
@@ -237,30 +183,13 @@ func (r *NodeExecutor) executeNodeElsewhere(ctx context.Context, runID string, n
 	return nil, fmt.Errorf("%s: node spawner returned outcome %q with no error", node.ID(), res.Outcome)
 }
 
-// executeNodeInProcess runs the node's body here, in this process,
-// and returns the output as the JSON it wrote to the node's terminal
-// row -- never the live Go value. A consumer reads an output through a
-// JSON round-trip whether the body ran here or in a process of its
-// own, so a pipeline that only works by pointer identity has to fail
-// in its author's test run exactly as it would in production. A node
-// that produced nothing returns an untyped nil, not a nil []byte in an
-// interface, so a caller's `output != nil` still means "there is an
-// output".
 func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
 	writeCtx := context.WithoutCancel(ctx)
 	nlog, err := r.backends.Logs.OpenNodeLog(runID, node.ID(), delegate)
 	if err != nil {
 		return nil, err
 	}
-	// Wrapper order is a security boundary, not a style choice. Each
-	// wrap makes the previous value its inner sink, so the LAST wrap is
-	// the outermost and sees the record first. The masker has to be
-	// outermost: the annotation and summary wrappers persist rec.Msg
-	// (and rec.Attrs) to the state store as they pass records through,
-	// so any wrapper installed outside the masker would persist the
-	// unredacted record. Every wrapper here forwards Fatal() / Drops()
-	// through the optional-interface probe, so the probe still reaches
-	// the real sink from outside.
+
 	nlog = wrapNodeLogWithAnnotations(nlog, r.backends.State, runID, node.ID())
 	nlog = wrapNodeLogWithSummary(nlog, r.backends.State, runID, node.ID())
 	nlog = wrapNodeLogWithStepState(nlog, r.backends.State, runID, node.ID())
@@ -550,12 +479,6 @@ done:
 	return outBytes, nil
 }
 
-// publishArtifacts captures the node's declared output globs from its
-// workspace into the artifact store and returns the resulting manifest
-// digest. Returns "" with no error when the node declares no outputs or
-// no artifact store is configured. A capture failure (an unreadable or
-// unresolvable declared file) fails the node: a producer that promised
-// outputs it cannot deliver has not succeeded.
 func (r *NodeExecutor) publishArtifacts(ctx context.Context, node *sparkwing.JobNode) (string, error) {
 	globs := node.OutputGlobs()
 	if len(globs) == 0 || r.backends.Artifact == nil {
@@ -568,10 +491,6 @@ func (r *NodeExecutor) publishArtifacts(ctx context.Context, node *sparkwing.Job
 	return captureArtifacts(ctx, r.backends.Artifact, workspace, globs)
 }
 
-// stageArtifacts materializes, before the node runs, the artifacts of
-// every producer the node consumes (see [sparkwing.JobNode.Consumes]).
-// Returns the number of files staged. A no-op when the node consumes
-// nothing or no artifact store is configured.
 func (r *NodeExecutor) stageArtifacts(ctx context.Context, runID string, node *sparkwing.JobNode) (int, error) {
 	edges := node.ConsumeEdges()
 	if len(edges) == 0 || r.backends.Artifact == nil {
@@ -584,9 +503,6 @@ func (r *NodeExecutor) stageArtifacts(ctx context.Context, runID string, node *s
 	return stageConsumedArtifacts(ctx, r.backends.Artifact, r.backends.State, runID, workspace, edges)
 }
 
-// nodeWorkspace resolves the directory a node's artifacts are captured
-// from and staged into: the runtime work dir, falling back to the
-// process cwd, or "" when neither resolves.
 func nodeWorkspace() string {
 	if ws := sparkwing.CurrentRuntime().WorkDir; ws != "" {
 		return ws
@@ -597,10 +513,6 @@ func nodeWorkspace() string {
 	return ""
 }
 
-// nodeLogFatal returns the sticky auth error from a NodeLog that
-// implements the optional Fataler interface. NodeLog impls without
-// auth-aware retry (localLogs, fakes) return nil here, matching the
-// no-fatal-state default.
 func nodeLogFatal(nlog NodeLog) error {
 	if f, ok := nlog.(interface{ Fatal() error }); ok {
 		return f.Fatal()
@@ -608,33 +520,14 @@ func nodeLogFatal(nlog NodeLog) error {
 	return nil
 }
 
-// LogsDropPolicyEnvVar opts a deployment out of failing a node whose
-// log lines were lost. The default -- fail -- exists because a run
-// that could not record what it did reporting success is the same
-// false all-clear as a run that could not authenticate to its log
-// store (store.FailureLogsAuth). Set it to "warn" to keep the older
-// behavior, where loss surfaces only as a WARN line and the
-// logs_drop event.
 const LogsDropPolicyEnvVar = "SPARKWING_LOGS_DROP_POLICY"
 
-// droppedLogsError renders the failure an operator reads when log
-// lines were lost.
-//
-// The store's own error goes last, under a label, because it is the
-// least actionable part: an unreachable bucket answers with an SDK
-// sentence about PutObject attempts and endpoint resolution, and
-// leading with that is the same failure this ticket's AWS-region gap
-// objects to. What the operator needs first is how many lines went
-// missing, then what to look at, then how to opt out.
 func droppedLogsError(count int, reason string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d log line(s) lost: the log store stayed unreachable past the append retry budget", count)
 	b.WriteString("\n  check: the logs backend this run named in invocation.backends")
 	b.WriteString("\n         (for s3: the bucket, AWS_REGION, credentials, SPARKWING_S3_ENDPOINT)")
-	// A 404 is not an outage, so the generic advice sends the operator
-	// to check a store that is answering fine. It means nothing serves
-	// log appends at that URL -- the shape a controller-only deployment
-	// has, because sparkwing-logs is a separate service.
+
 	if strings.Contains(reason, "404") {
 		b.WriteString("\n  note:  the store answered 404, so nothing serves log appends at that URL.")
 		b.WriteString("\n         A controller does not; sparkwing-logs is a separate service.")
@@ -646,16 +539,10 @@ func droppedLogsError(count int, reason string) error {
 	return errors.New(b.String())
 }
 
-// logsDropIsFatal reports whether lost log lines should fail the node.
-// Any value other than "warn" -- including an unset or misspelled one
-// -- fails, so a typo in the opt-out cannot silently restore the
-// behavior the variable exists to opt out of.
 func logsDropIsFatal() bool {
 	return os.Getenv(LogsDropPolicyEnvVar) != "warn"
 }
 
-// nodeLogDrops returns the (count, first-reason) tuple from a
-// NodeLog that implements the optional Dropper interface.
 func nodeLogDrops(nlog NodeLog) (int, string) {
 	if d, ok := nlog.(interface{ Drops() (int, string) }); ok {
 		return d.Drops()
@@ -663,8 +550,6 @@ func nodeLogDrops(nlog NodeLog) (int, string) {
 	return 0, ""
 }
 
-// runVerify runs a node's Verify postcondition with panic recovery. A
-// panic is reported as a verify failure, not a runner crash.
 func runVerify(ctx context.Context, fn sparkwing.VerifyFn) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -688,10 +573,6 @@ func (r *NodeExecutor) markFailed(ctx context.Context, runID, nodeID string, rea
 	appendFailureExcerptEvent(writeCtx, r.backends.State, runID, nodeID, reason)
 }
 
-// failureWriteCtx picks the context a node-failure write uses. A genuine
-// failure persists even when the run is tearing down, but a failure that
-// is itself the cancellation must not outrace the teardown or eviction
-// classifier that records the node's real outcome (cancelled, superseded).
 func failureWriteCtx(ctx context.Context, err error) context.Context {
 	if ctx.Err() != nil && errors.Is(err, context.Canceled) {
 		return ctx

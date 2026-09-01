@@ -29,12 +29,6 @@ func registerRemotePipelines(t *testing.T) {
 	})
 }
 
-// TestRunLocal_RemoteBackends_DispatchesAgainstController stitches the
-// orchestrator's *client.Client dispatch arm against a real
-// controller.Server backed by an in-memory SQLite store. A small
-// pipeline runs to completion; the run record is readable from the
-// same store the controller wraps, confirming RemoteBackends ferries
-// state writes over HTTP rather than touching the laptop's local DB.
 func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 	registerRemotePipelines(t)
 
@@ -77,12 +71,6 @@ func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 	}
 }
 
-// TestRemoteBackends_FromBaseURL exercises the constructor sanity:
-// State, Logs, Concurrency are all non-nil, the supplied artifact
-// store is threaded onto Backends.Artifact, and the concurrency
-// backend is HTTP-backed against the same controller. The pipeline
-// run above also covers this path implicitly; this is the cheap
-// asssertion when the run test breaks for unrelated reasons.
 func TestRemoteBackends_FromBaseURL(t *testing.T) {
 	c := client.NewWithToken("https://controller.example", nil, "tok-abc")
 	art := &noListArtifact{}
@@ -98,9 +86,6 @@ func TestRemoteBackends_FromBaseURL(t *testing.T) {
 	}
 }
 
-// TestRemoteBackends_NilArtifact confirms a nil artifact store stays
-// nil rather than being replaced with a stub: node execution treats
-// nil as "no cache surface configured".
 func TestRemoteBackends_NilArtifact(t *testing.T) {
 	c := client.NewWithToken("https://controller.example", nil, "")
 	b := orchestrator.RemoteBackends(c, nil, nil, nil, 0)

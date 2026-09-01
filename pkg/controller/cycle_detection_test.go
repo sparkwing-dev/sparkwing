@@ -16,8 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestCycleDetect_RejectsSelfCycle: pipeline A's run spawns a trigger
-// for A again. Controller detects the immediate self-cycle and 409s.
 func TestCycleDetect_RejectsSelfCycle(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -52,8 +50,6 @@ func TestCycleDetect_RejectsSelfCycle(t *testing.T) {
 	}
 }
 
-// TestCycleDetect_AllowsIndirectNonCycle: a parent's ancestry of
-// different pipeline names lets a fresh pipeline through.
 func TestCycleDetect_AllowsIndirectNonCycle(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -89,8 +85,6 @@ func TestCycleDetect_AllowsIndirectNonCycle(t *testing.T) {
 	}
 }
 
-// TestCycleDetect_RejectsDeepCycle: A -> B -> C spawning A again
-// re-enters. Reject even though the cycle is two hops away.
 func TestCycleDetect_RejectsDeepCycle(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -129,11 +123,6 @@ func TestCycleDetect_RejectsDeepCycle(t *testing.T) {
 	}
 }
 
-// TestTrigger_ParentRepoInheritance: when a spawned trigger carries
-// parent_run_id but no git fields, the controller copies the parent
-// run's git context onto the persisted trigger. Without this,
-// runners claiming the spawned trigger have no .git context and
-// fall through to the BakedBinary path.
 func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -145,13 +134,14 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
-		StartedAt:   time.Now(),
-		Repo:        "sample-app",
-		RepoURL:     "git@github.com:acme/sample-app.git",
-		GitBranch:   "main",
-		GitSHA:      "abc123",
-		GithubOwner: "acme",
-		GithubRepo:  "sample-app",
+		StartedAt:     time.Now(),
+		TriggerSource: "pipeline-working-tree@laptop.local",
+		Repo:          "sample-app",
+		RepoURL:       "git@github.com:acme/sample-app.git",
+		GitBranch:     "main",
+		GitSHA:        "abc123",
+		GithubOwner:   "acme",
+		GithubRepo:    "sample-app",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +149,7 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
-	body := strings.NewReader(`{"pipeline":"build","parent_run_id":"parent","trigger":{"source":"manual"}}`)
+	body := strings.NewReader(`{"pipeline":"build","parent_run_id":"parent","trigger":{"source":"await-pipeline"}}`)
 	resp, err := http.Post(srv.URL+"/api/v1/triggers", "application/json", body)
 	if err != nil {
 		t.Fatal(err)
@@ -198,11 +188,11 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	if got.GithubRepo != "sample-app" {
 		t.Errorf("GithubRepo: got %q", got.GithubRepo)
 	}
+	if got.TriggerSource != "pipeline-working-tree@laptop.local" {
+		t.Errorf("TriggerSource: got %q, want parent workspace placement", got.TriggerSource)
+	}
 }
 
-// TestTrigger_ParentRepoInheritance_RespectsExplicit: when the body
-// already carries git fields (e.g. webhook intake forwards them on
-// behalf of the user), the inheritance pass must NOT overwrite them.
 func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -260,11 +250,6 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	}
 }
 
-// TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA: when the caller
-// declares a different repo via body.Git.Repo, the parent's SHA must
-// NOT be copied -- it belongs to a different repo and the runner
-// would fail with "fatal: not our ref" on fetch. SHA stays empty so
-// the runner clones the branch tip.
 func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -276,11 +261,12 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
-		StartedAt: time.Now(),
-		Repo:      "acme/sample-app",
-		RepoURL:   "git@github.com:acme/sample-app.git",
-		GitBranch: "main",
-		GitSHA:    "parentSHAofProduct",
+		StartedAt:     time.Now(),
+		TriggerSource: "pipeline-working-tree@laptop.local",
+		Repo:          "acme/sample-app",
+		RepoURL:       "git@github.com:acme/sample-app.git",
+		GitBranch:     "main",
+		GitSHA:        "parentSHAofProduct",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -291,8 +277,8 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	body := strings.NewReader(`{
 		"pipeline":"build",
 		"parent_run_id":"parent",
-		"trigger":{"source":"manual"},
-		"git":{"repo":"acme/sample-app","branch":"main"}
+		"trigger":{"source":"await-pipeline"},
+		"git":{"repo":"acme/other","branch":"main"}
 	}`)
 	resp, err := http.Post(srv.URL+"/api/v1/triggers", "application/json", body)
 	if err != nil {
@@ -314,8 +300,8 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Repo != "acme/sample-app" {
-		t.Errorf("Repo = %q, want acme/sample-app", got.Repo)
+	if got.Repo != "acme/other" {
+		t.Errorf("Repo = %q, want acme/other", got.Repo)
 	}
 	if got.GitSHA != "" {
 		t.Errorf("GitSHA = %q, want empty (cross-repo must not inherit parent's SHA)", got.GitSHA)
@@ -323,11 +309,11 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	if got.GitBranch != "main" {
 		t.Errorf("GitBranch = %q, want main", got.GitBranch)
 	}
+	if got.TriggerSource != "await-pipeline" {
+		t.Errorf("TriggerSource = %q, want explicit cross-repo placement", got.TriggerSource)
+	}
 }
 
-// TestCycleDetect_ParentNotFound400: bogus parent_run_id gets a 400
-// so the caller knows their trigger request is malformed rather than
-// silently proceeding without the cycle check.
 func TestCycleDetect_ParentNotFound400(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

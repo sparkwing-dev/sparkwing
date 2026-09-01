@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// An entry is a content fingerprint and -trimpath keeps build paths out
-// of the binary, so the owners record is the only thing that can say
-// what a cached 90 MB blob belongs to.
 func TestRecordOwner_TracksCheckoutsAndCounts(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	const key = "11111111-11111111"
@@ -79,9 +76,6 @@ func TestLeaseRecordUseMutatesOnlyItsEntry(t *testing.T) {
 	}
 }
 
-// The explanation and the key must come from one computation, or
-// explain would confidently describe inputs that did not produce the
-// key it prints.
 func TestExplainCacheKey_AgreesWithPipelineCacheKey(t *testing.T) {
 	dir := newPipelineDir(t)
 	key, parts, err := ExplainCacheKey(dir)
@@ -101,7 +95,6 @@ func TestExplainCacheKey_AgreesWithPipelineCacheKey(t *testing.T) {
 	}
 }
 
-// The whole point of explain: name the input that moved.
 func TestDiffKeyParts_NamesTheChangedInput(t *testing.T) {
 	dir := newPipelineDir(t)
 	_, before, err := ExplainCacheKey(dir)

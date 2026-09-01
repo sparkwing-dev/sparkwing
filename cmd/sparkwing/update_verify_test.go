@@ -14,10 +14,6 @@ import (
 	"testing"
 )
 
-// withTestUpdateKey swaps the embedded verification key for a freshly
-// generated test key and returns the matching private key. The real
-// (placeholder) key is restored when the test ends -- production code
-// never sees the test key.
 func withTestUpdateKey(t *testing.T) ed25519.PrivateKey {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -38,17 +34,13 @@ func expectedAssetName() string {
 	return "sparkwing-" + runtime.GOOS + "-" + runtime.GOARCH + ext
 }
 
-// releaseServerOpts corrupts a served release to drive the failure paths.
 type releaseServerOpts struct {
-	sumsDigest string             // override the digest listed for the asset
-	signWith   ed25519.PrivateKey // sign SHA256SUMS with this key instead
-	omitSig    bool               // do not serve SHA256SUMS.sig (404)
-	omitAsset  bool               // do not serve the asset (404)
+	sumsDigest string
+	signWith   ed25519.PrivateKey
+	omitSig    bool
+	omitAsset  bool
 }
 
-// newReleaseServer serves a version's asset, SHA256SUMS, and its ed25519
-// detached signature, applying any corruption in opts. It points
-// updateBaseURL at itself for the duration of the test.
 func newReleaseServer(t *testing.T, version string, assetBytes []byte, signKey ed25519.PrivateKey, opts releaseServerOpts) {
 	t.Helper()
 	asset := expectedAssetName()
@@ -96,8 +88,6 @@ func newReleaseServer(t *testing.T, version string, assetBytes []byte, signKey e
 	t.Cleanup(func() { updateBaseURL = prev })
 }
 
-// writeCurrentBin creates a stand-in for the running binary with known
-// prior bytes so replacement / restoration is observable.
 func writeCurrentBin(t *testing.T, bytes []byte) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -113,9 +103,6 @@ func mustSHA256(b []byte) string {
 	return hex.EncodeToString(s[:])
 }
 
-// Contract 1-4 + 6, happy path: a valid signed asset installs atomically,
-// the installed bytes equal the served bytes (no post-verify mutation),
-// and the installed digest equals the signed manifest digest.
 func TestDownloadAndInstall_ValidSignedAsset(t *testing.T) {
 	priv := withTestUpdateKey(t)
 	newBytes := []byte("SPARKWING-NEW-RELEASE-BYTES-v9.9.9\x00\x01\x02")
@@ -140,21 +127,18 @@ func TestDownloadAndInstall_ValidSignedAsset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Installed bytes are byte-identical to the served/verified bytes:
-	// proves no codesign or any other mutation happened after verification.
+
 	if !bytesEqual(got, newBytes) {
 		t.Fatalf("installed bytes differ from served bytes: got %d bytes, want %d", len(got), len(newBytes))
 	}
 	if mustSHA256(got) != res.digest {
 		t.Errorf("installed digest %q != verified digest %q", mustSHA256(got), res.digest)
 	}
-	// No staging/backup litter left behind on success.
+
 	assertAbsent(t, currentBin+".update.tmp")
 	assertAbsent(t, currentBin+".prev")
 }
 
-// Contract 1 + no-replacement: a bad signature fails and does not replace
-// the current binary.
 func TestDownloadAndInstall_BadSignature_NoReplacement(t *testing.T) {
 	priv := withTestUpdateKey(t)
 	_, wrongKey, err := ed25519.GenerateKey(rand.Reader)
@@ -162,7 +146,7 @@ func TestDownloadAndInstall_BadSignature_NoReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	newBytes := []byte("ATTACKER-CONTROLLED-BYTES")
-	// Manifest is signed by a key that is NOT the embedded one.
+
 	newReleaseServer(t, "v9.9.9", newBytes, priv, releaseServerOpts{signWith: wrongKey})
 	old := []byte("OLD-BINARY-BYTES")
 	currentBin := writeCurrentBin(t, old)
@@ -178,8 +162,6 @@ func TestDownloadAndInstall_BadSignature_NoReplacement(t *testing.T) {
 	assertAbsent(t, currentBin+".prev")
 }
 
-// Contract 1 + no-replacement: a missing signature (404) fails without
-// replacement -- fail closed, exactly the placeholder-key/unarmed case.
 func TestDownloadAndInstall_MissingSignature_NoReplacement(t *testing.T) {
 	priv := withTestUpdateKey(t)
 	newBytes := []byte("SOME-BYTES")
@@ -193,12 +175,10 @@ func TestDownloadAndInstall_MissingSignature_NoReplacement(t *testing.T) {
 	assertBytes(t, currentBin, old)
 }
 
-// Contract 4 + no-replacement: a digest mismatch (signature valid over a
-// manifest that lists the wrong digest) fails without replacement.
 func TestDownloadAndInstall_DigestMismatch_NoReplacement(t *testing.T) {
 	priv := withTestUpdateKey(t)
 	newBytes := []byte("BYTES-THAT-DO-NOT-MATCH-THE-LISTED-DIGEST")
-	wrong := strings.Repeat("00", sha256.Size) // valid-length, wrong digest
+	wrong := strings.Repeat("00", sha256.Size)
 	newReleaseServer(t, "v9.9.9", newBytes, priv, releaseServerOpts{sumsDigest: wrong})
 	old := []byte("OLD-BINARY-BYTES")
 	currentBin := writeCurrentBin(t, old)
@@ -213,9 +193,6 @@ func TestDownloadAndInstall_DigestMismatch_NoReplacement(t *testing.T) {
 	assertBytes(t, currentBin, old)
 }
 
-// The post-rename digest recheck: if the installed bytes are corrupted
-// after the atomic swap, the updater restores the prior binary and fails
-// loudly. Simulated via the afterInstallHook seam.
 func TestDownloadAndInstall_PostRenameMismatch_RestoresPrior(t *testing.T) {
 	priv := withTestUpdateKey(t)
 	newBytes := []byte("GOOD-VERIFIED-RELEASE-BYTES")
@@ -225,7 +202,6 @@ func TestDownloadAndInstall_PostRenameMismatch_RestoresPrior(t *testing.T) {
 
 	previousHook := afterInstallHook
 	afterInstallHook = func(installed string) {
-		// Corrupt the just-installed file so the re-hash cannot match.
 		_ = os.WriteFile(installed, []byte("CORRUPTED-AFTER-RENAME"), 0o755)
 	}
 	t.Cleanup(func() { afterInstallHook = previousHook })
@@ -237,20 +213,17 @@ func TestDownloadAndInstall_PostRenameMismatch_RestoresPrior(t *testing.T) {
 	if !strings.Contains(err.Error(), "installed binary digest mismatch") {
 		t.Errorf("error did not describe the post-install mismatch: %v", err)
 	}
-	// The prior binary is restored, not left corrupted.
+
 	assertBytes(t, currentBin, old)
 	assertAbsent(t, currentBin+".prev")
 }
 
-// Contract 5, via a PATH spy independent of code structure: a
-// download/verification failure spawns no `go` subprocess at all -- the
-// `go install` fallback is gone.
 func TestRunUpdateBinary_Failure_SpawnsNoGo(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell shim spy is POSIX-only")
 	}
 	priv := withTestUpdateKey(t)
-	// Serve a valid manifest+sig but 404 the asset, so download fails.
+
 	newReleaseServer(t, "v9.9.9", []byte("unused"), priv, releaseServerOpts{omitAsset: true})
 
 	shimDir := t.TempDir()
@@ -271,13 +244,9 @@ func TestRunUpdateBinary_Failure_SpawnsNoGo(t *testing.T) {
 	}
 }
 
-// An unarmed build carries the all-zero placeholder key and must fail
-// closed -- never install -- regardless of what is served. The test
-// installs the placeholder through the same seam the real key uses, so
-// it holds whether or not the shipped binary is armed.
 func TestDownloadAndInstall_PlaceholderKey_FailsClosed(t *testing.T) {
 	prev := updateVerifyKey
-	updateVerifyKey = make(ed25519.PublicKey, ed25519.PublicKeySize) // all-zero placeholder
+	updateVerifyKey = make(ed25519.PublicKey, ed25519.PublicKeySize)
 	t.Cleanup(func() { updateVerifyKey = prev })
 	if !isPlaceholderUpdateKey(updateVerifyKey) {
 		t.Fatal("test setup: injected key is not the placeholder")
@@ -286,7 +255,7 @@ func TestDownloadAndInstall_PlaceholderKey_FailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Serve a well-formed, signed release; the placeholder must still refuse.
+
 	newReleaseServer(t, "v9.9.9", []byte("whatever"), priv, releaseServerOpts{})
 	old := []byte("OLD-BINARY-BYTES")
 	currentBin := writeCurrentBin(t, old)
@@ -301,8 +270,6 @@ func TestDownloadAndInstall_PlaceholderKey_FailsClosed(t *testing.T) {
 	assertBytes(t, currentBin, old)
 }
 
-// downloadFile bounds the body before verification: a response larger
-// than the ceiling is a terminal error, and one at/under it succeeds.
 func TestDownloadFile_BoundsBodySize(t *testing.T) {
 	var size int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -318,13 +285,11 @@ func TestDownloadFile_BoundsBodySize(t *testing.T) {
 		t.Errorf("error did not name the size limit: %v", err)
 	}
 
-	size = 1000 // exactly at the ceiling
+	size = 1000
 	if err := downloadFile(srv.URL, dst, 1000); err != nil {
 		t.Fatalf("at-limit body was rejected: %v", err)
 	}
 }
-
-// --- small assertion helpers ---
 
 func bytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {

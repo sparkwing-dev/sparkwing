@@ -23,27 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// RunNodeOnce is the shared execution core for cluster-mode node
-// runs: fetches run + plan, installs HTTP resolvers, locates the node
-// (with ExpandFrom fallback), and invokes NodeExecutor against
-// HTTP backends. The runner writes terminal state through the
-// controller; the returned Result is for caller-side logging.
-//
-// holderID is the lock/claim holder id (e.g. "pod:<runID>:<nodeID>"
-// or "runner:<hostname>"). token is the bearer for controller + logs;
-// empty = no auth header.
-//
-// admission is non-nil only for a registered runner on a box that also
-// owns a local admission daemon: the claimed node is submitted to that
-// daemon and held under a lease for its whole execution, exactly like a
-// local run, so controller work and local work share one arbiter. In a
-// Kubernetes pod the scheduler already admitted the work, so the pod's
-// run-node entrypoint passes nil and the daemon is never engaged.
-//
-// Options carry the execution mode. The default is the pod contract
-// above. [Coordinated] switches to the local contract, where the
-// dispatcher that spawned this process already resolved cache,
-// concurrency admission, and SkipIf before deciding to spawn at all.
 func RunNodeOnce(
 	ctx context.Context,
 	controllerURL, logsURL, runID, nodeID, holderID, token string,
@@ -83,8 +62,6 @@ func RunNodeOnce(
 		logsBackend = localLogs{paths: paths}
 	}
 
-	// Execution read: run.Args seeds the masker below and is handed to
-	// reg.Invoke and the runner.Request. The plain GetRun redacts.
 	run, err := stateClient.GetRunForExecution(ctx, runID)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("get run %s: %w", runID, err)
@@ -102,12 +79,8 @@ func RunNodeOnce(
 	var art storage.ArtifactStore
 	var localSecrets secrets.Source
 	if cfg.coordinated {
-		// safety: the dispatcher and this process are the same binary on the
-		// same machine reading the same project, so the child rebuilds
-		// the run's own surfaces rather than borrowing the pod's
-		// controller-backed ones: a laptop run's secrets live in a
-		// dotenv file the controller has never seen, and its artifact
-		// store is the one the dispatcher's profile named.
+		// safety: rebuild local surfaces; a laptop run's secrets and artifact
+		// store do not belong to the pod's controller-backed profile.
 		var profileLogs LogBackend
 		localSecrets, art, profileLogs, err = coordinatedChildSurfaces(ctx, run.Pipeline)
 		if err != nil {
@@ -142,13 +115,7 @@ func RunNodeOnce(
 		StartedAt: run.StartedAt,
 	}
 	sparkwing.SetGit(rc.Git)
-	// run.Args carries only the operator's explicit layer; the project's
-	// defaults.args and the pipeline entry's args: block are re-read from
-	// the checkout this node compiled out of, so the pod plans from the
-	// same merged set the local plan used. See checkoutInvokeArgs. The
-	// masker is seeded from the merge for the same reason it is on the
-	// local path: a yaml-supplied `secret:"true"` value the masker never
-	// saw is a value the node log persists in the clear.
+
 	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, logger)
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)
@@ -178,21 +145,15 @@ func RunNodeOnce(
 	}
 	ctx = sparkwing.WithSecretResolver(ctx,
 		secrets.NewCached(source, masker).AsResolver())
-	// The masker has to reach the node log wrapper the same way it does
-	// on the local path (RunLocal, replay): through the context. Without
-	// this the cluster/pod path resolves secrets into a masker nothing
-	// ever reads, and node logs persist raw secret values.
+
 	ctx = secrets.WithMasker(ctx, masker)
 
 	if in := plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)
 	}
 
-	// safety: the dispatcher installs this from the same plan (newDispatchState).
-	// Without it every sparkwing.ArgOrDefault call in a node running
-	// outside the dispatcher's process reads no resolved-args map and
-	// answers with the schema default, silently discarding the operator's
-	// value.
+	// safety: propagate the dispatcher's resolved args or an external node
+	// silently falls back to schema defaults.
 	if ra := plan.ResolvedArgs(); ra != nil {
 		ctx = sparkwingruntime.WithResolvedArgs(ctx, ra)
 	}
@@ -499,13 +460,8 @@ func RunNodeOnce(
 	return res, nil
 }
 
-// MetricsHook is set by sparkwing-runner to emit per-node metrics.
-// Nil in user pipeline binaries to keep the prometheus dep out.
 var MetricsHook func(pipeline, outcome string, d time.Duration)
 
-// runNodeCLI implements the pipeline binary's `run-node <runID> <nodeID>` entrypoint. One node
-// per invocation; orchestrator creates the node row first, this body
-// executes it and writes terminal state through the controller.
 func runNodeCLI(args []string) error {
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"),
@@ -533,13 +489,8 @@ func runNodeCLI(args []string) error {
 		return errors.New("--controller + <runID> + <nodeID> are required (or SPARKWING_CONTROLLER_URL + SPARKWING_RUN_ID + SPARKWING_NODE_ID env)")
 	}
 
-	// safety: SIGINT only, and SIGTERM must stay unhandled. SIGTERM is how a
-	// node process is stopped -- by `runs bounce`, by a cancelled run, by
-	// a pod's own termination -- and the guarantee those paths rest on is
-	// that the child dies without writing a terminal row: the supervisor
-	// decides what the kill meant. A handler here would let a bounced node
-	// record an outcome mid-bounce, which is the one thing a bounce must
-	// never produce. See TestNodeEntrypoints_DoNotHandleSIGTERM.
+	// safety: leave SIGTERM unhandled; bounce, cancellation, and pod termination
+	// rely on the supervisor rather than the killed node to record the outcome.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if *timeout > 0 {
@@ -575,18 +526,6 @@ func runNodeCLI(args []string) error {
 	return nil
 }
 
-// coordinatedExitStatus reports a spawned node's outcome to its
-// dispatcher without printing the node's own error text.
-//
-// The masker that redacts a node's logs is installed inside the node
-// log wrapper, so anything written straight to this process's stderr
-// goes out unredacted -- and the dispatcher relays stderr into the
-// run's delegate and its envelope file. A failure message carrying a
-// resolved secret would therefore be masked in the node log and naked
-// on the operator's terminal. The dispatcher does not need the text
-// anyway: it reads the node's terminal row, where the masked message
-// already is. Only the non-zero exit has to survive, for the case
-// where the row write itself failed.
 func coordinatedExitStatus(runID, nodeID string, res runner.Result) error {
 	if res.Err == nil {
 		return nil
@@ -594,9 +533,6 @@ func coordinatedExitStatus(runID, nodeID string, res runner.Result) error {
 	return fmt.Errorf("node %s/%s failed; its terminal row carries the reason", runID, nodeID)
 }
 
-// invokeGeneratorForPod runs one ExpandFrom generator under panic
-// recovery; panics yield an empty slice so the caller tries the next
-// expansion.
 func invokeGeneratorForPod(ctx context.Context, exp sparkwing.Expansion) (out []*sparkwing.JobNode) {
 	defer func() {
 		if r := recover(); r != nil {

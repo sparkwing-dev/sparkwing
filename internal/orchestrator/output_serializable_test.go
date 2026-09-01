@@ -37,9 +37,6 @@ type allUnexported struct {
 	count int
 }
 
-// The shapes that used to be rejected and must not be: json.Marshal
-// encodes each of them, and a plan-time verdict against them would
-// fail pipelines that have been shipping for months.
 type withOpaqueDeps struct {
 	Name string `json:"name"`
 	Mu   sync.Mutex
@@ -60,13 +57,11 @@ func TestValidateOutputSerializable_Accepts(t *testing.T) {
 		reflect.TypeOf(map[string]serializableOK{}),
 		reflect.TypeOf(""),
 		reflect.TypeOf(0),
-		// safety: a custom encoder answers for the whole type; time.Time has no
-		// exported fields and marshals fine.
+
 		reflect.TypeOf(time.Time{}),
-		// safety: a json:"-" field is not part of the encoding at all.
+
 		reflect.TypeOf(withSkippedChannel{}),
-		// safety: json.Marshal renders a struct with no exported fields as {},
-		// which is an answer, not a failure.
+
 		reflect.TypeOf(allUnexported{}),
 		reflect.TypeOf(withOpaqueDeps{}),
 		reflect.TypeOf(sync.Mutex{}),
@@ -124,10 +119,6 @@ func (j *encodableJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}), nil
 }
 
-// A node whose declared output cannot be encoded is a broken pipeline,
-// not a broken run: catching it at plan time costs nothing, while
-// catching it at execution time means every node upstream of it has
-// already done its work.
 func TestPlanOutputTypeErrors(t *testing.T) {
 	clean := sparkwing.NewPlan()
 	sparkwing.Job(clean, "ok", &encodableJob{})
@@ -148,8 +139,6 @@ func TestPlanOutputTypeErrors(t *testing.T) {
 	}
 }
 
-// A recovery node is a job like any other and its output crosses the
-// same boundary, so the check has to reach it.
 func TestPlanOutputTypeErrors_CoversRecoveryNodes(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "ok", &encodableJob{}).OnFailure("recover", &unencodableJob{})
@@ -171,8 +160,6 @@ func TestNodeOutputMarshalError_CitesTheGuide(t *testing.T) {
 	}
 }
 
-// The accept list is only trustworthy if encoding/json agrees, so the
-// claim is checked against json.Marshal itself rather than asserted.
 func TestValidateOutputSerializable_AcceptedTypesActuallyMarshal(t *testing.T) {
 	values := []any{
 		serializableOK{Name: "n", Count: 1},

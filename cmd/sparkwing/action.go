@@ -1,8 +1,3 @@
-// `sparkwing pipeline` is the per-project pipeline surface. This file
-// implements the dispatcher (runPipeline) and the read verbs (list,
-// describe, discover, explain). The catalog merges
-// .sparkwing/sparkwing.yaml entries with the describe cache's
-// typed metadata into one record shape.
 package main
 
 import (
@@ -23,11 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Pipeline is the agent-facing record for one entry in this
-// repo's sparkwing.yaml. Pipelines with at least one trigger
-// (push / pull request / webhook / schedule / hook) auto-run when the trigger
-// fires; pipelines with an empty Triggers list are manual-only
-// (`sparkwing run <name>`).
 type Pipeline struct {
 	Name       string                  `json:"name"`
 	Short      string                  `json:"short,omitempty"`
@@ -36,25 +26,14 @@ type Pipeline struct {
 	Entrypoint string                  `json:"entrypoint,omitempty"`
 	Args       []sparkwing.DescribeArg `json:"args,omitempty"`
 	Examples   []sparkwing.Example     `json:"examples,omitempty"`
-	// EnvVars are env vars the pipeline reads as inputs, surfaced via
-	// the optional sparkwing.EnvVarDocer interface. Empty unless the
-	// pipeline opts in.
+
 	EnvVars []sparkwing.EnvVarDoc `json:"env_vars,omitempty"`
-	// Risks is the sorted, deduplicated union of per-step risk
-	// labels declared anywhere in the pipeline's plan. Mirrors
-	// sparkwing.DescribePipeline.Risks. omitempty keeps the wire
-	// format quiet for pipelines without risk labels.
+
 	Risks []string `json:"risks,omitempty"`
-	// RisksBySteps is the per-step breakdown of declared risk
-	// labels. Mirrors sparkwing.DescribePipeline.RisksBySteps.
+
 	RisksBySteps []sparkwing.DescribeStepRisks `json:"risks_by_step,omitempty"`
 }
 
-// PipelineIndex is one line of `sparkwing pipeline list`: what a caller needs
-// to pick a pipeline and nothing else. The detail — help, args, examples, env
-// vars, risks — is what `pipeline describe` carries (house rule 13). Shipping
-// it in the listing made a five-pipeline catalog 2.7KB, most of it help text
-// nobody had asked for yet.
 type PipelineIndex struct {
 	Name       string   `json:"name"`
 	Short      string   `json:"short,omitempty"`
@@ -62,9 +41,6 @@ type PipelineIndex struct {
 	Triggers   []string `json:"triggers,omitempty"`
 }
 
-// index projects a pipeline down to what a chooser reads. A pipeline with no
-// short falls back to the first line of its help, so dropping the help text
-// from the listing never leaves a line with nothing on it.
 func (p Pipeline) index() PipelineIndex {
 	short := p.Short
 	if short == "" {
@@ -73,7 +49,6 @@ func (p Pipeline) index() PipelineIndex {
 	return PipelineIndex{Name: p.Name, Short: short, Entrypoint: p.Entrypoint, Triggers: p.Triggers}
 }
 
-// runPipeline dispatches `sparkwing pipeline <verb> [...]`.
 func runPipeline(args []string) error {
 	if handleParentHelp(cmdPipeline, args) {
 		return nil
@@ -113,10 +88,6 @@ func runPipeline(args []string) error {
 	}
 }
 
-// chdirFlag registers the shared -C/--sw-cd working-directory flag so a
-// repo-scoped discovery verb can target a repo other than the cwd,
-// matching `run` and `new`. applyChdir re-anchors before the verb
-// resolves the project.
 func chdirFlag(fs *flag.FlagSet) *string {
 	return fs.StringP("sw-cd", "C", "", "operate as if started in this directory (re-anchors the .sparkwing search)")
 }
@@ -155,8 +126,7 @@ func runPipelineList(args []string) error {
 	}
 	switch format {
 	case "json":
-		// NDJSON: one pipeline per line, so `head` returns whole records, and
-		// an index rather than the catalog, so each one is a line and not a page.
+
 		index := make([]PipelineIndex, 0, len(pipelines))
 		for _, a := range pipelines {
 			index = append(index, a.index())
@@ -223,7 +193,7 @@ func runPipelineDiscover(args []string) error {
 	})
 	switch format {
 	case "json":
-		// NDJSON: one scored pipeline per line.
+
 		return ndjson.Write(os.Stdout, results)
 	case "plain":
 		for _, r := range results {
@@ -250,11 +220,6 @@ func runPipelineDiscover(args []string) error {
 	return nil
 }
 
-// scorePipeline returns a positive relevance score if every query token
-// hits some haystack field; 0 otherwise. Field weights favor name
-// matches over description matches so `discover release` surfaces the
-// `release` entry before an unrelated entry that merely mentions
-// "release" in its long help text.
 func scorePipeline(a Pipeline, tokens []string) int {
 	fields := []struct {
 		weight int
@@ -351,9 +316,6 @@ func runPipelineDescribe(args []string) error {
 	}
 }
 
-// gatherPipelinesCatalog enriches the sparkwing.yaml registry with
-// typed metadata from the describe cache. It returns entries sorted by
-// pipeline name for the flat `sparkwing pipeline list` view.
 func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -400,10 +362,6 @@ func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 	return out, nil
 }
 
-// summarizeTriggerList turns the Triggers struct into one short
-// string per declared trigger. Each string is self-contained (kind
-// + args), so agents consuming JSON can parse by prefix if they
-// want to filter.
 func summarizeTriggerList(t pipelines.Triggers) []string {
 	var out []string
 	if t.Push != nil {
@@ -438,9 +396,6 @@ func summarizeTriggerList(t pipelines.Triggers) []string {
 	return out
 }
 
-// printPipelineTable renders the catalog as a flat, aligned table.
-// Sorted by name; no grouping. Switching between shell completion and
-// `sparkwing pipeline list` is intentionally one mental model now.
 func printPipelineTable(pipelineList []Pipeline) {
 	if len(pipelineList) == 0 {
 		fmt.Println("(no pipelines)")
@@ -463,9 +418,6 @@ func printPipelineTable(pipelineList []Pipeline) {
 	}
 }
 
-// printPipelineDetail renders a single Pipeline for human reading.
-// JSON output is handled separately in the caller; this is the
-// fallback when --json is absent.
 func printPipelineDetail(a *Pipeline) {
 	fmt.Printf("name:  %s\n", a.Name)
 	if a.Entrypoint != "" {

@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestNodeClaim_AuthBlocksUnauthedCaller stands up a controller with
-// a real sw*_ runner token in the tokens table and proves an unauthed
-// ClaimNode returns an error carrying 401, while a NewWithToken
-// client carrying the real token succeeds.
 func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

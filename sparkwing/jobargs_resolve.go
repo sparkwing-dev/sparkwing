@@ -6,22 +6,6 @@ import (
 	"fmt"
 )
 
-// resolveAndBindJobArgs walks every job in the plan that registered
-// a typed args [Schema] via [WithArgs[T]], resolves each against the
-// supplied flag values + profile defaults, and binds the resolved
-// typed args back onto the job's WithArgs holder so step bodies
-// reading j.Args(ctx) see the populated values.
-//
-// Also returns the merged resolved-args map across all jobs (keyed
-// by flag name) so the caller can install it on the run context for
-// later sparkwing.Arg[T](ctx, name) reads. Same-flag-name across two
-// jobs is impossible at this point -- [registerJobArgs] rejected
-// collisions at plan time -- so the merge is conflict-free by
-// construction.
-//
-// Returns the merged error of every per-job resolution failure
-// joined together so callers see every missing required arg / failed
-// predicate / group violation in one error rather than one at a time.
 func resolveAndBindJobArgs(plan *Plan, in ResolveInputs) (map[string]any, error) {
 	if plan == nil {
 		return nil, nil

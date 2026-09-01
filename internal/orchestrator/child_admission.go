@@ -34,10 +34,6 @@ func childPlanAdmissionStatusForRun(ctx context.Context, state StateBackend, con
 	return childPlanAdmissionScan(ctx, state, concurrency, runID, false)
 }
 
-// childPlanAdmissionStatusForGlobalKeys is the store-driven check
-// restricted to global-scope plan concurrency keys. The local run path
-// uses it: box- and run-scoped keys live in the daemon, so only global
-// keys can be queued in the store.
 func childPlanAdmissionStatusForGlobalKeys(ctx context.Context, state StateBackend, concurrency ConcurrencyBackend, runID string) (childPlanAdmission, error) {
 	return childPlanAdmissionScan(ctx, state, concurrency, runID, true)
 }
@@ -135,8 +131,6 @@ func planConcurrencyKeys(raw []byte) ([]string, error) {
 	return keys, nil
 }
 
-// filterGlobalScopeKeys keeps the coordination keys whose scheme tag
-// marks global scope.
 func filterGlobalScopeKeys(keys []string) []string {
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {

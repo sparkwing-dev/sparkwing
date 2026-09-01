@@ -16,13 +16,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
 
-// fakeCacheServer is a minimal stand-in for sparkwing-cache /bin/<hash>.
-// Stores uploads in-memory so tests can assert on them without a
-// filesystem or the real server.
 type fakeCacheServer struct {
 	mu       sync.Mutex
-	store    map[string][]byte // hash -> binary bytes
-	gotToken map[string]string // hash -> Authorization header seen on PUT
+	store    map[string][]byte
+	gotToken map[string]string
 	lastHash string
 }
 
@@ -80,8 +77,6 @@ func (s *fakeCacheServer) has(hash string) bool {
 	return ok
 }
 
-// TestTryRemoteBinary_Hit downloads a stored binary and writes it to
-// the destination path with executable bits set.
 func TestTryRemoteBinary_Hit(t *testing.T) {
 	fake := newFakeCacheServer()
 	fake.store["aaaaaaaa-bbbbbbbb"] = []byte("the binary bytes")
@@ -111,8 +106,6 @@ func TestTryRemoteBinary_Hit(t *testing.T) {
 	}
 }
 
-// TestTryRemoteBinary_Miss returns the sentinel on 404 so callers
-// can distinguish "not yet cached" from "server broken."
 func TestTryRemoteBinary_Miss(t *testing.T) {
 	fake := newFakeCacheServer()
 	srv := httptest.NewServer(fake.handler())
@@ -124,7 +117,6 @@ func TestTryRemoteBinary_Miss(t *testing.T) {
 	}
 }
 
-// TestUploadRemoteBinary_Authenticated sends the bearer token on PUT.
 func TestUploadRemoteBinary_Authenticated(t *testing.T) {
 	fake := newFakeCacheServer()
 	srv := httptest.NewServer(fake.handler())
@@ -147,10 +139,6 @@ func TestUploadRemoteBinary_Authenticated(t *testing.T) {
 	}
 }
 
-// TestPipelineCacheKey_HyphenFormat ensures the hash we send to the
-// cache matches the server's validation regex. Caught a real bug the
-// first time through: a 16-char continuous hex string was being
-// rejected as invalid by the cache.
 func TestPipelineCacheKey_HyphenFormat(t *testing.T) {
 	dir := scaffoldPipelineRepo(t)
 	key, err := bincache.PipelineCacheKey(dir)

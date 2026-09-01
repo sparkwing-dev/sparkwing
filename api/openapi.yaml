@@ -83,7 +83,6 @@ security:
   - bearerToken: []
 
 paths:
-  # ───────────────────────── Runs ─────────────────────────
 
   /api/v1/runs:
     post:
@@ -109,9 +108,8 @@ paths:
       tags: [runs]
       summary: List runs filtered by query parameters.
       description: |
-        Filter via `pipeline`, `status`, `since`, `limit` query
-        params. Empty result is `{"runs": []}`. Requires `runs.read`
-        scope.
+        Filters are applied before newest-first ordering and `limit`.
+        Empty result is `{"runs": []}`. Requires `runs.read` scope.
       parameters:
         - in: query
           name: pipeline
@@ -122,6 +120,26 @@ paths:
           schema: { type: string }
           description: csv of run statuses (e.g. `running,pending`).
         - in: query
+          name: git_sha
+          schema: { type: string }
+          description: csv of git SHA prefixes.
+        - in: query
+          name: git_branch
+          schema: { type: string }
+          description: csv of exact git branch names.
+        - in: query
+          name: repo
+          schema: { type: string }
+          description: csv of exact stored repository identities.
+        - in: query
+          name: repo_url
+          schema: { type: string }
+          description: csv of exact canonical repository URLs.
+        - in: query
+          name: root_only
+          schema: { type: boolean }
+          description: When true, exclude child runs.
+        - in: query
           name: since
           schema: { type: string, format: duration }
           description: Go duration (`1h`, `30m`). Returns runs younger than this.
@@ -131,6 +149,10 @@ paths:
       responses:
         "200":
           description: List wrapped under `runs`.
+          headers:
+            X-Sparkwing-Run-Filter-Version:
+              description: Native identity-filter contract version.
+              schema: { type: string, enum: ["1"] }
           content:
             application/json:
               schema:
@@ -140,6 +162,7 @@ paths:
                   runs:
                     type: array
                     items: { $ref: "#/components/schemas/Run" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "500": { $ref: "#/components/responses/InternalError" }
 
@@ -727,7 +750,6 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/DebugPause" }
 
-  # ───────────────────────── Node Steps ─────────────────────────
 
   /api/v1/runs/{id}/nodes/{nodeID}/steps/start:
     parameters:
@@ -848,7 +870,6 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/NodeStep" }
 
-  # ───────────────────────── Events ─────────────────────────
 
   /api/v1/runs/{id}/events:
     parameters: [{ $ref: "#/components/parameters/RunID" }]
@@ -903,7 +924,6 @@ paths:
                 properties:
                   seq: { type: integer, format: int64 }
 
-  # ───────────────────────── Triggers ─────────────────────────
 
   /api/v1/triggers:
     post:
@@ -1047,7 +1067,6 @@ paths:
               schema: { $ref: "#/components/schemas/Trigger" }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  # ───────────────────────── Approvals ─────────────────────────
 
   /api/v1/runs/{id}/approvals/{nodeID}/request:
     parameters:
@@ -1147,7 +1166,6 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/Approval" }
 
-  # ───────────────────────── Concurrency ─────────────────────────
 
   /api/v1/concurrency/{key}/acquire:
     parameters:
@@ -1341,7 +1359,6 @@ paths:
         "204": { description: Nothing to claim. }
         "400": { $ref: "#/components/responses/BadRequest" }
 
-  # ───────────────────────── Pool (cluster-only) ─────────────────────────
 
   /api/v1/pool:
     get:
@@ -1408,7 +1425,6 @@ paths:
         "204": { description: Renewed. }
         "409": { description: Heartbeat lost (job_id mismatch or PVC expired). }
 
-  # ───────────────────────── Artifacts (laptop-only) ─────────────────────────
 
   /api/v1/artifacts/{key}:
     parameters:
@@ -1428,7 +1444,6 @@ paths:
               schema: { type: string, format: binary }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  # ───────────────────────── Tokens ─────────────────────────
 
   /api/v1/tokens:
     post:
@@ -1508,7 +1523,6 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/CreateTokenResponse" }
 
-  # ───────────────────────── Users ─────────────────────────
 
   /api/v1/users:
     get:
@@ -1559,7 +1573,6 @@ paths:
       responses:
         "204": { description: Deleted. }
 
-  # ───────────────────────── Auth ─────────────────────────
 
   /api/v1/auth/login:
     post:
@@ -1667,7 +1680,6 @@ paths:
                 properties:
                   needed: { type: boolean }
 
-  # ───────────────────────── Secrets ─────────────────────────
 
   /api/v1/secrets:
     post:
@@ -1724,7 +1736,6 @@ paths:
       responses:
         "204": { description: Deleted. }
 
-  # ───────────────────────── Misc ─────────────────────────
 
   /api/v1/agents:
     get:
@@ -1801,7 +1812,6 @@ paths:
               schema: { $ref: "#/components/schemas/Run" }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  # ───────────────────────── Webhooks ─────────────────────────
 
   /webhooks/github/{pipeline}:
     parameters:
@@ -1825,7 +1835,6 @@ paths:
         "401": { description: Invalid HMAC signature. }
         "503": { description: GitHub webhook secret not configured. }
 
-  # ───────────────────────── Health / Metrics ─────────────────────────
 
   /api/v1/health:
     get:

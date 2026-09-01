@@ -8,14 +8,8 @@ import (
 	"path/filepath"
 )
 
-// errPeerClosed marks an orderly peer disconnect (EOF), distinguished
-// from a protocol or transport fault.
 var errPeerClosed = errors.New("wingd: peer closed connection")
 
-// elect attempts to win the single-daemon election for this home. It
-// returns (true, nil) holding the lock when it wins, (false, nil) when
-// another daemon holds it, or an error on a filesystem fault. The winner
-// must call releaseLock when it stops serving.
 func (d *Daemon) elect() (bool, error) {
 	if err := d.layout.ensureDir(); err != nil {
 		return false, err
@@ -37,8 +31,6 @@ func (d *Daemon) elect() (bool, error) {
 	return true, nil
 }
 
-// releaseLock unlocks and closes the election lock. Safe to call once,
-// after a successful elect.
 func (d *Daemon) releaseLock() {
 	if d.lockFile == nil {
 		return
@@ -48,13 +40,6 @@ func (d *Daemon) releaseLock() {
 	d.lockFile = nil
 }
 
-// LockHeld reports whether a process still holds home's election lock. A
-// daemon holds it from election until after its final state write, so this
-// is what a caller waiting for a daemon to be completely gone must watch:
-// the listener closes earlier, while the daemon is still creating files
-// under the home. It tests the lock by taking it and letting go at once,
-// and reports false when no lock file exists, since no daemon has run for
-// this home.
 func LockHeld(home string) (bool, error) {
 	l, err := resolveLayout(home)
 	if err != nil {
@@ -79,11 +64,6 @@ func LockHeld(home string) (bool, error) {
 	return false, nil
 }
 
-// bindListener prepares the socket directory, removes any stale socket left by a
-// dead predecessor (the election lock is held, so no live daemon owns it),
-// and binds a fresh unix listener. It validates the path length first so
-// an over-length socket fails with a named limit rather than a bare bind
-// error.
 func (d *Daemon) bindListener() (net.Listener, error) {
 	if err := ValidateSocketPath(d.layout.sock); err != nil {
 		return nil, err
@@ -99,8 +79,6 @@ func (d *Daemon) bindListener() (net.Listener, error) {
 	return ln, nil
 }
 
-// SocketPreparation names the mutually exclusive result of preparing a daemon
-// socket. Callers must handle every state before spawning.
 type SocketPreparation uint8
 
 const (
@@ -110,10 +88,6 @@ const (
 	SocketPreparationCleanupFailed
 )
 
-// PrepareDaemonSocket prepares home's daemon directory and removes its socket
-// when no live daemon holds the election lock. CleanupFailed means election is
-// free but stale-path removal failed; the daemon may be spawned so its bind
-// authority reports the exact failure. Unknown always carries an error.
 func PrepareDaemonSocket(home string) (SocketPreparation, error) {
 	l, err := resolveLayout(home)
 	if err != nil {

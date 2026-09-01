@@ -11,9 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// retryCounter tracks per-node execution counts across two runs so the
-// skip-passed assertion can inspect whether a previously-succeeded node
-// actually re-ran. Reset in each test via the constructor pattern.
 type retryCounter struct {
 	mu   sync.Mutex
 	runs map[string]int
@@ -33,9 +30,6 @@ func (c *retryCounter) get(name string) int {
 	return c.runs[name]
 }
 
-// Global counter for the retry test pipeline. One instance per test
-// invocation is enforced by the TestRun_SkipPassed* test resetting it
-// before each scenario.
 var retryCnt = &retryCounter{runs: map[string]int{}}
 
 type retryOut struct {
@@ -56,9 +50,6 @@ func (retryBuild) run(ctx context.Context) (retryOut, error) {
 	return retryOut{Tag: "v9"}, nil
 }
 
-// retryDeploy fails on its first attempt (tracked per-process) and
-// succeeds on subsequent ones. Confirms that on retry the upstream
-// Ref[retryOut] still resolves to "v9" even though build is skipped.
 type retryDeploy struct {
 	sparkwing.Base
 	Build sparkwing.Ref[retryOut]
@@ -93,12 +84,6 @@ func init() {
 	register("retry-pipe", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &retryPipe{} })
 }
 
-// TestRun_SkipPassedOnRetry verifies the skip-passed rehydration path:
-// a first run fails at deploy after build succeeds; a retry with
-// RetryOf set should skip build (not re-execute it) and re-run deploy,
-// which now succeeds because the per-process counter has advanced. The
-// critical assertion is that build's Ref still resolves correctly on
-// the retry even though build never ran in that run's process.
 func TestRun_SkipPassedOnRetry(t *testing.T) {
 	retryCnt = &retryCounter{runs: map[string]int{}}
 	p := newPaths(t)
@@ -161,9 +146,6 @@ func TestRun_SkipPassedOnRetry(t *testing.T) {
 	}
 }
 
-// TestRun_FullRetryReexecutesAll verifies the Options.Full escape hatch:
-// with RetryOf set AND Full=true, every node re-runs regardless of
-// prior outcome. build runs again on top of its prior pass.
 func TestRun_FullRetryReexecutesAll(t *testing.T) {
 	retryCnt = &retryCounter{runs: map[string]int{}}
 	p := newPaths(t)

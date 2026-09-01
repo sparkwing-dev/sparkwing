@@ -13,8 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-// TestRoundTrip_FS_KeyConventions catches divergence in path
-// conventions between the constructor and read paths.
 func TestRoundTrip_FS_KeyConventions(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -58,9 +56,6 @@ func TestRoundTrip_FS_KeyConventions(t *testing.T) {
 	}
 }
 
-// TestRealBucket_S3 round-trips against a real S3 bucket. Gated on
-// $SPARKWING_S3_TEST_BUCKET. Per-run prefix avoids stomping on
-// existing cache contents.
 func TestRealBucket_S3(t *testing.T) {
 	bucket := os.Getenv("SPARKWING_S3_TEST_BUCKET")
 	if bucket == "" {

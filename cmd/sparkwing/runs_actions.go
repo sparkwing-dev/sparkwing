@@ -1,9 +1,3 @@
-// Handlers for `sparkwing runs retry` / `cancel` / `prune`.
-//
-// All three accept run ids from any of: --run (repeatable), positional
-// args, or stdin (passed as the literal positional `-`). Failures on
-// individual ids do not abort the batch -- the verb prints a per-id
-// status line and exits non-zero only when at least one id failed.
 package main
 
 import (
@@ -26,14 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// resolveRunsClient returns a controller client for runs verbs. When
-// onFlag is empty, the local dashboard's URL (written to
-// $SPARKWING_HOME/dev.env by localws) is used so the verb operates
-// against the local SQLite-backed controller without needing a
-// configured profile.
-//
-// logc, when non-nil, is the matching logs-service client for prune's
-// log-blob cleanup.
 func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogStore, err error) {
 	if onFlag != "" {
 		prof, perr := resolveProfile(onFlag)
@@ -59,9 +45,6 @@ func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogSt
 	return c, logc, nil
 }
 
-// collectRunIDs walks --run flags and returns the deduplicated id
-// list in encounter order. A --run value of "-" reads ids from
-// stdin (one per line). Empty/whitespace-only entries are skipped.
 func collectRunIDs(flagIDs []string, stdin io.Reader) ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
@@ -101,20 +84,15 @@ func collectRunIDs(flagIDs []string, stdin io.Reader) ([]string, error) {
 	return out, nil
 }
 
-// runResult is one row in the per-id outcome list these verbs emit.
 type runResult struct {
 	RunID    string `json:"run_id"`
 	OK       bool   `json:"ok"`
 	NewRunID string `json:"new_run_id,omitempty"`
-	// Note carries a one-line explanation for a successful no-op row --
-	// e.g. a cancel of an already-terminal run -- so the reader sees why
-	// nothing happened without it reading as a failure.
+
 	Note  string `json:"note,omitempty"`
 	Error string `json:"error,omitempty"`
 }
 
-// reportResults prints per-id rows + a final summary; returns an error
-// when any row failed so the shell sees a non-zero exit.
 func reportResults(out io.Writer, action string, results []runResult) error {
 	failures := 0
 	for _, r := range results {
@@ -190,9 +168,6 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	return nil
 }
 
-// profileSuffix renders the trailing ` --profile <name>` segment for hint
-// strings only when the caller used a non-local profile, so the
-// suggested command is copy-pasteable in either mode.
 func profileSuffix(on string) string {
 	if on == "" {
 		return ""
@@ -226,12 +201,7 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	remaining := ids
 	if *on == "" {
 		results, remaining = cancelLocalRunsViaDaemon(ctx, *home, Version, ids)
-		// A submitted run that no consumer has claimed has no process for
-		// the daemon to hold, so the daemon reports nothing and the id
-		// falls through to here. Cancelling it is a store transaction, not
-		// a signal -- and it must work on a laptop with no dashboard and
-		// no profile, since that is exactly the machine `runs submit`
-		// serves.
+
 		var queued []runResult
 		queued, remaining = cancelQueuedLocalRuns(ctx, *home, remaining)
 		results = append(results, queued...)
@@ -242,9 +212,7 @@ func runRunsCancel(ctx context.Context, args []string) error {
 
 	c, _, err := resolveRunsClient(*on, cmdJobsCancel.Path)
 	if err != nil {
-		// With no controller reachable, a run this CLI could not account
-		// for locally is genuinely unresolvable. Say so per id rather than
-		// discarding the cancellations that did succeed.
+
 		if len(results) == 0 {
 			return err
 		}
@@ -259,20 +227,11 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	return reportResults(os.Stdout, "cancel", results)
 }
 
-// runCanceler is the slice of the controller client cancelOne needs: the
-// cancel request plus a run lookup to tell an already-terminal run apart
-// from a genuinely-unknown id.
 type runCanceler interface {
 	CancelRun(ctx context.Context, id string) error
 	GetRun(ctx context.Context, id string) (*store.Run, error)
 }
 
-// cancelOne cancels one run through the controller and renders an honest
-// outcome. The controller answers not-found both for an id it never knew
-// and for a run that already reached a terminal state; cancelOne resolves
-// the ambiguity with a run lookup so a finished run reports a no-op
-// success ("already finished (success)") instead of a misleading
-// "not found", while a truly-unknown id stays a not-found failure.
 func cancelOne(ctx context.Context, c runCanceler, id string) runResult {
 	err := c.CancelRun(ctx, id)
 	if err == nil {
@@ -287,8 +246,6 @@ func cancelOne(ctx context.Context, c runCanceler, id string) runResult {
 	return runResult{RunID: id, Error: fmt.Sprintf("run %s not found", id)}
 }
 
-// terminalCancelNote phrases the no-op explanation for a cancel of a run
-// that already finished.
 func terminalCancelNote(status string) string {
 	if status == "cancelled" {
 		return "already cancelled -- nothing to cancel"
@@ -296,12 +253,6 @@ func terminalCancelNote(status string) string {
 	return fmt.Sprintf("already finished (%s) -- nothing to cancel", status)
 }
 
-// cancelLocalRunsViaDaemon cancels each id through the local admission
-// daemon, which holds every local run's connection, and returns the ids
-// it did not hold so the caller can fall back to the controller. This is
-// the dashboard-free recovery path: a laptop with no dashboard and no
-// profile still cancels a wedged local run cleanly. Cluster runs and
-// already-finished runs are not known to the daemon and fall through.
 func cancelLocalRunsViaDaemon(ctx context.Context, home, version string, ids []string) (done []runResult, remaining []string) {
 	for _, id := range ids {
 		found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home, Version: version}, id)
@@ -314,19 +265,6 @@ func cancelLocalRunsViaDaemon(ctx context.Context, home, version string, ids []s
 	return done, remaining
 }
 
-// cancelQueuedLocalRuns cancels each id that is still waiting in this
-// home's trigger queue, and returns the ids it could not account for.
-//
-// It cancels exactly the run named and nothing else. A submitted run's
-// trigger and run row share one id, and the transaction is guarded on
-// that id and on the row still being pending, so a cancellation aimed at
-// a run that has since been replaced -- retried, resubmitted under a
-// fresh id -- cannot reach the replacement: the replacement has a
-// different id, and the original's row has already left pending.
-//
-// Store faults are reported as failures rather than swallowed into the
-// fallback: a caller told "not found" when the database was unreadable
-// would draw the wrong conclusion about its run.
 func cancelQueuedLocalRuns(ctx context.Context, home string, ids []string) (done []runResult, remaining []string) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -350,7 +288,11 @@ func cancelQueuedLocalRuns(ctx context.Context, home string, ids []string) (done
 		case cerr != nil:
 			done = append(done, runResult{RunID: id, Error: "cancel queued run: " + cerr.Error()})
 		case cancelled:
-			done = append(done, runResult{RunID: id, OK: true, Note: "cancelled before dispatch"})
+			if derr := orchestrator.DiscardSubmissionEnvironment(paths.Root, id); derr != nil {
+				done = append(done, runResult{RunID: id, Error: "discard submission environment: " + derr.Error()})
+			} else {
+				done = append(done, runResult{RunID: id, OK: true, Note: "cancelled before dispatch"})
+			}
 		default:
 			remaining = append(remaining, id)
 		}

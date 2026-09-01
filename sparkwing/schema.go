@@ -20,9 +20,9 @@ import (
 // metadata when it needs a working set.
 type Schema struct {
 	goType reflect.Type
-	fields map[string]*fieldMeta // by Go field name
+	fields map[string]*fieldMeta
 	groups []*groupMeta
-	order  []string // topo-sorted field names: resolve in this order
+	order  []string
 }
 
 // GoType returns the args struct type the schema validates against.
@@ -38,9 +38,6 @@ func (s *Schema) Fields() []string {
 	return out
 }
 
-// Field looks up the per-field metadata bundle. The bundle is
-// internal; this accessor is here for the resolution chain and
-// tests, not the public surface.
 func (s *Schema) field(name string) *fieldMeta { return s.fields[name] }
 
 // DescribeArgs projects the schema's fields into the wire-format
@@ -73,12 +70,6 @@ func (s *Schema) DescribeArgs() []DescribeArg {
 	return out
 }
 
-// argTypeString mirrors parseInputsSchema's classifyKind switch so
-// WithArgs[T] fields render the same Type tokens that Inputs fields
-// do ("string", "bool", "int", "int64", "float64", "duration",
-// "[]string"). Unsupported types render as the empty string so the
-// renderer can show a "[?]" rather than crash; Schema.Build already
-// catches unsupported field types at registration time.
 func argTypeString(t reflect.Type) string {
 	if t == nil {
 		return ""
@@ -105,10 +96,6 @@ func argTypeString(t reflect.Type) string {
 	return ""
 }
 
-// argDefaultString renders the fieldMeta's literal Default value into
-// the wire string format. Computed defaults are not pre-rendered --
-// the operator can read the Go schema for the formula and --help shows
-// the field as "computed" via the absence of Default.
 func argDefaultString(m *fieldMeta) string {
 	if m == nil || !m.HasDefault || m.Default == nil {
 		return ""
@@ -116,9 +103,6 @@ func argDefaultString(m *fieldMeta) string {
 	return fmt.Sprintf("%v", m.Default)
 }
 
-// argEnumStrings renders the OneOf allowed set as []string so tab
-// completion can offer the values directly. Only string-typed enums
-// land here; numeric enums (Min/Max ranges) aren't enumerable.
 func argEnumStrings(m *fieldMeta) []string {
 	if m == nil || !m.HasOneOf || len(m.OneOf) == 0 {
 		return nil
@@ -352,10 +336,6 @@ func (fb *FieldBuilder[T]) Positive() *FieldBuilder[T] { return fb.apply(Positiv
 // Custom is the escape-hatch validator (func(T) error).
 func (fb *FieldBuilder[T]) Custom(fn any) *FieldBuilder[T] { return fb.apply(Custom(fn)) }
 
-// reflectStructFields returns the exported fields of a struct type
-// keyed by Go field name. Unexported fields are skipped (they can't
-// be populated via reflection from CLI flags anyway). Anonymous
-// embedded fields are skipped too -- args structs are flat by design.
 func reflectStructFields(t reflect.Type) map[string]reflect.StructField {
 	out := make(map[string]reflect.StructField, t.NumField())
 	for i := 0; i < t.NumField(); i++ {
@@ -371,11 +351,6 @@ func reflectStructFields(t reflect.Type) map[string]reflect.StructField {
 	return out
 }
 
-// kebabCaseFieldName converts a CamelCase Go field name to a
-// kebab-cased CLI flag (Replicas -> replicas, PoolSize -> pool-size,
-// SlackWebhook -> slack-webhook). Handles consecutive uppercase
-// (URLToFetch -> url-to-fetch) by inserting separators before the
-// last uppercase in a run.
 func kebabCaseFieldName(name string) string {
 	if name == "" {
 		return ""
@@ -404,9 +379,6 @@ func kebabCaseFieldName(name string) string {
 	return b.String()
 }
 
-// validateFieldMeta cross-checks per-field constraint values against
-// the field's Go type. Called once per field from Build after the
-// fieldMeta has been populated with the struct field's reflect type.
 func validateFieldMeta(m *fieldMeta, argsType reflect.Type) error {
 	var problems []error
 
@@ -466,9 +438,6 @@ func validateFieldMeta(m *fieldMeta, argsType reflect.Type) error {
 	return nil
 }
 
-// checkAssignable verifies that value's runtime type is assignable
-// to target. Used by Default and OneOf to surface type mismatches at
-// schema-build time rather than at resolution time.
 func checkAssignable(value any, target reflect.Type, label string) error {
 	if value == nil {
 		return nil
@@ -488,10 +457,6 @@ func isNumericKind(k reflect.Kind) bool {
 	return isIntKind(k) || isUintKind(k) || isFloatKind(k)
 }
 
-// topoSortDependencies returns the field names in evaluation order
-// (every field's DependsOn entries come earlier in the slice).
-// Detects cycles and returns a descriptive error pointing at the
-// involved field names when one exists.
 func topoSortDependencies(fields map[string]*fieldMeta) ([]string, error) {
 	names := make([]string, 0, len(fields))
 	for n := range fields {

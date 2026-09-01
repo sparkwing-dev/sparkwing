@@ -12,9 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// wedgeRelease lets the test unblock the deliberately-stuck node body
-// after the watchdog has fired, so the leaked goroutine drains during
-// teardown instead of haunting subsequent tests in the same process.
 var wedgeRelease = make(chan struct{})
 
 type wedgedNodePipe struct{ sparkwing.Base }
@@ -31,13 +28,6 @@ func init() {
 	register("wedged-node", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &wedgedNodePipe{} })
 }
 
-// TestDispatchWatchdog_FiresOnStuckNode: a node whose body ignores ctx
-// and never returns leaves a wg slot incremented forever. With a
-// short DispatchWaitTimeout the dispatcher must (a) return with an
-// error mentioning dispatch_wait_timeout, (b) emit the watchdog event
-// into both the envelope and the state events table, (c) name the
-// stuck node, and (d) do all of this within a small multiple of the
-// timeout (no hidden additional wait).
 func TestDispatchWatchdog_FiresOnStuckNode(t *testing.T) {
 	t.Cleanup(func() {
 		select {
@@ -101,11 +91,6 @@ func TestDispatchWatchdog_FiresOnStuckNode(t *testing.T) {
 	}
 }
 
-// TestDispatchWatchdog_NegativeDisables: a negative timeout opts out
-// of the watchdog (the historical wait-forever behavior). We assert
-// the opt-out is reachable without actually hanging the test: a node
-// that respects ctx cancellation finishes normally, so a -1 timeout
-// must produce a clean success.
 func TestDispatchWatchdog_NegativeDisables(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)

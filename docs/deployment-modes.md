@@ -126,6 +126,10 @@ sparkwing-web --state-spec=s3://my-org-sparkwing/state \
               --artifacts-spec=s3://my-org-sparkwing/cache
 ```
 
+This controller-free dashboard has no browser login backend. Keep it on a
+trusted network. `--require-login` fails startup unless you also provide
+`--controller URL` or select a profile with `controller.url`.
+
 See [local-execution.md](local-execution.md#per-host-concurrency)
 for the host-local concurrency gate that caps how many `sparkwing run`
 processes a single machine admits at once. The gate is mode-agnostic
@@ -178,6 +182,10 @@ export SPARKWING_PG_URL="postgres://user:pass@db.example/sparkwing?sslmode=requi
 sparkwing run hello
 sparkwing-web --state-spec=postgres://...  # same DSN
 ```
+
+The Postgres state database is not a browser session backend. Keep this
+controller-free dashboard on a trusted network, or provide a controller URL or
+controller-bearing profile before enabling `--require-login`.
 
 ### Schema versioning
 

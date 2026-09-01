@@ -21,12 +21,8 @@ func (GenStrandedLabel) Examples() []sw.Example {
 }
 
 func (GenStrandedLabel) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-	// Anti-pattern: a blank label matches no runner, so this job never
-	// dispatches.
 	sw.Job(plan, "build", genStrandedStep).Requires("")
 
-	// Anti-pattern: Inline runs in-process on the dispatcher, so the
-	// runner label can never be honored.
 	sw.Job(plan, "setup", genStrandedStep).Inline().Requires("linux")
 
 	return nil

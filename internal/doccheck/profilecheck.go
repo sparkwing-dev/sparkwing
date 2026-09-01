@@ -10,23 +10,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
-// topLevelProfilesRE matches a ```yaml block that is a standalone
-// profiles.yaml document -- a top-level `profiles:` key. Blocks that
-// also carry `pipelines:` are project sparkwing.yaml documents and are
-// validated by checkYAMLConfigs (whose projectconfig.Config embeds the
-// same profile types under KnownFields), so this check skips them.
 var topLevelProfilesRE = regexp.MustCompile(`(?m)^profiles:\s*$`)
 
-// checkProfileConfigs decodes every standalone profiles.yaml ```yaml
-// block with the strict field rules profile.Load's types impose. A doc
-// that shows a key the loader doesn't model -- a top-level `default:`, a
-// `detect:` block, a flat `controller: <url>` scalar, a `gitcache:` /
-// `log_store:` profile key -- fails here instead of silently doing
-// nothing (or hard-erroring) in a reader's profiles.yaml.
-//
-// Migration and proposal docs are version-pinned historical artifacts
-// and may describe older or hypothetical shapes; they are excluded, the
-// same as the frozen-count check.
 func checkProfileConfigs(contentDir string) bool {
 	blocks, err := extract(contentDir, "yaml")
 	if err != nil {

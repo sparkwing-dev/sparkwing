@@ -42,9 +42,6 @@ func init() {
 	})
 }
 
-// parseTypedFlags is parse-only: it returns the CLI-parsed flags and does
-// not inject schema defaults. The --target default is applied downstream,
-// after the DefaultArgs / args: / CLI merge, so it is absent here.
 func TestParseTypedFlags_NoDefaultInjection(t *testing.T) {
 	out, err := parseTypedFlags("ptf-demo", []string{"--repo", "r"})
 	if err != nil {
@@ -58,9 +55,6 @@ func TestParseTypedFlags_NoDefaultInjection(t *testing.T) {
 	}
 }
 
-// A required flag absent from the CLI is not a parse-time error: the value
-// may still arrive from the pipeline's args: block, so the required check
-// runs downstream on the merged inputs rather than here.
 func TestParseTypedFlags_MissingRequiredDeferred(t *testing.T) {
 	out, err := parseTypedFlags("ptf-demo", []string{"--target", "prod"})
 	if err != nil {
@@ -71,10 +65,6 @@ func TestParseTypedFlags_MissingRequiredDeferred(t *testing.T) {
 	}
 }
 
-// The required check lives in Invoke (populateInputs) on the merged
-// argument map, so a required value supplied by anything other than the
-// CLI -- e.g. the pipeline's args: block -- satisfies it, and a genuinely
-// missing value still fails.
 func TestInvoke_RequiredSatisfiedByMergedArgs(t *testing.T) {
 	reg, _ := sparkwing.Lookup("ptf-demo")
 	if _, err := reg.Invoke(context.Background(), map[string]string{"repo": "r"}, sparkwing.RunContext{Pipeline: "ptf-demo"}); err != nil {
@@ -112,9 +102,6 @@ func TestParseTypedFlags_ShortAlias(t *testing.T) {
 	}
 }
 
-// The bag-forwarding path: a pipeline that opts in via `flag:",extra"`
-// must accept unknown flags at the CLI boundary so they reach
-// populateInputs in time to land in the map.
 func TestParseTypedFlags_BagForwardsUnknown(t *testing.T) {
 	out, err := parseTypedFlags("ptf-demo", []string{
 		"--repo", "r",
@@ -151,9 +138,6 @@ func TestParseTypedFlags_BoolWithEqualSign(t *testing.T) {
 	}
 }
 
-// Parsed args round-trip through Registration.Invoke, with bag entries
-// landing in the typed Extras field. Verifies the wire-format the CLI
-// produces is what populateInputs consumes.
 func TestParseTypedFlags_RoundTripsThroughInvoke(t *testing.T) {
 	out, err := parseTypedFlags("ptf-demo", []string{
 		"--repo", "myrepo",

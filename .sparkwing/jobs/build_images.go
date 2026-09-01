@@ -9,31 +9,13 @@ import (
 	sparkwing "github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// BuildImages builds one Docker image per deployable sparkwing
-// component. The standard components share build/Dockerfile.binary,
-// which is parameterized by a BINARY arg so one recipe covers them
-// all; sparkwing-runner uses build/Dockerfile.runner instead.
-//
-// Modes:
-//   - local (default): single-arch image into the local docker daemon,
-//     tagged <component>:<tag>. Useful for offline dev, smoke tests.
-//   - registry+push: multi-arch buildx push to the supplied registry,
-//     producing <registry>/<component>:<tag>. The caller is
-//     responsible for being logged in (e.g. `aws ecr get-login-password
-//     ... | docker login ...`).
-//
-// Cross-process consumers (kikd-infra/release-sparkwing) read the
-// final "RELEASE_IMAGES" summary line written to stdout.
 type BuildImages struct {
 	sparkwing.Base
 
 	args BuildImagesArgs
 
-	// Populated by resolve-tag from --tag or `git rev-parse --short HEAD`.
 	tag string
 
-	// fully-qualified refs computed once at resolve-tag and reused by
-	// downstream steps' summary line.
 	refs []string
 }
 
@@ -44,20 +26,12 @@ type BuildImagesArgs struct {
 	SkipWeb  bool   `flag:"skip-web-bundle" desc:"Skip the Next.js SPA build. Use when internal/web/next-out/ is already current (faster iteration)."`
 }
 
-// buildImageSpec is the per-component build recipe.
 type buildImageSpec struct {
-	// name matches both a cmd/<name>/ source dir and the image name
-	// pushed to the registry.
 	name string
-	// dockerfile is the path under the repo root; empty means
-	// build/Dockerfile.binary (the standard single-binary recipe).
+
 	dockerfile string
 }
 
-// components lists the binaries that get an image. The standard
-// components share build/Dockerfile.binary; sparkwing-runner needs
-// extra runtime tooling (git, a netrc-seeding entrypoint wrapper)
-// so it has its own dockerfile.
 var buildImagesComponents = []buildImageSpec{
 	{name: "sparkwing-controller"},
 	{name: "sparkwing-web"},
@@ -108,17 +82,6 @@ func (p *BuildImages) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// ensureBuildxBuilder makes sure a docker-container buildx builder is
-// available and selected. Multi-arch buildx builds (--platform=linux/
-// amd64,linux/arm64) need the docker-container driver; the default
-// builder shipped with docker uses the docker driver and silently
-// degrades to single-arch on multi-platform builds. Creating + booting
-// the builder up front means downstream build-<component> steps don't
-// race on first-use bootstrap.
-//
-// Idempotent: if the builder already exists, the create call's
-// "ERROR: existing instance" is treated as success and we just
-// select + bootstrap.
 const buildxBuilderName = "sparkwing-multiarch"
 
 func (p *BuildImages) ensureBuildxBuilder(ctx context.Context) error {
@@ -190,6 +153,7 @@ func (p *BuildImages) buildOne(ctx context.Context, spec buildImageSpec) error {
 		"--file", sparkwing.Path(dockerfile),
 		"--build-arg", "BINARY=" + spec.name,
 		"--build-arg", "SPARKWING_VERSION=" + p.tag,
+		"--build-arg", "SPARKWING_IMAGE_REFRESH=" + p.tag,
 		"--tag", imageRef,
 	}
 	if p.args.Push {
@@ -217,12 +181,6 @@ func (p *BuildImages) refForComponent(name string) string {
 	return name + ":" + p.tag
 }
 
-// summary emits a single parseable line to stdout that cross-process
-// callers grep for. The format is intentionally simple:
-//
-//	RELEASE_IMAGES tag=<tag> images=<ref>,<ref>,<ref>...
-//
-// Any consumer can split on the comma to get the per-component refs.
 func (p *BuildImages) summary(ctx context.Context) error {
 	line := fmt.Sprintf("RELEASE_IMAGES tag=%s images=%s",
 		p.tag, strings.Join(p.refs, ","))

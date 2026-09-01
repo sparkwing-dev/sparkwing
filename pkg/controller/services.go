@@ -29,15 +29,6 @@ type ServicesResponse struct {
 	Logs string `json:"logs,omitempty"`
 }
 
-// handleServices answers GET /api/v1/services with the controller's
-// announced auxiliary-service URLs. No auth required: the cache pod's
-// URL is something the operator needs to reach directly anyway, and
-// publishing it doesn't leak any secrets the operator wouldn't already
-// have via their profile bundle.
-//
-// Returns 404 when the controller has no services configured -- the
-// client treats this as "discovery unavailable" and may fall back to
-// explicit profile config (none, in v0.6+).
 func (s *Server) handleServices(w http.ResponseWriter, _ *http.Request) {
 	if s.cachePodURL == "" && s.logsURL == "" {
 		http.Error(w, "no services announced", http.StatusNotFound)

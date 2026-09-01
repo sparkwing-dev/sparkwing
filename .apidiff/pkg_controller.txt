@@ -95,12 +95,14 @@ func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
+func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
+func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
 func (s *Server) WithLogsURL(url string) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server

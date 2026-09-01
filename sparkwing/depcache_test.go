@@ -69,9 +69,6 @@ func TestDeriveDepCacheKeySanitizesName(t *testing.T) {
 	}
 }
 
-// populateDepCacheFixture writes a tree exercising the shapes a
-// dependency directory contains: nested dirs, an executable, a
-// read-only file (module caches), and a symlink (pnpm trees).
 func populateDepCacheFixture(t *testing.T, dir string) {
 	t.Helper()
 	sub := filepath.Join(dir, "example.com", "mod@v1.0.0")
@@ -154,8 +151,6 @@ func TestExtractDepCacheArchiveRejectsEscape(t *testing.T) {
 	}
 }
 
-// writeRawDepArchive builds a gzip tar from explicit headers so a test
-// can forge the archives a hostile cache service could return.
 func writeRawDepArchive(t *testing.T, path string, entries []*tar.Header, bodies map[string][]byte) {
 	t.Helper()
 	f, err := os.Create(path)
@@ -183,10 +178,6 @@ func writeRawDepArchive(t *testing.T, path string, entries []*tar.Header, bodies
 	}
 }
 
-// TestExtractRejectsEscapingSymlink is the regression for the
-// plant-a-symlink-then-write-through-it escape: a symlink whose target
-// leaves the extraction root must be refused, so no later file can be
-// written through it to an out-of-tree path.
 func TestExtractRejectsEscapingSymlink(t *testing.T) {
 	outside := t.TempDir()
 	victim := filepath.Join(outside, "victim")
@@ -217,8 +208,6 @@ func TestExtractRejectsEscapingSymlink(t *testing.T) {
 	}
 }
 
-// TestExtractBoundsDecompression is the regression for the gzip-bomb
-// fetch: extraction must stop at the cap rather than write unbounded.
 func TestExtractBoundsDecompression(t *testing.T) {
 	orig := depCacheMaxExtractBytes
 	depCacheMaxExtractBytes = 1 << 10
@@ -240,9 +229,6 @@ func TestExtractBoundsDecompression(t *testing.T) {
 	}
 }
 
-// TestDirKeyIncludesPath is the regression for same-basename Dir()
-// caches colliding: two directories with the same base name and
-// identical lockfile content must derive different keys.
 func TestDirKeyIncludesPath(t *testing.T) {
 	dir := t.TempDir()
 	lock := filepath.Join(dir, "go.sum")
@@ -264,12 +250,9 @@ func TestDirKeyIncludesPath(t *testing.T) {
 	}
 }
 
-// TestStagedExtractLeavesDirCleanOnFailure is the regression for a
-// truncated restore: a mid-stream failure must leave the target
-// absent, not half-populated.
 func TestStagedExtractLeavesDirCleanOnFailure(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "target")
-	truncated := bytes.NewReader([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00}) // gzip magic, then cut off
+	truncated := bytes.NewReader([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00})
 	if err := extractDepCacheArchiveStaged(truncated, dir); err == nil {
 		t.Fatal("truncated archive extracted without error")
 	}
@@ -325,9 +308,6 @@ func TestLocalDepCacheMissSaveHitCycle(t *testing.T) {
 	assertDepCacheFixture(t, dest)
 }
 
-// newCacheServiceStub mimics the cache service's /cache/<key> handler:
-// HEAD 200/404, GET body or 404, PUT 201, bearer required when token
-// is non-empty.
 func newCacheServiceStub(t *testing.T, token string) (*httptest.Server, *sync.Map) {
 	t.Helper()
 	var blobs sync.Map
@@ -458,9 +438,6 @@ func TestRemoteDepCacheRejectedAuthSurfacesAsError(t *testing.T) {
 	}
 }
 
-// setDepCacheWorkdir points the SDK runtime's WorkDir at dir for the
-// test's duration; depCacheWorkdir prefers WorkDir over the process
-// cwd.
 func setDepCacheWorkdir(t *testing.T, dir string) {
 	t.Helper()
 	prev := CurrentRuntime().WorkDir
@@ -488,7 +465,6 @@ func TestDirCacheRunNeverSavesOnFailure(t *testing.T) {
 		t.Fatal("expected a miss on an empty store")
 	}
 
-	// The node's Run populates the directory between restore and save.
 	if err := os.MkdirAll(depDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -517,10 +493,6 @@ func TestDirCacheRunNeverSavesOnFailure(t *testing.T) {
 	}
 }
 
-// TestDirCacheRunNpmStoreMissSaveHitCycle drives the npm helper
-// through miss, save-on-success, and hit. The helper targets the
-// store directory (npm_config_cache), not node_modules: the store
-// survives `npm ci`, an install tree does not.
 func TestDirCacheRunNpmStoreMissSaveHitCycle(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv("SPARKWING_CACHE_URL", "")
@@ -542,7 +514,7 @@ func TestDirCacheRunNpmStoreMissSaveHitCycle(t *testing.T) {
 	if !first.missed {
 		t.Fatal("expected first-run miss")
 	}
-	// The node's Run fills the npm store between restore and save.
+
 	populateDepCacheFixture(t, store1)
 	first.save(context.Background(), nil)
 

@@ -9,22 +9,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// WeatherOut is the typed output the weather-report pipeline emits
-// from its `stamp` node. Cross-pipeline consumers receive it via
-// sparkwing.RunAndAwait[WeatherOut, sparkwing.NoInputs](...) -- the
-// wire contract is the pipeline name plus this JSON schema.
 type WeatherOut struct {
 	Forecast string    `json:"forecast"`
 	TempF    int       `json:"temp_f"`
 	At       time.Time `json:"at"`
 }
 
-// WeatherReport is a tiny standalone pipeline whose only purpose is
-// to be called from `example` via sparkwing.RunAndAwait. It exists
-// to exercise the cross-pipeline dependency surface end-to-end: the
-// orchestrator's awaiter enqueues a child trigger for this pipeline,
-// dispatches it on the same machine, and threads the typed output
-// back to the parent's calling step.
 type WeatherReport struct{ sparkwing.Base }
 
 func (WeatherReport) ShortHelp() string {

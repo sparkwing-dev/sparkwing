@@ -9,17 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// runnerInfoFor builds the sparkwing.RunnerInfo the orchestrator
-// installs on the per-node ctx. Reads advertised labels from the
-// active runner when it implements LabelAdvertiser; classifies the
-// runner type (local vs kubernetes vs static) from the concrete
-// type and label hints.
-//
-// The pod path (RunNodeOnce) also runs through a NodeExecutor --
-// every execution model does, it is the thing that runs a node -- but
-// the operator-visible runner there is kubernetes/static. podRunnerInfo
-// overrides the type and name from env vars the trigger loop
-// stamps onto the pod.
 func runnerInfoFor(r runner.Runner) *sparkwing.RunnerInfo {
 	if r == nil {
 		return &sparkwing.RunnerInfo{
@@ -52,14 +41,6 @@ func runnerInfoFor(r runner.Runner) *sparkwing.RunnerInfo {
 	return info
 }
 
-// podRunnerInfo returns the RunnerInfo a runner pod should expose
-// to job bodies. SPARKWING_RUNNER_NAME / SPARKWING_RUNNER_TYPE /
-// SPARKWING_RUNNER_LABELS (comma-separated) are stamped by the
-// cluster trigger loop; defaults fill in when only Type is set.
-//
-// Returns nil when the env carries no runner identity at all -- a
-// fallback for laptop-tested pod-path invocations where the trigger
-// loop hasn't been involved.
 func podRunnerInfo() *sparkwing.RunnerInfo {
 	name := strings.TrimSpace(os.Getenv("SPARKWING_RUNNER_NAME"))
 	typ := strings.TrimSpace(os.Getenv("SPARKWING_RUNNER_TYPE"))
@@ -82,9 +63,6 @@ func podRunnerInfo() *sparkwing.RunnerInfo {
 	return &sparkwing.RunnerInfo{Name: name, Type: typ, Labels: labels}
 }
 
-// defaultLocalLabels mirrors pkg/runners.implicitLocal so a
-// laptop-default RunnerInfo advertises the same OS/arch markers a
-// runners.yaml-declared "local" entry would.
 func defaultLocalLabels() []string {
 	return []string{
 		"local",

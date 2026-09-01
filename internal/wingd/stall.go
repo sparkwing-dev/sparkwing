@@ -9,10 +9,6 @@ import (
 
 const descendantStallWindowMultiplier = 4
 
-// stallLoop samples holder process CPU on a slow cadence and marks holders
-// that stay idle while runs queue behind them. A capable ordinary holder must
-// then answer a control-plane challenge; an unanswered challenge closes its
-// socket and lets the normal disconnect path reclaim admission.
 func (d *Daemon) stallLoop(ctx context.Context) {
 	t := time.NewTicker(d.cfg.stallInterval())
 	defer t.Stop()
@@ -28,11 +24,6 @@ func (d *Daemon) stallLoop(ctx context.Context) {
 	}
 }
 
-// stallTick refreshes every holder's stall verdict. It samples process
-// CPU only while runs are queued -- an empty queue clears any latched
-// verdict and skips sampling entirely, so the cost is paid only under
-// contention. A holder below the CPU threshold for the whole stall
-// window latches stalled; any reading at or above it clears the verdict.
 func (d *Daemon) stallTick() {
 	window := d.cfg.stallWindow()
 	threshold := d.cfg.stallCPUFraction()
@@ -111,9 +102,7 @@ func (d *Daemon) stallTick() {
 			}
 			if now.Sub(c.lowSince) >= stallWindow {
 				c.stalled = true
-				// Only clients that advertised the challenge/ack capability may
-				// receive one. Older pinned clients retain the historical
-				// diagnostic-only behavior.
+
 				if c.holderLiveness && c.guard == nil && c.livenessNonce == 0 {
 					c.livenessSeq++
 					c.livenessNonce = c.livenessSeq
@@ -143,9 +132,6 @@ func (d *Daemon) stallTick() {
 			unanswered := challenge.c.role == roleHolder && challenge.c.livenessNonce == challenge.nonce
 			runID := challenge.c.runID
 			if unanswered {
-				// Claim expiration while holding the same mutex an ack needs. Once
-				// cleared here, a late ack cannot turn this expired challenge back
-				// into proof of health before close reclaims the lease.
 				challenge.c.livenessNonce = 0
 			}
 			d.mu.Unlock()

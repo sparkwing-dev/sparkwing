@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// A runner holding static credentials and no ~/.aws/config has no
-// region, and the SDK's own answer for that -- "resolve auth scheme:
-// resolve endpoint: endpoint rule error, Invalid region" -- names
-// neither the variable to set nor the tool that wanted it.
 func TestNewS3Client_MissingRegionNamesTheRemedy(t *testing.T) {
 	t.Setenv("AWS_REGION", "")
 	t.Setenv("AWS_DEFAULT_REGION", "")
@@ -33,8 +29,6 @@ func TestNewS3Client_MissingRegionNamesTheRemedy(t *testing.T) {
 	}
 }
 
-// A region present means the client builds, so the guard cannot reject
-// a working configuration.
 func TestNewS3Client_RegionPresentBuilds(t *testing.T) {
 	t.Setenv("AWS_REGION", "us-east-1")
 	t.Setenv("AWS_ACCESS_KEY_ID", "x")

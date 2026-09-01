@@ -19,8 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// registerOnce avoids "duplicate Register" panics when a test file's
-// pipelines are registered at package init.
 var registerOnce sync.Map
 
 func register(name string, factory func() sparkwing.Pipeline[sparkwing.NoInputs]) {
@@ -66,9 +64,6 @@ func (middleFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
-// inflightCancelStarted is closed by the orch-cancel-inflight victim
-// job the moment its body begins, so the test can cancel the run ctx
-// while the node is genuinely in-flight.
 var inflightCancelStarted chan struct{}
 
 type cancelInflight struct{ sparkwing.Base }
@@ -124,9 +119,6 @@ func (refPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInp
 	return nil
 }
 
-// sharedMemoryOut is an output that only reaches a consumer intact when
-// producer and consumer are the same process: encoding/json drops
-// Handle, so anything downstream reads a nil pointer.
 type sharedMemoryOut struct {
 	Tag    string  `json:"tag"`
 	Handle *string `json:"-"`
@@ -185,7 +177,6 @@ func init() {
 	register("orch-cancel-inflight", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cancelInflight{} })
 }
 
-// newPaths returns a Paths under t.TempDir() with the root created.
 func newPaths(t *testing.T) orchestrator.Paths {
 	t.Helper()
 	isolateProfiles(t)
@@ -197,10 +188,6 @@ func newPaths(t *testing.T) orchestrator.Paths {
 	return p
 }
 
-// isolateProfiles points profile resolution at an empty profiles.yaml and
-// neutralizes the detect env vars, so a run/read in tests resolves the
-// built-in laptop profile (local sqlite) rather than the developer's real
-// ~/.config/sparkwing/profiles.yaml.
 func isolateProfiles(t *testing.T) {
 	t.Helper()
 	t.Setenv("SPARKWING_PROFILES", filepath.Join(t.TempDir(), "profiles.yaml"))
@@ -245,9 +232,6 @@ func TestRun_FailurePropagatesResult(t *testing.T) {
 	}
 }
 
-// Bare errors.New("boom") from a node body must be prefixed with the
-// node ID by dispatch, so failure surfaces identify the failing node
-// without authors having to wrap manually.
 func TestRun_FailureAutoWrapsErrorWithNodeID(t *testing.T) {
 	p := newPaths(t)
 	res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-fail"})
@@ -305,6 +289,9 @@ func TestRun_MidFailureCancelsDownstream(t *testing.T) {
 	}
 	if res.Status != "failed" {
 		t.Fatalf("status = %q, want failed", res.Status)
+	}
+	if res.Error == nil || res.Error.Error() != "nodes failed: [b]; 1 more cancelled with the run" {
+		t.Fatalf("run error = %v, want the genuine failure named and the cancellation counted", res.Error)
 	}
 
 	st, _ := store.Open(p.StateDB())
@@ -390,13 +377,6 @@ func TestRun_TypedRefsThreadOutput(t *testing.T) {
 	}
 }
 
-// A pipeline that only works because two nodes shared memory has to
-// break where its author runs it. This run executes nodes inside the
-// test binary -- the shape every `go test` of a pipeline has, and the
-// one a library embedder keeps -- and it still fails, because Ref.Get
-// resolves from the node's stored JSON on every execution model there
-// is. Passing here and failing in production is the whole class of bug
-// process-per-node exists to close.
 func TestRun_InProcessRefsStillCrossAJSONBoundary(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -417,8 +397,7 @@ func TestRun_InProcessRefsStillCrossAJSONBoundary(t *testing.T) {
 	if !strings.Contains(deploy.Error, "handle did not survive the ref") {
 		t.Fatalf("deploy error = %q, want the consumer's own complaint about the dropped pointer", deploy.Error)
 	}
-	// safety: the rest of the output has to arrive, or this test would
-	// pass on a ref that resolved nothing at all.
+
 	build, err := st.GetNode(context.Background(), res.RunID, "build")
 	if err != nil || build == nil {
 		t.Fatalf("get build node: %v", err)

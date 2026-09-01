@@ -1,54 +1,68 @@
-# Cross-compile + upload sparkwing binaries to GH Releases on every
-# tag push.
-#
-# Trigger: any tag matching v*. Release notes are auto-generated from
-# PR titles since the previous tag.
-#
-# To cut a release: push a v*-prefixed tag (e.g. via `sparkwing run
-# release --version vX.Y.Z`). This workflow takes it from there.
-#
-# Shape: matrix-parallel build (one runner per binary × platform),
-# followed by a single release job that downloads every artifact and
-# pushes the bundle to GH Releases. Cuts wall-clock from ~8 min
-# sequential to ~1-2 min parallel; trades runner-minutes for latency.
-#
-# Per-binary platform constraints:
-#   - sparkwing -- the user-facing CLI; 6 platforms (linux/darwin/
-#     windows × amd64/arm64). It also bundles the local dashboard
-#     server, so `sparkwing dashboard start` is the supported way to
-#     run a long-lived local UI -- there is no separately-released
-#     daemon binary anymore.
-#   - sparkwing-cache, controller, runner, logs, web -- server-side
-#     components meant for Linux containers. linux + darwin (for local
-#     dev) only; windows is excluded because (a) nobody runs these on
-#     a Windows host, and (b) sparkwing-cache uses POSIX-only Setpgid
-#     + syscall.Kill so it won't compile there anyway.
 
 name: release
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild after a publication-only failure
+        required: true
+        type: string
+      publish_images:
+        description: Publish container images as part of the rebuild
+        required: true
+        default: true
+        type: boolean
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
+  validate-tag:
+    name: Validate immutable release tag
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
+    steps:
+      - name: Resolve tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
+          fi
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          remote="https://github.com/${{ github.repository }}.git"
+          lines="$(git ls-remote --exit-code --tags "$remote" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
+          source_sha="$(printf '%s\n' "$lines" | awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled { print $1 }')"
+          if [ -z "$source_sha" ]; then
+            source_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$TAG" '$2 == direct { print $1 }')"
+          fi
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "source_sha=$source_sha" >>"$GITHUB_OUTPUT"
+
   canonical:
     name: Verify tagged source
+    needs: validate-tag
     uses: ./.github/workflows/canonical-gates.yaml
+    with:
+      source_ref: ${{ needs.validate-tag.outputs.source_sha }}
+      release_tag: ${{ inputs.tag || github.ref_name }}
     permissions:
       contents: read
 
   build:
-    # fail-fast: false so a cell failure doesn't cancel siblings and
-    # leave the release half-built. The release job's `needs: build`
-    # gate then refuses to run on partial results, so the user sees a
-    # clean "build failed; release not created" outcome rather than a
-    # release with missing assets.
-    needs: canonical
+    needs: [validate-tag, canonical]
+    if: ${{ always() && needs.validate-tag.result == 'success' && needs.canonical.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -69,27 +83,24 @@ jobs:
           - { binary: sparkwing-web, goos: windows }
     runs-on: ${{ matrix.goos == 'darwin' && 'macos-latest' || 'ubuntu-latest' }}
     steps:
-      # Pin the checkout to the tag's exact commit. Every job in this
-      # workflow checks out the same github.sha, so a version string
-      # implies one identical tree across all assets and matches what
-      # `go install ...@tag` compiles -- no provenance drift.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ needs.validate-tag.outputs.source_sha }}
+
+      - name: Checkout current release scanner
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
           ref: ${{ github.sha }}
+          path: .release-tools
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.6"
           cache-dependency-path: go.sum
 
-      # actions/setup-go@v5 caches ~/go/pkg/mod (module deps); this
-      # cache covers ~/.cache/go-build (compiled object files for
-      # stdlib + dep packages, target-specific). Key includes goos +
-      # goarch since cross-compiled object files don't share, and
-      # all .go files so any source change invalidates fully. Cells
-      # with the same (goos, goarch) but different binary share the
-      # cache because the cached entries are binary-agnostic.
       - name: Cache Go build cache
         uses: actions/cache@v4
         with:
@@ -98,9 +109,6 @@ jobs:
           restore-keys: |
             gobuild-${{ matrix.goos }}-${{ matrix.goarch }}-
 
-      # The dashboard SPA is embedded via //go:embed all:next-out by
-      # both sparkwing (for `sparkwing dashboard start`) and
-      # sparkwing-web (the cluster pod). Other binaries skip this.
       - name: Setup Node (binaries that embed the dashboard)
         if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
         uses: actions/setup-node@v4
@@ -123,10 +131,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
           BIN: ${{ matrix.binary }}
-          # GitHub injects ${{ github.ref_name }} as the tag name;
-          # keep it in an env so the run script reads it as a normal
-          # bash var rather than YAML interpolation in a heredoc.
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -152,14 +157,9 @@ jobs:
           set -euo pipefail
           ext=""
           [ "$TARGET_GOOS" = "windows" ] && ext=".exe"
-          bash bin/check-release-binary-vulnerabilities.sh \
+          bash "${{ github.event_name == 'workflow_dispatch' && '.release-tools/bin/check-release-binary-vulnerabilities.sh' || 'bin/check-release-binary-vulnerabilities.sh' }}" \
             "dist/${BIN}-${TARGET_GOOS}-${TARGET_GOARCH}${ext}"
 
-      # Each cell uploads exactly one binary as a uniquely-named
-      # artifact. The release job re-downloads all of them with
-      # merge-multiple so they land in a single dist/ for sha256sum +
-      # upload. retention-days: 1 because these are immediately
-      # consumed by the release job; no value in keeping them after.
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
@@ -170,23 +170,27 @@ jobs:
 
   prepare-binaries:
     name: Assemble & scan release binaries
-    needs: build
+    needs: [validate-tag, build]
+    if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      # The scanner script and Go vulnerability tooling come from the exact
-      # tagged commit whose matrix artifacts are assembled below.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.validate-tag.outputs.source_sha }}
+
+      - name: Checkout current release scanner
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
           ref: ${{ github.sha }}
+          path: .release-tools
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.6"
           cache-dependency-path: go.sum
 
-      # merge-multiple: true flattens every artifact into one dist/
-      # without per-artifact subdirectories, so sha256sum + the upload
-      # glob below pick up all files in one shot.
       - name: Download all binaries
         uses: actions/download-artifact@v4
         with:
@@ -194,14 +198,6 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # Ad-hoc-sign the macOS Mach-O assets BEFORE SHA256SUMS is
-      # computed, so the published+hashed bytes are already
-      # Gatekeeper-valid and `sparkwing update` installs them UNCHANGED
-      # (the client no longer codesigns after verification -- doing so
-      # would mutate the verified bytes). rcodesign is a pure-Rust,
-      # cross-platform Apple code-signer, so this runs on the Linux
-      # runner with no macOS host. Version pinned; the released binary is
-      # fetched rather than built to keep the step fast.
       - name: Ad-hoc-sign macOS binaries (rcodesign)
         working-directory: dist
         run: |
@@ -227,7 +223,7 @@ jobs:
           rm -rf rcodesign.tar.gz apple-codesign-*
 
       - name: Scan assembled release binaries
-        run: bash bin/check-release-binary-vulnerabilities.sh dist/sparkwing-*
+        run: bash "${{ github.event_name == 'workflow_dispatch' && '.release-tools/bin/check-release-binary-vulnerabilities.sh' || 'bin/check-release-binary-vulnerabilities.sh' }}" dist/sparkwing-*
 
       - name: Upload scanned release binaries
         uses: actions/upload-artifact@v4
@@ -238,21 +234,20 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [prepare-binaries, publish-images]
+    needs: [validate-tag, prepare-binaries, publish-images]
+    if: ${{ always() && needs.prepare-binaries.result == 'success' && (needs.publish-images.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.publish_images == false && needs.publish-images.result == 'skipped')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      # Checkout supplies the tagged changelog, verification code, and schema
-      # reference. The binaries themselves come only from prepare-binaries.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ needs.validate-tag.outputs.source_sha }}
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.6"
           cache-dependency-path: go.sum
 
       - name: Download scanned release binaries
@@ -262,10 +257,6 @@ jobs:
           path: dist
 
       - name: Compute SHA256SUMS
-        # Operators verifying via install.sh (or any third party) can
-        # diff against this; the contents are fully reproducible from
-        # the GitHub-Actions-built binaries. Computed AFTER the macOS
-        # ad-hoc signing above so the digests match the shipped bytes.
         working-directory: dist
         run: |
           sha256sum sparkwing-* > SHA256SUMS
@@ -282,15 +273,6 @@ jobs:
           ls dist/sparkwing-*.sig >/dev/null
 
       - name: Verify release asset schema parity
-        # Pre-publish gate: the uploaded linux/amd64 binary must embed
-        # the same runs-store schema that the tagged source compiles.
-        # The reference is built fresh from the checked-out tag tree, so
-        # a mismatch means an asset was built from a different commit
-        # than the tag -- exactly the schema-skew failure mode. Fails
-        # the release before any asset reaches the public page.
-        # linux/amd64 is the one asset the runner can execute; every
-        # asset builds from the same pinned github.sha, and the schema
-        # constant is platform-independent, so this one is representative.
         run: |
           set -euo pipefail
           chmod +x dist/sparkwing-linux-amd64
@@ -299,25 +281,35 @@ jobs:
             --repo .
 
       - name: Extract CHANGELOG section for this tag
-        # The CHANGELOG entry for [vX.Y.Z] is the curated migration
-        # narrative. Use it verbatim as the release body so adopters
-        # see the migration tables, not the dev-facing commit log
-        # (which includes things like "regen apidiff" / "lint sweep"
-        # that aren't user-visible). Fails the workflow if the
-        # section is missing -- catches a missed [Unreleased] -> [v*]
-        # rename before adopters ever see an empty release page.
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          bash bin/extract-changelog-section.sh "${GITHUB_REF_NAME}" CHANGELOG.md > release-notes.md
+          bash bin/extract-changelog-section.sh "$TAG" CHANGELOG.md > release-notes.md
           echo "==> release notes:"
           cat release-notes.md
+
+      - name: Verify release tag remains pinned
+        env:
+          EXPECTED_SHA: ${{ needs.validate-tag.outputs.source_sha }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          remote="https://github.com/${{ github.repository }}.git"
+          lines="$(git ls-remote --exit-code --tags "$remote" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
+          actual_sha="$(printf '%s\n' "$lines" | awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled { print $1 }')"
+          if [ -z "$actual_sha" ]; then
+            actual_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$TAG" '$2 == direct { print $1 }')"
+          fi
+          test "$actual_sha" = "$EXPECTED_SHA"
 
       - name: Publish complete immutable release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="$TAG"
           # A published tag and its signed assets are immutable. Build
           # the complete set privately, verify it, then publish once.
           if gh release view "$tag" >/dev/null 2>&1; then
@@ -347,28 +339,21 @@ jobs:
           gh release upload "$tag" dist/*
           asset_count="$(gh release view "$tag" --json assets --jq '.assets | length')"
           test "$asset_count" -eq "$(find dist -type f | wc -l | tr -d ' ')"
+          remote="https://github.com/${{ github.repository }}.git"
+          lines="$(git ls-remote --exit-code --tags "$remote" "refs/tags/$tag" "refs/tags/$tag^{}")"
+          actual_sha="$(printf '%s\n' "$lines" | awk -v peeled="refs/tags/$tag^{}" '$2 == peeled { print $1 }')"
+          if [ -z "$actual_sha" ]; then
+            actual_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$tag" '$2 == direct { print $1 }')"
+          fi
+          test "$actual_sha" = "${{ needs.validate-tag.outputs.source_sha }}"
           gh release edit "$tag" --draft=false
           draft_created=false
           gh release view "$tag"
 
-  # Build and scan multi-arch container images for the cluster-side
-  # binaries on every v* tag push. Each matrix cell stages one untagged
-  # digest in GHCR; no version or latest tag is published until every
-  # image and architecture is clean.
-  #
-  # Five images fan out one runner per binary. The runner uses
-  # Dockerfile.runner because its runtime needs the Go toolchain and
-  # netrc-seeding entrypoint; the other four share Dockerfile.binary.
-  # Each cell pushes an untagged digest and scans both architectures.
-  # publish-images waits for the complete matrix before signing or tagging.
-  #
-  # Cosign signs keylessly via GitHub OIDC. The publish-images job alone
-  # can mint an identity token. No KMS key, no secret -- the signature commits
-  # the workflow + repo + tag triple as the signing identity, which
-  # `cosign verify --certificate-identity-regexp ...` can attest.
   build-images:
     name: Build & scan container images
-    needs: canonical
+    needs: [validate-tag, canonical]
+    if: ${{ always() && needs.validate-tag.result == 'success' && needs.canonical.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.publish_images) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -383,16 +368,26 @@ jobs:
           - sparkwing-logs
           - sparkwing-web
     steps:
-      # Pinned to the tag's exact commit, matching the binary build
-      # job so images and binaries ship from one identical tree.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ needs.validate-tag.outputs.source_sha }}
+
+      - name: Checkout current image recipe
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
           ref: ${{ github.sha }}
+          path: .release-tools
+
+      - name: Apply current image recipe
+        if: github.event_name == 'workflow_dispatch'
+        run: cp .release-tools/.dockerignore .dockerignore && cp .release-tools/build/Dockerfile.binary .release-tools/build/Dockerfile.runner build/
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.6"
           cache-dependency-path: go.sum
 
       - name: Setup Node (dashboard image)
@@ -424,20 +419,14 @@ jobs:
       - name: Validate vulnerability waiver policy
         run: GOWORK=off go run ./bin/check-vulnerability-waivers.go .trivyignore.yaml
 
-      # metadata-action emits the full tag list:
-      #   - type=ref,event=tag       -> ghcr.io/.../<bin>:v1.2.3
-      #   - type=raw,value=latest    -> ghcr.io/.../<bin>:latest
-      # `:latest` is gated on the tag NOT containing a hyphen so
-      # pre-release tags (v1.2.3-rc.1) don't clobber the stable
-      # rolling pointer.
       - name: Compute image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/sparkwing-dev/${{ matrix.binary }}
           tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=${{ inputs.tag || github.ref_name }}
+            type=raw,value=latest,enable=${{ !contains(inputs.tag || github.ref_name, '-') }}
 
       - name: Build and push image
         id: build
@@ -450,7 +439,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BINARY=${{ matrix.binary }}
-            SPARKWING_VERSION=${{ github.ref_name }}
+            SPARKWING_VERSION=${{ inputs.tag || github.ref_name }}
+            SPARKWING_IMAGE_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}
           cache-from: type=gha,scope=${{ matrix.binary }}
           cache-to: type=gha,mode=max,scope=${{ matrix.binary }}
 
@@ -502,7 +492,7 @@ jobs:
 
   publish-images:
     name: Publish scanned container images
-    needs: [build-images, prepare-binaries]
+    needs: [validate-tag, build-images, prepare-binaries]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -526,8 +516,20 @@ jobs:
 
       - uses: sigstore/cosign-installer@v3
 
-      # Sign every approved digest before exposing any version tag. A signing
-      # failure therefore leaves only the untagged staging digests behind.
+      - name: Verify release tag before signing images
+        env:
+          EXPECTED_SHA: ${{ needs.validate-tag.outputs.source_sha }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          remote="https://github.com/${{ github.repository }}.git"
+          lines="$(git ls-remote --exit-code --tags "$remote" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
+          actual_sha="$(printf '%s\n' "$lines" | awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled { print $1 }')"
+          if [ -z "$actual_sha" ]; then
+            actual_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$TAG" '$2 == direct { print $1 }')"
+          fi
+          test "$actual_sha" = "$EXPECTED_SHA"
+
       - name: Sign scanned image digests
         env:
           COSIGN_EXPERIMENTAL: "1"
@@ -548,9 +550,17 @@ jobs:
 
       - name: Publish scanned image tags
         env:
-          TAG: ${{ github.ref_name }}
+          EXPECTED_SHA: ${{ needs.validate-tag.outputs.source_sha }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
+          remote="https://github.com/${{ github.repository }}.git"
+          lines="$(git ls-remote --exit-code --tags "$remote" "refs/tags/$TAG" "refs/tags/$TAG^{}")"
+          actual_sha="$(printf '%s\n' "$lines" | awk -v peeled="refs/tags/$TAG^{}" '$2 == peeled { print $1 }')"
+          if [ -z "$actual_sha" ]; then
+            actual_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$TAG" '$2 == direct { print $1 }')"
+          fi
+          test "$actual_sha" = "$EXPECTED_SHA"
           binaries=(
             sparkwing-controller
             sparkwing-runner

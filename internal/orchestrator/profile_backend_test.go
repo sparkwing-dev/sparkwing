@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// neutralizeEnv clears the detect env vars and isolates XDG_CONFIG_HOME
-// so profile resolution in tests doesn't pick up the developer's real
-// environment or a CI runner's GITHUB_ACTIONS/KUBERNETES_SERVICE_HOST.
 func neutralizeEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{

@@ -9,12 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestSchemaV5_UpgradeAddsArtifactManifestColumn reconstructs a runs
-// store left at schema 4 by a binary that predates the artifact_manifest
-// column (v0.9.x / v0.10.0), then opens it with the current binary and
-// asserts the v5 migration adds the column so node reads and artifact
-// writes work again. The pre-v5 no-op-at-current-version path left such
-// a database without the column, breaking every node read.
 func TestSchemaV5_UpgradeAddsArtifactManifestColumn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schema4.db")
 

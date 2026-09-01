@@ -14,30 +14,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// The capacity routes publish what admission learned and how it priced it:
-// the pipeline table behind `sparkwing runs stats --capacity`, plus, per
-// pipeline, the stored sample window with the rank each charge was taken
-// from. They exist to be checked against rather than trusted -- a charge no
-// sample on screen supports is a bug in the capacity system, and finding it
-// by eye is the point.
-//
-// Live host state is deliberately not served here: the admission daemon
-// already answers for it at GET /api/v1/queue (pkg/localws), through the
-// same client the CLI's queue view uses, and a second path to the same
-// socket could disagree with the first.
-
-// profileReader is the store-backed slice these routes need. Only the
-// sqlite backend can answer it -- learned pricing is per machine and lives
-// in the local runs store -- so a dashboard in S3 or controller mode reports
-// the routes as unavailable rather than inventing an empty table.
 type profileReader interface {
 	ListPipelineProfiles(ctx context.Context, pipeline string) ([]store.PipelineProfile, error)
 	ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]store.ProfileSample, error)
 }
 
-// capacityConstants are the resolution knobs the page shows its arithmetic
-// against, so a reader recomputing a charge is not left to guess which
-// thresholds produced it.
 type capacityConstants struct {
 	MinSamples          int     `json:"min_samples"`
 	ChargePercentile    float64 `json:"charge_percentile"`
@@ -45,35 +26,25 @@ type capacityConstants struct {
 	WarmStartMultiple   float64 `json:"warm_start_multiple"`
 	SafetyMultiple      float64 `json:"safety_multiple"`
 	DriftFraction       float64 `json:"drift_fraction"`
-	// ColdStartCores is what an unmeasured pipeline is charged on this
-	// machine, resolved rather than recomputed so the figure cannot drift
-	// from the one admission uses.
+
 	ColdStartCores float64 `json:"cold_start_cores"`
 }
 
-// capacityCharge is one resolved admission price with its provenance.
 type capacityCharge struct {
 	Cores       float64 `json:"cores"`
 	MemoryBytes int64   `json:"memory_bytes"`
-	// Source is the [store.CostSource] admission resolved, and Rationale its
-	// canonical phrasing -- the same wording the daemon puts on a blocked
-	// waiter, so the panel and the queue never explain one charge two ways.
+
 	Source    string `json:"source"`
 	Rationale string `json:"rationale,omitempty"`
-	// CoresBasis names the figure the core charge was taken from:
-	// "sustained_p95", "peak_p95" when a profile predates sustained
-	// figures, "pin", "floor", "prev_charge", or "cold_start".
+
 	CoresBasis string `json:"cores_basis"`
-	// FloorApplied reports that the resolved charge is the small measured
-	// core floor rather than the basis figure, which is otherwise invisible
-	// on a pipeline the sampler saw drawing near-zero CPU.
+
 	FloorApplied bool `json:"floor_applied,omitempty"`
 }
 
-// capacityProfile is one pipeline's row in the priced table: the stored
-// rollup, the charge it resolves to, and any pin drift.
 type capacityProfile struct {
 	Pipeline string         `json:"pipeline"`
+	Display  string         `json:"display"`
 	Charge   capacityCharge `json:"charge"`
 
 	SampleCount     int     `json:"sample_count"`
@@ -105,8 +76,6 @@ type capacityProfile struct {
 	NodeCount      int    `json:"node_count,omitempty"`
 }
 
-// capacityNode is one node row under a pipeline: where the rollup's numbers
-// came from inside the DAG.
 type capacityNode struct {
 	NodeID          string  `json:"node_id"`
 	SampleCount     int     `json:"sample_count"`
@@ -117,9 +86,6 @@ type capacityNode struct {
 	P99DurationMS   int64   `json:"p99_duration_ms"`
 }
 
-// chargeStep is one rung of the resolution order, evaluated whether or not
-// it was taken. Showing the rungs that lost, with the figures they would
-// have charged, is what turns a price into an argument a reader can check.
 type chargeStep struct {
 	Step        string  `json:"step"`
 	Label       string  `json:"label"`
@@ -130,19 +96,13 @@ type chargeStep struct {
 	Detail      string  `json:"detail,omitempty"`
 }
 
-// rankSelection points at the one sample a percentile charge was taken
-// from, and reports whether recomputing from the window reproduces the
-// stored figure. A false Matches is the interesting case: the charge and
-// the evidence behind it have diverged.
 type rankSelection struct {
 	Field      string  `json:"field"`
 	Percentile float64 `json:"percentile"`
-	// Rank is the 1-based nearest-rank position within the sorted window,
-	// and Count its size, so "rank 12 of 12" reads as the arithmetic it is.
+
 	Rank  int `json:"rank"`
 	Count int `json:"count"`
-	// Index is the position of the selected sample in the window as
-	// displayed (oldest first), or -1 when the window is empty.
+
 	Index      int     `json:"index"`
 	Value      float64 `json:"value"`
 	Stored     float64 `json:"stored"`
@@ -165,8 +125,6 @@ type capacityProfilesPayload struct {
 	GeneratedMS  int64             `json:"generated_at_ms"`
 }
 
-// capacitySelection groups the ranks every stored percentile was taken at,
-// one per figure the table shows.
 type capacitySelection struct {
 	Cores       rankSelection `json:"cores"`
 	Memory      rankSelection `json:"memory"`
@@ -174,9 +132,6 @@ type capacitySelection struct {
 	DurationP99 rankSelection `json:"duration_p99"`
 }
 
-// capacityExplainPayload is the derivation behind one pipeline's charge:
-// the priced row, the window it was priced from with the selected ranks,
-// the resolution order, and the node rows underneath.
 type capacityExplainPayload struct {
 	MachineCores int               `json:"machine_cores"`
 	Constants    capacityConstants `json:"constants"`
@@ -185,17 +140,11 @@ type capacityExplainPayload struct {
 	Samples      []capacitySample  `json:"samples"`
 	Selections   capacitySelection `json:"selections"`
 	Nodes        []capacityNode    `json:"nodes"`
-	// CeilingNote names the cap the daemon applies at admission time, which
-	// this view cannot see: the charge here is what measurement resolves,
-	// not necessarily what a run was granted on a busy machine.
+
 	CeilingNote string `json:"ceiling_note"`
 	GeneratedMS int64  `json:"generated_at_ms"`
 }
 
-// capacityProfilesHandler serves GET /api/v1/capacity/profiles: every
-// measured pipeline with the charge it resolves to, the live page behind
-// `sparkwing runs stats --capacity`. Node rows are folded into their
-// pipeline; the explain route serves them.
 func capacityProfilesHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reader, ok := profileReaderFor(b)
@@ -223,11 +172,6 @@ func capacityProfilesHandler(b backend.Backend) http.HandlerFunc {
 	}
 }
 
-// capacityExplainHandler serves GET /api/v1/capacity/profiles/explain?
-// pipeline=KEY: the same row, plus the stored sample window, the rank each
-// charge was taken at, and the resolution order that produced it. The
-// pipeline key arrives as a query parameter because profile keys are
-// "repo/pipeline" and a path segment cannot carry the slash.
 func capacityExplainHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reader, ok := profileReaderFor(b)
@@ -275,9 +219,6 @@ func capacityExplainHandler(b backend.Backend) http.HandlerFunc {
 var errUnsupportedProfiles = errors.New(
 	"learned capacity profiles live in the local runs store; this dashboard is not reading one")
 
-// profileReaderFor unwraps the sqlite store behind the dashboard backend.
-// It mirrors how the local CLI reaches store-only helpers rather than
-// widening the Backend interface for impls that have no equivalent.
 func profileReaderFor(b backend.Backend) (profileReader, bool) {
 	sb, ok := b.(interface{ Store() *store.Store })
 	if !ok || sb.Store() == nil {
@@ -286,16 +227,11 @@ func profileReaderFor(b backend.Backend) (profileReader, bool) {
 	return sb.Store(), true
 }
 
-// profileGroup is one pipeline's rollup row with the node rows beneath it.
 type profileGroup struct {
 	rollup store.PipelineProfile
 	nodes  []store.PipelineProfile
 }
 
-// groupProfiles folds the flat profile rows into per-pipeline groups,
-// splitting the rollup (empty node id) from its node rows. It mirrors the
-// CLI's grouping so the two views cannot disagree about which row prices a
-// pipeline.
 func groupProfiles(rows []store.PipelineProfile) []profileGroup {
 	byPipeline := map[string]*profileGroup{}
 	order := []string{}
@@ -334,16 +270,8 @@ func constantsFor(numCPU int) capacityConstants {
 	}
 }
 
-// chargePercentile is the rank a stored profile takes across its window for
-// both the core and memory charges. It is the display copy of the store's
-// own constant; the selections this file reports are computed at this rank
-// and checked against the stored figure, so a divergence surfaces as a
-// mismatch on the page instead of silently mis-marking a row.
 const chargePercentile = 0.95
 
-// coldStartCores asks the resolver what an unmeasured pipeline costs on this
-// machine rather than recomputing the fraction, so the page cannot quote a
-// cold start the daemon would not charge.
 func coldStartCores(numCPU int) float64 {
 	return capacity.Resolve(nil, nil, numCPU, "").Cores
 }
@@ -353,6 +281,7 @@ func newCapacityProfile(rollup store.PipelineProfile, nodeCount, numCPU int) cap
 	res := capacity.Resolve(pin, &rollup, numCPU, rollup.PlanHash)
 	out := capacityProfile{
 		Pipeline:          rollup.Pipeline,
+		Display:           store.DisplayProfileKey(rollup.Pipeline),
 		Charge:            chargeOf(res, rollup),
 		SampleCount:       rollup.SampleCount,
 		PeakCores:         rollup.PeakCores,
@@ -401,10 +330,6 @@ func chargeOf(res capacity.Resolution, rollup store.PipelineProfile) capacityCha
 	}
 }
 
-// coresBasis names which stored figure the core charge came from, and
-// returns that figure so the caller can tell a charge raised to the measured
-// core floor from one taken verbatim. The measured case carries the peak
-// fallback a profile predating sustained figures still takes.
 func coresBasis(source store.CostSource, rollup store.PipelineProfile) (string, float64) {
 	switch source {
 	case store.CostSourcePin:
@@ -423,10 +348,6 @@ func coresBasis(source store.CostSource, rollup store.PipelineProfile) (string, 
 	}
 }
 
-// carriedCores is what a plan-hash change carried across from the previous
-// version: what it was charged, not what it peaked at. It mirrors the
-// resolver's own fallback for a predecessor measured before sustained
-// figures existed.
 func carriedCores(rollup store.PipelineProfile) float64 {
 	if rollup.PrevSustainedCores > 0 {
 		return rollup.PrevSustainedCores
@@ -434,10 +355,6 @@ func carriedCores(rollup store.PipelineProfile) float64 {
 	return rollup.PrevPeakCores
 }
 
-// chargeChain walks the resolution order top to bottom, recording what each
-// rung would charge and which one the resolver actually took. Applied is
-// keyed off [capacity.Resolve]'s own verdict rather than re-deciding here,
-// so the chain cannot claim a step the daemon did not take.
 func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 	pin := pinOf(rollup)
 	res := capacity.Resolve(pin, &rollup, numCPU, rollup.PlanHash)
@@ -540,10 +457,6 @@ func sampleRows(samples []store.ProfileSample) []capacitySample {
 	return out
 }
 
-// selectionsFor recomputes each stored percentile from the window and points
-// at the sample it landed on. Stored is carried beside the recomputed value
-// so the page can show the two agreeing -- or, when they do not, show that
-// the price and its evidence have parted company.
 func selectionsFor(rollup store.PipelineProfile, samples []store.ProfileSample) capacitySelection {
 	sustained := make([]float64, len(samples))
 	peaks := make([]float64, len(samples))
@@ -563,9 +476,7 @@ func selectionsFor(rollup store.PipelineProfile, samples []store.ProfileSample) 
 	return capacitySelection{
 		Cores:  selectionAt(coresField, coresValues, chargePercentile, coresStored),
 		Memory: selectionAt("peak_memory_bytes", mems, chargePercentile, float64(rollup.PeakMemoryBytes)),
-		// Durations are stored rounded to milliseconds while the window keeps
-		// nanoseconds, so both sides of the comparison are taken to the stored
-		// resolution rather than reporting every profile as mismatched.
+
 		DurationP50: selectionAtMS("duration", durations, 0.50, float64(rollup.P50Duration)),
 		DurationP99: selectionAtMS("duration", durations, 0.99, float64(rollup.P99Duration)),
 	}
@@ -599,10 +510,6 @@ func selectionAtMS(field string, values []float64, q, stored float64) rankSelect
 	return sel
 }
 
-// nearestRankOneBased is the rank position the store's percentile arithmetic
-// lands on, counted the way a reader counts a sorted list: 1 is smallest. It
-// asks the store where an already-sorted run of positions ranks rather than
-// restating the ceil arithmetic, which would be free to drift from it.
 func nearestRankOneBased(n int, q float64) int {
 	positions := make([]float64, n)
 	for i := range positions {

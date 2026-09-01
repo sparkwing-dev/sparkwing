@@ -24,6 +24,7 @@ web/out/
 *.db-wal
 .sparkwing/runs/
 .sparkwing/state.db*
+.release-tools/
 .claude-scratch/
 .claude/
 

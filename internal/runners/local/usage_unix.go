@@ -11,11 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 )
 
-// usageFrom reads the kernel's own accounting for the finished
-// process. It is exact where sampling is not: a node that lived under
-// one sampling interval is invisible to the sampler but still shows
-// its true CPU time and peak RSS here. PR3 folds these figures onto
-// the node row.
 func usageFrom(ps *os.ProcessState) *runner.ResourceUsage {
 	if ps == nil {
 		return nil
@@ -30,8 +25,6 @@ func usageFrom(ps *os.ProcessState) *runner.ResourceUsage {
 	}
 }
 
-// maxRSSBytes normalizes ru_maxrss, which Linux reports in kilobytes
-// and the BSDs (macOS included) report in bytes.
 func maxRSSBytes(maxrss int64) int64 {
 	if maxrss <= 0 {
 		return 0
@@ -42,8 +35,6 @@ func maxRSSBytes(maxrss int64) int64 {
 	return maxrss
 }
 
-// terminationSignal reports the signal that killed the process, if
-// one did.
 func terminationSignal(ps *os.ProcessState) (os.Signal, bool) {
 	ws, ok := ps.Sys().(syscall.WaitStatus)
 	if !ok || !ws.Signaled() {

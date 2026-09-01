@@ -11,9 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// sustainedFixture opens a store and seeds one run of a single node whose
-// per-tick CPU readings are the given millicore series, one reading every two
-// seconds. It returns the store and the run's exec window.
 func sustainedFixture(t *testing.T, pipeline string, millicores []int64) (*store.Store, time.Time, time.Time) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
@@ -41,12 +38,6 @@ func sustainedFixture(t *testing.T, pipeline string, millicores []int64) (*store
 	return st, start, start.Add(time.Duration(len(millicores)) * 2 * time.Second)
 }
 
-// TestRecordRunProfile_SustainedIsThePlateauNotTheBurst is the reason cores
-// stopped being charged from the peak. A run that touches five cores for one
-// tick of a long, one-core life held one core; charging it five reserves four
-// cores of nothing for the whole hold. The peak is still recorded, because
-// memory pricing needs a peak and an operator reading the stats wants to see
-// the spike.
 func TestRecordRunProfile_SustainedIsThePlateauNotTheBurst(t *testing.T) {
 	if runtime.NumCPU() < 5 {
 		t.Skip("host cannot hold a five-core reading")
@@ -79,9 +70,6 @@ func TestRecordRunProfile_SustainedIsThePlateauNotTheBurst(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_ShortRunSustainedIsItsMaximum pins the degenerate end
-// of the rank: a run of one or two intervals has no plateau to find, so it
-// prices exactly as it did before sustained figures existed.
 func TestRecordRunProfile_ShortRunSustainedIsItsMaximum(t *testing.T) {
 	if runtime.NumCPU() < 3 {
 		t.Skip("host cannot hold a three-core reading")
@@ -111,16 +99,6 @@ func TestRecordRunProfile_ShortRunSustainedIsItsMaximum(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn covers the
-// per-command report, which carries its own timestamp rather than a tick's.
-// It is grouped by when it happened, like every other reading: the command
-// drew its four cores while both nodes were drawing half a core each, so the
-// window it landed in reads five. Standing it alone would report a moment
-// the machine never had, and would hide the concurrency admission exists to
-// price. It still ranks as one window among five, so a single command's
-// burst cannot price the whole run. The run start is aligned to the cadence
-// the fold groups on, so the one-shot sits a millisecond inside a tick's
-// window rather than across its edge.
 func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
 	if runtime.NumCPU() < 5 {
 		t.Skip("host cannot hold a five-core reading")
@@ -171,14 +149,6 @@ func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_ContendedFloorResistsContentionDeflation pins the
-// floor to peaks rather than to the sustained level cores are charged from.
-// A contended run's sustained reading is the allocation contention left it,
-// so a floor fed from it would decay toward that allocation and stop clearing
-// the ceiling-hit fraction of its own SafetyMultiple charge -- the escalation
-// search would die exactly on the saturated box it exists for. The spiky run
-// here reads 1.3 sustained against a 4.0 peak: a sustained floor would record
-// 1.3 and admit the next run at 2.6 rather than holding the line at 4.
 func TestRecordRunProfile_ContendedFloorResistsContentionDeflation(t *testing.T) {
 	if runtime.NumCPU() < 4 {
 		t.Skip("host cannot hold a four-core reading")
@@ -199,9 +169,6 @@ func TestRecordRunProfile_ContendedFloorResistsContentionDeflation(t *testing.T)
 	}
 }
 
-// TestRecordRunProfile_ContendedBelowCeilingStillFloorsAtItsPeak is the other
-// half: a run nowhere near its charge raises the floor only to what it
-// measured, and that measurement is its peak.
 func TestRecordRunProfile_ContendedBelowCeilingStillFloorsAtItsPeak(t *testing.T) {
 	if runtime.NumCPU() < 4 {
 		t.Skip("host cannot hold a four-core reading")

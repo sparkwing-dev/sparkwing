@@ -20,11 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// fakeNodeBinary stands in for the pipeline binary. The runner passes
-// a fixed argv, so a script that ignores its arguments exercises
-// everything the runner owns -- spawn, process group, stdio
-// forwarding, liveness pipe, wait, exit mapping -- without needing a
-// compiled pipeline.
 func fakeNodeBinary(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fake-pipeline")
@@ -39,14 +34,10 @@ type spawnFixture struct {
 	runner *Runner
 	store  *store.Store
 	ctrl   *client.Client
-	// url is the test controller's base URL, for tests that need to sit
-	// a proxy between the runner and it.
+
 	url string
 }
 
-// newSpawnFixture builds a Runner over a real store and controller.
-// tune adjusts the Config before construction, which is how a test
-// picks a supervision cadence its scenario needs.
 func newSpawnFixture(t *testing.T, exe string, tune ...func(*Config)) *spawnFixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -66,8 +57,7 @@ func newSpawnFixture(t *testing.T, exe string, tune ...func(*Config)) *spawnFixt
 		WorkDir:          t.TempDir(),
 		Home:             t.TempDir(),
 		TerminationGrace: time.Second,
-		// safety: the operator-facing cadence is five seconds, which every
-		// bounce test would otherwise wait out twice over.
+
 		SuperviseInterval: 25 * time.Millisecond,
 		Logger:            quiet,
 	}
@@ -92,9 +82,6 @@ func (f *spawnFixture) seedNode(t *testing.T, runID, nodeID string) {
 	}
 }
 
-// The process that ran the work is the authority on how it went. An
-// exit status only says how the process ended, so a terminal row wins
-// over anything the supervisor could infer.
 func TestRunNode_TerminalRowWinsOverExitStatus(t *testing.T) {
 	f := newSpawnFixture(t, fakeNodeBinary(t, "exit 0"))
 	f.seedNode(t, "run-1", "build")
@@ -117,9 +104,6 @@ func TestRunNode_TerminalRowWinsOverExitStatus(t *testing.T) {
 	}
 }
 
-// A process that died without recording an outcome leaves the node
-// stuck at pending, which would hang the dispatcher. The runner
-// synthesizes the outcome AND writes it back.
 func TestRunNode_NonZeroExitSynthesizesFailureAndWritesTheRow(t *testing.T) {
 	f := newSpawnFixture(t, fakeNodeBinary(t, "exit 3"))
 	f.seedNode(t, "run-2", "build")
@@ -178,8 +162,6 @@ func TestRunNode_ForwardsChildStdoutAndStderr(t *testing.T) {
 	}
 }
 
-// Cancelling the run terminates the node's whole process tree and
-// reports Cancelled, not a failure the operator has to interpret.
 func TestRunNode_CancelTerminatesAndReportsCancelled(t *testing.T) {
 	f := newSpawnFixture(t, fakeNodeBinary(t, "sleep 60"))
 	f.seedNode(t, "run-4", "build")
@@ -199,8 +181,7 @@ func TestRunNode_CancelTerminatesAndReportsCancelled(t *testing.T) {
 	if res.Outcome != sparkwing.Cancelled {
 		t.Fatalf("outcome = %q (err=%v), want cancelled", res.Outcome, res.Err)
 	}
-	// safety: teardown owns a cancelled node's row; the runner must not race it
-	// by writing a failure.
+
 	n, err := f.store.GetNode(context.Background(), "run-4", "build")
 	if err != nil {
 		t.Fatalf("get node: %v", err)
@@ -210,14 +191,7 @@ func TestRunNode_CancelTerminatesAndReportsCancelled(t *testing.T) {
 	}
 }
 
-// The dispatcher's death is the one event a signal handler cannot
-// catch, so the child watches a pipe instead. This asserts the child's
-// end is actually descriptor 3.
 func TestRunNode_PassesTheParentLivenessPipeOnFD3(t *testing.T) {
-	// safety: the script blocks reading fd 3 and only proceeds on EOF, which
-	// arrives when the runner closes its write end after the wait --
-	// so a script that reaches the echo proves the descriptor was
-	// there and readable.
 	f := newSpawnFixture(t, fakeNodeBinary(t,
 		"if [ -r /dev/fd/3 ]; then echo '{\"level\":\"info\",\"msg\":\"fd3 present\"}'; else exit 9; fi"))
 	f.seedNode(t, "run-5", "build")
@@ -242,12 +216,6 @@ func TestRunNode_PassesTheParentLivenessPipeOnFD3(t *testing.T) {
 	}
 }
 
-// The deadlock this guards against needs a real pipe: a forwarder
-// that stops draining leaves the child blocked in write(2), and no
-// timeout can reach it because the node's timeout runs inside the
-// blocked child. The child here prints one oversized line and then
-// more than a pipe-buffer's worth of ordinary lines, so a forwarder
-// that gave up on the first line can never finish.
 func TestRunNode_OversizedChildLineDoesNotDeadlockTheRun(t *testing.T) {
 	f := newSpawnFixture(t, fakeNodeBinary(t,
 		"head -c 2097152 /dev/zero | tr '\\0' 'x'\n"+
@@ -273,9 +241,7 @@ func TestRunNode_OversizedChildLineDoesNotDeadlockTheRun(t *testing.T) {
 			t.Fatalf("outcome = %q (err=%v), want success", res.Outcome, res.Err)
 		}
 	case <-time.After(60 * time.Second):
-		// safety: the blocked child is not reaped by failing here. The test
-		// binary exiting is what releases it, which is acceptable for a
-		// regression that must never reach a release.
+
 		t.Fatal("RunNode did not return: the forwarder stopped draining and the child is blocked writing")
 	}
 

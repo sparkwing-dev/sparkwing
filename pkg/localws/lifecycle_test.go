@@ -38,10 +38,6 @@ func TestVersionHandler_ReportsVersionAndSchema(t *testing.T) {
 	}
 }
 
-// TestSchemaGuard_ExitsWhenDatabaseAdvances verifies the guard cancels
-// the server context once the shared store is migrated past the schema
-// this binary understands, so a resident dashboard shuts down cleanly
-// instead of serving 500s forever.
 func TestSchemaGuard_ExitsWhenDatabaseAdvances(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guard.db")
 	st, err := store.Open(path)
@@ -76,9 +72,6 @@ func TestSchemaGuard_ExitsWhenDatabaseAdvances(t *testing.T) {
 	}
 }
 
-// TestSchemaGuard_MiddlewareChecksOn5xx confirms a server error triggers
-// a schema check at request time: with the database already advanced, a
-// single failing request drives the clean shutdown.
 func TestSchemaGuard_MiddlewareChecksOn5xx(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guard_mw.db")
 	st, err := store.Open(path)
@@ -115,8 +108,6 @@ func TestSchemaGuard_MiddlewareChecksOn5xx(t *testing.T) {
 	}
 }
 
-// TestSchemaGuard_MiddlewarePassesThroughOn2xx confirms a healthy
-// response leaves the server running.
 func TestSchemaGuard_MiddlewarePassesThroughOn2xx(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guard_ok.db")
 	st, err := store.Open(path)

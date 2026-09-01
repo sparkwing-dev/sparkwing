@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestReaper_RequeuesDeadWorkerTrigger simulates a worker that
-// claimed a trigger and then died without heartbeating. The reaper
-// should re-queue the trigger so a fresh worker can pick it up, and
-// the associated run (if one was created) should be marked failed.
 func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -45,15 +41,13 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	reaperCtx, cancelReaper := context.WithCancel(ctx)
-	// safety: the reaper writes to st, so wait for it to be gone rather than
-	// only cancelled. Deferred, not t.Cleanup, so it runs before st.Close.
+
 	reaperDone := make(chan struct{})
 	defer func() {
 		cancelReaper()
 		<-reaperDone
 	}()
-	// safety: an id lands here only after its run is finished, so a receive
-	// means the whole reap of that trigger is done.
+
 	reaped := make(chan string, 4)
 	go func() {
 		defer close(reaperDone)
@@ -121,8 +115,6 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 	}
 }
 
-// TestReaper_HeartbeatKeepsAlive is the happy path: a worker that
-// heartbeats is not reaped.
 func TestReaper_HeartbeatKeepsAlive(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

@@ -41,9 +41,6 @@ func registerPodYAMLPipe(t *testing.T) {
 		func() sparkwing.Pipeline[podYAMLInputs] { return podYAMLPipe{} })
 }
 
-// writeCheckout lays down a project checkout whose sparkwing.yaml
-// supplies both argument layers, and points the runtime's WorkDir at
-// it the way a compiled pipeline binary's own walk-up would.
 func writeCheckout(t *testing.T, yaml string) string {
 	t.Helper()
 	root := isolateCheckout(t)
@@ -56,12 +53,6 @@ func writeCheckout(t *testing.T, yaml string) string {
 	return root
 }
 
-// isolateCheckout points the runtime at an empty directory this test
-// owns and restores the previous root afterwards. Any test that reaches
-// a path which re-reads the executing checkout's argument layers needs
-// it, or this repo's own .sparkwing/sparkwing.yaml becomes a live input
-// -- and a defaults.args block added to it later would break tests that
-// have nothing to do with project config.
 func isolateCheckout(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -71,14 +62,6 @@ func isolateCheckout(t *testing.T) string {
 	return root
 }
 
-// A cluster node plans from the run row, which records only the
-// operator's explicit arguments -- the yaml layers are deliberately
-// left out of it so a re-execution reads the project's current values
-// rather than a stale copy. That contract only holds if the executing
-// side actually re-reads them: before it did, the same commit planned
-// with `region: eu-west` on a laptop and without it in a pod, and a
-// `secret:"true"` value the project supplied was never registered with
-// the pod's masker, so the node log kept it in the clear.
 func TestRunNodeOnce_MergesCheckoutYAMLArgs(t *testing.T) {
 	registerPodYAMLPipe(t)
 	isolateProfiles(t)
@@ -116,9 +99,7 @@ pipelines:
 		runID  = "run-pod-yaml"
 		nodeID = "deploy"
 	)
-	// No Args on the row at all: everything this node runs with comes
-	// from the checkout, which is the shape a `sparkwing run` with no
-	// flags produces.
+
 	if err := st.CreateRun(ctx, store.Run{
 		ID:        runID,
 		Pipeline:  "pod-yaml-pipe",
@@ -156,9 +137,6 @@ pipelines:
 	}
 }
 
-// The explicit layer still wins on the executing side, the same way it
-// does locally: a retry that rehydrates `--region us-east` onto the run
-// row must not be quietly re-pointed at the project's default.
 func TestRunNodeOnce_StoredArgsBeatCheckoutYAML(t *testing.T) {
 	registerPodYAMLPipe(t)
 	isolateProfiles(t)

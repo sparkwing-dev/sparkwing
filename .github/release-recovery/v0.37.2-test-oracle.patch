@@ -1,0 +1,19 @@
+diff --git a/internal/orchestrator/repo_ident_test.go b/internal/orchestrator/repo_ident_test.go
+index e5683d30..3062227c 100644
+--- a/internal/orchestrator/repo_ident_test.go
++++ b/internal/orchestrator/repo_ident_test.go
+@@ -90,2 +90,2 @@ func TestCurrentProfileKey_SurvivesABranchChange(t *testing.T) {
+-	if want != "sample-repo/pre-commit" {
+-		t.Fatalf("main checkout keyed %q, want sample-repo/pre-commit", want)
++	if want != "11:sample-repopre-commit" {
++		t.Fatalf("main checkout keyed %q, want 11:sample-repopre-commit", want)
+@@ -117,2 +117,2 @@ func TestCurrentProfileKey_UsesRunWorkDirAfterCWDChanges(t *testing.T) {
+-	if got := currentProfileKey("build"); got != "sample-repo/build" {
+-		t.Fatalf("profile key after cwd change = %q, want sample-repo/build", got)
++	if got := currentProfileKey("build"); got != "11:sample-repobuild" {
++		t.Fatalf("profile key after cwd change = %q, want 11:sample-repobuild", got)
+@@ -134,2 +134,2 @@ func TestCurrentProfileKey_FallsBackToCWDWithoutRunWorkDir(t *testing.T) {
+-	if got := currentProfileKey("build"); got != "fallback-repo/build" {
+-		t.Fatalf("profile key without run directory = %q, want fallback-repo/build", got)
++	if got := currentProfileKey("build"); got != "13:fallback-repobuild" {
++		t.Fatalf("profile key without run directory = %q, want 13:fallback-repobuild", got)

@@ -138,5 +138,4 @@ func TestCheckSpec_RejectsExtraFields(t *testing.T) {
 	}
 }
 
-// Compile-time check the type still satisfies the interface.
 var _ storage.LogStore = (*stdoutlogs.LogStore)(nil)

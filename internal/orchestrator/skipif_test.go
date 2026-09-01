@@ -12,8 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// setupOut is the typed output that SkipIf predicates read through
-// closure-captured Refs.
 type setupOut struct {
 	SkipDeploy bool `json:"skip_deploy"`
 	SkipTests  bool `json:"skip_tests"`
@@ -24,7 +22,6 @@ type setupJob struct {
 	sparkwing.Produces[setupOut]
 }
 
-// skipDeployWant is module-level so tests can flip it per-case.
 var skipDeployWant atomic.Bool
 
 func (j *setupJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -35,8 +32,6 @@ func (setupJob) run(ctx context.Context) (setupOut, error) {
 	return setupOut{SkipDeploy: skipDeployWant.Load()}, nil
 }
 
-// skipOnDeployFlag: deploy is gated on the setup's SkipDeploy output.
-// When SkipDeploy=true, deploy should be marked Skipped.
 type skipOnDeployFlag struct{ sparkwing.Base }
 
 var deployRan atomic.Bool
@@ -55,7 +50,6 @@ func (skipOnDeployFlag) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkw
 	return nil
 }
 
-// multiplePredicates: two SkipIf accumulate with OR semantics.
 type multiPredicatesOR struct{ sparkwing.Base }
 
 var multiRan atomic.Bool
@@ -73,8 +67,6 @@ func (multiPredicatesOR) Plan(ctx context.Context, plan *sparkwing.Plan, _ spark
 	return nil
 }
 
-// slowPredicate exceeds the 1s predicate budget, should default to
-// "do not skip".
 type slowPredicate struct{ sparkwing.Base }
 
 var slowRan atomic.Bool
@@ -94,8 +86,6 @@ func (slowPredicate) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing
 	return nil
 }
 
-// panickyPredicate panics; orchestrator should catch and default to
-// "do not skip".
 type panickyPredicate struct{ sparkwing.Base }
 
 var panickyRan atomic.Bool
@@ -110,7 +100,6 @@ func (panickyPredicate) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkw
 	return nil
 }
 
-// downstream should still consider a Skipped upstream as OK-to-proceed.
 type skippedUpstream struct{ sparkwing.Base }
 
 var downstreamRan atomic.Bool
@@ -223,18 +212,25 @@ func TestSkipIf_PanickyPredicateDefaultsToRun(t *testing.T) {
 	}
 }
 
-// generousTimeout: the default budget is 30s; configure a tiny 50ms
-// budget explicitly and verify it's honored.
 type generousTimeout struct{ sparkwing.Base }
 
-var generousRan atomic.Bool
-var generousCanceled chan struct{}
+var (
+	generousRan      atomic.Bool
+	generousBudget   chan time.Duration
+	generousCanceled chan struct{}
+)
 
 func (generousTimeout) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "gated", func(ctx context.Context) error {
 		generousRan.Store(true)
 		return nil
 	}).SkipIf(func(ctx context.Context) bool {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			generousBudget <- 0
+		} else {
+			generousBudget <- time.Until(deadline)
+		}
 		<-ctx.Done()
 		generousCanceled <- struct{}{}
 		return false
@@ -248,14 +244,14 @@ func init() {
 
 func TestSkipIf_PerNodeTimeoutOverride(t *testing.T) {
 	generousRan.Store(false)
+	generousBudget = make(chan time.Duration, 1)
 	generousCanceled = make(chan struct{}, 1)
 	p := newPaths(t)
-	start := time.Now()
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-generous"})
-	elapsed := time.Since(start)
 
-	if elapsed > 500*time.Millisecond {
-		t.Fatalf("override budget should fire near 50ms, took %s", elapsed)
+	budget := <-generousBudget
+	if budget < 25*time.Millisecond || budget > 100*time.Millisecond {
+		t.Fatalf("predicate deadline budget = %s, want near 50ms", budget)
 	}
 	if !generousRan.Load() {
 		t.Fatal("job should run after predicate times out under override budget")

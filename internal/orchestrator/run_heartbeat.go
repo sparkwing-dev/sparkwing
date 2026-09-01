@@ -7,16 +7,6 @@ import (
 	"time"
 )
 
-// runRunHeartbeatLoop stamps last_heartbeat_at on the run row until
-// ctx cancels. The controller's reaper uses these pings to detect a
-// fully-orphaned orchestrator -- one whose laptop went away between
-// node dispatches, so the node-claim lease reaper has nothing to
-// expire. A missed ping just delays the orphan flip; correctness
-// lives in the reaper's grace window. The wedge guard still bounds a
-// wedged store: a "locking protocol" error or a failure streak past
-// wedgeBudget stops the loop instead of re-issuing statements forever
-// against a database another process has locked. The caller resolves
-// (and error-checks) the budget before spawning the loop.
 func runRunHeartbeatLoop(ctx context.Context, interval time.Duration, state StateBackend, runID string, wedgeBudget time.Duration) {
 	wedge := newStoreWedgeGuard(wedgeBudget)
 	if interval <= 0 {

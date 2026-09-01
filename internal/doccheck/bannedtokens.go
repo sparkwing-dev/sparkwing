@@ -8,17 +8,6 @@ import (
 	"strings"
 )
 
-// banned is the append-only denylist of dead tokens that must never
-// reappear in user- or agent-facing surfaces (the bundled docs and the
-// CLI help registry). Each entry pairs a precise pattern with the
-// correct replacement, printed verbatim when it fires.
-//
-// The compiler catches renamed Go symbols; prose, YAML, and shell
-// snippets have no such coupling, so a flag/file/key rename silently
-// rots every doc that mentions the old name. This list is that coupling:
-// once a divergence is fixed, add the dead token here so it can never
-// quietly return. Patterns must be tight enough to match zero times in
-// the current (clean) tree -- the gate self-tests that on every run.
 type bannedPattern struct {
 	re   *regexp.Regexp
 	want string
@@ -119,19 +108,8 @@ var banned = []bannedPattern{
 	},
 }
 
-// narrativeExempt names the one doc where change/deprecation vocabulary
-// is the subject matter rather than rot: the changelog style guide
-// teaches how to write changelog entries (which inherently record
-// change), so bannedNarrative is not enforced there.
 const narrativeExempt = "changelog-style.md"
 
-// bannedNarrative lists history- and deprecation-narrative phrasings.
-// Docs describe what IS, not what changed or what is going away; that
-// story belongs in docs/migrations/ (gate-excluded) or the CHANGELOG,
-// not the reference pages. These are scanned everywhere except
-// narrativeExempt. Kept high-precision on purpose -- fuzzy words
-// ("no longer"/"replaced"/"previously") have legitimate present-tense
-// uses and are left to review.
 var bannedNarrative = []bannedPattern{
 	{
 		regexp.MustCompile(`(?i)(?:pre|post)-rewrite`),
@@ -155,8 +133,6 @@ var bannedNarrative = []bannedPattern{
 	},
 }
 
-// checkBannedTokens scans the docs (contentDir) and the CLI help
-// registry for any dead token in `banned`. Returns false on any hit.
 func checkBannedTokens(contentDir, repoRoot string) bool {
 	targets := []string{filepath.Join(repoRoot, "cmd", "sparkwing", "help_registry.go")}
 	_ = filepath.Walk(contentDir, func(path string, info os.FileInfo, err error) error {

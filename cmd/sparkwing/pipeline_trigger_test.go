@@ -17,39 +17,32 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 var triggerTestGitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
-// triggerSpy is a minimal controller stand-in. It records request lines
-// and captures trigger POST bodies, and serves just enough of the
-// status-follow surface (GetRun returns a terminal run, ListNodes
-// returns empty) for a non-detach follow to render once and exit.
 type triggerSpy struct {
 	mu             sync.Mutex
 	reqs           []string
 	bodies         [][]byte
 	failRefresh    bool
+	failSeed       bool
 	seedBodyBytes  int
 	seedRepoValues []string
 	seedSHAValues  []string
-	// runStatus is the terminal status GetRun reports (default
-	// "success"); runError is the run-level error that goes with it.
+
 	runStatus string
 	runError  string
-	// runStatuses, when set, is consumed one entry per GetRun with the
-	// last entry repeating -- enough to stage a run that flips terminal
-	// between the status follow's render and its terminality check.
+
 	runStatuses []string
 	getRunCalls int
-	// runHTTPStatus, when non-zero, is the HTTP error GetRun returns
-	// instead of a run (a controller mid-rolling-restart).
+
 	runHTTPStatus int
 }
 
-// nextRunStatus returns the status this GetRun call should report.
 func (s *triggerSpy) nextRunStatus() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -85,6 +78,10 @@ func (s *triggerSpy) handler() http.Handler {
 			s.seedRepoValues = append(s.seedRepoValues, r.URL.Query().Get("repo"))
 			s.seedSHAValues = append(s.seedSHAValues, r.URL.Query().Get("sha"))
 			s.mu.Unlock()
+			if s.failSeed {
+				http.Error(w, "seed failed", http.StatusBadGateway)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers":
@@ -144,8 +141,6 @@ func writeTriggerProfiles(t *testing.T, controllerURL string) {
 	t.Setenv("SPARKWING_PROFILES", path)
 }
 
-// writeTriggerProfilesWithLogs adds a logs: surface so the follow takes
-// the log-streaming arm (followLogsRemote) instead of the status arm.
 func writeTriggerProfilesWithLogs(t *testing.T, controllerURL string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
@@ -167,6 +162,21 @@ func TestPipelineTrigger_MissingProfile(t *testing.T) {
 	}
 	if code := exitCodeFor(err); code != 2 {
 		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
+func TestPipelineTrigger_DelimiterProtectsWorkingTreePipelineArgument(t *testing.T) {
+	pipeline, profileName, detach, workingTree, help, passthrough, err := parseTriggerFlags([]string{
+		"release", "--profile", "prod", "--", "--working-tree", "--detach",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pipeline != "release" || profileName != "prod" || detach || workingTree || help {
+		t.Fatalf("parsed controls = %q %q detach=%t workingTree=%t help=%t", pipeline, profileName, detach, workingTree, help)
+	}
+	if !slices.Equal(passthrough, []string{"--working-tree", "--detach"}) {
+		t.Fatalf("passthrough = %v", passthrough)
 	}
 }
 
@@ -318,6 +328,144 @@ func TestPipelineTrigger_SeedsControllerGitcacheWhenRefreshFails(t *testing.T) {
 	}
 }
 
+func TestPipelineTrigger_WorkingTreeSeedsBeforeAdmission(t *testing.T) {
+	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	spy := &triggerSpy{}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfiles(t, srv.URL)
+	origin := "https://git.example.com/acme/widgets.git"
+	withGitCheckout(t, origin, func() {
+		base := strings.TrimSpace(runSnapshotGit(t, ".", "rev-parse", "HEAD"))
+		if err := os.WriteFile("README.md", []byte("dirty\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile("untracked.txt", []byte("local\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stderr := captureStderr(t, func() {
+			_ = captureStdout(t, func() {
+				if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--working-tree", "--detach"}); err != nil {
+					t.Fatalf("trigger: %v", err)
+				}
+			})
+		})
+		if !strings.Contains(stderr, "working tree: base "+base+" snapshot ") {
+			t.Fatalf("stderr = %q", stderr)
+		}
+	})
+
+	reqs := spy.requests()
+	seedAt, triggerAt := slices.Index(reqs, "POST /api/v1/gitcache/seed"), slices.Index(reqs, "POST /api/v1/triggers")
+	if seedAt < 0 || triggerAt < 0 || seedAt >= triggerAt {
+		t.Fatalf("seed must finish before trigger admission: %v", reqs)
+	}
+	if slices.Contains(reqs, "POST /api/v1/gitcache/refresh") {
+		t.Fatalf("working-tree trigger must not refresh the origin: %v", reqs)
+	}
+	_, _, shas := spy.seedStats()
+	if len(shas) != 1 {
+		t.Fatalf("seed shas = %v", shas)
+	}
+	var req client.TriggerRequest
+	if err := json.Unmarshal(spy.bodies[0], &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Git.SHA != shas[0] {
+		t.Fatalf("trigger SHA = %q, seed SHA = %q", req.Git.SHA, shas[0])
+	}
+	if _, ok := req.Args["working-tree"]; ok {
+		t.Fatalf("working-tree flag leaked into pipeline args: %v", req.Args)
+	}
+	if !strings.HasPrefix(req.Trigger.Source, "pipeline-working-tree@") {
+		t.Fatalf("trigger source = %q", req.Trigger.Source)
+	}
+}
+
+func TestPipelineTrigger_WorkingTreeSeedFailureDoesNotAdmitTrigger(t *testing.T) {
+	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	spy := &triggerSpy{failSeed: true}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfiles(t, srv.URL)
+	withGitCheckout(t, "https://git.example.com/acme/widgets.git", func() {
+		if err := os.WriteFile("local.txt", []byte("dirty\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := runPipelineTrigger([]string{"release", "--profile", "prod", "--working-tree", "--detach"})
+		if err == nil || !strings.Contains(err.Error(), "upload working-tree snapshot") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	if slices.Contains(spy.requests(), "POST /api/v1/triggers") {
+		t.Fatalf("failed seed admitted trigger: %v", spy.requests())
+	}
+}
+
+func TestPipelineTrigger_WorkingTreeFallsBackFromDirectCacheToController(t *testing.T) {
+	var directRequests int
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directRequests++
+		http.Error(w, "direct unavailable", http.StatusBadGateway)
+	}))
+	defer direct.Close()
+	t.Setenv("SPARKWING_GITCACHE_URL", direct.URL)
+
+	spy := &triggerSpy{}
+	controllerServer := httptest.NewServer(spy.handler())
+	defer controllerServer.Close()
+	writeTriggerProfiles(t, controllerServer.URL)
+	withGitCheckout(t, "https://git.example.com/acme/widgets.git", func() {
+		if err := os.WriteFile("local.txt", []byte("dirty\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_ = captureStdout(t, func() {
+			if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--working-tree", "--detach"}); err != nil {
+				t.Fatalf("trigger: %v", err)
+			}
+		})
+	})
+	if directRequests != 1 {
+		t.Fatalf("direct seed requests = %d, want 1", directRequests)
+	}
+	reqs := spy.requests()
+	seedAt, triggerAt := slices.Index(reqs, "POST /api/v1/gitcache/seed"), slices.Index(reqs, "POST /api/v1/triggers")
+	if seedAt < 0 || triggerAt < 0 || seedAt >= triggerAt {
+		t.Fatalf("controller fallback must seed before admission: %v", reqs)
+	}
+}
+
+func TestSeedWorkingTreeSnapshot_ControllerFallbackGetsFreshDeadline(t *testing.T) {
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(60 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer direct.Close()
+	var controllerRequests int
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		controllerRequests++
+		if r.URL.Query().Get("workspace") != "1" {
+			http.Error(w, "missing workspace marker", http.StatusBadRequest)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer controller.Close()
+	bundle := filepath.Join(t.TempDir(), "snapshot.bundle")
+	if err := os.WriteFile(bundle, []byte("bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := &worktreeSnapshot{BundlePath: bundle, SHA: strings.Repeat("a", 40)}
+	prof := &profile.Profile{Controller: &profile.ControllerSpec{URL: controller.URL, Token: "runner-token"}}
+	if err := seedWorkingTreeSnapshot(prof, direct.URL, "https://git.example.com/acme/widgets.git", snapshot, 20*time.Millisecond, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if controllerRequests != 1 {
+		t.Fatalf("controller fallback requests = %d, want 1", controllerRequests)
+	}
+}
+
 func TestPipelineTrigger_DetachCanonicalizesGitHubHTTPOrigin(t *testing.T) {
 	spy := &triggerSpy{}
 	srv := httptest.NewServer(spy.handler())
@@ -382,11 +530,6 @@ func TestPipelineTrigger_DefaultFollows(t *testing.T) {
 	}
 }
 
-// TestPipelineTrigger_FollowExitsOnRunOutcome is the scripted contract
-// CI wraps: a non-detach trigger must exit like the local run it
-// stands in for -- 0 only when the remote run succeeded, 1 when it
-// failed or was cancelled. Before this, the follow returned nil no
-// matter how the run ended and wrappers read a failed run as success.
 func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -423,9 +566,7 @@ func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.status) || !strings.Contains(err.Error(), "run-test") {
 				t.Errorf("error should name the run and its status; got %q", err.Error())
 			}
-			// The status arm renders to stdout as it polls, so the
-			// summary has to reach stderr too or `> run.log` swallows
-			// every trace of the failure.
+
 			for _, want := range []string{"run-test", "status:    " + tc.status, "node build failed"} {
 				if !strings.Contains(stderr, want) {
 					t.Errorf("stderr summary missing %q; got:\n%s", want, stderr)
@@ -435,10 +576,6 @@ func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
 	}
 }
 
-// TestPipelineTrigger_LogFollowReportsFailure covers the log-streaming
-// arm of the follow, where the SSE stream simply ends when the run
-// goes terminal: the summary has to come from a status read, printed
-// to stderr so stdout stays a pure log stream.
 func TestPipelineTrigger_LogFollowReportsFailure(t *testing.T) {
 	spy := &triggerSpy{runStatus: "failed", runError: "node build failed"}
 	srv := httptest.NewServer(spy.handler())
@@ -462,11 +599,6 @@ func TestPipelineTrigger_LogFollowReportsFailure(t *testing.T) {
 	}
 }
 
-// TestPipelineTrigger_StatusFollowRepaintsTerminalFrame covers the
-// window where the run flips terminal between the status follow's
-// render and its terminality check: the last frame on stdout still
-// says "running", so the authoritative summary must be reprinted or
-// the operator is left reading a stale frame next to exit 1.
 func TestPipelineTrigger_StatusFollowRepaintsTerminalFrame(t *testing.T) {
 	spy := &triggerSpy{runStatuses: []string{"running", "failed"}, runError: "node build failed"}
 	srv := httptest.NewServer(spy.handler())
@@ -492,11 +624,6 @@ func TestPipelineTrigger_StatusFollowRepaintsTerminalFrame(t *testing.T) {
 	}
 }
 
-// TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed pins the
-// distinction a rolling controller restart depends on: losing the
-// follow says nothing about the run, so it exits 3 with a pointer at
-// the command that answers later -- never 1, which would report a
-// possibly-succeeding run as failed.
 func TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed(t *testing.T) {
 	spy := &triggerSpy{runHTTPStatus: http.StatusServiceUnavailable}
 	srv := httptest.NewServer(spy.handler())
@@ -521,12 +648,6 @@ func TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed(t *testing.T) {
 	}
 }
 
-// TestFollowExitResult_UnknownTerminalState pins the third arm: when
-// the follow ends without a readable terminal status (dropped
-// connection, cancelled context), the CLI reports what it knows and
-// exits 3 rather than inventing success or failure. A follow that
-// broke on a run that still reads terminal is not that case -- the
-// outcome wins.
 func TestFollowExitResult_UnknownTerminalState(t *testing.T) {
 	fetchErr := followExitResult("prod", "run-test", "", errors.New("dial tcp: connection refused"), nil)
 	if code := exitCodeFor(fetchErr); code != 3 {
@@ -546,8 +667,6 @@ func TestFollowExitResult_UnknownTerminalState(t *testing.T) {
 		t.Errorf("error should name the last status and why the follow ended; got %q", stillRunning.Error())
 	}
 
-	// A broken stream over a run that did reach a verdict reports the
-	// verdict: the stream is how output arrived, not what happened.
 	brokenButFailed := followExitResult("prod", "run-test", "failed", nil, errors.New("unexpected EOF"))
 	if code := exitCodeFor(brokenButFailed); code != 1 {
 		t.Errorf("terminal-despite-broken-follow exit code = %d (err=%v), want 1", code, brokenButFailed)
@@ -557,8 +676,6 @@ func TestFollowExitResult_UnknownTerminalState(t *testing.T) {
 	}
 }
 
-// captureStderr mirrors captureStdout for the failure summary, which
-// deliberately avoids stdout so piped log output stays clean.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -584,7 +701,7 @@ func withGitCheckout(t *testing.T, origin string, fn func()) {
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", args...)
+		cmd := exec.Command("git", append([]string{"-c", "commit.gpgSign=false"}, args...)...)
 		cmd.Dir = dir
 		out, err := cmd.CombinedOutput()
 		if err != nil {

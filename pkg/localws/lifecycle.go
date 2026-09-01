@@ -24,7 +24,6 @@ type VersionInfo struct {
 	PID     int    `json:"pid"`
 }
 
-// versionHandler serves the running dashboard's version handshake.
 func versionHandler(version string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -36,13 +35,6 @@ func versionHandler(version string) http.HandlerFunc {
 	}
 }
 
-// schemaGuard watches for the shared state database being migrated to a
-// schema this dashboard does not understand -- the failure mode where a
-// newer binary upgrades the store out from under a resident reader,
-// which would otherwise serve 500s until an operator notices. On the
-// first observed skew it logs the concrete reason and cancels the
-// server context so Run shuts down cleanly; the next `dashboard start`
-// (or a supervisor) brings a matching binary back up.
 type schemaGuard struct {
 	st       *store.Store
 	expected int
@@ -54,10 +46,6 @@ func newSchemaGuard(st *store.Store, cancel context.CancelFunc) *schemaGuard {
 	return &schemaGuard{st: st, expected: store.ExpectedSchemaVersion(), cancel: cancel}
 }
 
-// check reads the recorded schema version and, if the database has
-// advanced past what this binary understands, triggers a single clean
-// shutdown. A read failure is ignored: it is not evidence of skew, and
-// the poller will try again.
 func (g *schemaGuard) check(ctx context.Context) {
 	if g == nil || g.st == nil {
 		return
@@ -77,8 +65,6 @@ func (g *schemaGuard) check(ctx context.Context) {
 	}
 }
 
-// poll runs check on an interval until ctx is cancelled, as a safety
-// net for the case where no request happens to trip the middleware.
 func (g *schemaGuard) poll(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -92,11 +78,6 @@ func (g *schemaGuard) poll(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// middleware re-checks the schema whenever a wrapped handler returns a
-// server error, so a schema skew that surfaces as a failing read
-// triggers the clean exit at request time instead of after the next
-// poll. Non-schema 5xxs are harmless: the schema is unchanged, so
-// check is a no-op.
 func (g *schemaGuard) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sc := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
@@ -107,8 +88,6 @@ func (g *schemaGuard) middleware(next http.Handler) http.Handler {
 	})
 }
 
-// statusRecorder captures the response status so the schema guard can
-// react to server errors.
 type statusRecorder struct {
 	http.ResponseWriter
 	status      int

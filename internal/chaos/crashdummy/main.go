@@ -1,20 +1,3 @@
-// Command crashdummy is the chaos harness's synthetic run process. It is
-// a test-only binary the harness builds on the fly and drives as a real
-// OS process so admission liveness is exercised through the kernel:
-// SIGKILL a crashdummy and the daemon learns of the death by the socket
-// closing, exactly as it would for a real run.
-//
-// It has two modes. `daemon` elects and serves a [wingd.Daemon] for an
-// isolated sparkwing home with a fixed host sampler, so admission
-// capacity is deterministic and machine-independent. `hold` connects,
-// submits one admission request, announces its lease token on stdout, and
-// then behaves per its flags: run for a bounded time or forever, burn CPU
-// or sit idle (a wedged holder), hold memory, exit clean or dirty, ignore
-// SIGTERM so only SIGKILL ends it, spawn children that attach to its
-// lease, and re-attach to a successor daemon after a daemon kill or
-// version takeover.
-//
-// The binary is not part of the shipped CLI.
 package main
 
 import (
@@ -52,8 +35,6 @@ func main() {
 	}
 }
 
-// fixedSampler reports a constant host capacity so admission gating on
-// cores and memory is deterministic regardless of the real machine.
 type fixedSampler struct {
 	cores float64
 	mem   uint64
@@ -100,9 +81,6 @@ func runDaemon(args []string) {
 	}
 }
 
-// finalizeLogger appends each finalized run id to finalized.log so the
-// harness can assert that a killed holder's run row was reconciled rather
-// than left hanging.
 func finalizeLogger(home string) func(string) {
 	return func(runID string) {
 		appendLine(home, "finalized.log", runID)
@@ -243,10 +221,6 @@ func (h *holder) request() wingwire.AdmissionRequest {
 	return req
 }
 
-// holdLoop is the lease's lifetime: it watches the connection, exits on
-// eviction, and re-attaches to a successor daemon when the connection
-// drops from a daemon kill or version takeover. It returns only when the
-// process is exiting.
 func (h *holder) holdLoop() {
 	for {
 		evicted := false
@@ -265,9 +239,6 @@ func (h *holder) holdLoop() {
 	}
 }
 
-// reattach reclaims the lease from a freshly elected daemon within the
-// grace window, spawning the successor if none is up yet. It reports
-// whether the lease was recovered.
 func (h *holder) reattach() bool {
 	deadline := time.Now().Add(time.Duration(h.hf.daemonGrace)*time.Millisecond + 2*time.Second)
 	token := h.current().Token
@@ -404,7 +375,6 @@ func (h *holder) current() *client.Lease {
 	return h.lease
 }
 
-// burnCPU spins the requested number of cores until the process exits.
 func burnCPU(cores float64) {
 	n := int(cores + 0.5)
 	if n < 1 {
@@ -423,8 +393,6 @@ func burnCPU(cores float64) {
 	}
 }
 
-// holdMemory allocates and touches roughly mb megabytes so the process's
-// real resident set reflects its declared memory cost.
 func holdMemory(mb int) [][]byte {
 	const chunk = 1 << 20
 	out := make([][]byte, 0, mb)

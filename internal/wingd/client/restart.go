@@ -7,15 +7,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// RefreshResult reports the daemon identity before and after a refresh.
 type RefreshResult struct {
 	PreviousVersion string
 	RunningVersion  string
 	Restarted       bool
 }
 
-// RefreshRunning replaces an answering daemon with opts.Version and leaves an absent daemon stopped.
 func RefreshRunning(ctx context.Context, opts Options) (RefreshResult, error) {
+	return replaceRunning(ctx, opts, false)
+}
+
+// RestartRunning replaces an answering daemon even when it already serves the
+// requested build. An absent daemon remains stopped.
+func RestartRunning(ctx context.Context, opts Options) (RefreshResult, error) {
+	return replaceRunning(ctx, opts, true)
+}
+
+func replaceRunning(ctx context.Context, opts Options, force bool) (RefreshResult, error) {
 	sock, err := wingd.SocketPath(opts.Home)
 	if err != nil {
 		return RefreshResult{}, err
@@ -36,7 +44,7 @@ func RefreshRunning(ctx context.Context, opts Options) (RefreshResult, error) {
 		return RefreshResult{}, fmt.Errorf("wingd/client: refresh handshake: %w", err)
 	}
 	result := RefreshResult{PreviousVersion: ack.BinaryVersion}
-	if ack.BinaryVersion == opts.Version && !ack.Draining {
+	if !force && ack.BinaryVersion == opts.Version && !ack.Draining {
 		result.RunningVersion = ack.BinaryVersion
 		_ = cl.Close()
 		return result, nil

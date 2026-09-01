@@ -31,11 +31,6 @@ func semReqCancel(runID, key string, cancelTimeoutMS int64) wingwire.AdmissionRe
 	}
 }
 
-// TestDaemon_CancelTimeoutForceReleasesNonCooperatingHolder holds a
-// cancel_others semaphore on a connection that never reads its eviction
-// push (a holder ignoring the cancel), then supersedes it. The daemon
-// must force-release the wedged holder within the aggressor's
-// CancelTimeout so it cannot pin the slot open.
 func TestDaemon_CancelTimeoutForceReleasesNonCooperatingHolder(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, HeadroomFraction: -1})
@@ -144,11 +139,6 @@ func waitForRecoveredHolderRelease(t *testing.T, q *client.Client, runID string)
 	}
 }
 
-// TestDaemon_StalledHolderMustAnswerLivenessChallenge proves that stall
-// detection is an automatic backstop, not only a queue annotation. The
-// victim remains alive and keeps its socket open, but never runs Watch and
-// therefore cannot answer a daemon challenge. A healthy zero-CPU holder does
-// run Watch and must retain its lease for the same observation window.
 func TestDaemon_StalledHolderMustAnswerLivenessChallenge(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
@@ -296,9 +286,6 @@ func TestReattach_RejectedAfterGrace(t *testing.T) {
 	}
 }
 
-// TestVersionTakeover_DrainsOldAndReattaches runs the full takeover: a
-// v2 client drains the v1 daemon, brings up a v2 successor via the spawn
-// hook, and the original holder reattaches to it inside the grace window.
 func TestVersionTakeover_DrainsOldAndReattaches(t *testing.T) {
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0"})
@@ -395,6 +382,38 @@ func TestRefreshRunning_ReplacesSameReleaseSourceBuildAndReattachesHolder(t *tes
 		t.Fatalf("old daemon should exit: %v", err)
 	}
 	reconnect := ensure(t, home, newVersion)
+	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token)
+	if err != nil {
+		t.Fatalf("holder reattach: %v", err)
+	}
+	if reclaimed.RunID != "active" {
+		t.Fatalf("reattached run = %q, want active", reclaimed.RunID)
+	}
+}
+
+func TestRestartRunning_ReplacesExactBuildAndReattachesHolder(t *testing.T) {
+	home := shortHome(t)
+	version := "v0.22.2"
+	old := startDaemon(t, wingd.Config{Home: home, Version: version})
+
+	holder := ensure(t, home, version)
+	lease := mustAcquire(t, holder, coreReq("active", 1))
+	successor := newSuccessor(t, home, version)
+
+	result, err := client.RestartRunning(context.Background(), client.Options{
+		Home: home, Version: version, Spawn: successor.spawn,
+		DialTimeout: time.Second, Backoff: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if !result.Restarted || result.PreviousVersion != version || result.RunningVersion != version {
+		t.Fatalf("restart result = %+v", result)
+	}
+	if err := old.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("old daemon should exit: %v", err)
+	}
+	reconnect := ensure(t, home, version)
 	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token)
 	if err != nil {
 		t.Fatalf("holder reattach: %v", err)
@@ -531,9 +550,6 @@ func TestQueueState_ReportsHoldersAndWaiters(t *testing.T) {
 	}
 }
 
-// successor lazily brings up a v2 daemon the first time the client's
-// spawn hook fires, retrying the election until the drained v1 releases
-// the lock.
 type successor struct {
 	t     *testing.T
 	home  string

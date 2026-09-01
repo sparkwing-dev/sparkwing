@@ -6,19 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// StaticAnalysis runs the heavier static-analysis pass that doesn't
-// fit in the fast `lint` pipeline: staticcheck plus a `go mod tidy
-// -diff` drift check. govulncheck is intentionally omitted here --
-// the platform-repo equivalent runs it, and re-running it in the OSS
-// repo would double-bill on every release-all call without adding
-// signal.
-//
-// staticcheck is invoked via `go run honnef.co/go/tools/cmd/staticcheck`
-// so dev machines without a global install still pass. The version is
-// pinned (not `@latest`) so the lint baseline doesn't drift mid-release
-// when a new staticcheck minor lands and surfaces a fresh batch of
-// findings. Bump deliberately, alongside the cleanup that the new
-// version's added checks demand.
 type StaticAnalysis struct{ sparkwing.Base }
 
 func (StaticAnalysis) ShortHelp() string {

@@ -18,30 +18,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-// envPrefix scopes this check to the variables sparkwing itself defines.
-//
-// The code also reads PATH, TERM, KUBECONFIG, GOWORK, CI and the OTEL_*
-// family, and those are other systems' contracts: an operator learns them from
-// the shell, from Kubernetes, or from the OpenTelemetry spec, and sparkwing
-// documenting them would be sparkwing claiming to own them. A SPARKWING_
-// variable has no other source of truth, so a reader who cannot find it in the
-// docs has to read Go to discover it.
 const envPrefix = "SPARKWING_"
 
-// undocumentedEnvVars are SPARKWING_ variables the code reads and no page
-// names. They are recorded rather than tolerated: the check below fails if a
-// name here has since been documented, so the list can only shrink, and it
-// fails on any new undocumented variable immediately.
-//
-// Writing the missing entries was left out of the change that added this
-// check. These pages are published to sparkwing.dev, and fifty paragraphs of
-// configuration semantics written from call sites, reaching external readers
-// without a human having read them, is a bigger risk than the gap they close.
-// docsMentionEnvVar reports whether the docs name the variable as a
-// whole token. A plain substring match would count SPARKWING_GITCACHE
-// as documented because SPARKWING_GITCACHE_URL contains it, hiding an
-// undocumented variable behind a longer one; "_" is an identifier
-// character, so the surrounding bytes must not be identifier bytes.
 func docsMentionEnvVar(documented, name string) bool {
 	for from := 0; from <= len(documented)-len(name); {
 		rel := strings.Index(documented[from:], name)
@@ -101,7 +79,6 @@ var undocumentedEnvVars = []string{
 	"SPARKWING_AUTO_REGISTER_WORKTREES",
 	"SPARKWING_BAKED_BINARY",
 	"SPARKWING_BINARY_SOURCE",
-	"SPARKWING_CACHE_TOKEN",
 	"SPARKWING_CHAOS_KEEP",
 	"SPARKWING_CHILD_LEASE_TOKEN",
 	"SPARKWING_DEBUG_PAUSE_AFTER",
@@ -136,16 +113,9 @@ var undocumentedEnvVars = []string{
 	"SPARKWING_STOP_AT",
 	"SPARKWING_STORE_WEDGE_BUDGET",
 	"SPARKWING_TRIGGER_RUNNER",
-	"SPARKWING_WEB_INSECURE_COOKIES",
 	"SPARKWING_WINGD_VERSION",
 }
 
-// userNamedEnvReads are the reads whose variable the user names, not
-// sparkwing. Each is a family rather than a contract -- there is no fixed set
-// of names to document, because the operator invents them -- so they are
-// acknowledged here rather than demanded of the pages. Anything not listed is
-// an error: a read this check cannot see is exactly how an undocumented
-// setting stays undocumented.
 var userNamedEnvReads = map[string]string{
 	`internal/orchestrator/local_repo_resolver.go: "SPARKWING_REPO_" + envKeyForName(name)`: "one variable per repo, named after the repo",
 	"pkg/backends/backends.go: s.TokenEnv":                                                  "the backend config says which variable holds its token",
@@ -154,15 +124,6 @@ var userNamedEnvReads = map[string]string{
 	"sparkwing/source_resolver.go: key":                                                     "a secret source's configured prefix plus the secret's name",
 }
 
-// TestDocsNameEveryEnvironmentVariableTheCodeReads is the mechanical half of
-// the honesty rule applied to configuration rather than to command names: a
-// variable the binary reads and no page mentions is surface a reader cannot
-// discover without opening Go source.
-//
-// It asks the whole set rather than one page. sparkwing's variables belong to
-// different subsystems -- the runner's on self-hosting, the cache's on
-// caching -- and forcing them onto a single contracts page would mix classes
-// the set has deliberately kept apart.
 func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 	names, dynamic, err := envVarsRead("../..")
 	if err != nil {
@@ -211,15 +172,6 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 	}
 }
 
-// The check above cannot fail while the pages and the list agree, so the walk
-// and the comparison are pinned against a synthetic module. The nested-package
-// case is the one that matters: a walker that reads only the root directory's
-// .go files misses every variable an internal package reads.
-//
-// The fixture also covers what the walk must not count: another system's
-// variable is not sparkwing's contract to document, a test file's reads are
-// scaffolding, testdata is fixture material, and a directory with its own
-// go.mod is a separate module that answers for its own docs.
 func TestEnvVarWalkReadsNestedPackagesAndSkipsNestedModules(t *testing.T) {
 	root := t.TempDir()
 	write := func(rel, body string) {
@@ -255,9 +207,6 @@ func TestEnvVarWalkReadsNestedPackagesAndSkipsNestedModules(t *testing.T) {
 	}
 }
 
-// A computed name is reported rather than skipped, and reported as the
-// expression rather than as a line number, so acknowledging one in
-// userNamedEnvReads does not go stale the next time something above it moves.
 func TestEnvVarWalkReportsAComputedRead(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module fake\n\ngo 1.26\n"), 0o644); err != nil {
@@ -280,9 +229,6 @@ func TestEnvVarWalkReportsAComputedRead(t *testing.T) {
 	}
 }
 
-// Several of sparkwing's binaries read their configuration through envOr /
-// envTruthy wrappers, so a walk that only understood a direct os.Getenv would
-// see the indirection and none of the names behind it.
 func TestEnvVarWalkFollowsEnvHelpersToTheirCallSites(t *testing.T) {
 	root := t.TempDir()
 	write := func(rel, body string) {
@@ -317,14 +263,6 @@ func TestEnvVarWalkFollowsEnvHelpersToTheirCallSites(t *testing.T) {
 	}
 }
 
-// allDocsText returns the pages that describe the binary as it ships,
-// concatenated: the corpus a variable has to appear somewhere in to count as
-// documented.
-//
-// The changelog and the migration notes are left out. They mention a variable
-// on the release that introduced it, which is a record of a change rather than
-// a description of a contract -- counting them would mark every variable
-// documented forever the moment it shipped.
 func allDocsText(t *testing.T) string {
 	t.Helper()
 	var b strings.Builder
@@ -342,19 +280,6 @@ func allDocsText(t *testing.T) string {
 	return b.String()
 }
 
-// envVarsRead walks the module rooted at root and returns the envPrefix
-// environment variable names its non-test Go reads, sorted and deduplicated,
-// plus the call sites that name a variable dynamically and so cannot be
-// checked. It walks the whole tree rather than one directory, because the
-// packages behind sparkwing's several binaries read configuration just as much
-// as main does.
-//
-// A call whose argument is a package-level string constant counts as named:
-// `os.Getenv(docs.BaseURLEnvVar)` is a spelling of the literal, and a better
-// one, so treating it as unreadable would push the code away from declaring
-// its own contracts. A read of a function's own parameter is skipped for the
-// opposite reason: that is the indirection inside an env helper, not a site
-// that names anything, and its callers are where the names are.
 func envVarsRead(root string) (names, dynamic []string, err error) {
 	files, err := moduleFiles(root)
 	if err != nil {
@@ -412,9 +337,6 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 	return names, dynamic, nil
 }
 
-// moduleFiles lists the non-test Go files of the module rooted at root,
-// skipping testdata and any directory carrying its own go.mod -- a separate
-// module answers for its own docs.
 func moduleFiles(root string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -443,9 +365,6 @@ func moduleFiles(root string) ([]string, error) {
 	return out, err
 }
 
-// stringConstants maps every package-level identifier bound to a string
-// literal onto its value. A name bound to two different values anywhere in the
-// module is dropped rather than guessed at.
 func stringConstants(files map[string]*ast.File) map[string]string {
 	values := map[string]map[string]bool{}
 	for _, file := range files {
@@ -491,8 +410,6 @@ func stringConstants(files map[string]*ast.File) map[string]string {
 	return out
 }
 
-// staticString resolves an argument to the string it always is: a literal, or
-// an identifier -- bare or package-qualified -- bound to one string constant.
 func staticString(arg ast.Expr, consts map[string]string) (string, bool) {
 	switch e := arg.(type) {
 	case *ast.BasicLit:
@@ -511,7 +428,6 @@ func staticString(arg ast.Expr, consts map[string]string) (string, bool) {
 	return "", false
 }
 
-// isEnvRead reports whether an expression is os.Getenv or os.LookupEnv.
 func isEnvRead(fun ast.Expr) bool {
 	sel, ok := fun.(*ast.SelectorExpr)
 	if !ok {
@@ -524,9 +440,6 @@ func isEnvRead(fun ast.Expr) bool {
 	return sel.Sel.Name == "Getenv" || sel.Sel.Name == "LookupEnv"
 }
 
-// envReadArg reports which argument of a call names an environment variable:
-// argument 0 of os.Getenv / os.LookupEnv, or the parameter a local helper
-// forwards to them.
 func envReadArg(fun ast.Expr, helpers map[string]int) (int, bool) {
 	if isEnvRead(fun) {
 		return 0, true
@@ -542,10 +455,6 @@ func envReadArg(fun ast.Expr, helpers map[string]int) (int, bool) {
 	return 0, false
 }
 
-// envHelpers finds the functions that exist only to wrap an environment read
-// -- envOr, envTruthy, ResolveDevEnvURL -- and returns the parameter each one
-// forwards. Without this the walk sees `os.Getenv(name)` inside the helper and
-// nothing at all at the call sites, which is where the names actually are.
 func envHelpers(files map[string]*ast.File) map[string]int {
 	out := map[string]int{}
 	for _, file := range files {
@@ -581,14 +490,6 @@ func envHelpers(files map[string]*ast.File) map[string]int {
 	return out
 }
 
-// forwardedReads returns the positions of the env reads that read one of their
-// own function's parameters. Those are the indirection inside an env helper
-// rather than a site that names a variable, and reporting them would bury the
-// call sites that do name one.
-//
-// The enclosing function is found structurally rather than by resolving the
-// identifier, because identifier resolution without type information is
-// unreliable enough that go/ast deprecated the field that offers it.
 func forwardedReads(files map[string]*ast.File) map[token.Pos]bool {
 	out := map[token.Pos]bool{}
 	for _, file := range files {
@@ -623,7 +524,6 @@ func forwardedReads(files map[string]*ast.File) map[token.Pos]bool {
 	return out
 }
 
-// paramNames returns a function's parameter names.
 func paramNames(ftype *ast.FuncType) map[string]bool {
 	out := map[string]bool{}
 	if ftype == nil || ftype.Params == nil {
@@ -637,8 +537,6 @@ func paramNames(ftype *ast.FuncType) map[string]bool {
 	return out
 }
 
-// exprText renders an expression back to source so a dynamic read is reported
-// as what it reads rather than as a line number that moves with every edit.
 func exprText(fset *token.FileSet, e ast.Expr) string {
 	var b strings.Builder
 	if err := printer.Fprint(&b, fset, e); err != nil {

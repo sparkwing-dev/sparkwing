@@ -11,9 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// cgroupFixture lays a minimal cgroup v2 tree under a fresh root with the
-// given cpu.max body, and returns the root plus the cpu.max path so a test can
-// rewrite the quota mid-run to simulate an instance resize.
 func cgroupFixture(t *testing.T, cpuMaxBody string) (root, cpuMaxPath string) {
 	t.Helper()
 	root = t.TempDir()
@@ -72,10 +69,6 @@ func waitForCapacity(t *testing.T, home string, want float64) {
 	}
 }
 
-// TestCapacity_CgroupGrowFlipIsPickedUp proves capacity is a living value: a
-// daemon started under a 4-core cgroup quota re-derives its capacity when the
-// quota is raised to 8 cores mid-run, without a restart, and records the shift
-// for the queue header.
 func TestCapacity_CgroupGrowFlipIsPickedUp(t *testing.T) {
 	root, cpuMax := cgroupFixture(t, "400000 100000")
 	home := shortHome(t)
@@ -102,10 +95,6 @@ func TestCapacity_CgroupGrowFlipIsPickedUp(t *testing.T) {
 	}
 }
 
-// TestCapacity_ShrinkNeverEvictsHolder proves a mid-run shrink drains rather
-// than evicts: when the cgroup quota drops below what a holder already holds,
-// the holder keeps its lease and the ledger total is floored at the granted
-// amount instead of resizing under the running work.
 func TestCapacity_ShrinkNeverEvictsHolder(t *testing.T) {
 	root, cpuMax := cgroupFixture(t, "800000 100000")
 	home := shortHome(t)

@@ -1,12 +1,5 @@
 "use client";
 
-// PipelineOverview: the "by pipeline" pivot of run history.
-//
-// Lists every pipeline discovered from /api/v1/pipelines and annotates
-// it with recent-run stats from /api/runs. Same-name pipelines in
-// different repos render as separate rows (key = repo/pipeline). Click
-// a row to expand recent runs + trigger form. Used as a tab on /runs
-// and as the body of /pipeline-overview (which is a redirect alias).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -38,16 +31,14 @@ import {
   fmtFullDate,
   fmtMs,
 } from "@/lib/timeFormat";
+import { useCurrentTime } from "@/lib/useCurrentTime";
+import { deferOnce, scheduleMicrotask } from "@/lib/deferredOnce";
 
 const POLL_MS = 5000;
 const RUNS_WINDOW = 200;
 const SPARK_SIZE = 30;
 
 interface PipelineRow {
-  // Composite identity: `repo/pipeline` when run history attaches a
-  // repo, bare pipeline name for registry-only entries. Used as the
-  // expand/trigger state key so two pipelines that share a name across
-  // different repos don't collide.
   key: string;
   pipeline: string;
   repo: string | null;
@@ -104,9 +95,6 @@ function buildRows(
     });
   }
 
-  // Registry-only rows: pipelines registered in pipelines.yaml that
-  // haven't been run yet in any repo we've seen. The registry doesn't
-  // carry repo info, so these render with no repo prefix.
   const seenPipelines = new Set(
     Array.from(runsByKey.values()).map((v) => v.pipeline),
   );
@@ -149,8 +137,6 @@ export default function PipelineOverview({
   const searchParams = useSearchParams();
   const router = useRouter();
   const selectedRun = searchParams.get("run");
-  // Expanded card keys live in the URL so deep links + reloads
-  // restore the same view. Local mirror keeps interactions snappy.
   const expandedFromUrl = useMemo(() => {
     const raw = searchParams.get("exp");
     if (!raw) return new Set<string>();
@@ -170,10 +156,6 @@ export default function PipelineOverview({
     const qs = params.toString();
     router.replace(qs ? `/runs?${qs}` : "/runs", { scroll: false });
   }, [expanded, searchParams, router]);
-  // Click on a run in the by-pipeline view jumps to the Activity
-  // pivot with that run selected so the user can dive into the detail
-  // panel + scroll context. The runs page picks the row id up from
-  // the URL and scrolls it into view on mount.
   const openRunInActivity = useCallback(
     (id: string) => {
       const params = new URLSearchParams(searchParams.toString());
@@ -185,9 +167,6 @@ export default function PipelineOverview({
     [router, searchParams],
   );
 
-  // toggleRunHighlight just flips the ?run= param without changing
-  // pivot, so the user can click blank space on a row to mark it as
-  // the focused run and click again to clear.
   const toggleRunHighlight = useCallback(
     (id: string) => {
       const params = new URLSearchParams(searchParams.toString());
@@ -210,15 +189,19 @@ export default function PipelineOverview({
   }, []);
 
   useEffect(() => {
-    refresh();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refresh();
+    });
     const i = window.setInterval(() => {
       if (!document.hidden) refresh();
     }, POLL_MS);
-    return () => window.clearInterval(i);
+    return () => {
+      cancelled = true;
+      window.clearInterval(i);
+    };
   }, [refresh]);
 
-  // Filter the underlying runs first, then build rows from what's
-  // left so per-pipeline stats reflect only matching runs.
   const filteredRuns = useMemo(
     () => runs.filter((r) => runMatchesFilter(r, filterState, registry)),
     [runs, filterState, registry],
@@ -229,26 +212,30 @@ export default function PipelineOverview({
     [registry, filteredRuns],
   );
 
-  // Auto-expand the row containing the selected run on entry / when
-  // the selection changes. Only fires once per selectedRun value so
-  // poll-driven row rebuilds don't re-open a card the user closed.
   const autoExpandedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedRun) return;
-    if (autoExpandedForRef.current === selectedRun) return;
+    if (!selectedRun) {
+      autoExpandedForRef.current = null;
+      return;
+    }
     const row = rows.find((r) => r.runs.some((rr) => rr.id === selectedRun));
     if (!row) return;
-    autoExpandedForRef.current = selectedRun;
-    setExpanded((cur) => {
-      if (cur.has(row.key)) return cur;
-      const next = new Set(cur);
-      next.add(row.key);
-      return next;
-    });
+    return deferOnce(
+      autoExpandedForRef,
+      selectedRun,
+      scheduleMicrotask,
+      () => {
+        setExpanded((cur) => {
+          if (cur.has(row.key)) return cur;
+          const next = new Set(cur);
+          next.add(row.key);
+          return next;
+        });
+        return true;
+      },
+    );
   }, [selectedRun, rows]);
 
-  // Scroll the selected run into view once the row is expanded and
-  // rendered. Tracked per-id so polls don't keep re-scrolling.
   const scrolledForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedRun) return;
@@ -606,7 +593,6 @@ function PipelineCard({
 }
 
 function Sparkline({ runs }: { runs: Run[] }) {
-  // Oldest-left, newest-right so new-runs-arrive animates from the right.
   const ordered = [...runs].reverse();
   const filler = Math.max(0, SPARK_SIZE - ordered.length);
   return (
@@ -861,9 +847,10 @@ function RunTimestampBlock({ run }: { run: Run }) {
 }
 
 function RunDurationCell({ run }: { run: Run }) {
+  const now = useCurrentTime(!run.finished_at);
   const startedMs = new Date(run.started_at).getTime();
   const finishedMs = run.finished_at ? new Date(run.finished_at).getTime() : 0;
-  const elapsedMs = (finishedMs || Date.now()) - startedMs;
+  const elapsedMs = (finishedMs || now) - startedMs;
   if (elapsedMs <= 0) return <span />;
   return (
     <Tooltip
@@ -878,32 +865,6 @@ function RunDurationCell({ run }: { run: Run }) {
       </span>
     </Tooltip>
   );
-}
-
-function StatusPill({ status }: { status: string }) {
-  const cls = statusClass(status);
-  return (
-    <span
-      className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold uppercase ${cls}`}
-    >
-      {status}
-    </span>
-  );
-}
-
-function statusClass(status: string): string {
-  switch (status) {
-    case "success":
-      return "bg-green-500/15 text-green-400";
-    case "failed":
-      return "bg-red-500/15 text-red-400";
-    case "running":
-      return "bg-indigo-500/15 text-indigo-400";
-    case "cancelled":
-      return "bg-amber-500/15 text-amber-400";
-    default:
-      return "bg-[var(--background)] text-[var(--muted)]";
-  }
 }
 
 function KV({
@@ -979,12 +940,8 @@ function Footer() {
 }
 
 function TimeAgo({ ts }: { ts: string }) {
-  const [, force] = useState(0);
-  useEffect(() => {
-    const i = setInterval(() => force((x) => x + 1), 1000);
-    return () => clearInterval(i);
-  }, []);
-  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  const now = useCurrentTime();
+  const sec = Math.floor((now - new Date(ts).getTime()) / 1000);
   if (sec < 60) return <span>{sec}s ago</span>;
   if (sec < 3600) return <span>{Math.floor(sec / 60)}m ago</span>;
   if (sec < 86_400) return <span>{Math.floor(sec / 3600)}h ago</span>;

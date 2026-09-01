@@ -8,12 +8,9 @@ import {
 } from "@/lib/api";
 
 export default function ConnectionBanner() {
-  const [status, setStatus] = useState<ConnectionStatus>("ok");
+  const [status, setStatus] = useState<ConnectionStatus>(getConnectionStatus);
 
-  useEffect(() => {
-    setStatus(getConnectionStatus());
-    return onConnectionStatusChange(setStatus);
-  }, []);
+  useEffect(() => onConnectionStatusChange(setStatus), []);
 
   if (status === "ok") return null;
 

@@ -8,13 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// ReflectSecretsField returns the SecretsField a pipeline declares
-// via its Secrets() provider, reflecting on the returned struct's
-// `sw:"NAME,required|optional"` tags. Returns nil when the pipeline
-// doesn't implement SecretsProvider or the provider returns nil.
-//
-// Required defaults to true when neither flag is set, matching the
-// historical declaration semantics.
 func ReflectSecretsField(reg *sparkwing.Registration) pipelines.SecretsField {
 	if reg == nil {
 		return nil

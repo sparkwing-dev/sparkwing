@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// TestObserveClaimOutcome verifies the claim counter exposes the
-// three outcome values we care about (claimed, empty, error) on
-// /metrics after each is called.
 func TestObserveClaimOutcome(t *testing.T) {
 	observeClaimOutcome("claimed")
 	observeClaimOutcome("empty")
@@ -31,8 +28,6 @@ func TestObserveClaimOutcome(t *testing.T) {
 	}
 }
 
-// TestObserveNodeExecution verifies the histogram emits a count row
-// with the pipeline + outcome labels after a single observation.
 func TestObserveNodeExecution(t *testing.T) {
 	const prefix = `sparkwing_node_execution_seconds_count{outcome="Success",pipeline="prom-exec-pipeline"}`
 	before := metricSampleValue(t, gatherMetrics(t), prefix)
@@ -59,10 +54,6 @@ func metricSampleValue(t *testing.T, body, prefix string) float64 {
 	return 0
 }
 
-// TestObserveNodeExecution_SkipsEmpty guards against accidental
-// unlabelled observations (empty pipeline or outcome would produce a
-// high-cardinality "" label row which the cardinality guard below
-// rejects).
 func TestObserveNodeExecution_SkipsEmpty(t *testing.T) {
 	observeNodeExecution("", "Success", 1*time.Second)
 	observeNodeExecution("some-pipeline", "", 1*time.Second)
@@ -75,9 +66,6 @@ func TestObserveNodeExecution_SkipsEmpty(t *testing.T) {
 	}
 }
 
-// TestStartMetricsListener_ServesMetrics binds the listener on an
-// ephemeral port, hits /metrics, asserts 200 + sparkwing_ prefix, and
-// relies on ctx-cancel to shut it down.
 func TestStartMetricsListener_ServesMetrics(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -117,9 +105,6 @@ func TestStartMetricsListener_ServesMetrics(t *testing.T) {
 	}
 }
 
-// TestStartMetricsListener_EmptyAddrNoOps guards the short-circuit
-// branch: empty --metrics-addr should return nil immediately with no
-// listener bound.
 func TestStartMetricsListener_EmptyAddrNoOps(t *testing.T) {
 	err := StartMetricsListener(context.Background(), "", nil)
 	if err != nil {
@@ -127,9 +112,6 @@ func TestStartMetricsListener_EmptyAddrNoOps(t *testing.T) {
 	}
 }
 
-// gatherMetrics opens an ephemeral /metrics listener against the
-// package registry, reads the body, and returns the text. Simpler
-// than round-tripping through a full httptest.Server.
 func gatherMetrics(t *testing.T) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

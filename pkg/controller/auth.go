@@ -46,10 +46,6 @@ const (
 	ScopeAdmin          = "admin"
 )
 
-// allScopes is the canonical set of scope names the controller
-// honors, and the allowlist token creation validates against. A new
-// Scope* constant belongs in this list; there is no second copy to
-// keep in sync.
 var allScopes = []string{
 	ScopeRunsRead,
 	ScopeRunsWrite,
@@ -61,13 +57,6 @@ var allScopes = []string{
 	ScopeAdmin,
 }
 
-// validateScopes rejects requested scopes the controller does not
-// honor, naming the offenders and the full valid set. A scope the
-// controller has never heard of would mint a token that authenticates
-// and then fails every scope check, so it is a creation-time error.
-// Surrounding whitespace and blank entries are tolerated because the
-// store drops them on write. An empty request is valid: a scopeless
-// token is a legal, if inert, credential.
 func validateScopes(scopes []string) error {
 	var unknown []string
 	for _, s := range scopes {
@@ -90,9 +79,6 @@ func validateScopes(scopes []string) error {
 	)
 }
 
-// quoteScopes renders scope names quoted and comma-separated so
-// stray whitespace or punctuation in an offender is visible in the
-// error message.
 func quoteScopes(scopes []string) string {
 	out := make([]string, 0, len(scopes))
 	for _, s := range scopes {
@@ -107,7 +93,7 @@ func quoteScopes(scopes []string) string {
 // lookups cheap.
 type Authenticator struct {
 	store    *store.Store
-	cache    sync.Map // map[string]*authCacheEntry
+	cache    sync.Map
 	cacheTTL time.Duration
 	now      func() time.Time
 }
@@ -223,8 +209,6 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// extractBearer pulls the token out of the Authorization header.
-// Returns a sanitizable error (no token content leaks).
 func extractBearer(r *http.Request) (string, error) {
 	h := r.Header.Get("Authorization")
 	const prefix = "Bearer "
@@ -234,10 +218,6 @@ func extractBearer(r *http.Request) (string, error) {
 	return strings.TrimSpace(strings.TrimPrefix(h, prefix)), nil
 }
 
-// requireScope wraps a handler so it only runs when the request-
-// context principal carries the named scope. The `admin` scope is an
-// implicit superset. When the Authenticator is disabled, requireScope
-// short-circuits to pass-through.
 func requireScope(scope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := PrincipalFromContext(r.Context())
@@ -258,8 +238,6 @@ func requireScope(scope string, next http.Handler) http.Handler {
 	})
 }
 
-// label renders the principal as "<kind>:<name>" for the
-// auth-error response body.
 func (p *Principal) label() string {
 	if p == nil {
 		return ""
@@ -270,10 +248,6 @@ func (p *Principal) label() string {
 	return p.Kind + ":" + p.Name
 }
 
-// authErrorBody is the wire shape for 401/403 responses
-// emitted by the controller's auth middleware. Mirrors the
-// logs.AuthErrorBody fields so a single client-side parser handles
-// either origin without a string match on the human message.
 type authErrorBody struct {
 	Code         string `json:"error"`
 	MissingScope string `json:"missing_scope,omitempty"`

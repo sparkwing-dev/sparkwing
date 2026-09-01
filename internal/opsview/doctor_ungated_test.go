@@ -27,8 +27,6 @@ func ungatedReport() opsview.DoctorReport {
 	}
 }
 
-// Which repos git gates is machine configuration, not this home's state, so
-// it must not decide a home's verdict the way an orphaned run does.
 func TestDoctorReport_UngatedReposDoNotDecideCleanliness(t *testing.T) {
 	if !ungatedReport().Clean() {
 		t.Fatal("a home with nothing to repair reported unclean because another checkout is ungated")
@@ -48,8 +46,6 @@ func TestRenderDoctorPretty_NamesEachUngatedRepoAndItsFix(t *testing.T) {
 	}
 }
 
-// A doctor run with nothing to repair is exactly where an ungated repo would
-// otherwise go unmentioned.
 func TestRenderDoctorPretty_ReportsUngatedReposOnTheHealthyPath(t *testing.T) {
 	var buf bytes.Buffer
 	if err := opsview.RenderDoctor(&buf, ungatedReport(), "", ""); err != nil {
@@ -64,8 +60,6 @@ func TestRenderDoctorPretty_ReportsUngatedReposOnTheHealthyPath(t *testing.T) {
 	}
 }
 
-// The checkout doctor was run from is already described in full under
-// shadowed_hooks; repeating it under the fleet heading reads as two findings.
 func TestRenderDoctorPretty_DoesNotRepeatTheCheckoutShadowedHooksDescribes(t *testing.T) {
 	r := ungatedReport()
 	r.ShadowedHooks = &githooks.Shadow{
@@ -115,9 +109,6 @@ func TestRenderDoctorPretty_SaysNothingAboutGatesWhenEveryRepoIsArmed(t *testing
 	}
 }
 
-// A surveyed fleet with nothing ungated has to say so. Silence would be
-// identical to the output of a build that never ran the survey, and a reader
-// looking for problems finds none either way -- the false all-clear.
 func TestRenderDoctorPretty_StatesTheCleanGateVerdictRatherThanImplyingIt(t *testing.T) {
 	var buf bytes.Buffer
 	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{GatesSurveyed: 3}, "", ""); err != nil {
@@ -128,8 +119,6 @@ func TestRenderDoctorPretty_StatesTheCleanGateVerdictRatherThanImplyingIt(t *tes
 	}
 }
 
-// The negative control for the line above: a report that never surveyed the
-// fleet must not claim a clean one.
 func TestRenderDoctorPretty_ClaimsNoGateVerdictWhenNothingWasSurveyed(t *testing.T) {
 	var buf bytes.Buffer
 	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "", ""); err != nil {
@@ -140,9 +129,6 @@ func TestRenderDoctorPretty_ClaimsNoGateVerdictWhenNothingWasSurveyed(t *testing
 	}
 }
 
-// The other negative control: a survey that could not run at all must read
-// nothing like a fleet whose gates all fire. Both leave UngatedRepos empty, so
-// without the reason the two machines render the same clean bill.
 func TestRenderDoctorPretty_AnUnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T) {
 	var gated, blind bytes.Buffer
 	if err := opsview.RenderDoctor(&gated, opsview.DoctorReport{GatesSurveyed: 3}, "", ""); err != nil {
@@ -182,9 +168,6 @@ func TestRenderDoctorPlain_FlagsAGateSurveyThatDidNotRun(t *testing.T) {
 	}
 }
 
-// The count is the field that says the question was asked, so it has to be in
-// the JSON whatever its value -- an omitted zero reads as a build that cannot
-// survey, which is the distinction the field exists to draw.
 func TestRenderDoctorJSON_AlwaysCarriesTheSurveyedGateCount(t *testing.T) {
 	var buf bytes.Buffer
 	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "json", ""); err != nil {

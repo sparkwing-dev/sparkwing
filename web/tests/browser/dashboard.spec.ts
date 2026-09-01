@@ -216,6 +216,61 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
   });
 }
 
+async function openCollapsedLogFocus(
+  page: Page,
+  stepID: string | null,
+): Promise<void> {
+  await page.addInitScript(() => {
+    const targetWindow = window as typeof window & {
+      __SPARKWING_TEST_SCROLLED_LINES__?: string[];
+    };
+    targetWindow.__SPARKWING_TEST_SCROLLED_LINES__ = [];
+    HTMLElement.prototype.scrollIntoView = function () {
+      const line = this.dataset.line;
+      if (line) targetWindow.__SPARKWING_TEST_SCROLLED_LINES__?.push(line);
+    };
+  });
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto("/runs");
+  await expect(
+    page.locator(`[data-run-id="${finishedRun.id}"]`),
+  ).toBeVisible();
+  await page.evaluate(
+    ({ focusStep }) => {
+      sessionStorage.setItem(
+        "sparkwing.searchResultFocus",
+        JSON.stringify({ nodeID: "verify", stepID: focusStep, line: 2 }),
+      );
+    },
+    { focusStep: stepID },
+  );
+  await page.goto(`/runs?run=${finishedRun.id}&node=verify`);
+}
+
+async function expectExactLineFocus(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Logs", exact: true }).click();
+  await expect(
+    page
+      .locator('[data-step-id="tests"]')
+      .getByText("PASS dashboard smoke", { exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & {
+              __SPARKWING_TEST_SCROLLED_LINES__?: string[];
+            }
+          ).__SPARKWING_TEST_SCROLLED_LINES__ ?? [],
+      ),
+    )
+    .toContain("2");
+}
+
 test("renders the empty production dashboard and passes accessibility smoke", async ({
   page,
 }) => {
@@ -275,6 +330,87 @@ test("opens a completed run and renders stored node logs", async ({ page }) => {
   await expect(
     page.getByText("PREAMBLE stays outside the tests step", { exact: true }),
   ).toBeVisible();
+});
+
+test("opens a selected DAG step when logs mount", async ({ page }) => {
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+
+  await page.locator('[data-node-id="verify"]').first().click();
+  await page.getByRole("button", { name: /^DAG/ }).click();
+  const dagStep = page.locator('[data-step-id="tests"]');
+  await expect(dagStep).toBeVisible();
+  await dagStep.click();
+  await page.getByRole("button", { name: "Logs", exact: true }).click();
+
+  await expect(
+    page
+      .locator('[data-step-id="tests"]')
+      .getByText("PASS dashboard smoke", { exact: true }),
+  ).toBeVisible();
+});
+
+test("focuses an exact line after expanding its selected step", async ({
+  page,
+}) => {
+  await openCollapsedLogFocus(page, "tests");
+  await expectExactLineFocus(page);
+});
+
+test("focuses an exact line without a selected step", async ({ page }) => {
+  await openCollapsedLogFocus(page, null);
+  await expectExactLineFocus(page);
+});
+
+test("memoized run pills follow URL filter state and toggle from it", async ({
+  page,
+}) => {
+  await installMockAPI(page, { runs: [finishedRun] });
+  await page.goto("/runs");
+
+  const row = page.locator(`[data-run-id="${finishedRun.id}"]`);
+  const pipelinePill = row
+    .locator("span.cursor-pointer")
+    .filter({ hasText: finishedRun.pipeline });
+  await expect(pipelinePill).not.toHaveClass(/decoration-2/);
+
+  await pipelinePill.click();
+  await page
+    .getByRole("button", {
+      name: `+ filter to ${finishedRun.pipeline}`,
+      exact: true,
+    })
+    .click();
+  await expect(page).toHaveURL(/(?:\?|&)pipeline=deploy-production(?:&|$)/);
+  await expect(pipelinePill).toHaveClass(/decoration-2/);
+
+  await pipelinePill.click();
+  await page
+    .getByRole("button", {
+      name: `✓ included ${finishedRun.pipeline}`,
+      exact: true,
+    })
+    .click();
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("pipeline"))
+    .toBeNull();
+  await expect(pipelinePill).not.toHaveClass(/decoration-2/);
+});
+
+test("auto-expands the pipeline that owns a selected run", async ({ page }) => {
+  await installMockAPI(page, { runs: [finishedRun] });
+  await page.goto(`/runs?view=pipelines&run=${finishedRun.id}`);
+
+  await expect(page.getByRole("heading", { name: "Pipelines" })).toBeVisible();
+  await expect(
+    page.locator(`[data-run-id="${finishedRun.id}"]`),
+  ).toBeVisible();
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("exp"))
+    .toBe("sparkwing/deploy-production");
 });
 
 test("renders live structured node logs", async ({ page }) => {

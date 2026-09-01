@@ -8,9 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestFormatPlain_IncludesStepWhenSet pins the dashboard-style
-// `node/step` prefix on plain log output so agents can group by step
-// without parsing body lines.
 func TestFormatPlain_IncludesStepWhenSet(t *testing.T) {
 	ts := time.Date(2026, 5, 12, 14, 0, 0, 0, time.UTC)
 	rec := sparkwing.LogRecord{
@@ -26,8 +23,6 @@ func TestFormatPlain_IncludesStepWhenSet(t *testing.T) {
 	}
 }
 
-// TestFormatPlain_NodeOnlyWhenNoStep keeps the legacy "node " prefix
-// (no trailing slash) when a record carries no step id.
 func TestFormatPlain_NodeOnlyWhenNoStep(t *testing.T) {
 	ts := time.Date(2026, 5, 12, 14, 0, 0, 0, time.UTC)
 	rec := sparkwing.LogRecord{

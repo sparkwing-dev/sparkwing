@@ -8,12 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestCreateRun_InvocationRoundTrip verifies the Invocation snapshot
-// (the "how was this started" map -- flags, args, binary_source, cwd,
-// reproducer, hashes) survives a CreateRun -> GetRun roundtrip with
-// the same shape it went in. The snapshot is a free-form map[string]any
-// so adding a new field upstream doesn't require touching the store --
-// this test guards the round-trip itself, not the field set.
 func TestCreateRun_InvocationRoundTrip(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
@@ -74,11 +68,6 @@ func TestCreateRun_InvocationRoundTrip(t *testing.T) {
 	}
 }
 
-// TestCreateRun_NoInvocationLeavesColumnNil checks that a run created
-// without an invocation snapshot reads back with Invocation == nil --
-// not an empty map -- so callers can distinguish "no snapshot taken"
-// from "snapshot present but empty". Pre-migration rows hit the same
-// path.
 func TestCreateRun_NoInvocationLeavesColumnNil(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()

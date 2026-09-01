@@ -30,8 +30,7 @@ func TestBuildRunInvocation_LogPathFromLocalLogBackend(t *testing.T) {
 	if !filepath.IsAbs(got) {
 		t.Errorf("log_path = %q, want an absolute path", got)
 	}
-	// The envelope and node logs must live under the advertised
-	// directory; that is the whole point of publishing it.
+
 	if d := filepath.Dir(p.EnvelopeLog("run-1")); d != got {
 		t.Errorf("envelope log lives in %q, log_path says %q", d, got)
 	}
@@ -45,9 +44,6 @@ func TestBuildRunInvocation_LogPathFromLocalLogBackend(t *testing.T) {
 	}
 }
 
-// A pointer receiver reaches the same Paths as the value form; the
-// switch in localRunLogDir must keep answering for both so a future
-// decorator author has a case to copy.
 func TestLocalRunLogDir_PointerBackend(t *testing.T) {
 	p := Paths{Root: t.TempDir()}
 	if got, want := localRunLogDir(&localLogs{paths: p}, "run-1"), p.RunDir("run-1"); got != want {
@@ -55,10 +51,6 @@ func TestLocalRunLogDir_PointerBackend(t *testing.T) {
 	}
 }
 
-// SPARKWING_HOME may be relative ("SPARKWING_HOME=.sparkwing sparkwing
-// run ..."). A relative log_path is useless to a reader that does not
-// share the writer's working directory, so the recorded value is
-// absolute regardless.
 func TestLocalRunLogDir_RelativeHomeRecordsAbsolutePath(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
@@ -84,11 +76,6 @@ func TestLocalRunLogDir_RelativeHomeRecordsAbsolutePath(t *testing.T) {
 	}
 }
 
-// `logs: {type: filesystem}` writes node logs to local disk just as
-// surely as the default localLogs backend does; it simply arrives
-// through HTTPLogs wrapping a storage.LogStore. Reporting no log_path
-// for those runs sent every reader scraping the stream for output that
-// was sitting on their own disk the whole time.
 func TestLogPath_FilesystemLogsStoreIsRecorded(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "logroot")
 	store, err := fs.NewLogStore(root)
@@ -108,10 +95,6 @@ func TestLogPath_FilesystemLogsStoreIsRecorded(t *testing.T) {
 	}
 }
 
-// The recorded directory has to be the one the store actually writes
-// into. The probe reproduces fs.LogStore's layout rather than asking
-// it, so this is the test that keeps the two from drifting apart into
-// a truthfully-existing but permanently empty directory.
 func TestLogPath_FilesystemLogsStoreMatchesWhereItWrites(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "logroot")
 	store, err := fs.NewLogStore(root)
@@ -142,9 +125,6 @@ func TestLogPath_FilesystemLogsStoreMatchesWhereItWrites(t *testing.T) {
 	}
 }
 
-// A run id that the store itself would refuse cannot be advertised as
-// a directory either -- the probe must not create a path outside the
-// store's root.
 func TestLogPath_FilesystemLogsStoreRejectsUnsafeRunID(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "logroot")
 	store, err := fs.NewLogStore(root)
@@ -177,8 +157,6 @@ func TestLocalRunLogDir_NonLocalBackendsReportNothing(t *testing.T) {
 	}
 }
 
-// An unwritable root cannot hold a run directory, so there is nothing
-// truthful to advertise.
 func TestLocalRunLogDir_UnwritableRootReportsNothing(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
@@ -192,11 +170,6 @@ func TestLocalRunLogDir_UnwritableRootReportsNothing(t *testing.T) {
 	}
 }
 
-// The worker and local-trigger paths call Run() directly, so nothing
-// has called EnsureRunDir by the time the invocation is built. A run
-// that then dies during planning never opens a node log either, which
-// is exactly the case where naming an uncreated directory would be a
-// lie. Whenever log_path is recorded, the directory exists.
 func TestRun_PlanFailureRecordsLogPathThatExists(t *testing.T) {
 	ctx := context.Background()
 	p := Paths{Root: t.TempDir()}
@@ -209,8 +182,6 @@ func TestRun_PlanFailureRecordsLogPathThatExists(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	// --start-at names a step that does not exist: the run is created,
-	// then fails validation before any node dispatches.
 	res, err := Run(ctx, LocalBackends(p, st, nil), Options{
 		Pipeline: "orch-ok",
 		StartAt:  "no-such-step",
@@ -240,9 +211,7 @@ func TestRun_PlanFailureRecordsLogPathThatExists(t *testing.T) {
 	if want := p.RunDir(res.RunID); got != want {
 		t.Errorf("log_path = %q, want %q", got, want)
 	}
-	// Nothing ran, so the directory is empty -- it exists because the
-	// invocation build ensured it, not because a node happened to open
-	// a log in it.
+
 	entries, err := os.ReadDir(got)
 	if err != nil {
 		t.Fatalf("read run dir: %v", err)

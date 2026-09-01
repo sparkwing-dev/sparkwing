@@ -1,8 +1,3 @@
-// `sparkwing runs timeline` -- ASCII waterfall of a run's nodes and
-// (optionally) inner steps, laid out along the run's wall-clock
-// span. Mirrors the dashboard's Timeline tab so an agent reading
-// run output through a terminal can reason about parallelism and
-// the critical path without correlating logs by hand.
 package orchestrator
 
 import (
@@ -18,16 +13,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TimelineOpts configures `runs timeline`.
 type TimelineOpts struct {
-	Width        int  // bar width in characters; <=0 picks a default
-	IncludeSteps bool // also render per-step rows under each node
+	Width        int
+	IncludeSteps bool
 	JSON         bool
 }
 
-// TimelineRow is one row in the JSON output. Kind is "node" or
-// "step"; for step rows NodeID is the parent node and StepID is
-// the inner id.
 type TimelineRow struct {
 	Kind          string `json:"kind"`
 	NodeID        string `json:"node_id"`
@@ -37,8 +28,6 @@ type TimelineRow struct {
 	Status        string `json:"status,omitempty"`
 }
 
-// RunTimeline assembles + renders the waterfall for runID. Local
-// mode; reads the SQLite store directly.
 func RunTimeline(ctx context.Context, paths Paths, runID string, opts TimelineOpts, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -60,7 +49,6 @@ func RunTimeline(ctx context.Context, paths Paths, runID string, opts TimelineOp
 	return renderTimeline(run, nodes, steps, opts, out)
 }
 
-// RunTimelineRemote is the cluster-mode counterpart.
 func RunTimelineRemote(ctx context.Context, controllerURL, token, runID string, opts TimelineOpts, out io.Writer) error {
 	if controllerURL == "" {
 		return errors.New("RunTimelineRemote: controller URL required")
@@ -78,8 +66,6 @@ func RunTimelineRemote(ctx context.Context, controllerURL, token, runID string, 
 	return renderTimeline(run, nodes, steps, opts, out)
 }
 
-// renderTimeline does the actual waterfall layout. Pure (no I/O
-// beyond writing to out) so it's straightforward to unit test.
 func renderTimeline(run *store.Run, nodes []*store.Node, steps []*store.NodeStep, opts TimelineOpts, out io.Writer) error {
 	if opts.Width <= 0 {
 		opts.Width = 60
@@ -133,9 +119,6 @@ func renderTimeline(run *store.Run, nodes []*store.Node, steps []*store.NodeStep
 	return nil
 }
 
-// buildTimelineRows produces one row per node plus, when
-// includeSteps, one row per step nested under its node. Step rows
-// inherit the node's row by being printed immediately after.
 func buildTimelineRows(runStart time.Time, span time.Duration, nodes []*store.Node, steps []*store.NodeStep, includeSteps bool) []TimelineRow {
 	byNode := map[string][]*store.NodeStep{}
 	for _, s := range steps {
@@ -164,8 +147,6 @@ func buildTimelineRows(runStart time.Time, span time.Duration, nodes []*store.No
 	return rows
 }
 
-// offsetWindow converts a (started, finished) pair to ms-offsets
-// from runStart. nil started -> 0; nil finished -> end-of-span.
 func offsetWindow(runStart time.Time, span time.Duration, started, finished *time.Time) (int64, int64) {
 	var startMS, endMS int64
 	if started != nil {
@@ -207,8 +188,6 @@ func formatOffsetMS(ms int64) string {
 	return fmt.Sprintf("%02d:%02d", mins, secs)
 }
 
-// waterfallBar renders the bar segment for [startMS, endMS] inside
-// a span of totalMS, using width characters total.
 func waterfallBar(startMS, endMS, totalMS int64, width int) string {
 	if totalMS <= 0 || width <= 0 {
 		return strings.Repeat(" ", width)

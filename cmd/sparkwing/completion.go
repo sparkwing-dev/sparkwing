@@ -1,6 +1,3 @@
-// Shell-completion script emitter. All behavior is driven off
-// help_registry.go so tab completion and --help describe the same
-// command tree; new commands are picked up automatically.
 package main
 
 import (
@@ -108,9 +105,6 @@ func runInternalCompletePipelines(_ []string) error {
 	return nil
 }
 
-// runInternalCompleteFlags emits "--flag\tDescription" per flag for
-// the leaf at the given argv path. Walks longest prefix to shortest
-// so multi-word leaves win.
 func runInternalCompleteFlags(args []string) error {
 	if len(args) == 0 {
 		return nil
@@ -132,11 +126,6 @@ func runInternalCompleteFlags(args []string) error {
 	return nil
 }
 
-// requirementTag returns a leading "[required]/[conditional]/[optional]"
-// marker, with an "arg, " prefix when the flag is defined by a pipeline
-// author (so operators can tell pipeline-defined flags from sparkwing's
-// own at a glance). Plain text -- ANSI in compadd descriptions
-// corrupts zsh redraws.
 func requirementTag(required bool, requiredWhen string, pipelineArg bool) string {
 	var req string
 	switch {
@@ -153,8 +142,6 @@ func requirementTag(required bool, requiredWhen string, pipelineArg bool) string
 	return "[" + req + "] "
 }
 
-// runInternalCompletePipelineFlags emits typed flags for one pipeline
-// from the describe cache. Silent on cache miss; caller falls back.
 func runInternalCompletePipelineFlags(args []string) error {
 	if len(args) != 1 {
 		return nil
@@ -184,8 +171,6 @@ func runInternalCompletePipelineFlags(args []string) error {
 	return nil
 }
 
-// walkUpForSparkwing mirrors findSparkwingDir with bool-not-error
-// return so completion can silently fall through.
 func walkUpForSparkwing(start string) (string, bool) {
 	dir := start
 	for {
@@ -211,8 +196,6 @@ func walkUpForSparkwing(start string) (string, bool) {
 	}
 }
 
-// runInternalCompleteHint emits "placeholder\trequirement\tdescription"
-// for the next positional. Empty output = nothing to hint.
 func runInternalCompleteHint(args []string) error {
 	cmds := commandsByArgvPath()
 	for n := len(args); n >= 1; n-- {
@@ -254,7 +237,6 @@ func runInternalCompleteVerbs(args []string) error {
 	return nil
 }
 
-// shortPipelineHint: prefer ShortHelp, then truncated Help, then trigger summary.
 func shortPipelineHint(short, help string, p pipelines.Pipeline) string {
 	if s := flattenOneLine(short); s != "" {
 		return s
@@ -317,15 +299,6 @@ func summarizePipelineTriggers(t pipelines.Triggers) string {
 	return strings.Join(bits, " ")
 }
 
-// commandsByArgvPath keys every Command by argv path (Path minus
-// "sparkwing "), root excluded since it has no argv path.
-//
-// It is deliberately not "leaves only". Being a group and taking
-// flags are independent: `sparkwing run` has a `config` child and
-// still owns `<pipeline>` plus every --sw- flag, so a map that
-// excluded groups had no entry to answer `sparkwing run --<TAB>`
-// from. Groups that take nothing but --help complete to just that,
-// which is what they accept.
 func commandsByArgvPath() map[string]Command {
 	out := make(map[string]Command, len(allCommands))
 	for _, c := range allCommands {
@@ -338,8 +311,6 @@ func commandsByArgvPath() map[string]Command {
 	return out
 }
 
-// parentCommands keys every Command that has registered children by
-// argv path; "" = top-level.
 func parentCommands() map[string]Command {
 	out := make(map[string]Command, len(allCommands))
 	for _, c := range allCommands {

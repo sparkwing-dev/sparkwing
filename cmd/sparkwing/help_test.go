@@ -388,11 +388,6 @@ func TestBindFlagsDefaults(t *testing.T) {
 	}
 }
 
-// TestRunHelpListsArcFlags pins that `--help` on the run commands
-// lists every sparkwing-owned flag (hot AND advanced). Tab completion
-// curates to the hot tier; --help is the full-disclosure surface.
-// The flag list is sourced from sparkwing.SparkwingFlagDocs() so a
-// flag added in the SDK propagates here automatically.
 func TestRunHelpListsArcFlags(t *testing.T) {
 	cases := []struct {
 		name string
@@ -423,9 +418,6 @@ func TestRunHelpListsArcFlags(t *testing.T) {
 	}
 }
 
-// TestCompletionFlagsListsHotOnly pins that tab-completion filters to
-// the hot tier -- `--sw-allow` and friends only surface in
-// --help, not in the completion menu.
 func TestCompletionFlagsListsHotOnly(t *testing.T) {
 	hotFlags := []string{
 		"--sw-ref",
@@ -482,10 +474,6 @@ func findFlagSpec(flags []FlagSpec, name string) (FlagSpec, bool) {
 	return FlagSpec{}, false
 }
 
-// containsFlagRow returns true when out contains a help-formatted
-// flag row for f -- i.e., a single line that includes both the flag
-// name and an [optional]/[required] tag. Excludes mentions of the
-// flag in DESCRIPTION prose where tags are absent.
 func containsFlagRow(out, flagName string) bool {
 	for _, line := range strings.Split(out, "\n") {
 		if !strings.Contains(line, flagName) {
@@ -513,17 +501,6 @@ func TestVisibleSubcommandsHidesHiddenChild(t *testing.T) {
 	}
 }
 
-// TestHelpListingMatchesRegistry is the acceptance criterion for this
-// surface, asserted against the rendered listing rather than against
-// the field it is derived from: every subcommand a group's help offers
-// resolves to a registered Command, every non-Hidden registered child
-// is offered, and each row carries that child's own synopsis.
-//
-// A group's help used to be a hand-written twin of the registry, and a
-// twin drifts silently: help named an `xrepo` with no Command, omitted
-// the registered `examples` and `run config`, and reworded seventy
-// synopses on one side only. A reader has no way to tell a stale
-// listing from a true one, which is what makes the defect expensive.
 func TestHelpListingMatchesRegistry(t *testing.T) {
 	byPath := map[string]*Command{}
 	for _, c := range allCommands {
@@ -562,12 +539,6 @@ func TestHelpListingMatchesRegistry(t *testing.T) {
 	}
 }
 
-// TestSubcommandOrderMatchesRegistry keeps the ordering hint honest.
-// A stale name in it cannot corrupt the listing -- filterSubcommands
-// ignores what does not resolve and appends what the hint forgot -- so
-// nothing user-facing breaks when it rots, which is exactly why it
-// needs its own gate: silent rot is how the old hand-written listing
-// got as far out of date as it did.
 func TestSubcommandOrderMatchesRegistry(t *testing.T) {
 	for _, parent := range allCommands {
 		want := map[string]bool{}
@@ -597,11 +568,6 @@ func TestSubcommandOrderMatchesRegistry(t *testing.T) {
 	}
 }
 
-// A value-taking flag consumes whatever follows it, so the parser binds
-// `--template --help` as a template named "--help" and then complains
-// about an unrelated missing flag. Someone reaching for --help does not
-// know the flag grammar yet, which is why they are asking, so the
-// request is answered before parsing.
 func TestWantsHelpIsPositionIndependent(t *testing.T) {
 	yes := [][]string{
 		{"--help"},
@@ -629,8 +595,6 @@ func TestWantsHelpIsPositionIndependent(t *testing.T) {
 	}
 }
 
-// Everything after `--` is an operand. A pipeline argument spelled
-// --help belongs to the pipeline, not to sparkwing.
 func TestWantsHelpStopsAtTheTerminator(t *testing.T) {
 	if wantsHelp([]string{"--", "--help"}) {
 		t.Error("--help after -- is an operand, not a help request")

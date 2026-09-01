@@ -127,9 +127,6 @@ func (s *Schema) Resolve(in ResolveInputs) (reflect.Value, error) {
 	return args, nil
 }
 
-// resolveField walks the per-source priority order for one field and
-// returns (value, set, err). set=false means no source provided a
-// value; the caller leaves the struct field at its zero value.
 func (s *Schema) resolveField(m *fieldMeta, args reflect.Value, resolved map[string]any, in ResolveInputs) (reflect.Value, bool, error) {
 	if raw, ok := in.FlagValues[m.Flag]; ok {
 		v, err := parseTypedValue(raw, m.GoType)
@@ -152,11 +149,6 @@ func (s *Schema) resolveField(m *fieldMeta, args reflect.Value, resolved map[str
 	return reflect.Value{}, false, nil
 }
 
-// parseTypedValue converts a raw string (from a CLI flag or profile
-// default-args) into the supplied Go type. Supports the kinds the
-// args system actually exposes -- string, bool, int/uint family,
-// float family, and time.Duration. Anything else errors with a
-// clear "unsupported type" message.
 func parseTypedValue(raw string, t reflect.Type) (reflect.Value, error) {
 	if t == reflect.TypeOf(time.Duration(0)) {
 		d, err := time.ParseDuration(raw)
@@ -202,10 +194,6 @@ func parseTypedValue(raw string, t reflect.Type) (reflect.Value, error) {
 	return reflect.Value{}, fmt.Errorf("unsupported arg type %s", t.String())
 }
 
-// coerceToType converts an any-typed value (most commonly from
-// Default) to the target type. Numeric kinds coerce across (so
-// Default(3) on an int64 field works); the rest must be directly
-// assignable.
 func coerceToType(value any, t reflect.Type) (reflect.Value, error) {
 	if value == nil {
 		return reflect.Zero(t), nil
@@ -220,10 +208,6 @@ func coerceToType(value any, t reflect.Type) (reflect.Value, error) {
 	return reflect.Value{}, fmt.Errorf("cannot coerce %s to %s", v.Type(), t)
 }
 
-// validateResolvedValue runs per-field validators (OneOf, Min, Max)
-// against a resolved value. Custom validators are NOT run here --
-// they execute later with the full typed args struct because they
-// often need to compare across fields.
 func validateResolvedValue(m *fieldMeta, value any) error {
 	if m.HasOneOf {
 		matched := false
@@ -245,11 +229,6 @@ func validateResolvedValue(m *fieldMeta, value any) error {
 	return nil
 }
 
-// checkNumericBounds enforces Min/Max against the resolved value.
-// Lifts the value to int64 / uint64 / float64 according to its kind
-// so cross-kind comparisons (Min(1) on an int32 field) work without
-// surprise truncation. Non-numeric kinds shouldn't reach here --
-// Schema.Build rejects Min/Max on non-numeric fields.
 func checkNumericBounds(value, minV, maxV any, hasMin, hasMax bool) error {
 	vRef := reflect.ValueOf(value)
 	switch {
@@ -360,10 +339,6 @@ func toFloat64(v any) (float64, error) {
 	return 0, fmt.Errorf("not numeric: %T", v)
 }
 
-// resolvedPredCtx is the PredicateContext implementation used by the
-// resolution chain when evaluating RequiredWhen and group .When()
-// predicates. Keys are flag names so user-written ArgEq("target",
-// "prod") reads naturally regardless of the underlying Go field name.
 type resolvedPredCtx struct {
 	values  map[string]any
 	profile string

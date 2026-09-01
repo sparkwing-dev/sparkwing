@@ -28,7 +28,6 @@ export default function LogSearch() {
     if (e.key === "Enter") doSearch();
   };
 
-  // Group results by job ID for compact display
   const grouped = new Map<string, LogSearchResult[]>();
   for (const r of results) {
     const existing = grouped.get(r.run_id);
@@ -45,7 +44,7 @@ export default function LogSearch() {
         Log Search
       </div>
 
-      {/* Search input */}
+      {                  }
       <div className="flex gap-2 mb-3">
         <input
           type="text"
@@ -64,7 +63,7 @@ export default function LogSearch() {
         </button>
       </div>
 
-      {/* Results */}
+      {             }
       {searched && results.length === 0 && (
         <div className="text-xs text-[var(--muted)] py-4 text-center">
           No results found for &ldquo;{query}&rdquo;
@@ -119,7 +118,6 @@ export default function LogSearch() {
   );
 }
 
-// Highlight matching text in a log line
 function highlightMatch(content: string, query: string): React.ReactNode {
   const lowerContent = content.toLowerCase();
   const lowerQuery = query.toLowerCase();

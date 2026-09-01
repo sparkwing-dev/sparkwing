@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// tokenRecordJSON is the read-side projection. Never includes the
-// hash or the raw value.
 type tokenRecordJSON struct {
 	Prefix     string   `json:"prefix"`
 	Principal  string   `json:"principal"`
@@ -55,12 +53,10 @@ type createTokenReq struct {
 }
 
 type createTokenResp struct {
-	Token    string          `json:"token"` // raw; emitted ONCE
+	Token    string          `json:"token"`
 	Metadata tokenRecordJSON `json:"metadata"`
 }
 
-// handleCreateToken mints a new token. The raw value is returned ONCE
-// in the response body; callers MUST stash it before acknowledging.
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	var req createTokenReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -99,11 +95,6 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleListTokens returns all tokens (prefix + metadata, no secrets).
-// Query params:
-//
-//	kind=user|runner|service
-//	include_revoked=1
 func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 	kind := r.URL.Query().Get("kind")
 	includeRevoked := r.URL.Query().Get("include_revoked") == "1"
@@ -119,8 +110,6 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tokens": out})
 }
 
-// handleLookupTokenByPrefix returns metadata for a single token given
-// its non-secret prefix.
 func (s *Server) handleLookupTokenByPrefix(w http.ResponseWriter, r *http.Request) {
 	prefix := r.PathValue("prefix")
 	tok, err := s.store.LookupTokenByPrefix(prefix)
@@ -146,7 +135,6 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// whoamiResp is what GET /api/v1/auth/whoami returns.
 type whoamiResp struct {
 	Principal   string   `json:"principal"`
 	Kind        string   `json:"kind"`
@@ -154,8 +142,6 @@ type whoamiResp struct {
 	TokenPrefix string   `json:"token_prefix,omitempty"`
 }
 
-// handleWhoami reflects the calling principal back to the caller. No
-// scope check: any valid token suffices to learn its own identity.
 func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {

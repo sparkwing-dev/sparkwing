@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestPreviewItem_Risks verifies PreviewPlan surfaces per-step risks
-// onto PreviewItem.Risks so JSON consumers see the contract.
 func TestPreviewItem_Risks(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "deploy", func(ctx context.Context) error { return nil })
@@ -32,8 +30,6 @@ func TestPreviewItem_Risks(t *testing.T) {
 	}
 }
 
-// TestPreviewItem_RisksEmpty confirms a plain step has no risks
-// field (omitempty wire shape).
 func TestPreviewItem_RisksEmpty(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "plain", func(ctx context.Context) error { return nil })

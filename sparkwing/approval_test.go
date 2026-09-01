@@ -64,8 +64,6 @@ func TestApproval_EmptyIDPanics(t *testing.T) {
 	_ = JobApproval(plan, "", ApprovalConfig{})
 }
 
-// ApprovalConfig.OnExpiry rejects unrecognized policies at plan
-// construction so a typo or stale constant fails loud.
 func TestApproval_InvalidOnExpiryPanics(t *testing.T) {
 	plan := NewPlan()
 	defer func() {
@@ -97,12 +95,6 @@ func TestApproval_RegularNodeIsNotApproval(t *testing.T) {
 	}
 }
 
-// ApprovalGate exposes only the gate-appropriate modifiers.
-// .Inline() / .Retry() / .Timeout() / .Memoize() / .Requires() are not
-// methods on *ApprovalGate -- the type system makes that class of
-// mistake a compile error rather than a runtime panic / silent
-// no-op. The negative cases would not compile, which is the point;
-// this test exercises the positive shape.
 func TestApproval_GateNeedsAndChain(t *testing.T) {
 	plan := NewPlan()
 	upstream := Job(plan, "build", &fakeJob{})

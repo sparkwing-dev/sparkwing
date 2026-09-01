@@ -21,16 +21,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// CompileLogNode is the synthetic node id used to attribute the
-// trigger loop's `go build` stdout + stderr to the run's structured
-// logs when the .sparkwing/ compile fails. The compile step happens
-// before any pipeline binary runs, so there's no real
-// orchestrator node to attach the output to; this fixed id lets
-// `sparkwing runs logs --run <id>` surface the toolchain error
-// without operators having to kubectl-log the warm-runner pod.
 const CompileLogNode = "_compile"
 
-// TriggerLoopOptions configures RunTriggerLoop.
 type TriggerLoopOptions struct {
 	ControllerURL   string
 	LogsURL         string
@@ -47,32 +39,19 @@ type TriggerLoopOptions struct {
 	ArtifactStore   string
 	K8sNodeSelector []string
 	K8sTolerations  []string
-	// DependencyProxy is the pull-through package proxy base URL the
-	// child's runner pods should use, already resolved. Empty is
-	// forwarded as an explicit opt-out: the child inherits
-	// SPARKWING_GITCACHE_URL from this process and would otherwise
-	// re-derive a proxy the operator turned off.
+
 	DependencyProxy string
-	// K8sImagePullPolicy is passed through unvalidated; the child's
-	// factory rejects a bad value with the flag name in the error.
+
 	K8sImagePullPolicy string
 	WorkRoot           string
 	Poll               time.Duration
 	Logger             *slog.Logger
-	// MaxConcurrent bounds in-flight trigger handlers in one worker.
-	// Values below 1 use the default. A value above 1 lets a worker claim
-	// RunAndAwait child triggers while the parent handler waits.
+
 	MaxConcurrent int
-	// Sources filters claim requests by trigger_source; empty = any.
-	// The warm-runner sets ["github"] so it only claims webhook-originated
-	// triggers and doesn't swallow manual/schedule work.
+
 	Sources []string
 }
 
-// RunTriggerLoop claims pending triggers and dispatches via
-// `handle-trigger <id>` child exec. Triggers with GITHUB_REPOSITORY
-// fetch source via sparkwing-cache; triggers without a repo exec the
-// baked pipeline binary. Blocks until ctx is canceled.
 func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	if opts.ControllerURL == "" {
 		return errors.New("TriggerLoopOptions.ControllerURL required")
@@ -179,8 +158,6 @@ func ensureTriggerWorkRoot(path string, private bool) error {
 	return os.MkdirAll(path, 0o755)
 }
 
-// BakedBinary is the path to a baked-in pipeline binary used for
-// triggers without a repo. Empty disables the no-repo path.
 var BakedBinary = os.Getenv("SPARKWING_BAKED_BINARY")
 
 func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) (selfTerminate bool, err error) {
@@ -233,7 +210,11 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		logger.Info("trigger loop: no trigger SHA, falling back to branch-tip clone",
 			"run_id", trigger.ID, "branch", branch)
 	}
-	sparkwingDir, fetchErr := fetchPipelineSourceWithRetry(ctx, opts.GitcacheURL, repoURL, branch, sha, workDir, logger, trigger.ID)
+	fetchSource := fetchPipelineSourceWithRetry
+	if strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") {
+		fetchSource = fetchPipelineWorkspaceSourceWithRetry
+	}
+	sparkwingDir, fetchErr := fetchSource(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, repoURL, branch, sha, workDir, logger, trigger.ID)
 	if fetchErr != nil {
 		return awaitHeartbeat(), fmt.Errorf("fetch source: %w", fetchErr)
 	}
@@ -251,8 +232,6 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	return awaitHeartbeat(), execErr
 }
 
-// execHandleTrigger runs the child pipeline binary with workDir as cwd.
-// Git metadata isn't forwarded via env; the child reads the cloned .git directly.
 func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) error {
 	childArgs := handleTriggerArgs(trigger.ID, opts)
 
@@ -316,8 +295,7 @@ func triggerRunnerArgs(opts TriggerLoopOptions) []string {
 	appendFlag("--kubeconfig", opts.Kubeconfig)
 	appendFlag("--artifact-store", opts.ArtifactStore)
 	appendFlag("--image-pull-policy", opts.K8sImagePullPolicy)
-	// Always explicit: "off" has to travel, or the child re-derives the
-	// proxy from the inherited SPARKWING_GITCACHE_URL.
+
 	if opts.DependencyProxy != "" {
 		args = append(args, "--dependency-proxy", opts.DependencyProxy)
 	} else {
@@ -332,11 +310,6 @@ func triggerRunnerArgs(opts TriggerLoopOptions) []string {
 	return args
 }
 
-// shipCompileOutput posts the captured `go build` output for a
-// trigger whose .sparkwing/ compile failed into a synthetic
-// CompileLogNode log on the controller's logs service. Best-effort:
-// we already have a wrapper error to return, so a failed POST
-// degrades silently to a warning.
 func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID string, buildErr error, logger *slog.Logger) {
 	if opts.LogsURL == "" {
 		return
@@ -354,49 +327,34 @@ func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID strin
 	}
 }
 
-// fetchSourceFn is the indirection used by fetchPipelineSourceWithRetry
-// so tests can substitute a fake that fails the first N times. Production
-// code uses bincache.FetchPipelineSource directly.
-var fetchSourceFn = bincache.FetchPipelineSource
+var (
+	fetchSourceFn          = bincache.FetchPipelineSourceWithToken
+	fetchWorkspaceSourceFn = bincache.FetchPipelineWorkspaceSourceWithToken
+)
 
-// Vars (not consts) so tests can shrink the retry surface.
-//
-// The warm-runner's source fetch races the gitcache's 30s
-// background-fetch loop on the `git push && sparkwing run X --on prod` path.
-// 3 attempts spaced ~10s apart (so total wall time ≤ 30s, the
-// background-fetch period) recovers the residual case where the
-// dispatch-time eager refresh either failed or got skipped (e.g. the
-// laptop profile has no gitcache URL configured).
 var (
 	triggerFetchMaxAttempts = 3
 	triggerFetchRetryDelay  = 10 * time.Second
 )
 
-// notOurRefSubstr is the marker we match in fetch errors to decide
-// "this is the gitcache catching up" vs. "this is a real failure".
-// Documented at the call site because git's wording could change in
-// a future release; if it does, the symptom is that retries stop
-// firing and operators see the original cryptic error again.
 const notOurRefSubstr = "not our ref"
 
-// fetchPipelineSourceWithRetry wraps bincache.FetchPipelineSource
-// with bounded retry on the gitcache-lag failure mode. Other errors
-// (auth, missing repo, malformed URL, etc.) fail fast -- we never
-// want to delay surfacing an obviously-broken state by 30s.
-//
-// On exhausted retries the caller still gets the original error
-// chain (so errors.Is / errors.As keep working), wrapped in a
-// human-readable message that names the SHA and points at the
-// gitcache-lag root cause instead of leaving operators staring at
-// "fatal: remote error: upload-pack: not our ref".
-func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+	return fetchPipelineSourceWithRetryFn(ctx, fetchSourceFn, gcURL, controllerURL, token, repoURL, branch, sha, workDir, logger, runID)
+}
+
+func fetchPipelineWorkspaceSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+	return fetchPipelineSourceWithRetryFn(ctx, fetchWorkspaceSourceFn, gcURL, controllerURL, token, repoURL, branch, sha, workDir, logger, runID)
+}
+
+func fetchPipelineSourceWithRetryFn(ctx context.Context, fetch func(string, string, string, string, string, string, string) (string, error), gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
 	attempts := triggerFetchMaxAttempts
 	if attempts < 1 {
 		attempts = 1
 	}
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		sparkwingDir, err := fetchSourceFn(gcURL, repoURL, branch, sha, workDir)
+		sparkwingDir, err := fetch(gcURL, controllerURL, token, repoURL, branch, sha, workDir)
 		if err == nil {
 			return sparkwingDir, nil
 		}
@@ -444,9 +402,13 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 		return triggerBinary{}, err
 	}
 	compiled := false
+	binaryCacheURL := opts.GitcacheURL
+	if bincache.ControllerGitcacheToken(opts.GitcacheURL, opts.ControllerURL, opts.Token) != "" {
+		binaryCacheURL = ""
+	}
 	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
-		if opts.GitcacheURL != "" {
-			if fetchErr := bincache.TryBinary(opts.GitcacheURL, key, tempPath); fetchErr == nil {
+		if binaryCacheURL != "" {
+			if fetchErr := bincache.TryBinary(binaryCacheURL, key, tempPath); fetchErr == nil {
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
 				logger.Warn("trigger loop: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)
@@ -458,8 +420,8 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 	if err != nil {
 		return triggerBinary{}, err
 	}
-	if published && compiled && opts.GitcacheURL != "" {
-		if err := bincache.UploadBinary(opts.GitcacheURL, opts.Token, key, lease.Path()); err != nil {
+	if published && compiled && binaryCacheURL != "" {
+		if err := bincache.UploadBinary(binaryCacheURL, bincache.CacheToken(), key, lease.Path()); err != nil {
 			logger.Warn("trigger loop: bin cache upload failed", "err", err, "hash", key)
 		}
 	}
@@ -487,25 +449,19 @@ type triggerClaimOutcome int
 
 const (
 	triggerClaimCtxDone triggerClaimOutcome = iota
-	// triggerClaimReaped: controller 404'd a heartbeat (lease lost). Child killed.
+
 	triggerClaimReaped
-	// triggerClaimSilenced: no successful heartbeat for maxTriggerHeartbeatSilence.
-	// Child killed; runner should self-terminate.
+
 	triggerClaimSilenced
 )
 
-// Vars (not consts) so tests can shrink them.
 var (
-	// Matches store.DefaultLeaseDuration so reaper + heartbeat decide simultaneously.
 	maxTriggerHeartbeatSilence = 3 * time.Minute
 	triggerHeartbeatInterval   = 3 * time.Second
-	// Strictly less than the interval so a wedged controller can't stack ticks.
+
 	triggerHeartbeatTimeout = 2 * time.Second
 )
 
-// triggerClaimHeartbeat extends the lease until ctx cancels. Kills the
-// child and returns non-ctxDone on a 404 or ≥maxTriggerHeartbeatSilence
-// of consecutive heartbeat failures.
 func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID string, killChild context.CancelFunc, logger *slog.Logger) triggerClaimOutcome {
 	t := time.NewTicker(triggerHeartbeatInterval)
 	defer t.Stop()

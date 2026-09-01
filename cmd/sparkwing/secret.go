@@ -1,4 +1,3 @@
-// `sparkwing secrets` subcommand. CRUD over secret stores. Two modes:
 package main
 
 import (
@@ -109,9 +108,6 @@ func runSecretSet(args []string) error {
 	return nil
 }
 
-// localPathFor returns the local dotenv file for the given mask
-// intent. Centralized so set / delete / list pick the right side
-// consistently.
 func localPathFor(masked bool) (string, error) {
 	if masked {
 		return secrets.DefaultDotenvPath()

@@ -1,14 +1,8 @@
-// Run with: node --test src/lib/timeFormat.test.ts
-//
-// Covers fmtDateTime's one branch that isn't pure formatting: whether
-// the year is spelled out. Everything else is Intl's job.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fmtDateTime } from "./timeFormat";
 
-// Build a local-time ISO string so the assertions don't depend on the
-// runner's timezone -- a UTC literal would shift the day across zones.
 function localISO(
   year: number,
   month: number,
@@ -47,7 +41,6 @@ describe("fmtDateTime", () => {
 
   it("adds seconds only when asked", () => {
     const ts = localISO(thisYear, 5, 31, 23, 53);
-    // Minute-level input, so seconds render as :00 when requested.
     assert.match(fmtDateTime(ts, { seconds: true }), /11:53:00/);
     assert.doesNotMatch(fmtDateTime(ts), /11:53:00/);
   });

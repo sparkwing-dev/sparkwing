@@ -7,18 +7,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// ledgerMemory is the 16 GiB memory capacity newHeadroomDaemon sizes its
-// ledger against, repeated here so the byte figures below are readable.
 const ledgerMemory = 16 << 30
 
-// capacityMinusReserve is what the queue view used to print as memory
-// external whenever available floored at zero: the whole 16 GiB capacity
-// minus the 20% reserve, which is 80.0% of the machine. This exact figure
-// was reported byte-identical across reads twenty minutes apart while real
-// demand measured by vm_stat fell from 9.41 to 8.23 GB.
 const capacityMinusReserve = 13743895348
 
-// queueRow pulls one resource row out of a queue state.
 func queueRow(t *testing.T, qs wingwire.QueueState, key string) wingwire.ResourceState {
 	t.Helper()
 	for _, r := range qs.Resources {
@@ -37,15 +29,6 @@ func queueState(t *testing.T, d *Daemon) wingwire.QueueState {
 	return d.buildQueueStateLocked()
 }
 
-// TestQueueState_ExternalIsTheReadingNotTheResidual pins the defect this
-// package was fixed for. The queue view used to derive external as capacity -
-// held - reserved - available, so once pressure pushed available to its zero
-// floor the external column stopped depending on the sensor at all and printed
-// capacity minus the reserve forever. Here the sampler measures 15 GiB of
-// external memory (16 GiB total, 1 GiB free) and 8 cores of external load,
-// both past the floor, and both columns must carry the measurement rather
-// than the residual. The cores residual would be 6.4, which is the same
-// 80.0%-of-capacity shape the memory one has.
 func TestQueueState_ExternalIsTheReadingNotTheResidual(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.applyHeadroom(HostStat{
@@ -81,12 +64,6 @@ func TestQueueState_ExternalIsTheReadingNotTheResidual(t *testing.T) {
 	}
 }
 
-// TestQueueState_UnmeasuredMemorySaysSoAndIsNotSubtracted covers the negative
-// control. A macOS sampler that cannot read kern.memorystatus_level hands over
-// a zero FreeMemoryBytes, which is byte-for-byte what a completely full
-// machine looks like. The row has to name the state and admission has to
-// charge nothing for it, because a run may not be held back by pressure
-// nobody looked at.
 func TestQueueState_UnmeasuredMemorySaysSoAndIsNotSubtracted(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.applyHeadroom(HostStat{
@@ -111,11 +88,6 @@ func TestQueueState_UnmeasuredMemorySaysSoAndIsNotSubtracted(t *testing.T) {
 	}
 }
 
-// TestQueueState_UnmeasuredCPUSaysSoAndIsNotSubtracted is the cores half of
-// the same rule: a sampler that could not read CPU utilization reports no
-// external cores and says the dimension is unmeasured, rather than passing a
-// zero off as an idle machine. The 7.5 figure here is the stale reading the
-// sampler never confirmed, and none of it may reach admission.
 func TestQueueState_UnmeasuredCPUSaysSoAndIsNotSubtracted(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.applyHeadroom(HostStat{
@@ -139,9 +111,6 @@ func TestQueueState_UnmeasuredCPUSaysSoAndIsNotSubtracted(t *testing.T) {
 	}
 }
 
-// TestQueueState_MeasuredExternalIsLabeledMeasured keeps the label honest in
-// the other direction, so "unmeasured" is a state the daemon actually chooses
-// between rather than a constant.
 func TestQueueState_MeasuredExternalIsLabeledMeasured(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.applyHeadroom(HostStat{
@@ -166,11 +135,6 @@ func TestQueueState_MeasuredExternalIsLabeledMeasured(t *testing.T) {
 	}
 }
 
-// TestApplyHeadroom_MeasuredFlipReappliesPastTheDeadband pins that going
-// blind is itself a change worth applying. The deadband only watches the
-// headroom numbers, so a sensor that fails while the totals barely move would
-// otherwise keep serving its last label and report a measurement it no longer
-// has.
 func TestApplyHeadroom_MeasuredFlipReappliesPastTheDeadband(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	measured := HostStat{
@@ -192,10 +156,6 @@ func TestApplyHeadroom_MeasuredFlipReappliesPastTheDeadband(t *testing.T) {
 	}
 }
 
-// TestHostBlockingReason_UnmeasuredExternalMakesNoClaim keeps the wait
-// explanation from naming external load it did not measure. Waiters used to
-// read "0B available (external load 16.0GiB)" on a 16 GiB machine, a figure
-// that is impossible on its face and was never read from anything.
 func TestHostBlockingReason_UnmeasuredExternalMakesNoClaim(t *testing.T) {
 	available := map[string]wingwire.ResourceState{
 		"memory": {

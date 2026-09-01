@@ -43,15 +43,12 @@ func (s *Server) AttachPool(cfg PoolConfig) *Server {
 	return s
 }
 
-// poolBinding holds the pool lifecycle state. Lazy-initialized so
-// AttachPool doesn't require a live API server.
 type poolBinding struct {
 	cfg  PoolConfig
 	pool *pool.Pool
 	pcfg *pool.Config
 }
 
-// run spawns the pool's background loops. Blocks until ctx is done.
 func (p *poolBinding) run(ctx context.Context, logger *slog.Logger) {
 	p.pcfg = pool.LoadConfig(ctx, p.cfg.Client, p.cfg.Namespace)
 	p.pool = pool.NewPool(p.cfg.Client, p.cfg.Namespace, p.pcfg.PoolSize, p.pcfg.PVCSize)
@@ -84,9 +81,6 @@ func (p *poolBinding) reconcileLoop(ctx context.Context, logger *slog.Logger) {
 	}
 }
 
-// ready returns true once the background goroutines have loaded
-// config and constructed the Pool. Handlers short-circuit to 503
-// until then so callers don't see nil-panic mid-startup.
 func (p *poolBinding) ready() bool {
 	return p != nil && p.pool != nil
 }
@@ -182,6 +176,4 @@ func (s *Server) handlePoolHeartbeat(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Compile-time confirmation that json.Marshal stays in scope for any
-// future debug endpoint that wants to dump PoolConfig.
 var _ = json.Marshal

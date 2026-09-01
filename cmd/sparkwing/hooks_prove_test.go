@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// localHooksPath is the claim an install makes so git reads the repo's own
-// hooks instead of the machine's; empty means the claim was not made.
 func localHooksPath(t *testing.T, f *chainFixture) string {
 	t.Helper()
 	out, err := f.tryGit(f.repo, "config", "--local", "--type=path", "core.hooksPath")
@@ -20,8 +18,6 @@ func localHooksPath(t *testing.T, f *chainFixture) string {
 	return strings.TrimSpace(out)
 }
 
-// recordingProver answers every proof with err and remembers what it was
-// asked to run.
 func recordingProver(err error, seen *[]string) Prover {
 	return func(_, pipeline string) error {
 		*seen = append(*seen, pipeline)
@@ -29,8 +25,6 @@ func recordingProver(err error, seen *[]string) Prover {
 	}
 }
 
-// twoGateProject declares a commit gate and a push gate, so a test can fail
-// one proof and watch what happens to the other.
 const twoGateProject = `pipelines:
   - name: gate
     entrypoint: Gate
@@ -42,9 +36,6 @@ const twoGateProject = `pipelines:
       pre_push: {}
 `
 
-// gateAndNotifyProject declares a commit gate and a post-commit notifier, so
-// a test can fail every proof there is to fail and still leave a hook the
-// install never proved.
 const gateAndNotifyProject = `pipelines:
   - name: gate
     entrypoint: Gate
@@ -56,8 +47,6 @@ const gateAndNotifyProject = `pipelines:
       post_commit: {}
 `
 
-// notifyOnlyProject declares a hook that fires after the commit has landed
-// and nothing that can refuse one.
 const notifyOnlyProject = `pipelines:
   - name: notify
     entrypoint: Notify
@@ -65,7 +54,6 @@ const notifyOnlyProject = `pipelines:
       post_commit: {}
 `
 
-// redPushGate passes every proof but the push gate's.
 func redPushGate(_, pipeline string) error {
 	if pipeline == "push-gate" {
 		return errors.New("push gate is red")
@@ -116,8 +104,6 @@ func TestHooksInstall_LeavesTheHooksPathAloneWhenNoGatePasses(t *testing.T) {
 	}
 }
 
-// Hooks git was never going to read are inert whether or not this run leaves
-// them there, so deleting them would be the only lasting thing it did.
 func TestHooksInstall_KeepsTheHooksOfARepoItCannotArm(t *testing.T) {
 	f := newChainFixture(t)
 	prior := filepath.Join(f.repo, ".git", "hooks", "pre-commit")
@@ -135,9 +121,6 @@ func TestHooksInstall_KeepsTheHooksOfARepoItCannotArm(t *testing.T) {
 	}
 }
 
-// A post-commit hook is never proven, so counting it among the hooks left to
-// arm hands a repo whose only gate is red the arming path: the claim it must
-// not make, and the deletion of the hook it was not going to fire.
 func TestHooksInstall_ArmsNothingWhenTheGateIsRedAndAPostCommitHookIsDeclared(t *testing.T) {
 	f := newChainFixture(t)
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), gateAndNotifyProject)
@@ -168,8 +151,6 @@ func TestHooksInstall_ArmsNothingWhenTheGateIsRedAndAPostCommitHookIsDeclared(t 
 	}
 }
 
-// A repo whose only hook is post-commit gates nothing, so the install arms
-// the notifier and still reports commits going through unchecked.
 func TestHooksInstall_ReportsARepoWithOnlyAPostCommitHookUngated(t *testing.T) {
 	f := newChainFixture(t)
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), notifyOnlyProject)
@@ -578,8 +559,6 @@ func TestHooksInstall_ProvesBlockingGatesAndNotThePostCommitOne(t *testing.T) {
 	}
 }
 
-// Install refuses to overwrite a hand-written hook, and rollback must leave
-// it byte-for-byte unchanged.
 func TestHooksInstall_LeavesAHandWrittenHookAloneWhenItsGateDoesNotPass(t *testing.T) {
 	f := newChainFixture(t)
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), twoGateProject)

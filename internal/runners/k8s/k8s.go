@@ -1,19 +1,3 @@
-// Package k8s is the K8s-Job-per-node Runner implementation.
-//
-// For each dispatched node, Runner.RunNode creates a batch/v1 Job
-// named deterministically on (runID, nodeID, attempt) so duplicate
-// dispatch collides on the API server rather than spawning a racing
-// second pod. The pod runs `sparkwing run-node <runID> <nodeID>`, which
-// executes the node against HTTP backends (state + logs + locks) and
-// writes the terminal state. When the Job succeeds or fails, this
-// runner reads the resulting node row from the controller and maps
-// it to a runner.Result the orchestrator understands.
-//
-// v1 uses polling (not informers) to track Job status. Polling keeps
-// the implementation small and has acceptable overhead at the node
-// counts a single orchestrator sees; informers + a shared workqueue
-// come in session 3 (warm pool) where every runner in a pool watches
-// the same Job objects.
 package k8s
 
 import (
@@ -41,112 +25,51 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// Config captures the knobs a caller tunes per deployment. Defaults
-// are chosen for prod; a Kind-based dev loop might tune
-// Namespace + Image and leave the rest.
 type Config struct {
-	// Namespace where Jobs are created. Must match the SA's binding.
 	Namespace string
 
-	// Image is the runner image containing the compiled `.sparkwing`
-	// binary and whatever the pipeline's jobs need at runtime. Same
-	// image used for the orchestrator pod today.
 	Image string
 
-	// ImagePullSecret, when set, is attached to every Job's pod spec.
 	ImagePullSecret string
 
-	// ServiceAccountName is the K8s SA that Job pods run under. Needs
-	// only egress to the controller + logs-service; no K8s API access.
 	ServiceAccountName string
 
-	// ControllerURL + LogsURL are what the pod is told to talk to.
-	// Typically in-cluster service URLs.
 	ControllerURL string
 	LogsURL       string
 
-	// ArtifactStoreURL, when set, is stamped on every Job pod as
-	// SPARKWING_CACHE_URL so the spawned runner opens the same
-	// content-addressed artifact store the rest of the run uses to
-	// publish node outputs and stage consumed inputs. Empty disables
-	// artifacts for the pod.
 	ArtifactStoreURL string
 
-	// DependencyProxyURL is the base URL of the cache pod's
-	// pull-through registry proxy (the service that serves
-	// /proxy/{golang,npm,pypi,...}). Set, it points every Job pod's
-	// package managers at it so a node's dependency fetch is served
-	// in-cluster instead of egressing once per run. Empty leaves the
-	// pod on upstream defaults.
 	DependencyProxyURL string
 
-	// ImagePullPolicy applied to every Job pod's container. Empty
-	// means IfNotPresent -- see pullPolicyOrDefault, which also
-	// explains why the field is never left for the API server to
-	// default.
 	ImagePullPolicy corev1.PullPolicy
 
-	// NodeSelector + Tolerations let the caller pin runner pods to a
-	// specific pool (GPU nodes, spot nodes, etc.). v1 copies the same
-	// selector to every Job; Requires-style per-job routing lands in a
-	// later session.
 	NodeSelector map[string]string
 	Tolerations  []corev1.Toleration
 
-	// CPU + Memory requests/limits applied to every runner pod. Keep
-	// modest defaults; let pipeline authors override via pod-spec
-	// overrides in a later session.
-	CPURequest    string // e.g. "100m"
-	CPULimit      string // e.g. "2"
-	MemoryRequest string // e.g. "256Mi"
-	MemoryLimit   string // e.g. "2Gi"
+	CPURequest    string
+	CPULimit      string
+	MemoryRequest string
+	MemoryLimit   string
 
-	// BackoffLimit is the Job-level retry cap. Sparkwing's own Retry
-	// modifier runs inside the pod; this is a backstop for pod-level
-	// failures (image pull errors, OOMKills). 0 means no K8s-side
-	// retry, which matches sparkwing semantics: the node's Retry
-	// modifier handles retries within a pod; if the pod dies entirely
-	// that's a hard failure surfaced to the operator.
 	BackoffLimit int32
 
-	// AgentToken, when non-empty, is stamped on every Job pod as
-	// SPARKWING_AGENT_TOKEN so the spawned runner can authenticate
-	// its controller + logs-service calls. Closes the FOLLOWUPS #2
-	// v0 gap where K8sRunner fallback Jobs 401'd under auth. The
-	// worker passes its own token value through; per-Job tokens are
-	// a later session.
 	AgentToken string
 
-	// PollInterval is how often we poll Job status. Matches the
-	// reaper's granularity well; don't drop below 500ms or every
-	// concurrent node hammers the API server.
 	PollInterval time.Duration
 
-	// TTLSecondsAfterFinished auto-cleans terminated Jobs. 5m is a
-	// sane default: short enough to keep the cluster tidy, long
-	// enough for an operator to poke at a failed pod.
 	TTLSecondsAfterFinished int32
 
-	// MissingJobGracePeriod is how long a poller that sees a missing
-	// Job waits for the pod's terminal node write to appear on the
-	// controller before treating the missing Job as infrastructure
-	// failure.
 	MissingJobGracePeriod time.Duration
 }
 
-// Runner is a runner.Runner backed by one K8s Job per node.
 type Runner struct {
 	client        kubernetes.Interface
 	ctrl          *client.Client
 	cfg           Config
 	logger        *slog.Logger
-	labelInstance string // kubernetes.io/instance label per orchestrator
+	labelInstance string
 }
 
-// New constructs a K8sRunner. `kcli` is the client-go kube interface
-// (typically kubernetes.NewForConfig(rest.InClusterConfig())). `ctrl`
-// is the state client used to read the node's terminal row after the
-// Job succeeds.
 func New(kcli kubernetes.Interface, ctrl *client.Client, cfg Config, logger *slog.Logger) *Runner {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = time.Second
@@ -171,9 +94,6 @@ func New(kcli kubernetes.Interface, ctrl *client.Client, cfg Config, logger *slo
 
 var _ runner.Runner = (*Runner)(nil)
 
-// RunNode is the runner.Runner entry point. Creates the Job, polls
-// until it terminates, reads the terminal node row from the
-// controller, and maps to Result.
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
 	job := r.buildJob(name, req, r.resolveResources(ctx, req))
@@ -230,12 +150,6 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	}
 }
 
-// observePodPhase returns a human-readable phase string for the Job's
-// pod, or "" when no pod exists yet / the API call fails. We pick the
-// newest pod (owner-ref match) and fold container-waiting reasons in
-// when the pod is in Pending/ContainerCreating, since those carry the
-// useful signal ("ImagePullBackOff", "ErrImagePull") that a bare
-// phase string would hide.
 func (r *Runner) observePodPhase(ctx context.Context, jobName string) string {
 	pods, err := r.client.CoreV1().Pods(r.cfg.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("batch.kubernetes.io/job-name=%s", jobName),
@@ -258,9 +172,6 @@ func (r *Runner) observePodPhase(ctx context.Context, jobName string) string {
 	return string(p.Status.Phase)
 }
 
-// heartbeatLoop stamps last_heartbeat every 5s until ctx cancels. A
-// missed heartbeat is a UI annoyance, not a correctness issue; log
-// errors at debug so they don't drown out real warnings.
 func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) {
 	_ = ctrl.TouchNodeHeartbeat(ctx, runID, nodeID)
 	t := time.NewTicker(5 * time.Second)
@@ -278,10 +189,6 @@ func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID strin
 	}
 }
 
-// readMissingJobResult handles Jobs removed outside this runner. A TTL reap can
-// delete the Job after the pod wrote the terminal node row; an operator delete
-// before terminal state must fail the node so the orchestrator does not poll
-// forever.
 func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, jobName string) runner.Result {
 	deadline := time.NewTimer(r.cfg.MissingJobGracePeriod)
 	defer deadline.Stop()
@@ -320,10 +227,6 @@ func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, j
 	}
 }
 
-// readFinalResult fetches the node row the pod wrote and maps it.
-// If the pod crashed before writing, the node is still "running" on
-// the controller side; we return a synthesized Failed result so the
-// orchestrator sees something deterministic.
 func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *batchv1.Job) runner.Result {
 	n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
 	if err != nil {
@@ -340,7 +243,7 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 	}
 
 	res := runner.ResultFromNode(n)
-	// safety: pod crashed before writing terminal state; synthesize Failed so the orchestrator sees something deterministic
+	// safety: synthesize Failed when a crashed pod leaves no terminal state.
 	if !runner.NodeTerminal(n) {
 		res.Outcome = sparkwing.Failed
 		reason, exitCode := r.inspectTerminatedPod(ctx, j)
@@ -357,11 +260,6 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 	return res
 }
 
-// inspectTerminatedPod returns the structured failure reason and
-// exit code for the first terminated container it finds on the
-// Job's pods. Returns (FailureUnknown, nil) when the lookup fails
-// or no terminated state is visible; the caller falls back to a
-// generic Failed outcome.
 func (r *Runner) inspectTerminatedPod(ctx context.Context, j *batchv1.Job) (string, *int) {
 	if j == nil {
 		return store.FailureUnknown, nil
@@ -393,28 +291,6 @@ func (r *Runner) inspectTerminatedPod(ctx context.Context, j *batchv1.Job) (stri
 	return store.FailureUnknown, nil
 }
 
-// JobName is the deterministic K8s name for one node's Job. Kept
-// exported so tests (and the manifest reviewer) can reason about it.
-// The attempt suffix is reserved for retry handling; today it's
-// always 0.
-//
-// It is also what a cluster-side `sparkwing runs bounce` would need.
-// The state half already exists and is dialect-agnostic: the intent
-// row (store.RequestNodeBounce / PendingNodeBounce /
-// ConsumeNodeBounce) and its three controller endpoints are the same
-// ones the local runner uses. What remains is this runner's own
-// supervision loop -- poll for a pending request beside the Job watch,
-// delete the Job with a foreground propagation policy, wait for the
-// pod to go, then submit the same node at attempt+1 and keep watching
-// the new name -- plus the rule the local path already follows: write
-// no terminal node row across the gap, and consume the request as
-// store.BounceMissed when the pod finished first.
-//
-// K8s names: lowercase alphanumerics + '-', ≤63 chars. We combine a
-// short sha256 prefix of (runID+nodeID+attempt) with a human-readable
-// suffix built from the truncated nodeID so operators can still
-// eyeball which node a Job belongs to. The hash makes collisions
-// between runs (even same-minute retries) impossible in practice.
 func JobName(runID, nodeID string, attempt int) string {
 	h := sha256.Sum256([]byte(fmt.Sprintf("%s/%s/%d", runID, nodeID, attempt)))
 	hashSeg := hex.EncodeToString(h[:])[:10]
@@ -425,30 +301,13 @@ func JobName(runID, nodeID string, attempt int) string {
 }
 
 const (
-	// podCPULimitFactor sizes a runner pod's CPU limit above its request.
-	// CPU is compressible -- the kernel throttles rather than kills -- so a
-	// generous ceiling lets a bursty node use spare cores without letting a
-	// runaway starve its neighbours.
 	podCPULimitFactor = 2.0
-	// podMemoryLimitFactor sizes a runner pod's memory limit above its
-	// request. Memory is not compressible: overshoot means an OOM kill, so
-	// the ceiling stays tight, just enough headroom to absorb a modest spike
-	// past the measured peak.
+
 	podMemoryLimitFactor = 1.25
-	// podDefaultRefCPU is the machine size handed to capacity.Resolve for
-	// the cold-start default tier. Its cores are unused -- the pod default
-	// falls back to the configured request rather than a share of some
-	// machine -- so any positive value serves.
+
 	podDefaultRefCPU = 1
 )
 
-// resolveResources sizes a node's pod from the same resolution the local
-// daemon uses: an explicit .Resources() pin wins, else the node's measured
-// profile once it has enough samples, else the conservative configured
-// default. It reports an applied pin back to the controller so cluster-side
-// drift can judge it against measured peaks. Every controller lookup is
-// best-effort: a failed profile read simply falls back to the pin or the
-// default rather than failing the node.
 func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capacity.Resolution {
 	pipeline := req.Pipeline
 	if pipeline == "" {
@@ -471,8 +330,6 @@ func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capac
 	return capacity.Resolve(pin, profile, podDefaultRefCPU, "")
 }
 
-// nodePin flattens a node's explicit .Resources() declaration to a
-// capacity.Pin, or nil when the node (or its plan) declared none.
 func nodePin(node *sparkwing.JobNode) *capacity.Pin {
 	if node == nil {
 		return nil
@@ -570,12 +427,6 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 
 func boolPtr(v bool) *bool { return &v }
 
-// ResolveDependencyProxy picks the pull-through package proxy a runner
-// pod should use: an explicit value wins, the literal "off" disables
-// the wiring, and an empty value falls back to the cache service the
-// caller already talks to, because the same pod serves both the
-// gitcache and /proxy/. A non-HTTP cache URL (fs:// or s3:// artifact
-// stores reach this too) is not a proxy and yields "".
 func ResolveDependencyProxy(explicit, cacheURL string) string {
 	explicit = strings.TrimSpace(explicit)
 	if strings.EqualFold(explicit, "off") {
@@ -590,10 +441,6 @@ func ResolveDependencyProxy(explicit, cacheURL string) string {
 	return cacheURL
 }
 
-// ParsePullPolicy validates a configured image pull policy, mapping
-// the empty string onto the default. Case-insensitive so an operator
-// passing `--image-pull-policy=ifnotpresent` is not rejected on
-// capitalization the K8s API type is strict about.
 func ParsePullPolicy(s string) (corev1.PullPolicy, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "":
@@ -608,10 +455,6 @@ func ParsePullPolicy(s string) (corev1.PullPolicy, error) {
 	return "", fmt.Errorf("image pull policy %q: expected Always, IfNotPresent, or Never", s)
 }
 
-// pullPolicyOrDefault resolves an unset policy to IfNotPresent. The
-// field is always written explicitly: an empty ImagePullPolicy makes
-// the API server default to Always for a `:latest` tag, so leaving it
-// blank would silently re-download the runner image on every node.
 func pullPolicyOrDefault(p corev1.PullPolicy) corev1.PullPolicy {
 	if p == "" {
 		return corev1.PullIfNotPresent
@@ -619,23 +462,6 @@ func pullPolicyOrDefault(p corev1.PullPolicy) corev1.PullPolicy {
 	return p
 }
 
-// dependencyProxyEnv points a pod's package managers at the cache's
-// pull-through proxy. The values encode four constraints:
-//
-//   - GOPROXY separates proxy from upstream with "|" so ANY proxy error
-//     falls through to proxy.golang.org; "," only falls through on 404
-//     and 410, which would fail every build while the cache pod rolls.
-//   - "direct" stays last so GOPRIVATE modules keep resolving against
-//     the ~/.netrc the runner entrypoint seeds.
-//   - pip ignores a plain-HTTP index unless its host is also named in
-//     PIP_TRUSTED_HOST, and then fails with "no matching distribution"
-//     rather than falling back to PyPI.
-//   - the pypi index is proxied at /proxy/pypi/simple/, and the proxy
-//     rewrites the file URLs in that index onto /proxy/pythonhosted, so
-//     the download half needs no separate env.
-//
-// A base URL without a scheme and host yields no env at all: upstream
-// defaults beat a pod that cannot resolve its own registry.
 func dependencyProxyEnv(base string) []corev1.EnvVar {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	u, err := url.Parse(base)
@@ -650,25 +476,8 @@ func dependencyProxyEnv(base string) []corev1.EnvVar {
 	}
 }
 
-// podResources maps a resolved admission cost onto a runner pod's
-// requests and limits, so one .Resources() declaration drives both the
-// laptop daemon and the kube scheduler.
-//
-// safety: the resolved Cores figure becomes a CPU *limit* here, not only a
-// request, and a Kubernetes CPU limit is a hard CFS quota. The local daemon
-// charges cores from sustained demand precisely because a host holds no such
-// quota -- the kernel time-slices a transient collision instead of capping
-// it. Cluster profiles therefore carry no sustained figure and capacity.Resolve
-// falls back to their peaks; a spiky pod sized at its plateau would be
-// throttled to that plateau for its whole life. Do not add sustained figures
-// to the controller's fold without first splitting request from limit here.
-//
-// Per dimension: an explicit pin or a
-// measured peak becomes the request, with a limit set by the policy
-// (generous for compressible CPU, tight for memory that OOMs); the
-// cold-start default tier, and any dimension a pin or profile leaves
-// unset, falls back to the configured conservative request and limit so an
-// unprofiled pipeline's first pods still carry sane figures.
+// safety: cluster profiles use peak CPU because the resolved core value is a
+// hard CFS limit here; sustained local-host demand would throttle spiky pods.
 func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequirements {
 	req := corev1.ResourceList{}
 	lim := corev1.ResourceList{}
@@ -700,9 +509,6 @@ func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequiremen
 	return corev1.ResourceRequirements{Requests: req, Limits: lim}
 }
 
-// isJobDone returns true when the Job has a terminal condition.
-// Sparkwing only cares whether the pod finished writing (success or
-// fail); the specific status is read off the controller.
 func isJobDone(j *batchv1.Job) bool {
 	for _, c := range j.Status.Conditions {
 		if c.Status != corev1.ConditionTrue {
@@ -720,9 +526,6 @@ func isJobDone(j *batchv1.Job) bool {
 	return false
 }
 
-// sanitizeK8sName coerces a runID/nodeID into something a Job name can
-// contain: lowercase, digit-or-letter-or-hyphen, no leading/trailing
-// hyphens. Characters outside that set collapse to '-'.
 func sanitizeK8sName(s string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(s) {

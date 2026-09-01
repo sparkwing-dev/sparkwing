@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// lastValue mirrors how os/exec resolves duplicates: the last entry
-// for a key wins.
 func lastValue(env []string, key string) (string, bool) {
 	out, found := "", false
 	for _, kv := range env {
@@ -72,9 +70,6 @@ func TestChildEnv_PinsTheNodeContract(t *testing.T) {
 	}
 }
 
-// The node body reads the operator's own environment -- credentials,
-// PATH, toolchain settings -- so inheriting is the default and pinning
-// is the exception.
 func TestChildEnv_InheritsBaseAndOverridesPinnedKeys(t *testing.T) {
 	base := []string{
 		"PATH=/usr/bin",
@@ -94,16 +89,12 @@ func TestChildEnv_InheritsBaseAndOverridesPinnedKeys(t *testing.T) {
 	if v, _ := lastValue(env, "SPARKWING_CONTROLLER_URL"); v != "http://127.0.0.1:52341" {
 		t.Errorf("SPARKWING_CONTROLLER_URL = %q, want this run's controller", v)
 	}
-	// safety: a pretty renderer would arrive on stdout as lines the dispatcher
-	// cannot decode, so the operator does not get to choose here.
+
 	if v, _ := lastValue(env, "SPARKWING_LOG_FORMAT"); v != "json" {
 		t.Errorf("SPARKWING_LOG_FORMAT = %q, want json", v)
 	}
 }
 
-// --logs= is passed on the command line; a logs URL in the
-// environment must not be manufactured here, or a resident
-// dashboard's service would collect this run's node logs.
 func TestChildEnv_DoesNotSetLogsURL(t *testing.T) {
 	env := childEnv(context.Background(), nil, testConfig(),
 		runner.Request{RunID: "run-1", NodeID: "build"})

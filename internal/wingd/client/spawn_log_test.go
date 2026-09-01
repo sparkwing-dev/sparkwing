@@ -7,10 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// TestOpenDaemonLog_CreatesDirWhenMissing pins the root-cause fix: the
-// daemon directory does not exist when the client opens the log at spawn,
-// so openDaemonLog must create it rather than silently fail and discard
-// the daemon's output.
 func TestOpenDaemonLog_CreatesDirWhenMissing(t *testing.T) {
 	home := t.TempDir()
 	f, _ := openDaemonLog(home)
@@ -31,8 +27,6 @@ func TestOpenDaemonLog_CreatesDirWhenMissing(t *testing.T) {
 	}
 }
 
-// TestOpenDaemonLog_RotatesOncePastCap pins that a log grown past the cap
-// is rotated to d.log.1 on the next spawn, keeping the file bounded.
 func TestOpenDaemonLog_RotatesOncePastCap(t *testing.T) {
 	home := t.TempDir()
 	path, err := wingd.LogPath(home)

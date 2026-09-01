@@ -82,9 +82,6 @@ func FailureFromContext(ctx context.Context) Failure {
 	return Failure{}
 }
 
-// recoveryFn is the unexported Workable wrapper installed when OnFailure
-// receives a [FailureRecoveryFn]. At run time it reads the parent's
-// Failure from context and invokes the callback.
 type recoveryFn struct {
 	fn FailureRecoveryFn
 }

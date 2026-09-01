@@ -23,10 +23,6 @@ func (f SpawnHandlerFunc) Spawn(ctx context.Context, parentNodeID, spawnID strin
 	return f(ctx, parentNodeID, spawnID, job)
 }
 
-// spawnHandlerFromContext returns the handler that
-// internal/sparkwingruntime.WithSpawnHandler installed, or nil.
-// RunWork errors loudly if a Work declares spawns and no handler is
-// present.
 func spawnHandlerFromContext(ctx context.Context) SpawnHandler {
 	if h, ok := ctx.Value(keySpawnHandler).(SpawnHandler); ok {
 		return h

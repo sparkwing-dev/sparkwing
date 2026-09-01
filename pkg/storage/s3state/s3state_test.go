@@ -16,9 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// memArt is an in-memory ArtifactStore used to exercise s3state
-// without requiring a live object store. The fault knobs (putErr,
-// getErr) let outbox + transient-error paths run in unit tests.
 type memArt struct {
 	mu     sync.Mutex
 	data   map[string][]byte

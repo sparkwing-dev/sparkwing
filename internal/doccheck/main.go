@@ -1,19 +1,3 @@
-// doccheck extracts ```go fenced blocks from the sparkwing docs and
-// compiles each against the in-repo SDK, so a doc example that references
-// a removed symbol or a wrong signature fails loudly instead of misleading
-// a reader (or an agent).
-//
-// Blocks that are deliberately illustrative and not meant to compile must
-// carry an HTML comment immediately above the fence:
-//
-//	<!-- doccheck:skip reason text -->
-//	```go
-//	... non-compiling snippet ...
-//	```
-//
-// Skips are reported (count + reasons), never silent.
-//
-// Usage: go run . <docs-content-dir> <sparkwing-repo-root>
 package main
 
 import (
@@ -28,7 +12,7 @@ import (
 
 type block struct {
 	file     string
-	line     int // 1-based line of the first code line
+	line     int
 	body     string
 	topLevel bool
 	skip     string
@@ -72,9 +56,6 @@ func main() {
 	}
 }
 
-// checkGoBlocks compiles every ```go fenced block under contentDir
-// against the in-repo SDK and reports SDK-API drift. Returns false on
-// any drift.
 func checkGoBlocks(contentDir, repoRoot string) bool {
 	blocks, err := extract(contentDir, "go")
 	if err != nil {
@@ -157,11 +138,6 @@ var (
 	sdkProblemRE = regexp.MustCompile(`undefined|has no field or method|unknown field|arguments in call|cannot use|mismatched types|not enough arguments|too many`)
 )
 
-// sdkDriftLines keeps only compiler error lines that indicate the doc
-// misused the sparkwing/sw API (referenced a removed symbol, a method
-// that doesn't exist on *Plan/*Work, or a wrong signature). Everything
-// else (undeclared business idents, unused vars) is harness noise from
-// a snippet that isn't self-contained.
 func sdkDriftLines(out string) []string {
 	var keep []string
 	for _, l := range strings.Split(out, "\n") {
@@ -233,10 +209,6 @@ func hasTopDecl(lines []string) bool {
 	return false
 }
 
-// harness wraps a block into a compilable Go file. Top-level decls go at
-// package scope; statement fragments go inside a func with the common doc
-// locals (ctx/plan/w/rc) predeclared. All common imports are force-used so
-// an unused import never trips the build.
 func harness(b block) string {
 	const preamble = `package main
 
@@ -287,11 +259,6 @@ func writeModule(tmp, repoRoot string) error {
 	return nil
 }
 
-// moduleGoMod builds the synthetic go.mod that replaces the sparkwing SDK
-// with the in-repo copy. The replace target is absolutized: a replace path
-// is resolved relative to the go.mod that holds it, which lives in a temp
-// dir, so a relative repoRoot (e.g. ".") would point outside the repo and
-// send `go mod tidy` chasing sparkwing@latest instead.
 func moduleGoMod(repoRoot string) (string, error) {
 	abs, err := filepath.Abs(repoRoot)
 	if err != nil {

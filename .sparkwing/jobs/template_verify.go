@@ -21,11 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// verifyTemplates is the registry snapshot the pipeline fans out over.
-// It is read once at package load (the registry is an embedded FS, so
-// the read is in-memory and deterministic) which keeps Plan() pure: the
-// plan body only ranges over this slice, exactly as the build pipeline
-// ranges over its compiled-in binary list.
 var verifyTemplates, verifyTemplatesErr = templates.List()
 
 var templateVerifyGroup = sparkwing.NewConcurrencyGroup("template-verify", sparkwing.ConcurrencyLimit{
@@ -36,33 +31,17 @@ var templateVerifyGroup = sparkwing.NewConcurrencyGroup("template-verify", spark
 
 const templateVerifyMinFreeDisk = uint64(10 << 30)
 
-// TemplateVerifySummary is the gate node's typed output: proof that
-// every registered template passed. Cross-pipeline callers (the release
-// gate) receive it via sparkwing.RunAndAwait.
 type TemplateVerifySummary struct {
 	Total int `json:"total"`
 }
 
-// verifyEnv is what build-cli hands each template job: the path to the
-// sparkwing CLI built from the working tree, plus the local sparks-core
-// module checkout (module path -> directory) discovered on this machine.
-// Templates are verified against that in-development checkout -- the same
-// sparks-core the repo is co-releasing -- rather than whatever tags the
-// module proxy happens to serve.
 type verifyEnv struct {
 	CLI string `json:"cli"`
-	// Root is the working-tree checkout the CLI was built from. Scaffolds
-	// pin their sparkwing SDK onto it (see pinLocalSparkwingSDK) so a
-	// template is verified against the SDK about to ship, not the last
-	// released tag -- which also keeps the scaffold's runs-store schema in
-	// step with the tree-built CLI that shares StateHome with it.
+
 	Root       string            `json:"root"`
 	StateHome  string            `json:"state_home"`
 	SparksCore map[string]string `json:"sparks_core"`
-	// GoEnv carries GOCACHE / GOMODCACHE / GOPATH so a job that runs the
-	// inner pipeline under an overridden HOME (the postgres fixture, to
-	// point secret resolution at a scratch dotenv) keeps the host's warm
-	// build and module caches instead of a cold HOME default.
+
 	GoEnv map[string]string `json:"go_env"`
 }
 
@@ -72,12 +51,6 @@ var (
 	templateVerifyLockFile *os.File
 )
 
-// TemplateVerify proves that every sparks-core template is a working
-// pipeline: it builds the sparkwing CLI from the working tree, then for
-// each registered template scaffolds it into a throwaway repo with the
-// template's sample parameters and checks it compiles, lints, and
-// explains. Runnable-tier templates additionally run to green (a
-// docker-fixture template is skipped when no Docker daemon is present).
 type TemplateVerify struct{ sparkwing.Base }
 
 func (TemplateVerify) ShortHelp() string {
@@ -114,9 +87,6 @@ func (TemplateVerify) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.
 	return nil
 }
 
-// buildVerifyCLIJob builds the sparkwing CLI from the working tree into
-// a throwaway directory and discovers the local sparks-core checkout,
-// handing both to every template job.
 type buildVerifyCLIJob struct {
 	sparkwing.Base
 	sparkwing.Produces[verifyEnv]
@@ -216,10 +186,6 @@ func requireTemplateVerifyDisk(free uint64) error {
 	return nil
 }
 
-// readGoEnv captures the host's GOCACHE / GOMODCACHE / GOPATH so a job
-// running the inner pipeline under an overridden HOME still resolves the
-// warm caches. Best-effort: a lookup failure yields an empty map and the
-// inner run falls back to the (overridden) HOME defaults.
 func readGoEnv(ctx context.Context) map[string]string {
 	keys := []string{"GOCACHE", "GOMODCACHE", "GOPATH"}
 	res, err := sparkwing.Exec(ctx, "go", append([]string{"env"}, keys...)...).Capture()
@@ -238,9 +204,6 @@ func readGoEnv(ctx context.Context) map[string]string {
 	return out
 }
 
-// templateVerifyGate is the convergence node every template job feeds.
-// Its success is the invariant the release gate awaits: it can only run
-// once all template jobs passed.
 type templateVerifyGate struct {
 	sparkwing.Base
 	sparkwing.Produces[TemplateVerifySummary]
@@ -254,11 +217,6 @@ func (j *templateVerifyGate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 	}), nil
 }
 
-// verifyTemplateFn returns the job body that verifies one template: it
-// scaffolds the template with its sample parameters into a throwaway
-// repo, compiles the generated pipeline, lints and explains it, and --
-// for a runnable/dry-runnable tier -- runs it against a synthesized
-// fixture. Any failing check fails the job (and thus the pipeline).
 func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) func(context.Context) error {
 	return func(ctx context.Context) error {
 		env := envRef.Get(ctx)
@@ -384,8 +342,6 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 	})
 }
 
-// sortedParamFlags renders a verify_params map as sorted "k=v" strings
-// so the scaffold command is deterministic.
 func sortedParamFlags(params map[string]string) []string {
 	out := make([]string, 0, len(params))
 	for k, v := range params {
@@ -395,11 +351,6 @@ func sortedParamFlags(params map[string]string) []string {
 	return out
 }
 
-// pinLocalSparksCore rewrites the scratch .sparkwing/go.mod to resolve
-// every sparks-core module from the local checkout via a filesystem
-// replace, then re-tidies. This lets a template compile against
-// unreleased sparks-core APIs it co-develops with, instead of the older
-// tags the module proxy serves. A no-op when no checkout was found.
 func pinLocalSparksCore(ctx context.Context, dotSparkwing string, core map[string]string) error {
 	if len(core) == 0 {
 		return nil
@@ -426,14 +377,6 @@ func pinLocalSparksCore(ctx context.Context, dotSparkwing string, core map[strin
 	return nil
 }
 
-// pinLocalSparkwingSDK rewrites the scratch .sparkwing/go.mod to resolve
-// the sparkwing SDK from the working tree the verify CLI was built from,
-// then re-tidies. Scaffolds pin the last released SDK by default, which
-// verifies nothing about the release being cut -- and across a runs-store
-// schema bump it is fatal: the tree-built CLI migrates the shared verify
-// state home to the new schema, and a scaffold binary on the released SDK
-// then refuses to open it. Verifying against the tree keeps the scaffold
-// and the CLI on one schema and one SDK.
 func pinLocalSparkwingSDK(ctx context.Context, dotSparkwing, root string) error {
 	if root == "" {
 		return nil
@@ -460,11 +403,6 @@ func pinLocalSparkwingSDK(ctx context.Context, dotSparkwing, root string) error 
 
 var goModModuleRe = regexp.MustCompile(`(?m)^module[\t ]+(\S+)`)
 
-// discoverSparksCore returns the sparks-core module checkout as a map of
-// module path to local directory. It looks for the checkout root in
-// SPARKWING_SPARKS_CORE_DIR, then in the repo's go.work, then in a
-// sibling ../sparks-core, and enumerates every sub-module directory.
-// Returns nil when no checkout is found.
 func discoverSparksCore(repoRoot string) map[string]string {
 	root := sparksCoreRoot(repoRoot)
 	if root == "" {
@@ -499,8 +437,6 @@ func discoverSparksCore(repoRoot string) map[string]string {
 	return out
 }
 
-// sparksCoreRoot resolves the directory holding the sparks-core
-// sub-module checkouts, or "" when none is discoverable.
 func sparksCoreRoot(repoRoot string) string {
 	if env := strings.TrimSpace(os.Getenv("SPARKWING_SPARKS_CORE_DIR")); env != "" {
 		if isDir(env) {
@@ -517,10 +453,6 @@ func sparksCoreRoot(repoRoot string) string {
 	return ""
 }
 
-// sparksCoreRootFromGoWork scans repoRoot/go.work for a `use` entry
-// pointing at the sparks-core templates module and returns its parent
-// directory (the checkout root). Relative entries resolve against
-// repoRoot.
 func sparksCoreRootFromGoWork(repoRoot string) string {
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "go.work"))
 	if err != nil {
@@ -563,13 +495,6 @@ func sortedKeys(m map[string]string) []string {
 	return out
 }
 
-// runToolchainReady reports whether the host has everything a
-// runnable/dry-runnable run needs -- the fixture's own toolchain plus
-// every command in the manifest's verify_tools -- naming the first
-// missing one otherwise. When anything is absent the run step is skipped
-// (not failed), so the gate stays green on a host that lacks a tool. It
-// runs before any fixture provisioning, so a missing tool never leaves a
-// half-started container behind.
 func runToolchainReady(ctx context.Context, m templates.Manifest) (bool, string) {
 	if ok, missing := fixtureToolchainReady(ctx, m.Fixture()); !ok {
 		return false, missing
@@ -588,12 +513,6 @@ func runToolchainReady(ctx context.Context, m templates.Manifest) (bool, string)
 	return true, ""
 }
 
-// fixtureToolchainReady reports whether the host has the toolchain a
-// fixture's run needs, naming the missing tool otherwise. The interpreter
-// each fixture synthesizes against is the contract: the node fixture
-// drives npm, the python fixture stdlib python3, and the docker and
-// postgres fixtures the Docker daemon (postgres provisions an ephemeral
-// container).
 func fixtureToolchainReady(ctx context.Context, fixture string) (bool, string) {
 	switch fixture {
 	case templates.FixtureDocker, templates.FixturePostgres:
@@ -614,16 +533,11 @@ func fixtureToolchainReady(ctx context.Context, fixture string) (bool, string) {
 	return true, ""
 }
 
-// dockerAvailable reports whether a Docker daemon is reachable.
 func dockerAvailable(ctx context.Context) bool {
 	_, err := sparkwing.Exec(ctx, "docker", "info").Capture()
 	return err == nil
 }
 
-// gitInitFixture turns the scratch repo into a real git repository with
-// its seeded files committed, matching the environment templates
-// actually scaffold into: version derivation runs git describe and skip
-// predicates read git ls-files, both of which need a repo with a commit.
 func gitInitFixture(ctx context.Context, root string) error {
 	ident := []string{"-c", "user.email=verify@sparkwing.invalid", "-c", "user.name=template-verify"}
 	for _, args := range [][]string{
@@ -640,10 +554,6 @@ func gitInitFixture(ctx context.Context, root string) error {
 	return nil
 }
 
-// seedFixture writes the scratch-repo scaffolding a runnable template
-// needs at the repo root before it runs: FixtureNone writes nothing,
-// FixtureGoModule a buildable go module, FixtureDocker that module plus
-// a Dockerfile and an integration test package.
 func seedFixture(root, fixture string) error {
 	switch fixture {
 	case templates.FixtureNone, "":
@@ -664,11 +574,6 @@ func seedFixture(root, fixture string) error {
 	}
 }
 
-// seedGoModule writes a buildable go module at the repo root: a package
-// with a fully covered function plus its test, so a coverage-gated
-// template's `go test -coverprofile` reports nonzero total statements and
-// 100% coverage (clearing any threshold), and an integration test
-// package for templates whose default command runs `go test ./integration/...`.
 func seedGoModule(root string) error {
 	files := map[string]string{
 		"go.mod":       "module verifyfixture\n\ngo 1.26\n",
@@ -679,13 +584,6 @@ func seedGoModule(root string) error {
 	return writeFixtureFiles(root, files)
 }
 
-// provisionFixture writes a fixture's files and, for the postgres
-// fixture, starts an ephemeral database and injects its DSN as a masked
-// secret for the inner run. It returns a cleanup to run after the node
-// (a no-op except for postgres, which tears the container down) and any
-// extra environment the inner `sparkwing run` needs (the HOME override
-// that points secret resolution at the scratch dotenv, plus the host's
-// Go caches so that override stays fast).
 func provisionFixture(ctx context.Context, scratch string, m templates.Manifest, env verifyEnv) (func(), map[string]string, error) {
 	noop := func() {}
 	if m.Fixture() != templates.FixturePostgres {
@@ -728,8 +626,6 @@ func valueOr(v, fallback string) string {
 	return v
 }
 
-// seedMigrations writes a trivial reversible golang-migrate pair into dir
-// (relative to root), matching the NNNN_name.up.sql / .down.sql naming.
 func seedMigrations(root, dir string) error {
 	files := map[string]string{
 		filepath.Join(dir, "0001_init.up.sql"):   "CREATE TABLE verify_fixture (id integer PRIMARY KEY);\n",
@@ -738,9 +634,6 @@ func seedMigrations(root, dir string) error {
 	return writeFixtureFiles(root, files)
 }
 
-// startEphemeralPostgres runs a throwaway postgres container on a free
-// host port, waits for it to accept connections, and returns its DSN plus
-// a cleanup that removes the container. Callers must invoke cleanup.
 func startEphemeralPostgres(ctx context.Context) (string, func(), error) {
 	port, err := freeTCPPort()
 	if err != nil {
@@ -762,8 +655,6 @@ func startEphemeralPostgres(ctx context.Context) (string, func(), error) {
 	return dsn, cleanup, nil
 }
 
-// waitPostgresReady polls pg_isready inside the container until it accepts
-// connections or a deadline passes.
 func waitPostgresReady(ctx context.Context, container string) error {
 	deadline := time.Now().Add(90 * time.Second)
 	for {
@@ -790,10 +681,6 @@ func freeTCPPort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
-// writeMaskedSecret writes a single KEY=VALUE into a scratch masked
-// dotenv under home, the file the CLI's secret resolver reads when the
-// inner run is invoked with HOME set to home. Keeping it in a scratch
-// home leaves the operator's real ~/.config/sparkwing/secrets.env alone.
 func writeMaskedSecret(home, name, value string) error {
 	dir := filepath.Join(home, ".config", "sparkwing")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -810,11 +697,6 @@ func seedDocker(root string) error {
 	return writeFixtureFiles(root, files)
 }
 
-// seedNodeModule writes a dependency-free Node project at the repo root:
-// a package.json whose install / lint / typecheck / build / test scripts
-// all pass with only the Node runtime (no npm install, no network -- the
-// lockfile has zero dependencies and the test runs the stdlib test
-// runner), plus a passing test file.
 func seedNodeModule(root string) error {
 	files := map[string]string{
 		"package.json": `{
@@ -844,10 +726,6 @@ func seedNodeModule(root string) error {
 	return writeFixtureFiles(root, files)
 }
 
-// seedPythonModule writes a dependency-free Python project at the repo
-// root: a pyproject.toml, a trivial importable package, and a passing
-// stdlib unittest that `python3 -m unittest discover` finds -- no pip,
-// uv, pytest, or network required.
 func seedPythonModule(root string) error {
 	files := map[string]string{
 		"pyproject.toml": "[project]\nname = \"verify-fixture\"\nversion = \"0.0.0\"\n",

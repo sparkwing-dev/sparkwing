@@ -10,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-// noticeHome points the process at a throwaway sparkwing home and
-// returns its paths plus the running test binary's own stamp file.
 func noticeHome(t *testing.T) (paths.Paths, string) {
 	t.Helper()
 	home := t.TempDir()
@@ -25,8 +23,6 @@ func noticeHome(t *testing.T) (paths.Paths, string) {
 	return p, p.VersionStampFile(installsite.PathKey(self))
 }
 
-// seedStamp writes a stamp file as if the install at exe last ran as
-// version, the way writeVersionStamp lays it down.
 func seedStamp(t *testing.T, file, exe, version string) {
 	t.Helper()
 	writeVersionStamp(file, exe, version)
@@ -54,10 +50,6 @@ func TestVersionTransition(t *testing.T) {
 	}
 }
 
-// TestNoteVersionTransition_OnceOnly is the core once-per-transition
-// contract: the first invocation after the stamped version differs
-// emits exactly one line and rewrites the stamp; the next invocation is
-// silent.
 func TestNoteVersionTransition_OnceOnly(t *testing.T) {
 	_, stamp := noticeHome(t)
 	seedStamp(t, stamp, "test-binary", "v0.14.0")
@@ -82,9 +74,6 @@ func TestNoteVersionTransition_OnceOnly(t *testing.T) {
 	}
 }
 
-// TestNoteVersionTransition_InfoSuppressesStderr verifies the info verb
-// stashes the notice for inline rendering instead of duplicating it on
-// stderr.
 func TestNoteVersionTransition_InfoSuppressesStderr(t *testing.T) {
 	_, stamp := noticeHome(t)
 	seedStamp(t, stamp, "test-binary", "v0.14.0")

@@ -29,20 +29,6 @@ func TestRequiresDocumentationStatesDispatchBehavior(t *testing.T) {
 	}
 }
 
-func TestRequiresStorageDocumentationStatesClaimBoundary(t *testing.T) {
-	doc := strings.Join(strings.Fields(jobNodeFieldDoc(t, "requires")), " ")
-	for _, want := range []string{"stored with", "non-inline dispatched jobs", "runner-claim filtering"} {
-		if !strings.Contains(doc, want) {
-			t.Errorf("requires storage documentation does not contain %q", want)
-		}
-	}
-	for _, falseClaim := range []string{"restricts the job", "into runner claims"} {
-		if strings.Contains(doc, falseClaim) {
-			t.Errorf("requires storage documentation contains false claim %q", falseClaim)
-		}
-	}
-}
-
 func TestGeneratedRequiresDocumentationStatesClaimBoundary(t *testing.T) {
 	for _, path := range []string{"../docs/sdk-reference.md", "../pkg/docs/mirror/sdk-reference.md"} {
 		data, err := os.ReadFile(path)

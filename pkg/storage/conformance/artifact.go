@@ -183,10 +183,6 @@ func mustGet(t *testing.T, s storage.ArtifactStore, ctx context.Context, key str
 	return body
 }
 
-// maybeSkipUnsupported returns true if err signals the implementation
-// has opted out of this operation (per the conformance contract).
-// Logs the skip with the wrapped reason so test output still names
-// what was skipped and why.
 func maybeSkipUnsupported(t *testing.T, err error, op string) bool {
 	t.Helper()
 	if err == nil {

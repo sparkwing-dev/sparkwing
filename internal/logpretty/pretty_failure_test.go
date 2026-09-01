@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// renderRunFailure emits a run_summary + run_finish pair for a failed
-// run and returns the rendered Summary block (color off for stable
-// assertions).
 func renderRunFailure(t *testing.T, nodes []any) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -30,9 +27,6 @@ func renderRunFailure(t *testing.T, nodes []any) string {
 	return buf.String()
 }
 
-// A leaf failure with a cascade of upstream-cancelled dependents must
-// lead with the failing leaf + its error tail, and report the
-// cancellations separately -- never as additional failures.
 func TestRunSummary_HeadlineLeadsWithRootCauseLeaf(t *testing.T) {
 	out := renderRunFailure(t, []any{
 		map[string]any{"id": "build", "outcome": "success", "duration_ms": int64(2000)},
@@ -73,8 +67,6 @@ func TestRunSummary_HeadlineLeadsWithRootCauseLeaf(t *testing.T) {
 	}
 }
 
-// skipped (a SkipIf / filter decision) stays distinct from cancelled
-// (an upstream-failure cascade) in the tally.
 func TestRunSummary_SkippedDistinctFromCancelled(t *testing.T) {
 	out := renderRunFailure(t, []any{
 		map[string]any{"id": "gate", "outcome": "failed", "error": "boom"},

@@ -9,10 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// SideloadRemoteForReplay copies a remote run's state into the local
-// store so MintReplayRun + replay-node can run as if it were local.
-// Copies the run row, target node + upstream dep rows (with output),
-// and the target's dispatch snapshot. Idempotent.
 func SideloadRemoteForReplay(ctx context.Context, st *store.Store, c *client.Client, runID, nodeID string) error {
 	if err := sideloadRun(ctx, st, c, runID); err != nil {
 		return err
@@ -38,9 +34,7 @@ func sideloadRun(ctx context.Context, st *store.Store, c *client.Client, runID s
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("check local run: %w", err)
 	}
-	// Execution read: this row is written to the local store and
-	// replayed from. A redacted fetch would persist "***" permanently,
-	// since the idempotent early return above never refetches.
+
 	remote, err := c.GetRunForExecution(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("fetch remote run %s: %w", runID, err)

@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// noLinks resolves nothing, so a case that does not care about cross-page
-// links gets the unlinked rendering.
 func noLinks(string) (string, bool) { return "", false }
 
 func render(t *testing.T, md string) string {
@@ -40,8 +38,6 @@ func TestHeadingsParagraphsAndListsRender(t *testing.T) {
 	}
 }
 
-// Reference pages are mostly tables -- config-reference.md is nothing else --
-// so a renderer that dropped them would publish those pages unreadable.
 func TestPipeTablesRender(t *testing.T) {
 	md := "| Field | Type |\n|---|---|\n| `name` | string |\n"
 	got := render(t, md)
@@ -68,8 +64,6 @@ func TestTableWithoutASeparatorRowIsAllData(t *testing.T) {
 	}
 }
 
-// Every generated page opens with a "do not edit by hand" banner comment, so a
-// renderer that escaped comments would put that banner in front of the reader.
 func TestHTMLCommentsAreDropped(t *testing.T) {
 	md := "<!-- GENERATED; do not edit -->\n# Title\n"
 	got := render(t, md)
@@ -91,8 +85,6 @@ func TestMultiLineHTMLCommentIsDropped(t *testing.T) {
 	}
 }
 
-// The set cross-references itself by filename. In a browser those have to
-// become links into this handler, or every one of them 404s.
 func TestCrossPageLinksResolveThroughTheHandler(t *testing.T) {
 	known := func(slug string) (string, bool) {
 		if slug == "pipelines" {
@@ -120,9 +112,6 @@ func TestAnchorOnACrossPageLinkStillResolves(t *testing.T) {
 	}
 }
 
-// The pages are third-party-authored markdown as far as this renderer is
-// concerned, and it emits HTML, so the escaping is a boundary rather than a
-// nicety.
 func TestMarkupInAPageCannotForgeTags(t *testing.T) {
 	got := render(t, "<script>alert(1)</script>")
 	if strings.Contains(got, "<script>") {

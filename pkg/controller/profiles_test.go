@@ -12,11 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestFinishRun_FoldsProfilesAndEmitsPinDrift drives a cluster run to
-// finish with measured node metrics well below its applied pin and asserts
-// the controller folds the measurement into the pipeline profile and
-// records a resource_pin_drift event -- the cluster-side counterpart of the
-// local daemon's end-of-run drift warning.
 func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -85,8 +80,6 @@ func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 	}
 }
 
-// TestFinishRun_NoPinNoDrift confirms an unpinned pipeline folds its
-// measurement without ever emitting a drift event.
 func TestFinishRun_NoPinNoDrift(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -129,9 +122,6 @@ func TestFinishRun_NoPinNoDrift(t *testing.T) {
 	}
 }
 
-// TestGetPipelineProfile_RoundTripsThroughController exercises the read the
-// cluster runner uses to size a pod, including the 404-as-nil path for an
-// unprofiled pipeline.
 func TestGetPipelineProfile_RoundTripsThroughController(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

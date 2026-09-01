@@ -35,6 +35,17 @@ You'll need a reverse proxy in front handling TLS. Caddy is recommended
 for the simplest setup -- see `install/docker-compose/Caddyfile.example`.
 Traefik, nginx, or Cloudflare tunnels also work.
 
+To publish pull-request results back to GitHub, set `GITHUB_TOKEN` in
+`.env`. Use a fine-grained token with **Commit statuses: Read and write**
+for every repository this controller serves, or a classic token with
+`repo:status`. The compose deployment passes `DASHBOARD_URL` through as
+`SPARKWING_DASHBOARD_URL`, so each `sparkwing/<pipeline>` status links to
+that run in the dashboard. The dashboard URL must use HTTP or HTTPS, include
+a host, and omit credentials, a query, and a fragment; invalid values omit
+the status link. Leave `GITHUB_TOKEN` unset to disable outbound status
+reporting. A GitHub API failure is logged and does not reject the webhook or
+change the run result.
+
 What runs:
 
 - `controller` - queue, dispatcher, webhooks, pool management, state store.
@@ -211,6 +222,12 @@ SSH agent across reboots, use [ssh-agent as a launchd service](https://apple.sta
 **Runner runs but Docker commands fail.** Ensure Docker Desktop (or
 colima/rancher-desktop) is running before the runner claims a job. On
 macOS, the LaunchAgent inherits the user's Docker socket.
+
+**Pull-request runs have no GitHub status.** Confirm the controller has a
+non-empty `GITHUB_TOKEN`, the token can write commit statuses in that
+repository, and the webhook delivery is a `pull_request` event. Read the
+controller log for `github commit status update failed`; status reporting
+is best-effort and never changes the Sparkwing run result.
 
 **Logs stop arriving in the dashboard.** Check `sparkwing-logs` health
 on the server and the logs hostname is reachable from the laptop. The

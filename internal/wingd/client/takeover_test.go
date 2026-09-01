@@ -16,9 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// stuckOlderDaemon answers every handshake as the same superseded
-// version, whatever drain requests it is sent. It is what a spawn that
-// keeps bringing up the old binary looks like from the client side.
 func stuckOlderDaemon(t *testing.T, home, version string) *atomic.Int64 {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)
@@ -63,11 +60,6 @@ func stuckOlderDaemon(t *testing.T, home, version string) *atomic.Int64 {
 	return handshakes
 }
 
-// TestTakeoverStopsAfterItsAttemptBudget bounds the drain-respawn churn.
-// A takeover that worked is followed by a connection to the successor, so
-// a daemon that keeps coming back as the version it replaced is a skew an
-// operator has to resolve -- not something to retry until the process
-// ends.
 func TestTakeoverStopsAfterItsAttemptBudget(t *testing.T) {
 	home := shortHome(t)
 	handshakes := stuckOlderDaemon(t, home, "v0.1.0")
@@ -94,10 +86,6 @@ func TestTakeoverStopsAfterItsAttemptBudget(t *testing.T) {
 	}
 }
 
-// TestTakeoverBudgetRestartsForADifferentDaemon keeps the cap pointed at
-// the loop it exists for. Several different old daemons winning the
-// socket race in turn is progress -- each one is replaced -- so only the
-// same version coming back should exhaust the budget.
 func TestTakeoverBudgetRestartsForADifferentDaemon(t *testing.T) {
 	home := shortHome(t)
 	sock, err := wingd.SocketPath(home)
@@ -163,11 +151,6 @@ func TestTakeoverBudgetRestartsForADifferentDaemon(t *testing.T) {
 	}
 }
 
-// TestAlternatingPredecessorsStillExhaustTheBudget closes the loop a
-// per-version budget alone cannot see. Two old clients on a shared box,
-// each respawning its own daemon, hand this client a version that is
-// always different from the last one, so the per-version allowance never
-// fills -- and every attempt drains a live daemon and starts a process.
 func TestAlternatingPredecessorsStillExhaustTheBudget(t *testing.T) {
 	home := shortHome(t)
 	sock, err := wingd.SocketPath(home)

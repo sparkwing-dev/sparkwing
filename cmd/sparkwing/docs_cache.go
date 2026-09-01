@@ -1,8 +1,3 @@
-// `sparkwing docs cache` manages the on-disk web cache that backs
-// `--web` fetches. The cache lives at
-// $XDG_CACHE_HOME/sparkwing/web/ (or ~/.cache/sparkwing/web/) and
-// mirrors the URL paths it serves, so users can inspect / grep the
-// cached files directly without going through the CLI.
 package main
 
 import (

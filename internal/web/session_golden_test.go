@@ -26,8 +26,9 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 		sessionHeaders []string
 		proxyAuth      string
 		proxyCalls     int
+		activeSessions map[string]string
 	}
-	state := &controllerState{}
+	state := &controllerState{activeSessions: map[string]string{}}
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		state.Lock()
 		defer state.Unlock()
@@ -51,25 +52,35 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 				return
 			}
 			state.loginCalls++
+			sessionID := "session-" + strconv.Itoa(state.loginCalls)
+			csrfToken := "csrf-" + sessionID
+			state.activeSessions[sessionID] = csrfToken
 			_ = json.NewEncoder(w).Encode(loginResp{
-				SessionID: "session-" + strconv.Itoa(state.loginCalls),
-				CSRFToken: "csrf-token",
+				SessionID: sessionID,
+				CSRFToken: csrfToken,
 				Principal: "admin",
 				Scopes:    []string{"admin"},
 				ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			})
 		case "/api/v1/auth/session":
-			state.sessionHeaders = append(state.sessionHeaders, r.Header.Get("Authorization"))
+			header := r.Header.Get("Authorization")
+			state.sessionHeaders = append(state.sessionHeaders, header)
+			const prefix = "Session "
+			if !strings.HasPrefix(header, prefix) || state.activeSessions[strings.TrimPrefix(header, prefix)] == "" {
+				http.Error(w, "invalid session", http.StatusUnauthorized)
+				return
+			}
 			_ = json.NewEncoder(w).Encode(sessionResp{
 				Principal: "admin",
 				Scopes:    []string{"admin"},
-				CSRFToken: "csrf-token",
+				CSRFToken: state.activeSessions[strings.TrimPrefix(header, prefix)],
 				ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			})
 		case "/api/v1/auth/logout":
 			var body map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			state.logoutSessions = append(state.logoutSessions, body["session_id"])
+			delete(state.activeSessions, body["session_id"])
 			w.WriteHeader(http.StatusNoContent)
 		case "/api/v1/probe":
 			state.proxyAuth = r.Header.Get("Authorization")
@@ -81,7 +92,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	}))
 	t.Cleanup(controller.Close)
 
-	dashboard := httptest.NewServer(HandlerFromOptions(HandlerOptions{
+	dashboard := httptest.NewTLSServer(HandlerFromOptions(HandlerOptions{
 		ControllerURL: controller.URL,
 		Token:         "service-token",
 		RequireLogin:  true,
@@ -94,7 +105,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 
 	unauthenticated := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/", nil)
 	resp := doDashboardRequest(t, client, unauthenticated)
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login?next=/" {
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login?next=%2F" {
 		t.Fatalf("unauthenticated dashboard = %d %q, want 303 to login", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	resp.Body.Close()
@@ -107,7 +118,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	loginPage := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/login", nil)
+	loginPage := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/login?next=%2Fruns%3Frun%3Dauth-run%26tab%3Dlogs", nil)
 	resp = doDashboardRequest(t, client, loginPage)
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -117,27 +128,45 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Create first admin") {
 		t.Fatalf("fresh login page = %d %q, want bootstrap form", resp.StatusCode, body)
 	}
+	preauthCSRF := cookieValue(t, resp.Cookies(), csrfCookieName)
+	if !strings.Contains(string(body), `name="next" value="/runs?run=auth-run&amp;tab=logs"`) ||
+		!strings.Contains(string(body), `name="csrf_token" value="`+preauthCSRF+`"`) {
+		t.Fatalf("login form did not preserve next and bind CSRF cookie: %s", body)
+	}
 
 	bootstrap := newDashboardFormRequest(t, dashboard.URL+"/login/bootstrap", url.Values{
-		"username": {"admin"},
-		"password": {"correct-horse"},
-		"next":     {"/runs"},
+		"username":   {"admin"},
+		"password":   {"correct-horse"},
+		"next":       {"/runs?run=auth-run&tab=logs"},
+		"csrf_token": {preauthCSRF},
 	})
+	bootstrap.AddCookie(&http.Cookie{Name: csrfCookieName, Value: preauthCSRF})
 	resp = doDashboardRequest(t, client, bootstrap)
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/runs" {
-		t.Fatalf("bootstrap = %d %q, want 303 to /runs", resp.StatusCode, resp.Header.Get("Location"))
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/runs?run=auth-run&tab=logs" {
+		t.Fatalf("bootstrap = %d %q, want 303 to preserved runs query", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	bootstrapCookies := resp.Cookies()
 	resp.Body.Close()
-	assertSessionCookies(t, bootstrapCookies, "session-1")
+	assertSessionCookies(t, bootstrapCookies, "session-1", "csrf-session-1")
 
-	logout := newDashboardRequest(t, http.MethodPost, dashboard.URL+"/logout", nil)
-	addSessionCookie(t, logout, bootstrapCookies)
+	logout := newDashboardFormRequest(t, dashboard.URL+"/logout", url.Values{
+		"csrf_token": {"csrf-session-1"},
+	})
+	addAuthCookies(t, logout, bootstrapCookies)
 	resp = doDashboardRequest(t, client, logout)
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login" {
 		t.Fatalf("logout = %d %q, want 303 to /login", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	assertClearedSessionCookies(t, resp.Cookies())
+	resp.Body.Close()
+
+	copiedSession := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	copiedSession.Header.Set("Accept", "application/json")
+	copiedSession.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-1"})
+	resp = doDashboardRequest(t, client, copiedSession)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("copied revoked session = %d, want 401", resp.StatusCode)
+	}
 	resp.Body.Close()
 
 	stolenBearer := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
@@ -149,25 +178,43 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	}
 	resp.Body.Close()
 
+	loginPage = newDashboardRequest(t, http.MethodGet, dashboard.URL+"/login?next=%2Fcluster", nil)
+	resp = doDashboardRequest(t, client, loginPage)
+	loginCSRF := cookieValue(t, resp.Cookies(), csrfCookieName)
+	resp.Body.Close()
 	login := newDashboardFormRequest(t, dashboard.URL+"/login", url.Values{
-		"username": {"admin"},
-		"password": {"correct-horse"},
-		"next":     {"/cluster"},
+		"username":   {"admin"},
+		"password":   {"correct-horse"},
+		"next":       {"/cluster"},
+		"csrf_token": {loginCSRF},
 	})
+	login.AddCookie(&http.Cookie{Name: csrfCookieName, Value: loginCSRF})
 	resp = doDashboardRequest(t, client, login)
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/cluster" {
 		t.Fatalf("login = %d %q, want 303 to /cluster", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	loginCookies := resp.Cookies()
 	resp.Body.Close()
-	assertSessionCookies(t, loginCookies, "session-2")
+	assertSessionCookies(t, loginCookies, "session-2", "csrf-session-2")
 
 	proxy := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
 	proxy.Header.Set("Accept", "application/json")
-	addSessionCookie(t, proxy, loginCookies)
+	addAuthCookies(t, proxy, loginCookies)
 	resp = doDashboardRequest(t, client, proxy)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("authenticated proxy = %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	state.Lock()
+	delete(state.activeSessions, "session-2")
+	state.Unlock()
+	revoked := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	revoked.Header.Set("Accept", "application/json")
+	addAuthCookies(t, revoked, loginCookies)
+	resp = doDashboardRequest(t, client, revoked)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("server-revoked session = %d, want immediate 401", resp.StatusCode)
 	}
 	resp.Body.Close()
 
@@ -179,8 +226,9 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	if len(state.logoutSessions) != 1 || state.logoutSessions[0] != "session-1" {
 		t.Errorf("controller logout sessions = %v, want session-1", state.logoutSessions)
 	}
-	if len(state.sessionHeaders) != 1 || state.sessionHeaders[0] != "Session session-2" {
-		t.Errorf("controller session headers = %v, want Session session-2", state.sessionHeaders)
+	if !containsString(state.sessionHeaders, "Session session-1") ||
+		!containsString(state.sessionHeaders, "Session session-2") {
+		t.Errorf("controller session headers = %v, want both sessions resolved", state.sessionHeaders)
 	}
 	if state.proxyAuth != "Bearer service-token" {
 		t.Errorf("proxied Authorization = %q, want service token", state.proxyAuth)
@@ -213,9 +261,8 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 
 	sessionless := httptest.NewRecorder()
 	spaHandler(fs.FS(bundle), HandlerOptions{
-		Token:        "service-token",
-		APIURL:       "https://controller.example.test",
-		RequireLogin: true,
+		Token:  "service-token",
+		APIURL: "https://controller.example.test",
 	}).ServeHTTP(
 		sessionless,
 		httptest.NewRequest(http.MethodGet, "/", nil),
@@ -240,6 +287,11 @@ func newDashboardFormRequest(t *testing.T, target string, form url.Values) *http
 	t.Helper()
 	req := newDashboardRequest(t, http.MethodPost, target, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	u, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", u.Scheme+"://"+u.Host)
 	return req
 }
 
@@ -252,26 +304,49 @@ func doDashboardRequest(t *testing.T, client *http.Client, req *http.Request) *h
 	return resp
 }
 
-func addSessionCookie(t *testing.T, req *http.Request, cookies []*http.Cookie) {
+func addAuthCookies(t *testing.T, req *http.Request, cookies []*http.Cookie) {
 	t.Helper()
+	found := map[string]bool{}
 	for _, cookie := range cookies {
-		if cookie.Name == sessionCookieName {
+		if cookie.Name == sessionCookieName || cookie.Name == csrfCookieName {
 			req.AddCookie(cookie)
-			return
+			found[cookie.Name] = true
 		}
 	}
-	t.Fatal("response did not include a session cookie")
+	if !found[sessionCookieName] || !found[csrfCookieName] {
+		t.Fatal("response did not include session and CSRF cookies")
+	}
 }
 
-func assertSessionCookies(t *testing.T, cookies []*http.Cookie, sessionID string) {
+func assertSessionCookies(t *testing.T, cookies []*http.Cookie, sessionID, csrfToken string) {
 	t.Helper()
 	values := map[string]string{}
 	for _, cookie := range cookies {
 		values[cookie.Name] = cookie.Value
 	}
-	if values[sessionCookieName] != sessionID || values[csrfCookieName] != "csrf-token" {
-		t.Fatalf("session cookies = %v, want %s and csrf-token", values, sessionID)
+	if values[sessionCookieName] != sessionID || values[csrfCookieName] != csrfToken {
+		t.Fatalf("session cookies = %v, want %s and %s", values, sessionID, csrfToken)
 	}
+}
+
+func cookieValue(t *testing.T, cookies []*http.Cookie, name string) string {
+	t.Helper()
+	for _, cookie := range cookies {
+		if cookie.Name == name && cookie.Value != "" {
+			return cookie.Value
+		}
+	}
+	t.Fatalf("response did not include %s", name)
+	return ""
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func assertClearedSessionCookies(t *testing.T, cookies []*http.Cookie) {

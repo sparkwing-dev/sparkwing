@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-#
-# Sparkwing Proxy Benchmark -- In-Cluster (EKS)
-#
-# Runs Docker builds inside a k8s pod with DinD to measure
-# the impact of sparkwing-cache on build times.
-#
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -163,6 +157,5 @@ echo "==> Benchmark job created: $JOB_NAME"
 echo "==> Streaming logs (this will take 10-20 minutes)..."
 echo ""
 
-# Wait for pod to start, then stream logs
 kubectl wait --for=condition=Ready "pods" -l "job-name=$JOB_NAME" -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
 kubectl logs -f "job/$JOB_NAME" -n "$NAMESPACE" -c bench

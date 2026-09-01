@@ -67,8 +67,6 @@ func TestEmbeddedChangelogMatchesRoot(t *testing.T) {
 	}
 }
 
-// hashTree walks a directory and returns relative path -> sha256.
-// Map comparison lets failure messages name which files drifted.
 func hashTree(root string) (map[string]string, error) {
 	out := map[string]string{}
 	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {

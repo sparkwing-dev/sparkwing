@@ -23,44 +23,35 @@ const (
 
 var pipelineEntryKeyRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{8}$`)
 
-var removeCacheEntry = os.RemoveAll
-var cacheNow = time.Now
+var (
+	removeCacheEntry = os.RemoveAll
+	cacheNow         = time.Now
+)
 
-// Entry is the authority to inspect, materialize, and execute one managed
-// pipeline-cache entry.
 type Entry struct {
 	root string
 	key  string
 }
 
-// Lease keeps an entry live until Release or process replacement.
 type Lease struct {
 	entry Entry
 	file  *os.File
 }
 
-// PruneOptions bounds one cache reclamation attempt.
 type PruneOptions struct {
 	Root         string
 	ReclaimBytes int64
-	// RemoveBytes is the logical cache-byte goal used by configured ceilings.
-	// Reclaim callers use ReclaimBytes and remeasure the filesystem instead.
+
 	RemoveBytes int64
-	// ReclaimEntries is an optional entry-count goal used by configured
-	// cache ceilings. Reclaim callers normally leave it zero.
+
 	ReclaimEntries int
 	MaxEntries     int
 }
 
-// PruneResult reports observed pressure and work completed by Prune. A
-// successful attempt classifies every examined entry as reclaimed, active, or
-// busy. PruneBusy reports coordinator contention without examining an entry.
 type PruneResult struct {
 	ObservedBytes       int64 `json:"observed_bytes"`
 	LogicalRemovedBytes int64 `json:"logical_removed_bytes"`
-	// ObservedCapacityGainedBytes is capacity observed becoming available after removal.
-	// Admission must remeasure afterward because concurrent filesystem activity
-	// prevents attributing the observation to this prune attempt.
+
 	ObservedCapacityGainedBytes int64 `json:"observed_capacity_gained_bytes"`
 	ExaminedEntries             int   `json:"examined_entries"`
 	ReclaimedEntries            int   `json:"reclaimed_entries"`
@@ -68,12 +59,10 @@ type PruneResult struct {
 	BusySkippedEntries          int   `json:"busy_skipped_entries"`
 	PruneBusy                   bool  `json:"prune_busy"`
 	GoalSatisfied               bool  `json:"goal_satisfied"`
-	// WorkBoundExhausted means discovery or examination reached a caller-set
-	// limit; an empty inventory leaves it false.
+
 	WorkBoundExhausted bool `json:"work_bound_exhausted"`
 }
 
-// CacheStatus reports the measured managed and legacy pipeline-cache state.
 type CacheStatus struct {
 	ObservedBytes      int64 `json:"observed_bytes"`
 	EntryCount         int   `json:"entry_count"`
@@ -85,7 +74,6 @@ type CacheStatus struct {
 	DiscoveryExhausted bool  `json:"discovery_exhausted"`
 }
 
-// PipelineEntry resolves key inside Sparkwing's managed pipeline cache.
 func PipelineEntry(key string) (Entry, error) {
 	return pipelineEntryAt(filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema), key)
 }
@@ -100,7 +88,6 @@ func pipelineEntryAt(root, key string) (Entry, error) {
 	return Entry{root: root, key: key}, nil
 }
 
-// Path returns the executable protected by the lease.
 func (l *Lease) Path() string {
 	if l == nil {
 		return ""
@@ -108,7 +95,6 @@ func (l *Lease) Path() string {
 	return l.entry.binaryPath()
 }
 
-// Release relinquishes the entry lease.
 func (l *Lease) Release() error {
 	if l == nil || l.file == nil {
 		return nil
@@ -118,9 +104,6 @@ func (l *Lease) Release() error {
 	return err
 }
 
-// ExecReplace runs the leased entry as the foreground child. This process
-// retains the lease until that child exits, so pipeline descendants cannot
-// inherit cache authority.
 func (l *Lease) ExecReplace(args []string, dir string, env []string) error {
 	if l == nil || l.file == nil {
 		return errors.New("pipeline cache lease is not held")
@@ -128,7 +111,6 @@ func (l *Lease) ExecReplace(args []string, dir string, env []string) error {
 	return ExecReplace(l.Path(), args, dir, env)
 }
 
-// Acquire obtains a live-entry lease if the entry exists.
 func (e Entry) Acquire(ctx context.Context) (*Lease, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
@@ -147,7 +129,6 @@ func (e Entry) Acquire(ctx context.Context) (*Lease, bool, error) {
 	return &Lease{entry: e, file: lease}, true, nil
 }
 
-// Materialize publishes the entry through a private staging path.
 func (e Entry) Materialize(ctx context.Context, write func(string) error) (published bool, err error) {
 	lease, published, err := e.AcquireOrMaterialize(ctx, write)
 	if lease != nil {
@@ -156,8 +137,6 @@ func (e Entry) Materialize(ctx context.Context, write func(string) error) (publi
 	return published, err
 }
 
-// AcquireOrMaterialize returns a held lease for an existing or newly
-// materialized entry.
 func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) error) (_ *Lease, published bool, err error) {
 	if write == nil {
 		return nil, false, errors.New("pipeline cache materializer is required")
@@ -250,7 +229,6 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 	return &Lease{entry: e, file: lease}, true, nil
 }
 
-// Prune reclaims inactive entries within the requested bounds.
 func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err error) {
 	if opts.ReclaimBytes <= 0 && opts.RemoveBytes <= 0 && opts.ReclaimEntries <= 0 {
 		return result, errors.New("a positive reclaim byte or entry goal is required")
@@ -448,7 +426,6 @@ func pruneGoalSatisfied(result PruneResult, opts PruneOptions) bool {
 	return bytesSatisfied && removedSatisfied && entriesSatisfied
 }
 
-// Status measures the pipeline cache without deleting entries.
 func Status(ctx context.Context, root string) (status CacheStatus, err error) {
 	if root == "" {
 		root = filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema)

@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Session TTL with sliding-window extension on active use within the
-// last hour of life.
 const (
 	sessionTTL    = 12 * time.Hour
 	sessionExtend = 1 * time.Hour
@@ -29,9 +27,6 @@ type loginResp struct {
 	ExpiresAt int64    `json:"expires_at"`
 }
 
-// handleLogin validates username+password and mints a session. The
-// caller presents a password, not a bearer token, so the endpoint is
-// unauthenticated.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -72,7 +67,6 @@ type logoutReq struct {
 	SessionID string `json:"session_id"`
 }
 
-// handleLogout deletes the session row. Idempotent; no scope check.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	var req logoutReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -97,10 +91,6 @@ type sessionResp struct {
 	ExpiresAt int64    `json:"expires_at"`
 }
 
-// handleSession resolves a session id (passed in the Authorization:
-// Session header, NOT as a Bearer token) to the principal + scopes +
-// CSRF token bound to it. Unauthed: the caller presents the session
-// id itself, which is the same trust the cookie grants.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	// safety: Session header keeps session ids off the Bearer path so a session id never authenticates as a bearer token.
 	raw := extractSessionHeader(r)
@@ -167,11 +157,6 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCreateUserOrBootstrap accepts a first-admin create while the
-// users table is empty and otherwise creates an additional user. The
-// route's auth middleware requires an admin principal whenever
-// authentication is enabled. CreateFirstUser re-checks emptiness in-tx
-// so two concurrent bootstrap POSTs cannot both succeed.
 func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Request) {
 	if !s.bootstrapAllowed() {
 		s.handleCreateUser(w, r)
@@ -206,9 +191,6 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-// handleBootstrapNeeded is the unauthenticated probe the web pod hits
-// before rendering /login. Signup is available only while controller
-// authentication is disabled and the users table is empty.
 func (s *Server) handleBootstrapNeeded(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{
 		"needed": !s.AuthEnabled() && s.bootstrapAllowed(),
@@ -243,20 +225,17 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 type rotateReq struct {
-	GraceSecs int64 `json:"grace_secs,omitempty"` // default 24h
-	TTLSecs   int64 `json:"ttl_secs,omitempty"`   // 0 = use the old token's remaining TTL
+	GraceSecs int64 `json:"grace_secs,omitempty"`
+	TTLSecs   int64 `json:"ttl_secs,omitempty"`
 }
 
 type rotateResp struct {
 	Token       string          `json:"token"`
 	New         tokenRecordJSON `json:"new"`
-	OldRevoked  int64           `json:"old_revoked_at"` // unix seconds; when the old token stops working
+	OldRevoked  int64           `json:"old_revoked_at"`
 	OldReplaced string          `json:"old_replaced_by"`
 }
 
-// handleRotateToken creates a replacement token and sets the old
-// token's revoked_at to now+grace so in-flight callers have time to
-// swap.
 func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 	prefix := r.PathValue("prefix")
 	var req rotateReq

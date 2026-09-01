@@ -73,8 +73,6 @@ func TestParseInlineSpec_ControllerMissingProfile(t *testing.T) {
 	}
 }
 
-// TestFromSpecs_SQLite is the always-on smoke test: a fresh SQLite
-// path resolves into a StoreBackend with the right capability tags.
 func TestFromSpecs_SQLite(t *testing.T) {
 	dir := t.TempDir()
 	paths := newTempPaths(t, dir)
@@ -98,8 +96,6 @@ func TestFromSpecs_SQLite(t *testing.T) {
 	}
 }
 
-// TestFromSpecs_Postgres exercises the pg path. Env-gated so a
-// developer without Postgres still gets a green run.
 func TestFromSpecs_Postgres(t *testing.T) {
 	dsn := os.Getenv("SPARKWING_TEST_PG_URL")
 	if dsn == "" {
@@ -126,10 +122,6 @@ func TestFromSpecs_Postgres(t *testing.T) {
 	}
 }
 
-// TestFromSpecs_Controller verifies the hosted-controller branch.
-// The httptest server only needs to respond to one capabilities-probe
-// path; FromSpecs itself doesn't make any HTTP calls, only the
-// resulting Backend would when the dashboard hits it.
 func TestFromSpecs_Controller(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{})
@@ -163,7 +155,6 @@ func TestFromSpecs_Controller(t *testing.T) {
 	}
 }
 
-// TestFromSpecs_NilState rejects a missing state spec.
 func TestFromSpecs_NilState(t *testing.T) {
 	paths := newTempPaths(t, t.TempDir())
 	_, _, err := backend.FromSpecs(context.Background(), nil, nil, nil, paths, nil)
@@ -172,10 +163,6 @@ func TestFromSpecs_NilState(t *testing.T) {
 	}
 }
 
-// TestFromSpecs_CapabilitiesTagsFlow confirms the resolved spec types
-// flow through to Storage.{Runs,Logs,Artifacts} verbatim. The dashboard
-// SPA uses these tags to adapt UI; they need to be the spec's Type, not
-// the impl's hardcoded default.
 func TestFromSpecs_CapabilitiesTagsFlow(t *testing.T) {
 	dir := t.TempDir()
 	paths := newTempPaths(t, dir)

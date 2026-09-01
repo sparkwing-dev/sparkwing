@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
-# sparkwing run: sync-sdk
-# desc: Push to GitHub and print the go.mod pseudo-version require line
 set -euo pipefail
 
-# Pushes sparkwing to GitHub and prints the go.mod require line
-# for use in .sparkwing/go.mod files.
-#
-# Usage: ./bin/sync-sdk.sh
-# Then copy the output into your app's .sparkwing/go.mod
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

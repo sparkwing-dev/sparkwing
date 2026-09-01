@@ -9,13 +9,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// ListRunsHandler serves GET /api/v1/runs from the dashboard for
-// topologies (e.g. S3-only) without a controller. Filter parsing routes
-// through store.ParseRunFilter so dashboard and controller can't drift
-// on query-param semantics.
 func ListRunsHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		filter := store.ParseRunFilter(r.URL.Query())
+		filter, parseErr := store.ParseRunFilterValidated(r.URL.Query())
+		if parseErr != nil {
+			writeErr(w, http.StatusBadRequest, parseErr)
+			return
+		}
 		runs, err := b.ListRuns(r.Context(), filter)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
@@ -25,13 +25,11 @@ func ListRunsHandler(b backend.Backend) http.HandlerFunc {
 		if runs == nil {
 			runs = []*store.Run{}
 		}
+		w.Header().Set("X-Sparkwing-Run-Filter-Version", "1")
 		writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 	}
 }
 
-// GetRunHandler serves GET /api/v1/runs/{id}, mirroring the controller
-// shape: bare run by default, {run, nodes} wrapper when
-// ?include=nodes.
 func GetRunHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := r.PathValue("id")

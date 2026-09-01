@@ -38,10 +38,6 @@ const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
 // [BusyTimeoutEnvVar] is unset. See Open for why 30s.
 const DefaultBusyTimeoutMS = 30000
 
-// busyTimeoutMS resolves the SQLite busy_timeout for this open:
-// [BusyTimeoutEnvVar] when set and valid, [DefaultBusyTimeoutMS]
-// otherwise. A set-but-invalid value is an error, never a silent
-// fallback.
 func busyTimeoutMS() (int, error) {
 	raw := os.Getenv(BusyTimeoutEnvVar)
 	if raw == "" {
@@ -175,8 +171,6 @@ func preparePrivateSQLite(path string) error {
 	return nil
 }
 
-// sqliteDSN builds Open's read-write DSN, resolving the busy_timeout
-// from [BusyTimeoutEnvVar] / [DefaultBusyTimeoutMS].
 func sqliteDSN(path string) (string, error) {
 	ms, err := busyTimeoutMS()
 	if err != nil {
@@ -185,8 +179,6 @@ func sqliteDSN(path string) (string, error) {
 	return fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", path, ms), nil
 }
 
-// sqliteReadOnlyDSN builds OpenReadOnly's DSN; the busy_timeout
-// resolves the same way as [sqliteDSN].
 func sqliteReadOnlyDSN(path string) (string, error) {
 	return sqliteReadOnlyDSNWithMode(path, false)
 }
@@ -423,11 +415,6 @@ func OpenPostgres(_ context.Context, dsn string) (*Store, error) {
 	return openSQL("pgx", dsn, DialectPostgres)
 }
 
-// openSQL is the shared constructor for both dialects. Pool sizing
-// differs: SQLite is single-writer by construction; Postgres uses a
-// modest connection pool to absorb orchestrator concurrency without
-// overwhelming the server. Migration runs immediately after Open so
-// callers observe a fully provisioned schema on success.
 func openSQL(driver, dsn string, dialect Dialect) (*Store, error) {
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
@@ -507,6 +494,11 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_pipeline ON runs(pipeline, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_branch_started ON runs(git_branch, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_slug_started ON runs(repo, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(repo, git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(repo, git_branch, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS nodes (
     run_id           TEXT NOT NULL,
@@ -815,12 +807,6 @@ CREATE INDEX IF NOT EXISTS idx_node_dispatches_lookup
     ON node_dispatches(run_id, node_id, seq DESC);
 `
 
-// schemaPostgres is derived from schemaSQLite by substituting the two
-// type names that differ. The full SQLite schema is otherwise valid
-// Postgres: partial indexes, RETURNING, ON CONFLICT, FK CASCADE,
-// composite PRIMARY KEY, and DEFAULT '<literal>' all carry over
-// unchanged. JSON-encoded columns stay as BYTEA so read paths can
-// remain dialect-agnostic; JSONB is a future optimization.
 var schemaPostgres = func() string {
 	r := strings.NewReplacer(
 		"INTEGER", "BIGINT",
@@ -829,13 +815,14 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-// expectedSchemaVersion is the schema version this binary understands.
-// Bumped each time a new migrateToVN step is appended below. On Open,
-// a database recording a higher version refuses; a database recording
-// a lower (or no) version is brought forward by running the missing
-// steps in order inside a single transaction (on Postgres, guarded by
-// pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 16
+const expectedSchemaVersion = 17
+
+const runIdentityIndexes = `
+CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_branch_started ON runs(git_branch, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_slug_started ON runs(repo, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(repo, git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(repo, git_branch, started_at DESC);`
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -843,18 +830,8 @@ const expectedSchemaVersion = 16
 // sparkwing_schema_version table on a fresh database.
 func ExpectedSchemaVersion() int { return expectedSchemaVersion }
 
-// metaKeyMinVersion is the sparkwing_meta row recording the minimum
-// binary version required to open the database at its current schema:
-// the version of whichever binary last advanced the schema. The
-// schema-skew error path reads it to name a concrete upgrade target
-// instead of a raw schema number. Stored in sparkwing_meta -- a table
-// present since schema v4, so every binary that could migrate past a
-// given binary's understanding also carries the row.
 const metaKeyMinVersion = "min_binary_version"
 
-// binaryVersion is the running binary's version string, injected by
-// the process entrypoint via SetBinaryVersion. Empty until set, in
-// which case resolveBinaryVersion falls back to build info.
 var binaryVersion string
 
 // SetBinaryVersion records the running binary's version so migrations
@@ -866,9 +843,6 @@ var binaryVersion string
 // runtime build info instead.
 func SetBinaryVersion(v string) { binaryVersion = v }
 
-// resolveBinaryVersion returns the version to stamp and report:
-// the SetBinaryVersion value when present, else the module version
-// from build info, else "(devel)" for an unstamped local build.
 func resolveBinaryVersion() string {
 	if binaryVersion != "" {
 		return binaryVersion
@@ -881,9 +855,6 @@ func resolveBinaryVersion() string {
 	return "(devel)"
 }
 
-// stampMinVersion records resolveBinaryVersion into metaKeyMinVersion.
-// Called after a migration advances the schema so the row always
-// reflects the newest binary to have touched the database.
 func (s *Store) stampMinVersion(ctx context.Context) error {
 	now := time.Now()
 	_, err := s.exec(ctx,
@@ -893,10 +864,6 @@ func (s *Store) stampMinVersion(ctx context.Context) error {
 	return err
 }
 
-// readMinVersion returns the metaKeyMinVersion row's value, or "" when
-// the row (or the sparkwing_meta table) is absent. Best-effort: any
-// read error yields "" so the skew-error path degrades to schema
-// numbers rather than masking the original skew with a query error.
 func (s *Store) readMinVersion(ctx context.Context) string {
 	var v string
 	if err := s.queryRow(ctx,
@@ -906,9 +873,6 @@ func (s *Store) readMinVersion(ctx context.Context) string {
 	return v
 }
 
-// readMinVersionTx is readMinVersion against an open migration
-// transaction, used on the Postgres skew path where the version check
-// runs inside the advisory-locked tx.
 func readMinVersionTx(ctx context.Context, tx *storeTx) string {
 	var v string
 	if err := tx.QueryRowContext(ctx,
@@ -940,20 +904,12 @@ func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error) {
 	return v, nil
 }
 
-// schemaVersionTable is created unconditionally on every Open before
-// the version check runs; the check needs the table to exist in order
-// to read from it. The same DDL is valid in both dialects (INTEGER +
-// BIGINT translate identically here).
 const schemaVersionTable = `CREATE TABLE IF NOT EXISTS sparkwing_schema_version (
     version    INTEGER NOT NULL,
     applied_at BIGINT NOT NULL,
     PRIMARY KEY (version)
 );`
 
-// metaTableSQLite is the singleton key/value table backing throttle
-// stamps and other small operational state. Created in migration v4 so
-// existing databases gain it without a full reschema; written in SQLite
-// syntax and translated for Postgres at apply time.
 const metaTableSQLite = `CREATE TABLE IF NOT EXISTS sparkwing_meta (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
@@ -962,11 +918,6 @@ const metaTableSQLite = `CREATE TABLE IF NOT EXISTS sparkwing_meta (
 
 var metaTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(metaTableSQLite)
 
-// pipelineProfilesTableSQLite backs learned capacity: one row per
-// (pipeline, node) with duration percentiles and peak host usage over a
-// bounded window of recent runs. Created in migration v7 so existing
-// databases gain it without a full reschema; the empty node id carries
-// the pipeline-level rollup admission and ETA read.
 const pipelineProfilesTableSQLite = `CREATE TABLE IF NOT EXISTS pipeline_profiles (
     pipeline            TEXT    NOT NULL,
     node_id             TEXT    NOT NULL,
@@ -988,20 +939,6 @@ var pipelineProfilesTablePostgres = strings.NewReplacer(
 	"BLOB", "BYTEA",
 ).Replace(pipelineProfilesTableSQLite)
 
-// nodeBouncesTableSQLite records operator requests to restart a
-// running node's process in place, and what became of each. Created in
-// migration v16, as its own table rather than as columns on nodes: a
-// node can be bounced any number of times, and one row per request is
-// what makes "bounced three times" a history rather than a counter.
-//
-// The partial index is the one a runner hits: every supervision tick
-// of every running node asks whether this node has an unconsumed
-// request, and unconsumed rows are a vanishing fraction of the table.
-//
-// Both statements are IF NOT EXISTS, which is what makes the step safe
-// to replay -- the SQLite path applies migrations outside a
-// transaction, so a process killed between this step and its version
-// stamp re-runs it on the next open.
 const nodeBouncesTableSQLite = `CREATE TABLE IF NOT EXISTS node_bounces (
     run_id       TEXT    NOT NULL,
     node_id      TEXT    NOT NULL,
@@ -1060,26 +997,6 @@ func (e *SkewError) Error() string {
 	)
 }
 
-// migrate brings the database up to expectedSchemaVersion. The flow
-// is identical across dialects:
-//
-//  1. Ensure sparkwing_schema_version exists (idempotent CREATE TABLE
-//     IF NOT EXISTS).
-//  2. Read MAX(version). NULL → 0; treat a brand-new database the
-//     same as one stuck at the pre-history version 0.
-//  3. If current > expectedSchemaVersion: return SkewError. Do not
-//     touch the database.
-//  4. If current < expectedSchemaVersion: run migrateToVN(...) for
-//     each missing step in order. Each step ends by INSERTing its
-//     version row.
-//  5. If current == expectedSchemaVersion: no-op.
-//
-// On Postgres the version check and migration steps run inside one
-// transaction guarded by pg_advisory_xact_lock so concurrent opens
-// against a fresh database produce exactly one execution. SQLite
-// serializes writers at the database level; concurrent opens
-// converge via INSERT ... ON CONFLICT DO NOTHING on the version
-// row.
 func (s *Store) migrate() error {
 	ctx := context.Background()
 	if s.dialect == DialectPostgres {
@@ -1093,11 +1010,6 @@ func (s *Store) migrate() error {
 	})
 }
 
-// retryOnBusy runs fn, retrying with a short backoff while it returns a
-// SQLite busy/locked error. The DSN's busy_timeout handles in-flight
-// contention; this covers the residual cold-start windows where the
-// lock is held across separate statements. Returns the last error if
-// every attempt is busy, or fn's first non-busy result.
 func retryOnBusy(fn func() error) error {
 	return retryOnBusyWithSleep(fn, time.Sleep)
 }
@@ -1115,9 +1027,6 @@ func retryOnBusyWithSleep(fn func() error, sleep func(time.Duration)) error {
 	return err
 }
 
-// isBusyErr reports whether err is a SQLite "database is locked" /
-// SQLITE_BUSY condition. modernc.org/sqlite surfaces these as a message
-// string rather than a typed sentinel, so match on the stable text.
 func isBusyErr(err error) bool {
 	if err == nil {
 		return false
@@ -1231,9 +1140,6 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	return s.backfillRunAnnotationRollup()
 }
 
-// applyMigrationSQLite dispatches on version. Each case body is the
-// canonical SQLite-side migration step for that version; new
-// versions append a case here and bump expectedSchemaVersion.
 func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 	switch version {
 	case 1:
@@ -1290,15 +1196,14 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 	case 16:
 		_, err := s.exec(ctx, nodeBouncesTableSQLite)
 		return err
+	case 17:
+		_, err := s.exec(ctx, runIdentityIndexes)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
 }
 
-// applyMigrationPostgresTx dispatches on version inside the open
-// migration transaction. Pairs with applyMigrationSQLite -- the same
-// version number maps to a semantically equivalent step on each
-// dialect.
 func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, version int) error {
 	switch version {
 	case 1:
@@ -1352,13 +1257,14 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 16:
 		_, err := tx.ExecContext(ctx, nodeBouncesTablePostgres)
 		return err
+	case 17:
+		_, err := tx.ExecContext(ctx, runIdentityIndexes)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
 }
 
-// addColumnsTx applies one table's additive column set inside an open
-// Postgres migration transaction.
 func addColumnsTx(ctx context.Context, tx *storeTx, table string, cols map[string]string) error {
 	for name, typ := range cols {
 		stmt := fmt.Sprintf(
@@ -1372,15 +1278,6 @@ func addColumnsTx(ctx context.Context, tx *storeTx, table string, cols map[strin
 	return nil
 }
 
-// columnMigrations enumerates the additive column changes that have
-// landed since the canonical schema first shipped. Types are written
-// in SQLite syntax; the Postgres path translates them at apply time
-// via translateColumnType.
-//
-// New columns must keep the existing row default behavior compatible:
-// either NOT NULL DEFAULT <literal> or NULL-able. This list is part of
-// the schema contract; reorderings and deletions both count as
-// schema-version bumps.
 type columnSpec struct {
 	table string
 	cols  map[string]string
@@ -1455,23 +1352,12 @@ var columnMigrations = []columnSpec{
 	}},
 }
 
-// pipelineProfilesCPUMeasuredCols is the additive column v8 adds to the
-// v7 pipeline_profiles table. It is applied on its own rather than through
-// columnMigrations because that list runs at v1, before v7 has created the
-// table.
 var pipelineProfilesCPUMeasuredCols = map[string]string{
 	"cpu_measured": "INTEGER NOT NULL DEFAULT 0",
 }
 
-// pipelineProfilesCPUMeasuredBackfill marks rows carried across the v8
-// upgrade as CPU-measured when they recorded a positive peak, matching
-// the qualification rule: a legacy positive peak could only have come
-// from a sampler that measured CPU. Zero-peak rows stay conservative.
 const pipelineProfilesCPUMeasuredBackfill = `UPDATE pipeline_profiles SET cpu_measured = 1 WHERE peak_cores > 0`
 
-// pipelineProfilesWaitCols is the additive column set v9 adds for
-// per-pipeline queue-wait observations: the windowed samples and the
-// percentiles recomputed from them, meaningful only on the rollup row.
 var pipelineProfilesWaitCols = map[string]string{
 	"wait_samples_json": "BLOB",
 	"wait_p50_ms":       "INTEGER NOT NULL DEFAULT 0",
@@ -1479,18 +1365,10 @@ var pipelineProfilesWaitCols = map[string]string{
 	"wait_sample_count": "INTEGER NOT NULL DEFAULT 0",
 }
 
-// pipelineProfilesContendedCols is the additive column v10 adds: a tally
-// of runs the admission daemon flagged as throttled by host contention,
-// kept on the rollup row so capacity stats can show a per-pipeline share.
 var pipelineProfilesContendedCols = map[string]string{
 	"contended_count": "INTEGER NOT NULL DEFAULT 0",
 }
 
-// pipelineProfilesVersioningCols is the additive column set v11 adds to
-// version profiles by plan hash and price a still-measuring version from
-// contended-run floors: the DAG-topology hash the clean window was measured
-// on, the per-resource demand floor learned from contended runs, and the
-// predecessor peak carried across a structural change for a warm start.
 var pipelineProfilesVersioningCols = map[string]string{
 	"plan_hash":              "TEXT NOT NULL DEFAULT ''",
 	"floor_cores":            "REAL NOT NULL DEFAULT 0",
@@ -1499,62 +1377,21 @@ var pipelineProfilesVersioningCols = map[string]string{
 	"prev_peak_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
 }
 
-// pipelineProfilesSustainedCols is the additive column set v14 adds: the
-// core figure admission charges once it prices cores from sustained demand
-// rather than burst peaks, plus its counterpart carried across a plan-hash
-// change so a warm start prices at the predecessor's charge, not its bursts.
 var pipelineProfilesSustainedCols = map[string]string{
 	"sustained_cores":      "REAL NOT NULL DEFAULT 0",
 	"prev_sustained_cores": "REAL NOT NULL DEFAULT 0",
 }
 
-// pipelineProfilesSustainedBackfill prices rows carried across the v14
-// upgrade at their existing peaks, so a stored profile charges exactly what
-// it charged before the upgrade until fresh observations age sustained
-// figures into its window -- twenty runs at most, and no cold start in the
-// meantime.
-//
-// The predicate makes a re-run harmless rather than merely unlikely: the
-// SQLite path applies migration steps outside a transaction, so a crash
-// between this statement and the version stamp replays it, and a row already
-// carrying a measured sustained figure must not be overwritten by a peak.
 const pipelineProfilesSustainedBackfill = `UPDATE pipeline_profiles
    SET sustained_cores = peak_cores, prev_sustained_cores = prev_peak_cores
  WHERE sustained_cores = 0`
 
-// nodesUsageCols is the additive column set v15 adds to nodes: the
-// kernel's exit accounting for the process that executed the node, which
-// is exact where the per-interval sampler is not -- a node shorter than one
-// sampling interval is invisible to sampling and still reports its true CPU
-// time and peak RSS here. All three default to zero, which every reader
-// treats as "no process was supervised" (a cluster pod, a node run inside
-// the dispatcher) rather than as a measurement of nothing.
-//
-// process_wall_nanos is the span the CPU was drawn over, spawn to reap, and
-// it is stored rather than derived because the node's own timestamps do not
-// describe the same span: started_at and finished_at are stamped inside the
-// process, after runtime and plan startup and before teardown. Pricing the
-// process's whole CPU against that shorter window reports a rate the machine
-// never gave.
-//
-// It is applied on its own rather than through columnMigrations because
-// that list runs at v1, which every store past v1 has already applied.
 var nodesUsageCols = map[string]string{
 	"cpu_nanos":          "INTEGER NOT NULL DEFAULT 0",
 	"max_rss_bytes":      "INTEGER NOT NULL DEFAULT 0",
 	"process_wall_nanos": "INTEGER NOT NULL DEFAULT 0",
 }
 
-// nodeMetricsCPUTimeCols is v15's addition to node_metrics: the CPU a
-// one-shot sample measured, as a duration rather than as the rate the
-// sample's cpu_millicores carries.
-//
-// A sampler tick is a rate over a known window and leaves this zero. A
-// per-command report is a rate over that command's own span, which may be a
-// fraction of the window it lands in, so summing several of them as rates
-// invents concurrency that never existed: four 400ms commands at two cores
-// each, run back to back inside one window, would read as eight cores. The
-// duration lets the fold integrate them instead.
 var nodeMetricsCPUTimeCols = map[string]string{
 	"cpu_time_nanos": "INTEGER NOT NULL DEFAULT 0",
 }
@@ -1563,9 +1400,6 @@ var triggerRepoInheritedCols = map[string]string{
 	"repo_inherited": "INTEGER NOT NULL DEFAULT 0",
 }
 
-// triggerSubmissionCols are the additive columns v13 adds so a
-// submitted run can be deduplicated by a caller-supplied key and so
-// each claim on a trigger is distinguishable from the one before it.
 var triggerSubmissionCols = map[string]string{
 	"idempotency_key": "TEXT NOT NULL DEFAULT ''",
 	"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
@@ -1577,16 +1411,6 @@ var triggerSubmissionCols = map[string]string{
 // insert that happens to fail.
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 
-// triggerIdempotencyIndex is v13's other half. The columns alone would
-// let two concurrent submissions of one key both insert; the constraint
-// is what makes "at most one run per key" true rather than likely. It
-// is written once here and applied on both dialects because the partial
-// unique index is valid SQL in each.
-//
-// An upgrade over a database that somehow already holds duplicate keys
-// would fail here -- correctly. No binary before v13 could write the
-// column, so on a real upgrade every row carries the empty default and
-// the partial predicate excludes all of them.
 const triggerIdempotencyIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TriggerIdempotencyIndexName + `
     ON triggers(pipeline, idempotency_key) WHERE idempotency_key != ''`
 
@@ -1614,10 +1438,6 @@ func (s *Store) ensureColumnsAllTx(ctx context.Context, tx *storeTx) error {
 	return nil
 }
 
-// translateColumnType rewrites a SQLite column-type fragment into its
-// Postgres equivalent. Only the two name substitutions used in the
-// canonical schema are handled; the rest of the SQL fragment
-// (NULL/NOT NULL, DEFAULT, etc.) is byte-identical between dialects.
 func translateColumnType(t string) string {
 	r := strings.NewReplacer(
 		"INTEGER", "BIGINT",
@@ -1626,12 +1446,6 @@ func translateColumnType(t string) string {
 	return r.Replace(t)
 }
 
-// backfillRunAnnotationRollup populates the runs annotation columns
-// from per-node + per-step annotations for rows that predate the
-// live-bump writes in AppendNodeAnnotation / AppendStepAnnotation.
-// Idempotent: only rows whose count is still 0 get re-computed, and
-// the computation yields 0 for runs that genuinely have no
-// annotations, so this is a no-op the second time around.
 func (s *Store) backfillRunAnnotationRollup() error {
 	rows, err := s.queryNoCtx(`SELECT id FROM runs WHERE annotation_count = 0`)
 	if err != nil {
@@ -1665,9 +1479,6 @@ WHERE id = ?`, len(gathered), gathered[len(gathered)-1], blob, id); err != nil {
 	return nil
 }
 
-// gatherRunAnnotations reads every annotation across the run's nodes
-// and steps in append order. Order is by table then natural row
-// order -- close to event order in practice.
 func (s *Store) gatherRunAnnotations(runID string) ([]string, error) {
 	var out []string
 	rows, err := s.queryNoCtx(`
@@ -1693,10 +1504,6 @@ SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS
 	return out, nil
 }
 
-// appendRunAnnotation appends one entry to runs.annotations_json
-// inside the supplied transaction. Caller is responsible for the
-// surrounding txn lifecycle so the per-node/per-step write and the
-// run-row rollup stay in sync.
 func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	var blob []byte
 	err := tx.QueryRow(`SELECT annotations_json FROM runs WHERE id = ?`, runID).Scan(&blob)
@@ -1716,10 +1523,6 @@ func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	return err
 }
 
-// ensureColumns adds any of the named columns missing from the table.
-// Types are the literal SQL fragments appended after the column name.
-// Returning on the first error is safe because subsequent opens will
-// finish the job.
 func (s *Store) ensureColumns(table string, cols map[string]string) error {
 	rows, err := s.queryNoCtx(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
 	if err != nil {
@@ -1753,9 +1556,6 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 	return nil
 }
 
-// isDuplicateColumnErr reports whether err is SQLite's "duplicate
-// column name" -- the benign outcome of two migrators racing the same
-// additive ALTER on a fresh database.
 func isDuplicateColumnErr(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate column name")
 }
@@ -2018,15 +1818,31 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 
 // RunFilter narrows ListRuns results; zero value matches everything.
 type RunFilter struct {
-	Pipelines   []string
-	Statuses    []string
-	Since       time.Time
-	Limit       int // <=0 = default
-	ParentRunID string
+	Pipelines      []string
+	Statuses       []string
+	GitSHAPrefixes []string
+	GitBranches    []string
+	Repos          []string
+	RepoURLs       []string
+	Since          time.Time
+	Limit          int // <=0 = default
+	ParentRunID    string
+	RootOnly       bool
 }
 
 // ListRuns returns runs ordered newest-first, filtered by f.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
+	normalizedPrefixes := make([]string, len(f.GitSHAPrefixes))
+	for i, prefix := range f.GitSHAPrefixes {
+		prefix = strings.ToLower(strings.TrimSpace(prefix))
+		if prefix == "" || strings.IndexFunc(prefix, func(r rune) bool {
+			return (r < '0' || r > '9') && (r < 'a' || r > 'f')
+		}) >= 0 {
+			return nil, fmt.Errorf("git SHA prefix %q must contain hexadecimal characters", prefix)
+		}
+		normalizedPrefixes[i] = prefix
+	}
+	f.GitSHAPrefixes = normalizedPrefixes
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 50
@@ -2052,21 +1868,38 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	}
 	addIn("pipeline", f.Pipelines)
 	addIn("status", f.Statuses)
-	if f.ParentRunID != "" {
+	addIn("git_branch", f.GitBranches)
+	addIn("repo", f.Repos)
+	addIn("repo_url", f.RepoURLs)
+	addClause := func(clause string, values ...any) {
 		if where == "" {
-			where = " WHERE parent_run_id = ?"
+			where = " WHERE " + clause
 		} else {
-			where += " AND parent_run_id = ?"
+			where += " AND " + clause
 		}
-		args = append(args, f.ParentRunID)
+		args = append(args, values...)
+	}
+	if len(f.GitSHAPrefixes) > 0 {
+		parts := make([]string, 0, len(f.GitSHAPrefixes))
+		values := make([]any, 0, len(f.GitSHAPrefixes)*2)
+		for _, prefix := range f.GitSHAPrefixes {
+			if upper, ok := prefixUpperBound(prefix); ok {
+				parts = append(parts, "(git_sha >= ? AND git_sha < ?)")
+				values = append(values, prefix, upper)
+			} else {
+				parts = append(parts, "git_sha = ?")
+				values = append(values, prefix)
+			}
+		}
+		addClause("("+strings.Join(parts, " OR ")+")", values...)
+	}
+	if f.ParentRunID != "" {
+		addClause("parent_run_id = ?", f.ParentRunID)
+	} else if f.RootOnly {
+		addClause("(parent_run_id IS NULL OR parent_run_id = '')")
 	}
 	if !f.Since.IsZero() {
-		if where == "" {
-			where = " WHERE started_at >= ?"
-		} else {
-			where += " AND started_at >= ?"
-		}
-		args = append(args, f.Since.UnixNano())
+		addClause("started_at >= ?", f.Since.UnixNano())
 	}
 	args = append(args, limit)
 
@@ -2091,6 +1924,18 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func prefixUpperBound(prefix string) (string, bool) {
+	b := []byte(prefix)
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] == 0xff {
+			continue
+		}
+		b[i]++
+		return string(b[:i+1]), true
+	}
+	return "", false
 }
 
 // GetLatestRun returns the newest run for pipeline matching statuses
@@ -2471,7 +2316,6 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 	return n, nil
 }
 
-// scanNodeRow reads one row into n.
 func scanNodeRow(rs rowScanner, n *Node) error {
 	var depsJSON, outputJSON, labelsJSON, annotationsJSON []byte
 	var startedNS, finishedNS, readyNS, leaseNS, heartbeatNS sql.NullInt64
@@ -2908,12 +2752,6 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 	return nil, ErrNotFound
 }
 
-// labelsSatisfied reports whether the have label set satisfies the
-// needed label expression. Each entry in needed is a single term;
-// within a term, comma-separated values are alternatives (OR), and
-// across terms results compose with AND. Empty or nil needed matches
-// any have (including empty). Mirrors sparkwingruntime.MatchLabels; kept
-// in-package to avoid an import cycle between store and sparkwing.
 func labelsSatisfied(needed []string, have map[string]struct{}) bool {
 	for _, term := range needed {
 		if term == "" {
@@ -3033,7 +2871,6 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	return pairs, nil
 }
 
-// failExpiredNodeClaims terminates expired claims with FailureAgentLost.
 func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
 	now := time.Now().UnixNano()
 	tx, err := s.beginTx(ctx)
@@ -3084,8 +2921,6 @@ UPDATE nodes
 	return pairs, nil
 }
 
-// failNodesInRun marks every non-terminal node in runID as failed.
-// Used by the reaper to avoid zombie nodes when a worker lease expires.
 func (s *Store) failNodesInRun(ctx context.Context, runID, errMsg, failureReason string) ([]string, error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -3132,8 +2967,6 @@ UPDATE nodes
 	return nodeIDs, nil
 }
 
-// failStaleQueuedNodes terminates unclaimed nodes whose ready_at is
-// older than olderThan with FailureQueueTimeout.
 func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duration) ([][2]string, error) {
 	if olderThan <= 0 {
 		return nil, nil
@@ -3498,11 +3331,6 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 // and the caller resolves it with [Store.FindTriggerByIdempotencyKey].
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 
-// isUniqueViolation reports whether err is a unique-constraint failure.
-// Both drivers surface it as message text rather than a typed sentinel
-// -- modernc.org/sqlite says "UNIQUE constraint failed", lib/pq says
-// "duplicate key value violates unique constraint" -- so the match is on
-// the stable fragment each uses, the same approach isBusyErr takes.
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false
@@ -3573,8 +3401,6 @@ func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int
 	current, err := s.TriggerClaimGeneration(ctx, runID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			// No trigger row means nothing can supersede this write --
-			// the run was not produced by the trigger queue at all.
 			return true, s.FinishRun(ctx, runID, status, errMsg)
 		}
 		return false, err
@@ -3986,8 +3812,6 @@ func (s *Store) RequestCancel(ctx context.Context, id string) error {
 	return nil
 }
 
-// reapExpiredTriggers flips lease-expired claimed triggers back to
-// pending. Returns reaped IDs; matching runs are caller-reconciled.
 func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 	now := time.Now().UnixNano()
 
@@ -4046,24 +3870,6 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error {
 	return err
 }
 
-// reapTimedOutApprovals resolves approvals whose timeout window has
-// elapsed without any human (or live orchestrator) acting first.
-// Writes ApprovalResolutionTimedOut + a sentinel approver so a
-// re-attached orchestrator can map the resolution to its
-// author-configured on_timeout policy via the usual code path. Idle
-// approver string ("controller-reaper") distinguishes
-// controller-initiated timeouts from orchestrator-initiated ones
-// ("sparkwing") in audit logs.
-//
-// Returns (run_id, node_id) pairs for the approvals that were
-// reaped. The caller logs them; no further cleanup is needed at the
-// store layer.
-//
-// Notes for future work: this only resolves the APPROVAL state. If
-// the dispatching orchestrator process is fully dead, the run row
-// will still sit at status='running' because no one drives the
-// downstream node dispatch. A run-level heartbeat reaper would
-// catch that case separately.
 func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) {
 	now := time.Now()
 	nowNS := now.UnixNano()
@@ -4125,19 +3931,6 @@ func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) 
 	return pairs, nil
 }
 
-// reapStalePendingRuns marks runs failed whose trigger has already
-// transitioned to 'done' (terminal) but whose run row never moved
-// past 'pending'. This catches the gap a trigger consumer can leave
-// behind when it FinishTriggers a claim but crashes / errors before
-// (or instead of) calling FinishRun -- e.g. an older runner image
-// whose source-fetch path doesn't propagate failure to the run row,
-// or any future bug along that boundary. The threshold grace lets
-// the normal pending -> running transition complete without a race
-// against this sweep.
-//
-// Returns the run IDs that were reaped. Each reaped run gets
-// error="..." set to the supplied reason so operators see why it
-// flipped rather than a bare "failed" with no context.
 func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, reason string) ([]string, error) {
 	cutoff := time.Now().Add(-grace).UnixNano()
 	now := time.Now().UnixNano()
@@ -4192,18 +3985,6 @@ func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, r
 	return ids, nil
 }
 
-// reapStaleRunningRuns marks runs failed whose last_heartbeat_at is
-// older than grace. Catches fully-orphaned dispatching orchestrators
-// in Mode 4 (hosted controller): the laptop died between node
-// dispatches with no active claim to expire via the node-claim
-// reaper. Rows with NULL last_heartbeat_at are ignored -- those
-// predate the column or come from a backend whose TouchRunHeartbeat is
-// a no-op (S3 mode, which reconciles orphans via per-node heartbeats
-// elsewhere). Each reaped run also has its non-done
-// nodes cascade-failed: running -> failed, pending -> cancelled, both
-// with failure_reason='orphaned', matching the local orphan
-// reconciler so downstream readers don't have to special-case the
-// controller-side sweep.
 func (s *Store) reapStaleRunningRuns(ctx context.Context, grace time.Duration, reason string) ([]string, error) {
 	cutoff := time.Now().Add(-grace).UnixNano()
 	now := time.Now().UnixNano()
@@ -4241,10 +4022,6 @@ SELECT id FROM runs
 	return ids, nil
 }
 
-// cascadeOrphanedNodes fails the running nodes and cancels the pending
-// nodes of an orphaned run -- the single definition of the orphan
-// cascade, shared by the controller-side stale-run reaper and the local
-// reconciler so the two sweeps cannot drift apart.
 func (s *Store) cascadeOrphanedNodes(ctx context.Context, runID, errMsg string, nowNS int64) error {
 	if _, err := s.exec(ctx, `
 UPDATE nodes
@@ -4268,20 +4045,6 @@ UPDATE nodes
 	return err
 }
 
-// reconcileOrphanedLocalRuns sweeps 'running' runs whose latest
-// liveness signal -- the newest of any node heartbeat, the run-level
-// orchestrator heartbeat, and the run's start time -- is older than
-// threshold, and transitions them, and their nodes, to terminal states
-// via the shared orphan cascade. Folding in the run-level heartbeat
-// keeps a run that is alive but between node dispatches (the
-// orchestrator keeps stamping last_heartbeat_at even when no node is
-// executing, e.g. while parked waiting on a plan-level concurrency
-// slot before its first node runs) from being reaped while it is
-// demonstrably still pinging; start time remains the backstop for a
-// run that predates the column or never heartbeated at all. Cheap
-// enough to run lazily on every status / list read: it only scans
-// status='running' rows over indexes already in place. Returns the
-// count reconciled.
 func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
 	cutoff := time.Now().Add(-threshold).UnixNano()
 

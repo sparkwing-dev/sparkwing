@@ -7,9 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
-// Main is the entry point for the sparkwing-runner binary
-// (cmd/sparkwing-runner/main.go). Dispatches the cluster-side
-// subcommands that an operator or the K8s Deployment runs:
 func Main() {
 	if len(os.Args) < 2 {
 		usage()

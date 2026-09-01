@@ -173,8 +173,6 @@ func FilesetHash(ctx context.Context, repoDir string) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil))[:12], nil
 }
 
-// listGitFiles returns tracked + untracked-not-ignored files in
-// repoDir, or nil when repoDir is not a git tree.
 func listGitFiles(ctx context.Context, repoDir string) []string {
 	gitDir := ".git"
 	if repoDir != "" {
@@ -194,8 +192,6 @@ func listGitFiles(ctx context.Context, repoDir string) []string {
 	return splitLines(tracked + "\n" + untracked)
 }
 
-// listFilesystemFiles walks repoDir applying a small skip list for
-// directories that are never part of a build context.
 func listFilesystemFiles(repoDir string) []string {
 	root := repoDir
 	if root == "" {
@@ -368,8 +364,6 @@ func PushTag(ctx context.Context, repoDir, tag, message string) error {
 	return nil
 }
 
-// runGit runs `git <args...>` in repoDir and returns stdout. Errors
-// include stderr. Empty repoDir runs in process CWD.
 func runGit(ctx context.Context, repoDir string, args ...string) (string, error) {
 	// safety: all public ctx-taking git helpers funnel through here; one guard covers them all.
 	planguard.Guard(ctx, "git "+firstWord(args))
@@ -390,8 +384,6 @@ func runGit(ctx context.Context, repoDir string, args ...string) (string, error)
 	return stdout.String(), nil
 }
 
-// firstWord returns the first arg, used as the helper name in
-// planguard panic messages.
 func firstWord(args []string) string {
 	if len(args) == 0 {
 		return "git command"

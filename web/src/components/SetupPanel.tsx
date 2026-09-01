@@ -1,23 +1,10 @@
 "use client";
 
-// SetupPanel renders "how was this run started" -- run id, pipeline,
-// trigger source, git context, and the invocation snapshot
-// (binary_source, cwd, log_path, flags, args, reproducer, hashes) the
-// orchestrator persists on the run row at CreateRun time. Mirrors
-// the CLI's `--- Setup ---` section so the dashboard surfaces the
-// same reproducibility info an operator would see in `sparkwing run release`.
-//
-// Per-node selection info (Runner, Activity, Heartbeat) lives in a
-// sibling SelectedNodePanel so the Setup section stays scoped to the
-// run as a whole.
 
 import { useState } from "react";
 import type { Run, RunInvocation } from "@/lib/api";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 
-// runDurationMs is duplicated here rather than imported so the panel
-// stays self-contained and renders cleanly in Storybook / standalone
-// previews. Same logic as @/lib/api's runDurationMs.
 function durationMs(run: Run): number {
   if (!run.finished_at) return 0;
   return (
@@ -34,9 +21,6 @@ function fmtMs(ms: number): string {
   return `${m}m ${s}s`;
 }
 
-// shortHash trims `sha256:<hex>` to its first 12 hex chars for
-// display; the full value is exposed via title for copy-on-hover.
-// Returns "" when input doesn't look like a sparkwing hash.
 function shortHash(h?: string): string {
   if (!h) return "";
   const prefix = "sha256:";
@@ -45,10 +29,6 @@ function shortHash(h?: string): string {
   return hex.length > 12 ? `sha256:${hex.slice(0, 12)}` : h;
 }
 
-// CopyButton: small inline button that copies its `value` to
-// clipboard and shows a brief "copied" affordance. Used for
-// reproducer + hashes -- the bits an operator/agent typically wants
-// to paste elsewhere.
 function CopyButton({ value, label }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   const onClick = () => {
@@ -72,10 +52,6 @@ function CopyButton({ value, label }: { value: string; label?: string }) {
   );
 }
 
-// FlagBadge renders one flag entry. Boolean-true gets the flag name;
-// scalar values render as `name=value`. Booleans known to be
-// "authorization gates" (allow_*, dry_run) get a yellow/red tint so
-// they stand out from default knobs like max_parallel.
 function FlagBadge({ name, value }: { name: string; value: unknown }) {
   let cls = "border-[var(--border)] text-[var(--muted)]";
   if (typeof value === "boolean" && value) {
@@ -101,10 +77,6 @@ function FlagBadge({ name, value }: { name: string; value: unknown }) {
   );
 }
 
-// RunLink: jump to another run. Calls onOpenRun if provided (the
-// Pipelines page wires this to its sidebar-row click behavior so
-// filter state is preserved); falls back to a plain href so the
-// component still works in standalone previews.
 function RunLink({
   runID,
   cls,
@@ -134,8 +106,6 @@ function RunLink({
   );
 }
 
-// LabelRow is the standard Setup row layout: a fixed-width dim label
-// in the gutter and the value column flowing to the right.
 function LabelRow({
   label,
   children,
@@ -181,17 +151,8 @@ export default function SetupPanel({
   run: Run;
   collapsed: boolean;
   onToggle: () => void;
-  // Optional callback: when provided, retry-of / retried-as links
-  // call onOpenRun(id) instead of navigating via anchor href. The
-  // Pipelines page wires this to its sidebar-click behavior so the
-  // jump preserves filter state.
   onOpenRun?: (id: string) => void;
-  // When true, render body without the collapsible header chevron --
-  // the panel is being embedded somewhere (e.g., a tab) where the
-  // surrounding UI already names it.
   inline?: boolean;
-  // Set of field keys matching the run's top-level find query.
-  // Each labeled row checks for its key to paint a fuchsia wash.
   findMatchedFields?: Set<string>;
   findActiveKey?: string | null;
 }) {
@@ -352,9 +313,9 @@ export default function SetupPanel({
             </LabelRow>
           )}
 
-          {/* Reproducer is highlighted as the main "copy this command"
-               affordance -- agents and humans both want to paste it
-               back into a terminal. */}
+          {
+
+                                       }
           {inv.reproducer && (
             <div
               data-find-key="setup::reproducer"

@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// ExpireS3ConcurrencyHolderForTest moves one live holder behind the
-// persisted lease boundary without waiting for wall time.
 func ExpireS3ConcurrencyHolderForTest(ctx context.Context, backend ConcurrencyBackend, key, holderID string) error {
 	c, ok := backend.(*s3Concurrency)
 	if !ok {

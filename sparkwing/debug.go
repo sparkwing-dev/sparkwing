@@ -9,18 +9,12 @@ import (
 	"time"
 )
 
-// debugEnabled toggles emission of Level:"debug" LogRecords. Atomic
-// so Debug is close to free when off (one load + branch). Seeded
-// from SPARKWING_DEBUG at package init; tests can override via the
-// test-only setDebug helper in testhelpers_test.go.
 var debugEnabled atomic.Bool
 
 func init() {
 	debugEnabled.Store(parseDebug(os.Getenv("SPARKWING_DEBUG")))
 }
 
-// parseDebug interprets SPARKWING_DEBUG. Empty / "0" / "false" → off;
-// any other non-empty value → on.
 func parseDebug(v string) bool {
 	if v == "" || v == "0" || strings.EqualFold(v, "false") {
 		return false

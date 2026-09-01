@@ -10,34 +10,16 @@ import (
 	"strings"
 )
 
-// Generator turns a spec into pipeline Go source. The default is
-// fixture-backed (deterministic); a CommandGenerator drives a live
-// model so the same scorer measures real generation.
 type Generator interface {
-	// Generate returns the pipeline source for spec, in package jobs,
-	// registering spec.Name with entrypoint spec.Entrypoint.
 	Generate(ctx context.Context, spec Spec) (string, error)
-	// Label names the generator for the report header.
+
 	Label() string
 }
 
-// Reviser is a Generator that can take a second look: given the source
-// it produced and the oracle output that rejected it, produce a fix.
-//
-// The acceptance bar is "first or second try" -- an author may read one
-// round of failing output and revise. A one-shot harness measures
-// something stricter than the bar it claims to enforce, and stricter
-// than how a pipeline actually gets written, since `pipeline lint` is
-// right there. Generators that cannot use feedback (fixtures) simply
-// do not implement this.
 type Reviser interface {
 	Revise(ctx context.Context, spec Spec, prev, feedback string) (string, error)
 }
 
-// FixtureGenerator returns the source each spec ships in its corpus
-// directory (candidate.go). A run over fixtures is fully reproducible:
-// it scores fixed source, which makes the corpus a regression gate on
-// the linter, explain, and the template catalog the fixtures imitate.
 type FixtureGenerator struct {
 	FS   fs.FS
 	Root string
@@ -53,21 +35,10 @@ func (g FixtureGenerator) Generate(_ context.Context, spec Spec) (string, error)
 	return string(raw), nil
 }
 
-// CommandGenerator shells an external generator: it runs Argv with the
-// spec's prompt on stdin (prefixed with the registration contract) and
-// takes the pipeline source from stdout. This is the seam a real AI
-// generator plugs into without touching the scorer -- the harness stays
-// the measuring instrument, the model stays swappable.
 type CommandGenerator struct {
 	Argv []string
 }
 
-// commandPrompt is the payload a command generator reads on stdin: the
-// registration contract the scorer binds to, then the spec prompt. The
-// scored project's sparkwing.yaml names spec.Name/spec.Entrypoint, so the
-// authored source must register under exactly those or `explain` cannot
-// resolve the pipeline. The fixture source encodes this contract in its
-// file; a live author has to be told it.
 func commandPrompt(spec Spec) string {
 	return fmt.Sprintf(
 		"Register the pipeline under the name %q with an entrypoint struct named %s.\n\n%s",
@@ -86,9 +57,6 @@ func (g CommandGenerator) Generate(ctx context.Context, spec Spec) (string, erro
 	return g.run(ctx, commandPrompt(spec))
 }
 
-// Revise re-invokes the same command with the rejected source and the
-// oracle output appended to the original spec, so the author fixes its
-// own attempt rather than starting over blind.
 func (g CommandGenerator) Revise(ctx context.Context, spec Spec, prev, feedback string) (string, error) {
 	prompt := fmt.Sprintf(
 		"%s\n\n=== YOUR PREVIOUS ATTEMPT ===\n%s\n\n=== IT WAS REJECTED ===\n%s\n\n"+

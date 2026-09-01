@@ -8,9 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// D3: the idempotent re-acquire path is the twin of the heartbeat-revive
-// guard. Re-acquiring an expired holder_id must not revive it onto a
-// slot whose budget was already reassigned.
 func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -44,9 +41,6 @@ func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
 	}
 }
 
-// D2: budget arithmetic must not overflow into a false "fits". Several
-// holders with huge declared costs whose sum wraps past MaxInt must not
-// all be admitted.
 func TestConcurrency_BudgetOverflowDoesNotOverAdmit(t *testing.T) {
 	s := newStoreT(t)
 	big := math.MaxInt/3 + 1
@@ -73,10 +67,6 @@ func TestConcurrency_BudgetOverflowDoesNotOverAdmit(t *testing.T) {
 	}
 }
 
-// D5: a holder carrying declared_capacity<=0 (a v3-migration backfill or
-// a promoted legacy waiter) must still constrain the effective-capacity
-// floor, not vanish from it and let a higher-declaring arrival
-// over-admit.
 func TestConcurrency_ZeroDeclaredCapacityHolderConstrainsFloor(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -100,9 +90,6 @@ func TestConcurrency_ZeroDeclaredCapacityHolderConstrainsFloor(t *testing.T) {
 	}
 }
 
-// D4: a waiter that abandons (timeout/cancel) just after being promoted
-// into a holder must have that holder reclaimed by CancelWaiter, not
-// left orphaned to pin the slot until the lease reaps.
 func TestConcurrency_CancelWaiterReclaimsPromotedHolder(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -137,9 +124,6 @@ func TestConcurrency_CancelWaiterReclaimsPromotedHolder(t *testing.T) {
 	}
 }
 
-// D1: a coalesced follower that asked to bypass the cache (--no-cache)
-// must not replay a stale memo entry via ResolveWaiter -- bypass must be
-// honored on the resolve read just as it is on the acquire read.
 func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
 	s := newStoreT(t)
 	now := time.Now()
@@ -163,9 +147,6 @@ func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
 	}
 }
 
-// D-C: a fresh Queue arrival must not barge a waiter already parked on
-// the key when budget frees outside the atomic release+promote (here, a
-// lapsed lease before the reaper runs).
 func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -228,9 +209,6 @@ func TestConcurrency_ResolveWaiterRejectsFailedLeaderOutcome(t *testing.T) {
 	}
 }
 
-// D-A: a --no-cache (BypassRead) node must not coalesce onto an in-flight
-// leader -- that would hand it the leader's result via the leader-finished
-// path. It queues for the memo slot instead, to run fresh.
 func TestConcurrency_BypassReadNodeQueuesInsteadOfCoalescing(t *testing.T) {
 	s := newStoreT(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
@@ -253,10 +231,6 @@ func TestConcurrency_BypassReadNodeQueuesInsteadOfCoalescing(t *testing.T) {
 	}
 }
 
-// D6: CancelOthers is best-effort preemption -- the canceller takes the
-// slot immediately, so a later arrival can't steal the freed budget, and
-// a second CancelOthers supersedes the canceller rather than degrading to
-// a no-op grant.
 func TestConcurrency_CancelOthersGrantsAndReservesBudget(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{

@@ -7,12 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
-// SpecString stringifies a backend spec for display. It is the single
-// source of truth shared by the `sparkwing profile` introspection
-// command and the run_start envelope, so both agree byte-for-byte (e.g.
-// `controller://prod`). It never emits a postgres/mysql DSN URL (those
-// carry credentials); only the type and an optional url_source
-// indirection.
 func SpecString(s *backends.Spec) string {
 	if s == nil {
 		return "-"
@@ -45,12 +39,6 @@ func SpecString(s *backends.Spec) string {
 	}
 }
 
-// SurfaceStrings renders the profile's effective state/logs/cache as the
-// strings shown by `sparkwing profile` and the run_start envelope. It
-// mirrors the orchestrator's profileSurfaceSpecs precedence (explicit
-// surfaces > controller implication > local sqlite fallback) without
-// filling concrete paths, so the output reflects what the profile
-// declares. Nil-safe.
 func (p *Profile) SurfaceStrings() (state, logs, cache string) {
 	if p == nil {
 		return "-", "-", "-"
@@ -67,9 +55,6 @@ func (p *Profile) SurfaceStrings() (state, logs, cache string) {
 	return state, SpecString(surf.Logs), SpecString(surf.Cache)
 }
 
-// DisplayDefaultPath returns the profiles.yaml path resolved by
-// DefaultPath with a leading $HOME collapsed to ~ for display. Best
-// effort: returns "profiles.yaml" when the path can't be resolved.
 func DisplayDefaultPath() string {
 	path, err := DefaultPath()
 	if err != nil || path == "" {

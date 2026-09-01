@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// newBounceTestServer wires a Server over a fresh store with auth
-// enabled, holding one live run whose "build" node is running and
-// whose "deploy" node never started.
 func newBounceTestServer(t *testing.T) (*Server, string, *store.Store) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -65,9 +62,6 @@ func bounceRequest(t *testing.T, srv *Server, token, method, path, body string) 
 	return rec
 }
 
-// The whole loop over HTTP: an operator's request, the runner's poll,
-// the runner's consume. The runner has no database handle of its own,
-// so this path is the only one it has.
 func TestBounce_RequestPollConsumeOverHTTP(t *testing.T) {
 	srv, token, st := newBounceTestServer(t)
 
@@ -112,9 +106,6 @@ func TestBounce_RequestPollConsumeOverHTTP(t *testing.T) {
 	}
 }
 
-// A refusal has to be distinguishable over the wire: 404 for an id the
-// controller never knew, 409 for a node it will not bounce, and a
-// message naming the status in both cases.
 func TestBounce_RefusalsCarryTheirStatusAndReason(t *testing.T) {
 	srv, token, st := newBounceTestServer(t)
 

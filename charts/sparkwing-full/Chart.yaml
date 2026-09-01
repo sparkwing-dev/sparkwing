@@ -25,10 +25,11 @@ type: application
 # Chart version: SemVer for this chart's *templates / values surface*.
 # Independent of appVersion. Bump on any user-facing values.yaml
 # change or template structural change.
-version: 0.1.1
+version: 0.1.3
 
-# appVersion: the sparkwing release this chart is *known to be tested
-# against*. Per-component image.tag in values.yaml overrides it.
+# appVersion is retained as Helm metadata and the empty-tag fallback. The
+# current value is not a compatible public image-set guarantee; operators
+# must pin per-component repositories and tags until a corrected release.
 appVersion: "0.1.0"
 
 keywords:
@@ -49,9 +50,8 @@ maintainers:
 
 # The runner-side bundle is a separate chart so it can also be
 # installed standalone (Cloud + self-hosted-runners topology). Here
-# we pull it in as a sub-chart so a single `helm install
-# sparkwing-full` deploys controller + web + runner + cache + logs
-# in one shot.
+# we pull it in as a sub-chart so one release owns the controller,
+# web, runner, cache, and logs manifests.
 #
 # repository: file://../sparkwing-runner-bundle
 #   Local sibling-directory dependency. After `helm dep up`, the
@@ -65,7 +65,7 @@ maintainers:
 # work from the in-cluster controller.
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.0"
+    version: "0.1.2"
     repository: "file://../sparkwing-runner-bundle"
     # condition lets operators disable the runner side entirely
     # (e.g. they already have runners deployed elsewhere and just

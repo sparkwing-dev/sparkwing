@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// applyAll is a test helper that runs each constraint's applyTo
-// against a fresh fieldMeta and returns the result + the first error.
 func applyAll(cs ...Constraint) (*fieldMeta, error) {
 	m := &fieldMeta{}
 	for _, c := range cs {

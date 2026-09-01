@@ -10,12 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// buildClusterRunnerBackends mirrors the runner-pod Backends wiring
-// from orchestrator.HandleClaimedTrigger (orchestrator/worker.go,
-// "Concurrency must go through the controller" block). If that block
-// changes shape, update this fixture in lockstep -- the assertions
-// below pin the *types*, not the construction syntax, so the static
-// fixture is a faithful stand-in for the live constructor.
 func buildClusterRunnerBackends() orchestrator.Backends {
 	const ctrlURL = "http://controller.sparkwing.svc.cluster.local"
 	stateClient := client.NewWithToken(ctrlURL, nil, "")
@@ -26,9 +20,6 @@ func buildClusterRunnerBackends() orchestrator.Backends {
 	}
 }
 
-// TestClusterBackends_StateMustBeHTTP pins Backends.State to the
-// HTTP-backed *client.Client and rejects *store.Store. See file
-// header for the privilege-escalation rationale.
 func TestClusterBackends_StateMustBeHTTP(t *testing.T) {
 	backends := buildClusterRunnerBackends()
 
@@ -54,11 +45,6 @@ decisions/0001-open-core-tier-strategy.md.`, stateType)
 	}
 }
 
-// TestClusterBackends_ConcurrencyMustBeHTTP pins Backends.Concurrency
-// to *HTTPConcurrency and rejects the SQLite-direct localConcurrency.
-// Cluster cache hits + slot coordination MUST flow through the
-// controller; a per-pod local store would silo coordination AND grant
-// inline jobs direct write access.
 func TestClusterBackends_ConcurrencyMustBeHTTP(t *testing.T) {
 	backends := buildClusterRunnerBackends()
 
@@ -85,13 +71,6 @@ decisions/0001-open-core-tier-strategy.md.`, concType)
 	}
 }
 
-// TestClusterBackends_NoStoreReachable walks Backends.State via
-// reflection and asserts no *store.Store sits inside it. Belt-and-
-// suspenders: catches the case where a future refactor wraps a
-// *store.Store inside an HTTP-shaped struct (e.g. a "hybrid"
-// StateBackend that lazily falls back to direct SQLite). The
-// HTTP-only invariant is meant to be HARD: no embedded direct-store
-// references anywhere in the runner-pod Backends graph.
 func TestClusterBackends_NoStoreReachable(t *testing.T) {
 	backends := buildClusterRunnerBackends()
 
@@ -110,10 +89,6 @@ strategy.md.`, found)
 	}
 }
 
-// findStoreType walks v looking for a *store.Store value. Returns
-// the field path where it found one, or "" if none. Bounded depth
-// keeps this from chasing into stdlib graph cycles (net/http
-// transports, etc.).
 func findStoreType(v reflect.Value, depth int) string {
 	if depth > 6 {
 		return ""
@@ -146,13 +121,6 @@ func findStoreType(v reflect.Value, depth int) string {
 	return ""
 }
 
-// TestClusterBackends_GuardCatchesViolation is the meta-test: prove
-// the assertions above actually fire on a *store.Store. Without
-// this, a future refactor could silently neuter the guard (e.g.
-// rename the type) and the tests would keep passing on bad wiring.
-//
-// Constructs a deliberately-wrong Backends bundle and confirms the
-// type checks classify it as a regression.
 func TestClusterBackends_GuardCatchesViolation(t *testing.T) {
 	var bad *store.Store
 	stateType := reflect.TypeOf(bad).String()

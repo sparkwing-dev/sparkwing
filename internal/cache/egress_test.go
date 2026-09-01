@@ -13,16 +13,6 @@ import (
 	"time"
 )
 
-// These tests cover the two NAT-egress guards on the gitcache: the
-// per-repo fetch freshness throttle and the recovery-reclone circuit
-// breaker. Both are about how much traffic leaves the cluster, so the
-// assertions count git operations rather than inspect refs.
-
-// gitcacheFixture points the package's directory layout at a temp dir
-// and leaves a bare mirror of a local upstream on disk, registered
-// under a repo URL that passes sourceurl.ValidateCloneURL (handleArchive
-// rejects filesystem paths, so the URL is a plausible-looking remote and
-// the network operations are stubbed instead).
 func gitcacheFixture(t *testing.T) (repoURL, bareRepo, upstream string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -65,8 +55,6 @@ func gitcacheFixture(t *testing.T) (repoURL, bareRepo, upstream string) {
 	return repoURL, bareRepo, upstream
 }
 
-// resetFetchState isolates a test from freshness/reclone bookkeeping
-// left behind by other tests -- bgFetch is process-wide.
 func resetFetchState(t *testing.T) {
 	t.Helper()
 	old := bgFetch
@@ -74,8 +62,6 @@ func resetFetchState(t *testing.T) {
 	t.Cleanup(func() { bgFetch = old })
 }
 
-// countFetches replaces the mirror fetch with a counting stub that
-// reports the given error (nil for success).
 func countFetches(t *testing.T, err error) *atomic.Int32 {
 	t.Helper()
 	var n atomic.Int32
@@ -91,7 +77,6 @@ func countFetches(t *testing.T, err error) *atomic.Int32 {
 	return &n
 }
 
-// setWindows overrides the throttle knobs for the duration of a test.
 func setWindows(t *testing.T, fresh, cooldown time.Duration) {
 	t.Helper()
 	oldFresh, oldCooldown := fetchFreshWindow, recloneCooldown
@@ -127,11 +112,6 @@ func archiveRequest(t *testing.T, repoURL string) *httptest.ResponseRecorder {
 	return w
 }
 
-// TestFetchThrottle_SecondRequestInsideWindowDoesNotFetch is the
-// egress claim: back-to-back reads of the same repo cost one fetch, not
-// one per request. Before the throttle a webhook burst multiplied
-// GitHub traffic by the number of requests for no extra freshness --
-// the background loop had already fetched.
 func TestFetchThrottle_SecondRequestInsideWindowDoesNotFetch(t *testing.T) {
 	repoURL, _, _ := gitcacheFixture(t)
 	setWindows(t, time.Minute, time.Hour)
@@ -148,8 +128,6 @@ func TestFetchThrottle_SecondRequestInsideWindowDoesNotFetch(t *testing.T) {
 	}
 }
 
-// TestFetchThrottle_ExpiredWindowFetchesAgain: the throttle bounds
-// staleness, it does not freeze the mirror.
 func TestFetchThrottle_ExpiredWindowFetchesAgain(t *testing.T) {
 	repoURL, _, _ := gitcacheFixture(t)
 	setWindows(t, 10*time.Millisecond, time.Hour)
@@ -164,9 +142,6 @@ func TestFetchThrottle_ExpiredWindowFetchesAgain(t *testing.T) {
 	}
 }
 
-// TestFetchThrottle_AppliesToEveryReadHandler pins the throttle to all
-// the handlers that used to fetch unconditionally, so a later edit that
-// reintroduces a raw per-request fetch on one of them fails here.
 func TestFetchThrottle_AppliesToEveryReadHandler(t *testing.T) {
 	repoURL, _, _ := gitcacheFixture(t)
 	setWindows(t, time.Minute, time.Hour)
@@ -195,9 +170,6 @@ func TestFetchThrottle_AppliesToEveryReadHandler(t *testing.T) {
 	}
 }
 
-// TestGitRefresh_BypassesFreshnessThrottle: /git/refresh exists to
-// close the push-then-trigger race, so throttling it would defeat the
-// endpoint. A fresh repo must still be fetched on demand.
 func TestGitRefresh_BypassesFreshnessThrottle(t *testing.T) {
 	repoURL, _, _ := gitcacheFixture(t)
 	setWindows(t, time.Hour, time.Hour)
@@ -220,9 +192,6 @@ func TestGitRefresh_BypassesFreshnessThrottle(t *testing.T) {
 	}
 }
 
-// countReclones stubs the recovery reclone with a counting version that
-// really re-clones from a local upstream, so the handler continues down
-// its normal path afterwards.
 func countReclones(t *testing.T, upstream string) *atomic.Int32 {
 	t.Helper()
 	var n atomic.Int32
@@ -236,14 +205,9 @@ func countReclones(t *testing.T, upstream string) *atomic.Int32 {
 	return &n
 }
 
-// TestRecloneBreaker_SecondFailureInsideCooldownDoesNotReclone is the
-// terabyte bug: a fetch that fails persistently (a ref conflict after a
-// branch rename, for instance) used to turn every archive request into a
-// full re-download of the repository. The first failure still recovers;
-// the second reports the git error instead.
 func TestRecloneBreaker_SecondFailureInsideCooldownDoesNotReclone(t *testing.T) {
 	repoURL, _, upstream := gitcacheFixture(t)
-	setWindows(t, -1, time.Hour) // throttle off: every request reaches the fetch
+	setWindows(t, -1, time.Hour)
 	fetchErr := &gitError{"cannot lock ref 'refs/heads/foo': 'refs/heads/foo/bar' exists"}
 	countFetches(t, fetchErr)
 	reclones := countReclones(t, upstream)
@@ -270,8 +234,6 @@ func TestRecloneBreaker_SecondFailureInsideCooldownDoesNotReclone(t *testing.T) 
 	}
 }
 
-// backdateReclone rewinds a repo's last-reclone stamp so cooldown
-// expiry is testable without sleeping through a real one.
 func backdateReclone(t *testing.T, hash string, d time.Duration) {
 	t.Helper()
 	bgFetch.mu.Lock()
@@ -283,9 +245,6 @@ func backdateReclone(t *testing.T, hash string, d time.Duration) {
 	rs.lastReclone = rs.lastReclone.Add(-d)
 }
 
-// TestRecloneBreaker_CooldownExpiryPermitsOneReclone: the breaker is a
-// rate limit, not a permanent lockout -- a repo that recovers on its own
-// later still gets one attempt per cooldown.
 func TestRecloneBreaker_CooldownExpiryPermitsOneReclone(t *testing.T) {
 	repoURL, _, upstream := gitcacheFixture(t)
 	setWindows(t, -1, time.Hour)
@@ -307,9 +266,6 @@ func TestRecloneBreaker_CooldownExpiryPermitsOneReclone(t *testing.T) {
 	}
 }
 
-// TestHealth_RepeatedReclonesSurfaceProblem: two reclones of one repo
-// inside 24h is an operator problem, not a self-healing cache, so
-// /health has to say so.
 func TestHealth_RepeatedReclonesSurfaceProblem(t *testing.T) {
 	repoURL, _, upstream := gitcacheFixture(t)
 	setWindows(t, -1, time.Hour)
@@ -340,9 +296,6 @@ func TestHealth_RepeatedReclonesSurfaceProblem(t *testing.T) {
 	}
 }
 
-// gitError stands in for a git failure whose message an operator needs
-// to see -- the breaker's error path is judged on whether it surfaces
-// this text.
 type gitError struct{ msg string }
 
 func (e *gitError) Error() string { return e.msg }

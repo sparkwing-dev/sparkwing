@@ -6,16 +6,13 @@ import (
 	"testing"
 )
 
-// schemaTestArgs is the canonical args struct exercised by these
-// tests. It deliberately covers the typed surface the resolution
-// chain will need: numerics, strings, bools, tag overrides.
 type schemaTestArgs struct {
 	Replicas     int    `desc:"target replica count"`
 	Image        string `desc:"OCI image ref"`
 	DryRun       bool   `flag:"dry-run" desc:"skip rollout"`
 	PoolSize     int    `flag:"pool-size"`
 	SlackWebhook string `flag:"slack-webhook"`
-	NoTag        string // no flag override, no desc -- exercises kebab-case default
+	NoTag        string
 }
 
 func TestSchema_BuildSucceedsForUnconstrainedStruct(t *testing.T) {
@@ -280,8 +277,6 @@ func TestKebabCase_RealisticInputs(t *testing.T) {
 	}
 }
 
-// allErrors flattens an error tree produced by errors.Join into a
-// slice of leaf errors. Used by TestSchema_ConstraintErrorsAccumulate.
 func allErrors(err error) []error {
 	type unwrapper interface{ Unwrap() []error }
 	if u, ok := err.(unwrapper); ok {

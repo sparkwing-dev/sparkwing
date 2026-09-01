@@ -26,7 +26,6 @@ func writeYAML(t *testing.T, dir, name, contents string) string {
 	return path
 }
 
-// A merged file that exercises every section.
 const mergedFixture = `
 defaults:
   profile: prod

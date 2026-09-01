@@ -1,21 +1,19 @@
 package orchestrator
 
 import (
+	"crypto/sha256"
+	"fmt"
+	"net/url"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// repoShortName derives the short repo identity of the directory a run
-// was launched from: the basename of the repository the enclosing git
-// toplevel belongs to, found by walking up to the first directory
-// containing a .git entry. A .git directory is a normal checkout, so the
-// toplevel's own basename is the repo. A .git file is a linked worktree
-// or a submodule; a worktree resolves to the repository it was branched
-// from, because a worktree is one branch of a repo and not a repo of its
-// own. Empty when dir is not inside a git repository.
 func repoShortName(dir string) string {
 	d := filepath.Clean(dir)
 	for {
@@ -23,9 +21,13 @@ func repoShortName(dir string) string {
 		info, err := os.Stat(gitPath)
 		if err == nil {
 			if !info.IsDir() {
-				if main := worktreeRepoDir(gitPath, d); main != "" {
-					return filepath.Base(main)
-				}
+				return gitFileRepoName(gitPath, d)
+			}
+			if name := originRepoName(gitPath); name != "" {
+				return name
+			}
+			if name := alternatesRepoName(gitPath); name != "" {
+				return name
 			}
 			return filepath.Base(d)
 		}
@@ -37,45 +39,129 @@ func repoShortName(dir string) string {
 	}
 }
 
-// worktreeRepoDir resolves the working directory of the repository a
-// linked worktree belongs to, from the "gitdir:" pointer in the
-// worktree's .git file. Git writes that pointer as
-// <common>/worktrees/<name>, where common is the repo's .git directory
-// (or the bare repo itself), so the repo is one or two levels up. It
-// returns "" for any other .git file -- a submodule's pointer has no
-// worktrees segment, and a submodule is its own repo for pricing.
-func worktreeRepoDir(gitFile, worktreeDir string) string {
+func originRepoName(gitDir string) string {
+	cmd := exec.Command("git", "config", "--file", filepath.Join(gitDir, "config"), "--includes", "--get", "remote.origin.url")
+	raw, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return repoNameFromURL(strings.TrimSpace(string(raw)))
+}
+
+func repoNameFromURL(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if strings.HasPrefix(remote, "/") || (len(remote) >= 3 && remote[1] == ':' && (remote[2] == '/' || remote[2] == '\\')) {
+		return localRepoName(remote)
+	}
+	if !strings.Contains(remote, "://") {
+		if colon := strings.Index(remote, ":"); colon > 0 {
+			remote = "ssh://" + remote[:colon] + "/" + remote[colon+1:]
+		}
+	}
+	parsed, err := url.Parse(remote)
+	if err != nil {
+		return ""
+	}
+	if parsed.Scheme == "file" {
+		return localRepoName(parsed.Host + parsed.Path)
+	}
+	if parsed.Host == "" {
+		return ""
+	}
+	host := parsed.Host
+	if parsed.User != nil {
+		host = strings.TrimPrefix(host, parsed.User.String()+"@")
+	}
+	path := strings.TrimSuffix(strings.Trim(strings.TrimSpace(parsed.Path), "/"), ".git")
+	if path == "" {
+		return ""
+	}
+	return strings.ToLower(host) + "/" + path
+}
+
+func localRepoName(repoPath string) string {
+	normalized := path.Clean(strings.ReplaceAll(strings.TrimSpace(repoPath), "\\", "/"))
+	normalized = strings.TrimSuffix(normalized, ".git")
+	if normalized == "" || normalized == "." {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(normalized))
+	return fmt.Sprintf("local:%x", sum[:12])
+}
+
+func alternatesRepoName(gitDir string) string {
+	raw, err := os.ReadFile(filepath.Join(gitDir, "objects", "info", "alternates"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		objects := strings.TrimSpace(line)
+		if objects == "" || strings.HasPrefix(objects, "#") {
+			continue
+		}
+		if !filepath.IsAbs(objects) {
+			objects = filepath.Join(gitDir, "objects", objects)
+		}
+		repo := filepath.Dir(filepath.Clean(objects))
+		if name := originRepoName(repo); name != "" {
+			return name
+		}
+		if name := localRepoName(repo); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func gitFileRepoName(gitFile, dir string) string {
+	gitDir := gitDirPointer(gitFile, dir)
+	if gitDir == "" {
+		return filepath.Base(dir)
+	}
+	if filepath.Base(filepath.Dir(gitDir)) == "worktrees" {
+		common := filepath.Dir(filepath.Dir(gitDir))
+		if name := originRepoName(common); name != "" {
+			return name
+		}
+		if name := alternatesRepoName(common); name != "" {
+			return name
+		}
+		if filepath.Base(common) == ".git" {
+			return filepath.Base(filepath.Dir(common))
+		}
+		return strings.TrimSuffix(filepath.Base(common), ".git")
+	}
+	if name := originRepoName(gitDir); name != "" {
+		return name
+	}
+	if name := alternatesRepoName(gitDir); name != "" {
+		return name
+	}
+	return filepath.Base(dir)
+}
+
+func gitDirPointer(gitFile, dir string) string {
 	raw, err := os.ReadFile(gitFile)
 	if err != nil {
 		return ""
 	}
-	gitDir := ""
 	for _, line := range strings.Split(string(raw), "\n") {
-		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "gitdir:"); ok {
-			gitDir = strings.TrimSpace(rest)
-			break
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "gitdir:")
+		if !ok {
+			continue
 		}
+		gitDir := strings.TrimSpace(rest)
+		if gitDir == "" {
+			return ""
+		}
+		if !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(dir, gitDir)
+		}
+		return filepath.Clean(gitDir)
 	}
-	if gitDir == "" {
-		return ""
-	}
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(worktreeDir, gitDir)
-	}
-	gitDir = filepath.Clean(gitDir)
-	if filepath.Base(filepath.Dir(gitDir)) != "worktrees" {
-		return ""
-	}
-	common := filepath.Dir(filepath.Dir(gitDir))
-	if filepath.Base(common) == ".git" {
-		return filepath.Dir(common)
-	}
-	return strings.TrimSuffix(common, ".git")
+	return ""
 }
 
-// currentRepoShortName keeps profile reads and writes bound to the
-// configured run directory even when node code changes the process cwd.
-// Callers outside a configured runtime fall back to the process cwd.
 func currentRepoShortName() string {
 	if workDir := sparkwing.CurrentRuntime().WorkDir; workDir != "" {
 		return repoShortName(workDir)
@@ -87,24 +173,10 @@ func currentRepoShortName() string {
 	return repoShortName(wd)
 }
 
-// scopedProfileKey is the identity a pipeline's capacity profile is stored
-// under in the machine-global state database: repo-scoped, because pipeline
-// names repeat across repos (every scaffolded repo ships a "ci") and pooling
-// their samples and contended floors lets contention in one repo poison
-// another's pricing. A run outside any git repo keeps the bare pipeline name.
-// Every linked worktree of a repo shares the repo's key, because a pipeline
-// costs what it costs whichever branch runs it; keying per worktree throws
-// that learning away whenever work moves to a fresh branch.
 func scopedProfileKey(repo, pipeline string) string {
-	if repo == "" || pipeline == "" {
-		return pipeline
-	}
-	return repo + "/" + pipeline
+	return store.JoinProfileKey(repo, pipeline)
 }
 
-// currentProfileKey scopes a pipeline's profile identity to the repo the
-// process runs from. Every profile read and write in one run goes through
-// this, so pricing, folds, and contention tallies always land on one row.
 func currentProfileKey(pipeline string) string {
 	return scopedProfileKey(currentRepoShortName(), pipeline)
 }

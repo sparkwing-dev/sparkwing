@@ -25,7 +25,7 @@ prune) require a profile; 'runs logs' supports both.
 - `summary` -- Aggregated work view: groups, work items, modifiers, annotations
 - `timeline` -- ASCII waterfall of nodes (and optional steps) for a run
 - `wait` -- Block until a run reaches a terminal status
-- `find` -- Find runs by git SHA / repo / pipeline filter
+- `find` -- Find runs by source identity or pipeline
 - `grep` -- Search log bodies across recent runs for a substring
 - `logs` -- Print a run's logs
 - `errors` -- Surface the error trail for a failed run
@@ -434,6 +434,9 @@ Fetches recent runs with status=failed and extracts the first failing node's ste
 | Flag | Description |
 |---|---|
 | `--pipeline NAME` | Restrict to one pipeline |
+| `--git-sha SHA` | Restrict to a git SHA prefix |
+| `--branch NAME` | Restrict to one git branch |
+| `--repo OWNER/NAME` | Restrict to one repository |
 | `--since DURATION` | Only failures newer than this (e.g. 24h, 7d) |
 | `--limit N` | Max failures to analyze (default: 20) |
 | `--group-by KEY` | Cluster by: step \| node |
@@ -452,13 +455,12 @@ sparkwing runs failures --profile prod --group-by step
 
 ## `sparkwing runs find`
 
-Find runs by git SHA / repo / pipeline filter
+Find runs by source identity or pipeline
 
 Searches recent runs for a match. Use --git-sha to find
 the run that was fired by a specific commit; add --pipeline to
 disambiguate when multiple pipelines respond to the same push. --repo
-matches the GITHUB_REPOSITORY env on the trigger (owner/name), useful
-when one controller handles webhooks from multiple repos.
+matches the repository identity stored on the run (owner/name).
 
 With --wait, blocks until at least one match appears, up to
 --find-timeout. Pairs with 'runs wait' for the push-and-follow loop:
@@ -475,8 +477,10 @@ infrastructure error.
 | Flag | Description |
 |---|---|
 | `--git-sha SHA` | Match runs whose git SHA starts with this value (prefix match) |
+| `--branch NAME` | Restrict to one git branch |
 | `--pipeline NAME` | Restrict to one pipeline |
-| `--repo OWNER/NAME` | Match trigger's GITHUB_REPOSITORY env |
+| `--repo OWNER/NAME` | Restrict to one stored repository identity |
+| `--root-only` | Exclude child runs |
 | `--since DURATION` | Lookback window (default: 1h) |
 | `--limit N` | Max results (default: 20) |
 | `--wait` | Block until at least one match appears |
@@ -852,9 +856,9 @@ Aggregate run counts, success %, avg + p95 duration
 
 Per-pipeline aggregates across the last 500 root runs (or the --since window). In-flight runs count toward RUN (running) but do not contribute to timing percentiles.
 
---capacity switches to the measured capacity profiles admission learns from: each pipeline's p50/p99 duration, its CPU and memory distributions (p50/p95/peak across recent runs), the CPU CHARGE column holding the core figure admission actually reserves, its queue-wait p50/p99, sample count, and whether the admission charge comes from a pin, measurement, or the cold-start default. The resource percentiles show whether a pipeline is steady or spiky. Admission charges memory from the peak, because under-reserving memory recreates the oversubscription admission exists to prevent, and charges cores from each run's sustained demand instead, because the kernel time-slices a transient CPU collision and reserving a burst peak for a whole run only refuses work the box could have run. A pipeline whose pin has drifted from its measured peaks carries the exact fix. Capacity profiles are local-only and keyed repo/pipeline for runs launched inside a git repo, so same-named pipelines in different repos never share a profile. Every linked worktree of a repo shares that repo's key: a pipeline costs what it costs whichever branch runs it, so a gate on a fresh branch arrives already knowing its price.
+--capacity switches to the measured capacity profiles admission learns from: each pipeline's p50/p99 duration, its CPU and memory distributions (p50/p95/peak across recent runs), the CPU CHARGE column holding the core figure admission actually reserves, its queue-wait p50/p99, sample count, and whether the admission charge comes from a pin, measurement, or the cold-start default. The resource percentiles show whether a pipeline is steady or spiky. Admission charges memory from the peak, because under-reserving memory recreates the oversubscription admission exists to prevent, and charges cores from each run's sustained demand instead, because the kernel time-slices a transient CPU collision and reserving a burst peak for a whole run only refuses work the box could have run. A pipeline whose pin has drifted from its measured peaks carries the exact fix. Capacity profiles are local-only and repo-scoped for runs launched inside a git repo, so same-named pipelines in different repos never share a profile. The repo scope is the repository's canonical identity: host/owner/path from its origin remote, the object store it borrows from when it has no remote, or a private hash of a local-path remote. Every tree of one repository -- the main checkout, a linked worktree, a clone in an ephemeral directory -- therefore shares one profile: a pipeline costs what it costs whichever tree runs it, and a gate cloning into a fresh directory arrives already knowing its price. A repo with no remote at all keys by its directory name. The table prints each key as its repo scope and pipeline joined with "/".
 
---reset clears a pipeline's learned capacity profile so it re-learns from a cold start, the escape hatch for a poisoned measurement -- one freak run that recorded an absurd peak, or a contention-ratcheted demand floor (sparkwing doctor flags those). Name the pipeline with --pipeline NAME as --capacity shows it (repo/pipeline inside a git repo); a bare pipeline name resets every repo-scoped key that carries it, and the summary names each key it reached. Reset every pipeline with --all --yes. The demand floor goes whether or not measured samples sit behind it, since a pipeline that never finished a clean run is still priced off its floor. An explicit .Resources() pin is preserved: admission keeps charging the pin while the profile re-learns. The command prints how many rows were dropped, how many pinned rows were cleared, and how many samples and demand floors were discarded.
+--reset clears a pipeline's learned capacity profile so it re-learns from a cold start, the escape hatch for a poisoned measurement -- one freak run that recorded an absurd peak, or a contention-ratcheted demand floor (sparkwing doctor flags those). Name the pipeline with --pipeline NAME as --capacity shows it (repo/pipeline inside a git repo); a bare pipeline name resets every repo-scoped key that carries it, a repo/pipeline name reaches every stored encoding of that profile, and the summary names each profile it reached in the same repo/pipeline form. Reset every pipeline with --all --yes. The demand floor goes whether or not measured samples sit behind it, since a pipeline that never finished a clean run is still priced off its floor. An explicit .Resources() pin is preserved: admission keeps charging the pin while the profile re-learns. The command prints how many rows were dropped, how many pinned rows were cleared, and how many samples and demand floors were discarded.
 
 ### Flags
 
@@ -980,19 +984,9 @@ is recorded on the run, so the consumer executes the tree you
 submitted from even when another registered checkout declares the
 same pipeline name.
 
-ENVIRONMENT: a submitted run does NOT inherit this shell's
-environment. It is executed by the resident consumer, which
-carries the environment of whichever shell started it -- possibly
-hours ago, in another project, with a different AWS_PROFILE or
-KUBECONFIG. So
-
-  AWS_PROFILE=prod sparkwing runs submit deploy
-
-may not do what it looks like. Pass values as pipeline arguments,
-put them in the pipeline's configuration, or start the consumer
-from the environment you want ('sparkwing runs consumer start')
-before submitting. The acknowledgment names the consumer pid so
-the difference is visible.
+Each submitted run executes with the environment captured by its
+submission. The owner-only snapshot is removed when dispatch reaches
+a terminal outcome; it is never stored in the run or trigger row.
 
 Deduplication is opt-in via --idempotency-key, scoped to the
 pipeline. A second submission of the SAME pipeline carrying a key

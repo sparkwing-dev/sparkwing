@@ -13,10 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// ciEmbeddedHelloPipe is the smallest pipeline that exercises the
-// LogStore + ArtifactStore plumbing: one node that emits one log
-// line. We assert the line lands in the LogStore and that the run
-// state lands in the ArtifactStore after RunLocal returns.
 type ciEmbeddedHelloPipe struct{ sparkwing.Base }
 
 func (ciEmbeddedHelloPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {

@@ -8,8 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// suggestFixturePipe is a minimal registered pipeline used to
-// populate sparkwing.Registered() for the suggestion tests.
 type suggestFixturePipe struct{ sparkwing.Base }
 
 func (suggestFixturePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -71,8 +69,6 @@ func TestUnknownPipelineErr_FarTypoNoSuggestion(t *testing.T) {
 	}
 }
 
-// parseTypedFlags is one of the four orchestrator call sites;
-// verify it routes through unknownPipelineErr.
 func TestParseTypedFlags_UnknownPipelineSuggests(t *testing.T) {
 	registerSuggestFixtures(t)
 	_, err := parseTypedFlags("claster-up", nil)
@@ -84,9 +80,6 @@ func TestParseTypedFlags_UnknownPipelineSuggests(t *testing.T) {
 	}
 }
 
-// printPipelineHelp is the second call site. The function writes to
-// stdout on success; on the unknown-pipeline path it returns an
-// error before any output.
 func TestPrintPipelineHelp_UnknownPipelineSuggests(t *testing.T) {
 	registerSuggestFixtures(t)
 	err := printPipelineHelp("claster-up")
@@ -98,7 +91,6 @@ func TestPrintPipelineHelp_UnknownPipelineSuggests(t *testing.T) {
 	}
 }
 
-// printPipelinePlan (--explain) is the third call site.
 func TestPrintPipelinePlan_UnknownPipelineSuggests(t *testing.T) {
 	registerSuggestFixtures(t)
 	err := printPipelinePlan("claster-up", nil)
@@ -110,8 +102,6 @@ func TestPrintPipelinePlan_UnknownPipelineSuggests(t *testing.T) {
 	}
 }
 
-// printPipelineRuntimePlan (--plan) is the fourth call site. Lives
-// in printpipelineplan.go.
 func TestPrintPipelineRuntimePlan_UnknownPipelineSuggests(t *testing.T) {
 	registerSuggestFixtures(t)
 	err := printPipelineRuntimePlan("claster-up", nil)

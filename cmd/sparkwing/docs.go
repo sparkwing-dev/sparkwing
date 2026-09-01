@@ -1,8 +1,3 @@
-// `sparkwing docs` is the agent + human entrypoint to the
-// embedded sparkwing documentation. The /docs/ tree is shipped in
-// the binary via pkg/docs (//go:embed), so an agent can answer
-// "how does X work" without leaving the CLI: the docs always match
-// the binary it's running, and there's no network roundtrip.
 package main
 
 import (
@@ -79,9 +74,6 @@ func runDocsList(args []string) error {
 	return renderDocsList(entries, output)
 }
 
-// runDocsGuides lists the guides. It is a separate verb from `docs
-// list` because a guide is not a document: listing them together would
-// imply you could `--topic` one.
 func runDocsGuides(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsGuides.Path, flag.ContinueOnError)
 	var output string
@@ -95,7 +87,7 @@ func runDocsGuides(args []string) error {
 	list := docs.Guides()
 	switch strings.ToLower(output) {
 	case "json":
-		// NDJSON: one guide per line.
+
 		return ndjson.Write(os.Stdout, list)
 	case "plain":
 		for _, g := range list {
@@ -194,13 +186,6 @@ func runDocsAll(args []string) error {
 	return nil
 }
 
-// runDocsSearch answers a question from two corpora at once.
-//
-// Examples print first: a working pipeline that already does the thing
-// answers "how do I do X" more directly than the reference section
-// defining the symbols it uses, and the registry entries are executed
-// by template-verify, so unlike prose they cannot quietly stop being
-// true.
 func runDocsSearch(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsSearch.Path, flag.ContinueOnError)
 	var query string
@@ -232,18 +217,10 @@ func runDocsSearch(args []string) error {
 	return renderDocsSections(docs.SearchSections(query), query, withBody, output)
 }
 
-// renderDocsSections prints section hits.
-//
-// The default is a snippet plus the topic, heading, and line range,
-// because that is the shape of the answer: which page, where in it, and
-// enough text to tell whether it is the right place. --body prints the
-// whole section for a caller that would otherwise go read it anyway.
 func renderDocsSections(hits []docs.Section, query string, withBody bool, output string) error {
 	switch strings.ToLower(output) {
 	case "json":
-		// NDJSON: one section per line, so `head` returns whole
-		// sections -- which matters most here, where --with-body makes
-		// a single record thousands of characters long.
+
 		return ndjson.Write(os.Stdout, hits)
 	case "plain":
 		for _, h := range hits {
@@ -279,9 +256,6 @@ func renderDocsSections(hits []docs.Section, query string, withBody bool, output
 	}
 }
 
-// sectionSnippet returns the first body line that mentions a query
-// token, so the preview shows the match rather than the boilerplate
-// under the heading.
 func sectionSnippet(s docs.Section, query string) string {
 	tokens := strings.Fields(strings.ToLower(query))
 	lines := strings.Split(s.Body, "\n")
@@ -315,7 +289,7 @@ func truncateLine(s string) string {
 func renderDocsList(entries []docs.Entry, output string) error {
 	switch strings.ToLower(output) {
 	case "json":
-		// NDJSON: one doc entry per line.
+
 		return ndjson.Write(os.Stdout, entries)
 	case "plain":
 		for _, e := range entries {
@@ -361,10 +335,6 @@ func renderDocsList(entries []docs.Entry, output string) error {
 	}
 }
 
-// sectionLabel identifies a hit. A heading alone does not: the
-// generated CLI reference has 139 sections titled "Examples", and a
-// result list of them tells a reader nothing about which verb each one
-// belongs to.
 func sectionLabel(h docs.Section) string {
 	if h.Breadcrumb == "" {
 		return h.Heading

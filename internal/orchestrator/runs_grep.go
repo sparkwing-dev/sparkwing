@@ -1,9 +1,3 @@
-// `sparkwing runs grep PATTERN` -- substring search across recent
-// runs' log bodies. Walks the filter-narrowed candidate set
-// and emits one row per matching line. Fills the gap between
-// `runs logs --grep` (one known run) and `runs list --error`
-// (structured failure reason only) by surfacing free-form log body
-// matches the dashboard can't easily answer either.
 package orchestrator
 
 import (
@@ -27,23 +21,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// GrepOpts configures `runs grep`.
 type GrepOpts struct {
 	Pattern    string
-	Limit      int // max runs to scan; 0 -> default 50
-	MaxMatches int // per-run match cap; 0 -> no cap
+	Limit      int
+	MaxMatches int
 	JSON       bool
 	Quiet      bool
 
-	// Filter set built from --pipeline / --status / --branch / etc.
-	// Mirrors `runs list` so the candidate run set is the same.
 	Pipelines []string
 	Statuses  []string
 	Since     time.Duration
 	Filter    CompiledFilter
 }
 
-// GrepMatch is one matching line in the wire shape emitted to JSON.
 type GrepMatch struct {
 	RunID  string `json:"run_id"`
 	NodeID string `json:"node_id"`
@@ -56,9 +46,6 @@ const (
 	grepMaxRunLimit     = 1000
 )
 
-// resolveRunLimit picks the candidate scan cap. When filters are
-// active we over-fetch up to grepMaxRunLimit so the post-filter
-// narrowing has room.
 func resolveRunLimit(opts GrepOpts) int {
 	limit := opts.Limit
 	if limit <= 0 {
@@ -70,7 +57,6 @@ func resolveRunLimit(opts GrepOpts) int {
 	return limit
 }
 
-// RunGrepLocal scans every node log file for matches.
 func RunGrepLocal(ctx context.Context, paths Paths, opts GrepOpts, out io.Writer) error {
 	if opts.Pattern == "" {
 		return errors.New("runs grep: PATTERN is required")
@@ -103,7 +89,6 @@ func RunGrepLocal(ctx context.Context, paths Paths, opts GrepOpts, out io.Writer
 	return emitGrepMatches(matches, opts, out)
 }
 
-// RunGrepRemote is the cluster-mode counterpart.
 func RunGrepRemote(ctx context.Context, controllerURL, logsURL, token string, opts GrepOpts, out io.Writer) error {
 	if opts.Pattern == "" {
 		return errors.New("runs grep: PATTERN is required")
@@ -133,8 +118,6 @@ func RunGrepRemote(ctx context.Context, controllerURL, logsURL, token string, op
 	return emitGrepMatches(matches, opts, out)
 }
 
-// grepFetchLimit over-fetches when any client-side filter is active
-// so the candidate set has room to narrow.
 func grepFetchLimit(opts GrepOpts) int {
 	want := resolveRunLimit(opts)
 	if opts.Filter.HasAny() {
@@ -150,10 +133,6 @@ func sinceCutoff(d time.Duration) time.Time {
 	return time.Now().Add(-d)
 }
 
-// scanLocalRuns walks each run's per-node log file and collects
-// substring matches. Stops at MaxMatches per node, not per run, so
-// a run with several chatty nodes still surfaces evidence across
-// all of them.
 func scanLocalRuns(ctx context.Context, st *store.Store, paths Paths, runs []*store.Run, opts GrepOpts) ([]GrepMatch, error) {
 	var out []GrepMatch
 	for _, r := range runs {
@@ -177,9 +156,6 @@ func scanLocalRuns(ctx context.Context, st *store.Store, paths Paths, runs []*st
 	return out, nil
 }
 
-// scanRemoteRuns delegates each (run, node) substring read to the
-// logs service. The service already supports server-side grep, so we
-// only see matching bytes back over the wire.
 func scanRemoteRuns(ctx context.Context, c *client.Client, logc storage.LogStore, runs []*store.Run, opts GrepOpts) ([]GrepMatch, error) {
 	var out []GrepMatch
 	for _, r := range runs {
@@ -221,8 +197,6 @@ type grepLine struct {
 	line   string
 }
 
-// grepNodeFile reads one node log file line by line. Returns at
-// most maxMatches entries when >0; otherwise every match.
 func grepNodeFile(path, pattern string, maxMatches int) ([]grepLine, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -250,8 +224,6 @@ func grepNodeFile(path, pattern string, maxMatches int) ([]grepLine, error) {
 	return out, sc.Err()
 }
 
-// emitGrepMatches renders the result set per opts: table (default),
-// json (array of matches), or quiet (unique run ids).
 func emitGrepMatches(matches []GrepMatch, opts GrepOpts, out io.Writer) error {
 	if opts.Quiet {
 		seen := map[string]bool{}
@@ -265,7 +237,6 @@ func emitGrepMatches(matches []GrepMatch, opts GrepOpts, out io.Writer) error {
 		}
 		sort.Strings(ids)
 		if opts.JSON {
-			// One quoted id per line, matching the plain form below.
 			return ndjson.Write(out, ids)
 		}
 		for _, id := range ids {
@@ -274,7 +245,6 @@ func emitGrepMatches(matches []GrepMatch, opts GrepOpts, out io.Writer) error {
 		return nil
 	}
 	if opts.JSON {
-		// NDJSON: one match per line, so `head` returns whole matches.
 		return ndjson.Write(out, matches)
 	}
 	if len(matches) == 0 {

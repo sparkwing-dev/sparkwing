@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Regenerate docs/config-reference.md from the sparkwing.yaml schema
-# structs (pkg/pipelines, pkg/projectconfig), then re-sync the embedded
-# mirror. docs/config-reference.md is GENERATED -- never edit it by
-# hand; change the struct fields / field godoc and rerun this. The
-# pre-push docs-generated gate fails until the committed file matches.
 
 set -euo pipefail
 

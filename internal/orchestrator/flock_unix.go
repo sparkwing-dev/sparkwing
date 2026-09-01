@@ -7,11 +7,6 @@ import (
 	"syscall"
 )
 
-// flockTry takes a non-blocking exclusive lock on f. ok is false when
-// another process holds it. The kernel drops the lock when the holder's
-// descriptor closes -- including on crash or SIGKILL -- which is what
-// makes a free lock proof that no consumer is alive, with no stale-PID
-// heuristics.
 func flockTry(f *os.File) (ok bool, err error) {
 	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err == nil {

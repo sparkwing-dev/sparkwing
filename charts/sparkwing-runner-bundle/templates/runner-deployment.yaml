@@ -1,3 +1,4 @@
+{{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,9 +8,6 @@ metadata:
     {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "runner") | nindent 4 }}
 spec:
   replicas: {{ .Values.runner.replicas }}
-  # RollingUpdate so a `helm upgrade` doesn't drop the entire pool
-  # at once; the controller's lease reaper handles in-flight claims
-  # on the rolled pod.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -42,23 +40,41 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.volumePermissions.enabled }}
+      initContainers:
+        - name: volume-permissions
+          image: {{ include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.runner.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN"]
+          command: ["/bin/chown"]
+          args:
+            - {{ printf "%d:%d" (int .Values.podSecurityContext.runAsUser) (int .Values.podSecurityContext.fsGroup) | quote }}
+            - "/tmp/sparkwing"
+          volumeMounts:
+            - name: sparkwing-home
+              mountPath: /tmp/sparkwing
+      {{- end }}
       containers:
         - name: runner
           image: {{ include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) | quote }}
           imagePullPolicy: {{ .Values.runner.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
-          # The runner image entrypoint is runner-entrypoint.sh which
-          # seeds ~/.netrc from $GITHUB_TOKEN before exec'ing the
-          # binary. Keep the wrapper in the command chain; pass
-          # subcommand + flags through args.
           command:
             - /usr/local/bin/runner-entrypoint.sh
             - /usr/local/bin/sparkwing-runner
           args:
             - runner
-            {{- if .Values.controller.url }}
-            - {{ printf "--controller=%s" .Values.controller.url | quote }}
+            {{- if $controllerURL }}
+            - {{ printf "--controller=%s" $controllerURL | quote }}
             {{- end }}
             {{- if .Values.logs.enabled }}
             - {{ printf "--logs=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.logs.fullname" .) .Release.Namespace | quote }}
@@ -66,9 +82,6 @@ spec:
             {{- if .Values.cache.enabled }}
             - {{ printf "--gitcache=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
             {{- if not .Values.cache.dependencyProxy.enabled }}
-            # The runner otherwise derives the dependency proxy for the
-            # pods it spawns from --gitcache; the opt-out has to be
-            # explicit to reach them.
             - --dependency-proxy=off
             {{- end }}
             {{- end }}
@@ -90,9 +103,6 @@ spec:
               containerPort: {{ .Values.runner.metricsPort }}
           {{- end }}
           env:
-            # HOME on the writable scratch volume so runner-entrypoint
-            # can write ~/.netrc (private go-mod fetch) and `go build`
-            # has somewhere to land caches.
             - name: HOME
               value: /tmp/sparkwing
             - name: SPARKWING_HOME
@@ -101,8 +111,6 @@ spec:
               value: /tmp/sparkwing/gocache
             - name: GOMODCACHE
               value: /tmp/sparkwing/gomodcache
-            - name: SPARKWING_BAKED_BINARY
-              value: /usr/local/bin/sparkwing
             {{- if .Values.cache.enabled }}
             - name: SPARKWING_GITCACHE_URL
               value: {{ printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
@@ -112,15 +120,11 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
             {{- if and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key }}
-            # Bearer token for both controller-claim auth and
-            # logs-service auth (logs forwards to controller's
-            # /api/v1/auth/whoami).
             - name: SPARKWING_AGENT_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.controller.tokenSecret.name | quote }}
                   key: {{ .Values.controller.tokenSecret.key | quote }}
-                  optional: true
             {{- end }}
             {{- with (include "sparkwing-runner-bundle.runnerDependencyProxyEnv" .) }}
             {{- . | nindent 12 }}

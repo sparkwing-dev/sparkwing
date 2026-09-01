@@ -16,16 +16,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// defaultChargeCores is the conservative host charge applied to a run
-// that declared no resource hints, so unhinted work still counts against
-// capacity rather than being admitted for free.
 const defaultChargeCores = 1.0
 
 const maxCancelledRunTombstones = 4096
 
-// Daemon is one elected sparkwingd instance. Construct it with [New] and
-// drive it with [Run]; it serves until it is drained, told to stop, or
-// idles out.
 type Daemon struct {
 	cfg            Config
 	layout         layout
@@ -37,10 +31,6 @@ type Daemon struct {
 	lockFile *os.File
 	ln       net.Listener
 
-	// connSeq numbers accepted connections so a per-conn log line names
-	// something an operator can correlate. A unix-socket peer that never
-	// bound an address renders as "@" through RemoteAddr, which makes
-	// every client look like the same client in the daemon log.
 	connSeq atomic.Uint64
 
 	ready       chan struct{}
@@ -78,34 +68,18 @@ type Daemon struct {
 	headroomInit     bool
 	appliedCores     float64
 	appliedMem       uint64
-	// reservedCores/externalCores and their memory counterparts hold the
-	// headroom decomposition from the sample that set the applied headroom:
-	// the reserve margin and the measured non-sparkwing load per host
-	// dimension. They move only when the headroom does, so the queue view's
-	// external column and its available column come from the same reading.
+
 	reservedCores float64
 	externalCores float64
 	reservedMem   uint64
 	externalMem   uint64
-	// cpuMeasured/memMeasured record whether that sample could read each
-	// dimension the external figures come from. False means the external
-	// figure is not a measurement and none was subtracted, which the queue
-	// view states rather than printing a number.
+
 	cpuMeasured bool
 	memMeasured bool
-	// measuredAt advances on every successful host measurement. headroomAt
-	// advances only when that measurement becomes the effective admission
-	// value, so sensor health and deadband hold time remain distinct, and a
-	// reading the deadband has held in force can show its age instead of
-	// passing for live.
+
 	measuredAt time.Time
 	headroomAt time.Time
 
-	// machineCores/machineMemory are the effective capacity the budget and
-	// ledger are sized against: the host total, lowered to the container's
-	// cgroup limit when one binds. hostCores/hostMemory keep the unclamped
-	// host total, and containerCores/containerMemory the cgroup ceiling when
-	// it clamps below the host, so the queue view can show each tier.
 	machineCores    float64
 	machineMemory   uint64
 	hostCores       float64
@@ -114,29 +88,19 @@ type Daemon struct {
 	containerMemory uint64
 	budgetCores     float64
 	budgetMemory    uint64
-	// capacityChange holds the most recent runtime capacity shift for the
-	// queue header, nil until one occurs. Guarded by mu.
+
 	capacityChange *wingwire.CapacityChange
 
-	// container reads this process's own cgroup limits so admission plans
-	// against the container it runs in, not the host. Nil disables
-	// detection (host totals stand).
 	container *containerSensor
 
-	// cgroup enforces a Linux CPU/memory wall for admitted runs when the
-	// budget opts in; nil on other platforms or when enforcement is off or
-	// unavailable.
 	cgroup *cgroupLimiter
 }
 
-// delivery pairs a framed message with the connection it belongs to.
 type delivery struct {
 	c   *conn
 	msg wingwire.Message
 }
 
-// New constructs a daemon for cfg without electing or serving. Run does
-// the election and blocks.
 func New(cfg Config) (*Daemon, error) {
 	if cfg.Sampler != nil && cfg.OwnedCPUSampler != nil {
 		if _, paired := cfg.Sampler.(pairedHostOwnedSampler); paired {
@@ -189,17 +153,10 @@ func New(cfg Config) (*Daemon, error) {
 	}, nil
 }
 
-// Ready returns a channel closed once the daemon is listening. Tests wait
-// on it before connecting; it never fires for a daemon that lost the
-// election.
 func (d *Daemon) Ready() <-chan struct{} { return d.ready }
 
-// SocketPath is the address this daemon serves on.
 func (d *Daemon) SocketPath() string { return d.layout.sock }
 
-// Run elects, restores durable state, and serves until shutdown. It
-// returns [ErrNotElected] immediately when another daemon owns this
-// home, and nil on a clean stop (idle exit, drain, or context cancel).
 func (d *Daemon) Run(ctx context.Context) error {
 	won, err := d.elect()
 	if err != nil {
@@ -267,8 +224,6 @@ func (d *Daemon) watchContext(ctx context.Context) {
 	}
 }
 
-// shutdown signals every loop to stop and closes the listener, which
-// unblocks Accept. It is safe to call repeatedly.
 func (d *Daemon) shutdown() {
 	d.shutdownOne.Do(func() {
 		d.mu.Lock()
@@ -281,9 +236,6 @@ func (d *Daemon) shutdown() {
 	})
 }
 
-// finalShutdown closes every open connection without releasing leases --
-// they persist for the successor to reclaim -- then writes a final
-// snapshot.
 func (d *Daemon) finalShutdown() {
 	if d.graceTimer != nil {
 		d.graceTimer.Stop()
@@ -396,12 +348,6 @@ func (d *Daemon) initLedger() error {
 	return nil
 }
 
-// restoreLedger rebuilds the ledger from snap and fits it to the current
-// budget without revoking restored authority. The daemon cannot distinguish
-// a leaked grant from a still-running client during startup, so totals are
-// temporarily floored at existing grants and queued requests while headroom
-// tightens new admission to the current budget. Holders then drain or expire
-// through the normal reattach grace path.
 func (d *Daemon) restoreLedger(snap admission.Snapshot) (*admission.Ledger, []admission.LeaseState, error) {
 	lg, err := admission.Restore(snap, nil)
 	if err != nil {
@@ -428,11 +374,6 @@ func (d *Daemon) restoreLedger(snap admission.Snapshot) (*admission.Ledger, []ad
 	return lg, snap.Leases, nil
 }
 
-// discardState quarantines an unusable state file and logs the reason,
-// so a bad ledger snapshot costs its leases, never the daemon: the
-// daemon serves with a fresh ledger and the next persist writes a clean
-// file. A failed rename is logged and otherwise ignored because the next
-// persist overwrites the bad file in place.
 func (d *Daemon) discardState(reason error) {
 	dst, err := quarantineState(d.layout.state, d.now())
 	if err != nil {
@@ -452,8 +393,6 @@ func (d *Daemon) startGrace() {
 	d.graceTimer = time.AfterFunc(d.cfg.graceWindow(), d.expireGrace)
 }
 
-// expireGrace releases every restored lease no client reclaimed within
-// the grace window. Crash recovery and takeover both land here.
 func (d *Daemon) expireGrace() {
 	d.mu.Lock()
 	if d.shuttingDown {
@@ -486,11 +425,6 @@ func (d *Daemon) now() time.Time { return d.cfg.now() }
 
 func (d *Daemon) touchLocked() { d.lastActivity = d.now() }
 
-// touchConnLocked records activity on behalf of a connection: only a
-// handshaked working client counts. A health probe must never advance the
-// idle clock it exists to leave alone, and a peer that dialed and vanished
-// without a hello did no work -- charging either would let observation
-// hold the daemon open, which is the failure idle-exit exists to end.
 func (d *Daemon) touchConnLocked(c *conn) {
 	if c.handshaked && !c.healthProbe {
 		d.touchLocked()
@@ -499,8 +433,6 @@ func (d *Daemon) touchConnLocked(c *conn) {
 
 func (d *Daemon) isDrainingLocked() bool { return d.draining }
 
-// serveConn runs one connection: the version handshake, then the request
-// loop, until the peer disconnects or the daemon shuts down.
 func (d *Daemon) serveConn(c *conn) {
 	defer d.handleDisconnect(c)
 
@@ -519,10 +451,7 @@ func (d *Daemon) serveConn(c *conn) {
 	c.healthProbe = hello.HealthProbe
 	c.holderLiveness = hello.HolderLiveness
 	c.handshaked = true
-	// Activity is recorded here rather than at accept, because only the
-	// hello says whether the peer is a health probe -- and a probe must
-	// not advance the idle clock, or probing keeps the daemon alive
-	// forever and its supervisor can never reap it.
+
 	if !c.healthProbe {
 		d.touchLocked()
 	}
@@ -549,12 +478,7 @@ func (d *Daemon) serveConn(c *conn) {
 	}
 }
 
-// dispatch handles one post-handshake message and reports whether the
-// connection loop should stop.
 func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
-	// A health probe observes; it may not do work. Its idle-accounting
-	// exemption would otherwise be claimable by any client wanting
-	// admission without holding the daemon open.
 	if c.healthProbe {
 		if _, ok := msg.(*wingwire.QueueState); !ok {
 			return true
@@ -605,15 +529,6 @@ func chargedResources(r wingwire.HostResources) wingwire.HostResources {
 	return r
 }
 
-// clampHostChargeLocked caps a measured/default charge at the box's idle
-// grantable ceiling, on cores and on memory. Explicit pins are not clamped
-// here; the ledger enforces those as hard budgets.
-//
-// Memory is clamped for the same reason cores are: a charge above what the
-// box grants a single run can never be admitted, and a still-measuring
-// pipeline derives its next charge from the last one, so an uncapped memory
-// charge ratchets away from the machine every contended run. Clamping here
-// covers a client that resolved its charge with no daemon answering.
 func (d *Daemon) clampHostChargeLocked(r wingwire.HostResources, costSource wingwire.CostSource) (wingwire.HostResources, bool) {
 	if costSource != wingwire.CostSourcePin {
 		if maxCores := d.idleGrantableCoresLocked(); maxCores > 0 && r.Cores > maxCores {
@@ -707,19 +622,10 @@ func (d *Daemon) idleGrantableMemoryLocked() uint64 {
 	return grantable
 }
 
-// subLeaseMajor is the first protocol major whose clients mark an
-// internal, non-finalizing lease with SubLease. Before it the daemon read
-// that from SemaphoresOnly, which this major freed up for run-level claims
-// that do finalize; reading an older client's request by the newer rule
-// would finalize a run row for every node-level semaphore acquisition it
-// makes, duplicating the row the run writes for itself.
 const subLeaseMajor = 2
 
 const guardedSessionMajor = 3
 
-// finalizesRun reports whether a lease admitted for req owns the terminal
-// row of its run, reading the request in the terms of the protocol major
-// the connection speaks.
 func finalizesRun(protocolMajor int, req *wingwire.AdmissionRequest) bool {
 	if protocolMajor < subLeaseMajor {
 		return !req.SemaphoresOnly
@@ -727,9 +633,6 @@ func finalizesRun(protocolMajor int, req *wingwire.AdmissionRequest) bool {
 	return !req.SubLease
 }
 
-// handleAdmission submits a run's all-or-nothing request. A granted or
-// queued outcome is delivered through the event stream; fail and skip
-// terminate the request with an [wingwire.Evicted] carrying the policy.
 func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if !validCostSource(req.CostSource) {
 		d.rejectInvalid(c, req, rejectCauseCostSource, fmt.Sprintf(
@@ -998,9 +901,6 @@ func validCostSource(source wingwire.CostSource) bool {
 	}
 }
 
-// tightestQueueTimeoutMS returns the smallest positive queue timeout
-// declared by an OnLimit:Queue claim in the request, or zero when every
-// wait is unbounded.
 func tightestQueueTimeoutMS(sems []wingwire.SemaphoreClaim) int64 {
 	var t int64
 	for _, s := range sems {
@@ -1093,9 +993,6 @@ func claimRequestsMatch(got, want []wingwire.SemaphoreClaim) bool {
 	return true
 }
 
-// cancelTimeoutFor returns the smallest positive CancelTimeout declared
-// by a cancel_others claim in the request, or zero when none bound the
-// wind-down.
 func cancelTimeoutFor(sems []wingwire.SemaphoreClaim) time.Duration {
 	var t time.Duration
 	for _, s := range sems {
@@ -1110,11 +1007,6 @@ func cancelTimeoutFor(sems []wingwire.SemaphoreClaim) time.Duration {
 	return t
 }
 
-// armCancelTimeout schedules a force-release of the leases a
-// cancel_others grant superseded: a holder that has not wound down
-// within the timeout has its connection dropped, which releases its
-// lease and promotes any waiter. A holder that released cooperatively
-// before the timeout is already gone and is skipped.
 func (d *Daemon) armCancelTimeout(evicted []admission.LeaseID, timeout time.Duration) {
 	if timeout <= 0 || len(evicted) == 0 {
 		return
@@ -1123,10 +1015,6 @@ func (d *Daemon) armCancelTimeout(evicted []admission.LeaseID, timeout time.Dura
 	time.AfterFunc(timeout, func() { d.forceReleaseSuperseded(leases) })
 }
 
-// forceReleaseSuperseded drops the connection of any still-holding
-// superseded lease so a non-cooperating holder cannot pin the daemon
-// open indefinitely. The reused disconnect path releases the lease,
-// promotes waiters, and finalizes an orphaned run row.
 func (d *Daemon) forceReleaseSuperseded(leases []admission.LeaseID) {
 	d.mu.Lock()
 	if d.shuttingDown {
@@ -1175,8 +1063,6 @@ func (d *Daemon) forceReleaseSuperseded(leases []admission.LeaseID) {
 	}
 }
 
-// handleChildAttach joins a child run to its parent's live lease so
-// nested runs are not double-charged.
 func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	d.mu.Lock()
 	if _, pending := d.cancelPending[req.RunID]; pending {
@@ -1256,8 +1142,6 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	})
 }
 
-// leaseSemaphores names every semaphore a lease holds, read from a
-// ledger snapshot.
 func leaseSemaphores(snap admission.Snapshot, id admission.LeaseID) []string {
 	for _, ls := range snap.Leases {
 		if ls.ID != id {
@@ -1268,8 +1152,6 @@ func leaseSemaphores(snap admission.Snapshot, id admission.LeaseID) []string {
 	return nil
 }
 
-// handleReattach reclaims a lease that survived a restart or takeover by
-// re-binding this connection to it inside the grace window.
 func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	d.mu.Lock()
 	leaseID, err := d.ledger.Reattach(req.LeaseToken)
@@ -1360,8 +1242,6 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	_ = c.send(&wingwire.Grant{RunID: requestID, LeaseToken: lease.Token, Resources: c.resources})
 }
 
-// handleRelease frees the lease this connection holds without waiting for
-// the socket to close.
 func (d *Daemon) handleRelease(c *conn, _ *wingwire.Release) {
 	d.mu.Lock()
 	if c.role != roleHolder {
@@ -1381,8 +1261,6 @@ func (d *Daemon) handleRelease(c *conn, _ *wingwire.Release) {
 	d.flush(deliveries, snap)
 }
 
-// handleDrain stops admission, acknowledges, and begins shutting the
-// daemon down so a newer successor can take over its socket and state.
 func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 	d.mu.Lock()
 	d.draining = true
@@ -1397,19 +1275,6 @@ func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 	d.shutdown()
 }
 
-// handleCancelLease answers a control client's cancel-by-run-id request:
-// it signals the run's connection to wind down cleanly (the same terminal
-// path as an operator interrupt) and reports whether the run was found. It
-// covers both a holder and a still-queued waiter -- cancelling a waiter is
-// the most common cancel there is -- so the dashboard-free recovery path
-// reaches a run in either admission state. A waiter is removed from the
-// queue at once (re-stating positions and promoting any run it blocked)
-// and its connection neutralized, so the imminent close is a clean no-op
-// rather than a second removal or a redundant orphan finalize; the
-// signalled process finalizes its own row as cancelled. A holder keeps its
-// lease until its process winds down and the disconnect handler releases
-// it. A run the daemon does not hold or queue returns not-found so the
-// caller falls back to the controller.
 func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	d.mu.Lock()
 	target := d.byRun[req.RunID]
@@ -1533,8 +1398,6 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	_ = c.send(&wingwire.CancelLeaseAck{Found: true})
 }
 
-// handleQueueState answers a read-only state query. It creates no lease
-// and leaves the connection open for the client to close.
 func (d *Daemon) handleQueueState(c *conn) {
 	d.mu.Lock()
 	qs := d.buildQueueStateLocked()
@@ -1542,8 +1405,6 @@ func (d *Daemon) handleQueueState(c *conn) {
 	_ = c.send(&qs)
 }
 
-// handleStatsReset clears the daemon's rolling admission-outcome window and
-// persists the empty window so the reset survives a restart, then acks.
 func (d *Daemon) handleStatsReset(c *conn) {
 	d.events.reset()
 	d.mu.Lock()
@@ -1556,17 +1417,11 @@ func (d *Daemon) handleStatsReset(c *conn) {
 	_ = c.send(&wingwire.StatsResetAck{})
 }
 
-// handleDisconnect reacts to a connection ending. On a healthy daemon a
-// holder's death releases its members and promotes waiters; a waiter's
-// death removes it from the queue. During shutdown, leases are left
-// intact for the successor.
 func (d *Daemon) handleDisconnect(c *conn) {
 	c.disconnectOnce.Do(func() {
 		c.close()
 		d.mu.Lock()
-		// Snapshot what this connection was carrying so the log line can
-		// be written after the lock is released; every field below is
-		// guarded by d.mu and the teardown clears some of them.
+
 		role, runID := c.role, c.runID
 		if runID == "" && len(c.members) > 0 {
 			runID = c.members[0]
@@ -1638,14 +1493,6 @@ func (d *Daemon) handleDisconnect(c *conn) {
 	})
 }
 
-// logDisconnect records which connection went away and what it was
-// carrying at the time. Only role-bearing connections are logged: a
-// client that connected, read the queue state, and left is not
-// something an operator ever needs to correlate, while a holder or a
-// waiter vanishing is the first half of every "why did my run get
-// released" question. The conn id is what makes the answer possible --
-// an unbound unix-socket peer's RemoteAddr is "@" for every client
-// alike, so the address identifies nothing.
 func (d *Daemon) logDisconnect(c *conn, role connRole, runID string) {
 	if role == roleNone {
 		return
@@ -1656,10 +1503,6 @@ func (d *Daemon) logDisconnect(c *conn, role connRole, runID string) {
 	d.cfg.logf("conn %d disconnected while %s (run %s)", c.id, role, runID)
 }
 
-// waiterDepartureKindLocked classifies why a queued run left without a
-// grant: a waiter whose declared bounded queue wait had elapsed timed
-// out; every other departure (operator cancel, interrupt, process death)
-// is a cancellation. The caller holds d.mu.
 func waiterDepartureKindLocked(c *conn, now time.Time) string {
 	if c.queueTimeoutMS > 0 && !c.startAt.IsZero() &&
 		now.Sub(c.startAt).Milliseconds() >= c.queueTimeoutMS {
@@ -1668,8 +1511,6 @@ func waiterDepartureKindLocked(c *conn, now time.Time) string {
 	return eventCancellation
 }
 
-// releaseConnLocked releases every member the connection owns and clears
-// its holder state. The caller holds d.mu.
 func (d *Daemon) releaseConnLocked(c *conn) []admission.Event {
 	var events []admission.Event
 	for _, m := range c.members {
@@ -1683,9 +1524,6 @@ func (d *Daemon) releaseConnLocked(c *conn) []admission.Event {
 	return events
 }
 
-// flush persists the post-mutation snapshot, then delivers queued frames.
-// State is written before grants are announced so a re-attach token is
-// durable before any client can act on it.
 func (d *Daemon) flush(deliveries []delivery, snap admission.Snapshot) {
 	persistErr := d.persistState(snap)
 	if persistErr != nil {
@@ -1740,17 +1578,11 @@ func (d *Daemon) persistState(snap admission.Snapshot) error {
 	return nil
 }
 
-// Stable cause labels for malformed-request rejections, aggregated in the
-// admission-outcome window so doctor can flag a repeat pattern.
 const (
 	rejectCauseCostSource = "cost_source"
 	rejectCauseRequest    = "request"
 )
 
-// rejectInvalid answers a malformed request with a descriptive terminal
-// error, logs the offending request's contents, and tallies the rejection
-// in the outcome window. It touches neither the ledger nor d.mu, so callers
-// may invoke it either before taking the daemon lock or after releasing it.
 func (d *Daemon) rejectInvalid(c *conn, req *wingwire.AdmissionRequest, cause, reason string) {
 	_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "invalid", Policy: wingwire.PolicyFail, Reason: reason})
 	d.cfg.logf("conn %d rejected run %s: %s [cost_source=%q cores=%.2f memory_bytes=%d semaphores=%d]",
@@ -1758,10 +1590,6 @@ func (d *Daemon) rejectInvalid(c *conn, req *wingwire.AdmissionRequest, cause, r
 	d.events.record(d.now(), admissionEvent{Kind: eventRejection, Key: cause})
 }
 
-// refusalReason is the operator-facing half of a terminal submit error: the
-// arithmetic the ledger settled it on, without the sentinel prefix. The
-// client puts its own context in front of this, and "admission: request can
-// never be admitted" twice in one line tells nobody anything.
 func refusalReason(err error) string {
 	msg := err.Error()
 	for _, sentinel := range []error{admission.ErrNeverAdmissible, admission.ErrDuplicateID} {

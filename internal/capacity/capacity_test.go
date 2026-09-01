@@ -310,10 +310,6 @@ func TestCheckDrift_Gating(t *testing.T) {
 	}
 }
 
-// TestResolve_MeasuredChargesSustainedCores is the charge site of the whole
-// sustained-pricing change: a profile whose runs burst to six cores but hold
-// one and a half admits at one and a half. Memory is untouched by the split
-// and still charges the peak.
 func TestResolve_MeasuredChargesSustainedCores(t *testing.T) {
 	profile := &store.PipelineProfile{
 		PeakCores:       6,
@@ -334,10 +330,6 @@ func TestResolve_MeasuredChargesSustainedCores(t *testing.T) {
 	}
 }
 
-// TestResolve_ProfileWithoutSustainedFallsBackToPeak covers a profile
-// measured before sustained figures were recorded: it carries none, and must
-// keep pricing at exactly what it priced at rather than dropping to the core
-// floor and over-admitting until its window refills.
 func TestResolve_ProfileWithoutSustainedFallsBackToPeak(t *testing.T) {
 	profile := &store.PipelineProfile{
 		PeakCores:       6,
@@ -350,9 +342,6 @@ func TestResolve_ProfileWithoutSustainedFallsBackToPeak(t *testing.T) {
 	}
 }
 
-// TestResolve_SustainedBelowFloorLiftsToFloor keeps a near-idle pipeline
-// accounted for rather than free once cores are priced from the quieter of
-// the two figures.
 func TestResolve_SustainedBelowFloorLiftsToFloor(t *testing.T) {
 	tiny := &store.PipelineProfile{
 		PeakCores:      6,
@@ -365,11 +354,6 @@ func TestResolve_SustainedBelowFloorLiftsToFloor(t *testing.T) {
 	}
 }
 
-// TestCheckDrift_JudgesCorePinsAgainstTheChargedFigure covers a spiky
-// pipeline whose pin already matches its price. Judged against the 8.0 peak,
-// a pin of 3 looks under-pinned and the warning tells the author to raise it
-// -- quadrupling what the pipeline reserves to silence advice that was
-// measured against a number nothing charges.
 func TestCheckDrift_JudgesCorePinsAgainstTheChargedFigure(t *testing.T) {
 	spiky := &store.PipelineProfile{
 		PeakCores:      8,
@@ -388,8 +372,6 @@ func TestCheckDrift_JudgesCorePinsAgainstTheChargedFigure(t *testing.T) {
 	}
 }
 
-// TestCheckDrift_FallsBackToPeakBeforeSustainedExists keeps a pre-v14
-// profile's drift advice identical to what it was.
 func TestCheckDrift_FallsBackToPeakBeforeSustainedExists(t *testing.T) {
 	d := CheckDrift(&Pin{Cores: 2}, &store.PipelineProfile{PeakCores: 8, SampleCount: 12})
 	if d == nil || d.MeasuredCores != 8 {
@@ -397,11 +379,6 @@ func TestCheckDrift_FallsBackToPeakBeforeSustainedExists(t *testing.T) {
 	}
 }
 
-// TestResolve_WarmStartAfterPlanHashChangePricesAtParity guards
-// WarmStartMultiple's promise. A structural edit to a spiky pipeline must
-// re-measure at what its predecessor was charged; pricing the carried peak
-// instead would spike the charge fourfold for the three runs it takes to
-// graduate, on a change that may not have altered cost at all.
 func TestResolve_WarmStartAfterPlanHashChangePricesAtParity(t *testing.T) {
 	changed := &store.PipelineProfile{
 		PlanHash:           "old",
@@ -418,8 +395,6 @@ func TestResolve_WarmStartAfterPlanHashChangePricesAtParity(t *testing.T) {
 	}
 }
 
-// TestResolve_WarmStartFallsBackToPrevPeak covers a predecessor measured
-// before sustained figures existed: its carried peak is all there is.
 func TestResolve_WarmStartFallsBackToPrevPeak(t *testing.T) {
 	changed := &store.PipelineProfile{PlanHash: "old", PrevPeakCores: 8, SampleCount: 1}
 	if got := Resolve(nil, changed, 8, "new"); got.Cores != 8 {

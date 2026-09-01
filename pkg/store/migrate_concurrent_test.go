@@ -8,11 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Several processes can cold-start the same fresh state.db at once --
-// Box-scoped budgeting actively encourages concurrent `sparkwing run`
-// on one host. The first writer's WAL switch + table creation must not
-// fail a concurrent opener with SQLITE_BUSY; every opener should
-// converge on the migrated schema.
 func TestMigrate_ConcurrentColdStartConverges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 

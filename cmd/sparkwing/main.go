@@ -1,6 +1,3 @@
-// The sparkwing binary. Exposes pipeline dispatch (`sparkwing run`),
-// infrastructure verbs (cluster, secrets, configure), and observation
-// verbs (runs, dashboard).
 package main
 
 import (
@@ -37,8 +34,6 @@ func main() {
 	}
 }
 
-// cliError carries an explicit exit code so verbs can distinguish
-// "outcome = failed" from "timed out" from "infrastructure error".
 type cliError struct {
 	code int
 	err  error
@@ -64,11 +59,6 @@ func exitError(code int, err error) error {
 	return &cliError{code: code, err: err}
 }
 
-// setEnv returns env with key set to value, removing any prior
-// occurrence of the same key. Use instead of append when the flag
-// value must override a preexisting shell-environment value; bare
-// append leaves duplicates and POSIX getenv returns the first
-// match, so the shell var would silently shadow the flag.
 func setEnv(env []string, key, value string) []string {
 	prefix := key + "="
 	out := make([]string, 0, len(env)+1)
@@ -94,12 +84,6 @@ func exitCodeFor(err error) int {
 	return 1
 }
 
-// dispatchRun implements `sparkwing run <pipeline> [flags...]`.
-// Locates the enclosing .sparkwing/, strips sparkwing-owned flags,
-// optionally re-roots on a git ref (--sw-ref), then compiles + execs
-// the user's pipeline binary. `sparkwing run <pipeline> --help`
-// cannot short-circuit here because pipeline flags are parsed by the
-// user's compiled binary.
 func dispatchRun(args []string) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		if len(args) == 0 {
@@ -166,6 +150,7 @@ func dispatchRun(args []string) error {
 	}
 
 	env := os.Environ()
+	env = removeEnv(env, "SPARKWING_RUN_HANDLE_FILE")
 	logFormat := os.Getenv("SPARKWING_LOG_FORMAT")
 	if logFormat == "" {
 		logFormat = logFormatJSON
@@ -174,14 +159,20 @@ func dispatchRun(args []string) error {
 		}
 		env = append(env, "SPARKWING_LOG_FORMAT="+logFormat)
 	}
-	// Bound after the format is settled: the receipt is part of this run's
-	// output, so it is rendered the way the rest of the run will be.
+
 	if wf.index != "" {
 		bound, bindErr := bindRunIndex(env, wf.index, os.Stdout, logFormat)
 		if bindErr != nil {
 			return bindErr
 		}
 		env = bound
+	}
+	if wf.runHandleFile != "" {
+		path, pathErr := filepath.Abs(wf.runHandleFile)
+		if pathErr != nil {
+			return fmt.Errorf("--sw-run-handle-file %s: %w", wf.runHandleFile, pathErr)
+		}
+		env = setEnv(env, "SPARKWING_RUN_HANDLE_FILE", path)
 	}
 	if wf.verbose {
 		env = append(env, "SPARKWING_LOG_LEVEL=debug")
@@ -227,8 +218,6 @@ func dispatchRun(args []string) error {
 		}
 	}
 
-	// Bring the daemon to this CLI's version only when this invocation
-	// will actually admit work.
 	if runNeedsDaemon(wf, passthrough) {
 		ensureRunDaemon()
 	}
@@ -236,11 +225,17 @@ func dispatchRun(args []string) error {
 		compileOptions{NoUpdate: wf.noUpdate})
 }
 
-// runSparkwing dispatches a command line. It unbinds the process from any
-// repository first: a hook-launched run arrives with git's GIT_DIR and
-// GIT_INDEX_FILE pointing at the repository being gated, and everything a
-// pipeline goes on to run would inherit them and operate there instead of
-// where it was pointed.
+func removeEnv(env []string, key string) []string {
+	prefix := key + "="
+	out := env[:0]
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
 func runSparkwing(args []string) error {
 	gitenv.Unbind()
 	if len(args) == 0 {
@@ -528,10 +523,7 @@ func runJobs(args []string) error {
 				Style:        sparkStyle,
 			},
 		}
-		// Resolved unconditionally: with no flag this is the project's
-		// defaults.profile, which is where `sparkwing run` put the runs
-		// being listed. Reading the local store instead is how a machine
-		// that shares a bucket reports an empty list.
+
 		p, perr := resolveProfileFlag(*profileName)
 		if perr != nil {
 			return perr
@@ -574,9 +566,7 @@ func runJobs(args []string) error {
 		if *exitZero {
 			return nil
 		}
-		// The exit code comes from the store the status was just read
-		// from, not from local SQLite: they are the same store only on
-		// the machine that ran the pipeline.
+
 		status, serr := orchestrator.RunStatus(ctx, paths, p, *runID)
 		if serr != nil {
 			return serr
@@ -698,9 +688,6 @@ func runJobs(args []string) error {
 	}
 }
 
-// resolveOutputFormat canonicalizes -o/--output into one of
-// {"pretty","json","plain"}. Empty string means "no value set" and
-// resolves to the default "pretty".
 func resolveOutputFormat(outFmt, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "pretty", "json", "plain":
@@ -713,15 +700,6 @@ func resolveOutputFormat(outFmt, cmdPath string) (string, error) {
 	return outFmt, nil
 }
 
-// resolveTTYAwareOutput canonicalizes -o/--output for verbs that
-// want runs-logs-style behavior: TTY-derived default fallback when
-// no -o value is provided.
-//
-// Rules:
-//   - With an explicit -o value, that value passes through.
-//   - With nothing set: "pretty" when stdout is a TTY, "json" otherwise.
-//     The auto-default lets agents pipe `... | jq` without typing
-//     -o json, while humans get the readable form by default.
 func resolveTTYAwareOutput(outFmt, cmdPath string) (string, error) {
 	switch outFmt {
 	case "", "pretty", "json", "plain":
@@ -741,11 +719,6 @@ func isTerminalRunStatus(s string) bool {
 	return s == "success" || s == "failed" || s == "cancelled"
 }
 
-// normalizeRunID auto-prefixes "run-" when the operator dropped it
-// from the `--run` value (a frequent friction point: `runs list`
-// shows the full id, but copy-paste of just the timestamp+suffix
-// portion still resolves to the same row). Bare "run-" is left alone
-// so an explicit prefix never gets doubled up.
 func normalizeRunID(id string) string {
 	if id == "" || strings.HasPrefix(id, "run-") {
 		return id
@@ -753,8 +726,6 @@ func normalizeRunID(id string) string {
 	return "run-" + id
 }
 
-// statusExitCode maps run status to the scripted exit contract:
-// success -> nil, anything else -> exit 1.
 func statusExitCode(status string) error {
 	if status == "success" {
 		return nil
@@ -768,7 +739,6 @@ func multiFlagVar(fs *flag.FlagSet, name, usage string) *[]string {
 	return &dest
 }
 
-// findSparkwingDir walks up from cwd looking for a .sparkwing/main.go.
 func findSparkwingDir() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {

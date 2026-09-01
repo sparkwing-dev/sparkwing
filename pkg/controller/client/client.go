@@ -71,8 +71,6 @@ func (c *Client) BaseURL() string { return c.baseURL }
 // the same auth to sibling HTTP backends.
 func (c *Client) Token() string { return c.token }
 
-// bearerTransport decorates outgoing requests with a fixed bearer
-// token.
 type bearerTransport struct {
 	base  http.RoundTripper
 	token string
@@ -103,6 +101,21 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	if len(f.Statuses) > 0 {
 		q.Set("status", strings.Join(f.Statuses, ","))
 	}
+	if len(f.GitSHAPrefixes) > 0 {
+		q.Set("git_sha", strings.Join(f.GitSHAPrefixes, ","))
+	}
+	if len(f.GitBranches) > 0 {
+		q.Set("git_branch", strings.Join(f.GitBranches, ","))
+	}
+	if len(f.Repos) > 0 {
+		q.Set("repo", strings.Join(f.Repos, ","))
+	}
+	if len(f.RepoURLs) > 0 {
+		q.Set("repo_url", strings.Join(f.RepoURLs, ","))
+	}
+	if f.RootOnly {
+		q.Set("root_only", "true")
+	}
 	if !f.Since.IsZero() {
 		q.Set("since", time.Since(f.Since).String())
 	}
@@ -124,6 +137,10 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return nil, readHTTPError(resp)
+	}
+	advancedFilter := len(f.GitSHAPrefixes) > 0 || len(f.GitBranches) > 0 || len(f.Repos) > 0 || len(f.RepoURLs) > 0 || f.RootOnly
+	if advancedFilter && resp.Header.Get("X-Sparkwing-Run-Filter-Version") != "1" {
+		return nil, errors.New("controller does not support native run identity filters")
 	}
 	var body struct {
 		Runs []*store.Run `json:"runs"`
@@ -868,7 +885,8 @@ func (c *Client) EnqueueTriggerWithEnv(
 			Env:    triggerEnv,
 		},
 	}
-	// hack: without explicit repo, the controller inherits the parent's repo+SHA and builds the wrong code for cross-repo awaits.
+	// hack: pass the repo explicitly so a cross-repo await cannot inherit the
+	// parent's repository and SHA.
 	if repo != "" {
 		req.Git.Repo = repo
 		req.Git.Branch = branch
@@ -1344,9 +1362,6 @@ func (c *Client) ListPendingApprovals(ctx context.Context) ([]*store.Approval, e
 	return body.Approvals, nil
 }
 
-// post marshals body as JSON, POSTs to path, and checks the status.
-// If out is non-nil, the response is JSON-decoded into it. body may
-// be nil.
 func (c *Client) post(ctx context.Context, path string, body any, wantStatus int, out any) error {
 	var reader io.Reader
 	if body != nil {
@@ -1378,7 +1393,6 @@ func (c *Client) post(ctx context.Context, path string, body any, wantStatus int
 	return nil
 }
 
-// postRaw sends an octet-stream POST.
 func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStatus int) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+path, bytes.NewReader(body))
@@ -1397,9 +1411,6 @@ func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStat
 	return nil
 }
 
-// readHTTPError unpacks a non-2xx response into a typed error.
-// Controller returns `{"error": "msg"}` on failures; extract that
-// so callers see the server's reason.
 func readHTTPError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
 	var payload struct {

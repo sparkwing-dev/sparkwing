@@ -1,7 +1,3 @@
-// `sparkwing runs summary` -- run-level aggregated work view across
-// every node. Mirrors the dashboard's Summary tab so an agent
-// auditing a run sees groups, work items, modifiers, annotations,
-// and approvals in one render instead of paging through nodes.
 package orchestrator
 
 import (
@@ -20,25 +16,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// SummaryOpts configures `runs summary`.
 type SummaryOpts struct {
 	JSON bool
 }
 
-// SummaryAnnotation is one annotation in the run-wide list.
 type SummaryAnnotation struct {
 	NodeID  string `json:"node_id"`
 	StepID  string `json:"step_id,omitempty"`
 	Message string `json:"message"`
 }
 
-// SummaryGroup is one node group (members are node ids).
 type SummaryGroup struct {
 	Name    string   `json:"name"`
 	Members []string `json:"members"`
 }
 
-// SummaryWorkItem aggregates the same step id across nodes.
 type SummaryWorkItem struct {
 	NodeID   string   `json:"node_id"`
 	StepID   string   `json:"step_id,omitempty"`
@@ -48,15 +40,11 @@ type SummaryWorkItem struct {
 	Needs    []string `json:"needs,omitempty"`
 }
 
-// SummaryModifier is one node-level modifier in effect. Aggregated
-// across the run so the rollup answers "what modifiers did this run
-// actually exercise".
 type SummaryModifier struct {
 	Modifier string   `json:"modifier"`
 	Nodes    []string `json:"nodes"`
 }
 
-// RunSummary is the wire shape of `runs summary -o json`.
 type RunSummary struct {
 	RunID       string              `json:"run_id"`
 	Pipeline    string              `json:"pipeline"`
@@ -73,7 +61,6 @@ type RunSummary struct {
 	Approvals   []*store.Approval   `json:"approvals,omitempty"`
 }
 
-// RunSummaryLocal opens the local store and renders the summary.
 func RunSummaryLocal(ctx context.Context, paths Paths, runID string, opts SummaryOpts, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -96,7 +83,6 @@ func RunSummaryLocal(ctx context.Context, paths Paths, runID string, opts Summar
 	return renderSummary(buildSummary(run, nodes, steps, approvals), opts, out)
 }
 
-// RunSummaryRemote is the cluster-mode counterpart.
 func RunSummaryRemote(ctx context.Context, controllerURL, token, runID string, opts SummaryOpts, out io.Writer) error {
 	if controllerURL == "" {
 		return errors.New("RunSummaryRemote: controller URL required")
@@ -115,8 +101,6 @@ func RunSummaryRemote(ctx context.Context, controllerURL, token, runID string, o
 	return renderSummary(buildSummary(run, nodes, steps, approvals), opts, out)
 }
 
-// buildSummary assembles the RunSummary from store rows + the
-// plan snapshot's decorations. Pure: no I/O, safe to unit-test.
 func buildSummary(run *store.Run, nodes []*store.Node, steps []*store.NodeStep, approvals []*store.Approval) RunSummary {
 	s := RunSummary{
 		RunID:     run.ID,
@@ -260,7 +244,6 @@ func aggregateWorkItems(nodes []*store.Node, steps []*store.NodeStep) []SummaryW
 	return out
 }
 
-// renderSummary emits the text or JSON form of s.
 func renderSummary(s RunSummary, opts SummaryOpts, out io.Writer) error {
 	if opts.JSON {
 		enc := json.NewEncoder(out)

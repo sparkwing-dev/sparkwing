@@ -6,33 +6,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// annotatingNodeLog observes LogRecords for the node_annotation event
-// emitted by sparkwing.Annotate and forwards each one to the State
-// backend. Annotations fired inside a step body (rec.Step set) land
-// on the per-step row; everything else lands on the node row. The
-// two are disjoint so consumers can render them side-by-side without
-// deduplication. A consumer that wants every annotation on a node
-// should sum node.annotations + each step.annotations.
-//
-// The wrapper holds its own background context for the persist call
-// so an annotation that fires late in a canceled step still lands.
-// Persist errors are intentionally swallowed: annotations are
-// advisory metadata, never load-bearing for run correctness.
 type annotatingNodeLog struct {
 	inner       NodeLog
 	persistNode func(msg string)
 	persistStep func(stepID, msg string)
 }
 
-// wrapNodeLogWithAnnotations returns inner unchanged when state is
-// nil. The returned wrapper writes annotation messages to state and
-// then delegates the original record to inner so the JSONL log file,
-// pretty renderer, and dashboard tail all still see the event.
-//
-// Annotation routing: when the LogRecord carries a Step (set by
-// recordEnvelope while inside a step body), the message lands on the
-// node_steps row instead of the node row. Annotations fired between
-// steps (node setup, after-hooks, etc.) still land on the node row.
 func wrapNodeLogWithAnnotations(inner NodeLog, state StateBackend, runID, nodeID string) NodeLog {
 	if inner == nil || state == nil {
 		return inner

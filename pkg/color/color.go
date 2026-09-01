@@ -9,9 +9,6 @@ import (
 	"golang.org/x/term"
 )
 
-// enabled is computed once at process start. Pure functions of env +
-// the original stdout fd, so the result is stable for the lifetime of
-// the process.
 var enabled = detectEnabled()
 
 func detectEnabled() bool {

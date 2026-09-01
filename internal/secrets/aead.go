@@ -11,29 +11,14 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
-// envelopePrefix marks a Sealed value on disk so the reader can tell
-// encrypted rows from rows that predate this ticket. Bumping the
-// version (v2, v3, ...) lets us evolve the format without forcing a
-// bulk re-encrypt: each row carries enough self-description to be
-// decoded by whichever code path matches its prefix.
 const envelopePrefix = "enc:v1:"
 
-// KeySize is the master-key length expected by NewCipher (XChaCha20-
-// Poly1305 = 32 bytes). Operators generate one with
-// `head -c 32 /dev/urandom | base64`.
 const KeySize = chacha20poly1305.KeySize
 
-// Cipher seals and opens secret values with XChaCha20-Poly1305 AEAD.
-// One Cipher per controller process; cheap to create, immutable.
 type Cipher struct {
 	aead cipher.AEAD
 }
 
-// NewCipher constructs a Cipher from a 32-byte master key. The key
-// stays in memory for the lifetime of the controller; we don't make
-// any effort to scrub it (Go's GC + the memory guarantees of
-// SQLite's value-copy model already make sweeper-leak risk low for
-// this threat model).
 func NewCipher(key []byte) (*Cipher, error) {
 	if len(key) != KeySize {
 		return nil, fmt.Errorf("secrets cipher: key must be %d bytes, got %d", KeySize, len(key))
@@ -45,9 +30,6 @@ func NewCipher(key []byte) (*Cipher, error) {
 	return &Cipher{aead: aead}, nil
 }
 
-// Seal encrypts plain and returns the storage-ready envelope. Empty
-// plain is allowed (rare but valid: a secret deliberately set to "").
-// Returns the envelope; never the raw ciphertext on its own.
 func (c *Cipher) Seal(plain string) (string, error) {
 	if c == nil {
 		return "", errors.New("secrets cipher: nil receiver")
@@ -61,9 +43,6 @@ func (c *Cipher) Seal(plain string) (string, error) {
 	return envelopePrefix + base64.StdEncoding.EncodeToString(envelope), nil
 }
 
-// Open decrypts a sealed envelope. Returns an error for values that
-// don't carry the envelope prefix or when the AEAD authentication
-// fails (tampered ciphertext, wrong key).
 func (c *Cipher) Open(envelope string) (string, error) {
 	if c == nil {
 		return "", errors.New("secrets cipher: no key configured")
@@ -88,16 +67,10 @@ func (c *Cipher) Open(envelope string) (string, error) {
 	return string(plain), nil
 }
 
-// IsEncrypted reports whether v is in the sealed envelope shape.
-// Cheap prefix check; safe to call without a Cipher.
 func IsEncrypted(v string) bool {
 	return strings.HasPrefix(v, envelopePrefix)
 }
 
-// DecodeKey parses a base64-encoded 32-byte key (the format the
-// SPARKWING_SECRETS_KEY env var carries). Whitespace and trailing
-// newlines are tolerated so operators can pipe `... | base64`
-// without worrying about exact formatting.
 func DecodeKey(s string) ([]byte, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -117,9 +90,6 @@ func DecodeKey(s string) ([]byte, error) {
 	return raw, nil
 }
 
-// GenerateKey returns a fresh 32-byte master key suitable for use
-// with NewCipher. Convenience for tests + a future `sparkwing
-// secrets keygen` subcommand.
 func GenerateKey() ([]byte, error) {
 	key := make([]byte, KeySize)
 	if _, err := rand.Read(key); err != nil {

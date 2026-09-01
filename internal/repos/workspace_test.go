@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// writeLocalSDK lays down a checkout whose go.mod declares the SDK module
-// path, so a workspace `use` pointing at it is a real SDK substitution.
 func writeLocalSDK(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -65,8 +63,6 @@ func TestSDKWorkspaceOverride_EmptyWithoutAWorkspace(t *testing.T) {
 	}
 }
 
-// TestSDKWorkspaceOverride_IgnoresAWorkspaceThatDoesNotUseTheSDK keeps an
-// unrelated multi-module workspace from being read as a pin override.
 func TestSDKWorkspaceOverride_IgnoresAWorkspaceThatDoesNotUseTheSDK(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "app")

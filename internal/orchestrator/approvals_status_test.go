@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestRenderApprovalsSection_PendingShowsPolicy verifies a pending
-// gate row surfaces the on-timeout policy and a "running" wait age
-// so an agent reading `runs status` knows what's holding the run.
 func TestRenderApprovalsSection_PendingShowsPolicy(t *testing.T) {
 	requested := time.Now().Add(-15 * time.Second)
 	rows := []*store.Approval{{
@@ -31,8 +28,6 @@ func TestRenderApprovalsSection_PendingShowsPolicy(t *testing.T) {
 	}
 }
 
-// TestRenderApprovalsSection_ResolvedShowsApprover verifies a
-// resolved gate surfaces approver, comment, and finite wait duration.
 func TestRenderApprovalsSection_ResolvedShowsApprover(t *testing.T) {
 	requested := time.Now().Add(-30 * time.Second)
 	resolved := requested.Add(20 * time.Second)
@@ -59,9 +54,6 @@ func TestRenderApprovalsSection_ResolvedShowsApprover(t *testing.T) {
 	}
 }
 
-// TestRenderApprovalsSection_EmptyIsNoop pins the no-approvals case
-// to no output so it doesn't add a stray "approvals:" heading on
-// every run.
 func TestRenderApprovalsSection_EmptyIsNoop(t *testing.T) {
 	var buf bytes.Buffer
 	renderApprovalsSection(&buf, nil)

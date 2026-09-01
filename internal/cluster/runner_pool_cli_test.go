@@ -14,9 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// stubClaimer implements nodeClaimer for the RunPoolLoop unit tests.
-// Each call returns the next pre-programmed response so a test can
-// sequence "claim / claim / empty / claim" etc. without HTTP stubs.
 type stubClaimer struct {
 	responses []claimResp
 	calls     atomic.Int64
@@ -41,7 +38,6 @@ func fakeNode(id string) *store.Node {
 	return &store.Node{RunID: "run-" + id, NodeID: id}
 }
 
-// discardLogger silences the loop's slog output during tests.
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

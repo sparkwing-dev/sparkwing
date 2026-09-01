@@ -17,8 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// runReplayNodeCLI implements the pipeline binary's `replay-node <runID> <nodeID>` entrypoint.
-// runID must be a replay run minted by MintReplayRun.
 func runReplayNodeCLI(args []string) error {
 	fs := flag.NewFlagSet("replay-node", flag.ExitOnError)
 	if err := fs.Parse(args); err != nil {
@@ -55,9 +53,6 @@ func runReplayNodeCLI(args []string) error {
 	return nil
 }
 
-// RunReplayNode executes one node from a replay run. Reconstitutes
-// input from the original run's dispatch snapshot. Loud-fails on type
-// drift or truncated envelopes.
 func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nodeID string, delegate sparkwing.Logger) (runner.Result, error) {
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {
@@ -95,11 +90,7 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		Trigger:   sparkwing.TriggerInfo{Source: "replay"},
 		StartedAt: run.StartedAt,
 	}
-	// Same layering as the run being replayed: `replay-node` execs the
-	// pipeline binary out of the project's own .sparkwing/, so the yaml
-	// layers the original plan merged in are on disk here too. Planning
-	// from the bare run row instead would rebuild a different plan than
-	// the one whose dispatch snapshot is about to be replayed into it.
+
 	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, slog.Default())
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {
@@ -151,7 +142,6 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		return nil, false
 	})
 
-	// Seeded from the same args the reg.Invoke above planned with.
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 	src := secrets.NewDotenvSource("")
 	ctx = sparkwing.WithSecretResolver(ctx, secrets.NewCached(src, masker).AsResolver())
@@ -184,7 +174,6 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 	return res, nil
 }
 
-// envelopeTruncated reports whether b is the "truncated":true stub.
 func envelopeTruncated(b []byte) bool {
 	if len(b) == 0 {
 		return false
@@ -196,8 +185,6 @@ func envelopeTruncated(b []byte) bool {
 	return probe.Truncated
 }
 
-// MintReplayRun creates the run + node rows for a replay. New run
-// inherits pipeline/args/git from the original and stamps replay_of_*.
 func MintReplayRun(ctx context.Context, st *store.Store, originalRunID, nodeID string) (newRunID string, err error) {
 	orig, err := st.GetRun(ctx, originalRunID)
 	if err != nil {
@@ -226,11 +213,7 @@ func MintReplayRun(ctx context.Context, st *store.Store, originalRunID, nodeID s
 		StartedAt:      time.Now(),
 		ReplayOfRunID:  originalRunID,
 		ReplayOfNodeID: nodeID,
-		// A replay row is minted here, not through the orchestrator's
-		// invocation snapshot, so it inherits the source run's
-		// secret-arg classification or it would render orig.Args in
-		// the clear on every read surface -- permanently, since no
-		// later write fills it in.
+
 		Invocation: store.InheritSecretArgs(nil, orig),
 	}); err != nil {
 		return "", fmt.Errorf("create replay run: %w", err)

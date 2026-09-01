@@ -7,10 +7,6 @@ metadata:
     {{- include "sparkwing-full.componentLabels" (dict "root" . "component" "controller") | nindent 4 }}
 spec:
   replicas: {{ .Values.controller.replicas }}
-  # Recreate, not RollingUpdate: the controller's state DB is local
-  # SQLite on an RWO PVC. A second pod can't multi-attach; rolling
-  # would deadlock. Single-instance posture per decision 0001 --
-  # multi-replica HA lives in the paid feature pack.
   strategy:
     type: Recreate
   selector:
@@ -40,6 +36,28 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.volumePermissions.enabled }}
+      initContainers:
+        - name: volume-permissions
+          image: {{ include "sparkwing-full.image" (dict "img" .Values.controller.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN"]
+          command: ["/bin/chown"]
+          args:
+            - {{ printf "%d:%d" (int .Values.podSecurityContext.runAsUser) (int .Values.podSecurityContext.fsGroup) | quote }}
+            - "/data"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      {{- end }}
       containers:
         - name: controller
           image: {{ include "sparkwing-full.image" (dict "img" .Values.controller.image "root" .) | quote }}
@@ -68,9 +86,6 @@ spec:
             - {{ printf "--logs-url=%s" $logsURL | quote }}
             {{- end }}
           env:
-            # SPARKWING_HOME on a writable mount: the orchestrator's
-            # DefaultPaths() mkdir's this at startup, and runAsUser
-            # 65534 can't write to "/".
             - name: SPARKWING_HOME
               value: /data
             - name: POD_NAMESPACE
@@ -78,17 +93,24 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             {{- if .Values.controller.githubWebhookSecret.name }}
-            # Verifies HMAC signatures on POST /webhooks/github/{pipeline}.
             - name: GITHUB_WEBHOOK_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.controller.githubWebhookSecret.name | quote }}
                   key: {{ .Values.controller.githubWebhookSecret.key | quote }}
             {{- end }}
+            {{- if .Values.controller.githubStatusToken.name }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.githubStatusToken.name | quote }}
+                  key: {{ .Values.controller.githubStatusToken.key | quote }}
+            {{- end }}
+            {{- if .Values.controller.dashboardURL }}
+            - name: SPARKWING_DASHBOARD_URL
+              value: {{ .Values.controller.dashboardURL | quote }}
+            {{- end }}
             {{- if .Values.controller.secretsKey.name }}
-            # AT-REST encryption key for the secrets store.
-            # Without it, the controller logs a WARNING at startup
-            # and stores secret values as plaintext in its DB.
             - name: SPARKWING_SECRETS_KEY
               valueFrom:
                 secretKeyRef:

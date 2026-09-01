@@ -4,17 +4,11 @@ package wingd
 
 import "os"
 
-// cpuTracker derives host CPU utilization from the change in /proc/stat's
-// cumulative counters between successive samples. It holds the previous
-// reading because a single reading of a cumulative counter describes the
-// machine's whole uptime, not its present state.
 type cpuTracker struct {
 	prev cpuTotals
 	seen bool
 }
 
-// busyCores reports cores busy since the previous call. The first call
-// establishes the baseline and reports nothing measured.
 func (c *cpuTracker) busyCores(totalCores float64) (float64, bool) {
 	data, err := os.ReadFile("/proc/stat")
 	if err != nil {

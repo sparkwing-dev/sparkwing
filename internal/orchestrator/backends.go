@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
@@ -18,17 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// ArtifactStoreEnvVar names the artifact-store URL a cluster runner reads
-// to locate the content-addressed store node execution publishes outputs
-// to and stages inputs from. The worker stamps it onto each runner pod
-// from its --artifact-store URL; the in-cluster run-node entrypoint reads
-// it back. Empty means no cache surface (artifacts disabled).
 const ArtifactStoreEnvVar = "SPARKWING_CACHE_URL"
 
-// resolveArtifactStoreFromEnv opens the artifact store named by
-// ArtifactStoreEnvVar, resolved through dev.env like the controller and
-// logs URLs. Returns (nil, nil) when unset so callers treat artifacts as
-// off, matching a nil Backends.Artifact.
 func resolveArtifactStoreFromEnv(ctx context.Context) (storage.ArtifactStore, error) {
 	url := ResolveDevEnvURL(ArtifactStoreEnvVar)
 	if url == "" {
@@ -37,56 +29,33 @@ func resolveArtifactStoreFromEnv(ctx context.Context) (storage.ArtifactStore, er
 	return storeurl.OpenArtifactStore(ctx, url)
 }
 
-// Backends bundles the infrastructure interfaces the orchestrator
-// depends on.
 type Backends struct {
 	State       StateBackend
 	Logs        LogBackend
 	Concurrency ConcurrencyBackend
 
-	// Artifact is the content-addressed blob store node execution
-	// publishes outputs to and stages inputs from. Nil when no cache
-	// surface is configured; callers must tolerate its absence.
 	Artifact storage.ArtifactStore
 }
 
-// StateBackend persists run/node/event/cache state. The orchestrator
-// holds it in Backends.State. It embeds storage.StateStore (the
-// methods every state-store implementation must expose) and adds the
-// wrapper-shaped methods that fold adapter logic on top of the raw
-// store (output extraction, trigger cycle detection, simplified-error
-// AppendEvent).
 type StateBackend interface {
 	storage.StateStore
 
-	// AppendEvent mirrors store.AppendEvent but discards the sequence
-	// number; orchestrator call sites never read it.
 	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 
-	// GetNodeOutput returns a finished node's raw JSON output.
 	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
 
-	// EnqueueTrigger spawns a new trigger; cycles are rejected with
-	// a wrapped error mentioning "cycle". parentNodeID + retryOf
-	// thread retry lineage across nested spawns.
 	EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (runID string, err error)
 }
 
-// LogBackend issues per-node log sinks.
 type LogBackend interface {
 	OpenNodeLog(runID, nodeID string, delegate sparkwing.Logger) (NodeLog, error)
 }
 
-// NodeLog is a sparkwing.Logger with Close. No writes after Close.
 type NodeLog interface {
 	sparkwing.Logger
 	Close() error
 }
 
-// ConcurrencyBackend mediates the Cache()/Concurrency() DSL: atomic
-// acquire (granted/skipped/failed/cached/queued/coalesced), waiter
-// resolution, memoizing release (which also promotes waiters), and
-// heartbeats that surface the supersede signal.
 type ConcurrencyBackend interface {
 	AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error)
 	State(ctx context.Context, key string) (*store.ConcurrencyState, error)
@@ -95,20 +64,11 @@ type ConcurrencyBackend interface {
 	ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 	ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error)
 
-	// ForceReleaseSuperseded drops superseded=1 holders so a stuck
-	// CancelOthers eviction can't block forward progress.
 	ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error)
 
-	// CancelWaiter removes a parked waiter row so it won't later be
-	// promoted to a holder. The QueueTimeout path uses it to clean up
-	// after a waiter that gave up. Reports whether a row matched.
 	CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 }
 
-// LocalBackends builds a Backends bundle over a local SQLite store
-// and on-disk log files. art is the content-addressed artifact store
-// node execution publishes to and stages from; pass nil when no cache
-// surface is configured. Caller owns the Store lifecycle.
 func LocalBackends(paths Paths, st *store.Store, art storage.ArtifactStore) Backends {
 	return Backends{
 		State:       localState{st: st},
@@ -118,13 +78,6 @@ func LocalBackends(paths Paths, st *store.Store, art storage.ArtifactStore) Back
 	}
 }
 
-// S3Backends builds a Backends bundle for Mode 2 (S3-only shared).
-// State is the NDJSON-over-object-store backend; Logs is the
-// supplied storage.LogStore wrapped as a LogBackend; Concurrency is
-// the conditional-write CAS semaphore over the artifact store (it
-// degrades to no-op when the store can't enforce write preconditions);
-// art is the content-addressed artifact store, nil when no cache
-// surface is configured. Caller owns the s3state.Backend lifecycle.
 func S3Backends(log storage.LogStore, state *s3state.Backend, art storage.ArtifactStore) Backends {
 	return Backends{
 		State:       s3StateAdapter{Backend: state},
@@ -134,39 +87,12 @@ func S3Backends(log storage.LogStore, state *s3state.Backend, art storage.Artifa
 	}
 }
 
-// s3StateAdapter wraps *s3state.Backend so it satisfies StateBackend.
-// AppendEvent, GetNodeOutput, and EnqueueTrigger are real
-// implementations on the embedded backend; EnqueueTrigger records the
-// trigger as a discrete CAS object and returns ErrNotSupported only when
-// the artifact store cannot do conditional writes.
 type s3StateAdapter struct {
 	*s3state.Backend
 }
 
-// Compile-time check: *client.Client (the HTTP-backed state surface
-// the cluster worker and Mode 4 laptop runs against) satisfies the
-// orchestrator's runtime StateBackend interface. The narrower
-// storage.StateStore assertion lives next to the client itself in
-// pkg/controller/client/state_assertion.go; this one catches drift in
-// the orchestrator-only adapter methods (AppendEvent, GetNodeOutput,
-// EnqueueTrigger).
 var _ StateBackend = (*client.Client)(nil)
 
-// RemoteBackends builds a Backends bundle for Mode 4 (hosted
-// controller). State + concurrency talk to the same controller HTTP
-// surface; logs is the caller-supplied LogBackend or, when nil, a
-// fresh HTTP logs backend pointed at the same controller. httpClient
-// shapes the concurrency backend's transport; nil picks the default.
-// The lease argument shapes how long the HTTPConcurrency holders run
-// before the controller can reap them; zero falls back to the package
-// default.
-//
-// Use this when state-store creds are an HTTP profile, not direct
-// access to a database. The laptop path, the cluster worker, and the
-// single-node runner all assemble Mode 4 through this one constructor,
-// symmetric with LocalBackends + S3Backends. art is the
-// content-addressed artifact store, nil when no cache surface is
-// configured.
 func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
 	if logs == nil {
 		logs = NewHTTPLogsWithToken(remoteLogsURL(c), nil, c.Token(), nil)
@@ -182,21 +108,6 @@ func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore
 	}
 }
 
-// remoteLogsURL picks where a Mode 4 run posts its node log lines when
-// the caller named no logs surface.
-//
-// A cluster runs the controller and the logs service as two binaries on
-// two ports, and only sparkwing-logs routes /api/v1/logs, so assuming
-// the controller's own URL posted every line into a 404 -- silently
-// before v0.34.0, and as a failed run after it. The controller
-// announces the real URL through the discovery endpoint it already
-// serves for the cache pod.
-//
-// The controller's own URL stays the fallback rather than an error,
-// because it is the right answer for a co-located deployment: the
-// laptop dashboard mounts the controller and the logs service on one
-// mux. When it is the wrong answer, the append fails with a 404 whose
-// message names the missing service.
 func remoteLogsURL(c *client.Client) string {
 	ctx, cancel := context.WithTimeout(context.Background(), logsDiscoveryTimeout)
 	defer cancel()
@@ -206,25 +117,10 @@ func remoteLogsURL(c *client.Client) string {
 	return c.BaseURL()
 }
 
-// logsDiscoveryTimeout bounds the one discovery call a run makes while
-// assembling its backends. Short, because an unreachable controller
-// must not delay the fallback the co-located case depends on;
-// discovery.ServicesFor caches the result for the process either way.
 const logsDiscoveryTimeout = 3 * time.Second
 
-// defaultHTTPClient returns nil so NewHTTPConcurrency picks its own
-// default transport (mirrors how client.NewWithToken handles a nil
-// httpClient). Kept as a named helper so a future change to
-// "share the same *http.Client across state + concurrency" lands in
-// one place.
 func defaultHTTPClient() *http.Client { return nil }
 
-// canonicalLocalStore returns the *store.Store underneath a StateBackend
-// when one is reachable -- either a bare localState, or one nested inside
-// a mirrorStateBackend's canonical slot. Cluster-backed (controller / S3)
-// state returns nil. The local-trigger dispatcher uses this to find the
-// store whose triggers table it should poll, regardless of whether the
-// caller is sqlite, postgres, or postgres+mirror.
 func canonicalLocalStore(b StateBackend) *store.Store {
 	switch s := b.(type) {
 	case localState:
@@ -235,34 +131,6 @@ func canonicalLocalStore(b StateBackend) *store.Store {
 	return nil
 }
 
-// localRunLogDir returns the absolute filesystem directory this log
-// backend writes the run's node logs into, or "" when the logs do not
-// land on the executing machine's disk. Same shape as
-// canonicalLocalStore: unwrap to the concrete local implementation and
-// ask it, so the answer comes from the Paths the log writer actually
-// uses instead of a second guess about where a run "should" write.
-// Any future decorator around LogBackend (a tee, a mirror) must be
-// added to the switch below, or runs behind it silently lose the
-// field.
-//
-// The directory is ensured, not just named: the entry points differ on
-// who creates it (RunLocal ensures it up front; the worker and local
-// trigger paths reach Run() directly and would otherwise not create it
-// until the first node opens a log), and a run that dies during
-// planning must not advertise a directory that never existed. Creating
-// it here is the same idempotent MkdirAll localLogs.OpenNodeLog already
-// performs, hoisted early enough that the recorded path is true when it
-// is recorded. Callers surface the result as the run's log_path; an
-// empty string means there is nothing local to point at, and the field
-// is omitted rather than fabricated.
-//
-// A profile whose logs backend is a filesystem log store
-// (`logs: {type: filesystem}`) also writes to local disk, but it does
-// so through HTTPLogs wrapping a storage.LogStore rather than through
-// localLogs. That case is answered by [HTTPLogs.localRunDir], which
-// probes for the concrete fs store rather than widening the public
-// storage.LogStore interface with a run-directory accessor every
-// remote implementation would have to answer meaninglessly.
 func localRunLogDir(b LogBackend, runID string) string {
 	switch l := b.(type) {
 	case localLogs:
@@ -275,14 +143,6 @@ func localRunLogDir(b LogBackend, runID string) string {
 	return ""
 }
 
-// EnsureRunLogDir creates and returns the absolute directory a locally
-// executed run writes its node logs into, or "" when it cannot be
-// created or is not a directory. It is [localRunLogDir]'s body, exported
-// so a caller that acknowledges a run before the run has started -- most
-// sharply `sparkwing runs submit`, which returns a log_path the moment
-// the trigger is persisted -- reports exactly the directory the executing
-// run will later record, under the same "the path exists or is omitted"
-// rule the run_start receipt follows.
 func EnsureRunLogDir(p Paths, runID string) string {
 	if err := p.EnsureRunDir(runID); err != nil {
 		return ""
@@ -290,9 +150,6 @@ func EnsureRunLogDir(p Paths, runID string) string {
 	return absExistingDir(p.RunDir(runID))
 }
 
-// absExistingDir resolves dir to an absolute path and returns it only
-// when it names an existing directory, keeping the "the path exists or
-// is omitted" rule in one place for every log_path producer.
 func absExistingDir(dir string) string {
 	if dir == "" {
 		return ""
@@ -311,10 +168,6 @@ type localState struct {
 	st *store.Store
 }
 
-// Close satisfies storage.StateStore. The orchestrator never invokes
-// Close through Backends.State; RunLocal owns the underlying store
-// lifecycle and closes it directly. The method exists so localState
-// satisfies the storage.StateStore interface.
 func (l localState) Close() error { return l.st.Close() }
 
 func (l localState) CreateRun(ctx context.Context, r store.Run) error {
@@ -546,6 +399,9 @@ func (l localState) EnqueueTriggerWithEnv(
 	} else if parentRunID != "" {
 		parent, err := l.st.GetRun(ctx, parentRunID)
 		if err == nil && parent != nil {
+			if strings.HasPrefix(parent.TriggerSource, "pipeline-working-tree@") {
+				tg.TriggerSource = parent.TriggerSource
+			}
 			tg.Repo = parent.Repo
 			tg.RepoURL = parent.RepoURL
 			tg.GitBranch = firstNonEmptyStr(branch, parent.GitBranch)
@@ -602,7 +458,6 @@ func enqueueTriggerWithEnv(
 	return state.EnqueueTrigger(ctx, pipeline, args, parentRunID, parentNodeID, retryOf, source, user, repo, branch)
 }
 
-// sparkwingGithubSplit returns owner+repo from "owner/repo".
 func sparkwingGithubSplit(slug string) (owner, repo string) {
 	if slug == "" {
 		return "", ""
@@ -618,15 +473,10 @@ func sparkwingGithubSplit(slug string) (owner, repo string) {
 	return "", ""
 }
 
-// localNewRunID matches controller.newRunID.
 func localNewRunID() string {
 	return fmt.Sprintf("run-%s-%08x", time.Now().UTC().Format("20060102-150405"), time.Now().UnixNano()&0xFFFFFFFF)
 }
 
-// NewLocalRunID mints a run id for a caller that must know the id before
-// the run exists -- `sparkwing runs submit`, which returns the id as its
-// acknowledgment. It is the same generator every local trigger uses, so
-// a submitted run is indistinguishable from any other by its id.
 func NewLocalRunID() string { return localNewRunID() }
 
 func firstNonEmptyStr(a, b string) string {
@@ -652,8 +502,6 @@ func (l localLogs) OpenNodeLog(runID, nodeID string, delegate sparkwing.Logger) 
 	return newNodeLogger(l.paths.NodeLog(runID, nodeID), nodeID, delegate)
 }
 
-// localConcurrency delegates straight to the Store. Release runs the
-// promote/coalesce phases so pending arrivals unblock before return.
 type localConcurrency struct {
 	st *store.Store
 }

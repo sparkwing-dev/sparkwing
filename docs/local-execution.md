@@ -61,8 +61,10 @@ Local pipelines share a small admission daemon named wingd. It starts on
 demand and normally needs no operator attention. `sparkwing daemon status`
 reports whether it is running; JSON output includes the serving binary and its
 source revision. `sparkwing daemon restart` replaces only an answering daemon
-with the installed Sparkwing build. Existing holders reconnect and reattach to
-their durable leases, while a deliberately stopped daemon stays stopped. A
+when its build differs from the installed Sparkwing build. Add `--force` to
+replace an answering daemon that already serves the installed build. Existing
+holders reconnect and reattach to their durable leases, while a deliberately
+stopped daemon stays stopped. A
 release-pinned pipeline can use that refreshed daemon without replacing it
 with the older release build.
 
@@ -158,54 +160,32 @@ is passed to the pipeline as its own arguments.
 Submission is local-only. To hand a run to a cluster, use
 `sparkwing pipeline trigger --profile <p> --detach`.
 
-#### A submitted run uses the consumer's environment, not your shell's
+#### Publishing a foreground run handle
 
-This is the sharpest difference between `sparkwing run` and
-`sparkwing runs submit`, and it will bite you if you skip it.
+`sparkwing run PIPELINE --sw-run-handle-file PATH` atomically writes a JSON
+handle after the run row is durable and before planning or node execution.
+The handle carries `schema_version`, `run_id`, `pipeline`, `log_path`, and
+`status`. Sparkwing exits before executing work when publication fails.
 
-A foreground `sparkwing run` inherits the environment of the shell you
-typed it in. A submitted run does not. It is executed by the resident
-consumer, and the consumer inherits the environment of whichever shell
-happened to start it -- possibly hours earlier, possibly in a different
-project, possibly with a different `AWS_PROFILE`, `KUBECONFIG`,
-`GITHUB_TOKEN`, or `PATH`. This is the same rule the admission daemon
-follows: a process started on demand keeps the environment of the run
-that needed it first.
+The outer CLI passes the path to the pipeline process through
+`SPARKWING_RUN_HANDLE_FILE`; callers should use the flag. The file is mode
+`0600` and replaces its destination atomically.
 
-So this does **not** do what it looks like:
+#### A submitted run uses its submission environment
 
-```bash
-AWS_PROFILE=prod sparkwing runs submit deploy   # the run may NOT see AWS_PROFILE=prod
-```
+Foreground and submitted runs inherit the environment of the shell that
+starts them. The submit command captures that environment in an owner-only
+file, and the consumer supplies the exact snapshot to the run. Concurrent
+submissions cannot inherit values from the shell that started the consumer
+or from another submission.
 
-The acknowledgment names the process that will run it, so the
-divergence is at least visible:
+The snapshot may contain credentials. Sparkwing stores it outside the runs
+database with mode `0600`, names it by a hash of the run ID, and removes it
+after dispatch reaches a terminal outcome. A consumer restart preserves the
+snapshot so the queued run keeps the same environment.
 
-```
-  runner: consumer pid 4831 (started 2026-08-12T09:14:02Z); the run uses ITS environment, not this shell's
-```
-
-Until submitted runs carry their submitter's environment, the reliable
-options are:
-
-- Put the value in the pipeline's own configuration or a secret store,
-  where it does not depend on an ambient variable at all.
-- Pass it as a pipeline argument: `sparkwing runs submit deploy --env prod`.
-- Start the consumer deliberately from the environment you want, then
-  submit against it:
-
-  ```bash
-  AWS_PROFILE=prod sparkwing runs consumer start
-  sparkwing runs submit deploy
-  ```
-
-- Or run it in the foreground with `sparkwing run`, which always uses
-  your shell's environment.
-
-Carrying the submitter's environment on the trigger is deliberately not
-done: it would persist whatever happened to be exported -- tokens
-included -- into the runs store, which is a new place for secrets to
-live.
+Prefer pipeline configuration, secret stores, and pipeline arguments for
+values that should remain independent of a caller's ambient environment.
 
 #### Which checkout runs
 
@@ -305,14 +285,13 @@ because the box paid for it.
 
 ```
 Your laptop:
-  1. sparkwing pipeline trigger tarballs .sparkwing/ + working tree
-     (incremental sync)
-  2. sparkwing POSTs the upload + a trigger to the profile's controller
+  1. sparkwing resolves the origin, branch, and commit
+  2. sparkwing refreshes or seeds that commit, then POSTs the trigger
 
-Cluster:
+Remote runner:
   3. Controller records the trigger; a polling runner claims it
-  4. Runner clones the upload, compiles, runs the pipeline
-  5. Your laptop streams logs back via the logs service
+  4. Runner clones the exact commit, compiles, and runs the pipeline
+  5. Runner streams logs through the logs service
 ```
 
 The controller is the gatekeeper for prod-side execution: only the
@@ -326,6 +305,45 @@ reaches a terminal state -- full log streaming when the profile defines a
 logs URL, node-status updates from the controller otherwise. Pass
 `--detach` to return as soon as the trigger is registered without
 following.
+
+Add `--working-tree` to run current tracked edits and untracked non-ignored
+files remotely without committing or pushing them. Sparkwing freezes those
+bytes as a synthetic Git commit, requires the bundle seed to finish before it
+admits the trigger, and prints the base SHA, snapshot SHA, file count, and
+bundle size. The source checkout's HEAD, refs, index, and object database stay
+unchanged. The bundle limit is 500 MiB.
+The remote checkout is clean and detached at the synthetic SHA; file contents
+match the laptop, but staged-versus-unstaged state is intentionally flattened.
+Capture requires a complete SHA-1 repository; shallow and SHA-256 repositories
+fail before upload. Workspace seed refs are capped at 128 distinct snapshots
+per repository; a full cache rejects a new snapshot before trigger admission.
+
+An off-cluster machine can claim only these triggers and compile them locally:
+
+```bash
+SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
+  --controller=https://sparkwing.example.com \
+  --logs=https://sparkwing.example.com \
+  --gitcache=https://sparkwing.example.com/api/v1/gitcache \
+  --also-claim-triggers --claim-nodes=false \
+  --trigger-sources=pipeline-working-tree@laptop-hostname \
+  --metrics-addr= --max-claims-before-restart=0
+```
+
+The source proxy and trigger claim require the current admin-capable runner
+token. Login-enabled dashboard ingress passes this machine bearer directly to
+the controller without a browser session or CSRF token. The process opens no
+listener. A private direct cache URL can replace the controller proxy when the
+machines already share a LAN, VPN, or tailnet. Direct cache binary and seed
+writes use only `SPARKWING_CACHE_TOKEN`; the agent/controller token is never
+sent to that raw cache. Raw Git reads have no cache-level auth, so keep a direct
+cache on a trusted private network. Upload and pack streams have
+a 30-minute server window; the CLI gives a direct upload two minutes before a
+fresh 15-minute controller fallback. Manual retries and same-repository
+`RunAndAwait` children retain the original `pipeline-working-tree@<host>`
+placement source.
+Do not leave an unrestricted cluster runner racing for the same trigger source
+when testing deterministic placement.
 
 A follow exits on the run's outcome, the same way a local `sparkwing run`
 does: 0 when the run succeeded, 1 when it failed or was cancelled, with the
@@ -675,10 +693,11 @@ that does not mean "wait for the window to age out." There are two:
   what external load is reading, so a pipeline can always measure its way
   back down instead of being locked out by a floor it can never disprove.
   To clear a floor immediately anyway, reset with
-  `sparkwing runs stats --reset --pipeline <name>` (profiles are keyed
-  `repo/pipeline` for runs launched inside a git repo, exactly as
-  `runs stats --capacity` shows them; a bare pipeline name reaches every
-  repo-scoped key that carries it and the summary names each one): the
+  `sparkwing runs stats --reset --pipeline <name>` (profiles are scoped by the
+  repository's canonical identity for runs launched inside a git repo and
+  shown as `repo/pipeline`, exactly as `runs stats --capacity` prints them; a
+  bare pipeline name reaches every repo-scoped key that carries it and the
+  summary names each one): the
   learned samples, peaks, floors, waits, and contention tally are dropped
   so the pipeline re-learns from a cold start, and the command prints what
   it removed -- including a floor with no measured samples behind it, which

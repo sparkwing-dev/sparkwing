@@ -33,14 +33,8 @@ func runNodeCommand(args []string) error {
 		return errors.New("--controller + <runID> + <nodeID> are required")
 	}
 
-	// safety: SIGINT only, and SIGTERM must stay unhandled. SIGTERM is how a
-	// node process is stopped -- by `runs bounce`, by a cancelled run, by
-	// a pod's own termination -- and the guarantee those paths rest on is
-	// that the child dies without writing a terminal row: the supervisor
-	// decides what the kill meant. A handler here would let a killed node
-	// record an outcome of its own, and a bounce would land the run's
-	// downstream nodes on a failure nobody asked for. See
-	// TestNodeEntrypoints_DoNotHandleSIGTERM.
+	// safety: leave SIGTERM unhandled; bounce, cancellation, and pod termination
+	// rely on the supervisor rather than the killed node to record the outcome.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 

@@ -2,30 +2,41 @@ package web
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
-	"sync"
 	"time"
 )
 
-// sessionAuthMiddleware gates /api/v1/* and SPA routes behind a session
-// cookie when RequireLogin is set. Service credentials stay behind the
-// reverse proxy and cannot bypass a browser session after logout.
-func sessionAuthMiddleware(opts HandlerOptions, next http.Handler) http.Handler {
+func sessionAuthMiddleware(opts HandlerOptions, bundleFS fs.FS, next http.Handler) http.Handler {
 	if !loginRequired(opts) {
 		return next
 	}
-	cache := newSessionCache(60 * time.Second)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if immutableStaticAssetRequest(r, bundleFS) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		cookie, err := r.Cookie(sessionCookieName)
 		if err != nil || cookie.Value == "" {
 			redirectOrUnauth(w, r)
 			return
 		}
-		sess, err := cache.lookup(r.Context(), opts.ControllerURL, cookie.Value)
+		sess, err := controllerResolveSession(r.Context(), authControllerURL(opts), cookie.Value)
 		if err != nil {
-			clearSessionCookies(w)
-			redirectOrUnauth(w, r)
+			if errors.Is(err, errInvalidControllerSession) {
+				clearSessionCookies(w)
+				redirectOrUnauth(w, r)
+			} else {
+				sessionBackendError(w)
+			}
+			return
+		}
+		if unsafeAPIRequest(r) && !validAPIRequestCSRF(r, sess.CSRFToken) {
+			csrfError(w)
 			return
 		}
 		r = r.WithContext(contextWithWebPrincipal(r.Context(), sess))
@@ -33,27 +44,59 @@ func sessionAuthMiddleware(opts HandlerOptions, next http.Handler) http.Handler 
 	})
 }
 
-func loginRequired(opts HandlerOptions) bool {
-	return opts.RequireLogin && opts.ControllerURL != ""
+func immutableStaticAssetRequest(r *http.Request, bundleFS fs.FS) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	p := r.URL.Path
+	if !strings.HasPrefix(p, "/_next/static/") || path.Clean(p) != p || strings.Contains(p, `\`) {
+		return false
+	}
+	info, err := fs.Stat(bundleFS, strings.TrimPrefix(p, "/"))
+	return err == nil && !info.IsDir()
 }
 
-// redirectOrUnauth sends a browser to /login (303) and an XHR/API caller
-// to 401, distinguished by the Accept header and path prefix.
+func unsafeAPIRequest(r *http.Request) bool {
+	if !strings.HasPrefix(r.URL.Path, "/api/v1/") {
+		return false
+	}
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return false
+	default:
+		return true
+	}
+}
+
+func validAPIRequestCSRF(r *http.Request, sessionToken string) bool {
+	if !sameOriginRequest(r) {
+		return false
+	}
+	cookie, err := r.Cookie(csrfCookieName)
+	if err != nil {
+		return false
+	}
+	headerToken := r.Header.Get(csrfHeaderName)
+	return constantTimeEqual(headerToken, cookie.Value) && constantTimeEqual(headerToken, sessionToken)
+}
+
+func loginRequired(opts HandlerOptions) bool {
+	return opts.RequireLogin
+}
+
 func redirectOrUnauth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "application/json") ||
 		strings.HasPrefix(r.URL.Path, "/api/") {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
-	next := r.URL.Path
-	if r.URL.RawQuery != "" {
-		next = next + "?" + r.URL.RawQuery
-	}
-	http.Redirect(w, r, "/login?next="+next, http.StatusSeeOther)
+	next := safeNext(r.URL.RequestURI())
+	query := url.Values{"next": []string{next}}
+	http.Redirect(w, r, "/login?"+query.Encode(), http.StatusSeeOther)
 }
 
-// webPrincipal is the logged-in user stamped on the request context.
 type webPrincipal struct {
 	Name      string
 	Scopes    []string
@@ -70,47 +113,7 @@ func contextWithWebPrincipal(ctx context.Context, sess *sessionResp) context.Con
 	})
 }
 
-// WebPrincipalFromContext returns the logged-in user from the request
-// context, if any.
 func WebPrincipalFromContext(ctx context.Context) (*webPrincipal, bool) {
 	p, ok := ctx.Value(webPrincipalCtxKey{}).(*webPrincipal)
 	return p, ok
-}
-
-type sessionCacheEntry struct {
-	sess    *sessionResp
-	expires time.Time
-}
-
-type sessionCache struct {
-	mu  sync.Mutex
-	ttl time.Duration
-	m   map[string]*sessionCacheEntry
-}
-
-func newSessionCache(ttl time.Duration) *sessionCache {
-	return &sessionCache{ttl: ttl, m: map[string]*sessionCacheEntry{}}
-}
-
-func (c *sessionCache) lookup(ctx context.Context, controllerURL, sessionID string) (*sessionResp, error) {
-	c.mu.Lock()
-	e := c.m[sessionID]
-	c.mu.Unlock()
-	if e != nil && time.Now().Before(e.expires) {
-		return e.sess, nil
-	}
-	sess, err := controllerResolveSession(ctx, controllerURL, sessionID)
-	if err != nil {
-		c.mu.Lock()
-		delete(c.m, sessionID)
-		c.mu.Unlock()
-		return nil, err
-	}
-	c.mu.Lock()
-	c.m[sessionID] = &sessionCacheEntry{
-		sess:    sess,
-		expires: time.Now().Add(c.ttl),
-	}
-	c.mu.Unlock()
-	return sess, nil
 }

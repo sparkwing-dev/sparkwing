@@ -1,19 +1,3 @@
-// Command pipelineaccept runs the AI-pipeline acceptance harness on
-// demand. It generates every corpus spec with a chosen generator, scores
-// each through the gofmt/compile/vet/explain/lint oracle bar, prints the
-// aggregate report, and exits nonzero when any spec disagrees with its
-// expectation.
-//
-// With the default fixture generator the run is deterministic and needs no
-// model: it is a regression gate on the pipeline templates, the authoring
-// guide the fixtures imitate, the linter, and the SDK pin the candidate
-// project builds against. With --generator=command it drives a live
-// cold-author model through the same bar, so "can a cold agent author a
-// working pipeline" becomes a repeatable check rather than a manual spike.
-//
-// Exit codes: 0 every spec matched its expectation; 1 a spec disagreed (a
-// regression, or a cold author that failed the bar); 2 the harness could
-// not run.
 package main
 
 import (
@@ -116,10 +100,6 @@ func run(ctx context.Context, opts options) (pipelinegen.Report, error) {
 	}), nil
 }
 
-// makeGenerator selects the generator from the flags. The fixture
-// generator reads each spec's committed candidate source (deterministic);
-// the command generator shells an external cold author, whitespace-split
-// from --command.
 func makeGenerator(opts options, fsys fs.FS, croot string) (pipelinegen.Generator, error) {
 	switch opts.generator {
 	case "fixture", "":
@@ -142,11 +122,6 @@ func exitCode(rep pipelinegen.Report) int {
 	return 0
 }
 
-// dropAntiPatterns returns the expect=pass specs. The expect=fail specs
-// ship deliberately-bad fixture source to prove the linter rejects
-// anti-patterns; asking a live author to reproduce an anti-pattern is not a
-// cold-author test, so the command generator drops them. It notes on stderr
-// how many it skipped so a live run never silently narrows.
 func dropAntiPatterns(specs []pipelinegen.Spec) []pipelinegen.Spec {
 	kept := make([]pipelinegen.Spec, 0, len(specs))
 	skipped := 0
@@ -180,8 +155,6 @@ func repoRoot(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// buildSparkwing compiles the sparkwing CLI the explain and lint oracles
-// invoke, into a temp file the caller removes via cleanup.
 func buildSparkwing(ctx context.Context, root string) (bin string, cleanup func(), err error) {
 	dir, err := os.MkdirTemp("", "pipelineaccept-")
 	if err != nil {
@@ -198,7 +171,6 @@ func buildSparkwing(ctx context.Context, root string) (bin string, cleanup func(
 	return bin, cleanup, nil
 }
 
-// emit writes the report as indented JSON or a human summary.
 func emit(w io.Writer, format string, rep pipelinegen.Report) error {
 	switch format {
 	case "json":
@@ -212,9 +184,6 @@ func emit(w io.Writer, format string, rep pipelinegen.Report) error {
 	}
 }
 
-// emitPretty writes the human summary: one line per attempt, then a
-// per-spec rollup. The rollup is printed only when each spec got more
-// than one attempt, since at Repeat=1 it just restates the lines above.
 func emitPretty(w io.Writer, rep pipelinegen.Report) error {
 	if _, err := fmt.Fprintf(w, "generator: %s\n", rep.Generator); err != nil {
 		return err

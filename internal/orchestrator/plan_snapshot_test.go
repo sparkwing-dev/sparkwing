@@ -11,8 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// snapshotChildJob is a Spawn target with no inner spawns. Used to
-// verify SpawnNode targets recurse into snapshotWork.
 type snapshotChildJob struct{}
 
 func (snapshotChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -20,8 +18,6 @@ func (snapshotChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// snapshotParentJob spawns a snapshotChildJob from inside its Work so
-// the snapshot walker has to recurse one level.
 type snapshotParentJob struct{}
 
 func (snapshotParentJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -30,10 +26,6 @@ func (snapshotParentJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// A node that declares both Cache and Concurrency must carry the two
-// concerns independently in the snapshot: the content-cache fact (with
-// TTL) and the concurrency facts (group, capacity, cost, scope,
-// policy, timeouts). No Coalesce, no shared "cache_*" field.
 func TestMarshalPlanSnapshot_SplitsCacheAndConcurrency(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	g := sparkwing.NewConcurrencyGroup("db", sparkwing.ConcurrencyLimit{
@@ -163,9 +155,6 @@ func TestMarshalPlanSnapshot_EmbedsWorkAndSpawnTargets(t *testing.T) {
 	}
 }
 
-// snapshotCycleA spawns snapshotCycleB; snapshotCycleB spawns
-// snapshotCycleA. The snapshot walker must catch this without
-// recursing forever.
 type (
 	snapshotCycleA struct{}
 	snapshotCycleB struct{}
@@ -194,8 +183,6 @@ func TestMarshalPlanSnapshot_DetectsSpawnCycle(t *testing.T) {
 	}
 }
 
-// snapshotForEachJob declares a SpawnNodeForEach so the walker exercises
-// the zero-value-template materialization path.
 type snapshotForEachJob struct{}
 
 func (snapshotForEachJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -206,8 +193,6 @@ func (snapshotForEachJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// snapshotGroupSteps declares two GroupSteps inside its Work so the
-// snapshot walker has groups to serialize.
 type snapshotGroupSteps struct{}
 
 func (snapshotGroupSteps) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {

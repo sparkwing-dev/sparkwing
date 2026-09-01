@@ -1,22 +1,4 @@
 #!/usr/bin/env bash
-# Validate and plan the Mode 3 Postgres Terraform module offline.
-#
-# Runs fmt + validate on the module, then plans the plan-only fixture
-# under test/plan for both engine knobs (rds, aurora-serverless-v2) and
-# asserts the expected resource set per knob: the networking wiring
-# (security group + subnet group) is always present, and the count-gated
-# engine resources flip correctly (single RDS instance vs Aurora cluster
-# + instance). The fixture uses mock AWS credentials and every provider
-# skip flag, so plan runs with no AWS account and reaches no API.
-#
-# Finally runs `terraform test` (tests/security.tftest.hcl) with mocked
-# providers to assert the security-critical attribute VALUES the resource
-# set cannot: publicly_accessible=false, storage_encrypted=true, ingress
-# restricted to the Postgres port with no 0.0.0.0/0, and sslmode=require in
-# the generated DSN. The mocks need no AWS account and reach no API.
-#
-# Exit 0 if clean; non-zero with detail on any failure. Requires
-# terraform on PATH (see install/terraform/mode3-postgres/README.md).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

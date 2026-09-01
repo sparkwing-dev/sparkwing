@@ -11,12 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestMaxParallel_CapsConcurrentNodeExecution verifies that
-// dispatchState's semaphore caps how many activeRunner.RunNode calls
-// run at once when Options.MaxParallel > 0. Builds a fan-out plan
-// with 30 sibling jobs, each of which records "active goroutine
-// count" via shared atomic counters; assertion is that the observed
-// peak never exceeds MaxParallel.
 func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
 	const fanOut = 30
 	const cap = 4

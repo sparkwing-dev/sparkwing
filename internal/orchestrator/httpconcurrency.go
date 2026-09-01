@@ -10,15 +10,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// HTTPConcurrency satisfies ConcurrencyBackend via the controller's
-// /api/v1/concurrency/* endpoints. In-process orchestrators use
-// localConcurrency instead.
 type HTTPConcurrency struct {
 	client *client.Client
 	lease  time.Duration
 }
 
-// NewHTTPConcurrency binds a backend to baseURL with optional bearer.
 func NewHTTPConcurrency(baseURL string, httpClient *http.Client, token string, lease time.Duration) *HTTPConcurrency {
 	if lease <= 0 {
 		lease = store.DefaultConcurrencyLease
@@ -74,9 +70,6 @@ func (h *HTTPConcurrency) AcquireSlot(ctx context.Context, req store.AcquireSlot
 	return out, nil
 }
 
-// storeHolderFromClient is the single mapping from the controller's
-// wire holder shape back into the store type, so a field added to one
-// response path can't silently vanish from its siblings.
 func storeHolderFromClient(key string, hd client.WaiterHolder) store.ConcurrencyHolder {
 	holder := store.ConcurrencyHolder{
 		Key: key, HolderID: hd.HolderID, RunID: hd.RunID, NodeID: hd.NodeID,
@@ -145,10 +138,6 @@ func (h *HTTPConcurrency) ReleaseSlot(ctx context.Context, key, holderID, outcom
 	return h.client.ReleaseSlot(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
 }
 
-// ResolveWaiter polls the controller's resolve endpoint so an in-pod
-// orchestrator can wait on a queued/coalesced group slot and observe
-// promotion, a cache hit, leader completion, or cancellation -- the
-// same resolutions the in-process backend serves from the store.
 func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
 	resp, err := h.client.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
 	if err != nil {
@@ -174,8 +163,6 @@ func (h *HTTPConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID,
 	return res, nil
 }
 
-// ForceReleaseSuperseded drops superseded holders via the controller so
-// a stuck CancelOthers eviction can't block forward progress.
 func (h *HTTPConcurrency) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {
 	dropped, err := h.client.ForceReleaseSuperseded(ctx, key)
 	if err != nil {
@@ -188,8 +175,6 @@ func (h *HTTPConcurrency) ForceReleaseSuperseded(ctx context.Context, key string
 	return out, nil
 }
 
-// CancelWaiter drops a parked waiter row via the controller so a
-// QueueTimeout'd waiter won't later be promoted to a holder.
 func (h *HTTPConcurrency) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
 	return h.client.CancelWaiter(ctx, key, runID, nodeID)
 }

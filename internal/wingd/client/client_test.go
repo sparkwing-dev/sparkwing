@@ -66,11 +66,6 @@ func TestDefaultReattachTimeoutFitsInsideDaemonGrace(t *testing.T) {
 	}
 }
 
-// TestSupersedes_NeverMutual pins the property the takeover loop depends
-// on: no two builds may each supersede the other. A mutual pair makes two
-// concurrently running sparkwings drain and respawn each other's daemon
-// without end, since connect() re-takes-over on every reconnect and
-// nothing bounds the exchange.
 func TestSupersedes_NeverMutual(t *testing.T) {
 	versions := []string{
 		"", "(devel)", "(unknown)", "garbage",
@@ -127,11 +122,6 @@ func shortHome(t *testing.T) string {
 	return dir
 }
 
-// spawnInProcess returns a Spawn hook that brings up a real daemon inside
-// the test process, so EnsureDaemon exercises its spawn-and-retry path
-// without a child process. Each call makes its own election attempt, matching
-// spawnDetached: a clean election loss does not consume another client's
-// opportunity to start the daemon.
 func spawnInProcess(t *testing.T, home string) func(string, string) error {
 	return func(string, string) error {
 		d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0"})
@@ -336,8 +326,6 @@ func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
 	}
 }
 
-// TestEnsureDaemon_DevClientRejectsReleaseDaemon verifies that unordered
-// same-major builds fail closed instead of silently sharing a daemon.
 func TestEnsureDaemon_DevClientAcceptsSameSourceReleaseDaemon(t *testing.T) {
 	home := shortHome(t)
 	spawn := spawnInProcess(t, home)

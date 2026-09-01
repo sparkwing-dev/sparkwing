@@ -17,38 +17,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// loopbackTokenTTL bounds the run-scoped bearer for the case where
-// teardown never runs -- a dispatcher killed with SIGKILL revokes
-// nothing. Until it expires, a full-admin bearer for the machine's
-// run store is sitting in a dead process's environment, so the window
-// is hours rather than a day. Two hours covers a long local run with
-// room to spare.
-//
-// Expiry is the backstop, not the mechanism: a clean teardown revokes
-// immediately. Even then the authenticator's cache keeps a revoked
-// token working for up to its TTL (see the cache argument below), so
-// revocation is prompt rather than instant.
 const loopbackTokenTTL = 2 * time.Hour
 
-// loopbackAuthCacheTTL trades revocation latency against an argon2
-// verify per request. A node writes state on every step boundary, so
-// verifying each one uncached is real cost; a minute of staleness on
-// a loopback-only token is not.
 const loopbackAuthCacheTTL = time.Minute
 
-// loopbackController is the controller a local run mounts for its own
-// node processes.
-//
-// The node processes could not simply open the run's SQLite file:
-// several writers on one SQLite database is the contention this
-// repository already carries a wedge-guard subsystem for, because it
-// was hit. Mounting the same controller a pod talks to keeps one
-// writer -- the dispatcher's process -- and gives local and cluster
-// execution the same state API.
-//
-// It binds 127.0.0.1 on an ephemeral port and is never announced in
-// dev.env: the address belongs to this run, not to the machine, and a
-// resident dashboard's dev.env entry is what other tools read.
 type loopbackController struct {
 	url         string
 	token       string
@@ -58,18 +30,6 @@ type loopbackController struct {
 	logger      *slog.Logger
 }
 
-// loopbackLogger is what the loopback controller says when the caller
-// names no logger.
-//
-// The level is Warn, not the default: this controller serves a request
-// per state write of every node, and at info level that is a request
-// log per line the operator never asked for, printed over the run
-// output they did.
-//
-// The format follows the run's own. A warning rendered as logfmt in
-// the middle of a JSON log stream is a line whatever is consuming that
-// stream cannot parse, which is how a warning becomes an error
-// somewhere downstream.
 func loopbackLogger() *slog.Logger {
 	opts := &slog.HandlerOptions{Level: slog.LevelWarn}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("SPARKWING_LOG_FORMAT")), "json") {
@@ -78,8 +38,6 @@ func loopbackLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, opts))
 }
 
-// startLoopbackController mounts the controller and mints the run's
-// bearer. The caller owns the returned handle and must Close it.
 func startLoopbackController(
 	st *store.Store,
 	art storage.ArtifactStore,
@@ -121,19 +79,6 @@ func startLoopbackController(
 	}, nil
 }
 
-// startLoopbackShim mounts the same node-facing API over a state
-// backend that is not a SQLite database -- today the per-run NDJSON on
-// an object store, which a `state: {type: s3}` profile resolves to.
-//
-// Such a run used to be the one shape that still executed its nodes in
-// the dispatcher's own goroutines, because RunNodeOnce is written
-// against a controller and there was none to point a child at. There
-// is one now, so there is one execution model.
-//
-// The bearer lives in memory rather than in a tokens table. That is not
-// a compromise: the shim IS the run, so a credential scoped to the
-// shim's life is scoped to the run's, and a process that dies takes the
-// only thing that would honor the token with it.
 func startLoopbackShim(
 	state StateBackend,
 	concurrency ConcurrencyBackend,
@@ -160,9 +105,6 @@ func startLoopbackShim(
 	return &loopbackController{url: url, token: token, srv: srv, logger: logger}, nil
 }
 
-// newLoopbackToken mints the run-scoped bearer for a shim. 256 bits
-// from the system source, hex-encoded: the token is compared verbatim
-// rather than looked up by prefix, so it carries no structure.
 func newLoopbackToken() (string, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -171,9 +113,6 @@ func newLoopbackToken() (string, error) {
 	return "swl_" + hex.EncodeToString(raw[:]), nil
 }
 
-// serveLoopback binds 127.0.0.1 on an ephemeral port and starts
-// serving. The address belongs to this run, not to the machine, so it
-// is never announced in dev.env.
 func serveLoopback(h http.Handler, runID string, logger *slog.Logger) (string, *http.Server, error) {
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -191,12 +130,6 @@ func serveLoopback(h http.Handler, runID string, logger *slog.Logger) (string, *
 	return "http://" + lis.Addr().String(), srv, nil
 }
 
-// Close stops serving and revokes the run's bearer. Both halves run
-// even if the first fails: a token that outlives its run is the part
-// that matters.
-//
-// A shim has no token row to revoke -- its bearer was only ever held in
-// this process -- so shutting the listener is the whole of it.
 func (c *loopbackController) Close() {
 	if c == nil {
 		return

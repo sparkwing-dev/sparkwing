@@ -9,20 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// childEnv is the whole environment contract between a dispatcher and
-// one node process, in one place so a reviewer can see every variable
-// the child depends on without reading the child.
-//
-// It starts from base (the dispatcher's own environment) because a
-// node body reads whatever the operator exported -- credentials,
-// PATH, toolchain settings -- and then pins the variables that
-// describe THIS node. Pinned values are appended, and os/exec takes
-// the last value for a duplicate key, so a pinned value always beats
-// an inherited one.
-//
-// Notably absent: SPARKWING_LOGS_URL. The child is passed --logs=
-// explicitly empty so it writes node logs to the run's own files; an
-// inherited value would be read only if the flag were missing.
 func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request) []string {
 	env := make([]string, 0, len(base)+16)
 	env = append(env, base...)

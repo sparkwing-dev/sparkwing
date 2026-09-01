@@ -14,11 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// artifactAggregatePipe is two cached producers feeding an aggregator
-// that consumes both. The aggregator reads each shard from its workspace
-// and fails if either is absent, so a run only succeeds when staging
-// delivered the complete input set -- the exact condition the old
-// incomplete-set-on-partial-hit bug violated.
 type artifactAggregatePipe struct{ sparkwing.Base }
 
 func (artifactAggregatePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -62,13 +57,6 @@ func setWorkDir(t *testing.T, dir string) {
 	t.Cleanup(func() { sparkwing.SetWorkDir(orig) })
 }
 
-// TestArtifacts_AggregatorStagesFullSetOnCacheHit runs the aggregate
-// pipeline twice against a shared store and artifact store, the second
-// run in a fresh empty workspace. On run 2 both producers cache-hit and
-// write nothing to disk, so the aggregator sees its inputs only if
-// staging materialized them from the recorded manifests. The fresh
-// workspace also rules out the local shared-tree accident: anything the
-// aggregator reads got there by staging.
 func TestArtifacts_AggregatorStagesFullSetOnCacheHit(t *testing.T) {
 	art, err := fsstore.NewArtifactStore(t.TempDir())
 	if err != nil {
@@ -114,12 +102,6 @@ func TestArtifacts_AggregatorStagesFullSetOnCacheHit(t *testing.T) {
 	}
 }
 
-// TestArtifacts_StagedInDistributedMode exercises the same publish-then-
-// stage round trip with state served over HTTP by an in-process
-// controller (RemoteBackends), proving staging is mode-agnostic: the
-// producer's manifest is recorded and the consumer resolves it across the
-// remote state surface. The second run uses a fresh workspace so the
-// aggregator's inputs can only come from the shared artifact store.
 func TestArtifacts_StagedInDistributedMode(t *testing.T) {
 	art, err := fsstore.NewArtifactStore(t.TempDir())
 	if err != nil {

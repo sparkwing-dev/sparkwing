@@ -1,7 +1,3 @@
-// Command sparkwing-cache is the cache pod's entry point: an HTTP
-// gitcache, blob/artifact store, upload sync, and pass-through
-// package-registry proxy. The business logic lives in
-// internal/cache; this file only parses flags and calls Run.
 package main
 
 import (
@@ -102,8 +98,6 @@ func envInt(name string, fallback int) int {
 	return fallback
 }
 
-// trimColon strips a leading `:` so PORT (which is just a number)
-// can be composed back into a full bind address.
 func trimColon(s string) string {
 	if len(s) > 0 && s[0] == ':' {
 		return s[1:]

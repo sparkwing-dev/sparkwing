@@ -102,7 +102,6 @@ func TestSecret_MissingNameFailsTheJob(t *testing.T) {
 	}
 }
 
-// captureLogger collects every emitted record for inspection.
 type captureLogger struct {
 	mu      sync.Mutex
 	records []sparkwing.LogRecord
@@ -153,9 +152,6 @@ func init() {
 	register("secret-leaker", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &secretLeakerPipe{} })
 }
 
-// TestSecret_MaskerRedactsResolvedValues verifies the per-run masker
-// hooks the delegate logger so a job that accidentally logs a secret
-// emits the redaction marker instead of the raw value.
 func TestSecret_MaskerRedactsResolvedValues(t *testing.T) {
 	dir := t.TempDir()
 	dotenvPath := filepath.Join(dir, "secrets.env")

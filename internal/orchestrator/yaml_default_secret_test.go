@@ -14,11 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// A secret input whose value never appears on the command line: it is
-// supplied by sparkwing.yaml, either from the project's `defaults.args`
-// block (Options.DefaultArgs) or the pipeline entry's `args:` block
-// (Options.PipelineYAML.Args). Both layers reach reg.Invoke through the
-// orchestrator's arg merge, so both have to reach the run's masker.
 const (
 	yamlDefaultSecretValue  = "yaml-defaults-supersecret"
 	yamlPipelineSecretValue = "yaml-pipeline-args-supersecret"
@@ -32,8 +27,6 @@ type yamlSecretInputs struct {
 	Env   string `flag:"env" desc:"target environment"`
 }
 
-// observedYAMLToken is what the job body actually received. Masking must
-// not reach execution: the pipeline still has to run with the real value.
 var observedYAMLToken string
 
 type yamlSecretPipe struct{ sparkwing.Base }
@@ -56,8 +49,6 @@ func registerYAMLSecretPipeline() {
 	})
 }
 
-// runYAMLSecret executes the fixture and returns the paths, the run id,
-// and the records the delegate saw.
 func runYAMLSecret(t *testing.T, opts orchestrator.Options) (orchestrator.Paths, string, *captureLogger) {
 	t.Helper()
 	registerYAMLSecretPipeline()
@@ -76,8 +67,6 @@ func runYAMLSecret(t *testing.T, opts orchestrator.Options) (orchestrator.Paths,
 	return p, res.RunID, cap
 }
 
-// assertYAMLSecretMasked is the whole guarantee in one place: the job ran
-// with the real value, and no surface the run wrote holds it.
 func assertYAMLSecretMasked(t *testing.T, p orchestrator.Paths, runID string, cap *captureLogger, secret string) {
 	t.Helper()
 
@@ -107,8 +96,6 @@ func assertYAMLSecretMasked(t *testing.T, p orchestrator.Paths, runID string, ca
 	}
 }
 
-// The project-level `defaults.args` block. This is the reported hole: the
-// masker was seeded from the caller's args, which never carry this value.
 func TestYAMLDefaultSecret_ProjectDefaultsAreMasked(t *testing.T) {
 	p, runID, cap := runYAMLSecret(t, orchestrator.Options{
 		Args:        map[string]string{"env": yamlVisibleArgValue},
@@ -117,8 +104,6 @@ func TestYAMLDefaultSecret_ProjectDefaultsAreMasked(t *testing.T) {
 	assertYAMLSecretMasked(t, p, runID, cap, yamlDefaultSecretValue)
 }
 
-// The per-pipeline `args:` block, the other yaml layer the merge folds in
-// below the CLI flag.
 func TestYAMLDefaultSecret_PipelineArgsAreMasked(t *testing.T) {
 	p, runID, cap := runYAMLSecret(t, orchestrator.Options{
 		Args: map[string]string{"env": yamlVisibleArgValue},
@@ -130,9 +115,6 @@ func TestYAMLDefaultSecret_PipelineArgsAreMasked(t *testing.T) {
 	assertYAMLSecretMasked(t, p, runID, cap, yamlPipelineSecretValue)
 }
 
-// An explicit CLI flag outranks both yaml layers, so the value that must
-// be masked is the flag's -- and the yaml value the run never used must
-// not be dragged into the redaction set.
 func TestYAMLDefaultSecret_CLIFlagOutranksYAMLAndIsMasked(t *testing.T) {
 	const flagSecret = "cli-flag-supersecret"
 	p, runID, cap := runYAMLSecret(t, orchestrator.Options{
@@ -142,12 +124,6 @@ func TestYAMLDefaultSecret_CLIFlagOutranksYAMLAndIsMasked(t *testing.T) {
 	assertYAMLSecretMasked(t, p, runID, cap, flagSecret)
 }
 
-// The display half. A yaml-supplied secret is not recorded on the run row
-// at all -- the row keeps the caller's args, which is what the reproducer
-// replays -- so the display surfaces cannot leak it. The classification is
-// still written, because it comes from the registration's declared names
-// rather than from the values, which is what keeps a *flag*-supplied
-// secret on the same row redacted.
 func TestYAMLDefaultSecret_DisplaySurfacesCarryNoPlaintext(t *testing.T) {
 	p, runID, _ := runYAMLSecret(t, orchestrator.Options{
 		Args:        map[string]string{"env": yamlVisibleArgValue},
@@ -192,8 +168,7 @@ func TestYAMLDefaultSecret_DisplaySurfacesCarryNoPlaintext(t *testing.T) {
 	if strings.Contains(runStart, yamlDefaultSecretValue) {
 		t.Errorf("run_start attrs leak the yaml-supplied secret:\n%s", runStart)
 	}
-	// The envelope is one file: a masked run_start next to an unmasked
-	// node log line is still a leaked secret on disk.
+
 	if strings.Contains(string(env), yamlDefaultSecretValue) {
 		t.Errorf("run envelope leaks the yaml-supplied secret:\n%s", env)
 	}
@@ -215,10 +190,6 @@ func TestYAMLDefaultSecret_DisplaySurfacesCarryNoPlaintext(t *testing.T) {
 	}
 }
 
-// Retry rehydrates a run's args from the stored row and re-merges the
-// yaml layers from the checkout it runs in. The rehydrated args carry no
-// token, so the value arrives from sparkwing.yaml again -- the retry must
-// execute with the real secret and mask it just like the first attempt.
 func TestYAMLDefaultSecret_RetryRehydrationExecutesAndMasks(t *testing.T) {
 	defaults := map[string]string{"token": yamlDefaultSecretValue}
 	p, runID, _ := runYAMLSecret(t, orchestrator.Options{

@@ -11,17 +11,6 @@ import (
 	"testing"
 )
 
-// The command registry is what `--help`, shell completion, and the
-// generated CLI reference all read, and nothing checked it against the
-// flags the dispatch code actually registers. `dashboard start
-// --profile` was advertised on all three surfaces for as long as it did
-// not exist; the guard inside dashboard.go even built an error string
-// naming it. The command-name checks in docs_honesty_test.go could not
-// see it, because they compare names and this is a flag.
-//
-// The truth here is the source: a flag exists if some FlagSet built for
-// that command registers it. Registry-side flags the source never
-// registers are the failure this catches.
 func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 	varPaths := registryVarPaths(t)
 	registered := flagsRegisteredPerCommand(t, varPaths)
@@ -36,16 +25,12 @@ func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 		}
 		have, ok := registered[cmd.Path]
 		if !ok {
-			// The command builds no FlagSet this walk can attribute to
-			// it -- a group node, or one whose flags come from
-			// bindFlags. Neither can go stale the way a hand-registered
-			// set can, so silence here is not a missed check.
 			continue
 		}
 		checked++
 		for _, f := range cmd.Flags {
 			if f.Type != "" {
-				continue // bindFlags registers these from the registry itself
+				continue
 			}
 			if slices.Contains(have, f.Name) {
 				continue
@@ -110,10 +95,6 @@ func stringLiteral(expr ast.Expr) (string, bool) {
 	return value, err == nil
 }
 
-// flagsRegisteredPerCommand walks cmd/sparkwing for
-// `flag.NewFlagSet(cmdX.Path, ...)` and collects every flag name
-// registered on the resulting variable, keyed by the command's
-// registry path.
 func flagsRegisteredPerCommand(t *testing.T, varPaths map[string]string) map[string][]string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -153,14 +134,6 @@ func flagsRegisteredPerCommand(t *testing.T, varPaths map[string]string) map[str
 	return byPath
 }
 
-// helperFlagSets maps every function that registers flags on a
-// *flag.FlagSet parameter to the names it registers.
-//
-// Registration through a shared helper is the norm here -- --profile
-// alone is added to a dozen cluster commands that way -- so a walk that
-// only looked at the command's own body would report most of the CLI as
-// advertising flags that do not exist. Three passes let a helper that
-// calls another helper resolve; the CLI nests no deeper.
 func helperFlagSets(funcs []*ast.FuncDecl) map[string][]string {
 	out := map[string][]string{}
 	for range 3 {
@@ -175,8 +148,6 @@ func helperFlagSets(funcs []*ast.FuncDecl) map[string][]string {
 	return out
 }
 
-// flagSetParam names fn's *flag.FlagSet parameter, or "" when it takes
-// none.
 func flagSetParam(fn *ast.FuncDecl) string {
 	if fn.Type.Params == nil {
 		return ""
@@ -191,8 +162,6 @@ func flagSetParam(fn *ast.FuncDecl) string {
 	return ""
 }
 
-// flagSetsIn maps each `flag.NewFlagSet(cmdX.Path, ...)` in fn to the
-// variable it was assigned to, keyed by the cmdX identifier.
 func flagSetsIn(fn *ast.FuncDecl) map[string]string {
 	out := map[string]string{}
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -222,10 +191,6 @@ func flagSetsIn(fn *ast.FuncDecl) map[string]string {
 	return out
 }
 
-// flagNamesOn collects the flag names registered on the FlagSet held in
-// fsVar. Both the returning forms (fs.String) and the Var forms
-// (fs.StringVar) are counted; the name is the first string literal
-// argument in either shape.
 func flagNamesOn(fn *ast.FuncDecl, fsVar string, helpers map[string][]string) []string {
 	var names []string
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -258,8 +223,7 @@ func flagNamesOn(fn *ast.FuncDecl, fsVar string, helpers map[string][]string) []
 		}
 		return true
 	})
-	// A call that hands the FlagSet to a helper registers whatever
-	// that helper registers.
+
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -280,7 +244,7 @@ func flagNamesOn(fn *ast.FuncDecl, fsVar string, helpers map[string][]string) []
 			return true
 		}
 		names = append(names, helpers[id.Name]...)
-		// The wrappers that take the flag name themselves.
+
 		for _, arg := range call.Args {
 			if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
 				if v, err := strconv.Unquote(lit.Value); err == nil && v != "" {
@@ -303,9 +267,6 @@ func isSelector(e ast.Expr, pkg, name string) bool {
 	return ok && id.Name == pkg
 }
 
-// registryVarPaths maps each `var cmdX = Command{...}` identifier in
-// help_registry.go to the Path that entry declares, so a FlagSet built
-// from cmdX.Path can be attributed to the right registry entry.
 func registryVarPaths(t *testing.T) map[string]string {
 	t.Helper()
 	fset := token.NewFileSet()

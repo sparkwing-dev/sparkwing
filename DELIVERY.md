@@ -10,12 +10,10 @@ this file is a menu and checklist, not a command that every change must run.
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
 - **Normal broad check:** `sparkwing run pre-commit` covers every committed Go
-  module, the dashboard TypeScript unit, production build, browser-test lint,
+  module, the dashboard TypeScript unit, full ESLint, production build,
   and browser smoke suites, formatting, vet, build, tests, documentation
-  mirrors, and source policy. Unit and browser-test lint run in parallel; the
-  production build then feeds the browser suite. A measured warm browser chain
-  takes about 18 seconds (0.7s unit, 2.2s lint, 4.5s build, 11.0s browser,
-  including its cached browser install and authenticated Go fixture).
+  mirrors, and source policy. Unit and ESLint run in parallel; the production
+  build then feeds the browser suite.
 - **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
@@ -24,6 +22,12 @@ this file is a menu and checklist, not a command that every change must run.
   dev` on :3100) and stop it with `bash bin/dev-stop.sh`; the browser gate uses
   deterministic API fixtures on OS-assigned local ports and does not replace
   that product exercise or exercise Kubernetes.
+- **Kubernetes product path:** `sparkwing run k8s-e2e` proves authenticated
+  webhook intake, runner execution, logs, cancellation, retry, restarts, and
+  retained state against an explicit Kubernetes context and caller-supplied
+  image set. It requires an exact namespace/release cleanup allow-list and
+  never creates or deletes cluster infrastructure. This check is manual and
+  opt-in because it uses a real cluster.
 
 ## Decisions before landing
 

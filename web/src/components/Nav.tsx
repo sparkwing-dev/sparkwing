@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { type Approval, getPendingApprovals } from "@/lib/api";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 
@@ -18,9 +18,6 @@ const tabs: Tab[] = [
   { href: "https://sparkwing.dev/docs/", label: "Docs", external: true },
 ];
 
-// Polling cadence for the pending-approvals badge. 10s is a compromise
-// between "badge feels live" and "don't thrash the controller while
-// dashboards are left open in a tab all day".
 const APPROVALS_POLL_MS = 10_000;
 
 export default function Nav() {
@@ -106,16 +103,15 @@ export default function Nav() {
 }
 
 function LogoutControl() {
-  const [required, setRequired] = useState(false);
-  useEffect(() => {
-    const configured = (
-      window as unknown as { __SPARKWING_REQUIRE_LOGIN__?: string }
-    ).__SPARKWING_REQUIRE_LOGIN__;
-    setRequired(configured === "true");
-  }, []);
-  if (!required) return null;
+  const csrfToken = useSyncExternalStore(
+    subscribeToLogoutConfig,
+    readLogoutCSRFToken,
+    emptyLogoutCSRFToken,
+  );
+  if (!csrfToken) return null;
   return (
     <form method="POST" action="/logout">
+      <input type="hidden" name="csrf_token" value={csrfToken} />
       <button
         type="submit"
         className="ml-2 px-2 py-1 text-xs rounded-sm border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
@@ -126,18 +122,45 @@ function LogoutControl() {
   );
 }
 
-// VersionPill surfaces the CLI version the serving binary reports
-// (injected by internal/web via __SPARKWING_VERSION_MARKER__). Hidden
-// when the server doesn't inject a value -- typically a non-cluster
-// dev build with no -ldflags="-X main.Version=..." set.
+function subscribeToLogoutConfig() {
+  return () => {};
+}
+
+function readLogoutCSRFToken() {
+  const configured = (
+    window as unknown as { __SPARKWING_REQUIRE_LOGIN__?: string }
+  ).__SPARKWING_REQUIRE_LOGIN__;
+  if (configured !== "true") return "";
+  const cookie = document.cookie
+    .split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith("sw_csrf="));
+  if (!cookie) return "";
+  try {
+    return decodeURIComponent(cookie.slice("sw_csrf=".length));
+  } catch {
+    return "";
+  }
+}
+
+function emptyLogoutCSRFToken() {
+  return "";
+}
+
 function VersionPill() {
   const [version, setVersion] = useState<string>("");
   useEffect(() => {
-    const v = (window as unknown as { __SPARKWING_VERSION__?: string })
-      .__SPARKWING_VERSION__;
-    if (v && v !== "__SPARKWING_VERSION_MARKER__") {
-      setVersion(v);
-    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      const v = (window as unknown as { __SPARKWING_VERSION__?: string })
+        .__SPARKWING_VERSION__;
+      if (!cancelled && v && v !== "__SPARKWING_VERSION_MARKER__") {
+        setVersion(v);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
   if (!version) return null;
   return (

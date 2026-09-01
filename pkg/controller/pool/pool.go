@@ -276,9 +276,6 @@ func (p *Pool) NextToWarm(ctx context.Context, refreshInterval time.Duration) (s
 	return candidates[0].name, nil
 }
 
-// setState updates a PVC's pool-state annotation and optionally
-// clears/sets other annotations. Does NOT touch warmed-at -- only
-// MarkClean updates that, after an actual warm.
 func (p *Pool) setState(ctx context.Context, name, state string, clearAnnotations map[string]string) error {
 	pvc, err := p.Client.CoreV1().PersistentVolumeClaims(p.Namespace).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {

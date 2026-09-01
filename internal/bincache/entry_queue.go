@@ -17,9 +17,6 @@ const cacheQueueLockRetry = 10 * time.Millisecond
 
 var cacheQueueLockTimeout = 2 * time.Second
 
-// ErrCacheQueueBusy reports that the bounded wait for the cache's
-// ordering lock expired. The caller can retry without guessing whether
-// an otherwise bounded cache operation is still making progress.
 var ErrCacheQueueBusy = errors.New("pipeline cache queue is busy")
 
 type cacheQueueState struct {

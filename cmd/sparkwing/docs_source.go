@@ -1,7 +1,3 @@
-// Helpers shared between `sparkwing docs` and `sparkwing docs
-// migrations` for the --web / --version / --no-cache flags. The CLI
-// stays hermetic by default; --web opts into network fetches against
-// sparkwing.dev with an on-disk cache.
 package main
 
 import (
@@ -19,18 +15,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-// docsWebFlags is the bundle of network-related flags added to every
-// docs verb. Callers register the flags on their own FlagSet via
-// register(), then call resolve() after parsing.
 type docsWebFlags struct {
 	web     bool
 	version string
 	noCache bool
 }
 
-// registerWebFlags attaches --web, --version, and --no-cache to fs.
-// includeVersion lets `all` / `search` skip the --version flag since
-// they don't take a version argument.
 func registerWebFlags(fs *flag.FlagSet, f *docsWebFlags, includeVersion bool) {
 	fs.BoolVar(&f.web, "web", false, "fetch from sparkwing.dev instead of the embedded corpus")
 	if includeVersion {
@@ -39,8 +29,6 @@ func registerWebFlags(fs *flag.FlagSet, f *docsWebFlags, includeVersion bool) {
 	fs.BoolVar(&f.noCache, "no-cache", false, "with --web, bypass the on-disk cache (read + write)")
 }
 
-// embeddedVersion returns this CLI's own version, or "" if no
-// release version is baked in.
 func embeddedVersion() string {
 	v := installedVersion()
 	if semver.IsValid(v) {
@@ -49,23 +37,14 @@ func embeddedVersion() string {
 	return ""
 }
 
-// resolveDocSource decides where to read a doc / list / migration
-// from, given the parsed flags. Returns a webResolution describing
-// the chosen source (embed vs web) and, when web, a configured
-// WebClient. Errors carry the clean user-facing messages from the
-// task spec.
 type webResolution struct {
 	useWeb     bool
-	version    string // canonical: "vX.Y.Z" or "latest"; "" means embed-only
+	version    string
 	client     *docs.WebClient
-	versions   *docs.Versions // nil unless --web AND discovery succeeded
-	discoveryW string         // warning printed when discovery failed
+	versions   *docs.Versions
+	discoveryW string
 }
 
-// resolveSource validates the requested version against the embed
-// (when --web is off) or against sparkwing.dev/versions.json (when
-// --web is on). The returned context.Context carries the call timeout
-// for any subsequent web fetches.
 func resolveSource(ctx context.Context, f docsWebFlags) (webResolution, error) {
 	r := webResolution{useWeb: f.web, version: strings.TrimSpace(f.version)}
 	embedVer := embeddedVersion()
@@ -137,26 +116,16 @@ func displayEmbedded(v string) string {
 	return v
 }
 
-// printDiscoveryWarning writes the resolution's discovery warning, if
-// any, to stderr. Idempotent -- callers can invoke once they know the
-// resolution went through.
 func printDiscoveryWarning(r webResolution) {
 	if r.discoveryW != "" {
 		fmt.Fprintf(os.Stderr, "%s %s\n", color.Yellow("warning:"), r.discoveryW)
 	}
 }
 
-// newWebContext returns a context with a 30s timeout suitable for a
-// single CLI invocation: long enough to cover one retry + cache write
-// on a slow link, short enough that a hung connection doesn't hang
-// the user indefinitely.
 func newWebContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 30*time.Second)
 }
 
-// fetchDocWeb fetches one doc from the resolution's source, returning
-// the raw markdown. Wraps 404 into a clean user-facing error per the
-// task spec.
 func fetchDocWeb(ctx context.Context, r webResolution, slug string) (string, error) {
 	body, err := r.client.Doc(ctx, r.version, slug)
 	if err == nil {
@@ -170,9 +139,6 @@ func fetchDocWeb(ctx context.Context, r webResolution, slug string) (string, err
 	return "", err
 }
 
-// fetchMigrationWeb fetches one migration guide from the resolution's
-// source. Migrations require an explicit semver; LatestAlias is
-// rejected upstream.
 func fetchMigrationWeb(ctx context.Context, r webResolution) (string, error) {
 	if r.version == "" || r.version == docs.LatestAlias {
 		return "", errors.New("docs migrations: --version must be a specific semver (e.g. --version v0.4.0); 'latest' is not meaningful for migrations")

@@ -16,25 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// TestHeadless_ScaffoldedModuleServesOpsAndRuns is the gate behind the product
-// principle "sparkwing does not require sparkwing": a plain `go build` of a
-// scaffolded .sparkwing module -- one that blank-imports its jobs package and
-// calls runner.Main, with no sparkwing CLI anywhere in the loop -- must produce
-// a binary that runs a pipeline and serves the operator surface (queue, stats,
-// version) for itself.
-//
-// The binary no longer hosts the admission daemon, so with no sparkwing
-// installed there is nothing to admit against. The scaffolded pipeline declares
-// no resources and no concurrency groups, so this is the implicit-reservations
-// case: the run says once that it is uncoordinated and proceeds. That is what
-// keeps a pipeline binary shipped alone to a deploy box a working product.
-//
-// PATH is emptied for the run phase, deliberately: the host-binary lookup falls
-// back to a `sparkwing` on PATH, and an ambient one on the developer's machine
-// would make this gate pass for the wrong reason.
-//
-// It generates the module against the working tree (a replace directive), so
-// the guarantee is checked for the code under test, not a released SDK.
 func TestHeadless_ScaffoldedModuleServesOpsAndRuns(t *testing.T) {
 	if testing.Short() {
 		t.Skip("headless guarantee build is slow; run without -short")
@@ -76,10 +57,6 @@ func TestHeadless_ScaffoldedModuleServesOpsAndRuns(t *testing.T) {
 		t.Fatalf("ops queue -o json is not valid QueueState JSON: %v", err)
 	}
 
-	// safety: no daemon and no host binary, so the run cannot be admitted and
-	// must proceed anyway -- announcing the fact exactly once, since a silently
-	// uncoordinated run on a box that usually coordinates is the failure mode
-	// this warning exists to prevent.
 	runOut := runBin(t, mod, runEnv, bin, "noop")
 	const warning = "running without local coordination"
 	if got := strings.Count(runOut, warning); got != 1 {
@@ -89,10 +66,6 @@ func TestHeadless_ScaffoldedModuleServesOpsAndRuns(t *testing.T) {
 		t.Fatalf("uncoordinated-run warning does not name the missing host:\n%s", runOut)
 	}
 
-	// The other side of "it never hosts": nothing in that run started a
-	// daemon. The failure this guards against is not a pipeline binary
-	// serving the wrong daemon verb -- it is a pipeline binary being asked
-	// to serve one at all.
 	if _, err := os.Stat(filepath.Join(home, "wingd", "d.log")); err == nil {
 		t.Fatal("a pipeline binary with no host available started a daemon anyway")
 	}
@@ -108,11 +81,6 @@ func TestHeadless_ScaffoldedModuleServesOpsAndRuns(t *testing.T) {
 		t.Fatalf("ops stats json: %v", err)
 	}
 
-	// A pipeline binary serves no daemon verb, and the argv the client's
-	// spawn builds is exactly what an accidental self-exec would run. This
-	// asserts it is refused as an unknown pipeline rather than half-served
-	// -- the state that broke local runs when the spawn verb and the
-	// dispatcher drifted apart.
 	for _, verb := range []string{"run", wingdclient.DaemonSpawnVerb} {
 		cmd := exec.Command(bin, "wingd", verb, "--home", home)
 		cmd.Dir = mod
@@ -158,17 +126,8 @@ import (
 func main() { runner.Main() }
 `
 
-// daemonStopTimeout bounds the teardown drain, generously enough to cover
-// a daemon still writing its final state snapshot.
 const daemonStopTimeout = 15 * time.Second
 
-// stopHomeDaemon registers the teardown that stops the admission daemon
-// the binary under test spawns for home, and fails the test when one is
-// still answering afterwards. Register it before anything runs against
-// home: the daemon detaches from the test process and outlives it, so a
-// teardown that only runs on the success path leaks a daemon exactly when
-// someone is already debugging -- and a stray daemon reads as the
-// machine's resident one to whoever inspects it next.
 func stopHomeDaemon(t *testing.T, home string) {
 	t.Helper()
 	t.Cleanup(func() {

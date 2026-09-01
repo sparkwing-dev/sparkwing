@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// seedRunAndNode creates a run + a single node in the 'pending'
-// status. Shared helper for the node-claim tests so each test stays
-// focused on the one behavior it's asserting.
 func seedRunAndNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -262,9 +259,6 @@ func TestNodeClaim_DoneNodesNotClaimable(t *testing.T) {
 	}
 }
 
-// seedNodeWithLabels inserts a pending node with a needs_labels
-// selector and marks it ready. Kept inline to the label-match tests
-// so each case reads top-to-bottom.
 func seedNodeWithLabels(t *testing.T, s *store.Store, runID, nodeID string, labels []string) {
 	t.Helper()
 	ctx := context.Background()

@@ -10,13 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// repoTest creates a fresh git repo in a temp dir, populates it with
-// the given files, and returns the directory path. Each file is
-// committed so `git ls-files` reports it. The test t.Cleanup hook
-// removes the dir.
-//
-// Files: map of relative path -> content. Subdirectories are created
-// as needed.
 func repoTest(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -52,10 +45,6 @@ func writeAll(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
-// hashIn temporarily switches sparkwing.WorkDir to the test repo so
-// the inputs helpers run git in the right place; restores on
-// cleanup. Mirrors what the orchestrator does in production via
-// SPARKWING_WORK_DIR + the runtime snapshot.
 func hashIn(t *testing.T, dir string, fn func()) {
 	t.Helper()
 	prev := sparkwing.CurrentRuntime().WorkDir
@@ -155,8 +144,6 @@ func TestRepoFiles_NewFileBusts(t *testing.T) {
 	})
 }
 
-// Verifies that a deleted-but-still-indexed file (`git rm` minus commit,
-// or working-tree delete) doesn't crash the hash.
 func TestRepoFiles_HandlesIndexTreeMismatch(t *testing.T) {
 	dir := repoTest(t, map[string]string{
 		"a.txt": "content",
@@ -208,12 +195,6 @@ func TestFiles_EditWithinGlobBusts(t *testing.T) {
 	})
 }
 
-// When WorkDir() points at a subdirectory of the repo (e.g. .sparkwing/
-// after the env-var handoff was retired), `git ls-files` from that
-// cwd default-scopes to the subdir. The hash silently dropped every
-// file outside .sparkwing/, so edits to top-level tracked files
-// (install.sh, source files, CHANGELOG, ...) never busted the cache.
-// This test pins the regression.
 func TestRepoFiles_HashCoversWholeTreeFromSubdirWorkDir(t *testing.T) {
 	dir := repoTest(t, map[string]string{
 		"public/install.sh":      "#!/bin/sh\necho v1",

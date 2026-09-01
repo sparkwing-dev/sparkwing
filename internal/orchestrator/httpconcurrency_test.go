@@ -178,9 +178,6 @@ func TestHTTPConcurrency_CancelWaiterAndForceRelease(t *testing.T) {
 	}
 }
 
-// Defect 4: --no-cache (BypassRead) must reach the store over the HTTP
-// wire. After a cache entry exists, a BypassRead acquire must skip the
-// cache read and run fresh (Granted), not replay the stale entry.
 func TestParity_BypassRead_NoCache(t *testing.T) {
 	b, _ := newHTTPConcurrency(t)
 	ctx := context.Background()
@@ -207,8 +204,6 @@ func TestParity_BypassRead_NoCache(t *testing.T) {
 	}
 }
 
-// Defect 8: a queued acquire's Position/QueueLength/Holders must cross
-// the HTTP wire so the dashboard renders the real queue depth.
 func TestParity_QueuedAcquire_Position_QueueLength_Holders(t *testing.T) {
 	b, _ := newHTTPConcurrency(t)
 	if r := acquireHTTP(t, b, store.AcquireSlotRequest{

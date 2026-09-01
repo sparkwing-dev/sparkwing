@@ -2,10 +2,6 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-// ActionMenuItem is one row of an ActionMenu popover. `tone` shifts
-// the row's hover accent; "danger" picks rose, "primary" indigo, the
-// default a neutral slate. `description` renders as a muted second
-// line so an item can carry a one-line hint without a tooltip.
 export interface ActionMenuItem {
   label: string;
   description?: string;
@@ -14,11 +10,6 @@ export interface ActionMenuItem {
   onSelect: () => void;
 }
 
-// ActionMenu anchors a popover to its trigger and closes on outside
-// click, Escape, or item selection. Use for compact two-or-three
-// choice menus next to a button -- the popover stays visually tied
-// to the dashboard's surfaces instead of dropping out to a native
-// browser confirm() dialog.
 export default function ActionMenu({
   trigger,
   items,
@@ -27,11 +18,7 @@ export default function ActionMenu({
 }: {
   trigger: (open: boolean, toggle: () => void) => ReactNode;
   items: ActionMenuItem[];
-  // Horizontal alignment of the popover relative to the trigger.
-  // "end" right-aligns (good for top-bar action stacks); "start"
-  // left-aligns.
   align?: "start" | "end";
-  // Optional small label rendered above the items.
   title?: string;
 }) {
   const [open, setOpen] = useState(false);

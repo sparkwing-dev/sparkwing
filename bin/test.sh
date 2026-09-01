@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# sparkwing run: test
-# desc: Run Go tests with formatted pass/fail summary
-# arg: package (optional, default: ./...) Go package pattern
 set -uo pipefail
 
 CYAN="\033[36m"
@@ -18,13 +15,11 @@ FLAKY_RUNS="${FLAKY_RUNS:-0}"
 echo -e "${BOLD}sparkwing test suite${RESET}"
 echo ""
 
-# Run tests with verbose output, skip the intentional flaky test
 START=$SECONDS
 OUTPUT=$(SPARKWING_DISABLE_FLAKY=1 go test "$PACKAGE" -count=1 -v 2>&1)
 DURATION=$(( SECONDS - START ))
 EXIT_CODE=${PIPESTATUS[0]:-$?}
 
-# Parse results
 PASSED=0
 FAILED=0
 SKIPPED=0
@@ -44,7 +39,6 @@ done <<< "$OUTPUT"
 
 TOTAL=$((PASSED + FAILED + SKIPPED))
 
-# Per-package results
 echo -e "${BOLD}Packages${RESET}"
 while IFS= read -r line; do
   if [[ "$line" =~ ^ok ]]; then
@@ -68,12 +62,10 @@ done <<< "$OUTPUT"
 
 echo ""
 
-# Failed test details
 if [[ ${#FAIL_NAMES[@]} -gt 0 ]]; then
   echo -e "${RED}${BOLD}Failed tests:${RESET}"
   for name in "${FAIL_NAMES[@]}"; do
     echo -e "  ${RED}$name${RESET}"
-    # Show the failure message
     echo "$OUTPUT" | grep -A2 "--- FAIL: $name" | tail -n +2 | while read -r l; do
       echo -e "    ${DIM}$l${RESET}"
     done
@@ -81,7 +73,6 @@ if [[ ${#FAIL_NAMES[@]} -gt 0 ]]; then
   echo ""
 fi
 
-# Summary
 echo -e "${BOLD}Results${RESET}"
 echo -e "  ${GREEN}${PASSED} passed${RESET}  ${RED}${FAILED} failed${RESET}  ${YELLOW}${SKIPPED} skipped${RESET}  ${DIM}${TOTAL} total${RESET}  ${DIM}${DURATION}s${RESET}"
 
@@ -91,7 +82,6 @@ else
   echo -e "\n${RED}${BOLD}${FAILED} test(s) failed.${RESET}"
 fi
 
-# Optional: run flaky detection
 if [[ "$FLAKY_RUNS" -gt 0 ]]; then
   echo ""
   echo -e "${BOLD}Flaky detection${RESET} (${FLAKY_RUNS} runs)"

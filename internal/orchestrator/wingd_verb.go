@@ -16,21 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// RunWingd serves the hidden `wingd` subcommands for installed binaries
-// that host the local admission daemon: sparkwing-runner, whose
-// in-process client self-spawns when it routes controller work through
-// the local daemon, dispatches here.
-//
-// Both verbs are served, because the client's self-spawn starts `wingd
-// supervise` and that supervisor re-execs `wingd run`: a binary that
-// serves only one half answers its own spawn with a usage error and
-// never brings a daemon up.
-//
-// Compiled pipeline binaries do not serve these verbs. The installed
-// Sparkwing distribution owns daemon lifecycle; pipeline clients declare
-// required capabilities and use the running daemon, but never host,
-// replace, or upgrade it (see pipelineAdmission), so a repo's
-// .sparkwing/go.mod pin never becomes the machine's daemon version.
 func RunWingd(args []string) error {
 	if len(args) > 0 && args[0] == "supervise" {
 		return supervise.Run(args[1:])
@@ -38,7 +23,6 @@ func RunWingd(args []string) error {
 	return runWingdCLI(args)
 }
 
-// runWingdCLI elects and serves one daemon for a sparkwing home.
 func runWingdCLI(args []string) error {
 	if len(args) == 0 || args[0] != "run" {
 		return errors.New("usage: wingd run|supervise [--home DIR] [--version V]")
@@ -83,12 +67,6 @@ func runWingdCLI(args []string) error {
 	return nil
 }
 
-// NewOrphanRunFinalizer returns the daemon hook that finalizes a run
-// row whose process died holding or awaiting admission -- the kernel
-// closed the socket without an explicit release. It opens the home's
-// local state DB, and flips the row to interrupted only when it is
-// still running; rows already finalized, absent, or backed by a
-// non-local state store are left alone.
 func NewOrphanRunFinalizer(home string) func(runID string) {
 	return func(runID string) {
 		if err := finalizeRun(home, runID, "interrupted: run process exited without finalizing (admission connection lost)"); err != nil {
@@ -97,8 +75,6 @@ func NewOrphanRunFinalizer(home string) func(runID string) {
 	}
 }
 
-// NewCancelledRunsFinalizer returns the daemon hook that persists every run
-// sharing an explicitly cancelled lease in one transaction.
 func NewCancelledRunsFinalizer(home string) func([]string, string) error {
 	return func(runIDs []string, reason string) error {
 		return finalizeRuns(home, runIDs, reason)

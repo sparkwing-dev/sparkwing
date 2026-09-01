@@ -4,6 +4,21 @@ Sparkwing runner bundle installed.
   Namespace: {{ .Release.Namespace }}
   Chart:     {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }})
 
+{{- $unpinnedImages := empty .Values.runner.image.tag -}}
+{{- if .Values.cache.enabled -}}
+{{- $unpinnedImages = or $unpinnedImages (empty .Values.cache.image.tag) -}}
+{{- end -}}
+{{- if .Values.logs.enabled -}}
+{{- $unpinnedImages = or $unpinnedImages (empty .Values.logs.image.tag) -}}
+{{- end -}}
+{{- if $unpinnedImages }}
+
+WARNING: This chart version has no compatible public default image set.
+At least one enabled component still uses the appVersion fallback. Pin both
+image.repository and image.tag for every enabled component to images built
+from one compatible Sparkwing revision before treating this as runnable.
+{{- end }}
+
 Components:
   Runner    {{ .Values.runner.replicas }} replica(s)  -> {{ include "sparkwing-runner-bundle.runner.fullname" . }}
 {{- if .Values.cache.enabled }}
@@ -13,7 +28,8 @@ Components:
   Logs      {{ .Values.logs.replicas }} replica(s)  -> {{ include "sparkwing-runner-bundle.logs.fullname" . }}
 {{- end }}
 
-{{- if not .Values.controller.url }}
+{{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . }}
+{{- if not $controllerURL }}
 
 WARNING: controller.url is empty. The runner will not be able to claim
 work until you set it:

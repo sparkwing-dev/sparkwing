@@ -7,18 +7,11 @@ import (
 )
 
 const (
-	// capacityCoreBand is the smallest core swing that re-derivation acts on,
-	// so a fractional measurement wobble never resizes the ledger.
 	capacityCoreBand = 0.5
-	// capacityBandFraction scales the deadband with the machine, so a large
-	// host tolerates a proportionally larger wiggle before a resize.
+
 	capacityBandFraction = 0.05
 )
 
-// capacityReading is the machine capacity derived from one host sample: the
-// raw host totals, the effective machine size after the container clamp, the
-// container ceiling when it binds below the host, and the budget-capped
-// totals the ledger is sized against.
 type capacityReading struct {
 	hostCores       float64
 	hostMemory      uint64
@@ -30,11 +23,6 @@ type capacityReading struct {
 	budgetMemory    uint64
 }
 
-// deriveCapacity resolves the machine capacity from a host sample: the host
-// total, lowered to the cgroup ceiling on each dimension the container
-// constrains below it, then capped by the configured budget. It is the
-// single derivation both startup and the periodic re-check use, so a running
-// daemon sizes capacity exactly as a fresh one does.
 func (d *Daemon) deriveCapacity(stat HostStat) capacityReading {
 	r := capacityReading{
 		hostCores:     stat.TotalCores,

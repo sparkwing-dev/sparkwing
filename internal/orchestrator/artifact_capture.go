@@ -17,45 +17,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-// artifactManifest is the content-addressed record of the files a
-// producer node published. It is stored in the [storage.ArtifactStore]
-// under its own digest; the producer node records that digest so a
-// consumer (or a cache replay) resolves the exact published file set
-// without re-running the producer.
 type artifactManifest struct {
 	Entries []artifactEntry `json:"entries"`
 }
 
-// artifactEntry is one captured file: its path relative to the producer
-// workspace, the content digest under which its bytes are stored, and
-// the unix permission bits to restore on staging.
 type artifactEntry struct {
 	Path   string `json:"path"`
 	Digest string `json:"digest"`
 	Mode   uint32 `json:"mode"`
 }
 
-// artifactBlobKey is the store key for a captured file's bytes, keyed by
-// the file's own content digest (dedup across runs and producers).
 func artifactBlobKey(digest string) string { return "artifacts/blobs/" + digest }
 
-// artifactManifestKey is the store key for a manifest's bytes, keyed by
-// the manifest's own content digest.
 func artifactManifestKey(digest string) string { return "artifacts/manifests/" + digest }
 
-// captureArtifacts resolves globs against workspace, stores each matched
-// regular file content-addressed in store, builds a manifest, stores the
-// manifest content-addressed, and returns the manifest digest.
-//
-// Glob semantics: a path is captured when a glob matches it or any of
-// its ancestor directories ("**" recurses any number of segments, a
-// single segment uses path.Match), so naming a directory captures the
-// files beneath it. Symlinks are followed to their content; a symlink in
-// a matched path that does not resolve is an error. A match set of zero
-// files yields (and stores) an empty manifest rather than failing.
-//
-// store must be non-nil and globs non-empty; the caller skips capture
-// otherwise.
 func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspace string, globs []string) (string, error) {
 	var entries []artifactEntry
 	walkErr := filepath.WalkDir(workspace, func(p string, d fs.DirEntry, err error) error {
@@ -118,8 +93,6 @@ func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspac
 	return digest, nil
 }
 
-// putArtifactBlob stores the file at p under its content key, skipping
-// the upload when the blob already exists (content-addressed dedup).
 func putArtifactBlob(ctx context.Context, store storage.ArtifactStore, p, digest string) error {
 	key := artifactBlobKey(digest)
 	if ok, err := store.Has(ctx, key); err == nil && ok {
@@ -140,7 +113,6 @@ func putBytes(ctx context.Context, store storage.ArtifactStore, key string, b []
 	return store.Put(ctx, key, strings.NewReader(string(b)))
 }
 
-// hashFile streams the file through sha256 and returns the hex digest.
 func hashFile(p string) (string, error) {
 	f, err := os.Open(p)
 	if err != nil {
@@ -154,9 +126,6 @@ func hashFile(p string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// anyGlobMatches reports whether any glob matches rel or one of its
-// ancestor directory prefixes. Matching an ancestor captures files under
-// a directory named (or wildcard-matched) by a glob.
 func anyGlobMatches(globs []string, rel string) bool {
 	segs := strings.Split(rel, "/")
 	for i := len(segs); i >= 1; i-- {
@@ -170,9 +139,6 @@ func anyGlobMatches(globs []string, rel string) bool {
 	return false
 }
 
-// globMatch matches a slash-separated glob against name. "**" matches
-// zero or more path segments; any other segment is matched with
-// path.Match (so "*", "?" and "[...]" work within a single segment).
 func globMatch(pattern, name string) bool {
 	return matchSegments(strings.Split(pattern, "/"), strings.Split(name, "/"))
 }

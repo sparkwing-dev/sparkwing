@@ -1,9 +1,3 @@
-// `sparkwing docs migrations` exposes the per-version migration
-// guides shipped under docs/migrations/ as a typed surface on top of
-// the embedded docs corpus. The intent is agent-facing: one
-// invocation should drop a full migration context blob into a chat
-// without the agent needing to know which slugs exist or how to
-// concatenate them.
 package main
 
 import (
@@ -204,11 +198,6 @@ func runDocsMigrationsBetween(args []string) error {
 	return nil
 }
 
-// filterAndOrderBetween applies the same (from, to] filter as
-// docs.MigrationsBetween, but to an externally-supplied index (e.g.
-// the web-fetched MigrationIndex). The local-only variant lives in
-// pkg/docs/migrations.go; this duplicates the logic so the web path
-// doesn't have to round-trip through the embed.
 func filterAndOrderBetween(all []docs.MigrationEntry, from, to string) []docs.MigrationEntry {
 	if from == "" {
 		from = "v0.0.0"
@@ -242,10 +231,6 @@ func filterAndOrderBetween(all []docs.MigrationEntry, from, to string) []docs.Mi
 	return picked
 }
 
-// renderBetweenMarkdown is the shared formatter for "between" output.
-// Mirrors docs.MigrationsBetweenMarkdown but parameterizes the
-// per-version body fetch so the web path can pull from sparkwing.dev
-// without going through the embed.
 func renderBetweenMarkdown(from, to string, entries []docs.MigrationEntry, fetch func(string) (string, error)) (string, error) {
 	var b strings.Builder
 	displayFrom := from
@@ -287,7 +272,7 @@ func renderBetweenMarkdown(from, to string, entries []docs.MigrationEntry, fetch
 func renderMigrationsList(entries []docs.MigrationEntry, output string) error {
 	switch strings.ToLower(output) {
 	case "json":
-		// NDJSON: one migration guide per line.
+
 		return ndjson.Write(os.Stdout, entries)
 	case "plain":
 		for _, e := range entries {
@@ -332,13 +317,6 @@ func renderMigrationsList(entries []docs.MigrationEntry, output string) error {
 	}
 }
 
-// renderStaleCLIHint prints a one-line footer to stderr when the
-// CLI's own version is older than the highest embedded guide -- which
-// happens after a `git pull` of the repo without rebuilding the
-// binary. Without a network call, we can't say "the latest release
-// is X"; we can only flag a local skew between binary and embed.
-// Silent when the CLI version is unknown or matches/exceeds the
-// newest embedded guide.
 func renderStaleCLIHint(entries []docs.MigrationEntry, output string) {
 	if strings.ToLower(output) == "json" || strings.ToLower(output) == "plain" {
 		return

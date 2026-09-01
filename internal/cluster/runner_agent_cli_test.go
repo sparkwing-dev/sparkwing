@@ -14,10 +14,6 @@ import (
 	"time"
 )
 
-// TestAgentConfig_RoundTripFromYAML exercises the file loader and
-// validator: yaml -> struct -> normalized struct with defaults.
-// Ensures label trimming, spawn_policy default, and required-field
-// checks all fire.
 func TestAgentConfig_RoundTripFromYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "agent.yaml")
@@ -59,8 +55,6 @@ spawn_policy: return-to-queue
 	}
 }
 
-// TestAgentConfig_RejectsMissingController fails loudly rather than
-// letting an agent claim with a blank controller URL.
 func TestAgentConfig_RejectsMissingController(t *testing.T) {
 	_, err := ValidateAgentConfig(AgentConfig{Token: "x"})
 	if err == nil {
@@ -68,9 +62,6 @@ func TestAgentConfig_RejectsMissingController(t *testing.T) {
 	}
 }
 
-// TestAgentConfig_RejectsUnsupportedSpawnPolicy makes sure the two
-// deferred policies (run-local / auto) fail validation so a human
-// misconfiguration doesn't silently fall through to return-to-queue.
 func TestAgentConfig_RejectsUnsupportedSpawnPolicy(t *testing.T) {
 	for _, policy := range []string{"run-local", "auto", "bogus"} {
 		_, err := ValidateAgentConfig(AgentConfig{
@@ -83,9 +74,6 @@ func TestAgentConfig_RejectsUnsupportedSpawnPolicy(t *testing.T) {
 	}
 }
 
-// TestAgentConfig_DefaultsSpawnPolicy fills in return-to-queue when
-// unset so agents without an explicit policy don't silently break
-// once run-local / auto ship.
 func TestAgentConfig_DefaultsSpawnPolicy(t *testing.T) {
 	norm, err := ValidateAgentConfig(AgentConfig{Controller: "http://x"})
 	if err != nil {
@@ -96,10 +84,6 @@ func TestAgentConfig_DefaultsSpawnPolicy(t *testing.T) {
 	}
 }
 
-// TestAgent_ClaimPassesLabelsAndToken is the wire-level test: stand
-// up a mock controller, write an agent.yaml pointing at it, run the
-// agent loop with a cancelable ctx, and assert the claim call
-// carried both the bearer token and the configured labels.
 func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	var seen atomic.Value
 	claimSeen := make(chan struct{}, 1)

@@ -22,8 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestTrigger_Validation confirms malformed payloads fail fast
-// without consulting the dispatcher.
 func TestTrigger_Validation(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -54,8 +52,6 @@ func TestTrigger_Validation(t *testing.T) {
 	_ = resp2.Body.Close()
 }
 
-// A POST without trigger.source gets 400, not a 202 with a
-// mislabeled default source.
 func TestTrigger_MissingSource400(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -79,10 +75,6 @@ func TestTrigger_MissingSource400(t *testing.T) {
 	}
 }
 
-// TestTrigger_NoopDispatcher exercises the default path: controller
-// accepts the trigger, returns a run_id, but no pipeline actually
-// runs. Proves the handler returns quickly regardless of dispatch
-// behavior.
 func TestTrigger_NoopDispatcher(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -171,10 +163,6 @@ func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
 	}
 }
 
-// TestTrigger_InProcessDispatcher_FullLoop is the full vertical
-// slice: webhook arrives, controller dispatches, pipeline runs
-// against the same controller via HTTP, final state lands in the
-// DB. Proves external triggers actually produce completed runs.
 func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	registerPipeline("trigger-e2e", func() sparkwing.Pipeline[sparkwing.NoInputs] { return triggerE2EPipe{} })
 
@@ -262,10 +250,6 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	}
 }
 
-// every accepted trigger creates a pending Run row so
-// `runs list` / `runs status` show it before the runner has even
-// claimed it. Without this, dispatches that fail at fetch / compile
-// would never surface in the CLI.
 func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -329,11 +313,6 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	}
 }
 
-// a controller-pre-allocated pending row gets transitioned
-// to running when the orchestrator's CreateRun fires. This is the
-// claimed -> running edge. The upsert deliberately
-// preserves the original CreatedAt so receipt fields can
-// reason about queue latency = StartedAt - CreatedAt.
 func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -376,8 +355,6 @@ func TestTrigger_PendingTransitionsToRunning(t *testing.T) {
 	}
 }
 
-// TestTrigger_DispatcherError surfaces dispatcher-reported errors
-// as 500 responses so the caller can retry.
 func TestTrigger_DispatcherError(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -433,8 +410,6 @@ func (c *captureDispatcher) Dispatch(_ context.Context, req controller.RunReques
 	return nil
 }
 
-// registerPipeline defined in e2e_test context via the client package,
-// but that's a different test package. Redefine locally.
 var registerOnce sync.Map
 
 func registerPipeline(name string, factory func() sparkwing.Pipeline[sparkwing.NoInputs]) {

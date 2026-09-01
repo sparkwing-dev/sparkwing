@@ -9,10 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestSchemaV6_UpgradeAddsQueueArrivedAtColumn reconstructs a schema-5
-// runs store without the queue_arrived_at column, then opens it with the
-// current binary and asserts the v6 migration makes concurrency state
-// queries usable.
 func TestSchemaV6_UpgradeAddsQueueArrivedAtColumn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schema5.db")
 

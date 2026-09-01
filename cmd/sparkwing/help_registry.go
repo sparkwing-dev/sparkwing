@@ -1,7 +1,3 @@
-// Command registry -- the source of truth for help output, flag
-// validation, and shell completion. Every leaf handler pulls its
-// Command from here so the help page, the error messages, and the
-// tab-completion menu all describe the same thing.
 package main
 
 import (
@@ -10,14 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// helpExampleScratchDir returns a per-OS scratch directory string
-// suitable for inlining into help text. Linux gets "/tmp/<name>",
-// macOS the same (since /tmp is a symlink to /private/tmp and works
-// fine), and Windows gets "%TEMP%\<name>" -- using the env-var form
-// rather than a hardcoded C:\Temp so the example is portable across
-// users and matches what they'd type at a cmd.exe prompt. Avoids
-// os.TempDir() because that resolves to ugly per-process paths on
-// macOS (/var/folders/...) that aren't useful to copy-paste.
 func helpExampleScratchDir(name string) string {
 	if runtime.GOOS == "windows" {
 		return `%TEMP%\` + name
@@ -86,14 +74,16 @@ var cmdDaemonStatus = Command{
 var cmdDaemonRestart = Command{
 	Path:        "sparkwing daemon restart",
 	Synopsis:    "Refresh an answering wingd to this installed build",
-	Description: `Drain the current daemon, start this installed binary as its successor, and verify the successor reports the exact target build. Existing holders reconnect and reattach through durable leases. If no daemon is running, nothing is started.`,
+	Description: `Refresh an answering daemon when its build differs from this installed build. With --force, drain and replace an answering daemon even when the builds match. Existing holders reconnect and reattach through durable leases. If no daemon is running, nothing is started.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
+		{Name: "force", Desc: "Replace the daemon even when it already serves this build", Group: "Behavior"},
 	},
-	GroupOrder: []string{"Input", "Output", "Other"},
+	GroupOrder: []string{"Input", "Behavior", "Output", "Other"},
 	Examples: []Example{
 		{"Refresh only if already running", "sparkwing daemon restart"},
+		{"Replace an answering daemon", "sparkwing daemon restart --force"},
 		{"Machine-readable result", "sparkwing daemon restart -o json"},
 	},
 }
@@ -307,10 +297,6 @@ latest) for shell pipelines.`,
 	},
 }
 
-// cmdVersionHold is the operator-set ceiling on CLI self-upgrades.
-// The tool enforces the hold so an agent cannot cross it against
-// operator instruction; the override flag exists but is intentionally
-// left out of the refusal message an agent sees.
 var cmdVersionHold = Command{
 	Path:     "sparkwing version hold",
 	Synopsis: "Show, set, or clear the operator ceiling on CLI upgrades",
@@ -345,10 +331,6 @@ being deferred.`,
 	},
 }
 
-// cmdUpdate is the top-level binary self-update verb. Binary-only
-// (no --cli/--sdk split); for SDK updates use `version update --sdk`.
-// --check reports installed vs latest without modifying anything;
-// --force overrides the downgrade safety guard.
 var cmdUpdate = Command{
 	Path:     "sparkwing update",
 	Synopsis: "Self-update the CLI binary",
@@ -384,11 +366,6 @@ For SDK (go.mod) bumps, use 'sparkwing version update --sdk'.`,
 	},
 }
 
-// cmdVersionUpdate is the unified update verb. Picks one of two
-// targets explicitly via --cli (binary self-update) or --sdk
-// (per-project go.mod bump). Neither flag is the default --
-// the operator must state intent so a stray `version update`
-// can't quietly do the wrong half.
 var cmdVersionUpdate = Command{
 	Path:     "sparkwing version update",
 	Synopsis: "Self-update the CLI binary (--cli) or bump this project's SDK pin (--sdk)",
@@ -1120,15 +1097,6 @@ continuously.`,
 	},
 }
 
-// runFlagSpecs is shared between cmdRun (the `sparkwing run` help
-// page) and cmdPipelineRun (the `sparkwing pipeline run` help page),
-// since the two invocation surfaces are the same execution path
-// under different names. Derived from sparkwing.SparkwingFlagDocs()
-// so the per-pipeline footer (orchestrator/main.go's
-// printPipelineHelp) and the top-level `sparkwing run --help`
-// enumerate from the same source. Adding a flag in
-// sparkwing/sparkwing_flag_docs.go surfaces it in every help page
-// simultaneously.
 var runFlagSpecs = runFlagSpecsFromDocs()
 
 func runFlagSpecsFromDocs() []FlagSpec {
@@ -1179,11 +1147,6 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 	},
 }
 
-// cmdPipelineRun is the canonical run verb under the pipeline
-// namespace. `sparkwing run <name>` aliases to this. Positional
-// pipeline name (the deliberate exception in an otherwise
-// flag-only sparkwing surface) -- run is the hot path, typed
-// many times a day.
 var cmdPipelineRun = Command{
 	Path:     "sparkwing pipeline run",
 	Synopsis: "Invoke a pipeline (canonical form of `sparkwing run <name>`)",
@@ -1213,11 +1176,6 @@ Args.`,
 	},
 }
 
-// cmdPipelineTrigger submits a trigger to a profile's controller for
-// remote execution -- the v0.5.0 successor to `sparkwing run
-// --sw-profile`. Positional pipeline name (mirrors `pipeline run`), a
-// required --profile naming the controller, and pass-through pipeline
-// args.
 var cmdPipelineTrigger = Command{
 	Path:     "sparkwing pipeline trigger",
 	Synopsis: "Submit a pipeline to a profile's controller (remote execution)",
@@ -1246,6 +1204,12 @@ typed Arg, e.g. 'sparkwing pipeline trigger release --profile
 prod --version v1.2.3' passes --version through to the trigger
 payload -- same shape as 'sparkwing run'.
 
+--working-tree freezes tracked changes and untracked non-ignored
+files into an immutable Git snapshot, uploads it before admission,
+and runs that exact snapshot without pushing to the origin. It
+requires a complete SHA-1 repository; shallow and SHA-256 checkouts
+fail before upload.
+
 Requires a profile with controller: set. For local execution
 against a profile's storage, use 'sparkwing run --profile X'.`,
 	PosArgs: []PosArg{
@@ -1254,12 +1218,14 @@ against a profile's storage, use 'sparkwing run --profile X'.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile (from ~/.config/sparkwing/profiles.yaml) whose controller runs the pipeline", Group: "System", Required: true},
 		{Name: "detach", Desc: "Return once the trigger is registered (print the run id); don't follow", Group: "System"},
+		{Name: "working-tree", Desc: "Run tracked changes and untracked non-ignored files from an immutable remote snapshot", Group: "Source"},
 	},
-	GroupOrder:  []string{"System", "Other"},
+	GroupOrder:  []string{"Source", "System", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Submit and follow", "sparkwing pipeline trigger release --profile prod --version v1.2.3"},
 		{"Fire-and-forget; print run id and exit", "sparkwing pipeline trigger release --profile prod --detach"},
+		{"Run the current dirty tree remotely", "sparkwing pipeline trigger test --profile gaming --working-tree"},
 	},
 }
 
@@ -1470,11 +1436,6 @@ rendered with each parameter's default.
 	},
 }
 
-// cmdExampleScaffold materializes an example into a repo. It exists for
-// the template-verify pipeline, which proves every example still
-// compiles and runs by building one; it is hidden because scaffolding
-// from an example is not the path anyone should take to start a
-// pipeline.
 var cmdPipelineExplain = Command{
 	Path:     "sparkwing pipeline explain",
 	Synopsis: "Render the pipeline's Plan DAG without dispatching any jobs",
@@ -1570,12 +1531,6 @@ override with --dir.`,
 	},
 }
 
-// cmdPipelinePlan: same DAG as `explain` plus per-step would-run /
-// would-skip decisions evaluated against the supplied args +
-// --start-at / --stop-at bounds. NO step bodies execute. Designed
-// as the canonical pre-flight verb -- agents and humans inspect the
-// runtime-resolved plan before destructive operations,
-// terraform-style.
 var cmdPipelinePlan = Command{
 	Path:     "sparkwing pipeline plan",
 	Synopsis: "Render the runtime-resolved DAG without dispatching any jobs",
@@ -1617,10 +1572,6 @@ with 'sparkwing run <name>' to actually dispatch.`,
 	},
 }
 
-// cmdRunConfig documents the `<pipeline> config` inspection subverb.
-// Implemented by the inner pipeline binary (orchestrator/main.go's
-// dispatch), so this entry exists primarily for --help discoverability
-// and shell completion.
 var cmdRunConfig = Command{
 	Path:     "sparkwing run config",
 	Synopsis: "Print a pipeline's declared Secrets with provenance",
@@ -1643,11 +1594,6 @@ pipeline binary handles the subverb directly.`,
 	HideFromComplete: true,
 }
 
-// cmdRun is the top-level invoke verb: `sparkwing run <pipeline>`.
-// Takes the pipeline name as a positional (the deliberate exception
-// to the otherwise-flag-only sparkwing surface) because typing the
-// pipeline name many times a day is the hot path; the symmetry cost
-// is worth the ergonomic win.
 var cmdRun = Command{
 	Path:     "sparkwing run",
 	Synopsis: "Invoke a pipeline",
@@ -1689,9 +1635,6 @@ the default for managed git hooks.`,
 	},
 }
 
-// cmdProfile is read-side introspection: which profile would sparkwing
-// pick right now, and why. No positional args; --profile NAME drives the
-// hypothetical "what if I passed --profile NAME" case.
 var cmdProfile = Command{
 	Path:     "sparkwing profile",
 	Synopsis: "Show which profile sparkwing would use right now, and why",
@@ -2350,6 +2293,9 @@ var cmdJobsFailures = Command{
 	Description: `Fetches recent runs with status=failed and extracts the first failing node's step + error message for each. --group-by clusters the output by step so a systemic failure surfaces as one row with a count.`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
+		{Name: "git-sha", Argument: "SHA", Desc: "Restrict to a git SHA prefix", Group: "Filter"},
+		{Name: "branch", Argument: "NAME", Desc: "Restrict to one git branch", Group: "Filter"},
+		{Name: "repo", Argument: "OWNER/NAME", Desc: "Restrict to one repository", Group: "Filter"},
 		{Name: "since", Argument: "DURATION", Desc: "Only failures newer than this (e.g. 24h, 7d)", Group: "Filter"},
 		{Name: "limit", Argument: "N", Desc: "Max failures to analyze", Default: "20", Group: "Filter"},
 		{Name: "group-by", Argument: "KEY", Desc: "Cluster by: step | node", Group: "Output"},
@@ -2368,9 +2314,9 @@ var cmdJobsStats = Command{
 	Synopsis: "Aggregate run counts, success %, avg + p95 duration",
 	Description: `Per-pipeline aggregates across the last 500 root runs (or the --since window). In-flight runs count toward RUN (running) but do not contribute to timing percentiles.
 
---capacity switches to the measured capacity profiles admission learns from: each pipeline's p50/p99 duration, its CPU and memory distributions (p50/p95/peak across recent runs), the CPU CHARGE column holding the core figure admission actually reserves, its queue-wait p50/p99, sample count, and whether the admission charge comes from a pin, measurement, or the cold-start default. The resource percentiles show whether a pipeline is steady or spiky. Admission charges memory from the peak, because under-reserving memory recreates the oversubscription admission exists to prevent, and charges cores from each run's sustained demand instead, because the kernel time-slices a transient CPU collision and reserving a burst peak for a whole run only refuses work the box could have run. A pipeline whose pin has drifted from its measured peaks carries the exact fix. Capacity profiles are local-only and keyed repo/pipeline for runs launched inside a git repo, so same-named pipelines in different repos never share a profile. Every linked worktree of a repo shares that repo's key: a pipeline costs what it costs whichever branch runs it, so a gate on a fresh branch arrives already knowing its price.
+--capacity switches to the measured capacity profiles admission learns from: each pipeline's p50/p99 duration, its CPU and memory distributions (p50/p95/peak across recent runs), the CPU CHARGE column holding the core figure admission actually reserves, its queue-wait p50/p99, sample count, and whether the admission charge comes from a pin, measurement, or the cold-start default. The resource percentiles show whether a pipeline is steady or spiky. Admission charges memory from the peak, because under-reserving memory recreates the oversubscription admission exists to prevent, and charges cores from each run's sustained demand instead, because the kernel time-slices a transient CPU collision and reserving a burst peak for a whole run only refuses work the box could have run. A pipeline whose pin has drifted from its measured peaks carries the exact fix. Capacity profiles are local-only and repo-scoped for runs launched inside a git repo, so same-named pipelines in different repos never share a profile. The repo scope is the repository's canonical identity: host/owner/path from its origin remote, the object store it borrows from when it has no remote, or a private hash of a local-path remote. Every tree of one repository -- the main checkout, a linked worktree, a clone in an ephemeral directory -- therefore shares one profile: a pipeline costs what it costs whichever tree runs it, and a gate cloning into a fresh directory arrives already knowing its price. A repo with no remote at all keys by its directory name. The table prints each key as its repo scope and pipeline joined with "/".
 
---reset clears a pipeline's learned capacity profile so it re-learns from a cold start, the escape hatch for a poisoned measurement -- one freak run that recorded an absurd peak, or a contention-ratcheted demand floor (sparkwing doctor flags those). Name the pipeline with --pipeline NAME as --capacity shows it (repo/pipeline inside a git repo); a bare pipeline name resets every repo-scoped key that carries it, and the summary names each key it reached. Reset every pipeline with --all --yes. The demand floor goes whether or not measured samples sit behind it, since a pipeline that never finished a clean run is still priced off its floor. An explicit .Resources() pin is preserved: admission keeps charging the pin while the profile re-learns. The command prints how many rows were dropped, how many pinned rows were cleared, and how many samples and demand floors were discarded.`,
+--reset clears a pipeline's learned capacity profile so it re-learns from a cold start, the escape hatch for a poisoned measurement -- one freak run that recorded an absurd peak, or a contention-ratcheted demand floor (sparkwing doctor flags those). Name the pipeline with --pipeline NAME as --capacity shows it (repo/pipeline inside a git repo); a bare pipeline name resets every repo-scoped key that carries it, a repo/pipeline name reaches every stored encoding of that profile, and the summary names each profile it reached in the same repo/pipeline form. Reset every pipeline with --all --yes. The demand floor goes whether or not measured samples sit behind it, since a pipeline that never finished a clean run is still priced off its floor. An explicit .Resources() pin is preserved: admission keeps charging the pin while the profile re-learns. The command prints how many rows were dropped, how many pinned rows were cleared, and how many samples and demand floors were discarded.`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline (required with --reset unless --all)", Group: "Filter"},
 		{Name: "since", Argument: "DURATION", Desc: "Only runs newer than this (e.g. 7d)", Group: "Filter"},
@@ -2493,12 +2439,11 @@ described in the CLI wishlist.`,
 
 var cmdJobsFind = Command{
 	Path:     "sparkwing runs find",
-	Synopsis: "Find runs by git SHA / repo / pipeline filter",
+	Synopsis: "Find runs by source identity or pipeline",
 	Description: `Searches recent runs for a match. Use --git-sha to find
 the run that was fired by a specific commit; add --pipeline to
 disambiguate when multiple pipelines respond to the same push. --repo
-matches the GITHUB_REPOSITORY env on the trigger (owner/name), useful
-when one controller handles webhooks from multiple repos.
+matches the repository identity stored on the run (owner/name).
 
 With --wait, blocks until at least one match appears, up to
 --find-timeout. Pairs with 'runs wait' for the push-and-follow loop:
@@ -2511,8 +2456,10 @@ Exit code 0 on match, non-zero on timeout-without-match or
 infrastructure error.`,
 	Flags: []FlagSpec{
 		{Name: "git-sha", Argument: "SHA", Desc: "Match runs whose git SHA starts with this value (prefix match)", Group: "Filter"},
+		{Name: "branch", Argument: "NAME", Desc: "Restrict to one git branch", Group: "Filter"},
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "Match trigger's GITHUB_REPOSITORY env", Group: "Filter"},
+		{Name: "repo", Argument: "OWNER/NAME", Desc: "Restrict to one stored repository identity", Group: "Filter"},
+		{Name: "root-only", Desc: "Exclude child runs", Group: "Filter"},
 		{Name: "since", Argument: "DURATION", Desc: "Lookback window", Default: "1h", Group: "Filter"},
 		{Name: "limit", Argument: "N", Desc: "Max results", Default: "20", Group: "Filter"},
 		{Name: "wait", Desc: "Block until at least one match appears", Group: "Output"},
@@ -2687,19 +2634,9 @@ is recorded on the run, so the consumer executes the tree you
 submitted from even when another registered checkout declares the
 same pipeline name.
 
-ENVIRONMENT: a submitted run does NOT inherit this shell's
-environment. It is executed by the resident consumer, which
-carries the environment of whichever shell started it -- possibly
-hours ago, in another project, with a different AWS_PROFILE or
-KUBECONFIG. So
-
-  AWS_PROFILE=prod sparkwing runs submit deploy
-
-may not do what it looks like. Pass values as pipeline arguments,
-put them in the pipeline's configuration, or start the consumer
-from the environment you want ('sparkwing runs consumer start')
-before submitting. The acknowledgment names the consumer pid so
-the difference is visible.
+Each submitted run executes with the environment captured by its
+submission. The owner-only snapshot is removed when dispatch reaches
+a terminal outcome; it is never stored in the run or trigger row.
 
 Deduplication is opt-in via --idempotency-key, scoped to the
 pipeline. A second submission of the SAME pipeline carrying a key

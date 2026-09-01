@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,75 +21,37 @@ type Server struct {
 	store      *store.Store
 	dispatcher Dispatcher
 	logger     *slog.Logger
-	// pool is the optional warm-PVC pool binding. Nil when the
-	// controller runs without K8s API access; see AttachPool.
+
 	pool *poolBinding
-	// auth wraps every authenticated request and stamps a Principal on
-	// ctx. Nil = auth fully disabled (laptop-local dev).
+
 	auth *Authenticator
-	// githubWebhookSecret verifies HMAC signatures on /webhooks/github
-	// deliveries. Empty = endpoint returns 503.
-	githubWebhookSecret string
-	// queueTimeout is how long a node may sit with ready_at set and
-	// claimed_by NULL before the reaper terminates it with
-	// failure_reason=queue_timeout. Zero disables the sweep.
+
+	githubWebhookSecret  string
+	githubCommitStatuses *githubCommitStatusReporter
+
 	queueTimeout time.Duration
-	// concurrencyCacheCap bounds the total rows retained in the
-	// concurrency_cache table. Zero disables LRU eviction (TTL still
-	// applies). Default 10_000.
+
 	concurrencyCacheCap int
 
-	// secretsCipher, when non-nil, encrypts secret values at rest. Nil
-	// means the controller runs unencrypted (laptop dev).
 	secretsCipher Cipher
 
-	// costPerRunnerHour is the USD rate fed into receipt cost
-	// computation. Zero = unconfigured -> compute_cents=0
-	// in receipts. costRateSource is the human-readable provenance
-	// string the receipt echoes back (e.g. "controller config").
 	costPerRunnerHour float64
 	costRateSource    string
 
-	// bootstrap* caches the users-table-empty check for the
-	// unauthenticated /api/v1/auth/bootstrap-needed probe. Cache is
-	// one-way: once the table becomes non-empty, the "false" answer is
-	// latched and we never probe the store again.
 	bootstrapMu     sync.Mutex
 	bootstrapExpiry time.Time
 	bootstrapNeeded bool
 	bootstrapClosed bool
 
-	// artifactStore exposes /api/v1/artifacts/{key} when non-nil.
-	// Laptop mode wires this so the dashboard can serve build/test
-	// artifacts from the in-process backend; cluster mode leaves it
-	// nil (artifacts come from a dedicated process there) so the
-	// route is unregistered and 404s.
 	artifactStore storage.ArtifactStore
 
-	// cachePodURL is the externally-reachable URL of the sparkwing-cache
-	// pod (gitcache + artifact store + registry proxy). Surfaced via
-	// GET /api/v1/services so the operator CLI can discover it without
-	// hardcoding it in profiles.yaml. Empty = endpoint returns 404,
-	// callers fall back to "no cache pod configured."
 	cachePodURL string
 	logsURL     string
-	// cacheURL is the controller-reachable sparkwing-cache URL. It can
-	// be an in-cluster service URL because only controller proxy routes
-	// use it.
+
 	cacheURL string
 
-	// reconcileHook runs before list/get-run reads when non-nil.
-	// Laptop mode sets this to a closure over
-	// orchestrator.ReconcileOrphanedLocalRuns so a dashboard refresh
-	// never shows a "running" row whose orchestrator process died.
-	// Cluster mode leaves it nil -- the cluster has a dedicated
-	// reconciler. Errors are swallowed so a transient sweep failure
-	// never blocks a read.
 	reconcileHook func(context.Context) error
 
-	// runnerHeadroom holds each registered runner's most recently
-	// advertised free capacity, refreshed on node claims and heartbeats
-	// and surfaced in the agents view. Soft state; never gates admission.
 	runnerHeadroom *runnerHeadroomRegistry
 }
 
@@ -175,9 +138,6 @@ func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server {
 	return s
 }
 
-// reconcileBeforeRead wraps a read handler so the reconcile hook (if
-// set) runs first. Returns h unchanged when no hook is configured;
-// no allocation, no overhead in cluster mode.
 func (s *Server) reconcileBeforeRead(h http.HandlerFunc) http.HandlerFunc {
 	if s.reconcileHook == nil {
 		return h
@@ -198,10 +158,6 @@ func (s *Server) WithSecretsCipher(c Cipher) *Server {
 	return s
 }
 
-// bootstrapAllowed reports whether the first-visit signup path is
-// currently live (users table is empty). Result is cached for 60s.
-// Once observed-as-non-empty, the answer is latched false until a
-// process restart.
 func (s *Server) bootstrapAllowed() bool {
 	s.bootstrapMu.Lock()
 	defer s.bootstrapMu.Unlock()
@@ -226,8 +182,6 @@ func (s *Server) bootstrapAllowed() bool {
 	return needed
 }
 
-// markBootstrapClosed latches the bootstrap path shut so the probe
-// immediately returns false instead of waiting out the 60s cache.
 func (s *Server) markBootstrapClosed() {
 	s.bootstrapMu.Lock()
 	defer s.bootstrapMu.Unlock()
@@ -236,9 +190,6 @@ func (s *Server) markBootstrapClosed() {
 	s.bootstrapExpiry = time.Now().Add(60 * time.Second)
 }
 
-// authMiddleware returns a non-nil Authenticator (a sentinel disabled
-// one if none was configured) so Middleware's branch logic stays
-// centralized.
 func (s *Server) authMiddleware() *Authenticator {
 	if s.auth != nil {
 		return s.auth
@@ -281,8 +232,6 @@ func (s *Server) AuthEnabled() bool {
 	return s.auth != nil
 }
 
-// tokensTableNonEmpty reports whether the tokens table has any
-// non-revoked rows at startup.
 func (s *Server) tokensTableNonEmpty() bool {
 	if s.store == nil {
 		return false
@@ -301,7 +250,8 @@ func (s *Server) WithAuthenticator(a *Authenticator) *Server {
 }
 
 // Handler returns the HTTP router. Exposed separately from Serve so
-// tests can wrap it in httptest without binding a real port.
+// tests can wrap it in httptest without binding a real port. Callers using
+// Handler directly must call Shutdown to drain server-owned background work.
 //
 // Auth shape:
 //   - /api/v1/health is always unauthenticated so k8s probes don't
@@ -344,6 +294,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleGetTrigger)))
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
+	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
+	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheGit)))
+	mux.Handle("POST /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheGit)))
 
 	mux.Handle("POST /api/v1/runs/{id}/cancel", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCancelRun)))
 
@@ -399,12 +352,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/runs/{id}/events", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListEvents)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/debug-pause", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetActiveDebugPause)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/release", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleReleaseDebugPause)))
-	// safety: asking for a bounce is an operator action (runs.write), while
-	// reading and closing the request are the supervising runner's and
-	// sit with the scope it already holds. The consume is
-	// state-changing, which nodes.claim already is -- it starts,
-	// finishes, and heartbeats nodes -- so closing a request that
-	// runner was handed adds no power to the scope.
+	// safety: nodes.claim may consume only the bounce request already assigned
+	// to that supervising runner; creating one still requires runs.write.
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRequestNodeBounce)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handlePendingNodeBounce)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleConsumeNodeBounce)))
@@ -458,7 +407,16 @@ func (s *Server) Handler() http.Handler {
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
 	router.Handle("/", authed)
 
-	return otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger))
+	return gitcacheStreamDeadlineHandler(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
+}
+
+func gitcacheStreamDeadlineHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/gitcache/seed" || strings.HasPrefix(r.URL.Path, "/api/v1/gitcache/git/") {
+			extendGitcacheStreamDeadline(w)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Serve starts the HTTP listener and blocks until ctx is done. On
@@ -507,9 +465,15 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			s.logger.Warn("controller HTTP shutdown incomplete", "err", err)
+		}
+		s.shutdownGitHubCommitStatuses(shutdownCtx)
 		return nil
 	case err := <-errCh:
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.shutdownGitHubCommitStatuses(shutdownCtx)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -517,9 +481,21 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 }
 
-// runReaper is the crash-recovery sweep. Every `interval` it
-// re-queues triggers whose lease has expired and cascade-fails the
-// associated run + nodes so the dashboard reflects the real state.
+func (s *Server) shutdownGitHubCommitStatuses(ctx context.Context) {
+	if err := s.Shutdown(ctx); err != nil {
+		s.logger.Warn("github commit status shutdown incomplete", "err", err)
+	}
+}
+
+// Shutdown drains server-owned background work until ctx expires. ServeWith
+// calls Shutdown automatically; callers serving Handler directly must call it.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.githubCommitStatuses == nil {
+		return nil
+	}
+	return s.githubCommitStatuses.shutdown(ctx)
+}
+
 func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -585,7 +561,11 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			for _, id := range ids {
 				run, err := s.store.GetRun(ctx, id)
 				if err == nil && run.FinishedAt == nil {
-					_ = s.store.FinishRun(ctx, id, "failed", "runner lease expired")
+					if ferr := s.store.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
+						s.logger.Error("finish reaped run failed", "run_id", id, "err", ferr)
+					} else {
+						s.reportGitHubCommitStatus(ctx, id, "failed")
+					}
 					if nids, nerr := store.Maintenance.FailNodesInRun(s.store, ctx, id,
 						"runner lease expired before node reported completion",
 						store.FailureRunnerLeaseExpired); nerr != nil {
@@ -611,6 +591,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale pending run", "run_id", id)
+					s.reportGitHubCommitStatus(ctx, id, "failed")
 				}
 			}
 
@@ -621,6 +602,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale running run", "run_id", id)
+					s.reportGitHubCommitStatus(ctx, id, "failed")
 				}
 			}
 
@@ -647,11 +629,6 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// withRequestLog records method, path, and status for every request
-// and emits per-request Prometheus metrics against the normalized
-// route pattern. The raw URL path only enters the log line, never a
-// metric label, so cardinality stays bounded to the registered route
-// set.
 func withRequestLog(next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}

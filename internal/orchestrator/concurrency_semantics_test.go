@@ -93,11 +93,6 @@ func releaseLeaderBarrier() {
 	}
 }
 
-// held returns a job body that marks its slot held, then blocks until
-// the test releases it (or ctx is cancelled), so the leader holds for
-// exactly as long as the test needs -- no fixed sleep to race against.
-// onStart, if non-nil, runs once the body begins and returns a cleanup
-// to run when it ends (e.g. to track in-flight concurrency).
 func held(onStart func() func()) func(context.Context) error {
 	return func(ctx context.Context) error {
 		if onStart != nil {
@@ -116,9 +111,6 @@ func held(onStart func() func()) func(context.Context) error {
 	}
 }
 
-// heldSkip is the SkipIf twin of held: the leader holds its slot through
-// skip evaluation until released, then skips. Used to make a skipped
-// memo leader hold deterministically while a follower coalesces.
 func heldSkip(ctx context.Context) bool {
 	barrier := currentLeaderBarrier.Load()
 	barrier.holdingOnce.Do(func() { close(barrier.holding) })
@@ -135,9 +127,6 @@ func waitForConcurrencyPoll(poll *time.Ticker) {
 	<-poll.C
 }
 
-// waitForLeaderHolding blocks until a held leader signals it holds its
-// slot, with a generous ceiling so a hang fails loudly rather than
-// hanging the suite.
 func waitForLeaderHolding(t *testing.T) {
 	t.Helper()
 	barrier := currentLeaderBarrier.Load()
@@ -150,11 +139,6 @@ func waitForLeaderHolding(t *testing.T) {
 	}
 }
 
-// waitForCoalesceWaiter blocks until a coalesce waiter row exists, i.e. a
-// follower has actually coalesced onto an in-flight leader. Used so a
-// memo leader can be released only once the follower it is meant to
-// coalesce is genuinely parked -- a coalesced follower blocks on the
-// leader finishing, so the leader can't wait on the follower's run.
 func waitForCoalesceWaiter(t *testing.T, dbPath string) {
 	t.Helper()
 	st, err := store.Open(dbPath)
@@ -312,9 +296,6 @@ func (scopeBoxPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 	return nil
 }
 
-// scopeRunBarrier is reset by the run-scope test; both runs' nodes must
-// reach it for the test to pass, which only happens if the run-scoped
-// group does NOT serialize them.
 var scopeRunBarrier atomic.Pointer[runBarrier]
 
 type runBarrier struct {

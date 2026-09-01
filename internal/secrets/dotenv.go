@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// DefaultDotenvPath returns the location of the laptop's masked
-// secret store. The file is created on first write; readers must
-// tolerate ENOENT as "no secrets stored locally yet" rather than an
-// error.
 func DefaultDotenvPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -24,10 +20,6 @@ func DefaultDotenvPath() (string, error) {
 	return filepath.Join(home, ".config", "sparkwing", "secrets.env"), nil
 }
 
-// DefaultConfigPath returns the location of the laptop's plain
-// (non-masked) config store. Same directory as the secrets file but
-// distinct file so an operator can chmod / share / version-control
-// either independently of the other.
 func DefaultConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -36,8 +28,6 @@ func DefaultConfigPath() (string, error) {
 	return filepath.Join(home, ".config", "sparkwing", "config.env"), nil
 }
 
-// DotenvSource resolves secrets from one or two flat KEY=VAL files.
-// Two files because splits storage by mask intent:
 type DotenvSource struct {
 	secretsPath string
 	configPath  string
@@ -49,31 +39,16 @@ type DotenvSource struct {
 	loadErr error
 }
 
-// NewDotenvSource returns a source backed by the default file pair
-// under ~/.config/sparkwing/. Tests use NewDotenvSourcePaths to
-// pin the file locations explicitly.
 func NewDotenvSource(secretsPath string) *DotenvSource {
 	return &DotenvSource{secretsPath: secretsPath}
 }
 
-// NewDotenvSourcePaths returns a source backed by an explicit
-// (secrets, config) file pair. Either may be empty to fall back to
-// the default location for that file.
 func NewDotenvSourcePaths(secretsPath, configPath string) *DotenvSource {
 	return &DotenvSource{secretsPath: secretsPath, configPath: configPath}
 }
 
-// ErrSecretMissing means the source has no entry for this name.
-// Re-exports the canonical sparkwing.ErrSecretMissing so existing
-// callers that errors.Is against this name keep working without
-// importing sparkwing directly.
 var ErrSecretMissing = sparkwing.ErrSecretMissing
 
-// Read returns the value + masked flag for `name`, or ErrSecretMissing
-// when neither file holds an entry. The first call lazy-loads both
-// files; subsequent calls hit the cached maps. Plain (config.env)
-// wins over masked (secrets.env) on collision -- the explicit-plain
-// intent beats the safe default.
 func (s *DotenvSource) Read(name string) (string, bool, error) {
 	s.once.Do(s.load)
 	s.mu.RLock()
@@ -90,7 +65,6 @@ func (s *DotenvSource) Read(name string) (string, bool, error) {
 	return "", false, ErrSecretMissing
 }
 
-// SecretsPath returns the resolved secrets.env path.
 func (s *DotenvSource) SecretsPath() string {
 	if s.secretsPath != "" {
 		return s.secretsPath
@@ -99,7 +73,6 @@ func (s *DotenvSource) SecretsPath() string {
 	return p
 }
 
-// ConfigPath returns the resolved config.env path.
 func (s *DotenvSource) ConfigPath() string {
 	if s.configPath != "" {
 		return s.configPath
@@ -161,10 +134,6 @@ func parseDotenvFile(path string) (map[string]string, error) {
 	return out, nil
 }
 
-// WriteDotenvEntry upserts (name, value) into the dotenv file at path.
-// Creates the directory and file if needed; chmods the file 0600 on
-// every write so accidental world-readability is corrected. An empty
-// path resolves to DefaultDotenvPath.
 func WriteDotenvEntry(path, name, value string) error {
 	if path == "" {
 		p, err := DefaultDotenvPath()
@@ -184,9 +153,6 @@ func WriteDotenvEntry(path, name, value string) error {
 	return writeDotenvFile(path, existing)
 }
 
-// DeleteDotenvEntry removes name from the dotenv file. Returns
-// ErrSecretMissing when name wasn't present so the CLI can render a
-// distinct message vs an actual write error.
 func DeleteDotenvEntry(path, name string) error {
 	if path == "" {
 		p, err := DefaultDotenvPath()
@@ -206,9 +172,6 @@ func DeleteDotenvEntry(path, name string) error {
 	return writeDotenvFile(path, existing)
 }
 
-// ListDotenvEntries returns all names in the file (values blanked at
-// the call site if the caller wants a safe-to-render projection).
-// Returns an empty slice when the file doesn't exist yet.
 func ListDotenvEntries(path string) (map[string]string, error) {
 	if path == "" {
 		p, err := DefaultDotenvPath()
@@ -245,9 +208,6 @@ func writeDotenvFile(path string, data map[string]string) error {
 	return nil
 }
 
-// sortStrings is a tiny insertion sort to avoid pulling sort into
-// this leaf package's import set. Inputs are <50 entries in the
-// realistic case.
 func sortStrings(xs []string) {
 	for i := 1; i < len(xs); i++ {
 		for j := i; j > 0 && xs[j-1] > xs[j]; j-- {

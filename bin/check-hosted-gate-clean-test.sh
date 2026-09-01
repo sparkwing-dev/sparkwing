@@ -71,4 +71,100 @@ git -C "$CASE_ROOT" commit --allow-empty -qm mutation
 expect_status committed ''
 expect_failure committed 'hosted gate changed HEAD'
 
+git -C "$CASE_ROOT" reset --hard -q "$target"
+mkdir -p "$CASE_ROOT/testdata/k8s-e2e/repo/.sparkwing" "$CASE_ROOT/pkg/scaffold" "$CASE_ROOT/.apidiff" "$CASE_ROOT/.sparkwing"
+cat >"$CASE_ROOT/testdata/k8s-e2e/repo/.sparkwing/go.mod" <<'EOF'
+module release-fixture
+
+go 1.26.0
+
+require github.com/sparkwing-dev/sparkwing v0.37.1
+EOF
+printf 'github.com/sparkwing-dev/sparkwing v0.37.1 h1:old\n' >"$CASE_ROOT/testdata/k8s-e2e/repo/.sparkwing/go.sum"
+printf 'module release-pipeline\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing v0.37.1\n\nreplace github.com/sparkwing-dev/sparkwing => ..\n' >"$CASE_ROOT/.sparkwing/go.mod"
+printf 'github.com/sparkwing-dev/sparkwing v0.37.1 h1:pipeline-old\n' >"$CASE_ROOT/.sparkwing/go.sum"
+printf 'package scaffold\n\nconst FallbackSDKVersion = "v0.37.1"\n' >"$CASE_ROOT/pkg/scaffold/version.go"
+printf '# pkg/scaffold\n\nconst FallbackSDKVersion = "v0.37.1"\n' >"$CASE_ROOT/.apidiff/pkg_scaffold.txt"
+git -C "$CASE_ROOT" add testdata pkg/scaffold/version.go .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum
+git -C "$CASE_ROOT" commit -qm fixture
+target="$(git -C "$CASE_ROOT" rev-parse HEAD)"
+
+sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/testdata/k8s-e2e/repo/.sparkwing/go.mod"
+rm "$CASE_ROOT/testdata/k8s-e2e/repo/.sparkwing/go.mod.bak"
+sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/testdata/k8s-e2e/repo/.sparkwing/go.sum"
+rm "$CASE_ROOT/testdata/k8s-e2e/repo/.sparkwing/go.sum.bak"
+sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/pkg/scaffold/version.go"
+rm "$CASE_ROOT/pkg/scaffold/version.go.bak"
+sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/.apidiff/pkg_scaffold.txt"
+rm "$CASE_ROOT/.apidiff/pkg_scaffold.txt.bak"
+sed -i.bak 's/v0.37.1/v0.37.2/; /replace github.com\/sparkwing-dev\/sparkwing => ../d' "$CASE_ROOT/.sparkwing/go.mod"
+rm "$CASE_ROOT/.sparkwing/go.mod.bak"
+sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/.sparkwing/go.sum"
+rm "$CASE_ROOT/.sparkwing/go.sum.bak"
+git -C "$CASE_ROOT" add .sparkwing/go.mod .sparkwing/go.sum
+self_pin_oid="$(git -C "$CASE_ROOT" diff HEAD --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum pkg/scaffold/version.go testdata/k8s-e2e/repo/.sparkwing/go.mod testdata/k8s-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
+(
+  cd "$CASE_ROOT"
+  bash "$CHECK" --release-self-pin v0.37.2 "$self_pin_oid" "$target"
+)
+
+for path in \
+  .apidiff/pkg_scaffold.txt \
+  .sparkwing/go.mod \
+  .sparkwing/go.sum \
+  pkg/scaffold/version.go \
+  testdata/k8s-e2e/repo/.sparkwing/go.mod \
+  testdata/k8s-e2e/repo/.sparkwing/go.sum; do
+  sed -i.bak 's/v0.37.2/v0.37.2+meta/' "$CASE_ROOT/$path"
+  rm "$CASE_ROOT/$path.bak"
+done
+git -C "$CASE_ROOT" add .sparkwing/go.mod .sparkwing/go.sum
+metadata_oid="$(git -C "$CASE_ROOT" diff HEAD --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum pkg/scaffold/version.go testdata/k8s-e2e/repo/.sparkwing/go.mod testdata/k8s-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
+(
+  cd "$CASE_ROOT"
+  bash "$CHECK" --release-self-pin v0.37.2+meta "$metadata_oid" "$target"
+)
+for path in \
+  .apidiff/pkg_scaffold.txt \
+  .sparkwing/go.mod \
+  .sparkwing/go.sum \
+  pkg/scaffold/version.go \
+  testdata/k8s-e2e/repo/.sparkwing/go.mod \
+  testdata/k8s-e2e/repo/.sparkwing/go.sum; do
+  sed -i.bak 's/v0.37.2+meta/v0.37.2/' "$CASE_ROOT/$path"
+  rm "$CASE_ROOT/$path.bak"
+done
+git -C "$CASE_ROOT" add .sparkwing/go.mod .sparkwing/go.sum
+
+printf 'unrelated\n' >>"$CASE_ROOT/tracked.txt"
+if (
+  cd "$CASE_ROOT"
+  bash "$CHECK" --release-self-pin v0.37.2 "$self_pin_oid" "$target"
+) >"$OUTPUT" 2>&1; then
+  echo 'check-hosted-gate-clean-test: release allowance admitted an unrelated edit' >&2
+  exit 1
+fi
+grep -Fq 'hosted gate changed files outside the release self-pin allowance' "$OUTPUT"
+
+git -C "$CASE_ROOT" restore tracked.txt
+if (
+  cd "$CASE_ROOT"
+  bash "$CHECK" --release-self-pin v0.37.3 "$self_pin_oid" "$target"
+) >"$OUTPUT" 2>&1; then
+  echo 'check-hosted-gate-clean-test: release allowance admitted the wrong version' >&2
+  exit 1
+fi
+grep -Fq 'release fixture does not pin v0.37.3' "$OUTPUT"
+
+sed -i.bak 's/h1:old/h1:tampered/' "$CASE_ROOT/testdata/k8s-e2e/repo/.sparkwing/go.sum"
+rm "$CASE_ROOT/testdata/k8s-e2e/repo/.sparkwing/go.sum.bak"
+if (
+  cd "$CASE_ROOT"
+  bash "$CHECK" --release-self-pin v0.37.2 "$self_pin_oid" "$target"
+) >"$OUTPUT" 2>&1; then
+  echo 'check-hosted-gate-clean-test: release allowance admitted a changed self-pin patch' >&2
+  exit 1
+fi
+grep -Fq 'release self-pin patch changed during the hosted gate' "$OUTPUT"
+
 echo "check-hosted-gate-clean-test: ok"

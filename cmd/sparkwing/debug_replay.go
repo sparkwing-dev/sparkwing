@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// runDebugReplay mints a new replay run row + single nodes row and
-// hands off to the pipeline binary's `replay-node` entrypoint for the
-// actual single-node execution.
 func runDebugReplay(args []string) error {
 	t, err := parseReplayFlags(args)
 	if err != nil {

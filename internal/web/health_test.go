@@ -99,15 +99,6 @@ func TestHealthServices_Empty(t *testing.T) {
 	}
 }
 
-// Every sparkwing service reports partial failure in the body while
-// answering HTTP 200 -- the dashboard used to discard that body, so a
-// filling disk, a stalled fetch loop, or a controller whose runs are
-// mostly failing all rendered as a green lamp.
-//
-// A degraded body with no problems still has to name itself, or the
-// lamp goes amber with no reason next to it. A service outside the
-// contract answering 200 in plain text has told us it is up and
-// nothing more, so it stays green.
 func TestProbeService_DegradedBodyAtHTTP200(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -191,8 +182,6 @@ func TestProbeService_DegradedBodyAtHTTP200(t *testing.T) {
 	}
 }
 
-// A degraded body must survive the aggregated handler, not just the
-// probe: the panel reads this response.
 func TestHealthServices_DegradedBodyReachesTheResponse(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -243,8 +232,6 @@ func TestDefaultServices_CacheIsProbedWhenConfigured(t *testing.T) {
 	}
 }
 
-// An unconfigured cache is absent rather than red: an operator who has
-// not pointed the dashboard at a cache has not reported an outage.
 func TestDefaultServices_CacheAbsentWhenUnconfigured(t *testing.T) {
 	got := defaultServices(HandlerOptions{ControllerURL: "http://controller"}, "")
 	if len(got) != 1 || got[0].Name != "controller" {
@@ -252,11 +239,6 @@ func TestDefaultServices_CacheAbsentWhenUnconfigured(t *testing.T) {
 	}
 }
 
-// Slowness is the dashboard's own measurement and the body's problems
-// are the service's; a probe that meets both has found two faults and
-// must report both. The rule used to run only while the status was
-// still "ok", so a degraded body swallowed the latency the panel is the
-// only thing watching.
 func TestNoteSlowResponse_SurvivesADegradedBody(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -319,12 +301,6 @@ func TestNoteSlowResponse_SurvivesADegradedBody(t *testing.T) {
 	}
 }
 
-// The probe reads a bounded prefix of a 2xx body and reads nothing at
-// all on a non-2xx, so it drains what is left before closing. An
-// abandoned body costs the pooled connection, and the panel reprobes
-// every service on a cycle -- a dashboard that opens a fresh TCP
-// connection per service per refresh is a slow leak against every
-// service it is watching.
 func TestProbeService_ReusesTheConnection(t *testing.T) {
 	oversized := `{"status":"ok","problems":["` + strings.Repeat("x", health.MaxBodyBytes) + `"]}`
 	cases := []struct {

@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// TestBudgetNote_NamesTheSetting checks the queue's budget row names the
-// setting the budget came from, for each source an operator can act on.
-// A cap they can see but not locate is one they cannot revoke.
 func TestBudgetNote_NamesTheSetting(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -76,11 +73,6 @@ func TestBudgetNote_NamesTheSetting(t *testing.T) {
 	}
 }
 
-// TestBudgetNote_UnsetSaysSo is the negative control in the view. With no
-// budget set anywhere, the queue must state that rather than print a
-// number that reads like a deliberate whole-machine choice, or say
-// nothing at all. Silence and "capped at the machine total" are what an
-// operator hunting a phantom cap cannot tell apart from a real one.
 func TestBudgetNote_UnsetSaysSo(t *testing.T) {
 	note := opsview.BudgetNote(&wingwire.BudgetState{
 		Cores: 10, MachineCores: 10,
@@ -95,10 +87,6 @@ func TestBudgetNote_UnsetSaysSo(t *testing.T) {
 	}
 }
 
-// TestBudgetNote_UnreportedBudgetClaimsNothing checks the view stays
-// silent when the daemon did not describe its budget -- an older build,
-// or a controller's queue view. "Not reported" is not evidence of "not
-// set", and printing the stronger claim would invent an all-clear.
 func TestBudgetNote_UnreportedBudgetClaimsNothing(t *testing.T) {
 	if note := opsview.BudgetNote(nil); note != "" {
 		t.Errorf("budget note = %q, want empty when the daemon reported no budget state", note)
@@ -111,10 +99,6 @@ func TestBudgetNote_UnreportedBudgetClaimsNothing(t *testing.T) {
 	}
 }
 
-// TestExternalIgnoredNote_NamesTheSetting checks the escape hatch says
-// where it was turned on. ignore-external makes the machine admit against
-// total capacity while real external load goes unsubtracted, and an
-// operator who finds it on has no other way to learn who set it.
 func TestExternalIgnoredNote_NamesTheSetting(t *testing.T) {
 	qs := wingwire.QueueState{
 		IgnoreExternal: true,
@@ -138,10 +122,6 @@ func TestExternalIgnoredNote_NamesTheSetting(t *testing.T) {
 	}
 }
 
-// TestRenderDoctorPretty_ReportsMachineBudget checks a non-default budget
-// surfaces in doctor on the healthy path. A machine admitting against
-// total capacity while ignoring real external load is a state someone
-// should be able to discover without already suspecting it.
 func TestRenderDoctorPretty_ReportsMachineBudget(t *testing.T) {
 	r := opsview.DoctorReport{
 		MachineBudget: &opsview.DoctorMachineBudget{
@@ -166,10 +146,6 @@ func TestRenderDoctorPretty_ReportsMachineBudget(t *testing.T) {
 	}
 }
 
-// TestRenderDoctorPretty_EnvBudgetWarnsItDies checks doctor says out loud
-// that an env-sourced budget will not survive the next respawn, because
-// the daemon is spawned by whichever gate runs first and inherits that
-// process's environment.
 func TestRenderDoctorPretty_EnvBudgetWarnsItDies(t *testing.T) {
 	r := opsview.DoctorReport{
 		MachineBudget: &opsview.DoctorMachineBudget{
@@ -187,9 +163,6 @@ func TestRenderDoctorPretty_EnvBudgetWarnsItDies(t *testing.T) {
 	}
 }
 
-// TestRenderDoctorPlain_StatesBudgetEitherWay checks the machine-readable
-// doctor view always carries a budget line, so "unset" is an answer the
-// output gives rather than one a reader infers from a missing row.
 func TestRenderDoctorPlain_StatesBudgetEitherWay(t *testing.T) {
 	var buf bytes.Buffer
 	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "plain", ""); err != nil {

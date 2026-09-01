@@ -1,7 +1,3 @@
-// `sparkwing webhooks` -- sparkwing-aware wrapper over the GitHub
-// hooks API. Cross-references GitHub delivery metadata with
-// sparkwing trigger/run state so operators can debug a webhook
-// cycle without bouncing between gh and the sparkwing dashboard.
 package main
 
 import (
@@ -45,9 +41,6 @@ func runWebhooks(args []string) error {
 	}
 }
 
-// ghCLIAvailable verifies that the gh CLI is reachable. Called up
-// front by every webhooks subcommand so we fail with a clear install
-// hint instead of a cryptic exec error midway through.
 func ghCLIAvailable() error {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return errors.New("gh CLI not found on PATH. install: https://cli.github.com")
@@ -55,9 +48,6 @@ func ghCLIAvailable() error {
 	return nil
 }
 
-// normalizeRepo accepts "OWNER/NAME" or bare "NAME" (falling back
-// to gh's configured default owner). An empty return value means
-// "couldn't resolve" and callers surface that as an error.
 func normalizeRepo(repo string) (string, error) {
 	if strings.Contains(repo, "/") {
 		return repo, nil
@@ -73,9 +63,6 @@ func normalizeRepo(repo string) (string, error) {
 	return owner + "/" + repo, nil
 }
 
-// ghAPI runs `gh api <path>` and JSON-decodes stdout into out.
-// Propagates stderr on failure so gh's own error text surfaces
-// (rate-limit, 404, auth prompts) without wrapping.
 func ghAPI(path string, out any) error {
 	cmd := exec.Command("gh", "api", path)
 	cmd.Stderr = os.Stderr
@@ -89,10 +76,6 @@ func ghAPI(path string, out any) error {
 	return json.Unmarshal(stdout, out)
 }
 
-// ghAPIPost runs `gh api -X POST <path>` and JSON-decodes stdout
-// into out (nil accepted). Factored out of ghAPI so callers that
-// POST (replay attempts, eventually delete/create) don't have to
-// hand-craft exec.Cmd.
 func ghAPIPost(path string, out any) error {
 	cmd := exec.Command("gh", "api", "-X", "POST", path)
 	cmd.Stderr = os.Stderr
@@ -106,8 +89,6 @@ func ghAPIPost(path string, out any) error {
 	return json.Unmarshal(stdout, out)
 }
 
-// githubHook mirrors the subset of the GitHub hooks API response we
-// render. Extra fields are ignored.
 type githubHook struct {
 	ID           int64              `json:"id"`
 	Active       bool               `json:"active"`
@@ -174,7 +155,6 @@ func runWebhooksList(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-		// NDJSON: one row per line, so `head` returns whole rows.
 		return ndjson.Write(os.Stdout, rows)
 	}
 
@@ -190,11 +170,6 @@ func runWebhooksList(args []string) error {
 	return tw.Flush()
 }
 
-// derivePipelineFromHookURL extracts the pipeline name from a
-// sparkwing webhook URL. The controller routes POST
-// /webhooks/github/<pipeline>; older unscoped hooks posted to
-// /webhooks/github with no path segment, so they render as "(unscoped)"
-// to flag them for cleanup.
 func derivePipelineFromHookURL(rawURL string) string {
 	u, err := neturl.Parse(rawURL)
 	if err != nil {
@@ -220,7 +195,7 @@ type githubDelivery struct {
 	GUID           string `json:"guid"`
 	DeliveredAt    string `json:"delivered_at"`
 	Redelivery     bool   `json:"redelivery"`
-	Duration       any    `json:"duration"` // float in seconds; preserved as any to skip precision churn
+	Duration       any    `json:"duration"`
 	Status         string `json:"status"`
 	StatusCode     int    `json:"status_code"`
 	Event          string `json:"event"`
@@ -312,7 +287,6 @@ func runWebhooksDeliveries(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-		// NDJSON: one row per line, so `head` returns whole rows.
 		return ndjson.Write(os.Stdout, rows)
 	}
 
@@ -325,17 +299,11 @@ func runWebhooksDeliveries(args []string) error {
 	return tw.Flush()
 }
 
-// deliveryHit carries the run id + status for one delivery match.
 type deliveryHit struct {
 	runID  string
 	status string
 }
 
-// buildDeliveryIndex walks the given runs, fetches each run's trigger
-// row (triggers store GITHUB_DELIVERY in their env), and returns a
-// map keyed by delivery UUID. Runs with no trigger row or no delivery
-// env simply don't land in the map -- the deliveries renderer falls
-// back to "-" in that column.
 func buildDeliveryIndex(ctx context.Context, c *client.Client, runs []*store.Run) map[string]deliveryHit {
 	out := map[string]deliveryHit{}
 	for _, r := range runs {

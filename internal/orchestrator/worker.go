@@ -16,63 +16,34 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// WorkerOptions configures a worker's polling loop.
 type WorkerOptions struct {
-	// ControllerURL is the controller base URL.
 	ControllerURL string
 
-	// LogsURL, when non-empty, routes per-node log lines to a
-	// sparkwing-logs service. Ignored if LogStore is set.
 	LogsURL string
 
-	// LogStore, when non-nil, takes precedence over LogsURL.
 	LogStore storage.LogStore
 
-	// ArtifactStore is the content-addressed store node execution
-	// publishes outputs to and stages consumed inputs from when this
-	// worker runs nodes in-process. Nil disables artifacts. K8s and warm
-	// runners give their pods the store through ArtifactStoreEnvVar
-	// instead, so this field shapes only the in-process runner path.
 	ArtifactStore storage.ArtifactStore
 
-	// HTTPClient transport for controller calls. Nil = default 30s.
 	HTTPClient *http.Client
 
-	// Paths resolves on-disk locations for locks and log files. Zero
-	// value uses DefaultPaths.
 	Paths Paths
 
-	// PollInterval is the wait between empty-queue polls. Zero = 1s.
 	PollInterval time.Duration
 
-	// HeartbeatInterval is the cadence of claim-lease heartbeats.
-	// Zero uses store.DefaultLeaseDuration / 3.
 	HeartbeatInterval time.Duration
 
-	// Logger receives lifecycle events. Nil uses slog.Default.
 	Logger *slog.Logger
 
-	// Delegate, when non-nil, mirrors every node log line.
 	Delegate sparkwing.Logger
 
-	// RunnerFactory returns the Runner each claimed trigger should
-	// use; called once per trigger so the factory can close over the
-	// claim. Nil means default NodeExecutor.
 	RunnerFactory func(backends Backends, trigger *store.Trigger) runner.Runner
 
-	// Token is the shared-secret bearer for controller + logs calls.
-	// Empty = no auth header.
 	Token string
 
-	// Sources filters trigger_source values this worker accepts.
-	// Empty/nil = accept any source.
 	Sources []string
 }
 
-// ExecuteClaimedTrigger runs a single trigger to terminal state.
-// Always flips the trigger to 'done' before returning, even on setup
-// failure -- otherwise the reaper would re-queue and the next worker
-// would hit the same error, infinite-looping.
 func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Backends, stateClient *client.Client, trigger *store.Trigger) {
 	logger := opts.Logger
 	if logger == nil {
@@ -112,12 +83,7 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		Delegate: opts.Delegate,
 		Runner:   r,
 	}
-	// Same reason as the local trigger child: a worker executes out of a
-	// project checkout, and a trigger that plans without the project's
-	// argument layers -- or without its guards -- is a trigger that
-	// dispatches something `sparkwing run` of the same pipeline would
-	// have merged differently, or refused outright. Degrades to a no-op
-	// in a runner image that carries no checkout.
+
 	applyCheckoutProjectConfig(&runOpts, logger)
 	res, err := Run(runCtx, backends, runOpts)
 	cancelRun()
@@ -155,13 +121,6 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	)
 }
 
-// HandleClaimedTrigger adopts an already-claimed trigger and runs it
-// to terminal state. Caller's lease is still live; this function's
-// heartbeat extends it.
-//
-// This is a cluster entry point: the run executes in a pod the
-// Kubernetes scheduler already admitted, so Options.Admission stays nil
-// and the local admission daemon is never contacted.
 func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID string) error {
 	if opts.ControllerURL == "" {
 		return errors.New("WorkerOptions.ControllerURL is required")
@@ -213,12 +172,6 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	return nil
 }
 
-// runHeartbeat POSTs heartbeats until ctx is cancelled. On a cancel
-// signal from the controller, cancels the run and records the fact in
-// `cancelled` so the caller marks 'cancelled' rather than 'failed'.
-// ErrNotFound means we lost the claim -- cancel the run ctx so we
-// don't write to a dead run. Self-terminates after
-// runHeartbeatMaxSilence of consecutive failures.
 func runHeartbeat(ctx context.Context, c *client.Client, triggerID string,
 	interval time.Duration,
 	cancelRun context.CancelFunc, cancelled *atomic.Bool, logger *slog.Logger,
@@ -274,15 +227,10 @@ func runHeartbeat(ctx context.Context, c *client.Client, triggerID string,
 	}
 }
 
-// Vars (not consts) so tests can shrink them.
 var (
 	runHeartbeatDefaultInterval = 3 * time.Second
 
-	// Strictly less than runHeartbeatDefaultInterval so a wedged
-	// controller can't stack ticks.
 	runHeartbeatTimeout = 2 * time.Second
 
-	// Cancel the run after this much consecutive failure; matches
-	// store.DefaultLeaseDuration.
 	runHeartbeatMaxSilence = 3 * time.Minute
 )

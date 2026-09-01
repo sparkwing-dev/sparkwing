@@ -317,7 +317,6 @@ func joinScopes(s []string) string {
 	return strings.Join(dedupeScopes(s), ",")
 }
 
-// hashPassword/verifyPassword reuse the argon2id token params.
 func hashPassword(password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {

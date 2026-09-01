@@ -1,24 +1,4 @@
 #!/usr/bin/env bash
-# Where the time actually goes in an agent trial.
-#
-# Splits wall-clock into model time (deciding what to do next) and tool
-# time (running the command), then attributes model round-trips to the
-# phases of authoring a pipeline. Tool time is close to free -- the
-# sparkwing CLI answers in milliseconds -- so the lever on wall-clock is
-# the number of round-trips, not the cost of any one call. A command
-# that saves a round-trip is worth more than one that runs faster.
-#
-# Two columns, not one, because the agents differ: `turns` counts model
-# round-trips and `calls` counts individual actions. Claude issues about
-# one call per turn; Codex chains several with `&&`, so its turn count
-# is the lower of the two and its call count is comparable to Claude's.
-# Comparing the wrong column across harnesses reads as a difference that
-# is not there.
-#
-# Codex traces carry no timestamps, so the model/tool split is blank for
-# those runs; take wall-clock from the trial report instead.
-#
-# Usage: agent-trial-report.sh <trace.jsonl> [<trace.jsonl> ...]
 set -uo pipefail
 
 if [[ $# -eq 0 ]]; then

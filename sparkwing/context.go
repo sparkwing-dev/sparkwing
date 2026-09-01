@@ -187,7 +187,6 @@ func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Cont
 	return context.WithValue(ctx, keyResourceReporter, fn)
 }
 
-// reportResource delivers a sample to the installed reporter, if any.
 func reportResource(ctx context.Context, sample ResourceSample) {
 	if fn, ok := ctx.Value(keyResourceReporter).(ResourceReporter); ok && fn != nil {
 		fn(sample)

@@ -104,8 +104,6 @@ func consumerTestStore(t *testing.T, home string) *store.Store {
 	return st
 }
 
-// seedSubmission writes the trigger + pending run pair `runs submit`
-// persists, pointed at repoDir so the consumer can locate it.
 func seedSubmission(t *testing.T, st *store.Store, id, pipeline, repoDir string) {
 	t.Helper()
 	ctx := context.Background()
@@ -128,9 +126,6 @@ func seedSubmission(t *testing.T, st *store.Store, id, pipeline, repoDir string)
 	}
 }
 
-// waitFor polls cond until it holds or the deadline passes. Polling
-// beats sleeping: these tests assert on a background loop whose timing
-// varies with machine load, and a fixed sleep either flakes or is slow.
 func waitFor(t *testing.T, what string, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -162,10 +157,6 @@ func expireTriggerLease(t *testing.T, st *store.Store, id string) {
 	}
 }
 
-// TestServeConsumer_OneConsumerPerHome is the no-double-consume proof at
-// the primitive that enforces it. Two consumers on one home would each
-// claim triggers, and a home with both a dashboard and a resident
-// consumer is the ordinary case, not an exotic one.
 func TestServeConsumer_OneConsumerPerHome(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -247,9 +238,6 @@ func TestServeConsumerClaimsPendingWorkImmediately(t *testing.T) {
 	})
 }
 
-// TestConsumerRunning_FalseBeforeAnyConsumerHasRun pins that a home
-// nobody has ever consumed reads as idle rather than erroring, so
-// `runs submit` on a fresh machine spawns instead of failing.
 func TestConsumerRunning_FalseBeforeAnyConsumerHasRun(t *testing.T) {
 	running, err := ConsumerRunning(t.TempDir())
 	if err != nil {
@@ -260,10 +248,6 @@ func TestConsumerRunning_FalseBeforeAnyConsumerHasRun(t *testing.T) {
 	}
 }
 
-// TestRunLocalTriggerConsumer_StandsDownWhenAResidentConsumerHoldsTheLock
-// is the dashboard half of the exclusion. The dashboard has always
-// hosted a consumer; now that a standalone one exists, starting a
-// dashboard must not add a second claimer to the same queue.
 func TestRunLocalTriggerConsumer_StandsDownWhenAResidentConsumerHoldsTheLock(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -291,9 +275,6 @@ func TestRunLocalTriggerConsumer_StandsDownWhenAResidentConsumerHoldsTheLock(t *
 	}
 }
 
-// TestServeConsumer_IdleExitReleasesTheHome covers the other side of
-// residency: a laptop that submitted one run in the morning must not
-// carry a consumer process all day.
 func TestServeConsumer_IdleExitReleasesTheHome(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -319,10 +300,6 @@ func TestServeConsumer_IdleExitReleasesTheHome(t *testing.T) {
 	}
 }
 
-// TestShouldExit_KeepsServingWhileWorkIsQueued is the guarantee that
-// makes an acknowledgment mean something. If the consumer could leave
-// with a pending trigger in the table, a run submitted near an idle
-// boundary would silently never start.
 func TestShouldExit_KeepsServingWhileWorkIsQueued(t *testing.T) {
 	st := consumerTestStore(t, t.TempDir())
 	seedSubmission(t, st, "run-queued", "deploy", "")
@@ -341,8 +318,6 @@ func TestShouldExit_KeepsServingWhileWorkIsQueued(t *testing.T) {
 	}
 }
 
-// TestShouldExit_StaysWhenTheIdleWindowHasNotElapsed keeps the decision
-// from firing on the first quiet poll.
 func TestShouldExit_StaysWhenTheIdleWindowHasNotElapsed(t *testing.T) {
 	st := consumerTestStore(t, t.TempDir())
 	rt := consumerRuntime{idle: time.Hour, unlock: func() {}, relock: func() bool { return true }}
@@ -351,8 +326,6 @@ func TestShouldExit_StaysWhenTheIdleWindowHasNotElapsed(t *testing.T) {
 	}
 }
 
-// TestShouldExit_NeverExitsWhenIdleIsDisabled covers the
-// dashboard-hosted loop, which lives as long as the dashboard does.
 func TestShouldExit_NeverExitsWhenIdleIsDisabled(t *testing.T) {
 	st := consumerTestStore(t, t.TempDir())
 	rt := consumerRuntime{idle: -1}
@@ -361,17 +334,6 @@ func TestShouldExit_NeverExitsWhenIdleIsDisabled(t *testing.T) {
 	}
 }
 
-// TestShouldExit_ResumesWhenWorkArrivesDuringTheHandover is the
-// interleaving the design is built around, and the one a reviewer should
-// be most suspicious of.
-//
-// A submitter persists its trigger and then asks whether a consumer is
-// running; this consumer counts pending work and then releases its lock.
-// If the insert lands between the count and the release, the submitter
-// sees a held lock and does not spawn, while the consumer saw an empty
-// queue. Counting once more after the lock is free is what stops that
-// from stranding an acknowledged run. The fake unlock here inserts the
-// trigger at exactly that instant.
 func TestShouldExit_ResumesWhenWorkArrivesDuringTheHandover(t *testing.T) {
 	st := consumerTestStore(t, t.TempDir())
 	relocked := false
@@ -390,9 +352,6 @@ func TestShouldExit_ResumesWhenWorkArrivesDuringTheHandover(t *testing.T) {
 	}
 }
 
-// TestShouldExit_StandsDownWhenAnotherConsumerTookTheQueue covers the
-// same handover when a fresh consumer wins the freed lock first: this
-// one must leave rather than fight for it, since the work is owned.
 func TestShouldExit_StandsDownWhenAnotherConsumerTookTheQueue(t *testing.T) {
 	st := consumerTestStore(t, t.TempDir())
 	rt := consumerRuntime{
@@ -405,18 +364,12 @@ func TestShouldExit_StandsDownWhenAnotherConsumerTookTheQueue(t *testing.T) {
 	}
 }
 
-// TestConsumer_CancelRequestedBeforeClaimNeverDispatches closes the race
-// between an operator's cancel and a consumer's claim. The claim can win
-// the transaction, and without this check the run would start anyway --
-// a cancellation the system accepted and then ignored.
 func TestConsumer_CancelRequestedBeforeClaimNeverDispatches(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
 	ctx := context.Background()
 	seedSubmission(t, st, "run-cancelme", "never-runs", "")
 
-	// Claim it the way the loop does, then request cancellation, which is
-	// exactly the state the loop's pre-dispatch check exists for.
 	claimed, err := st.ClaimNextTrigger(ctx, time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +378,7 @@ func TestConsumer_CancelRequestedBeforeClaimNeverDispatches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !cancelClaimedTriggerIfRequested(ctx, st, claimed, time.Minute, quietLogger()) {
+	if !cancelClaimedTriggerIfRequested(ctx, st, claimed, home, time.Minute, quietLogger()) {
 		t.Fatal("a cancel-requested claim was not recognized before dispatch")
 	}
 	run, err := st.GetRun(ctx, "run-cancelme")
@@ -444,8 +397,6 @@ func TestConsumer_CancelRequestedBeforeClaimNeverDispatches(t *testing.T) {
 	}
 }
 
-// TestConsumer_NoCancelRequestedDispatchesNormally is the negative half:
-// the pre-dispatch check must not swallow ordinary work.
 func TestConsumer_NoCancelRequestedDispatchesNormally(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -455,15 +406,11 @@ func TestConsumer_NoCancelRequestedDispatchesNormally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cancelClaimedTriggerIfRequested(ctx, st, claimed, time.Minute, quietLogger()) {
+	if cancelClaimedTriggerIfRequested(ctx, st, claimed, home, time.Minute, quietLogger()) {
 		t.Fatal("an uncancelled claim was treated as cancelled")
 	}
 }
 
-// TestSubmittedTriggerRepoDir_SelectsTheSubmittingCheckout is the repo
-// threading the whole submission path depends on. Two checkouts of one
-// project declare the same pipeline names, and the registry cannot tell
-// them apart; the recorded directory can.
 func TestSubmittedTriggerRepoDir_SelectsTheSubmittingCheckout(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repoDir, ".sparkwing"), 0o755); err != nil {
@@ -482,11 +429,6 @@ func TestSubmittedTriggerRepoDir_SelectsTheSubmittingCheckout(t *testing.T) {
 	}
 }
 
-// TestSubmittedTriggerRepoDir_FailsClosedWhenTheCheckoutIsGone pins that
-// a vanished checkout is an error rather than a quiet fallback. Falling
-// back to the registry would execute a different copy of the pipeline
-// than the person submitted, which is the confusion recording the path
-// exists to prevent.
 func TestSubmittedTriggerRepoDir_FailsClosedWhenTheCheckoutIsGone(t *testing.T) {
 	trig := &store.Trigger{
 		ID: "run-1", Pipeline: "lint",
@@ -501,9 +443,6 @@ func TestSubmittedTriggerRepoDir_FailsClosedWhenTheCheckoutIsGone(t *testing.T) 
 	}
 }
 
-// TestSubmittedTriggerRepoDir_AbsentOnOrdinaryTriggers keeps the new
-// branch out of the way of every trigger the webhook, spawn, and retry
-// paths create.
 func TestSubmittedTriggerRepoDir_AbsentOnOrdinaryTriggers(t *testing.T) {
 	dir, err := submittedTriggerRepoDir(&store.Trigger{ID: "run-1", Pipeline: "lint"})
 	if err != nil || dir != "" {
@@ -511,9 +450,6 @@ func TestSubmittedTriggerRepoDir_AbsentOnOrdinaryTriggers(t *testing.T) {
 	}
 }
 
-// TestEnsureRunLogDir_OnlyNamesADirectoryThatExists holds the log_path
-// rule the submission acknowledgment inherits: the field is either a
-// real directory or absent, never a plausible-looking path to nothing.
 func TestEnsureRunLogDir_OnlyNamesADirectoryThatExists(t *testing.T) {
 	p := PathsAt(t.TempDir())
 	dir := EnsureRunLogDir(p, "run-1")
@@ -533,12 +469,6 @@ func TestEnsureRunLogDir_OnlyNamesADirectoryThatExists(t *testing.T) {
 	}
 }
 
-// TestSweeper_LeavesALiveRunningDispatchAlone covers suspension advancing wall
-// time past a live dispatch's lease while its monotonic heartbeat ticker stops.
-// The sweeper can therefore observe a lapsed lease before the next heartbeat.
-//
-// A lapsed lease alone is not evidence of death: only a run that never
-// started is requeued.
 func TestSweeper_LeavesALiveRunningDispatchAlone(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -548,14 +478,13 @@ func TestSweeper_LeavesALiveRunningDispatchAlone(t *testing.T) {
 	if _, err := st.ClaimNextTrigger(ctx, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	// The dispatch started: a child process is executing.
+
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "run-alive", Pipeline: "deploy", Status: "running", StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// The laptop wakes: wall time has jumped past the lease while the
-	// heartbeat's next monotonic tick is still far away.
+
 	if _, err := st.DB().Exec(
 		`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`,
 		time.Now().Add(-time.Hour).UnixNano(), "run-alive"); err != nil {
@@ -576,9 +505,6 @@ func TestSweeper_LeavesALiveRunningDispatchAlone(t *testing.T) {
 	}
 }
 
-// TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting covers the window where
-// a consumer owns a live local dispatch that the store cannot distinguish
-// from a dead one.
 func TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -589,9 +515,6 @@ func TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting(t *testing.T) {
 	}
 	expireTriggerLease(t, st, "run-mine")
 
-	// The run row is still pending -- the child has been exec'd but has
-	// not reached CreateRun yet, which is the widest version of the
-	// window. Only the in-flight set knows this work is owned.
 	inFlight := newInFlightSet()
 	inFlight.add("run-mine")
 
@@ -606,8 +529,6 @@ func TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting(t *testing.T) {
 	}
 }
 
-// TestSweeper_ClosesOutAClaimWhoseRunAlreadyEnded pins the reconcile
-// step, and that it happens before anything is requeued.
 func TestSweeper_ClosesOutAClaimWhoseRunAlreadyEnded(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -635,8 +556,6 @@ func TestSweeper_ClosesOutAClaimWhoseRunAlreadyEnded(t *testing.T) {
 	}
 }
 
-// TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted ensures that
-// protecting live dispatches does not prevent recovery before a run starts.
 func TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -658,10 +577,6 @@ func TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted(t *testing.T) {
 	}
 }
 
-// TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut covers the
-// ordering "resident consumer up, dashboard starts, resident idles out". The
-// dashboard used to attempt the election once and stand down forever, leaving
-// the home with no consumer.
 func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -698,7 +613,6 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 	}()
 	<-ready
 
-	// The dashboard comes up second and loses the election.
 	logger, stoodDown := newConsumerLogSignal(dashboardStandDownMessage)
 	var err error
 	dashboardFinished, err = runLocalTriggerConsumerWithRetryInterval(ctx, home, st, logger, 10*time.Millisecond)
@@ -713,8 +627,6 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 		t.Fatal("resident consumer never idled out")
 	}
 
-	// Work arrives with only the dashboard left. It must pick the queue
-	// back up rather than leave the run pending forever.
 	seedSubmission(t, st, "run-stranded", "deploy", "")
 
 	waitFor(t, "the dashboard consumer to retake the queue", 20*time.Second, func() bool {
@@ -744,11 +656,6 @@ func (s *transientHeartbeatStore) TriggerClaimGeneration(context.Context, string
 	return s.seq, nil
 }
 
-// TestHeartbeat_SurvivesATransientStoreError covers a heartbeat that used to
-// give up permanently on the first error that was not ErrNotFound, so
-// one "database is locked" from a concurrent writer left the claim
-// undefended for the rest of a long run -- which is what let the sweeper
-// requeue a live dispatch.
 func TestHeartbeat_SurvivesATransientStoreError(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -767,7 +674,6 @@ func TestHeartbeat_SurvivesATransientStoreError(t *testing.T) {
 		t.Fatalf("heartbeat attempts = %d, want 2 after one transient failure", transient.calls)
 	}
 
-	// A claim that no longer exists is the one case that ends it.
 	if err := st.FinishTrigger(ctx, "run-hb"); err != nil {
 		t.Fatal(err)
 	}
@@ -776,8 +682,6 @@ func TestHeartbeat_SurvivesATransientStoreError(t *testing.T) {
 	}
 }
 
-// TestHeartbeat_StopsWhenTheClaimIsSuperseded keeps a stale dispatch
-// from prolonging a lease the current claim owns.
 func TestHeartbeat_StopsWhenTheClaimIsSuperseded(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)

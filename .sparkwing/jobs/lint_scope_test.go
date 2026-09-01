@@ -11,16 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// productDirs are the four directories the lint step never opened while it
-// ran inside .sparkwing/ alone. One case each, because the defect was
-// precisely that some of the tree was out of scope and a single case cannot
-// tell "covered" from "covered somewhere else".
 var productDirs = []string{"cmd", "internal", "pkg", "sparkwing"}
 
-// lintFixtureConfig enables one cheap linter and no baseline. The baseline
-// is deliberately absent: this fixture answers which code the step opens,
-// and a baseline would let a missed directory and a forgiven finding
-// produce the same silence.
 const lintFixtureConfig = `version: "2"
 linters:
   default: none
@@ -28,16 +20,10 @@ linters:
     - ineffassign
 `
 
-// ineffassignViolation is a finding ineffassign reports and the compiler
-// accepts, so a directory that reds here reds for the lint step's reason
-// rather than the build step's.
 func ineffassignViolation(pkg string) string {
 	return fmt.Sprintf("package %s\n\nfunc NegativeControl() int {\n\tx := 1\n\tx = 2\n\treturn x\n}\n", pkg)
 }
 
-// lintFixtureRepo builds a repo shaped like this one -- a product module at
-// the root carrying cmd/, internal/, pkg/ and sparkwing/, and the pipeline
-// module in .sparkwing/ -- and points the gate at it.
 func lintFixtureRepo(t *testing.T) string {
 	t.Helper()
 	requireGolangciLint(t)
@@ -61,9 +47,6 @@ func lintFixtureRepo(t *testing.T) string {
 	return root
 }
 
-// The whole ticket in one test: a finding in each product directory must
-// red the step. Narrowing the step back to .sparkwing/ passes every case
-// below, which is what it did on every commit from 2026-05-20.
 func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
 	for _, dir := range productDirs {
 		t.Run(dir, func(t *testing.T) {
@@ -89,8 +72,6 @@ func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
 	}
 }
 
-// The pipeline module stays covered by the widening: the step that used to
-// read only .sparkwing/ must not now read only the root.
 func TestLintStillCoversThePipelineModule(t *testing.T) {
 	root := lintFixtureRepo(t)
 	ctx := context.Background()
@@ -104,8 +85,6 @@ func TestLintStillCoversThePipelineModule(t *testing.T) {
 	}
 }
 
-// A module added later is covered the day its go.mod lands, because the
-// step walks the committed modules rather than naming them.
 func TestLintCoversEveryCommittedModule(t *testing.T) {
 	root := lintFixtureRepo(t)
 	ctx := context.Background()
@@ -119,11 +98,6 @@ func TestLintCoversEveryCommittedModule(t *testing.T) {
 	}
 }
 
-// golangci-lint handed a baseline ref it cannot resolve drops the baseline
-// and reports the repo's whole standing debt against the change in front of
-// it. The step has to refuse instead, and say which ref went missing, or a
-// machine that has not fetched main turns every commit red for reasons the
-// author did not write and cannot read.
 func TestLintRefusesToRunWhenTheBaselineRefIsMissing(t *testing.T) {
 	root := lintFixtureRepo(t)
 	ctx := context.Background()
@@ -149,10 +123,6 @@ func TestLintRefusesToRunWhenTheBaselineRefIsMissing(t *testing.T) {
 	}
 }
 
-// The scope line is the negative control the exit code cannot be. A step
-// that silently narrows itself is how this survived two months, so the
-// modules and the baseline have to be readable in the output rather than
-// inferred from a zero exit.
 func TestLintScopeLineNamesEveryModuleAndTheBaseline(t *testing.T) {
 	got := describeLintScope([]string{".", ".sparkwing"}, "baseline origin/main at abc123def456")
 
@@ -163,9 +133,6 @@ func TestLintScopeLineNamesEveryModuleAndTheBaseline(t *testing.T) {
 	}
 }
 
-// The baseline description has to name the commit, not merely the ref. A
-// ref reads the same whether it is current or a month stale, and the
-// question a reader asks of a grandfathering gate is what it forgave.
 func TestLintBaselineDescriptionCarriesTheResolvedCommit(t *testing.T) {
 	root := lintFixtureRepo(t)
 
@@ -179,7 +146,6 @@ func TestLintBaselineDescriptionCarriesTheResolvedCommit(t *testing.T) {
 	}
 }
 
-// gitOutput runs git in dir and returns its stdout.
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()

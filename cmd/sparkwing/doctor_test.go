@@ -29,9 +29,6 @@ func TestRenderPartialDoctorWritesRepairsBeforeError(t *testing.T) {
 	}
 }
 
-// doctorHome prepares an isolated sparkwing home with an initialized
-// state database and returns its paths. home doubles as the daemon home;
-// no daemon runs under a fresh temp dir, so daemon queries report empty.
 func doctorHome(t *testing.T) paths.Paths {
 	t.Helper()
 	dir := t.TempDir()
@@ -57,8 +54,6 @@ func withStore(t *testing.T, p paths.Paths, fn func(st *store.Store)) {
 	fn(st)
 }
 
-// backdateHeartbeat rewinds a run's heartbeat so it reads as a process
-// that died, since CreateRun stamps a fresh heartbeat on running rows.
 func backdateHeartbeat(t *testing.T, st *store.Store, runID string, age time.Duration) {
 	t.Helper()
 	if _, err := st.DB().Exec(
@@ -220,11 +215,6 @@ func TestDiagnose_SecondRunIsClean(t *testing.T) {
 	}
 }
 
-// TestDiagnose_FlagsPoisonedProfileWithoutRepair seeds a still-measuring
-// profile whose contended-run floor prices runs at the whole machine. Doctor
-// must name it without repairing it: the
-// learned row must survive, since discarding measurements is the operator's
-// reset to run).
 func TestDiagnose_FlagsPoisonedProfileWithoutRepair(t *testing.T) {
 	p := doctorHome(t)
 	ctx := context.Background()

@@ -53,20 +53,12 @@ func NewSecretResolverFromSpec(_ context.Context, spec backends.Spec) (SecretRes
 	}
 }
 
-// noneResolver is installed when the active profile's secrets surface
-// is type=none. Every Resolve fails with a clear "no secrets backend
-// configured" error so a pipeline that declares secrets surfaces the
-// misconfiguration loudly rather than silently dropping them.
 type noneResolver struct{}
 
 func (noneResolver) Resolve(_ context.Context, name string) (string, bool, error) {
 	return "", false, fmt.Errorf("secrets %q: profile declares no secrets backend (type=none)", name)
 }
 
-// remoteControllerResolver hits the controller's secrets endpoint.
-// Values come back with the controller-declared masked flag so the
-// Secret/Config strict-classification check at the SDK call site
-// stays honest.
 type remoteControllerResolver struct {
 	spec   backends.Spec
 	client *http.Client
@@ -115,10 +107,6 @@ func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (st
 	return body.Value, body.Masked, nil
 }
 
-// fileResolver reads KEY=value pairs from a dotenv file. Values are
-// reported as masked=true (the file is intended for secrets); use a
-// separate env backend for non-secret config that should render
-// unmasked.
 type fileResolver struct {
 	spec  backends.Spec
 	mu    sync.Mutex
@@ -186,8 +174,6 @@ func (f *fileResolver) load() {
 	f.cache = out
 }
 
-// envResolver looks up os.Getenv(Prefix + name). Empty values resolve
-// to ErrSecretMissing.
 type envResolver struct {
 	spec backends.Spec
 }

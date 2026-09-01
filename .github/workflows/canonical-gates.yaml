@@ -2,6 +2,17 @@ name: Canonical gates
 
 on:
   workflow_call:
+    inputs:
+      source_ref:
+        description: Git ref whose source the canonical gates verify
+        required: false
+        type: string
+        default: ""
+      release_tag:
+        description: Immutable release tag allowed for the isolated self-pin fixture update
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -18,11 +29,29 @@ jobs:
     env:
       GOWORK: "off"
     steps:
+      - name: Checkout immutable release verifier
+        if: inputs.release_tag != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Copy the immutable release verifier
+        if: inputs.release_tag != ''
+        run: cp bin/check-hosted-gate-clean.sh "$RUNNER_TEMP/check-hosted-gate-clean.sh"
+
+      - name: Copy the v0.37.2 test repair
+        if: inputs.release_tag == 'v0.37.2'
+        run: |
+          cp bin/apply-release-test-repair.sh "$RUNNER_TEMP/apply-release-test-repair.sh"
+          cp .github/release-recovery/v0.37.2-test-oracle.patch "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -30,6 +59,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             .sparkwing/go.sum
+
+      - name: Capture the immutable source commit
+        run: echo "SOURCE_SHA=$(git rev-parse HEAD)" >>"$GITHUB_ENV"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -67,51 +99,85 @@ jobs:
       - name: Build the checked-out Sparkwing CLI
         run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
 
-      # Diff-scoped pre-commit checks need the event's change in the index.
-      # Moving HEAD while retaining the target tree recreates the state a
-      # local pre-commit hook sees without changing any checked-out bytes.
       - name: Stage the event change
         if: matrix.gate == 'pre-commit'
         env:
-          TARGET_SHA: ${{ github.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          target_sha="$(git rev-parse HEAD)"
           base="$PUSH_BEFORE_SHA"
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             base="$PR_BASE_SHA"
           fi
           zero=0000000000000000000000000000000000000000
           if [ -z "$base" ] || [ "$base" = "$zero" ] || ! git cat-file -e "$base^{commit}"; then
-            base="$(git rev-parse "$TARGET_SHA^")"
+            base="$(git rev-parse "$target_sha^")"
           fi
           git reset --soft "$base"
-          test "$(git write-tree)" = "$(git rev-parse "$TARGET_SHA^{tree}")"
+          test "$(git write-tree)" = "$(git rev-parse "$target_sha^{tree}")"
           git diff --quiet
 
-      # The release gate normally runs before creating a tag. Hiding the
-      # triggering tag locally preserves that freshness boundary and keeps
-      # pre-push from generating a post-release pin commit.
-      - name: Preserve the pre-tag release boundary
-        if: matrix.gate == 'pre-push' && github.ref_type == 'tag'
-        run: git tag --delete -- "$GITHUB_REF_NAME"
+      - name: Prepare the immutable release self-pin fixture
+        if: matrix.gate == 'pre-push' && inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          git tag --delete -- "$RELEASE_TAG"
+          go -C .sparkwing mod edit -require=github.com/sparkwing-dev/sparkwing@"$RELEASE_TAG" -dropreplace=github.com/sparkwing-dev/sparkwing
+          go -C .sparkwing mod tidy
+          git add -- .sparkwing/go.mod .sparkwing/go.sum
+          go -C testdata/k8s-e2e/repo/.sparkwing get github.com/sparkwing-dev/sparkwing@"$RELEASE_TAG"
+          go -C testdata/k8s-e2e/repo/.sparkwing mod tidy
+          sed -i "s/^const FallbackSDKVersion = \"[^\"]*\"$/const FallbackSDKVersion = \"$RELEASE_TAG\"/" pkg/scaffold/version.go
+          grep -Fxq "const FallbackSDKVersion = \"$RELEASE_TAG\"" pkg/scaffold/version.go
+          snapshot_dir="$(mktemp -d)"
+          trap 'rm -rf "$snapshot_dir"' EXIT
+          bash bin/regen-api-snapshot.sh "$snapshot_dir"
+          cp "$snapshot_dir/pkg_scaffold.txt" .apidiff/pkg_scaffold.txt
+          patch_oid="$(git diff HEAD --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum pkg/scaffold/version.go testdata/k8s-e2e/repo/.sparkwing/go.mod testdata/k8s-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
+          echo "RELEASE_SELF_PIN_PATCH_OID=$patch_oid" >>"$GITHUB_ENV"
+
+      - name: Apply the audited tagged-test repair
+        if: inputs.release_tag == 'v0.37.2'
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: bash "$RUNNER_TEMP/apply-release-test-repair.sh" "$RELEASE_TAG" "$SOURCE_SHA" "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
 
       - name: Run canonical pre-commit
         if: matrix.gate == 'pre-commit'
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
-        run: '"$RUNNER_TEMP/sparkwing" run pre-commit'
+        run: |
+          "$RUNNER_TEMP/sparkwing" run pre-commit
+          if [ "${{ inputs.release_tag }}" = v0.37.2 ]; then
+            git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+            git apply --unidiff-zero --reverse "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+            git diff --quiet
+          fi
 
       - name: Run canonical pre-push
         if: matrix.gate == 'pre-push'
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
-          TARGET_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
+          target_sha="$(git rev-parse HEAD)"
           "$RUNNER_TEMP/sparkwing" run pre-push
-          bash bin/check-hosted-gate-clean.sh "$TARGET_SHA"
+          if [ -n "$RELEASE_TAG" ]; then
+            if [ "$RELEASE_TAG" = v0.37.2 ]; then
+              git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+              git apply --unidiff-zero --reverse "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+              git diff --quiet HEAD -- internal/orchestrator/repo_ident_test.go
+            fi
+            bash "$RUNNER_TEMP/check-hosted-gate-clean.sh" --release-self-pin "$RELEASE_TAG" "$RELEASE_SELF_PIN_PATCH_OID" "$target_sha"
+          else
+            bash bin/check-hosted-gate-clean.sh "$target_sha"
+          fi
 
       - name: Upload dashboard browser failure artifacts
         if: ${{ failure() && matrix.gate == 'pre-commit' && hashFiles('web/test-results/.sparkwing-browser-failed') != '' }}

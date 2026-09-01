@@ -21,9 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// expectNoTrigger drains the pending queue and fails if any trigger
-// was enqueued. Uses ClaimNextTrigger because the store doesn't expose
-// a list-all surface; ErrNotFound is the empty-queue signal.
 func expectNoTrigger(t *testing.T, st *store.Store) {
 	t.Helper()
 	tr, err := st.ClaimNextTrigger(context.Background(), time.Minute)
@@ -81,8 +78,6 @@ func postWebhook(t *testing.T, url, event string, body []byte, sig string) *http
 	return resp
 }
 
-// TestWebhookGitHub_SecretUnset returns 503 rather than silently
-// succeeding so misconfig is loud.
 func TestWebhookGitHub_SecretUnset(t *testing.T) {
 	ts, _ := newWebhookServer(t, "")
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", []byte("{}"), "sha256=deadbeef")
@@ -92,8 +87,6 @@ func TestWebhookGitHub_SecretUnset(t *testing.T) {
 	}
 }
 
-// TestWebhookGitHub_Ping is the request GitHub fires when a webhook is
-// first created. Responds 200 without touching the store.
 func TestWebhookGitHub_Ping(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"zen":"Keep it simple."}`)
@@ -106,9 +99,6 @@ func TestWebhookGitHub_Ping(t *testing.T) {
 	expectNoTrigger(t, st)
 }
 
-// TestWebhookGitHub_PushEnqueuesTrigger is the happy path: a valid
-// push payload with correct signature lands a trigger row for the
-// path-named pipeline.
 func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{
@@ -159,6 +149,9 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 	if tr.GitSHA != "abc123def456abc123def456abc123def456abcd" {
 		t.Errorf("sha=%q", tr.GitSHA)
 	}
+	if tr.Repo != "acme/sample-app" || tr.GithubOwner != "acme" || tr.GithubRepo != "sample-app" {
+		t.Errorf("repository provenance = %q %q/%q", tr.Repo, tr.GithubOwner, tr.GithubRepo)
+	}
 	if tr.TriggerEnv["GITHUB_REPOSITORY"] != "acme/sample-app" {
 		t.Errorf("env[GITHUB_REPOSITORY]=%q", tr.TriggerEnv["GITHUB_REPOSITORY"])
 	}
@@ -167,9 +160,6 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 	}
 }
 
-// TestWebhookGitHub_BadSignature rejects bodies whose HMAC doesn't
-// match. Critical: an attacker knowing the handler exists must not be
-// able to inject triggers.
 func TestWebhookGitHub_BadSignature(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"ref":"refs/heads/main","after":"x","repository":{"full_name":"x/y"}}`)
@@ -182,9 +172,6 @@ func TestWebhookGitHub_BadSignature(t *testing.T) {
 	expectNoTrigger(t, st)
 }
 
-// TestWebhookGitHub_MissingSignature rejects unsigned requests even if
-// the body would otherwise parse. Belt-and-braces against operator
-// confusion about whether HMAC is optional.
 func TestWebhookGitHub_MissingSignature(t *testing.T) {
 	ts, _ := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"ref":"refs/heads/main"}`)
@@ -195,8 +182,6 @@ func TestWebhookGitHub_MissingSignature(t *testing.T) {
 	}
 }
 
-// TestWebhookGitHub_TagPushIgnored proves tag-push events are ack'd
-// but not dispatched. v1 policy: only branch pushes trigger runs.
 func TestWebhookGitHub_TagPushIgnored(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{
@@ -217,8 +202,6 @@ func TestWebhookGitHub_TagPushIgnored(t *testing.T) {
 	expectNoTrigger(t, st)
 }
 
-// TestWebhookGitHub_BranchDeleteIgnored covers the git-push-with-delete
-// case (push --delete). GitHub sends deleted=true; we ack and move on.
 func TestWebhookGitHub_BranchDeleteIgnored(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{
@@ -236,8 +219,6 @@ func TestWebhookGitHub_BranchDeleteIgnored(t *testing.T) {
 	expectNoTrigger(t, st)
 }
 
-// TestWebhookGitHub_UnknownEventIgnored acks issue and other unhandled
-// events without dispatching, so GitHub sees a green delivery.
 func TestWebhookGitHub_UnknownEventIgnored(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"action":"opened"}`)
@@ -262,9 +243,6 @@ func prWebhookBody(action string, number int) []byte {
 	}`, action, number))
 }
 
-// TestWebhookGitHub_PullRequestDispatches covers the built PR actions:
-// each enqueues a trigger against the PR head with the base ref and PR
-// number stamped into the trigger env.
 func TestWebhookGitHub_PullRequestDispatches(t *testing.T) {
 	for _, action := range []string{"opened", "synchronize", "reopened"} {
 		t.Run(action, func(t *testing.T) {
@@ -299,6 +277,9 @@ func TestWebhookGitHub_PullRequestDispatches(t *testing.T) {
 			if tr.GitSHA != "1111111111111111111111111111111111111111" {
 				t.Errorf("sha=%q want PR head sha", tr.GitSHA)
 			}
+			if tr.Repo != "acme/sample-app" || tr.GithubOwner != "acme" || tr.GithubRepo != "sample-app" {
+				t.Errorf("repository provenance = %q %q/%q", tr.Repo, tr.GithubOwner, tr.GithubRepo)
+			}
 			if tr.TriggerUser != "bob" {
 				t.Errorf("user=%q want bob", tr.TriggerUser)
 			}
@@ -321,8 +302,6 @@ func TestWebhookGitHub_PullRequestDispatches(t *testing.T) {
 	}
 }
 
-// TestWebhookGitHub_PullRequestActionIgnored proves non-diff actions
-// (closed, labeled, ...) are ack'd without dispatching a run.
 func TestWebhookGitHub_PullRequestActionIgnored(t *testing.T) {
 	for _, action := range []string{"closed", "labeled", "edited", "assigned"} {
 		t.Run(action, func(t *testing.T) {
@@ -343,8 +322,6 @@ func TestWebhookGitHub_PullRequestActionIgnored(t *testing.T) {
 	}
 }
 
-// TestWebhookGitHub_BodyTooLarge guards against memory blow-up from a
-// malicious or buggy payload.
 func TestWebhookGitHub_BodyTooLarge(t *testing.T) {
 	ts, _ := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"filler":"` + strings.Repeat("x", 2<<20) + `"}`)

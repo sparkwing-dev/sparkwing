@@ -11,10 +11,6 @@ import (
 	"strings"
 )
 
-// writeDepCacheArchive streams dir as a gzipped tar to w. Entries are
-// recorded relative to dir. Regular files, directories, and symlinks
-// are archived (pnpm trees are symlink farms); sockets, devices, and
-// other irregular entries are skipped.
 func writeDepCacheArchive(w io.Writer, dir string) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
@@ -73,22 +69,8 @@ func writeDepCacheArchive(w io.Writer, dir string) error {
 	return gz.Close()
 }
 
-// depCacheMaxExtractBytes bounds the total bytes an extract may write.
-// The archives sparkwing produces are capped at
-// remoteDepCacheMaxBytes compressed; a cluster cache entry that
-// decompresses past this bound is a corrupt or hostile archive (a gzip
-// bomb), and extraction stops rather than filling the runner's disk. A
-// var so tests can shrink it.
 var depCacheMaxExtractBytes = int64(20 << 30)
 
-// extractDepCacheArchive expands a gzipped tar produced by
-// writeDepCacheArchive into dir. Entry names are confined to dir:
-// absolute names and names escaping via .. are rejected rather than
-// written, and a symlink whose target leaves dir is rejected rather
-// than created (so a later entry cannot be written through it).
-// Extraction is bounded by depCacheMaxExtractBytes. Module caches ship
-// read-only files, so directory modes are applied after their contents
-// land.
 func extractDepCacheArchive(r io.Reader, dir string) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
@@ -181,10 +163,6 @@ func extractDepCacheArchive(r io.Reader, dir string) error {
 	return nil
 }
 
-// extractDepCacheArchiveStaged extracts into a sibling temp directory
-// and moves it into place only on full success, so a truncated stream
-// leaves dir untouched instead of half-populated. Restore only runs
-// against an absent or empty dir, so replacing it wholesale is safe.
 func extractDepCacheArchiveStaged(r io.Reader, dir string) error {
 	parent := filepath.Dir(dir)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
@@ -209,8 +187,6 @@ func extractDepCacheArchiveStaged(r io.Reader, dir string) error {
 	return nil
 }
 
-// securePathJoin joins name under root, rejecting absolute names and
-// names that escape root via "..".
 func securePathJoin(root, name string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(name))
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
@@ -219,11 +195,6 @@ func securePathJoin(root, name string) (string, error) {
 	return filepath.Join(root, clean), nil
 }
 
-// symlinkStaysInside rejects a symlink whose target resolves outside
-// root. dest is the symlink's own path under root; linkname is its
-// target as recorded in the archive. A rejected symlink is never
-// created, which is what stops the plant-a-symlink-then-write-through-it
-// escape: a later file entry has no out-of-tree link to follow.
 func symlinkStaysInside(root, dest, linkname string) error {
 	var target string
 	if filepath.IsAbs(linkname) {

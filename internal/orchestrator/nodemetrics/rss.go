@@ -5,10 +5,6 @@ import (
 	"strings"
 )
 
-// parseProcessRSSKB converts a `ps -o rss=` reading, which ps reports in
-// kilobytes, into bytes. It reports false for output carrying no parsable
-// row, so a ps that could not read the process table never passes as a
-// process holding no memory and the caller's MemStats fallback applies.
 func parseProcessRSSKB(out string) (int64, bool) {
 	for _, line := range strings.Split(out, "\n") {
 		field := strings.TrimSpace(line)

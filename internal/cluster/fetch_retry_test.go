@@ -10,11 +10,6 @@ import (
 	"time"
 )
 
-// TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures models
-// the happy path: the cache's background-fetch loop hasn't caught
-// up on attempt 1 or 2, but the SHA is present by attempt 3.
-// The retry loop must NOT surface the cryptic git error -- it should
-// return the eventually-good sparkwingDir.
 func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {
 	prevFn := fetchSourceFn
 	prevDelay := triggerFetchRetryDelay
@@ -28,7 +23,7 @@ func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {
 	triggerFetchMaxAttempts = 3
 
 	var calls int32
-	fetchSourceFn = func(gcURL, repoURL, branch, sha, parentDir string) (string, error) {
+	fetchSourceFn = func(gcURL, controllerURL, token, repoURL, branch, sha, parentDir string) (string, error) {
 		n := atomic.AddInt32(&calls, 1)
 		if n < 3 {
 			return "", errors.New("git fetch --depth 1 origin abc123: exit status 128: fatal: remote error: upload-pack: not our ref abc123")
@@ -37,7 +32,7 @@ func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {
 	}
 
 	got, err := fetchPipelineSourceWithRetry(context.Background(),
-		"http://cache", "git@github.com:o/r.git", "main", "abc123", "/tmp/work",
+		"http://cache", "http://controller", "token", "git@github.com:o/r.git", "main", "abc123", "/tmp/work",
 		slog.Default(), "run-1")
 	if err != nil {
 		t.Fatalf("expected success after retries, got %v", err)
@@ -50,11 +45,6 @@ func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {
 	}
 }
 
-// TestFetchPipelineSourceWithRetry_ExhaustsAndRewritesError verifies
-// that after every retry hits "not our ref", the caller sees a
-// human-readable error pointing at gitcache lag rather than the
-// raw upload-pack message -- and the original error is still in the
-// chain via errors.Is/As.
 func TestFetchPipelineSourceWithRetry_ExhaustsAndRewritesError(t *testing.T) {
 	prevFn := fetchSourceFn
 	prevDelay := triggerFetchRetryDelay
@@ -69,13 +59,13 @@ func TestFetchPipelineSourceWithRetry_ExhaustsAndRewritesError(t *testing.T) {
 
 	underlying := errors.New("fatal: remote error: upload-pack: not our ref deadbeef")
 	var calls int32
-	fetchSourceFn = func(gcURL, repoURL, branch, sha, parentDir string) (string, error) {
+	fetchSourceFn = func(gcURL, controllerURL, token, repoURL, branch, sha, parentDir string) (string, error) {
 		atomic.AddInt32(&calls, 1)
 		return "", underlying
 	}
 
 	_, err := fetchPipelineSourceWithRetry(context.Background(),
-		"http://cache", "git@github.com:o/r.git", "main", "deadbeef", "/tmp/work",
+		"http://cache", "http://controller", "token", "git@github.com:o/r.git", "main", "deadbeef", "/tmp/work",
 		slog.Default(), "run-2")
 	if err == nil {
 		t.Fatal("expected error after exhausted retries")
@@ -94,10 +84,6 @@ func TestFetchPipelineSourceWithRetry_ExhaustsAndRewritesError(t *testing.T) {
 	}
 }
 
-// TestFetchPipelineSourceWithRetry_FailsFastOnUnrelatedError ensures
-// non-"not our ref" errors (auth, network, malformed URL, ...) bypass
-// the retry -- we never want to delay an obviously-broken state by 30s
-// of pointless backoff.
 func TestFetchPipelineSourceWithRetry_FailsFastOnUnrelatedError(t *testing.T) {
 	prevFn := fetchSourceFn
 	prevDelay := triggerFetchRetryDelay
@@ -112,14 +98,14 @@ func TestFetchPipelineSourceWithRetry_FailsFastOnUnrelatedError(t *testing.T) {
 
 	authErr := errors.New("git fetch: Permission denied (publickey)")
 	var calls int32
-	fetchSourceFn = func(gcURL, repoURL, branch, sha, parentDir string) (string, error) {
+	fetchSourceFn = func(gcURL, controllerURL, token, repoURL, branch, sha, parentDir string) (string, error) {
 		atomic.AddInt32(&calls, 1)
 		return "", authErr
 	}
 
 	start := time.Now()
 	_, err := fetchPipelineSourceWithRetry(context.Background(),
-		"http://cache", "git@github.com:o/r.git", "main", "abc", "/tmp/work",
+		"http://cache", "http://controller", "token", "git@github.com:o/r.git", "main", "abc", "/tmp/work",
 		slog.Default(), "run-3")
 	elapsed := time.Since(start)
 
@@ -134,9 +120,6 @@ func TestFetchPipelineSourceWithRetry_FailsFastOnUnrelatedError(t *testing.T) {
 	}
 }
 
-// TestFetchPipelineSourceWithRetry_HonorsContextCancel makes sure a
-// cancelled parent context stops the retry loop instead of waiting
-// out the full backoff.
 func TestFetchPipelineSourceWithRetry_HonorsContextCancel(t *testing.T) {
 	prevFn := fetchSourceFn
 	prevDelay := triggerFetchRetryDelay
@@ -150,7 +133,7 @@ func TestFetchPipelineSourceWithRetry_HonorsContextCancel(t *testing.T) {
 	triggerFetchMaxAttempts = 3
 
 	attempted := make(chan struct{}, 1)
-	fetchSourceFn = func(gcURL, repoURL, branch, sha, parentDir string) (string, error) {
+	fetchSourceFn = func(gcURL, controllerURL, token, repoURL, branch, sha, parentDir string) (string, error) {
 		select {
 		case attempted <- struct{}{}:
 		default:
@@ -172,7 +155,7 @@ func TestFetchPipelineSourceWithRetry_HonorsContextCancel(t *testing.T) {
 
 	start := time.Now()
 	_, err := fetchPipelineSourceWithRetry(ctx,
-		"http://cache", "git@github.com:o/r.git", "main", "abc", "/tmp/work",
+		"http://cache", "http://controller", "token", "git@github.com:o/r.git", "main", "abc", "/tmp/work",
 		slog.Default(), "run-4")
 	<-cancelDone
 	elapsed := time.Since(start)

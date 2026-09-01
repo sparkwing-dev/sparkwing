@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// usageSample is one stored metric sample, positioned by its offset from the
-// run's execution start. A non-zero cpuTime makes it a per-command one-shot:
-// cpuMillicores is then the rate over that command's own span, not over the
-// sampling window it lands in.
 type usageSample struct {
 	at            time.Duration
 	cpuMillicores int64
@@ -23,11 +19,6 @@ type usageSample struct {
 	cpuTime       time.Duration
 }
 
-// usageNode is one node of a priced run: when its own work ran, how long the
-// process that carried it lived, what the sampler saw meanwhile, and what the
-// kernel charged that process at exit. A zero cpu, maxRSS, and wall is the
-// shape every node has where no runner supervises a process -- a Kubernetes
-// pod, or a node executed inside the dispatcher.
 type usageNode struct {
 	id      string
 	start   time.Duration
@@ -38,20 +29,15 @@ type usageNode struct {
 	maxRSS  int64
 }
 
-// wantNode is what one node's stored profile must read after the fold.
 type wantNode struct {
 	id        string
 	sustained float64
 	peak      float64
 	peakMem   int64
-	duration  time.Duration // zero skips the check
-	absent    bool          // no observation was recorded for this node at all
+	duration  time.Duration
+	absent    bool
 }
 
-// TestRecordRunProfile_PricesMeasuredShapes prices realistic runs through the
-// fold and pins the numbers a human can recompute by hand. Each case states
-// the arithmetic it asserts; together they cover the ways the kernel's exit
-// accounting, a per-command report, and the per-interval sampler disagree.
 func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -65,11 +51,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 		wantNoRollup bool
 	}{
 		{
-			// A node that lived under a single sampling interval has no
-			// samples at all: before exit accounting it was invisible to
-			// pricing, and a pipeline of such nodes priced at nothing.
-			// 300ms of CPU inside a 500ms process is 0.6 cores, and the run
-			// that contained it drew that CPU across a 1s window: 0.3.
 			name:      "sub-tick node is priced from its exit accounting alone",
 			hostCores: 1,
 			runWall:   time.Second,
@@ -83,13 +64,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 256 << 20,
 		},
 		{
-			// The reason the CPU integral is divided by the process's life
-			// and not by the node's own window. A node process spends most
-			// of a trivial node on runtime startup, plan rebuild, and
-			// teardown: 23.8ms of CPU across a 91ms process whose inner
-			// work window is 2.4ms. Dividing by the window prices an
-			// fmt.Sprintf at 9.9 cores -- host capacity after the clamp,
-			// for every node, forever. Dividing by the process gives 0.26.
 			name:      "process startup does not price a trivial node at host capacity",
 			hostCores: 1,
 			runWall:   200 * time.Millisecond,
@@ -106,10 +80,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 32 << 20,
 		},
 		{
-			// Five ticks of half a core, but the kernel charged 8s of CPU
-			// over the process's 10s life: 0.8 cores the sampler never saw,
-			// because it landed in children reaped between two ticks. The
-			// measured mean outranks the sampled plateau and is charged.
 			name:      "measured mean outranks the sampled plateau",
 			hostCores: 1,
 			runWall:   10 * time.Second,
@@ -124,11 +94,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 1 << 30,
 		},
 		{
-			// Four nodes, each its own process and so each its own sampler:
-			// their ticks land microseconds apart and never on the same
-			// nanosecond. The run drew four cores and 2GiB at once;
-			// grouping by exact timestamp would price it at one core and
-			// 512MiB, the widest single node.
 			name:      "fan-out of four rolls up to the sum of its interleaved samples",
 			hostCores: 4,
 			runWall:   6 * time.Second,
@@ -147,12 +112,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 2 << 30,
 		},
 		{
-			// Four commands run back to back inside one window, each two
-			// cores for 400ms and each holding 512MiB. The window carries
-			// 3.2 CPU-seconds, so the machine drew 1.6 cores of it, and it
-			// never held more than 512MiB at once. Adding the four reports
-			// as rates instead would price the run at eight cores and 2GiB
-			// -- concurrency and memory that never existed.
 			name:      "sequential commands in one window integrate rather than sum",
 			hostCores: 2,
 			runWall:   2 * time.Second,
@@ -165,18 +124,13 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 					command(1200*time.Millisecond, 2000, 512<<20, 800*time.Millisecond),
 				},
 			}},
-			// The node's own peak keeps the command-wall rate: those
-			// commands really did draw two cores while they ran, and an
-			// operator reading the node's chart should see the burst.
+
 			wantNodes:   []wantNode{{id: "serial", sustained: 2.0, peak: 2.0, peakMem: 512 << 20}},
 			wantSustain: 1.6,
 			wantPeak:    1.6,
 			wantPeakMem: 512 << 20,
 		},
 		{
-			// The other direction: two nodes each running one command for
-			// the whole window really were concurrent, so their integrals
-			// add to two cores and their high-water marks add to 512MiB.
 			name:      "concurrent commands in one window still sum",
 			hostCores: 2,
 			runWall:   2 * time.Second,
@@ -199,10 +153,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 512 << 20,
 		},
 		{
-			// A tick and two command reports in one window: the tick is
-			// what the node process itself held at that instant, and the
-			// commands' marks are memory beside it. One command's mark
-			// counts, not both.
 			name:      "a window adds its tick to one command mark, not to every one",
 			hostCores: 1,
 			runWall:   2 * time.Second,
@@ -220,9 +170,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 640 << 20,
 		},
 		{
-			// The kernel's high-water mark is 3GiB; the sampler caught
-			// 1GiB because the allocation lived and died between ticks.
-			// Memory is priced from the mark, which cannot miss a spike.
 			name:      "peak memory comes from the kernel high-water mark",
 			hostCores: 1,
 			runWall:   4 * time.Second,
@@ -237,11 +184,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 3 << 30,
 		},
 		{
-			// No exit accounting at all, the shape of every cluster node
-			// and of a node run inside the dispatcher. Pricing is the
-			// sampled plateau guarded by the sampled mean, exactly as it
-			// was before the columns existed: p80 of the five readings is
-			// 0.5, their mean is 0.8, and the burst stays on display.
 			name:      "a node without exit accounting prices from samples alone",
 			hostCores: 2,
 			runWall:   10 * time.Second,
@@ -261,9 +203,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 2 << 30,
 		},
 		{
-			// Nothing measured the node at all: no samples, no exit
-			// accounting. It stays out of the profiles rather than
-			// teaching the pipeline that it costs nothing.
 			name:         "an unmeasured node records nothing",
 			hostCores:    1,
 			runWall:      time.Second,
@@ -330,8 +269,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 	}
 }
 
-// ticks builds n sampler readings one sampling interval apart, all of the
-// same draw -- the shape a steady node samples as.
 func ticks(n int, cpuMillicores, memoryBytes int64) []usageSample {
 	out := make([]usageSample, n)
 	for i := range out {
@@ -344,15 +281,10 @@ func ticks(n int, cpuMillicores, memoryBytes int64) []usageSample {
 	return out
 }
 
-// command is one per-command report: a rate measured over the command's own
-// span, the CPU behind that rate, and the command's peak resident set.
 func command(at time.Duration, cpuMillicores, memoryBytes int64, cpu time.Duration) usageSample {
 	return usageSample{at: at, cpuMillicores: cpuMillicores, memoryBytes: memoryBytes, cpuTime: cpu}
 }
 
-// fanNode is one member of a parallel stage: a full core and 512MiB for
-// three intervals, sampled by its own process's sampler and therefore offset
-// from its siblings by a jitter no two of them share.
 func fanNode(id string, jitter time.Duration) usageNode {
 	samples := ticks(3, 1000, 512<<20)
 	for i := range samples {
@@ -361,11 +293,6 @@ func fanNode(id string, jitter time.Duration) usageNode {
 	return usageNode{id: id, dur: 6 * time.Second, samples: samples}
 }
 
-// seedUsageRun writes one run of the given nodes and returns the store and
-// the run's execution start. The start is aligned to the sampling cadence so
-// a case's offsets land in the windows it means them to land in: the fold
-// groups on absolute time, and a test that started mid-window would straddle
-// a boundary at random.
 func seedUsageRun(t *testing.T, pipeline string, nodes []usageNode) (*store.Store, time.Time) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
@@ -409,9 +336,6 @@ func seedUsageRun(t *testing.T, pipeline string, nodes []usageNode) (*store.Stor
 	return st, start
 }
 
-// assertCores compares a core figure at the precision the arithmetic
-// carries: the figures are divisions, so an exact float comparison would
-// fail on a representation the pricing does not care about.
 func assertCores(t *testing.T, label string, got, want float64) {
 	t.Helper()
 	if math.Abs(got-want) > 1e-9 {
@@ -419,10 +343,6 @@ func assertCores(t *testing.T, label string, got, want float64) {
 	}
 }
 
-// TestRecordRunProfile_SubTickNodesAreNoLongerInvisible states the change in
-// reach rather than in arithmetic: a run of nodes too short to sample used to
-// teach its pipeline nothing, so admission kept pricing it at a cold start no
-// matter how often it ran.
 func TestRecordRunProfile_SubTickNodesAreNoLongerInvisible(t *testing.T) {
 	st, start := seedUsageRun(t, "brief", []usageNode{
 		{
@@ -449,8 +369,7 @@ func TestRecordRunProfile_SubTickNodesAreNoLongerInvisible(t *testing.T) {
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup missing: %v", err)
 	}
-	// 200ms + 200ms of CPU inside a 1s run: 0.4 cores, and no sampled
-	// interval to raise the peak above it.
+
 	assertCores(t, "rollup SustainedCores", rollup.SustainedCores, 0.4)
 	assertCores(t, "rollup PeakCores", rollup.PeakCores, 0.4)
 	if rollup.PeakMemoryBytes != 64<<20 {
@@ -458,11 +377,6 @@ func TestRecordRunProfile_SubTickNodesAreNoLongerInvisible(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_RetriedNodeIsPricedOnEveryAttempt covers a node
-// executed more than once. Each attempt is a fresh process the machine paid
-// for, so the CPU and the occupancy accumulate while the peak RSS stays a
-// high-water: two 1s attempts at half a core price as one core-second over
-// two seconds of occupancy, not as whichever attempt wrote last.
 func TestRecordRunProfile_RetriedNodeIsPricedOnEveryAttempt(t *testing.T) {
 	st, start := seedUsageRun(t, "retried", nil)
 	ctx := context.Background()

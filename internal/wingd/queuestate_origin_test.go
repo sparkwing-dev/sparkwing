@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// TestQueueState_OriginTagsHoldersAndWaiters drives a controller-dispatched
-// admission alongside a local one and asserts the daemon carries each run's
-// origin onto its queue row, so a shared box's queue attributes contended
-// work to whoever launched it.
 func TestQueueState_OriginTagsHoldersAndWaiters(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
@@ -68,8 +64,6 @@ func TestQueueState_OriginTagsHoldersAndWaiters(t *testing.T) {
 	}
 }
 
-// waitForWaiter polls the queue until runID appears as a waiter, so the
-// test does not race the queued admission's arrival.
 func waitForWaiter(t *testing.T, home, runID string) wingwire.QueueState {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

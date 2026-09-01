@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// TestRenderQueuePretty_ResourceRowReconciles renders a host resource row and
-// asserts the printed numbers satisfy capacity - in use - reserved - external
-// = available exactly, and that the legend and the Running/Waiting section
-// headers frame the tables.
 func TestRenderQueuePretty_ResourceRowReconciles(t *testing.T) {
 	qs := wingwire.QueueState{
 		Resources: []wingwire.ResourceState{

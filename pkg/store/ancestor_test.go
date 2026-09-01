@@ -19,8 +19,6 @@ func openAncestorStore(t *testing.T) *store.Store {
 	return s
 }
 
-// insertChain creates runs in a linear parent chain. Each id's parent
-// is the previous entry; the first entry has no parent.
 func insertChain(t *testing.T, s *store.Store, entries []struct{ id, pipeline string }) {
 	t.Helper()
 	ctx := context.Background()
@@ -39,8 +37,6 @@ func insertChain(t *testing.T, s *store.Store, entries []struct{ id, pipeline st
 	}
 }
 
-// TestAncestor_EmptyWhenNoParent returns an empty slice when the run
-// has no parent chain. Important: no error, no nil-pointer surprise.
 func TestAncestor_EmptyWhenNoParent(t *testing.T) {
 	s := openAncestorStore(t)
 	insertChain(t, s, []struct{ id, pipeline string }{
@@ -55,8 +51,6 @@ func TestAncestor_EmptyWhenNoParent(t *testing.T) {
 	}
 }
 
-// TestAncestor_ReturnsChain walks a 3-deep chain and checks the order
-// (parent-first).
 func TestAncestor_ReturnsChain(t *testing.T) {
 	s := openAncestorStore(t)
 	insertChain(t, s, []struct{ id, pipeline string }{
@@ -79,8 +73,6 @@ func TestAncestor_ReturnsChain(t *testing.T) {
 	}
 }
 
-// TestAncestor_TerminatesOnMissingParent: a broken chain (parent_run_id
-// points at a deleted run) returns what was reachable without errors.
 func TestAncestor_TerminatesOnMissingParent(t *testing.T) {
 	s := openAncestorStore(t)
 	insertChain(t, s, []struct{ id, pipeline string }{
@@ -99,8 +91,6 @@ func TestAncestor_TerminatesOnMissingParent(t *testing.T) {
 	}
 }
 
-// TestAncestor_RunIDNotFound handles an invalid seed id gracefully
-// rather than erroring.
 func TestAncestor_RunIDNotFound(t *testing.T) {
 	s := openAncestorStore(t)
 	got, err := s.GetRunAncestorPipelines(context.Background(), "does-not-exist")

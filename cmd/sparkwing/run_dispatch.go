@@ -1,11 +1,9 @@
-// sparkwing run flag parsing. parseRunFlags walks args manually (not
-// pflag) because the pipeline binary defines its own flags; we strip
-// the sw-prefixed flags we know and pass the rest through untouched.
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,78 +35,36 @@ func atoiNonNeg(s string) (int, error) {
 
 type runFlags struct {
 	ref string
-	// profile names a storage profile from
-	// ~/.config/sparkwing/profiles.yaml for local execution: state,
-	// logs, and cache route through the profile (with a local SQLite
-	// mirror for non-local profiles). Parsed from the flat --profile
-	// flag, forwarded to the inner binary as SPARKWING_PROFILE.
+
 	profile  string
 	noUpdate bool
 	verbose  bool
-	// secrets sources secrets from the named profile's controller.
-	// Orthogonal to --profile: --secrets prod resolves against prod even
-	// when running locally. Empty = laptop dotenv.
+
 	secrets   string
 	changeDir string
-	// mode: "" / "local" = this machine's own dispatcher; "ci-embedded"
-	// = capped local procs + S3 storage.
+
 	mode string
-	// workers caps concurrent nodes in ci-embedded mode; 0 = NumCPU.
+
 	workers int
-	// --start-at / --stop-at name an inclusive WorkStep window the
-	// orchestrator runs; ids outside the resulting reachability set
-	// are skipped with `step_skipped`. Either bound can be empty to
-	// leave that side open. Unknown ids fail the run with a "did you
-	// mean X?" suggestion at registration time.
+
 	startAt string
 	stopAt  string
-	// --only is a job-level filter (path.Match glob over JobNode IDs).
-	// Matched jobs run; jobs reachable as transitive Needs() ancestors
-	// of matched jobs also run (so a glob hitting only the leaves still
-	// produces a self-consistent dispatch). Everything else is skipped
-	// with `node_skipped`. Mutually exclusive with --start-at / --stop-at:
-	// they're a different filter mode (step-level reachability) and
-	// intersecting the two would produce surprising selections.
+
 	only string
-	// --no-cache disables cache READS for this run; per-node cache
-	// WRITES still happen on success so subsequent runs over the same
-	// content hit cache normally. Distinct from SPARKWING_NO_BINCACHE
-	// (which gates the bincache compiled-pipeline-binary cache).
+
 	noCache bool
-	// --dry-run runs each step's DryRunFn instead of its apply Fn.
-	// No mutation; safe to run from agents and CI gates before
-	// destructive operations. Steps without a DryRunFn (and without
-	// an explicit SafeWithoutDryRun marker) soft-skip with reason
-	// `no_dry_run_defined` so the contract gap is visible.
+
 	dryRun bool
-	// allow is the union of risk labels the operator authorizes via
-	// --sw-allow (repeatable; comma-separated allowed). The gate
-	// walks the plan's declared labels, subtracts this set, and
-	// refuses dispatch if any remain. --sw-dry-run bypasses
-	// regardless. The gate degrades gracefully (no labels declared =
-	// no block).
+
 	allow []string
-	// localOnly forces SQLite state + filesystem logs + filesystem
-	// cache for this run, ignoring any configured shared backends.
-	// The escape hatch when shared state is misbehaving (stale
-	// Postgres, unreachable controller, broken bucket policy) and the
-	// operator wants to run against the laptop only.
+
 	localOnly bool
-	// index is a git index the caller wants this run's steps to read
-	// and write instead of the repository's own, from --sw-index. A
-	// verifier uses it to hand a pipeline a staged snapshot of work
-	// that is not committed yet, so steps scoped to the staged diff
-	// judge that snapshot. Deliberately a flag and not an environment
-	// variable: git exports GIT_INDEX_FILE to every hook it launches,
-	// sparkwing drops it on startup so the gated repository cannot
-	// leak into a pipeline's own work, and an argument is how a caller
-	// says the binding is intent rather than inheritance.
+
 	index string
+
+	runHandleFile string
 }
 
-// collectPipelineArgs parses passthrough into TriggerRequest.Args.
-// Bare flags map to "true". No schema validation here: the controller
-// re-parses against the remote pipeline's own schema.
 func collectPipelineArgs(passthrough []string) map[string]string {
 	out := map[string]string{}
 	i := 0
@@ -138,9 +94,6 @@ func collectPipelineArgs(passthrough []string) map[string]string {
 	return out
 }
 
-// appendCSV splits a comma-separated value and appends non-empty
-// entries to out. Used by repeatable flags that also accept
-// comma-separated lists (pflag StringSlice semantics).
 func appendCSV(out []string, v string) []string {
 	for _, part := range strings.Split(v, ",") {
 		p := strings.TrimSpace(part)
@@ -152,9 +105,6 @@ func appendCSV(out []string, v string) []string {
 	return out
 }
 
-// parseRunFlags splits sparkwing-owned (sw-prefixed) flags from
-// pass-through args. Unknown / malformed-trailing flags fall through
-// to the pipeline binary.
 func parseRunFlags(args []string) (runFlags, []string) {
 	var wf runFlags
 	pass := make([]string, 0, len(args))
@@ -294,6 +244,17 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case strings.HasPrefix(a, "--sw-index="):
 			wf.index = strings.TrimPrefix(a, "--sw-index=")
 			i++
+		case a == "--sw-run-handle-file":
+			if i+1 < len(args) {
+				wf.runHandleFile = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--sw-run-handle-file="):
+			wf.runHandleFile = strings.TrimPrefix(a, "--sw-run-handle-file=")
+			i++
 		case a == "-C", a == "--sw-cd":
 			if i+1 < len(args) {
 				wf.changeDir = args[i+1]
@@ -313,36 +274,13 @@ func parseRunFlags(args []string) (runFlags, []string) {
 	return wf, pass
 }
 
-// EventIndexBound is the run-stream event `sparkwing run --sw-index`
-// writes once the binding is in place, when the run's stream is JSON.
-// Its `path` attribute is the absolute index the run's steps will read.
-//
-// It is a receipt, and callers are meant to require it. Binding an
-// index is a request to have a pipeline judge that index; a binary
-// with no --sw-index forwards the flag to the pipeline and judges the
-// repository's own index instead, and nothing in the exit code tells
-// those apart. A caller that sees no index_bound knows the index it
-// supplied went unread, and can report that it verified nothing rather
-// than reporting a pass.
 const EventIndexBound = "index_bound"
 
-// The run stream formats a receipt can be written in. quiet and any
-// unrecognized spelling render as prose, since only a caller parsing
-// the stream asks for json.
 const (
 	logFormatJSON   = "json"
 	logFormatPretty = "pretty"
 )
 
-// bindRunIndex points a run's steps at the git index at path by
-// setting GIT_INDEX_FILE in env, and writes the index_bound receipt to
-// out in logFormat. The returned env replaces any inherited
-// GIT_INDEX_FILE, so the caller's index wins over the ambient one
-// rather than shadowing it.
-//
-// A path that does not exist is refused: git reads a missing index as
-// an empty one, so the steps would report a clean tree they were never
-// shown.
 func bindRunIndex(env []string, path string, out io.Writer, logFormat string) ([]string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -357,9 +295,6 @@ func bindRunIndex(env []string, path string, out io.Writer, logFormat string) ([
 	return setEnv(env, "GIT_INDEX_FILE", abs), nil
 }
 
-// announceIndexBound writes the receipt in the format the rest of the
-// run speaks: the record a caller parses when the stream is json, a
-// line when a person is reading the run go by.
 func announceIndexBound(out io.Writer, abs, logFormat string) error {
 	if logFormat != logFormatJSON {
 		_, err := fmt.Fprintf(out, "index bound: %s\n", abs)
@@ -373,8 +308,6 @@ func announceIndexBound(out io.Writer, abs, logFormat string) error {
 	return json.NewEncoder(out).Encode(&rec)
 }
 
-// setupRefWorktree creates a git worktree at ref. Caller must defer cleanup.
-// Best-effort fetch first so unseen refs resolve; fetch failure is non-fatal.
 func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub string, cleanup func(), err error) {
 	repoRoot := filepath.Dir(sparkwingDir)
 
@@ -409,10 +342,6 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub strin
 	return tmpDir, sub, cleanup, nil
 }
 
-// triggerSource builds the trigger_source string a remote dispatch
-// records, tagging the originating verb so runs are distinguishable in
-// `runs list`: "pipeline-trigger@host" for `pipeline trigger`. Falls
-// back to the bare prefix when the hostname can't be read.
 func triggerSource(prefix string) string {
 	if host, err := os.Hostname(); err == nil && host != "" {
 		return prefix + "@" + host
@@ -420,11 +349,7 @@ func triggerSource(prefix string) string {
 	return prefix
 }
 
-// createRemoteTrigger builds and POSTs a TriggerRequest to prof's
-// controller, returning the controller's response. It backs `sparkwing
-// pipeline trigger`. It does NOT print or tail -- the caller decides how
-// to report. prof must already carry a controller.
-func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf runFlags, passthrough []string) (*client.TriggerResponse, error) {
+func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf runFlags, passthrough []string, workingTree bool) (*client.TriggerResponse, error) {
 	args := collectPipelineArgs(passthrough)
 	var userName string
 	if u, err := user.Current(); err == nil {
@@ -445,6 +370,16 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		if err != nil {
 			return nil, fmt.Errorf("pipeline trigger %q: invalid git origin: %w", pipelineName, err)
 		}
+	}
+	var snapshot *worktreeSnapshot
+	if workingTree {
+		var err error
+		snapshot, err = captureWorktreeSnapshot(context.Background(), ".")
+		if err != nil {
+			return nil, fmt.Errorf("pipeline trigger %q: %w", pipelineName, err)
+		}
+		defer func() { _ = snapshot.close() }()
+		sha = snapshot.SHA
 	}
 	envMap := map[string]string{}
 	if repoSlug != "" {
@@ -497,7 +432,15 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		},
 	}
 
-	if repoURL != "" {
+	if snapshot != nil {
+		cacheURL := bincache.CacheURL()
+		seedErr := seedWorkingTreeSnapshot(prof, cacheURL, repoURL, snapshot, 2*time.Minute, 15*time.Minute)
+		if seedErr != nil {
+			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w", pipelineName, seedErr)
+		}
+		fmt.Fprintf(os.Stderr, "working tree: base %s snapshot %s (%d files, %s)\n",
+			snapshot.BaseSHA, snapshot.SHA, snapshot.FileCount, snapshotBytes(snapshot.Size))
+	} else if repoURL != "" {
 		discoverCtx, dCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		services, derr := discovery.ServicesFor(discoverCtx, prof.ControllerURL(), prof.ControllerToken())
 		dCancel()
@@ -510,6 +453,28 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		return nil, fmt.Errorf("create trigger on %s: %w", prof.Name, err)
 	}
 	return resp, nil
+}
+
+func seedWorkingTreeSnapshot(prof *profile.Profile, cacheURL, repoURL string, snapshot *worktreeSnapshot, directTimeout, controllerTimeout time.Duration) error {
+	var directErr error
+	if cacheURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), directTimeout)
+		directErr = bincache.SeedWorkspaceBundle(ctx, cacheURL, bincache.CacheToken(), repoURL, snapshot.BundlePath, snapshot.SHA)
+		cancel()
+		if directErr == nil {
+			return nil
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controllerTimeout)
+	controllerErr := bincache.SeedWorkspaceBundleViaController(ctx, prof.ControllerURL(), prof.ControllerToken(), repoURL, snapshot.BundlePath, snapshot.SHA)
+	cancel()
+	if controllerErr == nil {
+		return nil
+	}
+	if directErr != nil {
+		return errors.Join(fmt.Errorf("direct cache: %w", directErr), fmt.Errorf("controller proxy: %w", controllerErr))
+	}
+	return controllerErr
 }
 
 func seedTriggerSource(prof *profile.Profile, cacheURL string, discoveryErr error, repoURL, sha string) {
@@ -567,14 +532,10 @@ func isHTTPNotFound(err error) bool {
 	return err != nil && strings.HasPrefix(err.Error(), "404 ")
 }
 
-// detectRemoteGit reads cwd's git state. Unresolved fields return empty.
 func detectRemoteGit() (branch, sha, repo, repoURL string) {
 	return gitContextIn("")
 }
 
-// gitContextIn reads dir's git state, or cwd's when dir is empty.
-// Unresolved fields return empty: a project with no remote, or no git at
-// all, still runs -- it just records less provenance.
 func gitContextIn(dir string) (branch, sha, repo, repoURL string) {
 	git := func(args ...string) (string, bool) {
 		if dir != "" {
@@ -602,8 +563,6 @@ func gitContextIn(dir string) (branch, sha, repo, repoURL string) {
 	return branch, sha, repo, repoURL
 }
 
-// parseGithubOwnerRepo extracts "owner/name" from github SSH/HTTPS URLs;
-// empty for non-github hosts so warm-runner doesn't attempt unknown clones.
 func parseGithubOwnerRepo(url string) string {
 	if strings.HasPrefix(url, "git@github.com:") {
 		rest := strings.TrimPrefix(url, "git@github.com:")

@@ -1,20 +1,3 @@
-# golangci-lint v2 configuration.
-#
-# Two invocations, because one does not read the whole file. The linters:
-# block runs under `golangci-lint run ./...`; the formatters: block at the
-# bottom of this file runs only under `golangci-lint fmt ./...`, which is a
-# separate subcommand in v2. A tree can pass `run` forever while every file
-# in it drifts from the formatters configured here, and for two months this
-# one did.
-#
-# Both are wired into the gate: the lint step walks every committed module
-# and the formatters step holds the staged Go files (.sparkwing/jobs/
-# lint_contention.go and pre_commit.go).
-#
-# The rule set is a balance between catching real bugs (staticcheck,
-# errcheck, errorlint, bodyclose) and avoiding noise on legitimate
-# patterns (no gosec, no godot, no fieldalignment). Trimmed to what
-# the elite Go repos converge on per RESEARCH-elite-comparison.md.
 
 version: "2"
 
@@ -42,16 +25,11 @@ linters:
     govet:
       enable-all: true
       disable:
-        # fieldalignment is mechanical but rarely affects performance
-        # meaningfully and produces large noisy reorderings.
         - fieldalignment
-        # shadow is legitimate often enough that the noise outweighs
-        # the catches; readers can disambiguate.
         - shadow
     staticcheck:
       checks:
         - all
-        # Stylistic suggestions about formatting that we have own opinions on.
         - -QF1001
         - -QF1002
         - -QF1003
@@ -64,10 +42,6 @@ linters:
         - -QF1010
         - -QF1011
         - -QF1012
-        # ST1000 / ST1020 / ST1021 require godoc on every package /
-        # exported func / exported type; useful in libraries but a lot
-        # of legitimate internal code doesn't justify it. Enable in
-        # public-SDK config separately if desired.
         - -ST1000
         - -ST1020
         - -ST1021
@@ -89,9 +63,6 @@ linters:
     misspell:
       locale: US
       ignore-rules:
-        # `Cancelled` is the public Outcome constant in sparkwing/outcome.go
-        # and `"cancelled"` is its persisted string value. Renaming would
-        # be a breaking API + schema change.
         - cancelled
         - cancelling
     nolintlint:
@@ -111,21 +82,6 @@ linters:
             - pkg: github.com/stretchr/testify/assert
               desc: "use testify/require instead so a failed assertion stops the test (assert keeps going and produces follow-on noise)."
 
-        # The dispatch engine (internal/orchestrator) is heavy: it pulls in
-        # the run/node executor, the local trigger consumer, the runner
-        # pool, and the bin compile cache. Only binaries that actually
-        # run pipelines should link against it. Thin binaries
-        # (sparkwing-logs, sparkwing-web, sparkwing-cache,
-        # sparkwing-controller's entry) and the read-only dashboard
-        # support packages (internal/backend, internal/web) need only
-        # the file-layout helpers (internal/paths) and the log renderer
-        # (internal/logpretty); pulling in internal/orchestrator drags
-        # in megabytes of unrelated code and slows the build.
-        #
-        # If a new dependency on the dispatch engine is actually
-        # necessary, prefer extracting the shared concern to its own
-        # leaf package (mirror the paths / logpretty split) over
-        # weakening this rule.
         thin-binaries-no-dispatch:
           list-mode: lax
           files:
@@ -135,26 +91,13 @@ linters:
             - "**/cmd/sparkwing-controller/**"
             - "**/internal/backend/**"
             - "**/internal/web/**"
-            # Tests legitimately exercise the orchestrator -- e.g.
-            # internal/web/server_test.go runs a real pipeline to
-            # verify log rendering. The rule guards production
-            # binary size and arch, not test setup code.
             - "!**/*_test.go"
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/orchestrator
               desc: "Thin binaries and the dashboard support packages must not import internal/orchestrator (the dispatch engine). Use internal/paths for file-layout helpers and internal/logpretty for log rendering. If you genuinely need a new orchestrator symbol here, extract it to its own leaf package first."
 
-        # The public SDK is the contract users build pipelines
-        # against. Importing internal/* from it would ship internal
-        # types into every consumer repo's build graph. The single
-        # legitimate exception is internal/swtags (struct-tag
-        # helpers used by the SDK's flag parsing).
         sdk-no-internal:
           list-mode: lax
-          # Match only the top-level SDK package files (./sparkwing/*.go),
-          # not cmd/sparkwing/ or any other path that happens to contain
-          # the word "sparkwing". The negation rules exclude the CLI
-          # binary subtree (cmd/sparkwing*) and tests.
           files:
             - "sparkwing/*.go"
             - "!**/cmd/**"
@@ -162,17 +105,10 @@ linters:
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal
               desc: "The public sparkwing SDK package cannot import internal/* packages. Anything the SDK needs at the surface either belongs in the SDK itself or in pkg/."
-          # swtags is an internal helper the SDK already legitimately
-          # depends on for flag-tag parsing; carve it out explicitly
-          # so the rule is enforceable without re-architecting.
           allow:
             - $gostd
             - github.com/sparkwing-dev/sparkwing/internal/swtags
 
-        # pkg/store is the foundation data layer. If it grows imports
-        # of internal/*, it inverts the layering -- consumers (the
-        # orchestrator, the controller) depend on store, not the
-        # other way around.
         store-no-internal:
           list-mode: lax
           files:
@@ -182,9 +118,6 @@ linters:
             - pkg: github.com/sparkwing-dev/sparkwing/internal
               desc: "pkg/store is the data foundation; internal/* packages depend on it, not the reverse. If pkg/store needs a helper currently in internal/, lift it to pkg/ or inline it."
 
-        # pkg/backends owns the backends.yaml schema -- config types
-        # only. Storage / store / controller implementations consume
-        # the config; the config doesn't reach back into them.
         backends-no-impls:
           list-mode: lax
           files:
@@ -200,10 +133,6 @@ linters:
             - pkg: github.com/sparkwing-dev/sparkwing/pkg/logs
               desc: "pkg/backends declares log backend types only; log-service implementation must not bleed in here."
 
-        # The warm-runner pool's machinery (internal/cluster +
-        # internal/runners/*) is sparkwing-runner-only. If a different
-        # binary needs a piece of it, lift the piece to its own
-        # neutral package instead of widening the cluster surface.
         cluster-runner-only:
           list-mode: lax
           files:
@@ -226,12 +155,6 @@ linters:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/cache
               desc: "internal/cache is the sparkwing-cache HTTP server's implementation; only cmd/sparkwing-cache should import it."
 
-        # internal/runners/* are the per-runtime execution backends. Two
-        # places select one: internal/cluster (the warm-runner pool) and
-        # internal/orchestrator (the dispatcher, which wires the k8s
-        # backend through k8s_runner_factory.go and the local
-        # process-per-node backend through local_dispatch.go). Everything
-        # else goes through the runner.Runner interface instead.
         runners-dispatcher-only:
           list-mode: lax
           files:
@@ -244,8 +167,6 @@ linters:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/runners
               desc: "internal/runners/* are the per-runtime execution backends. Only internal/cluster (the warm-runner pool) and internal/orchestrator (the dispatcher that selects one) should import them; everything else depends on the runner.Runner interface."
     forbidigo:
-      # Each `forbid` pattern fires on call sites by default; analyze-types=false
-      # keeps the rule focused on textual matches (no need to load full type info).
       exclude-godoc-examples: true
       analyze-types: false
       forbid:
@@ -256,50 +177,27 @@ linters:
         - pattern: ^fmt\.Println$
           msg: "fmt.Println bypasses the structured logger; use sparkwing.Info/Error or slog directly. Allowed in cmd/**/main.go and _test.go (see exclusions)."
   exclusions:
-    # Path-level skip: third-party Go ports vendored under web/ via
-    # npm (e.g. the flatted JS library ships a parallel Go source
-    # tree). Not first-party code; their formatting + lint posture
-    # belongs to upstream.
     paths:
       - web/node_modules/
     rules:
-      # Tests often ignore errors deliberately.
       - path: _test\.go
         linters:
           - errcheck
-      # Tests can panic / Println / os.Exit as part of their style.
       - path: _test\.go
         linters:
           - forbidigo
-      # CLI binary subtrees legitimately do panic / os.Exit /
-      # fmt.Println at the process boundary. The forbidigo bans
-      # target library code, not the binary entry points. Two
-      # patterns: cmd/ for the conventional layout and any file
-      # literally named main.go (covers `internal/orchestrator/main.go`
-      # and similar entry-point shims).
       - path: cmd/
         linters:
           - forbidigo
       - path: (^|/)main\.go$
         linters:
           - forbidigo
-      # SDK root package convention: the public sparkwing/ package
-      # uses panic() at Plan / Register / Cache / GroupJobs time as
-      # programmer-error guards (caller passed an invalid argument
-      # at construction). This is the explicit SDK contract: panic
-      # loud at test time rather than carry the invalid plan into
-      # dispatch. The whole sparkwing/*.go set lives under this
-      # convention; the subpackages (sparkwing/planguard/, etc.)
-      # are covered by their own entries or follow the same rule.
-      # `forbidigo` still gates the rest of the tree (internal/,
-      # pkg/, cmd/<not-main>/).
       - path: ^sparkwing/[^/]+\.go$
         linters:
           - forbidigo
       - path: sparkwing/planguard/
         linters:
           - forbidigo
-      # Generated code should be left alone.
       - path: \.pb\.go$
         linters:
           - all
@@ -308,36 +206,6 @@ linters:
           - all
 
 issues:
-  # Baseline the pre-existing findings on main so lint only fails on NEW
-  # issues a change introduces. Unchanged code is grandfathered; the whole
-  # diff is still linted. Same convention as the sibling wing repos.
-  #
-  # What it is currently forgiving, measured at ff9dc07e:
-  #
-  #   GOLANGCI_LINT_CACHE=$(mktemp -d) golangci-lint run ./... \
-  #     --new-from-merge-base= --max-issues-per-linter=0 --max-same-issues=0
-  #
-  # 111 findings in the root module, 0 in .sparkwing/. forbidigo 27,
-  # errorlint 20, gofumpt 17, errcheck 15, misspell 15, staticcheck 7,
-  # goimports 3, govet 3, unconvert 2, bodyclose 1, depguard 1. A loan whose
-  # size nobody restates is a loan nobody repays, so the command above is the
-  # pointer: anyone can regenerate the number rather than trust this comment.
-  #
-  # All three parts of that command line matter, which is why it is written
-  # out rather than described. Drop the two max- flags and the same tree
-  # reports 49, because golangci-lint truncates at 50 per linter and 3 per
-  # repeated finding by default and forbidigo alone loses 21. Drop the
-  # isolated cache and it reports 206, because a golangci-lint cache shared
-  # between sibling git worktrees returns findings from whichever worktree
-  # analyzed the content first: 63 of those 206 name paths under ../bw-*
-  # that do not exist in this checkout. 49, 111 and 206 are the same tree
-  # measured three ways, and only the middle one is the count.
-  #
-  # The gate resolves origin/main itself before it lints. Handed a ref it
-  # cannot resolve golangci-lint drops the baseline silently and reports the
-  # whole standing debt against whatever commit is in front of it, so the
-  # step fails on the missing ref instead -- see resolveLintBaseline in
-  # .sparkwing/jobs/lint_contention.go.
   new-from-merge-base: origin/main
 
 formatters:

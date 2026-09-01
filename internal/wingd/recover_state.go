@@ -6,10 +6,6 @@ import (
 	"time"
 )
 
-// RecoverUnreadableState preserves an unreadable state file under its
-// quarantine name while holding the daemon election lock. The caller must
-// obtain explicit operator consent before invoking it because unreadable
-// bytes may describe guarded commands that are still running.
 func RecoverUnreadableState(home string, now time.Time) (string, error) {
 	l, err := resolveLayout(home)
 	if err != nil {

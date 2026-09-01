@@ -10,9 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// pauseTestHarness opens one store + one Backends bundle shared by
-// both the orchestrator goroutine and the test's polling/releasing
-// goroutine, avoiding a second store.Open racing with the first.
 type pauseTestHarness struct {
 	t        *testing.T
 	paths    orchestrator.Paths
@@ -83,9 +80,6 @@ func init() {
 	register("orch-pause-fail", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &failPipe{} })
 }
 
-// TestPause_BeforeRun_HoldsUntilReleased pauses a single-node pipeline
-// and then releases it from a side goroutine. The run must finish
-// success and the store must carry a released pause row.
 func TestPause_BeforeRun_HoldsUntilReleased(t *testing.T) {
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{
@@ -123,7 +117,6 @@ func TestPause_BeforeRun_HoldsUntilReleased(t *testing.T) {
 	}
 }
 
-// TestPause_BeforeRun_Timeout verifies SPARKWING_PAUSE_TIMEOUT fires.
 func TestPause_BeforeRun_Timeout(t *testing.T) {
 	t.Setenv("SPARKWING_PAUSE_TIMEOUT", "200ms")
 	h := newPauseHarness(t)
@@ -156,8 +149,6 @@ func TestPause_BeforeRun_Timeout(t *testing.T) {
 	}
 }
 
-// TestPause_After_HoldsAfterSuccess ensures pause-after fires when
-// the node completes successfully.
 func TestPause_After_HoldsAfterSuccess(t *testing.T) {
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{
@@ -190,8 +181,6 @@ func TestPause_After_HoldsAfterSuccess(t *testing.T) {
 	}
 }
 
-// TestPause_OnFailure_PausesOnError verifies that a Run-errored node
-// triggers --pause-on-failure.
 func TestPause_OnFailure_PausesOnError(t *testing.T) {
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{
@@ -224,13 +213,8 @@ func TestPause_OnFailure_PausesOnError(t *testing.T) {
 	}
 }
 
-// Compile-time: DebugDirectives is empty by default so production
-// Options don't accidentally pick up pause flags.
 var _ = sparkwing.Paused
 
-// TestPause_OnFailure_SkipsOnSuccess ensures --pause-on-failure does
-// NOT pause a node that returned without error. Guards against
-// accidentally coupling pause-after semantics into pause-on-failure.
 func TestPause_OnFailure_SkipsOnSuccess(t *testing.T) {
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{
@@ -256,10 +240,6 @@ func TestPause_OnFailure_SkipsOnSuccess(t *testing.T) {
 	}
 }
 
-// TestPause_OnFailure_SkipsOnCancelled ensures a cancelled node (its
-// upstream failed) does NOT get held by --pause-on-failure. The
-// dispatcher's markCancelled path is distinct from a Run-errored
-// Failed outcome.
 func TestPause_OnFailure_SkipsOnCancelled(t *testing.T) {
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{

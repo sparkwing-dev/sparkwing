@@ -6,24 +6,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
 )
 
-// TestFallbackSDKVersionIsResolvable guards the scaffold fallback pin
-// against being set to a value the scaffolder can't require -- a
-// pseudo-version, a "+dirty" marker, or a "(devel)" placeholder. The
-// freshness gate keeps it from lagging the latest release; this keeps it
-// a real release version at all. Offline: no proxy resolution.
 func TestFallbackSDKVersionIsResolvable(t *testing.T) {
 	if !isResolvableModuleVersion(scaffold.FallbackSDKVersion) {
 		t.Errorf("scaffold.FallbackSDKVersion = %q is not a resolvable release version", scaffold.FallbackSDKVersion)
 	}
 }
 
-// TestIsResolvableModuleVersion covers the forms a local build
-// produces. A source build stamps v<semver>-dev+<sha>, which is neither
-// a "+dirty" marker nor a pseudo-version: it once passed this check and
-// was written into scaffolds that then could not be built, and that
-// `version update --sdk` could not repair, since `go get` parses the
-// broken go.mod first. "+incompatible" is the one build-metadata suffix
-// the module system accepts.
 func TestIsResolvableModuleVersion(t *testing.T) {
 	cases := []struct {
 		v    string

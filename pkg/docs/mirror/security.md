@@ -21,6 +21,13 @@ and on `pull_request` (opened / synchronize / reopened, against the PR
 head), and answers `ping`; other event types and other `pull_request`
 actions are accepted and ignored.
 
+When `GITHUB_TOKEN` is set, the controller uses it only for outbound
+commit-status requests for `pull_request` webhook runs. Prefer a
+fine-grained token limited to the served repositories with **Commit
+statuses: Read and write**. The token never enters trigger environment,
+run state, logs, or the dashboard. An empty token disables outbound
+status reporting.
+
 ## Secrets at rest
 
 Encryption at rest is **opt-in and off by default.** Configure a master
@@ -63,6 +70,16 @@ endpoints (`--api-token`, falling back to `$SPARKWING_API_TOKEN`); an
 empty token disables auth. Read endpoints (clone, file access, repo
 listing) are reachable only in-cluster via the Service, not the
 ingress. In-cluster callers reach it directly without a token.
+
+Off-cluster runners read Git through the controller's admin-scoped
+`/api/v1/gitcache/git/...` proxy. The controller removes its bearer before the
+internal request and permits only registration and upload-pack reads. A
+login-enabled dashboard exposes that path to machine bearers without accepting
+browser session credentials. Direct-cache binary and seed writes use only
+`SPARKWING_CACHE_TOKEN`; direct-cache mode never receives the controller bearer.
+Keep the raw cache Service private: `pipeline trigger --working-tree` may seed
+uncommitted source, and the cache retains up to 128 workspace refs per
+repository.
 
 ## Container hardening
 
@@ -123,3 +140,5 @@ The signing key is release machinery, not per-user configuration:
 - **Encrypt etcd / your secret store.** Kubernetes Secrets are
   base64, not encrypted, unless the cluster enables it.
 - **Rotate the GitHub credentials and cache SSH key** periodically.
+- **Limit the status token.** Give the controller's `GITHUB_TOKEN` commit-status
+  write access only to repositories whose pull requests Sparkwing reports.

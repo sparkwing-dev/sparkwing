@@ -1181,7 +1181,7 @@ func TestDisconnectDuringFailedCancelPersistenceGetsOrphanFallback(t *testing.T)
 	<-entered
 	_ = holder.Close()
 	close(resume)
-	<-done // the first exchange is closed without an acknowledgement; the client may reconnect and observe not-found.
+	<-done
 	select {
 	case got := <-legacy:
 		if got != "disconnect-during-persist" {
@@ -1341,12 +1341,6 @@ func TestOversizedMeasuredCPURequestQueuesFollower(t *testing.T) {
 	}
 }
 
-// TestLivenessFloor_AdmitsSoleRunUnderExternalLoad drives the floor end to
-// end: on an otherwise-idle box pinned under synthetic 100% external load the
-// queue head still admits (charged the grantable budget, flagged sole-run),
-// while a second arrival queues -- the box runs exactly one pipeline, never
-// zero. It also composes the floor with the run-alone clamp: the head's cost
-// is an oversized measured peak.
 func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(8, 16<<30)
@@ -1381,12 +1375,6 @@ func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
 	}
 }
 
-// TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead reproduces a
-// multi-run stall. Run registrations keep several live daemon
-// connections and zero-cost leases while their node-level resource requests
-// wait behind one real grant. When that grant releases under total external
-// pressure, exactly the FIFO head must bootstrap; the remaining nodes stay
-// queued behind its positive host charge.
 func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(8, 16<<30)
@@ -1984,12 +1972,6 @@ func TestGrantedSubmitReconnectRejectsRestoredMultiMemberLease(t *testing.T) {
 	}
 }
 
-// TestWaiterDisconnect_UnblocksProtectedFollower drives the weighted
-// backfill guard end to end: a lighter run backfills past a queued heavy
-// head, which protects the head from being starved, so a later waiter
-// stays queued behind it. Disconnecting the heavy head lifts the
-// protection and promotes the follower -- the snapshot-rebuild
-// cancellation the daemon must get right when a queued waiter drops.
 func TestWaiterDisconnect_UnblocksProtectedFollower(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
@@ -2029,8 +2011,6 @@ func TestWaiterDisconnect_UnblocksProtectedFollower(t *testing.T) {
 	}
 }
 
-// The reconnect must retain enough reservation to admit the older waiter as
-// soon as memory opens while leaving genuinely spare cores usable.
 func TestBackfillStream_ReconnectedOlderWaiterUsesOnlyReservedSpareCapacity(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{

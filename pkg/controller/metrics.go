@@ -9,21 +9,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// metricSample is the JSON wire type. Field names match the
-// dashboard's MetricPoint so POST + GET share shapes.
 type metricSample struct {
-	TS            string `json:"ts"` // RFC3339
+	TS            string `json:"ts"`
 	CPUMillicores int64  `json:"cpu_millicores"`
 	MemoryBytes   int64  `json:"memory_bytes"`
-	// CPUTimeNanos marks a per-command one-shot and carries the CPU it
-	// measured. A node process reports its commands over this endpoint,
-	// so a field dropped here is dropped exactly for the runs the
-	// capacity fold needs it for. Absent (zero) means a sampler tick.
+	// safety: zero is a sampler tick; nonzero is a per-command measurement.
 	CPUTimeNanos int64 `json:"cpu_time_nanos,omitempty"`
 }
 
-// handleAddNodeMetric appends one resource sample for a node. Single
-// sample per request; sample rate is low (~0.5 Hz).
 func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -50,8 +43,6 @@ func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleGetNodeMetrics returns the sample series for one node.
-// Response shape matches the dashboard's NodeMetrics.
 func (s *Server) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")

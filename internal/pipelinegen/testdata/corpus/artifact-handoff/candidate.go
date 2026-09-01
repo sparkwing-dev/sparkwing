@@ -22,8 +22,6 @@ func (GenArtifactHandoff) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs
 	compile := sw.Job(plan, "compile", genArtifactCompile).
 		Outputs("dist/**")
 
-	// Consumes stages compile's artifacts into this node's workspace and
-	// implies Needs(compile), so the files exist wherever publish lands.
 	sw.Job(plan, "publish", genArtifactPublish).
 		Consumes(compile)
 
