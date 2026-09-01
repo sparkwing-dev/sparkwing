@@ -288,7 +288,11 @@ func cancelQueuedLocalRuns(ctx context.Context, home string, ids []string) (done
 		case cerr != nil:
 			done = append(done, runResult{RunID: id, Error: "cancel queued run: " + cerr.Error()})
 		case cancelled:
-			done = append(done, runResult{RunID: id, OK: true, Note: "cancelled before dispatch"})
+			if derr := orchestrator.DiscardSubmissionEnvironment(paths.Root, id); derr != nil {
+				done = append(done, runResult{RunID: id, Error: "discard submission environment: " + derr.Error()})
+			} else {
+				done = append(done, runResult{RunID: id, OK: true, Note: "cancelled before dispatch"})
+			}
 		default:
 			remaining = append(remaining, id)
 		}

@@ -1,8 +1,11 @@
 package orchestrator
 
 import (
+	"context"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -40,6 +43,55 @@ func TestSubmissionEnvironmentIsOwnerOnlyAndDiscarded(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("snapshot still exists after discard: %v", err)
+	}
+}
+
+func TestSubmissionExecutionEnvironmentForcesHomeAndDropsRunControls(t *testing.T) {
+	env := submissionExecutionEnvironment([]string{
+		"PATH=/submit/bin",
+		"SPARKWING_HOME=/wrong",
+		"SPARKWING_RUN_HANDLE_FILE=/tmp/stale.json",
+		"SPARKWING_START_AT=late",
+		"SPARKWING_SUBMIT_TEST_ENV=kept",
+	}, "/queue/home")
+	joined := strings.Join(env, "\n")
+	for _, forbidden := range []string{"/wrong", "SPARKWING_RUN_HANDLE_FILE", "SPARKWING_START_AT"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("execution environment contains %q: %s", forbidden, joined)
+		}
+	}
+	for _, required := range []string{"PATH=/submit/bin", "SPARKWING_HOME=/queue/home", "SPARKWING_SUBMIT_TEST_ENV=kept"} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("execution environment omits %q: %s", required, joined)
+		}
+	}
+}
+
+func TestReconcileSubmissionEnvironmentsRemovesTerminalSnapshots(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	const runID = "run-terminal-environment"
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"TOKEN=secret"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := st.CreateTrigger(ctx, store.Trigger{
+		ID: runID, Pipeline: "build", Status: "pending", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled, err := st.CancelPendingTrigger(ctx, runID); err != nil || !cancelled {
+		t.Fatalf("cancel pending trigger = %v, %v", cancelled, err)
+	}
+	removed, err := ReconcileSubmissionEnvironments(ctx, home, st, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	if _, err := os.Stat(submissionEnvironmentPath(home, runID)); !os.IsNotExist(err) {
+		t.Fatalf("terminal snapshot still exists: %v", err)
 	}
 }
 

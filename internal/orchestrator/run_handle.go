@@ -28,6 +28,14 @@ func NewRunHandle(runID, pipeline, logPath, status string) RunHandle {
 	}
 }
 
+func reserveRunHandle(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
 func publishRunHandle(path string, handle RunHandle) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".sparkwing-run-handle-*")

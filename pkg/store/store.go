@@ -1832,6 +1832,15 @@ type RunFilter struct {
 
 // ListRuns returns runs ordered newest-first, filtered by f.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
+	for i, prefix := range f.GitSHAPrefixes {
+		prefix = strings.ToLower(strings.TrimSpace(prefix))
+		if prefix == "" || strings.IndexFunc(prefix, func(r rune) bool {
+			return (r < '0' || r > '9') && (r < 'a' || r > 'f')
+		}) >= 0 {
+			return nil, fmt.Errorf("git SHA prefix %q must contain hexadecimal characters", prefix)
+		}
+		f.GitSHAPrefixes[i] = prefix
+	}
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 50

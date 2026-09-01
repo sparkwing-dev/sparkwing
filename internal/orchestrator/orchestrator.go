@@ -191,6 +191,17 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	owner, repo := sparkwing.GithubOwnerRepo(gitOpt.Repo)
 	invocation := buildRunInvocation(opts, runID, localRunLogDir(backends.Logs, runID), reg.SecretArgNames())
+	handlePublished := false
+	if opts.RunHandlePath != "" {
+		if err := reserveRunHandle(opts.RunHandlePath); err != nil {
+			return nil, fmt.Errorf("reserve run handle: %w", err)
+		}
+		defer func() {
+			if !handlePublished {
+				_ = os.Remove(opts.RunHandlePath)
+			}
+		}()
+	}
 	if err := backends.State.CreateRun(ctx, store.Run{
 		ID:            runID,
 		Pipeline:      opts.Pipeline,
@@ -218,6 +229,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			_ = backends.State.FinishRun(context.WithoutCancel(ctx), runID, "failed", msg)
 			return nil, errors.New(msg)
 		}
+		handlePublished = true
 	}
 
 	hbCtx, cancelHeartbeat := context.WithCancel(ctx)

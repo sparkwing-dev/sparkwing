@@ -141,6 +141,32 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 	return execLocalChild(ctx, binPath, repoDir, args, env)
 }
 
+func submissionExecutionEnvironment(captured []string, home string) []string {
+	if captured == nil {
+		return nil
+	}
+	blocked := map[string]struct{}{
+		"SPARKWING_RUN_HANDLE_FILE": {},
+		"SPARKWING_START_AT":        {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
+		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
+		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, "SPARKWING_SECRETS_PROFILE": {},
+		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {}, "SPARKWING_DISPATCH_WAIT_TIMEOUT": {},
+		"SPARKWING_DEBUG_PAUSE_BEFORE": {}, "SPARKWING_DEBUG_PAUSE_AFTER": {},
+		"SPARKWING_DEBUG_PAUSE_ON_FAILURE": {},
+	}
+	out := make([]string, 0, len(captured)+1)
+	for _, entry := range captured {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if _, denied := blocked[key]; !denied && key != "SPARKWING_HOME" {
+			out = append(out, entry)
+		}
+	}
+	return append(out, "SPARKWING_HOME="+home)
+}
+
 func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []string) error {
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Dir = repoDir

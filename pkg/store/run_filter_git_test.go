@@ -54,3 +54,14 @@ func TestParseRunFilterGitIdentity(t *testing.T) {
 		t.Fatalf("parsed filter = %#v", f)
 	}
 }
+
+func TestListRunsRejectsNonHexGitSHAPrefix(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/state.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.ListRuns(context.Background(), store.RunFilter{GitSHAPrefixes: []string{"not-a-sha"}}); err == nil {
+		t.Fatal("ListRuns accepted a non-hex git SHA prefix")
+	}
+}

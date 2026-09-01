@@ -49,6 +49,13 @@ func TestParseRunFlags_RunHandleFile(t *testing.T) {
 	}
 }
 
+func TestRemoveEnvDropsAmbientRunHandle(t *testing.T) {
+	env := removeEnv([]string{"PATH=/bin", "SPARKWING_RUN_HANDLE_FILE=/tmp/stale"}, "SPARKWING_RUN_HANDLE_FILE")
+	if len(env) != 1 || env[0] != "PATH=/bin" {
+		t.Fatalf("environment = %#v", env)
+	}
+}
+
 func TestParseRunFlags_LocalOnly(t *testing.T) {
 	wf, pass := parseRunFlags([]string{"--sw-local-only"})
 	if !wf.localOnly {

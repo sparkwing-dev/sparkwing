@@ -150,6 +150,7 @@ func dispatchRun(args []string) error {
 	}
 
 	env := os.Environ()
+	env = removeEnv(env, "SPARKWING_RUN_HANDLE_FILE")
 	logFormat := os.Getenv("SPARKWING_LOG_FORMAT")
 	if logFormat == "" {
 		logFormat = logFormatJSON
@@ -222,6 +223,17 @@ func dispatchRun(args []string) error {
 	}
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
 		compileOptions{NoUpdate: wf.noUpdate})
+}
+
+func removeEnv(env []string, key string) []string {
+	prefix := key + "="
+	out := env[:0]
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			out = append(out, entry)
+		}
+	}
+	return out
 }
 
 func runSparkwing(args []string) error {

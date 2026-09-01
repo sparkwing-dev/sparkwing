@@ -202,6 +202,11 @@ func ServeConsumer(ctx context.Context, opts ConsumerOptions) error {
 	if err != nil {
 		return fmt.Errorf("trigger consumer: %w", err)
 	}
+	if removed, reconcileErr := ReconcileSubmissionEnvironments(ctx, layout.Home, st, 1000); reconcileErr != nil {
+		logger.Warn("reconcile submission environments", "err", reconcileErr)
+	} else if removed > 0 {
+		logger.Info("removed terminal submission environments", "count", removed)
+	}
 
 	logger.Info("trigger consumer serving",
 		"home", layout.Home, "pid", os.Getpid(), "idle_timeout", opts.idleTimeout())
@@ -282,6 +287,9 @@ func consumeLocalTriggers(
 		if rt.maintain && time.Since(lastMaintenance) >= maintenanceInterval {
 			lastMaintenance = time.Now()
 			requeueExpiredClaims(ctx, st, inFlight, logger)
+			if _, err := ReconcileSubmissionEnvironments(ctx, rt.home, st, 100); err != nil {
+				logger.Warn("reconcile submission environments", "err", err)
+			}
 		}
 
 		trig, err := st.ClaimNextTrigger(ctx, rt.lease)
@@ -360,12 +368,17 @@ func runClaimedTrigger(
 	env, envErr := submissionEnvironment(home, trig)
 	if envErr != nil {
 		finishClaimedTriggerFailure(book, st, trig, logger, envErr)
-		_ = DiscardSubmissionEnvironment(home, trig.ID)
+		if err := DiscardSubmissionEnvironment(home, trig.ID); err != nil {
+			logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", err)
+		}
 		return
 	}
+	env = submissionExecutionEnvironment(env, home)
 	err := dispatchLocalTrigger(dispatchCtx, st, trig, "", "", cache, logger, env)
 	if err == nil {
-		_ = DiscardSubmissionEnvironment(home, trig.ID)
+		if err := DiscardSubmissionEnvironment(home, trig.ID); err != nil {
+			logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", err)
+		}
 		return
 	}
 	if ctx.Err() != nil {
@@ -403,7 +416,9 @@ func runClaimedTrigger(
 	if _, ferr := st.FinishTriggerAtGeneration(book, trig.ID, trig.ClaimSeq); ferr != nil {
 		logger.Warn("finish superseded trigger", "trigger_id", trig.ID, "err", ferr)
 	}
-	_ = DiscardSubmissionEnvironment(home, trig.ID)
+	if err := DiscardSubmissionEnvironment(home, trig.ID); err != nil {
+		logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", err)
+	}
 }
 
 func finishClaimedTriggerFailure(ctx context.Context, st *store.Store, trig *store.Trigger, logger *slog.Logger, err error) {
@@ -425,7 +440,9 @@ func cancelClaimedTriggerIfRequested(
 		return false
 	}
 	logger.Info("local trigger cancelled before dispatch", "trigger_id", trig.ID)
-	_ = DiscardSubmissionEnvironment(home, trig.ID)
+	if err := DiscardSubmissionEnvironment(home, trig.ID); err != nil {
+		logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", err)
+	}
 	_ = st.CreateRun(ctx, store.Run{
 		ID:        trig.ID,
 		Pipeline:  trig.Pipeline,

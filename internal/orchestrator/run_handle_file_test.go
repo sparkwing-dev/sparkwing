@@ -47,3 +47,24 @@ func TestRunRefusesWorkWhenHandleCannotBePublished(t *testing.T) {
 		t.Fatal("run succeeded without publishing its requested handle")
 	}
 }
+
+func TestRunRefusesAnExistingHandleDestination(t *testing.T) {
+	paths := newPaths(t)
+	handlePath := filepath.Join(t.TempDir(), "run.json")
+	old := []byte(`{"schema_version":1,"run_id":"old"}`)
+	if err := os.WriteFile(handlePath, old, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
+		Pipeline: "orch-ok", RunHandlePath: handlePath,
+	}); err == nil {
+		t.Fatal("run replaced an existing handle destination")
+	}
+	got, err := os.ReadFile(handlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(old) {
+		t.Fatalf("existing handle changed to %q", got)
+	}
+}
