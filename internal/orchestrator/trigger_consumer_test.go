@@ -378,7 +378,7 @@ func TestConsumer_CancelRequestedBeforeClaimNeverDispatches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !cancelClaimedTriggerIfRequested(ctx, st, claimed, time.Minute, quietLogger()) {
+	if !cancelClaimedTriggerIfRequested(ctx, st, claimed, home, time.Minute, quietLogger()) {
 		t.Fatal("a cancel-requested claim was not recognized before dispatch")
 	}
 	run, err := st.GetRun(ctx, "run-cancelme")
@@ -406,7 +406,7 @@ func TestConsumer_NoCancelRequestedDispatchesNormally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cancelClaimedTriggerIfRequested(ctx, st, claimed, time.Minute, quietLogger()) {
+	if cancelClaimedTriggerIfRequested(ctx, st, claimed, home, time.Minute, quietLogger()) {
 		t.Fatal("an uncancelled claim was treated as cancelled")
 	}
 }

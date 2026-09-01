@@ -39,6 +39,8 @@ type Options struct {
 
 	RunID string
 
+	RunHandlePath string
+
 	Args map[string]string
 
 	Trigger sparkwing.TriggerInfo
@@ -189,6 +191,13 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	owner, repo := sparkwing.GithubOwnerRepo(gitOpt.Repo)
 	invocation := buildRunInvocation(opts, runID, localRunLogDir(backends.Logs, runID), reg.SecretArgNames())
+	if opts.RunHandlePath != "" {
+		release, err := reserveRunHandle(opts.RunHandlePath)
+		if err != nil {
+			return nil, fmt.Errorf("reserve run handle: %w", err)
+		}
+		defer release()
+	}
 	if err := backends.State.CreateRun(ctx, store.Run{
 		ID:            runID,
 		Pipeline:      opts.Pipeline,
@@ -208,6 +217,14 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		Invocation:    invocation,
 	}); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
+	}
+	if opts.RunHandlePath != "" {
+		handle := NewRunHandle(runID, opts.Pipeline, localRunLogDir(backends.Logs, runID), "running")
+		if err := publishRunHandle(opts.RunHandlePath, handle); err != nil {
+			msg := fmt.Sprintf("publish run handle: %v", err)
+			_ = backends.State.FinishRun(context.WithoutCancel(ctx), runID, "failed", msg)
+			return nil, errors.New(msg)
+		}
 	}
 
 	hbCtx, cancelHeartbeat := context.WithCancel(ctx)

@@ -11,7 +11,11 @@ import (
 
 func ListRunsHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		filter := store.ParseRunFilter(r.URL.Query())
+		filter, parseErr := store.ParseRunFilterValidated(r.URL.Query())
+		if parseErr != nil {
+			writeErr(w, http.StatusBadRequest, parseErr)
+			return
+		}
 		runs, err := b.ListRuns(r.Context(), filter)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
@@ -21,6 +25,7 @@ func ListRunsHandler(b backend.Backend) http.HandlerFunc {
 		if runs == nil {
 			runs = []*store.Run{}
 		}
+		w.Header().Set("X-Sparkwing-Run-Filter-Version", "1")
 		writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 	}
 }

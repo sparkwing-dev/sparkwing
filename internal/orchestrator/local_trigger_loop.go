@@ -73,7 +73,7 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, st, t, profileName, parentRepoDir, cache, logger); err != nil {
+			if err := dispatchLocalTrigger(ctx, st, t, profileName, parentRepoDir, cache, logger, nil); err != nil {
 				logger.Error("local trigger dispatch failed",
 					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
 				_ = st.CreateRun(ctx, store.Run{
@@ -108,7 +108,7 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 }
 
 func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trigger,
-	profileName, parentRepoDir string, cache *localCompileCache, logger *slog.Logger,
+	profileName, parentRepoDir string, cache *localCompileCache, logger *slog.Logger, env []string,
 ) error {
 	repoDir, cleanup, err := prepareTriggerRepo(ctx, trig, parentRepoDir)
 	if err != nil {
@@ -138,15 +138,44 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 		args = append(args, "--profile", profileName)
 	}
 	args = append(args, trig.ID)
-	return execLocalChild(ctx, binPath, repoDir, args)
+	return execLocalChild(ctx, binPath, repoDir, args, env)
 }
 
-func execLocalChild(ctx context.Context, binPath, repoDir string, args []string) error {
+func submissionExecutionEnvironment(captured []string, home string) []string {
+	if captured == nil {
+		return nil
+	}
+	blocked := map[string]struct{}{
+		"SPARKWING_RUN_HANDLE_FILE": {},
+		"SPARKWING_START_AT":        {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
+		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
+		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, "SPARKWING_SECRETS_PROFILE": {},
+		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {}, "SPARKWING_DISPATCH_WAIT_TIMEOUT": {},
+		"SPARKWING_DEBUG_PAUSE_BEFORE": {}, "SPARKWING_DEBUG_PAUSE_AFTER": {},
+		"SPARKWING_DEBUG_PAUSE_ON_FAILURE": {},
+	}
+	out := make([]string, 0, len(captured)+1)
+	for _, entry := range captured {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if _, denied := blocked[key]; !denied && key != "SPARKWING_HOME" {
+			out = append(out, entry)
+		}
+	}
+	return append(out, "SPARKWING_HOME="+home)
+}
+
+func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []string) error {
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Dir = repoDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
+	cmd.Env = env
+	if cmd.Env == nil {
+		cmd.Env = os.Environ()
+	}
 	if err := cmd.Run(); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if _, statErr := os.Stat(binPath); os.IsNotExist(statErr) {

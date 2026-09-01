@@ -60,10 +60,15 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 		_, _ = ReconcileOrphanedLocalRuns(ctx, st, 0)
 	}
 
+	clientFilter := opts.Filter
+	clientFilter.Branches = nil
+	clientFilter.SHAPrefixes = nil
 	filter := store.RunFilter{
-		Limit:     listFetchLimit(opts),
-		Pipelines: opts.Pipelines,
-		Statuses:  opts.Statuses,
+		Limit:          listFetchLimitForFilter(opts.Limit, clientFilter),
+		Pipelines:      opts.Pipelines,
+		Statuses:       opts.Statuses,
+		GitBranches:    opts.Filter.Branches,
+		GitSHAPrefixes: opts.Filter.SHAPrefixes,
 	}
 	if opts.Since > 0 {
 		filter.Since = time.Now().Add(-opts.Since)
@@ -72,7 +77,7 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if err != nil {
 		return err
 	}
-	runs = applyClientFilters(runs, opts.Filter)
+	runs = applyClientFilters(runs, clientFilter)
 	if opts.ByPipeline {
 		opts.Pivot.JSON = opts.JSON
 		opts.Pivot.Quiet = opts.Quiet
@@ -88,11 +93,15 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 }
 
 func listFetchLimit(opts ListOpts) int {
-	if !opts.Filter.HasAny() {
-		return opts.Limit
+	return listFetchLimitForFilter(opts.Limit, opts.Filter)
+}
+
+func listFetchLimitForFilter(limit int, filter CompiledFilter) int {
+	if !filter.HasAny() {
+		return limit
 	}
 	const overFetch = 1000
-	if opts.Limit <= 0 || opts.Limit > overFetch {
+	if limit <= 0 || limit > overFetch {
 		return overFetch
 	}
 	return overFetch

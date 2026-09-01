@@ -1,14 +1,15 @@
 package store
 
 import (
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// ParseRunFilter accepts pipeline, status, since (Go duration),
-// limit; unknown params ignored.
+// ParseRunFilter accepts the public run-list query parameters. Unknown
+// parameters are ignored.
 func ParseRunFilter(q url.Values) RunFilter {
 	var f RunFilter
 	if v := q.Get("pipeline"); v != "" {
@@ -17,6 +18,19 @@ func ParseRunFilter(q url.Values) RunFilter {
 	if v := q.Get("status"); v != "" {
 		f.Statuses = splitCSV(v)
 	}
+	if v := q.Get("git_sha"); v != "" {
+		f.GitSHAPrefixes = splitCSV(v)
+	}
+	if v := q.Get("git_branch"); v != "" {
+		f.GitBranches = splitCSV(v)
+	}
+	if v := q.Get("repo"); v != "" {
+		f.Repos = splitCSV(v)
+	}
+	if v := q.Get("repo_url"); v != "" {
+		f.RepoURLs = splitCSV(v)
+	}
+	f.RootOnly, _ = strconv.ParseBool(q.Get("root_only"))
 	if v := q.Get("since"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			f.Since = time.Now().Add(-d)
@@ -28,6 +42,20 @@ func ParseRunFilter(q url.Values) RunFilter {
 		}
 	}
 	return f
+}
+
+// ParseRunFilterValidated rejects invalid public query values.
+func ParseRunFilterValidated(q url.Values) (RunFilter, error) {
+	f := ParseRunFilter(q)
+	for _, prefix := range f.GitSHAPrefixes {
+		prefix = strings.ToLower(strings.TrimSpace(prefix))
+		if prefix == "" || strings.IndexFunc(prefix, func(r rune) bool {
+			return (r < '0' || r > '9') && (r < 'a' || r > 'f')
+		}) >= 0 {
+			return RunFilter{}, fmt.Errorf("git SHA prefix %q must contain hexadecimal characters", prefix)
+		}
+	}
+	return f, nil
 }
 
 func splitCSV(s string) []string {

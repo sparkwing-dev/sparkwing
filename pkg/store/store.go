@@ -494,6 +494,11 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_pipeline ON runs(pipeline, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_branch_started ON runs(git_branch, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_slug_started ON runs(repo, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(repo, git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(repo, git_branch, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS nodes (
     run_id           TEXT NOT NULL,
@@ -810,7 +815,14 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 16
+const expectedSchemaVersion = 17
+
+const runIdentityIndexes = `
+CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_branch_started ON runs(git_branch, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_slug_started ON runs(repo, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(repo, git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(repo, git_branch, started_at DESC);`
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -1184,6 +1196,9 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 	case 16:
 		_, err := s.exec(ctx, nodeBouncesTableSQLite)
 		return err
+	case 17:
+		_, err := s.exec(ctx, runIdentityIndexes)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1241,6 +1256,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "node_metrics", nodeMetricsCPUTimeCols)
 	case 16:
 		_, err := tx.ExecContext(ctx, nodeBouncesTablePostgres)
+		return err
+	case 17:
+		_, err := tx.ExecContext(ctx, runIdentityIndexes)
 		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -1800,15 +1818,31 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 
 // RunFilter narrows ListRuns results; zero value matches everything.
 type RunFilter struct {
-	Pipelines   []string
-	Statuses    []string
-	Since       time.Time
-	Limit       int // <=0 = default
-	ParentRunID string
+	Pipelines      []string
+	Statuses       []string
+	GitSHAPrefixes []string
+	GitBranches    []string
+	Repos          []string
+	RepoURLs       []string
+	Since          time.Time
+	Limit          int // <=0 = default
+	ParentRunID    string
+	RootOnly       bool
 }
 
 // ListRuns returns runs ordered newest-first, filtered by f.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
+	normalizedPrefixes := make([]string, len(f.GitSHAPrefixes))
+	for i, prefix := range f.GitSHAPrefixes {
+		prefix = strings.ToLower(strings.TrimSpace(prefix))
+		if prefix == "" || strings.IndexFunc(prefix, func(r rune) bool {
+			return (r < '0' || r > '9') && (r < 'a' || r > 'f')
+		}) >= 0 {
+			return nil, fmt.Errorf("git SHA prefix %q must contain hexadecimal characters", prefix)
+		}
+		normalizedPrefixes[i] = prefix
+	}
+	f.GitSHAPrefixes = normalizedPrefixes
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 50
@@ -1834,21 +1868,38 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	}
 	addIn("pipeline", f.Pipelines)
 	addIn("status", f.Statuses)
-	if f.ParentRunID != "" {
+	addIn("git_branch", f.GitBranches)
+	addIn("repo", f.Repos)
+	addIn("repo_url", f.RepoURLs)
+	addClause := func(clause string, values ...any) {
 		if where == "" {
-			where = " WHERE parent_run_id = ?"
+			where = " WHERE " + clause
 		} else {
-			where += " AND parent_run_id = ?"
+			where += " AND " + clause
 		}
-		args = append(args, f.ParentRunID)
+		args = append(args, values...)
+	}
+	if len(f.GitSHAPrefixes) > 0 {
+		parts := make([]string, 0, len(f.GitSHAPrefixes))
+		values := make([]any, 0, len(f.GitSHAPrefixes)*2)
+		for _, prefix := range f.GitSHAPrefixes {
+			if upper, ok := prefixUpperBound(prefix); ok {
+				parts = append(parts, "(git_sha >= ? AND git_sha < ?)")
+				values = append(values, prefix, upper)
+			} else {
+				parts = append(parts, "git_sha = ?")
+				values = append(values, prefix)
+			}
+		}
+		addClause("("+strings.Join(parts, " OR ")+")", values...)
+	}
+	if f.ParentRunID != "" {
+		addClause("parent_run_id = ?", f.ParentRunID)
+	} else if f.RootOnly {
+		addClause("(parent_run_id IS NULL OR parent_run_id = '')")
 	}
 	if !f.Since.IsZero() {
-		if where == "" {
-			where = " WHERE started_at >= ?"
-		} else {
-			where += " AND started_at >= ?"
-		}
-		args = append(args, f.Since.UnixNano())
+		addClause("started_at >= ?", f.Since.UnixNano())
 	}
 	args = append(args, limit)
 
@@ -1873,6 +1924,18 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func prefixUpperBound(prefix string) (string, bool) {
+	b := []byte(prefix)
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] == 0xff {
+			continue
+		}
+		b[i]++
+		return string(b[:i+1]), true
+	}
+	return "", false
 }
 
 // GetLatestRun returns the newest run for pipeline matching statuses

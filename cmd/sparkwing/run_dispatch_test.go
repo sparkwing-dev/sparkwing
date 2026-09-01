@@ -39,6 +39,23 @@ func TestParseRunFlags_NoCache(t *testing.T) {
 	}
 }
 
+func TestParseRunFlags_RunHandleFile(t *testing.T) {
+	wf, pass := parseRunFlags([]string{"--sw-run-handle-file", "/tmp/run.json", "--target", "prod"})
+	if wf.runHandleFile != "/tmp/run.json" {
+		t.Fatalf("runHandleFile = %q", wf.runHandleFile)
+	}
+	if got := strings.Join(pass, " "); got != "--target prod" {
+		t.Fatalf("passthrough = %q", got)
+	}
+}
+
+func TestRemoveEnvDropsAmbientRunHandle(t *testing.T) {
+	env := removeEnv([]string{"PATH=/bin", "SPARKWING_RUN_HANDLE_FILE=/tmp/stale"}, "SPARKWING_RUN_HANDLE_FILE")
+	if len(env) != 1 || env[0] != "PATH=/bin" {
+		t.Fatalf("environment = %#v", env)
+	}
+}
+
 func TestParseRunFlags_LocalOnly(t *testing.T) {
 	wf, pass := parseRunFlags([]string{"--sw-local-only"})
 	if !wf.localOnly {

@@ -23,10 +23,15 @@ func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListO
 		return errors.New("ListJobsRemote: controller URL required")
 	}
 	c := client.NewWithToken(controllerURL, nil, token)
+	clientFilter := opts.Filter
+	clientFilter.Branches = nil
+	clientFilter.SHAPrefixes = nil
 	filter := store.RunFilter{
-		Limit:     listFetchLimit(opts),
-		Pipelines: opts.Pipelines,
-		Statuses:  opts.Statuses,
+		Limit:          listFetchLimitForFilter(opts.Limit, clientFilter),
+		Pipelines:      opts.Pipelines,
+		Statuses:       opts.Statuses,
+		GitBranches:    opts.Filter.Branches,
+		GitSHAPrefixes: opts.Filter.SHAPrefixes,
 	}
 	if opts.Since > 0 {
 		filter.Since = time.Now().Add(-opts.Since)
@@ -35,7 +40,7 @@ func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListO
 	if err != nil {
 		return err
 	}
-	runs = applyClientFilters(runs, opts.Filter)
+	runs = applyClientFilters(runs, clientFilter)
 	if opts.ByPipeline {
 		opts.Pivot.JSON = opts.JSON
 		opts.Pivot.Quiet = opts.Quiet

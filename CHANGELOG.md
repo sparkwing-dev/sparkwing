@@ -49,6 +49,19 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **cli:** `runs find` and `runs failures` now apply repository, branch, and
+  commit filters in the run store before ordering and limiting results.
+- **cli:** `sparkwing run --sw-run-handle-file PATH` atomically publishes the
+  accepted run ID before planning or node execution.
+
+### Fixed
+
+- **orchestrator:** Each detached local run now executes with the environment
+  captured by its own submission instead of the resident consumer's startup
+  environment.
+
 ## [v0.38.1] - 2026-09-01
 ### Fixed
 

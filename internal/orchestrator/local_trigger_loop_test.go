@@ -181,7 +181,7 @@ func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhi
 			Pipeline:     "child",
 			ParentRunID:  "parent-live",
 			ParentNodeID: "spawn-child",
-		}, "", repoDir, cache, logger)
+		}, "", repoDir, cache, logger, nil)
 	}
 
 	if err := dispatch("child-one"); err != nil {
@@ -210,7 +210,7 @@ func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhi
 
 func TestExecLocalChild_MissingLeaseExplainsCacheProvenanceAndRecovery(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing-pipeline")
-	err := execLocalChild(context.Background(), missing, t.TempDir(), []string{"handle-trigger", "child"})
+	err := execLocalChild(context.Background(), missing, t.TempDir(), []string{"handle-trigger", "child"}, nil)
 	if err == nil {
 		t.Fatal("missing executable unexpectedly ran")
 	}
@@ -461,7 +461,7 @@ func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *
 			t.Errorf("close local compile cache: %v", err)
 		}
 	})
-	if err := dispatchLocalTrigger(context.Background(), nil, trig, "", "", cache, logger); err != nil {
+	if err := dispatchLocalTrigger(context.Background(), nil, trig, "", "", cache, logger, nil); err != nil {
 		t.Fatalf("dispatchLocalTrigger: %v", err)
 	}
 	raw, err = os.ReadFile(outputPath)

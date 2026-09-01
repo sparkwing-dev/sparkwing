@@ -108,9 +108,8 @@ paths:
       tags: [runs]
       summary: List runs filtered by query parameters.
       description: |
-        Filter via `pipeline`, `status`, `since`, `limit` query
-        params. Empty result is `{"runs": []}`. Requires `runs.read`
-        scope.
+        Filters are applied before newest-first ordering and `limit`.
+        Empty result is `{"runs": []}`. Requires `runs.read` scope.
       parameters:
         - in: query
           name: pipeline
@@ -121,6 +120,26 @@ paths:
           schema: { type: string }
           description: csv of run statuses (e.g. `running,pending`).
         - in: query
+          name: git_sha
+          schema: { type: string }
+          description: csv of git SHA prefixes.
+        - in: query
+          name: git_branch
+          schema: { type: string }
+          description: csv of exact git branch names.
+        - in: query
+          name: repo
+          schema: { type: string }
+          description: csv of exact stored repository identities.
+        - in: query
+          name: repo_url
+          schema: { type: string }
+          description: csv of exact canonical repository URLs.
+        - in: query
+          name: root_only
+          schema: { type: boolean }
+          description: When true, exclude child runs.
+        - in: query
           name: since
           schema: { type: string, format: duration }
           description: Go duration (`1h`, `30m`). Returns runs younger than this.
@@ -130,6 +149,10 @@ paths:
       responses:
         "200":
           description: List wrapped under `runs`.
+          headers:
+            X-Sparkwing-Run-Filter-Version:
+              description: Native identity-filter contract version.
+              schema: { type: string, enum: ["1"] }
           content:
             application/json:
               schema:
@@ -139,6 +162,7 @@ paths:
                   runs:
                     type: array
                     items: { $ref: "#/components/schemas/Run" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "500": { $ref: "#/components/responses/InternalError" }
 

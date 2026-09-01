@@ -160,54 +160,32 @@ is passed to the pipeline as its own arguments.
 Submission is local-only. To hand a run to a cluster, use
 `sparkwing pipeline trigger --profile <p> --detach`.
 
-#### A submitted run uses the consumer's environment, not your shell's
+#### Publishing a foreground run handle
 
-This is the sharpest difference between `sparkwing run` and
-`sparkwing runs submit`, and it will bite you if you skip it.
+`sparkwing run PIPELINE --sw-run-handle-file PATH` atomically writes a JSON
+handle after the run row is durable and before planning or node execution.
+The handle carries `schema_version`, `run_id`, `pipeline`, `log_path`, and
+`status`. Sparkwing exits before executing work when publication fails.
 
-A foreground `sparkwing run` inherits the environment of the shell you
-typed it in. A submitted run does not. It is executed by the resident
-consumer, and the consumer inherits the environment of whichever shell
-happened to start it -- possibly hours earlier, possibly in a different
-project, possibly with a different `AWS_PROFILE`, `KUBECONFIG`,
-`GITHUB_TOKEN`, or `PATH`. This is the same rule the admission daemon
-follows: a process started on demand keeps the environment of the run
-that needed it first.
+The outer CLI passes the path to the pipeline process through
+`SPARKWING_RUN_HANDLE_FILE`; callers should use the flag. The file is mode
+`0600` and replaces its destination atomically.
 
-So this does **not** do what it looks like:
+#### A submitted run uses its submission environment
 
-```bash
-AWS_PROFILE=prod sparkwing runs submit deploy   # the run may NOT see AWS_PROFILE=prod
-```
+Foreground and submitted runs inherit the environment of the shell that
+starts them. The submit command captures that environment in an owner-only
+file, and the consumer supplies the exact snapshot to the run. Concurrent
+submissions cannot inherit values from the shell that started the consumer
+or from another submission.
 
-The acknowledgment names the process that will run it, so the
-divergence is at least visible:
+The snapshot may contain credentials. Sparkwing stores it outside the runs
+database with mode `0600`, names it by a hash of the run ID, and removes it
+after dispatch reaches a terminal outcome. A consumer restart preserves the
+snapshot so the queued run keeps the same environment.
 
-```
-  runner: consumer pid 4831 (started 2026-08-12T09:14:02Z); the run uses ITS environment, not this shell's
-```
-
-Until submitted runs carry their submitter's environment, the reliable
-options are:
-
-- Put the value in the pipeline's own configuration or a secret store,
-  where it does not depend on an ambient variable at all.
-- Pass it as a pipeline argument: `sparkwing runs submit deploy --env prod`.
-- Start the consumer deliberately from the environment you want, then
-  submit against it:
-
-  ```bash
-  AWS_PROFILE=prod sparkwing runs consumer start
-  sparkwing runs submit deploy
-  ```
-
-- Or run it in the foreground with `sparkwing run`, which always uses
-  your shell's environment.
-
-Carrying the submitter's environment on the trigger is deliberately not
-done: it would persist whatever happened to be exported -- tokens
-included -- into the runs store, which is a new place for secrets to
-live.
+Prefer pipeline configuration, secret stores, and pipeline arguments for
+values that should remain independent of a caller's ambient environment.
 
 #### Which checkout runs
 

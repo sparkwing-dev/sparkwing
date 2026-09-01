@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -76,16 +77,25 @@ func main() {
 	}
 	defer f.Close()
 	fmt.Fprintln(f, os.Args[len(os.Args)-1])
+	if envMarker := os.Getenv("SPARKWING_SUBMIT_TEST_ENV_MARKER"); envMarker != "" {
+		ef, err := os.OpenFile(envMarker, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			panic(err)
+		}
+		defer ef.Close()
+		fmt.Fprintln(ef, os.Getenv("SPARKWING_SUBMIT_TEST_ENV"))
+	}
 }
 `
 
 type submitTestEnv struct {
-	t        *testing.T
-	bin      string
-	home     string
-	repoDir  string
-	marker   string
-	extraEnv []string
+	t         *testing.T
+	bin       string
+	home      string
+	repoDir   string
+	marker    string
+	envMarker string
+	extraEnv  []string
 }
 
 func newSubmitTestEnv(t *testing.T) *submitTestEnv {
@@ -115,11 +125,12 @@ func newSubmitTestEnv(t *testing.T) *submitTestEnv {
 	}
 
 	env := &submitTestEnv{
-		t:       t,
-		bin:     buildSubmitCLI(t),
-		home:    home,
-		repoDir: repoDir,
-		marker:  filepath.Join(repoDir, "dispatched.txt"),
+		t:         t,
+		bin:       buildSubmitCLI(t),
+		home:      home,
+		repoDir:   repoDir,
+		marker:    filepath.Join(repoDir, "dispatched.txt"),
+		envMarker: filepath.Join(repoDir, "environment.txt"),
 	}
 	t.Cleanup(env.stopConsumer)
 	return env
@@ -132,8 +143,28 @@ func (e *submitTestEnv) env() []string {
 		"SPARKWING_REPOS="+filepath.Join(e.home, "repos.yaml"),
 		"SPARKWING_NO_UPDATE=1",
 		"SPARKWING_SUBMIT_TEST_MARKER="+e.marker,
+		"SPARKWING_SUBMIT_TEST_ENV_MARKER="+e.envMarker,
 	)
 	return append(base, e.extraEnv...)
+}
+
+func TestRunsSubmit_UsesEachSubmissionEnvironment(t *testing.T) {
+	e := newSubmitTestEnv(t)
+	e.extraEnv = []string{"SPARKWING_SUBMIT_TEST_ENV=first"}
+	e.submit()
+	waitUntil(t, "first submitted environment", 90*time.Second, func() bool {
+		return len(linesIn(e.envMarker)) == 1
+	})
+
+	e.extraEnv = []string{"SPARKWING_SUBMIT_TEST_ENV=second"}
+	e.submit()
+	waitUntil(t, "second submitted environment", 90*time.Second, func() bool {
+		return len(linesIn(e.envMarker)) == 2
+	})
+
+	if got := linesIn(e.envMarker); !slices.Equal(got, []string{"first", "second"}) {
+		t.Fatalf("execution environments = %q, want one snapshot from each submission", got)
+	}
 }
 
 func (e *submitTestEnv) run(args ...string) (string, error) {
@@ -198,7 +229,11 @@ func (e *submitTestEnv) store() *store.Store {
 }
 
 func (e *submitTestEnv) markerLines() []string {
-	b, err := os.ReadFile(e.marker)
+	return linesIn(e.marker)
+}
+
+func linesIn(path string) []string {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
