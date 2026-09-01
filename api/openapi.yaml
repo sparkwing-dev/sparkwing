@@ -108,9 +108,8 @@ paths:
       tags: [runs]
       summary: List runs filtered by query parameters.
       description: |
-        Filter via `pipeline`, `status`, `since`, `limit` query
-        params. Empty result is `{"runs": []}`. Requires `runs.read`
-        scope.
+        Filters are applied before newest-first ordering and `limit`.
+        Empty result is `{"runs": []}`. Requires `runs.read` scope.
       parameters:
         - in: query
           name: pipeline
@@ -120,6 +119,26 @@ paths:
           name: status
           schema: { type: string }
           description: csv of run statuses (e.g. `running,pending`).
+        - in: query
+          name: git_sha
+          schema: { type: string }
+          description: csv of git SHA prefixes.
+        - in: query
+          name: git_branch
+          schema: { type: string }
+          description: csv of exact git branch names.
+        - in: query
+          name: repo
+          schema: { type: string }
+          description: csv of exact stored repository identities.
+        - in: query
+          name: repo_url
+          schema: { type: string }
+          description: csv of exact canonical repository URLs.
+        - in: query
+          name: root_only
+          schema: { type: boolean }
+          description: When true, exclude child runs.
         - in: query
           name: since
           schema: { type: string, format: duration }

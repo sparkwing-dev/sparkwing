@@ -2293,6 +2293,9 @@ var cmdJobsFailures = Command{
 	Description: `Fetches recent runs with status=failed and extracts the first failing node's step + error message for each. --group-by clusters the output by step so a systemic failure surfaces as one row with a count.`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
+		{Name: "git-sha", Argument: "SHA", Desc: "Restrict to a git SHA prefix", Group: "Filter"},
+		{Name: "branch", Argument: "NAME", Desc: "Restrict to one git branch", Group: "Filter"},
+		{Name: "repo", Argument: "OWNER/NAME", Desc: "Restrict to one repository", Group: "Filter"},
 		{Name: "since", Argument: "DURATION", Desc: "Only failures newer than this (e.g. 24h, 7d)", Group: "Filter"},
 		{Name: "limit", Argument: "N", Desc: "Max failures to analyze", Default: "20", Group: "Filter"},
 		{Name: "group-by", Argument: "KEY", Desc: "Cluster by: step | node", Group: "Output"},
@@ -2436,12 +2439,11 @@ described in the CLI wishlist.`,
 
 var cmdJobsFind = Command{
 	Path:     "sparkwing runs find",
-	Synopsis: "Find runs by git SHA / repo / pipeline filter",
+	Synopsis: "Find runs by source identity or pipeline",
 	Description: `Searches recent runs for a match. Use --git-sha to find
 the run that was fired by a specific commit; add --pipeline to
 disambiguate when multiple pipelines respond to the same push. --repo
-matches the GITHUB_REPOSITORY env on the trigger (owner/name), useful
-when one controller handles webhooks from multiple repos.
+matches the repository identity stored on the run (owner/name).
 
 With --wait, blocks until at least one match appears, up to
 --find-timeout. Pairs with 'runs wait' for the push-and-follow loop:
@@ -2454,8 +2456,10 @@ Exit code 0 on match, non-zero on timeout-without-match or
 infrastructure error.`,
 	Flags: []FlagSpec{
 		{Name: "git-sha", Argument: "SHA", Desc: "Match runs whose git SHA starts with this value (prefix match)", Group: "Filter"},
+		{Name: "branch", Argument: "NAME", Desc: "Restrict to one git branch", Group: "Filter"},
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
-		{Name: "repo", Argument: "OWNER/NAME", Desc: "Match trigger's GITHUB_REPOSITORY env", Group: "Filter"},
+		{Name: "repo", Argument: "OWNER/NAME", Desc: "Restrict to one stored repository identity", Group: "Filter"},
+		{Name: "root-only", Desc: "Exclude child runs", Group: "Filter"},
 		{Name: "since", Argument: "DURATION", Desc: "Lookback window", Default: "1h", Group: "Filter"},
 		{Name: "limit", Argument: "N", Desc: "Max results", Default: "20", Group: "Filter"},
 		{Name: "wait", Desc: "Block until at least one match appears", Group: "Output"},
@@ -2630,19 +2634,9 @@ is recorded on the run, so the consumer executes the tree you
 submitted from even when another registered checkout declares the
 same pipeline name.
 
-ENVIRONMENT: a submitted run does NOT inherit this shell's
-environment. It is executed by the resident consumer, which
-carries the environment of whichever shell started it -- possibly
-hours ago, in another project, with a different AWS_PROFILE or
-KUBECONFIG. So
-
-  AWS_PROFILE=prod sparkwing runs submit deploy
-
-may not do what it looks like. Pass values as pipeline arguments,
-put them in the pipeline's configuration, or start the consumer
-from the environment you want ('sparkwing runs consumer start')
-before submitting. The acknowledgment names the consumer pid so
-the difference is visible.
+Each submitted run executes with the environment captured by its
+submission. The owner-only snapshot is removed when dispatch reaches
+a terminal outcome; it is never stored in the run or trigger row.
 
 Deduplication is opt-in via --idempotency-key, scoped to the
 pipeline. A second submission of the SAME pipeline carrying a key
