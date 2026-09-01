@@ -138,6 +138,10 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	if resp.StatusCode != http.StatusOK {
 		return nil, readHTTPError(resp)
 	}
+	advancedFilter := len(f.GitSHAPrefixes) > 0 || len(f.GitBranches) > 0 || len(f.Repos) > 0 || len(f.RepoURLs) > 0 || f.RootOnly
+	if advancedFilter && resp.Header.Get("X-Sparkwing-Run-Filter-Version") != "1" {
+		return nil, errors.New("controller does not support native run identity filters")
+	}
 	var body struct {
 		Runs []*store.Run `json:"runs"`
 	}

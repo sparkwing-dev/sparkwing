@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -41,6 +42,20 @@ func ParseRunFilter(q url.Values) RunFilter {
 		}
 	}
 	return f
+}
+
+// ParseRunFilterValidated rejects invalid public query values.
+func ParseRunFilterValidated(q url.Values) (RunFilter, error) {
+	f := ParseRunFilter(q)
+	for _, prefix := range f.GitSHAPrefixes {
+		prefix = strings.ToLower(strings.TrimSpace(prefix))
+		if prefix == "" || strings.IndexFunc(prefix, func(r rune) bool {
+			return (r < '0' || r > '9') && (r < 'a' || r > 'f')
+		}) >= 0 {
+			return RunFilter{}, fmt.Errorf("git SHA prefix %q must contain hexadecimal characters", prefix)
+		}
+	}
+	return f, nil
 }
 
 func splitCSV(s string) []string {

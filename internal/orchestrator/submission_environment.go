@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -18,6 +19,8 @@ import (
 const SubmissionEnvironmentCapturedKey = "_SPARKWING_SUBMISSION_ENV_CAPTURED"
 
 const submissionEnvironmentDir = "submission-environments"
+
+var submissionEnvironmentReconcileCursor atomic.Uint64
 
 type submissionEnvironmentSnapshot struct {
 	RunID       string   `json:"run_id"`
@@ -38,23 +41,29 @@ func CaptureSubmissionEnvironment(home, runID string, env []string) error {
 		return fmt.Errorf("encode submission environment: %w", err)
 	}
 	path := submissionEnvironmentPath(layout.Home, runID)
-	f, err := fssecure.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY)
+	tmp, err := os.CreateTemp(dir, ".submission-environment-*")
 	if err != nil {
 		return fmt.Errorf("create submission environment: %w", err)
 	}
-	if _, err := f.Write(body); err != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("write submission environment: %w", err)
 	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
 		return fmt.Errorf("sync submission environment: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
+	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close submission environment: %w", err)
+	}
+	if err := os.Link(tmpPath, path); err != nil {
+		return fmt.Errorf("publish submission environment: %w", err)
 	}
 	return nil
 }
@@ -103,9 +112,24 @@ func ReconcileSubmissionEnvironments(ctx context.Context, home string, st *store
 	if err != nil {
 		return 0, err
 	}
-	removed := 0
+	files := entries[:0]
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") || (limit > 0 && removed >= limit) {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			files = append(files, entry)
+		}
+	}
+	if len(files) == 0 {
+		return 0, nil
+	}
+	count := len(files)
+	if limit > 0 && count > limit {
+		count = limit
+	}
+	start := int(submissionEnvironmentReconcileCursor.Add(uint64(count))-uint64(count)) % len(files)
+	removed := 0
+	for i := 0; i < count; i++ {
+		entry := files[(start+i)%len(files)]
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
@@ -115,7 +139,11 @@ func ReconcileSubmissionEnvironments(ctx context.Context, home string, st *store
 		}
 		var snapshot submissionEnvironmentSnapshot
 		if jsonErr := json.Unmarshal(body, &snapshot); jsonErr != nil || snapshot.RunID == "" {
-			return removed, fmt.Errorf("decode submission environment %s", entry.Name())
+			if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return removed, removeErr
+			}
+			removed++
+			continue
 		}
 		trig, getErr := st.GetTrigger(ctx, snapshot.RunID)
 		terminal := errors.Is(getErr, store.ErrNotFound) || (getErr == nil && trig.Status == "done")

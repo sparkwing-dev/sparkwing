@@ -284,9 +284,11 @@ func consumeLocalTriggers(
 			}
 		}
 
-		if rt.maintain && time.Since(lastMaintenance) >= maintenanceInterval {
+		if time.Since(lastMaintenance) >= maintenanceInterval {
 			lastMaintenance = time.Now()
-			requeueExpiredClaims(ctx, st, inFlight, logger)
+			if rt.maintain {
+				requeueExpiredClaims(ctx, st, inFlight, logger)
+			}
 			if _, err := ReconcileSubmissionEnvironments(ctx, rt.home, st, 100); err != nil {
 				logger.Warn("reconcile submission environments", "err", err)
 			}

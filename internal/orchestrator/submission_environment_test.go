@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -92,6 +93,36 @@ func TestReconcileSubmissionEnvironmentsRemovesTerminalSnapshots(t *testing.T) {
 	}
 	if _, err := os.Stat(submissionEnvironmentPath(home, runID)); !os.IsNotExist(err) {
 		t.Fatalf("terminal snapshot still exists: %v", err)
+	}
+}
+
+func TestReconcileSubmissionEnvironmentsRemovesMalformedResidueAndContinues(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	dir := filepath.Join(home, submissionEnvironmentDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "000-malformed.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const runID = "run-terminal-after-malformed"
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"TOKEN=secret"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := st.CreateTrigger(ctx, store.Trigger{ID: runID, Pipeline: "build", Status: "pending", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled, err := st.CancelPendingTrigger(ctx, runID); err != nil || !cancelled {
+		t.Fatalf("cancel pending trigger = %v, %v", cancelled, err)
+	}
+	removed, err := ReconcileSubmissionEnvironments(ctx, home, st, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 2 {
+		t.Fatalf("removed = %d, want malformed and terminal snapshots", removed)
 	}
 }
 

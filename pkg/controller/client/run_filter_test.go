@@ -14,6 +14,7 @@ func TestListRunsSerializesNativeIdentityFilters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Sparkwing-Run-Filter-Version", "1")
 		_, _ = w.Write([]byte(`{"runs":[]}`))
 	}))
 	t.Cleanup(server.Close)

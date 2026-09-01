@@ -497,8 +497,8 @@ CREATE INDEX IF NOT EXISTS idx_runs_pipeline ON runs(pipeline, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_branch_started ON runs(git_branch, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_repo_slug_started ON runs(repo, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(repo_url, git_sha, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(repo_url, git_branch, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(repo, git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(repo, git_branch, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS nodes (
     run_id           TEXT NOT NULL,
@@ -821,8 +821,8 @@ const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_branch_started ON runs(git_branch, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_repo_slug_started ON runs(repo, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(repo_url, git_sha, started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(repo_url, git_branch, started_at DESC);`
+CREATE INDEX IF NOT EXISTS idx_runs_repo_sha_started ON runs(repo, git_sha, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_repo_branch_started ON runs(repo, git_branch, started_at DESC);`
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -1832,6 +1832,7 @@ type RunFilter struct {
 
 // ListRuns returns runs ordered newest-first, filtered by f.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
+	normalizedPrefixes := make([]string, len(f.GitSHAPrefixes))
 	for i, prefix := range f.GitSHAPrefixes {
 		prefix = strings.ToLower(strings.TrimSpace(prefix))
 		if prefix == "" || strings.IndexFunc(prefix, func(r rune) bool {
@@ -1839,8 +1840,9 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 		}) >= 0 {
 			return nil, fmt.Errorf("git SHA prefix %q must contain hexadecimal characters", prefix)
 		}
-		f.GitSHAPrefixes[i] = prefix
+		normalizedPrefixes[i] = prefix
 	}
+	f.GitSHAPrefixes = normalizedPrefixes
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 50
