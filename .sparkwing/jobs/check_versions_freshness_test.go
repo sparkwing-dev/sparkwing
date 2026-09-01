@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -185,6 +186,18 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 			t.Error("commitSparkwingPinBump() returned nil, want error when nothing to commit")
 		}
 	})
+}
+
+func TestSparkwingPinArtifactsIncludeKubernetesE2EFixture(t *testing.T) {
+	want := []string{
+		"testdata/k8s-e2e/repo/.sparkwing/go.mod",
+		"testdata/k8s-e2e/repo/.sparkwing/go.sum",
+	}
+	for _, path := range want {
+		if !slices.Contains(sparkwingPinArtifacts, path) {
+			t.Errorf("sparkwingPinArtifacts excludes %q", path)
+		}
+	}
 }
 
 func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *testing.T) {
