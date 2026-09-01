@@ -209,6 +209,7 @@ func ServeConsumer(ctx context.Context, opts ConsumerOptions) error {
 		close(opts.Ready)
 	}
 	return consumeLocalTriggers(ctx, st, logger, wedge, consumerRuntime{
+		home:     layout.Home,
 		idle:     opts.idleTimeout(),
 		lease:    opts.claimLease(),
 		unlock:   func() { _ = flockUnlock(lockF) },
@@ -232,6 +233,8 @@ func (o ConsumerOptions) claimLease() time.Duration {
 }
 
 type consumerRuntime struct {
+	home string
+
 	idle time.Duration
 
 	lease time.Duration
@@ -312,7 +315,7 @@ func consumeLocalTriggers(
 		go func(t *store.Trigger) {
 			defer wg.Done()
 			defer inFlight.remove(t.ID)
-			runClaimedTrigger(ctx, st, t, cache, logger, rt.lease)
+			runClaimedTrigger(ctx, st, t, cache, logger, rt.home, rt.lease)
 		}(trig)
 	}
 }
@@ -343,10 +346,10 @@ func (rt consumerRuntime) shouldExit(ctx context.Context, st *store.Store, logge
 
 func runClaimedTrigger(
 	ctx context.Context, st *store.Store, trig *store.Trigger,
-	cache *localCompileCache, logger *slog.Logger, lease time.Duration,
+	cache *localCompileCache, logger *slog.Logger, home string, lease time.Duration,
 ) {
 	book := context.WithoutCancel(ctx)
-	if cancelClaimedTriggerIfRequested(book, st, trig, lease, logger) {
+	if cancelClaimedTriggerIfRequested(book, st, trig, home, lease, logger) {
 		return
 	}
 
@@ -354,8 +357,15 @@ func runClaimedTrigger(
 	defer stopHeartbeat()
 	go heartbeatClaimedTrigger(dispatchCtx, st, trig.ID, trig.ClaimSeq, lease, logger)
 
-	err := dispatchLocalTrigger(dispatchCtx, st, trig, "", "", cache, logger)
+	env, envErr := submissionEnvironment(home, trig)
+	if envErr != nil {
+		finishClaimedTriggerFailure(book, st, trig, logger, envErr)
+		_ = DiscardSubmissionEnvironment(home, trig.ID)
+		return
+	}
+	err := dispatchLocalTrigger(dispatchCtx, st, trig, "", "", cache, logger, env)
 	if err == nil {
+		_ = DiscardSubmissionEnvironment(home, trig.ID)
 		return
 	}
 	if ctx.Err() != nil {
@@ -393,17 +403,29 @@ func runClaimedTrigger(
 	if _, ferr := st.FinishTriggerAtGeneration(book, trig.ID, trig.ClaimSeq); ferr != nil {
 		logger.Warn("finish superseded trigger", "trigger_id", trig.ID, "err", ferr)
 	}
+	_ = DiscardSubmissionEnvironment(home, trig.ID)
+}
+
+func finishClaimedTriggerFailure(ctx context.Context, st *store.Store, trig *store.Trigger, logger *slog.Logger, err error) {
+	_ = st.CreateRun(ctx, store.Run{ID: trig.ID, Pipeline: trig.Pipeline, Status: "failed", StartedAt: time.Now()})
+	if _, finishErr := st.FinishRunAtGeneration(ctx, trig.ID, trig.ClaimSeq, "failed", "local dispatch: "+err.Error()); finishErr != nil {
+		logger.Warn("record dispatch failure", "trigger_id", trig.ID, "err", finishErr)
+	}
+	if _, finishErr := st.FinishTriggerAtGeneration(ctx, trig.ID, trig.ClaimSeq); finishErr != nil {
+		logger.Warn("finish failed trigger", "trigger_id", trig.ID, "err", finishErr)
+	}
 }
 
 func cancelClaimedTriggerIfRequested(
 	ctx context.Context, st *store.Store, trig *store.Trigger,
-	lease time.Duration, logger *slog.Logger,
+	home string, lease time.Duration, logger *slog.Logger,
 ) bool {
 	cancelled, err := st.HeartbeatTrigger(ctx, trig.ID, lease)
 	if err != nil || !cancelled {
 		return false
 	}
 	logger.Info("local trigger cancelled before dispatch", "trigger_id", trig.ID)
+	_ = DiscardSubmissionEnvironment(home, trig.ID)
 	_ = st.CreateRun(ctx, store.Run{
 		ID:        trig.ID,
 		Pipeline:  trig.Pipeline,
