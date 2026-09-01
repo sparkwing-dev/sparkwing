@@ -49,6 +49,8 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.38.2] - 2026-09-01
+
 ### Added
 
 - **cli:** `runs find` and `runs failures` now apply repository, branch, and
