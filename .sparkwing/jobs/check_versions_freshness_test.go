@@ -244,7 +244,6 @@ func TestReleaseVersionArtifactsAlignedDetectsFixtureOnlyDrift(t *testing.T) {
 	if !aligned {
 		t.Fatal("coherent release artifacts reported drift")
 	}
-
 }
 
 func TestAutoBumpSparkwingPinPreservesCoherentAheadArtifacts(t *testing.T) {
