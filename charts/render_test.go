@@ -216,8 +216,9 @@ type renderedEnvValueSource struct {
 }
 
 type renderedSecretKeyRef struct {
-	Name string `yaml:"name"`
-	Key  string `yaml:"key"`
+	Name     string `yaml:"name"`
+	Key      string `yaml:"key"`
+	Optional *bool  `yaml:"optional"`
 }
 
 type renderedCapabilities struct {
@@ -497,6 +498,27 @@ func renderController(t *testing.T, sets ...string) renderedContainer {
 	t.Helper()
 	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing", sets...)
 	return runnerContainer(t, rendered)
+}
+
+func TestWebConfiguredControllerTokenIsRequired(t *testing.T) {
+	web := runnerContainer(t, helmTemplate(t, "sparkwing", "web.tokenSecret.name=sparkwing-token"))
+	for _, env := range web.Env {
+		if env.Name != "SPARKWING_AGENT_TOKEN" {
+			continue
+		}
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("SPARKWING_AGENT_TOKEN secretKeyRef missing: %+v", env)
+		}
+		ref := env.ValueFrom.SecretKeyRef
+		if ref.Name != "sparkwing-token" || ref.Key != "token" {
+			t.Errorf("SPARKWING_AGENT_TOKEN secretKeyRef = %+v", ref)
+		}
+		if ref.Optional != nil && *ref.Optional {
+			t.Fatal("SPARKWING_AGENT_TOKEN secretKeyRef is optional")
+		}
+		return
+	}
+	t.Fatal("SPARKWING_AGENT_TOKEN env missing")
 }
 
 func TestControllerGitHubStatusEnvironment(t *testing.T) {
