@@ -35,16 +35,7 @@ func reserveRunHandle(path string) (func(), error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	lockPath := path + ".lock"
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(lockPath)
-		return nil, err
-	}
-	return func() { _ = os.Remove(lockPath) }, nil
+	return func() {}, nil
 }
 
 func publishRunHandle(path string, handle RunHandle) error {

@@ -149,6 +149,10 @@ paths:
       responses:
         "200":
           description: List wrapped under `runs`.
+          headers:
+            X-Sparkwing-Run-Filter-Version:
+              description: Native identity-filter contract version.
+              schema: { type: string, enum: ["1"] }
           content:
             application/json:
               schema:
@@ -158,6 +162,7 @@ paths:
                   runs:
                     type: array
                     items: { $ref: "#/components/schemas/Run" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "500": { $ref: "#/components/responses/InternalError" }
 

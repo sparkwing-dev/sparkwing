@@ -126,6 +126,30 @@ func TestReconcileSubmissionEnvironmentsRemovesMalformedResidueAndContinues(t *t
 	}
 }
 
+func TestReconcileSubmissionEnvironmentsRemovesAbandonedTemporaryFile(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	dir := filepath.Join(home, submissionEnvironmentDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".submission-environment-crash")
+	if err := os.WriteFile(path, []byte(`{"environment":["TOKEN=secret"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-abandonedSubmissionEnvironmentAge - time.Minute)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := ReconcileSubmissionEnvironments(context.Background(), home, st, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+}
+
 func TestSubmissionWithoutCapturedEnvironmentUsesConsumerEnvironment(t *testing.T) {
 	env, err := submissionEnvironment(t.TempDir(), &store.Trigger{ID: "legacy"})
 	if err != nil {

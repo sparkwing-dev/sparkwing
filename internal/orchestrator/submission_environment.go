@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -19,8 +21,9 @@ import (
 const SubmissionEnvironmentCapturedKey = "_SPARKWING_SUBMISSION_ENV_CAPTURED"
 
 const submissionEnvironmentDir = "submission-environments"
+const abandonedSubmissionEnvironmentAge = 10 * time.Minute
 
-var submissionEnvironmentReconcileCursor atomic.Uint64
+var submissionEnvironmentReconcileCursors sync.Map
 
 type submissionEnvironmentSnapshot struct {
 	RunID       string   `json:"run_id"`
@@ -64,6 +67,17 @@ func CaptureSubmissionEnvironment(home, runID string, env []string) error {
 	}
 	if err := os.Link(tmpPath, path); err != nil {
 		return fmt.Errorf("publish submission environment: %w", err)
+	}
+	if err := os.Remove(tmpPath); err != nil {
+		return fmt.Errorf("remove submission environment temporary file: %w", err)
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open submission environment directory: %w", err)
+	}
+	defer func() { _ = d.Close() }()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("sync submission environment directory: %w", err)
 	}
 	return nil
 }
@@ -114,7 +128,7 @@ func ReconcileSubmissionEnvironments(ctx context.Context, home string, st *store
 	}
 	files := entries[:0]
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+		if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".json") || strings.HasPrefix(entry.Name(), ".submission-environment-")) {
 			files = append(files, entry)
 		}
 	}
@@ -125,14 +139,26 @@ func ReconcileSubmissionEnvironments(ctx context.Context, home string, st *store
 	if limit > 0 && count > limit {
 		count = limit
 	}
-	start := int(submissionEnvironmentReconcileCursor.Add(uint64(count))-uint64(count)) % len(files)
+	cursorValue, _ := submissionEnvironmentReconcileCursors.LoadOrStore(dir, &atomic.Uint64{})
+	cursor := cursorValue.(*atomic.Uint64)
+	start := int(cursor.Add(uint64(count))-uint64(count)) % len(files)
 	removed := 0
 	for i := 0; i < count; i++ {
 		entry := files[(start+i)%len(files)]
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+		path := filepath.Join(dir, entry.Name())
+		if strings.HasPrefix(entry.Name(), ".submission-environment-") {
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				return removed, infoErr
+			}
+			if time.Since(info.ModTime()) >= abandonedSubmissionEnvironmentAge {
+				if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+					return removed, removeErr
+				}
+				removed++
+			}
 			continue
 		}
-		path := filepath.Join(dir, entry.Name())
 		body, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return removed, readErr
