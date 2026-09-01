@@ -172,7 +172,14 @@ func ReconcileSubmissionEnvironments(ctx context.Context, home string, st *store
 			continue
 		}
 		trig, getErr := st.GetTrigger(ctx, snapshot.RunID)
-		terminal := errors.Is(getErr, store.ErrNotFound) || (getErr == nil && trig.Status == "done")
+		terminal := getErr == nil && trig.Status == "done"
+		if errors.Is(getErr, store.ErrNotFound) {
+			info, infoErr := entry.Info()
+			if infoErr != nil {
+				return removed, infoErr
+			}
+			terminal = time.Since(info.ModTime()) >= abandonedSubmissionEnvironmentAge
+		}
 		if getErr != nil && !errors.Is(getErr, store.ErrNotFound) {
 			return removed, getErr
 		}

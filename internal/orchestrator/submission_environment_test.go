@@ -150,6 +150,25 @@ func TestReconcileSubmissionEnvironmentsRemovesAbandonedTemporaryFile(t *testing
 	}
 }
 
+func TestReconcileSubmissionEnvironmentsPreservesFreshSnapshotBeforeTriggerCommit(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	const runID = "run-capture-window"
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"MODE=fresh"}); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := ReconcileSubmissionEnvironments(context.Background(), home, st, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 0 {
+		t.Fatalf("removed = %d, want fresh pre-trigger snapshot preserved", removed)
+	}
+	if _, err := os.Stat(submissionEnvironmentPath(home, runID)); err != nil {
+		t.Fatalf("fresh pre-trigger snapshot: %v", err)
+	}
+}
+
 func TestSubmissionWithoutCapturedEnvironmentUsesConsumerEnvironment(t *testing.T) {
 	env, err := submissionEnvironment(t.TempDir(), &store.Trigger{ID: "legacy"})
 	if err != nil {
