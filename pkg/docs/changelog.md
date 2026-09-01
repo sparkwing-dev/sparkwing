@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **web:** Run selection now discards superseded detail responses, so a slow
+  request cannot replace the selected run with stale nodes or metadata.
 - **docs:** Trigger filter documentation now distinguishes declarative
   `branches`, `paths`, and `actions` metadata from enforceable run guards and
   shows how to require a literal checked-out branch before any step starts.

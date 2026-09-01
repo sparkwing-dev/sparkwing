@@ -57,6 +57,7 @@ type MockAPIOptions = {
   details?: Record<string, Record<string, unknown>>;
   unauthorized?: boolean;
   failPath?: string;
+  onDetail?: (route: Route, runID: string) => Promise<boolean>;
   onEventStream?: (route: Route) => Promise<void>;
   onLogStream?: (route: Route) => Promise<void>;
   onRequest?: (route: Route) => void;
@@ -148,6 +149,9 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
     }
     const detailMatch = path.match(/^\/api\/v1\/runs\/([^/]+)$/);
     if (request.method() === "GET" && detailMatch) {
+      if (options.onDetail && (await options.onDetail(route, detailMatch[1]))) {
+        return;
+      }
       const detail = options.details?.[detailMatch[1]];
       await route.fulfill(detail ? { json: detail } : { status: 404, json: {} });
       return;
@@ -271,6 +275,67 @@ async function expectExactLineFocus(page: Page): Promise<void> {
     .toContain("2");
 }
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function selectRunWhileOlderDetailIsPending(
+  page: Page,
+  newerDetail: Record<string, unknown> | null,
+): Promise<() => Promise<void>> {
+  const olderStarted = deferred();
+  const olderRelease = deferred();
+  const newerFinished = deferred();
+  await installMockAPI(page, {
+    runs: [
+      finishedRun,
+      newerDetail
+        ? runningRun
+        : {
+            ...runningRun,
+            status: "failed",
+            finished_at: "2026-08-27T18:06:00Z",
+          },
+    ],
+    details: newerDetail ? { [runningRun.id]: newerDetail } : undefined,
+    onDetail: async (route, runID) => {
+      if (runID === runningRun.id && !newerDetail) {
+        await route.abort("connectionrefused");
+        newerFinished.resolve();
+        return true;
+      }
+      if (runID !== finishedRun.id) return false;
+      olderStarted.resolve();
+      await olderRelease.promise;
+      await route.fulfill({ json: finishedDetail });
+      return true;
+    },
+  });
+  await page.goto("/runs");
+  await page.locator(`[data-run-id="${finishedRun.id}"]`).click();
+  await olderStarted.promise;
+  await page.locator(`[data-run-id="${runningRun.id}"]`).click();
+  if (!newerDetail) await newerFinished.promise;
+
+  return async () => {
+    const olderResponse = page.waitForResponse((response) =>
+      new URL(response.url()).pathname.endsWith(`/runs/${finishedRun.id}`),
+    );
+    olderRelease.resolve();
+    await olderResponse;
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+  };
+}
+
 test("renders the empty production dashboard and passes accessibility smoke", async ({
   page,
 }) => {
@@ -330,6 +395,39 @@ test("opens a completed run and renders stored node logs", async ({ page }) => {
   await expect(
     page.getByText("PREAMBLE stays outside the tests step", { exact: true }),
   ).toBeVisible();
+});
+
+test("keeps the selected run when an older detail request finishes late", async ({
+  page,
+}) => {
+  const newerDetail = {
+    run: runningRun,
+    nodes: [
+      ...finishedDetail.nodes,
+      { id: "package", status: "running", outcome: "", deps: ["verify"] },
+    ],
+  };
+  const finishOlderRequest = await selectRunWhileOlderDetailIsPending(
+    page,
+    newerDetail,
+  );
+  await expect(page.getByText("Nodes (2)", { exact: true })).toBeVisible();
+  await finishOlderRequest();
+  await expect(page.getByText("Nodes (2)", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`run=${runningRun.id}`));
+});
+
+test("does not restore an older run after the new detail request fails", async ({
+  page,
+}) => {
+  const finishOlderRequest = await selectRunWhileOlderDetailIsPending(
+    page,
+    null,
+  );
+  await expect(page).toHaveURL(new RegExp(`run=${runningRun.id}`));
+  await finishOlderRequest();
+  await expect(page.getByText("Nodes (1)", { exact: true })).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`run=${runningRun.id}`));
 });
 
 test("opens a selected DAG step when logs mount", async ({ page }) => {

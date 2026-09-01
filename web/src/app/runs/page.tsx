@@ -350,9 +350,27 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setPipelineMeta(meta);
   }, []);
 
+  const detailSelectionRef = useRef({ runID: selectedRun });
+  const detailRequestRef = useRef({ next: 0, committed: 0 });
   const loadDetail = useCallback(async (runID: string) => {
-    const d = await getRun(runID);
-    if (d) setDetail(d);
+    const selection = detailSelectionRef.current;
+    const request = ++detailRequestRef.current.next;
+    let d: RunDetail | null;
+    try {
+      d = await getRun(runID);
+    } catch {
+      return;
+    }
+    if (
+      !d ||
+      detailSelectionRef.current !== selection ||
+      selection.runID !== runID ||
+      request < detailRequestRef.current.committed
+    ) {
+      return;
+    }
+    detailRequestRef.current.committed = request;
+    setDetail(d);
   }, []);
 
   useEffect(() => {
@@ -396,6 +414,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }, [runs]);
 
   useEffect(() => {
+    detailSelectionRef.current = { runID: selectedRun };
     if (!selectedRun) {
       setDetail(null);
       return;
@@ -407,21 +426,35 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     return () => clearInterval(i);
   }, [selectedRun, loadDetail]);
 
-  const refetchState = useRef<{ inFlight: boolean; stale: boolean }>({
+  const refetchState = useRef<{
+    runID: string | null;
+    inFlight: boolean;
+    stale: boolean;
+  }>({
+    runID: null,
     inFlight: false,
     stale: false,
   });
   const kickRefetch = useCallback(() => {
     if (!selectedRun) return;
+    if (refetchState.current.runID !== selectedRun) {
+      refetchState.current = {
+        runID: selectedRun,
+        inFlight: false,
+        stale: false,
+      };
+    }
     if (refetchState.current.inFlight) {
       refetchState.current.stale = true;
       return;
     }
+    const runID = selectedRun;
     const run = async () => {
       refetchState.current.inFlight = true;
       try {
-        await loadDetail(selectedRun);
+        await loadDetail(runID);
       } finally {
+        if (refetchState.current.runID !== runID) return;
         refetchState.current.inFlight = false;
         if (refetchState.current.stale) {
           refetchState.current.stale = false;
@@ -451,7 +484,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedAfter: filterState.setFinishedAfter,
     setFinishedBefore: filterState.setFinishedBefore,
   };
-  const detailRun = detail?.run ?? null;
+  const activeDetail = detail?.run.id === selectedRun ? detail : null;
+  const detailRun = activeDetail?.run ?? null;
   const topLevel = useMemo(() => {
     const withSelected =
       detailRun &&
@@ -486,8 +520,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     el.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [selectedRun, topLevel, runs.length]);
 
-  const run = detail?.run || null;
-  const nodes = detail?.nodes ?? EMPTY_NODES;
+  const run = activeDetail?.run || null;
+  const nodes = activeDetail?.nodes ?? EMPTY_NODES;
   const node = nodes.find((n) => n.id === selectedNode) || null;
   const { ids: reusedNodeIDs, priorRunID: reusedPriorRunID } =
     useReusedNodeIDs(run);
@@ -955,7 +989,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         </div>
 
         {                             }
-        {run && detail && (
+        {run && activeDetail && (
           <div className="w-44 border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto">
             <div
               onClick={() => {
