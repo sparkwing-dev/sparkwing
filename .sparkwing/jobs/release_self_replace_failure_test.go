@@ -23,6 +23,15 @@ require github.com/sparkwing-dev/sparkwing v0.1.0
 ` + selfReplaceComment + selfReplaceLine + `
 `
 
+const fakeKubernetesE2EPipelinesGoMod = `module sparkwing-k8s-e2e-pipelines
+
+go 1.26.0
+
+require github.com/sparkwing-dev/sparkwing v0.1.0
+
+replace github.com/sparkwing-dev/sparkwing => ../../../..
+`
+
 const refuseUnpinnedGate = `#!/bin/sh
 if git show ":.sparkwing/go.mod" | grep -q 'replace github.com/sparkwing-dev/sparkwing => \.\.'; then
 	exit 0
@@ -66,6 +75,13 @@ func seedReleaseRepo(t *testing.T) string {
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), fakePipelinesGoMod)
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.sum"), "")
 	writeFile(t, filepath.Join(repo, ".sparkwing", "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n\nfunc main() {}\n")
+	fixtureModuleDir := filepath.Join(repo, filepath.FromSlash(kubernetesE2EPipelineModuleRel))
+	if err := os.MkdirAll(fixtureModuleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(fixtureModuleDir, "go.mod"), fakeKubernetesE2EPipelinesGoMod)
+	writeFile(t, filepath.Join(fixtureModuleDir, "go.sum"), "")
+	writeFile(t, filepath.Join(fixtureModuleDir, "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n\nfunc main() {}\n")
 	if err := os.MkdirAll(filepath.Join(repo, "pkg", "scaffold"), 0o755); err != nil {
 		t.Fatal(err)
 	}

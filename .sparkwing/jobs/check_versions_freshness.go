@@ -21,6 +21,8 @@ const scaffoldFallbackRel = "pkg/scaffold/version.go"
 
 const scaffoldAPISnapshotRel = ".apidiff/pkg_scaffold.txt"
 
+const kubernetesE2EPipelineModuleRel = "testdata/k8s-e2e/repo/.sparkwing"
+
 var scaffoldFallbackVersionRe = regexp.MustCompile(`FallbackSDKVersion = "(v[^"]*)"`)
 
 var sparkwingPinArtifacts = []string{
@@ -28,6 +30,8 @@ var sparkwingPinArtifacts = []string{
 	".sparkwing/go.mod",
 	".sparkwing/go.sum",
 	scaffoldAPISnapshotRel,
+	kubernetesE2EPipelineModuleRel + "/go.mod",
+	kubernetesE2EPipelineModuleRel + "/go.sum",
 }
 
 type VersionFreshnessOptions struct {
@@ -357,11 +361,11 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 	if err != nil {
 		return "", fmt.Errorf("resolve latest sparkwing release: %w", err)
 	}
-	pinned, err := readFallbackSDKVersionFile(repoRoot)
+	pinned, aligned, err := coherentReleaseVersionArtifacts(repoRoot)
 	if err != nil {
 		return "", err
 	}
-	if semver.Compare(pinned, latest) >= 0 {
+	if aligned && semver.Compare(pinned, latest) >= 0 {
 		return "", nil
 	}
 	if err := requireCleanSparkwingPinArtifacts(ctx, repoRoot); err != nil {
@@ -385,6 +389,9 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 	if _, err := captureCmd(ctx, repoRoot, "go", "-C", ".sparkwing", "mod", "tidy"); err != nil {
 		return "", fmt.Errorf("go mod tidy .sparkwing: %w", err)
 	}
+	if err := bumpPipelineModulePin(ctx, repoRoot, kubernetesE2EPipelineModuleRel, latest); err != nil {
+		return "", err
+	}
 	if err := regenerateScaffoldAPISnapshot(ctx, repoRoot); err != nil {
 		return "", err
 	}
@@ -392,6 +399,63 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 		return "", fmt.Errorf("commit sparkwing pin bump: %w", err)
 	}
 	return latest, nil
+}
+
+func bumpPipelineModulePin(ctx context.Context, repoRoot, moduleDir, version string) error {
+	if _, err := captureCmd(ctx, repoRoot, "go", "-C", moduleDir, "mod", "edit",
+		"-require", sdkModulePath+"@"+version); err != nil {
+		return fmt.Errorf("go mod edit %s/go.mod: %w", moduleDir, err)
+	}
+	if _, err := captureCmd(ctx, repoRoot, "go", "-C", moduleDir, "mod", "tidy"); err != nil {
+		return fmt.Errorf("go mod tidy %s: %w", moduleDir, err)
+	}
+	return nil
+}
+
+func readPipelineModulePin(repoRoot, moduleDir string) (string, error) {
+	path := filepath.Join(repoRoot, filepath.FromSlash(moduleDir), "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := modfile.Parse(path, body, nil)
+	if err != nil {
+		return "", err
+	}
+	for _, requirement := range parsed.Require {
+		if requirement.Mod.Path == sdkModulePath {
+			return requirement.Mod.Version, nil
+		}
+	}
+	return "", fmt.Errorf("%s has no %s requirement", path, sdkModulePath)
+}
+
+func releaseVersionArtifactsAligned(repoRoot, version string) (bool, error) {
+	pinned, aligned, err := coherentReleaseVersionArtifacts(repoRoot)
+	if err != nil {
+		return false, err
+	}
+	return aligned && pinned == version, nil
+}
+
+func coherentReleaseVersionArtifacts(repoRoot string) (string, bool, error) {
+	fallback, err := readFallbackSDKVersionFile(repoRoot)
+	if err != nil {
+		return "", false, err
+	}
+	snapshot, err := readScaffoldVersionArtifact(repoRoot, scaffoldAPISnapshotRel)
+	if err != nil {
+		return "", false, err
+	}
+	pipeline, err := readPipelineModulePin(repoRoot, ".sparkwing")
+	if err != nil {
+		return "", false, err
+	}
+	fixture, err := readPipelineModulePin(repoRoot, kubernetesE2EPipelineModuleRel)
+	if err != nil {
+		return "", false, err
+	}
+	return fallback, fallback == snapshot && fallback == pipeline && fallback == fixture, nil
 }
 
 func regenerateScaffoldAPISnapshot(ctx context.Context, repoRoot string) error {
@@ -457,10 +521,14 @@ func bumpFallbackSDKVersionFile(repoRoot, version string) error {
 }
 
 func readFallbackSDKVersionFile(repoRoot string) (string, error) {
-	path := filepath.Join(repoRoot, filepath.FromSlash(scaffoldFallbackRel))
+	return readScaffoldVersionArtifact(repoRoot, scaffoldFallbackRel)
+}
+
+func readScaffoldVersionArtifact(repoRoot, rel string) (string, error) {
+	path := filepath.Join(repoRoot, filepath.FromSlash(rel))
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", scaffoldFallbackRel, err)
+		return "", fmt.Errorf("read %s: %w", rel, err)
 	}
 	match := scaffoldFallbackVersionRe.FindSubmatch(data)
 	if match == nil {

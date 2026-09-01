@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -127,11 +128,16 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(scaffoldAPISnapshotRel)), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(kubernetesE2EPipelineModuleRel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		for path, content := range map[string]string{
-			filepath.Join("pkg", "scaffold", "version.go"): "v0.19.0",
-			filepath.Join(".sparkwing", "go.mod"):          "module test",
-			filepath.Join(".sparkwing", "go.sum"):          "",
-			filepath.FromSlash(scaffoldAPISnapshotRel):     "v0.19.0",
+			filepath.Join("pkg", "scaffold", "version.go"):                 "v0.19.0",
+			filepath.Join(".sparkwing", "go.mod"):                          "module test",
+			filepath.Join(".sparkwing", "go.sum"):                          "",
+			filepath.FromSlash(scaffoldAPISnapshotRel):                     "v0.19.0",
+			filepath.FromSlash(kubernetesE2EPipelineModuleRel + "/go.mod"): "module fixture",
+			filepath.FromSlash(kubernetesE2EPipelineModuleRel + "/go.sum"): "",
 		} {
 			if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
 				t.Fatal(err)
@@ -159,7 +165,7 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		if err != nil {
 			t.Fatalf("git show: %v", err)
 		}
-		for _, f := range []string{"pkg/scaffold/version.go", ".sparkwing/go.mod", ".sparkwing/go.sum", ".apidiff/pkg_scaffold.txt"} {
+		for _, f := range sparkwingPinArtifacts {
 			if !strings.Contains(filesOut, f) {
 				t.Errorf("committed files: %q not found in output %q", f, filesOut)
 			}
@@ -178,13 +184,101 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		dir := initRepo(t)
 		createBumpFiles(t, dir)
 
-		mustGit(t, dir, "add", "--", "pkg/scaffold/version.go", ".sparkwing/go.mod", ".sparkwing/go.sum", scaffoldAPISnapshotRel)
+		mustGit(t, dir, append([]string{"add", "--"}, sparkwingPinArtifacts...)...)
 		mustGit(t, dir, "commit", "-m", "initial")
 
 		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err == nil {
 			t.Error("commitSparkwingPinBump() returned nil, want error when nothing to commit")
 		}
 	})
+}
+
+func TestSparkwingPinArtifactsIncludeKubernetesE2EFixture(t *testing.T) {
+	want := []string{
+		"testdata/k8s-e2e/repo/.sparkwing/go.mod",
+		"testdata/k8s-e2e/repo/.sparkwing/go.sum",
+	}
+	for _, path := range want {
+		if !slices.Contains(sparkwingPinArtifacts, path) {
+			t.Errorf("sparkwingPinArtifacts excludes %q", path)
+		}
+	}
+}
+
+func TestReleaseVersionArtifactsAlignedDetectsFixtureOnlyDrift(t *testing.T) {
+	dir := t.TempDir()
+	write := func(rel, body string) {
+		t.Helper()
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	module := func(version string) string {
+		return "module example.invalid/pipelines\n\ngo 1.26.0\n\nrequire " + sdkModulePath + " " + version + "\n"
+	}
+	write(scaffoldFallbackRel, `const FallbackSDKVersion = "v0.38.2"`)
+	write(scaffoldAPISnapshotRel, `const FallbackSDKVersion = "v0.38.2"`)
+	write(".sparkwing/go.mod", module("v0.38.2"))
+	write(kubernetesE2EPipelineModuleRel+"/go.mod", module("v0.38.1"))
+
+	aligned, err := releaseVersionArtifactsAligned(dir, "v0.38.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aligned {
+		t.Fatal("fixture-only drift reported aligned")
+	}
+	if got := releaseVersionArtifactsDryRunMessage("v0.38.2"); got != "dry-run: would align release-version artifacts to v0.38.2" {
+		t.Fatalf("fixture-only dry-run message = %q", got)
+	}
+
+	write(kubernetesE2EPipelineModuleRel+"/go.mod", module("v0.38.2"))
+	aligned, err = releaseVersionArtifactsAligned(dir, "v0.38.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !aligned {
+		t.Fatal("coherent release artifacts reported drift")
+	}
+}
+
+func TestAutoBumpSparkwingPinPreservesCoherentAheadArtifacts(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	const ahead = "v0.2.0"
+
+	for _, rel := range []string{".sparkwing/go.mod", kubernetesE2EPipelineModuleRel + "/go.mod"} {
+		path := filepath.Join(repo, filepath.FromSlash(rel))
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, path, strings.ReplaceAll(string(body), "v0.1.0", ahead))
+	}
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldFallbackRel)), "package scaffold\n\nconst FallbackSDKVersion = \""+ahead+"\"\n")
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldAPISnapshotRel)), "# pkg/scaffold\n\nconst FallbackSDKVersion = \""+ahead+"\"\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "seed coherent ahead artifacts")
+	gitRun(t, repo, "tag", "v0.1.0")
+	gitRun(t, repo, "push", "origin", "v0.1.0")
+	before := gitRun(t, repo, "rev-parse", "HEAD")
+
+	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bumped != "" {
+		t.Fatalf("auto bump returned %q, want no downgrade", bumped)
+	}
+	if after := gitRun(t, repo, "rev-parse", "HEAD"); after != before {
+		t.Fatal("auto bump committed over coherent ahead artifacts")
+	}
+	if dirty := strings.TrimSpace(gitRun(t, repo, "status", "--porcelain")); dirty != "" {
+		t.Fatalf("auto bump changed coherent ahead artifacts:\n%s", dirty)
+	}
 }
 
 func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *testing.T) {

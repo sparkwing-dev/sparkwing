@@ -394,8 +394,17 @@ func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
+	fixturePinned, err := readPipelineModulePin(repoDir, kubernetesE2EPipelineModuleRel)
+	if err != nil {
+		return fmt.Errorf("release: read Kubernetes pipeline fixture pin: %w", err)
+	}
 	fallbackChanged := pinned != version
-	if !changed && !fallbackChanged {
+	fixtureChanged := fixturePinned != version
+	aligned, err := releaseVersionArtifactsAligned(repoDir, version)
+	if err != nil {
+		return fmt.Errorf("release: inspect release-version artifacts: %w", err)
+	}
+	if !changed && aligned {
 		sparkwing.Info(ctx, "release-version artifacts already in shipped shape; skipping")
 		return nil
 	}
@@ -410,6 +419,11 @@ func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 	if fallbackChanged {
 		if err := bumpFallbackSDKVersionFile(repoDir, version); err != nil {
 			return fmt.Errorf("release: bump scaffold fallback: %w", err)
+		}
+	}
+	if fixtureChanged {
+		if err := bumpPipelineModulePin(ctx, repoDir, kubernetesE2EPipelineModuleRel, version); err != nil {
+			return fmt.Errorf("release: bump Kubernetes pipeline fixture: %w", err)
 		}
 	}
 	if err := regenerateScaffoldAPISnapshot(ctx, repoDir); err != nil {
@@ -438,16 +452,20 @@ func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
-	pinned, err := readFallbackSDKVersionFile(j.RepoDir)
+	aligned, err := releaseVersionArtifactsAligned(j.RepoDir, version)
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
-	if !moduleChanged && pinned == version {
+	if !moduleChanged && aligned {
 		sparkwing.Info(ctx, "dry-run: release-version artifacts already in shipped shape; no rewrite")
 	} else {
-		sparkwing.Info(ctx, "dry-run: would bump .sparkwing/go.mod and scaffold fallback to %s and strip self-replace", version)
+		sparkwing.Info(ctx, "%s", releaseVersionArtifactsDryRunMessage(version))
 	}
 	return nil
+}
+
+func releaseVersionArtifactsDryRunMessage(version string) string {
+	return "dry-run: would align release-version artifacts to " + version
 }
 
 func writeSelfModuleSums(ctx context.Context, repoDir, version string) error {
