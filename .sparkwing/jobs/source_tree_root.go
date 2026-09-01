@@ -7,11 +7,19 @@ import (
 )
 
 func sourceTreeRoot() string {
+	if cwd, err := os.Getwd(); err == nil {
+		if root := findSourceTreeRoot(cwd); root != "" {
+			return root
+		}
+	}
 	_, file, _, ok := runtime.Caller(0)
-	if !ok {
+	if !ok || !filepath.IsAbs(file) {
 		return ""
 	}
-	dir := filepath.Dir(file)
+	return findSourceTreeRoot(filepath.Dir(file))
+}
+
+func findSourceTreeRoot(dir string) string {
 	for {
 		if isSourceTreeRoot(dir) {
 			return dir

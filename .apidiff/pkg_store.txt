@@ -290,6 +290,7 @@ func OpenPostgres(_ context.Context, dsn string) (*Store, error)
 func OpenReadOnly(path string) (*Store, error)
 func OpenReadOnlySnapshot(path string) (*Store, error)
 func ParseRunFilter(q url.Values) RunFilter
+func ParseRunFilterValidated(q url.Values) (RunFilter, error)
 const PauseReasonAfter = "pause-after"
 const PauseReasonBefore = "pause-before"
 const PauseReasonOnFailure = "pause-on-failure"
@@ -414,11 +415,16 @@ type Run struct {
 func (r Run) RedactedForDisplay() Run
 func (r Run) SecretArgNames() []string
 type RunFilter struct {
-	Pipelines   []string
-	Statuses    []string
-	Since       time.Time
-	Limit       int
-	ParentRunID string
+	Pipelines      []string
+	Statuses       []string
+	GitSHAPrefixes []string
+	GitBranches    []string
+	Repos          []string
+	RepoURLs       []string
+	Since          time.Time
+	Limit          int
+	ParentRunID    string
+	RootOnly       bool
 }
 type Secret struct {
 	Name      string
