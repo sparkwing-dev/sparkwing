@@ -459,9 +459,13 @@ func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
 	if !moduleChanged && aligned {
 		sparkwing.Info(ctx, "dry-run: release-version artifacts already in shipped shape; no rewrite")
 	} else {
-		sparkwing.Info(ctx, "dry-run: would bump .sparkwing/go.mod and scaffold fallback to %s and strip self-replace", version)
+		sparkwing.Info(ctx, "%s", releaseVersionArtifactsDryRunMessage(version))
 	}
 	return nil
+}
+
+func releaseVersionArtifactsDryRunMessage(version string) string {
+	return "dry-run: would align release-version artifacts to " + version
 }
 
 func writeSelfModuleSums(ctx context.Context, repoDir, version string) error {

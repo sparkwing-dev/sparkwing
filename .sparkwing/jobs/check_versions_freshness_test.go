@@ -232,6 +232,9 @@ func TestReleaseVersionArtifactsAlignedDetectsFixtureOnlyDrift(t *testing.T) {
 	if aligned {
 		t.Fatal("fixture-only drift reported aligned")
 	}
+	if got := releaseVersionArtifactsDryRunMessage("v0.38.2"); got != "dry-run: would align release-version artifacts to v0.38.2" {
+		t.Fatalf("fixture-only dry-run message = %q", got)
+	}
 
 	write(kubernetesE2EPipelineModuleRel+"/go.mod", module("v0.38.2"))
 	aligned, err = releaseVersionArtifactsAligned(dir, "v0.38.2")
