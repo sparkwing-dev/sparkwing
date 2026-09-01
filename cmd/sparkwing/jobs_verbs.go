@@ -49,6 +49,9 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 	on := fs.String("profile", "", "profile name; omit for local-only")
 	limit := fs.Int("limit", 20, "max failures to analyze")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
+	gitSHA := fs.String("git-sha", "", "restrict to a git SHA prefix")
+	branch := fs.String("branch", "", "restrict to one git branch")
+	repo := fs.String("repo", "", "restrict to one repository (owner/name)")
 	since := lookbackDuration(fs, "since", 0, "only failures newer than this (e.g. 24h, 7d)")
 	groupBy := fs.String("group-by", "", "cluster failures by: step | node (default: flat list)")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
@@ -74,9 +77,11 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 		if err := requireController(prof, "runs failures"); err != nil {
 			return err
 		}
-		rows, err = collectRemoteFailures(ctx, prof.ControllerURL(), prof.ControllerToken(), *pipeline, *since, *limit)
+		rows, err = collectRemoteFailures(ctx, prof.ControllerURL(), prof.ControllerToken(),
+			failureRunFilter(*pipeline, *gitSHA, *branch, *repo, *since, *limit))
 	} else {
-		rows, err = collectLocalFailures(ctx, paths, *pipeline, *since, *limit)
+		rows, err = collectLocalFailures(ctx, paths,
+			failureRunFilter(*pipeline, *gitSHA, *branch, *repo, *since, *limit))
 	}
 	if err != nil {
 		return err
@@ -84,7 +89,31 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 	return renderFailures(rows, *groupBy, emitJSON)
 }
 
-func collectLocalFailures(ctx context.Context, paths orchestrator.Paths, pipeline string, since time.Duration, limit int) ([]failureRow, error) {
+func failureRunFilter(pipeline, gitSHA, branch, repo string, since time.Duration, limit int) store.RunFilter {
+	f := store.RunFilter{
+		Statuses: []string{"failed"},
+		RootOnly: true,
+		Limit:    limit,
+	}
+	if gitSHA != "" {
+		f.GitSHAPrefixes = []string{gitSHA}
+	}
+	if pipeline != "" {
+		f.Pipelines = []string{pipeline}
+	}
+	if branch != "" {
+		f.GitBranches = []string{branch}
+	}
+	if repo != "" {
+		f.Repos = []string{repo}
+	}
+	if since > 0 {
+		f.Since = time.Now().Add(-since)
+	}
+	return f
+}
+
+func collectLocalFailures(ctx context.Context, paths orchestrator.Paths, filter store.RunFilter) ([]failureRow, error) {
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
 	}
@@ -94,22 +123,12 @@ func collectLocalFailures(ctx context.Context, paths orchestrator.Paths, pipelin
 	}
 	defer func() { _ = st.Close() }()
 
-	filter := store.RunFilter{Statuses: []string{"failed"}, Limit: limit * 4}
-	if pipeline != "" {
-		filter.Pipelines = []string{pipeline}
-	}
-	if since > 0 {
-		filter.Since = time.Now().Add(-since)
-	}
 	runs, err := st.ListRuns(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 	rows := make([]failureRow, 0, len(runs))
 	for _, r := range runs {
-		if r.ParentRunID != "" {
-			continue
-		}
 		row := failureRow{ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status}
 		nodes, err := st.ListNodes(ctx, r.ID)
 		if err == nil {
@@ -125,31 +144,18 @@ func collectLocalFailures(ctx context.Context, paths orchestrator.Paths, pipelin
 			row.Message = truncateOneLine(r.Error, 160)
 		}
 		rows = append(rows, row)
-		if len(rows) >= limit {
-			break
-		}
 	}
 	return rows, nil
 }
 
-func collectRemoteFailures(ctx context.Context, controllerURL, token, pipeline string, since time.Duration, limit int) ([]failureRow, error) {
+func collectRemoteFailures(ctx context.Context, controllerURL, token string, filter store.RunFilter) ([]failureRow, error) {
 	c := client.NewWithToken(controllerURL, nil, token)
-	filter := store.RunFilter{Statuses: []string{"failed"}, Limit: limit * 4}
-	if pipeline != "" {
-		filter.Pipelines = []string{pipeline}
-	}
-	if since > 0 {
-		filter.Since = time.Now().Add(-since)
-	}
 	runs, err := c.ListRuns(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 	rows := make([]failureRow, 0, len(runs))
 	for _, r := range runs {
-		if r.ParentRunID != "" {
-			continue
-		}
 		row := failureRow{ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status}
 		nodes, err := c.ListNodes(ctx, r.ID)
 		if err == nil {
@@ -165,9 +171,6 @@ func collectRemoteFailures(ctx context.Context, controllerURL, token, pipeline s
 			row.Message = truncateOneLine(r.Error, 160)
 		}
 		rows = append(rows, row)
-		if len(rows) >= limit {
-			break
-		}
 	}
 	return rows, nil
 }
@@ -727,8 +730,10 @@ func emitWaitResult(run *store.Run, format string) {
 func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsFind.Path, flag.ContinueOnError)
 	gitSHA := fs.String("git-sha", "", "match runs whose git SHA starts with this (prefix match)")
+	branch := fs.String("branch", "", "restrict to one git branch")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
-	repo := fs.String("repo", "", "match trigger's GITHUB_REPOSITORY env (owner/name)")
+	repo := fs.String("repo", "", "restrict to one repository (owner/name)")
+	rootOnly := fs.Bool("root-only", false, "exclude child runs")
 	since := fs.Duration("since", time.Hour, "lookback window (default 1h)")
 	limit := fs.Int("limit", 20, "max results")
 	wait := fs.Bool("wait", false, "block until at least one match appears")
@@ -742,8 +747,8 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	if *gitSHA == "" && *pipeline == "" && *repo == "" {
-		return fmt.Errorf("runs find: at least one of --git-sha, --pipeline, or --repo is required")
+	if *gitSHA == "" && *branch == "" && *pipeline == "" && *repo == "" {
+		return fmt.Errorf("runs find: at least one of --git-sha, --branch, --pipeline, or --repo is required")
 	}
 	resolvedFmt, err := resolveOutputFormat(*outFmt, "runs find")
 	if err != nil {
@@ -761,7 +766,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		searchOnce = func() ([]*store.Run, error) {
-			return findRunsRemote(ctx, c, *gitSHA, *pipeline, *repo, *since, *limit)
+			return c.ListRuns(ctx, findRunFilter(*gitSHA, *branch, *pipeline, *repo, *rootOnly, *since, *limit))
 		}
 	} else {
 		if err := paths.EnsureRoot(); err != nil {
@@ -773,7 +778,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		defer func() { _ = st.Close() }()
 		searchOnce = func() ([]*store.Run, error) {
-			return findRunsLocal(ctx, st, *gitSHA, *pipeline, *repo, *since, *limit)
+			return st.ListRuns(ctx, findRunFilter(*gitSHA, *branch, *pipeline, *repo, *rootOnly, *since, *limit))
 		}
 	}
 
@@ -803,75 +808,24 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 	return renderFindResults(runs, resolvedFmt, *quiet)
 }
 
-func findRunsLocal(ctx context.Context, st *store.Store, gitSHA, pipeline, repo string,
-	since time.Duration, limit int,
-) ([]*store.Run, error) {
-	filter := store.RunFilter{Limit: limit * 5}
+func findRunFilter(gitSHA, branch, pipeline, repo string, rootOnly bool, since time.Duration, limit int) store.RunFilter {
+	filter := store.RunFilter{RootOnly: rootOnly, Limit: limit}
+	if gitSHA != "" {
+		filter.GitSHAPrefixes = []string{gitSHA}
+	}
 	if pipeline != "" {
 		filter.Pipelines = []string{pipeline}
+	}
+	if branch != "" {
+		filter.GitBranches = []string{branch}
+	}
+	if repo != "" {
+		filter.Repos = []string{repo}
 	}
 	if since > 0 {
 		filter.Since = time.Now().Add(-since)
 	}
-	runs, err := st.ListRuns(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	return narrowRunsByRepo(runs, gitSHA, repo, limit, func(id string) (map[string]string, error) {
-		t, err := st.GetTrigger(ctx, id)
-		if err != nil || t == nil {
-			return nil, err
-		}
-		return t.TriggerEnv, nil
-	}), nil
-}
-
-func findRunsRemote(ctx context.Context, c *client.Client, gitSHA, pipeline, repo string,
-	since time.Duration, limit int,
-) ([]*store.Run, error) {
-	filter := store.RunFilter{Limit: limit * 5}
-	if pipeline != "" {
-		filter.Pipelines = []string{pipeline}
-	}
-	if since > 0 {
-		filter.Since = time.Now().Add(-since)
-	}
-	runs, err := c.ListRuns(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	return narrowRunsByRepo(runs, gitSHA, repo, limit, func(id string) (map[string]string, error) {
-		t, err := c.GetTrigger(ctx, id)
-		if err != nil || t == nil {
-			return nil, err
-		}
-		return t.TriggerEnv, nil
-	}), nil
-}
-
-func narrowRunsByRepo(runs []*store.Run, gitSHA, repo string,
-	limit int, triggerEnv func(id string) (map[string]string, error),
-) []*store.Run {
-	var out []*store.Run
-	for _, r := range runs {
-		if gitSHA != "" && !strings.HasPrefix(r.GitSHA, gitSHA) {
-			continue
-		}
-		if repo != "" {
-			env, err := triggerEnv(r.ID)
-			if err != nil || env == nil {
-				continue
-			}
-			if env["GITHUB_REPOSITORY"] != repo {
-				continue
-			}
-		}
-		out = append(out, r)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
+	return filter
 }
 
 func renderFindResults(runs []*store.Run, format string, quiet bool) error {

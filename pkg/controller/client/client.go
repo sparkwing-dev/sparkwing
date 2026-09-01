@@ -101,6 +101,21 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	if len(f.Statuses) > 0 {
 		q.Set("status", strings.Join(f.Statuses, ","))
 	}
+	if len(f.GitSHAPrefixes) > 0 {
+		q.Set("git_sha", strings.Join(f.GitSHAPrefixes, ","))
+	}
+	if len(f.GitBranches) > 0 {
+		q.Set("git_branch", strings.Join(f.GitBranches, ","))
+	}
+	if len(f.Repos) > 0 {
+		q.Set("repo", strings.Join(f.Repos, ","))
+	}
+	if len(f.RepoURLs) > 0 {
+		q.Set("repo_url", strings.Join(f.RepoURLs, ","))
+	}
+	if f.RootOnly {
+		q.Set("root_only", "true")
+	}
 	if !f.Since.IsZero() {
 		q.Set("since", time.Since(f.Since).String())
 	}

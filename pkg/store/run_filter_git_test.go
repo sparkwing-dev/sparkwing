@@ -29,11 +29,11 @@ func TestListRunsFiltersGitIdentityBeforeLimit(t *testing.T) {
 	}
 
 	runs, err := st.ListRuns(ctx, store.RunFilter{
-		GitSHAPrefix: "abc123",
-		GitBranches:  []string{"topic"},
-		RepoURLs:     []string{"https://example.com/acme/app.git"},
-		RootOnly:     true,
-		Limit:        1,
+		GitSHAPrefixes: []string{"abc123"},
+		GitBranches:    []string{"topic"},
+		RepoURLs:       []string{"https://example.com/acme/app.git"},
+		RootOnly:       true,
+		Limit:          1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestParseRunFilterGitIdentity(t *testing.T) {
 		"repo_url":   {"https://example.com/acme/app.git"},
 		"root_only":  {"true"},
 	})
-	if f.GitSHAPrefix != "abc123" || len(f.GitBranches) != 2 || len(f.RepoURLs) != 1 || !f.RootOnly {
+	if len(f.GitSHAPrefixes) != 1 || f.GitSHAPrefixes[0] != "abc123" || len(f.GitBranches) != 2 || len(f.RepoURLs) != 1 || !f.RootOnly {
 		t.Fatalf("parsed filter = %#v", f)
 	}
 }
