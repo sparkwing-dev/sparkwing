@@ -8,8 +8,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"golang.org/x/mod/semver"
 )
 
 func TestScaffoldFallbackProblem(t *testing.T) {
@@ -247,16 +245,40 @@ func TestReleaseVersionArtifactsAlignedDetectsFixtureOnlyDrift(t *testing.T) {
 		t.Fatal("coherent release artifacts reported drift")
 	}
 
-	write(scaffoldFallbackRel, `const FallbackSDKVersion = "v0.38.3"`)
-	write(scaffoldAPISnapshotRel, `const FallbackSDKVersion = "v0.38.3"`)
-	write(".sparkwing/go.mod", module("v0.38.3"))
-	write(kubernetesE2EPipelineModuleRel+"/go.mod", module("v0.38.3"))
-	pinned, coherent, err := coherentReleaseVersionArtifacts(dir)
+}
+
+func TestAutoBumpSparkwingPinPreservesCoherentAheadArtifacts(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	const ahead = "v0.2.0"
+
+	for _, rel := range []string{".sparkwing/go.mod", kubernetesE2EPipelineModuleRel + "/go.mod"} {
+		path := filepath.Join(repo, filepath.FromSlash(rel))
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, path, strings.ReplaceAll(string(body), "v0.1.0", ahead))
+	}
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldFallbackRel)), "package scaffold\n\nconst FallbackSDKVersion = \""+ahead+"\"\n")
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldAPISnapshotRel)), "# pkg/scaffold\n\nconst FallbackSDKVersion = \""+ahead+"\"\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "seed coherent ahead artifacts")
+	gitRun(t, repo, "tag", "v0.1.0")
+	gitRun(t, repo, "push", "origin", "v0.1.0")
+	before := gitRun(t, repo, "rev-parse", "HEAD")
+
+	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !coherent || semver.Compare(pinned, "v0.38.2") < 0 {
-		t.Fatalf("ahead artifact set = (%q, %v), want coherent and at least latest", pinned, coherent)
+	if bumped != "" {
+		t.Fatalf("auto bump returned %q, want no downgrade", bumped)
+	}
+	if after := gitRun(t, repo, "rev-parse", "HEAD"); after != before {
+		t.Fatal("auto bump committed over coherent ahead artifacts")
+	}
+	if dirty := strings.TrimSpace(gitRun(t, repo, "status", "--porcelain")); dirty != "" {
+		t.Fatalf("auto bump changed coherent ahead artifacts:\n%s", dirty)
 	}
 }
 
