@@ -153,6 +153,7 @@ func (p *BuildImages) buildOne(ctx context.Context, spec buildImageSpec) error {
 		"--file", sparkwing.Path(dockerfile),
 		"--build-arg", "BINARY=" + spec.name,
 		"--build-arg", "SPARKWING_VERSION=" + p.tag,
+		"--build-arg", "SPARKWING_IMAGE_REFRESH=" + p.tag,
 		"--tag", imageRef,
 	}
 	if p.args.Push {

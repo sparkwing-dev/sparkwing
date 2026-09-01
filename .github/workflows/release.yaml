@@ -440,6 +440,7 @@ jobs:
           build-args: |
             BINARY=${{ matrix.binary }}
             SPARKWING_VERSION=${{ inputs.tag || github.ref_name }}
+            SPARKWING_IMAGE_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}
           cache-from: type=gha,scope=${{ matrix.binary }}
           cache-to: type=gha,mode=max,scope=${{ matrix.binary }}
 

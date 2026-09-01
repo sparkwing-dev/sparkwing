@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -138,7 +139,8 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 	for _, required := range []string{
 		"FROM --platform=$BUILDPLATFORM " + goImage + " AS build",
 		"FROM " + alpineImage,
-		"RUN apk upgrade --no-cache && apk add --no-cache ca-certificates git git-daemon openssh-client",
+		"ARG SPARKWING_IMAGE_REFRESH=local",
+		"RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apk upgrade --no-cache && apk add --no-cache ca-certificates git git-daemon openssh-client",
 		"COPY --from=" + goImage + " /usr/local/go /usr/local/go",
 		"COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh",
 		"COPY --from=build /out/sparkwing-runner /usr/local/bin/sparkwing-runner",
@@ -151,6 +153,40 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `go-version: "`+goVersion+`"`) {
 		t.Errorf("release workflow Go version does not match runner toolchain %s", goVersion)
+	}
+}
+
+func TestReleaseWorkflowRefreshesAlpinePackagesPerAttempt(t *testing.T) {
+	t.Parallel()
+
+	body, err := os.ReadFile("../../.github/workflows/release.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `SPARKWING_IMAGE_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}`) {
+		t.Error("release workflow does not refresh Alpine packages for each image build attempt")
+	}
+
+	for _, path := range []string{"../../build/Dockerfile.binary", "../../build/Dockerfile.runner"} {
+		path := path
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			dockerfile, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			instructions := dockerfileInstructions(dockerfile)
+			if !containsDockerInstruction(instructions, "ARG SPARKWING_IMAGE_REFRESH=local") {
+				t.Error("image refresh contract does not declare SPARKWING_IMAGE_REFRESH")
+			}
+			const refresh = "RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apk upgrade --no-cache"
+			var found bool
+			for _, instruction := range instructions {
+				found = found || strings.HasPrefix(instruction, refresh)
+			}
+			if !found {
+				t.Errorf("image refresh contract missing %q", refresh)
+			}
+		})
 	}
 }
 

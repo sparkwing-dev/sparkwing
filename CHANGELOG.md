@@ -49,6 +49,12 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **release:** Hosted image builds now refresh their Alpine package layer on
+  every workflow attempt, preventing a cached OpenSSH revision from failing the
+  final vulnerability scan after Alpine has published its security update.
+
 ## [v0.38.0] - 2026-08-31
 ### Changed
 
