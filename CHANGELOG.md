@@ -49,6 +49,14 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **docs:** Trigger filter documentation now distinguishes declarative
+  `branches`, `paths`, and `actions` metadata from enforceable run guards and
+  shows how to require a literal checked-out branch before any step starts.
+  The `default` branch token requires dispatch metadata that controller
+  webhook and local trigger claims do not supply.
+
 ## [v0.38.2] - 2026-09-01
 
 ### Added
@@ -221,11 +229,6 @@ code change to unlock.
 ## [v0.37.0] - 2026-08-28
 ### Fixed
 
-- **docs:** Trigger filter documentation now distinguishes declarative
-  `branches`, `paths`, and `actions` metadata from enforceable run guards and
-  shows how to require a literal checked-out branch before any step starts.
-  The `default` branch token requires dispatch metadata that controller
-  webhook and local trigger claims do not supply.
 - **web (Breaking):** Live dashboard node logs now retain structured step buckets instead
   of collapsing pretty-rendered stream output into preamble. Authenticated
   dashboards also provide a `Log out` control in the top navigation and keep
