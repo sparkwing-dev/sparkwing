@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.38.1] - 2026-09-01
 ### Fixed
 
 - **release:** Hosted image builds now refresh their Alpine package layer on
