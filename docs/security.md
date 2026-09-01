@@ -2,6 +2,11 @@
 
 How sparkwing protects code, credentials, and infrastructure.
 
+Report suspected vulnerabilities through
+[GitHub's private vulnerability form](https://github.com/sparkwing-dev/sparkwing/security/advisories/new),
+not a public issue. The repository [security policy](https://github.com/sparkwing-dev/sparkwing/security/policy)
+defines supported versions and the information to include.
+
 ## Authentication and authorization
 
 Controller and logs requests carry a bearer token; each route declares

@@ -49,6 +49,11 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Docs
+
+- **security:** The security policy now identifies the supported release and
+  provides a private GitHub vulnerability-reporting path.
+
 ### Fixed
 
 - **web:** Run selection now discards superseded detail responses, so a slow
