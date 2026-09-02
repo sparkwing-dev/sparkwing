@@ -645,13 +645,12 @@ func sliceRange[T any](lines []T, a, b int) []T {
 }
 
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("runID")
-	if err := validateID(runID); err != nil {
+	dir, err := s.runDir(r.PathValue("runID"))
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	runDir := filepath.Join(s.root, "runs", runID)
-	if err := os.RemoveAll(runDir); err != nil {
+	if err := os.RemoveAll(dir); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -659,12 +658,11 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReadRun(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("runID")
-	if err := validateID(runID); err != nil {
+	runDir, err := s.runDir(r.PathValue("runID"))
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	runDir := filepath.Join(s.root, "runs", runID)
 	entries, err := os.ReadDir(runDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -792,13 +790,13 @@ func sseEscape(s string) string {
 }
 
 func (s *Server) pathFor(runID, nodeID string) (string, error) {
-	if err := validateID(runID); err != nil {
+	dir, err := s.runDir(runID)
+	if err != nil {
 		return "", fmt.Errorf("runID: %w", err)
 	}
 	if err := validateID(nodeID); err != nil {
 		return "", fmt.Errorf("nodeID: %w", err)
 	}
-	dir := filepath.Join(s.root, "runs", runID)
 	if err := s.ensureDir(dir); err != nil {
 		return "", err
 	}
@@ -809,10 +807,32 @@ func validateID(s string) error {
 	if s == "" {
 		return errors.New("empty")
 	}
-	if strings.Contains(s, "..") || strings.ContainsAny(s, "/\\") {
+	if len(s) > 255 {
+		return errors.New("too long")
+	}
+	for _, r := range s {
+		if r == '/' || r == '\\' || r < 0x20 || r == 0x7f {
+			return errors.New("invalid characters")
+		}
+	}
+	// safety: filepath.Join collapses "." and "..", so only ids that survive Clean unchanged may address a directory.
+	if s == "." || s == ".." || filepath.Clean(s) != s {
 		return errors.New("invalid characters")
 	}
 	return nil
+}
+
+// safety: the join must land exactly one segment under the runs root before os.RemoveAll or os.Open sees it.
+func (s *Server) runDir(runID string) (string, error) {
+	if err := validateID(runID); err != nil {
+		return "", err
+	}
+	runsRoot := filepath.Join(s.root, "runs")
+	dir := filepath.Join(runsRoot, runID)
+	if filepath.Dir(dir) != runsRoot || filepath.Base(dir) != runID {
+		return "", errors.New("invalid characters")
+	}
+	return dir, nil
 }
 
 func withRequestLog(next http.Handler, logger *slog.Logger) http.Handler {
