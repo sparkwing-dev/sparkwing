@@ -28,6 +28,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       {{- with .Values.cache.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -51,6 +53,8 @@ spec:
             - --allow-unauthenticated
           {{- end }}
           env:
+            - name: HOME
+              value: /tmp
             {{- with (include "sparkwing-runner-bundle.cachePublicURL" .) }}
             - name: SPARKWING_CACHE_PUBLIC_URL
               value: {{ . | quote }}
@@ -77,6 +81,8 @@ spec:
             {{- end }}
             - name: data
               mountPath: /data
+            - name: scratch
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.cache.resources | nindent 12 }}
           livenessProbe:
@@ -105,4 +111,6 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: scratch
+          emptyDir: {}
 {{- end }}

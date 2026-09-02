@@ -182,11 +182,25 @@ helm install sparkwing ./charts/sparkwing-full \
     --set controller.secretsKey.name=sparkwing-secrets-key \
     --set web.tokenSecret.name=sparkwing-token \
     --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
+    --set web.requireLogin=true \
     --set ingress.enabled=true \
     --set ingress.hosts[0].host=sparkwing.example.com \
     --set ingress.hosts[0].paths[0].path=/ \
-    --set ingress.hosts[0].paths[0].pathType=Prefix
+    --set ingress.hosts[0].paths[0].pathType=Prefix \
+    --set ingress.tls[0].hosts[0]=sparkwing.example.com \
+    --set ingress.tls[0].secretName=sparkwing-tls
 ```
+
+An Ingress with an empty `ingress.tls` or with `web.requireLogin=false`
+fails to render, because publishing the dashboard is the one knob whose
+purpose is reaching browsers outside the cluster. Set
+`ingress.allowInsecure=true` to publish it unencrypted or open anyway;
+it must be a bool, since a quoted string fails the render instead of
+reading as an opt-out. Opting in without TLS also sets
+`SPARKWING_WEB_INSECURE_COOKIES=1` on the web Deployment, so the login
+gate still works over plain HTTP. The `ingress.tls` check is
+presence-only: an entry without `secretName` leaves TLS to the ingress
+controller's default certificate.
 
 ## Values cheat sheet
 
@@ -230,6 +244,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | --- | --- | --- |
 | `podSecurityContext.runAsUser` | Non-root UID for controller and web. | `65534` |
 | `podSecurityContext.fsGroup` | Group for mounted storage. | `65534` |
+| `podSecurityContext.seccompProfile.type` | Seccomp profile the Pod Security "restricted" profile requires. | `RuntimeDefault` |
+| `containerSecurityContext.readOnlyRootFilesystem` | Read-only image layer; each pod writes to its mounted volumes and a `/tmp` scratch `emptyDir`. | `true` |
 | `volumePermissions.enabled` | Run a CHOWN-only init container before controller and web. | `true` |
 
 ### Ingress
@@ -239,7 +255,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `ingress.enabled` | Create the Ingress resource. | `false` |
 | `ingress.className` | IngressClass. Empty = cluster default. | `""` |
 | `ingress.hosts[].host` | Hostname for the dashboard. | `sparkwing.example.com` |
-| `ingress.tls` | TLS section. | `[]` |
+| `ingress.tls` | TLS section. Empty fails the render unless `ingress.allowInsecure`; presence-only, `secretName` optional. | `[]` |
+| `ingress.allowInsecure` | Publish the dashboard without TLS or without a login gate. Bool only. | `false` |
 
 ### Runner-bundle sub-chart
 

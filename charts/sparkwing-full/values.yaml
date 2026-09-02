@@ -244,10 +244,22 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+  # The render check on this list is presence-only: one entry is enough,
+  # and an entry without `secretName` leaves the ingress controller's
+  # default certificate to terminate TLS, which is the operator's call.
   tls: []
   # - hosts:
   #     - sparkwing.example.com
   #   secretName: sparkwing-tls
+
+  # Publish the dashboard without TLS or without a login gate. An
+  # Ingress exists to expose the dashboard beyond the cluster, so the
+  # render fails on `tls: []` or `web.requireLogin: false` until this
+  # says the exposure is deliberate. Must be a bool: a quoted string
+  # fails the render rather than reading as an opt-out. With `tls: []`
+  # the web Deployment also gets `SPARKWING_WEB_INSECURE_COOKIES=1`, so
+  # a browser can hold a session over plain HTTP.
+  allowInsecure: false
 
 # -----------------------------------------------------------------------
 # 4. ServiceAccount + RBAC for the controller. The controller needs
@@ -298,10 +310,19 @@ podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65534
   fsGroup: 65534
+  # Required by the Pod Security "restricted" profile. Drop this only
+  # for a workload that needs syscalls the runtime's default profile
+  # blocks; the pods this chart runs do not.
+  seccompProfile:
+    type: RuntimeDefault
 
 containerSecurityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: false
+  # Every path the controller and web pods write lives on a mounted
+  # volume: /data, the /tmp scratch emptyDir, and SPARKWING_HOME
+  # inside it. Set false only for an image that writes to its own
+  # layer.
+  readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
 

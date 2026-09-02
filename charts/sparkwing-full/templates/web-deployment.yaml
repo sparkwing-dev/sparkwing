@@ -101,6 +101,10 @@ spec:
             {{- end }}
             - name: OTEL_SERVICE_NAME
               value: "sparkwing-web"
+            {{- if and .Values.ingress.enabled (not .Values.ingress.tls) (kindIs "bool" .Values.ingress.allowInsecure) .Values.ingress.allowInsecure }}
+            - name: SPARKWING_WEB_INSECURE_COOKIES
+              value: "1"
+            {{- end }}
             {{- with .Values.web.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -108,6 +112,8 @@ spec:
             - name: http
               containerPort: {{ .Values.web.port }}
           volumeMounts:
+            - name: scratch
+              mountPath: /tmp
             - name: sparkwing-home
               mountPath: /tmp/sparkwing
           resources:
@@ -125,5 +131,7 @@ spec:
             initialDelaySeconds: 3
             periodSeconds: 5
       volumes:
+        - name: scratch
+          emptyDir: {}
         - name: sparkwing-home
           emptyDir: {}

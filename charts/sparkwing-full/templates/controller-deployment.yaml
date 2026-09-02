@@ -148,6 +148,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: scratch
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           startupProbe:
@@ -177,3 +179,5 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: scratch
+          emptyDir: {}

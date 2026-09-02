@@ -54,6 +54,104 @@ func TestCipher_NonceVariesPerSeal(t *testing.T) {
 	}
 }
 
+func TestCipher_BindsNameAndRepo(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(key)
+
+	env, err := c.SealBound("aws/prod/token", "acme/api", "bound")
+	if err != nil {
+		t.Fatalf("SealBound: %v", err)
+	}
+	if !strings.HasPrefix(env, "enc:v2:") {
+		t.Fatalf("SealBound envelope = %q, want an enc:v2: prefix", env)
+	}
+	if !IsEncrypted(env) {
+		t.Fatalf("IsEncrypted(%q) = false, want true", env)
+	}
+	got, err := c.OpenBound("aws/prod/token", "acme/api", env)
+	if err != nil {
+		t.Fatalf("OpenBound: %v", err)
+	}
+	if got != "bound" {
+		t.Fatalf("OpenBound = %q, want bound", got)
+	}
+
+	for _, c2 := range []struct {
+		label, name, repo string
+	}{
+		{"other name, same repo", "aws/dev/token", "acme/api"},
+		{"same name, other repo", "aws/prod/token", "acme/web"},
+		{"same name, unscoped row", "aws/prod/token", ""},
+		{"fields shifted across the separator", "aws/prod/token\x00acme", "/api"},
+	} {
+		if _, err := c.OpenBound(c2.name, c2.repo, env); err == nil {
+			t.Errorf("OpenBound accepted an envelope sealed elsewhere (%s)", c2.label)
+		}
+	}
+	if _, err := c.Open(env); err == nil {
+		t.Fatal("Open accepted a bound envelope without name and repo")
+	}
+}
+
+func TestCipher_BindsUnscopedRowToEmptyRepo(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(key)
+
+	env, err := c.SealBound("TOKEN", "", "unscoped")
+	if err != nil {
+		t.Fatalf("SealBound: %v", err)
+	}
+	got, err := c.OpenBound("TOKEN", "", env)
+	if err != nil {
+		t.Fatalf("OpenBound: %v", err)
+	}
+	if got != "unscoped" {
+		t.Fatalf("OpenBound = %q, want unscoped", got)
+	}
+	if _, err := c.OpenBound("TOKEN", "acme/api", env); err == nil {
+		t.Fatal("OpenBound accepted an unscoped envelope under a repository")
+	}
+}
+
+func TestCipher_OpenBoundReadsUnboundEnvelopes(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(key)
+
+	env, err := c.Seal("legacy")
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	if !strings.HasPrefix(env, "enc:v1:") {
+		t.Fatalf("Seal envelope = %q, want an enc:v1: prefix", env)
+	}
+	for _, name := range []string{"TOKEN", "OTHER"} {
+		got, oerr := c.OpenBound(name, "acme/api", env)
+		if oerr != nil {
+			t.Fatalf("OpenBound(%q): %v", name, oerr)
+		}
+		if got != "legacy" {
+			t.Fatalf("OpenBound(%q) = %q, want legacy", name, got)
+		}
+	}
+}
+
+func TestCipher_OpenBoundRejectsTampered(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(key)
+
+	env, _ := c.SealBound("TOKEN", "acme/api", "hello")
+	tampered := env[:len(env)-1] + "A"
+	if tampered == env {
+		tampered = env[:len(env)-1] + "B"
+	}
+	if _, err := c.OpenBound("TOKEN", "acme/api", tampered); err == nil {
+		t.Fatal("OpenBound accepted a tampered envelope")
+	}
+	if _, err := c.OpenBound("TOKEN", "acme/api", "plain-no-prefix"); err == nil {
+		t.Fatal("OpenBound accepted an unsealed value")
+	}
+}
+
 func TestCipher_OpenRejectsUnsealed(t *testing.T) {
 	key, _ := GenerateKey()
 	c, _ := NewCipher(key)
