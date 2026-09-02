@@ -987,9 +987,19 @@ is recorded on the run, so the consumer executes the tree you
 submitted from even when another registered checkout declares the
 same pipeline name.
 
-Each submitted run executes with the environment captured by its
-submission. The owner-only snapshot is removed when dispatch reaches
-a terminal outcome; it is never stored in the run or trigger row.
+Each submitted run executes with an allow-listed snapshot of the
+submitting environment: SPARKWING_*, GITHUB_*, PATH, HOME, HOSTNAME,
+and KUBERNETES_SERVICE_HOST, minus every credential-shaped name and
+value. Widen it by naming variables in SPARKWING_SUBMIT_ENV_ALLOW,
+comma separated, an entry ending in '*' matching a prefix:
+
+  SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,DOCKER_*' \
+    sparkwing runs submit deploy
+
+The owner-only snapshot is a 0600 file outside the runs database,
+never stored in the run or trigger row, and it is removed when the
+consumer starts the run. A run that comes back to the queue without
+it fails rather than running with the consumer's own environment.
 
 Deduplication is opt-in via --idempotency-key, scoped to the
 pipeline. A second submission of the SAME pipeline carrying a key

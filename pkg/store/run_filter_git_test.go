@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -63,5 +64,53 @@ func TestListRunsRejectsNonHexGitSHAPrefix(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	if _, err := st.ListRuns(context.Background(), store.RunFilter{GitSHAPrefixes: []string{"not-a-sha"}}); err == nil {
 		t.Fatal("ListRuns accepted a non-hex git SHA prefix")
+	}
+}
+
+func TestParseRunFilterClampsLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		limit string
+		want  int
+	}{
+		{name: "under the cap", limit: "25", want: 25},
+		{name: "at the cap", limit: "1000", want: store.MaxRunListLimit},
+		{name: "over the cap", limit: "500000", want: store.MaxRunListLimit},
+		{name: "absurd", limit: "9223372036854775807", want: store.MaxRunListLimit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := store.ParseRunFilter(url.Values{"limit": {tc.limit}})
+			if f.Limit != tc.want {
+				t.Fatalf("Limit = %d, want %d", f.Limit, tc.want)
+			}
+		})
+	}
+}
+
+func TestListRunsClampsLimitToTheCap(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/state.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	for i := range store.MaxRunListLimit + 5 {
+		if err := st.CreateRun(ctx, store.Run{
+			ID:        "run-" + strconv.Itoa(i),
+			Pipeline:  "push",
+			Status:    "passed",
+			StartedAt: time.Unix(int64(i+1), 0),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runs, err := st.ListRuns(ctx, store.RunFilter{Limit: 1 << 40})
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != store.MaxRunListLimit {
+		t.Fatalf("rows = %d, want %d", len(runs), store.MaxRunListLimit)
 	}
 }

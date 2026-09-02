@@ -245,6 +245,13 @@ additionally export traces and structured logs via OTLP.
 
 Always active on every service; scrape it with your Prometheus.
 
+The controller serves `/metrics` unauthenticated on its API listener, so
+an ingress fronting that listener publishes pipeline names to anyone who
+asks. `sparkwing-controller --metrics-addr 127.0.0.1:9090`
+(`$SPARKWING_METRICS_ADDR`) moves the endpoint onto its own listener,
+which you can bind to a pod-local or cluster-internal address and leave
+out of the ingress. The API listener then answers `404` for `/metrics`.
+
 ### OTLP export
 
 When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, services export over OTLP/HTTP

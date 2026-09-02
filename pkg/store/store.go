@@ -595,7 +595,8 @@ CREATE TABLE IF NOT EXISTS triggers (
     idempotency_key       TEXT NOT NULL DEFAULT '',
     claim_seq             INTEGER NOT NULL DEFAULT 0,
     claim_principal       TEXT NOT NULL DEFAULT '',
-    claim_token_prefix    TEXT NOT NULL DEFAULT ''
+    claim_token_prefix    TEXT NOT NULL DEFAULT '',
+    webhook_delivery      TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_triggers_pending
@@ -616,6 +617,14 @@ CREATE INDEX IF NOT EXISTS idx_triggers_source_status_created
 -- another pipeline's run.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_idempotency_key
     ON triggers(pipeline, idempotency_key) WHERE idempotency_key != '';
+
+-- One trigger per webhook delivery id, across every pipeline. A
+-- provider delivery id names one event; replaying it -- to the same
+-- pipeline or to another one -- must not produce a second run, and
+-- only a unique constraint decides that between concurrent posts.
+-- The partial predicate keeps non-webhook submissions out of the index.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_webhook_delivery
+    ON triggers(webhook_delivery) WHERE webhook_delivery != '';
 
 -- Unified concurrency primitive (.Cache DSL).
 -- Capacity per-key on entries; policy per-arrival on waiters.
@@ -834,7 +843,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 23
+const expectedSchemaVersion = 24
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1233,6 +1242,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 			return err
 		}
 		return s.ensureColumns("triggers", triggerClaimOwnerCols)
+	case 24:
+		return s.addTriggerWebhookDelivery(ctx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1318,6 +1329,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			return err
 		}
 		return addColumnsTx(ctx, tx, "triggers", triggerClaimOwnerCols)
+	case 24:
+		if err := addColumnsTx(ctx, tx, "triggers", triggerWebhookDeliveryCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, triggerWebhookDeliveryIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1544,6 +1561,10 @@ var secretsSharedCols = map[string]string{
 	"shared": "INTEGER NOT NULL DEFAULT 0",
 }
 
+var triggerWebhookDeliveryCols = map[string]string{
+	"webhook_delivery": "TEXT NOT NULL DEFAULT ''",
+}
+
 // TriggerIdempotencyIndexName is the unique index enforcing at most one
 // trigger per (pipeline, idempotency key). Exported so a schema test can
 // assert the constraint exists by name rather than inferring it from an
@@ -1552,6 +1573,16 @@ const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 
 const triggerIdempotencyIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TriggerIdempotencyIndexName + `
     ON triggers(pipeline, idempotency_key) WHERE idempotency_key != ''`
+
+// TriggerWebhookDeliveryIndexName is the unique index enforcing at most
+// one trigger per webhook delivery id. Exported so a schema test can
+// assert the constraint exists by name.
+const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
+
+const triggerWebhookDeliveryColumn = "webhook_delivery"
+
+const triggerWebhookDeliveryIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TriggerWebhookDeliveryIndexName + `
+    ON triggers(` + triggerWebhookDeliveryColumn + `) WHERE ` + triggerWebhookDeliveryColumn + ` != ''`
 
 func (s *Store) ensureColumnsAll() error {
 	for _, spec := range columnMigrations {
@@ -1705,6 +1736,29 @@ func (s *Store) addSecretRepoScope(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
+	}
+	return tx.Commit()
+}
+
+// safety: the column is worthless without the index, so a crash between them must roll back rather than admit replays.
+func (s *Store) addTriggerWebhookDelivery(ctx context.Context) error {
+	have, err := s.tableColumns("triggers")
+	if err != nil {
+		return err
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if !have["webhook_delivery"] {
+		if _, err := tx.ExecContext(ctx,
+			`ALTER TABLE triggers ADD COLUMN "webhook_delivery" TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, triggerWebhookDeliveryIndex); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -2048,6 +2102,8 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	// safety: clamp again here so a non-HTTP caller cannot ask for every row.
+	limit = min(limit, MaxRunListLimit)
 
 	where := ""
 	args := []any{}
@@ -3557,6 +3613,17 @@ type Trigger struct {
 	// last to finish wins regardless of which one the store considers
 	// current.
 	ClaimSeq int64 `json:"claim_seq,omitempty"`
+	// WebhookDelivery is the provider's delivery id for the webhook that
+	// created this trigger, empty for every other submission path. At
+	// most one trigger may carry any given non-empty value across the
+	// whole store -- a partial unique index enforces it -- so replaying
+	// a signed delivery, whether at the pipeline it was sent to or at
+	// another one, is refused instead of producing a second run.
+	//
+	// The scope is global and not the pipeline because a delivery id
+	// names one event at the provider, not one caller's intent: the same
+	// id arriving at two pipelines is a replay, not two requests.
+	WebhookDelivery string `json:"webhook_delivery,omitempty"`
 }
 
 // DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
@@ -3612,14 +3679,17 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
 		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-		              idempotency_key)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		              idempotency_key, webhook_delivery)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
 		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
-		t.IdempotencyKey,
+		t.IdempotencyKey, t.WebhookDelivery,
 	)
 	if err != nil && isUniqueViolation(err) {
+		if t.WebhookDelivery != "" && strings.Contains(err.Error(), triggerWebhookDeliveryColumn) {
+			return fmt.Errorf("%w: delivery %q", ErrDuplicateWebhookDelivery, t.WebhookDelivery)
+		}
 		return fmt.Errorf("%w: idempotency key %q", ErrDuplicateIdempotencyKey, t.IdempotencyKey)
 	}
 	return err
@@ -3630,6 +3700,12 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 // failure for the caller to report: the winning trigger is the answer,
 // and the caller resolves it with [Store.FindTriggerByIdempotencyKey].
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
+
+// ErrDuplicateWebhookDelivery reports that a trigger insert carried a
+// webhook delivery id an earlier trigger already holds. The delivery is
+// a replay of work the store has already accepted, so the caller
+// refuses it rather than starting a second run.
+var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 
 func isUniqueViolation(err error) bool {
 	if err == nil {
@@ -3971,7 +4047,7 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity,
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq
+       idempotency_key, claim_seq, webhook_delivery
   FROM triggers
  WHERE status = ?`
 	args := []any{triggerStatusPending}
@@ -4004,7 +4080,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq,
+		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery,
 	)
 	if parent.Valid {
 		t.ParentRunID = parent.String
@@ -4482,12 +4558,12 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq
+       idempotency_key, claim_seq, webhook_delivery
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq); err != nil {
+		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -4523,12 +4599,12 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
-       idempotency_key, claim_seq
+       idempotency_key, claim_seq, webhook_delivery
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq)
+		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -4623,7 +4699,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at,
        claimed_at, lease_expires_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq
+       idempotency_key, claim_seq, webhook_delivery
   FROM triggers` + where + `
  ORDER BY created_at DESC
  LIMIT ?`
@@ -4645,7 +4721,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 			&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS,
 			&claimedNS, &leaseNS, &parent,
 			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-			&t.IdempotencyKey, &t.ClaimSeq); err != nil {
+			&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery); err != nil {
 			return nil, err
 		}
 		t.Full = fullInt != 0

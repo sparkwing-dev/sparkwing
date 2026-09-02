@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +32,7 @@ func (s *Server) handleGitcacheRefresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGitcacheSeed(w http.ResponseWriter, r *http.Request) {
-	extendGitcacheStreamDeadline(w)
+	extendGitcacheStreamDeadline(w, r)
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
@@ -72,7 +73,7 @@ func (s *Server) handleGitcacheRegister(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGitcacheGit(w http.ResponseWriter, r *http.Request) {
-	extendGitcacheStreamDeadline(w)
+	extendGitcacheStreamDeadline(w, r)
 	path := strings.TrimPrefix(r.PathValue("path"), "/")
 	parts := strings.SplitN(path, "/", 2)
 	if len(parts) != 2 || !gitcacheRepoName.MatchString(parts[0]) {
@@ -171,8 +172,27 @@ func (s *Server) proxyGitcacheRequest(w http.ResponseWriter, r *http.Request, me
 	}
 }
 
-func extendGitcacheStreamDeadline(w http.ResponseWriter) {
+type streamDeadlineKey struct{}
+
+// safety: this publishes a deadline setter and sets none, so only an authenticated handler
+// extends one. It sits outside the tracing and logging writers, which do not unwrap.
+func withStreamDeadlineControl(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		set := func(deadline time.Time) {
+			_ = rc.SetReadDeadline(deadline)
+			_ = rc.SetWriteDeadline(deadline)
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), streamDeadlineKey{}, set)))
+	})
+}
+
+func extendGitcacheStreamDeadline(w http.ResponseWriter, r *http.Request) {
 	deadline := time.Now().Add(30 * time.Minute)
+	if set, ok := r.Context().Value(streamDeadlineKey{}).(func(time.Time)); ok {
+		set(deadline)
+		return
+	}
 	controller := http.NewResponseController(w)
 	_ = controller.SetReadDeadline(deadline)
 	_ = controller.SetWriteDeadline(deadline)

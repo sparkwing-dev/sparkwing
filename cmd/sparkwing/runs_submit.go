@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -136,7 +137,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	}
 
 	runID := orchestrator.NewLocalRunID()
-	if err := orchestrator.CaptureSubmissionEnvironment(paths.Root, runID, os.Environ()); err != nil {
+	if err := orchestrator.CaptureSubmissionEnvironment(paths.Root, runID, os.Environ(), slog.Default()); err != nil {
 		return submitResult{}, fmt.Errorf("capture submission environment: %w", err)
 	}
 	triggerEnv := map[string]string{

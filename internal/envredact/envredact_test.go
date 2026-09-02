@@ -25,6 +25,11 @@ func TestCredentialName(t *testing.T) {
 		{"BASIC_AUTH", true},
 		{"GOOGLE_APPLICATION_CREDENTIALS", true},
 		{"npm_token", true},
+		{"GITHUB_PAT", true},
+		{"PAT", true},
+		{"CI_JWT", true},
+		{"SESSION_COOKIE", true},
+		{"WEBHOOK_SIGNATURE", true},
 		{"GIT_AUTHOR_NAME", false},
 		{"GIT_AUTHOR_EMAIL", false},
 		{"GOPRIVATE", false},
@@ -35,6 +40,10 @@ func TestCredentialName(t *testing.T) {
 		{"SPARKWING_RUN_ID", false},
 		{"GITHUB_REPOSITORY", false},
 		{"PATH", false},
+		{"GOPATH", false},
+		{"COMPAT_MODE", false},
+		{"SSH_AUTH_SOCK", false},
+		{"DOCKER_CERT_PATH", false},
 		{"HOME", false},
 		{"_SPARKWING_RETRY_REPO_DIR", false},
 		{"_SPARKWING_RETRY_REPO_URL", false},
@@ -61,6 +70,14 @@ func TestCredentialValue(t *testing.T) {
 		{"json nested password", `{"db":{"password":"hunter2"}}`, true},
 		{"json plain", `{"region":"us-east-1"}`, false},
 		{"not json", "bearded dragon", false},
+		{"bearer on a later line", "x\nAuthorization: Bearer abc.def", true},
+		{"pem on a later line", "note\n-----BEGIN CERTIFICATE-----\nMIIE", true},
+		{"json on a later line", "note\n{\"api_key\":\"AIza\"}", true},
+		{"json api key", `{"type":"service_account","api_key":"AIza"}`, true},
+		{"url query signature", "https://cache.example.com/objects?sig=abc", true},
+		{"url path secret", "https://hooks.example.com/services/T0/zzzSECRET", true},
+		{"plain url", "https://cache.example.com/v1/objects", false},
+		{"plain multi-line", "line one\nline two", false},
 		{"dsn", "postgres://u:p@db.example/sparkwing", false},
 		{"empty", "", false},
 	}
@@ -89,6 +106,19 @@ func TestRedactValue(t *testing.T) {
 		{"no userinfo", "https://api.example/v1", "https://api.example/v1"},
 		{"not a url", "/usr/local/bin:/usr/bin", "/usr/local/bin:/usr/bin"},
 		{"plain email", "korey@example.com", "korey@example.com"},
+		{
+			"query signature", "https://cache.example.com/objects?sig=abc&region=us",
+			"https://cache.example.com/objects?sig=redacted&region=us",
+		},
+		{
+			"query token beside userinfo", "https://u:p@api.example/v1?access_token=abc",
+			"https://redacted@api.example/v1?access_token=redacted",
+		},
+		{
+			"path secret", "https://hooks.example.com/services/T0/zzzSECRET",
+			"https://hooks.example.com/services/T0/redacted",
+		},
+		{"plain path", "https://cache.example.com/v1/objects", "https://cache.example.com/v1/objects"},
 	}
 	for _, c := range cases {
 		if got := RedactValue(c.value); got != c.want {

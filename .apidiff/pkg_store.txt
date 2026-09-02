@@ -159,6 +159,7 @@ func DisplayProfileKey(key string) string
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
+var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrInvalidCredentials = errors.New("invalid username or password")
 var ErrInvalidToken = errors.New("invalid token")
@@ -688,6 +689,8 @@ type Trigger struct {
 	IdempotencyKey string
 
 	ClaimSeq int64
+
+	WebhookDelivery string
 }
 type TriggerFilter struct {
 	Statuses  []string
@@ -696,6 +699,7 @@ type TriggerFilter struct {
 	Limit     int
 }
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
+const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
 type User struct {
 	Name        string
 	PWHash      string
