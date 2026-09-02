@@ -88,6 +88,13 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 	if trig == nil {
 		t.Fatal("ClaimTrigger returned no trigger; the queue was seeded with one")
 	}
+	gotTrigger, err := c.GetTrigger(ctx, trig.ID)
+	if err != nil {
+		t.Fatalf("GetTrigger while holding the trigger claim: %v", err)
+	}
+	if gotTrigger.ID != trig.ID {
+		t.Fatalf("GetTrigger ID = %q, want %q", gotTrigger.ID, trig.ID)
+	}
 	if _, err := c.HeartbeatTrigger(ctx, trig.ID); err != nil {
 		t.Fatalf("HeartbeatTrigger: %v", err)
 	}
@@ -154,6 +161,7 @@ func TestRunnerScopes_PoolRunnerReadsItsRepositorySecret(t *testing.T) {
 	c := client.NewWithToken(f.url, nil, raw)
 
 	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "acme/web", false)
+	seedRepoTrigger(t, f.store, "run-web", "acme/web")
 	seedRunNode(t, f.store, "run-web", "build")
 	setRunRepo(t, f.store, "run-web", "acme/web")
 	if err := f.store.MarkNodeReady(ctx, "run-web", "build"); err != nil {
@@ -161,6 +169,12 @@ func TestRunnerScopes_PoolRunnerReadsItsRepositorySecret(t *testing.T) {
 	}
 	if _, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil); err != nil {
 		t.Fatalf("ClaimNode: %v", err)
+	}
+	if _, err := c.GetRunForExecution(ctx, "run-web"); err != nil {
+		t.Fatalf("GetRunForExecution while holding the node claim: %v", err)
+	}
+	if _, err := c.GetTrigger(ctx, "run-web"); err != nil {
+		t.Fatalf("GetTrigger while holding the node claim: %v", err)
 	}
 
 	sec, err := c.GetSecretForRun(ctx, "DEPLOY_KEY", "run-web")
@@ -356,6 +370,7 @@ func TestRunnerScopes_StateWritesStillNeedTheNodeClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateToken stranger: %v", err)
 	}
+	seedRepoTrigger(t, f.store, "run-1", "acme/web")
 	seedRunNode(t, f.store, "run-1", "build")
 	if err := f.store.MarkNodeReady(ctx, "run-1", "build"); err != nil {
 		t.Fatal(err)
@@ -363,6 +378,14 @@ func TestRunnerScopes_StateWritesStillNeedTheNodeClaim(t *testing.T) {
 	if _, err := client.NewWithToken(f.url, nil, raw).
 		ClaimNode(ctx, "holder-1", nil, time.Minute, nil); err != nil {
 		t.Fatalf("ClaimNode: %v", err)
+	}
+	for _, path := range []string{
+		"/api/v1/runs/run-1?include=secret_values",
+		"/api/v1/triggers/run-1",
+	} {
+		if got := f.do(t, stranger, http.MethodGet, path, ""); got != http.StatusForbidden {
+			t.Errorf("stranger GET %s = %d, want 403", path, got)
+		}
 	}
 
 	for _, tc := range []struct {

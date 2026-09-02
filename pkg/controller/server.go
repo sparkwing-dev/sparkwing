@@ -235,7 +235,7 @@ func (s *Server) claimedBy(next http.Handler) http.Handler {
 
 // safety: a claim-scoped token touches only runs it is actually working on; admin bypasses.
 func (s *Server) claimedRun(next http.Handler) http.Handler {
-	return s.runMember(false, next)
+	return s.runMember("", next)
 }
 
 // safety: ownership is a live claim on one of the run's nodes or on the trigger the run came from.
@@ -249,14 +249,27 @@ func (s *Server) ownsRun(ctx context.Context, runID string, claimant store.Claim
 
 // safety: reads a runs.read token already gets stay open; a claim-only token is held to its own runs.
 func (s *Server) readableRun(next http.Handler) http.Handler {
-	return s.runMember(true, next)
+	return s.runMember(ScopeRunsRead, next)
 }
 
-func (s *Server) runMember(readerBypass bool, next http.Handler) http.Handler {
+func (s *Server) readableTrigger(next http.Handler) http.Handler {
+	return s.runMember(ScopeTriggersRead, next)
+}
+
+func (s *Server) runMember(readerScope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := PrincipalFromContext(r.Context())
-		if !ok || p.HasScope(ScopeAdmin) || (readerBypass && p.HasScope(ScopeRunsRead)) {
+		if !ok || p.HasScope(ScopeAdmin) || (readerScope != "" && p.HasScope(readerScope)) {
 			next.ServeHTTP(w, r)
+			return
+		}
+		if readerScope != "" && !p.HasScope(ScopeNodesClaim) && !p.HasScope(ScopeTriggersClaim) {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:         "missing_scope",
+				MissingScope: readerScope,
+				Principal:    p.label(),
+				Message:      "token lacks required scope: " + readerScope,
+			})
 			return
 		}
 		runID := r.PathValue("id")
@@ -357,7 +370,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateRun)))
 	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleListRuns)))
-	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleGetRun)))
+	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead,
+		s.readableRun(s.reconcileBeforeRead(s.handleGetRun)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodes)))
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleFinishRun))))
@@ -382,7 +396,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
-	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleGetTrigger)))
+	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead,
+		s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))

@@ -278,6 +278,8 @@ pod-read access to the runner Role. The default `inprocess` mode keeps the
 existing behavior and renders an empty Role.
 The fallback `run-node` process receives the runner token in its environment,
 so use warm mode only for trusted pipeline code and rotate short-lived tokens.
+The compiled pipeline binary interprets `warm`, so upgrade the controller,
+runner, and pipeline module to the same Sparkwing release before enabling it.
 
 ## Auth
 

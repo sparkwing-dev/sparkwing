@@ -385,6 +385,10 @@ trusted private network. Kubernetes fallback supplies its runner token to the
 `run-node` process as `SPARKWING_AGENT_TOKEN`, so pipeline code in that Job can
 read the controller credential. Source snapshots remain immutable, and
 Sparkwing does not embed credentials into cached source or binary objects.
+Runner tokens may read only trigger and run records covered by their live
+claim; secret run values still require a live node claim. The compiled pipeline
+binary interprets `warm`, so upgrade the controller, runner, and pipeline module
+to the same release before enabling this mode.
 The bundled service installer supports Linux and macOS. Native Windows agents
 run under an operator-managed service; WSL can use the Linux installer when
 systemd user services are enabled.

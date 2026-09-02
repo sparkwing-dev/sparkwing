@@ -59,7 +59,11 @@ code change to unlock.
   while granting only namespace-scoped Job lifecycle and pod-read access.
   Remote nodes fetch only the repository of their live claim through a new
   `nodes.claim`-scoped controller Git proxy; direct caches use the separate
-  `gitcache` and `cache_token` agent settings. Defaults remain `inprocess`.
+  `gitcache` and `cache_token` agent settings. Runner tokens can read only
+  trigger and run records covered by their live claim; secret run values still
+  require a live node claim. Because the compiled pipeline binary interprets
+  `warm`, upgrade the controller, runner, and pipeline module to the same
+  release before enabling it. Defaults remain `inprocess`.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

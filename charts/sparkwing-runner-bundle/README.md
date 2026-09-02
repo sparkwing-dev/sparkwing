@@ -153,6 +153,9 @@ Role namespace-scoped Job create, get, and delete plus pod list. The default
 `inprocess` mode retains the prior arguments and empty Role.
 The fallback `run-node` process receives the runner token in its environment,
 so use warm mode only for trusted pipeline code and rotate short-lived tokens.
+The compiled pipeline binary interprets `runner.triggerRunner.kind=warm`.
+Upgrade the controller, runner, and pipeline module to the same Sparkwing
+release before enabling it.
 
 ## Auth
 
