@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.40.0] - 2026-09-02
 ### Security
 
 - **dependencies:** Upgrade gRPC-Go from v1.82.1 to v1.83.1, which fixes
