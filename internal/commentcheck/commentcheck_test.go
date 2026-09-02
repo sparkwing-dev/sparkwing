@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -437,5 +438,23 @@ func unjustified() {
 	}
 	if len(got) != 2 || got[0].line != 11 || got[1].line != 16 {
 		t.Fatalf("violations = %+v, want the naked and unjustified annotations", got)
+	}
+}
+
+func TestScopedAdds_FailsWhenTheBaseCannotBeResolved(t *testing.T) {
+	if _, err := scopedAdds(t.TempDir(), false, "origin/main"); err == nil {
+		t.Fatal("scopedAdds reported a diff outside a repository, so the gate would pass ungated")
+	}
+}
+
+func TestDiffFailure_NamesTheFixAndTheEscape(t *testing.T) {
+	msg := diffFailure("origin/main", errors.New("fatal: bad revision"))
+	for _, want := range []string{"origin/main", "nothing was gated", "git fetch origin main", "-allow-no-diff"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the diff failure does not name %q: %s", want, msg)
+		}
+	}
+	if got := diffFailure("", errors.New("boom")); !strings.Contains(got, "the staged diff") {
+		t.Errorf("the staged-mode failure does not name its scope: %s", got)
 	}
 }

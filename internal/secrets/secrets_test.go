@@ -30,6 +30,7 @@ func TestDotenvSource_RoundTrip(t *testing.T) {
 	}
 
 	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	src := NewDotenvSource(path)
 	got, masked, err := src.Read("TOKEN")
 	if err != nil {
@@ -82,6 +83,7 @@ func TestDotenvSource_PlainAndMasked(t *testing.T) {
 func TestDotenvSource_MissingFileMeansEmpty(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	src := NewDotenvSource(filepath.Join(dir, "absent.env"))
 	_, _, err := src.Read("FOO")
 	if !errors.Is(err, ErrSecretMissing) {
@@ -92,6 +94,7 @@ func TestDotenvSource_MissingFileMeansEmpty(t *testing.T) {
 func TestDotenvSource_MalformedLineErrors(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	path := filepath.Join(dir, "bad.env")
 	if err := os.WriteFile(path, []byte("notakeyvalueline\n"), 0o600); err != nil {
 		t.Fatalf("seed: %v", err)

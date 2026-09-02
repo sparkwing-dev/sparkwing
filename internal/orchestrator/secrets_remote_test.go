@@ -31,6 +31,7 @@ func TestApplySecretsProfileOverride_NormalReadsRemoteProfile(t *testing.T) {
 
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	cfgDir := filepath.Join(tmpHome, ".config", "sparkwing")
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -90,6 +91,7 @@ func TestApplySecretsProfileOverride_LocalOnlyDoesNotOpenRemoteProfile(t *testin
 func TestRemoteSecretSource_BadProfileErrors(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	if err := os.MkdirAll(filepath.Join(tmpHome, ".config", "sparkwing"), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

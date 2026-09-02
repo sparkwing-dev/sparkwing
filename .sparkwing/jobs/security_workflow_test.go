@@ -200,6 +200,18 @@ func TestSecurityWorkflowKeepsForksReadOnly(t *testing.T) {
 	}
 }
 
+func TestSecurityWorkflowUploadsTheScannerReports(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/security.yaml")
+	requireWorkflowText(t, body,
+		"- name: Upload scanner reports\n        if: ${{ always() }}",
+		"path: ${{ runner.temp }}/security/",
+		"if-no-files-found: ignore",
+	)
+	if !strings.Contains(body, "--report-dir=\"$RUNNER_TEMP/security\"") {
+		t.Fatal("the uploaded directory is not the one the scanners write to")
+	}
+}
+
 func TestSecurityWorkflowPinsExternalActions(t *testing.T) {
 	pinned := regexp.MustCompile(`^[0-9a-f]{40}$`)
 	steps := workflowUsesSteps(t, "security.yaml")
@@ -209,8 +221,8 @@ func TestSecurityWorkflowPinsExternalActions(t *testing.T) {
 			t.Errorf("%s: external action is not pinned to a full commit SHA: %s", step.where(), step.uses)
 		}
 	}
-	if len(steps) != 8 {
-		t.Fatalf("external action uses = %d, want 8", len(steps))
+	if len(steps) != 9 {
+		t.Fatalf("external action uses = %d, want 9", len(steps))
 	}
 }
 

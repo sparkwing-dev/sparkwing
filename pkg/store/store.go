@@ -1639,7 +1639,7 @@ const triggerWebhookReplayKeyIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + Trig
 // TokenPrefixIndexName is the unique index enforcing one token row per
 // prefix. Exported so a schema test can assert the constraint exists by
 // name.
-const TokenPrefixIndexName = "idx_tokens_prefix"
+const TokenPrefixIndexName = "idx_tokens_prefix" // #nosec G101 -- an index name, not a credential
 
 const tokenPrefixColumn = "prefix"
 
@@ -1648,6 +1648,7 @@ const tokenPrefixIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TokenPrefixIndex
 
 const tokenPrefixIndexDrop = `DROP INDEX IF EXISTS ` + TokenPrefixIndexName
 
+// #nosec G101 -- a query over the prefix column, which holds a token handle and no secret
 const tokenPrefixDuplicates = `SELECT prefix FROM tokens GROUP BY prefix HAVING COUNT(*) > 1 ORDER BY prefix`
 
 func ensureColumnsAllSQLite(ctx context.Context, tx *storeTx) error {

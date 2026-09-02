@@ -5,6 +5,98 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+usage() {
+  cat <<'EOF'
+usage: bash bin/check-changelog.sh [--fix]
+
+  (no flags)  require a CHANGELOG.md entry when the diff touches a covered
+              surface
+  --fix       collapse duplicate ### headings under [Unreleased] into one
+              block per category, keeping bullets in landing order, then
+              re-sync the embedded mirror
+  -h, --help  this message
+EOF
+}
+
+fix_unreleased() {
+  local dups
+  dups="$(
+    awk '
+      /^## \[Unreleased\]/ { in_section = 1; next }
+      in_section && /^## / { in_section = 0 }
+      in_section && /^### / { print }
+    ' CHANGELOG.md | sort | uniq -d
+  )"
+  if [[ -z "$dups" ]]; then
+    echo "check-changelog --fix: [Unreleased] already has one block per category"
+    return 0
+  fi
+
+  local tmp
+  tmp="$(mktemp)"
+  awk '
+    function trim(s) {
+      sub(/^\n+/, "", s)
+      sub(/\n+$/, "", s)
+      return s
+    }
+    function flush(  text) {
+      text = trim(buf)
+      buf = ""
+      if (text == "") { return }
+      if (category == "") {
+        preamble = preamble (preamble == "" ? "" : "\n") text
+      } else {
+        body[category] = body[category] (body[category] == "" ? "" : "\n") text
+      }
+    }
+    function emit(  i, c) {
+      if (preamble != "") { print preamble; print "" }
+      else if (count > 0) { print "" }
+      for (i = 1; i <= count; i++) {
+        c = order[i]
+        print "### " c
+        print ""
+        if (body[c] != "") { print body[c]; print "" }
+      }
+    }
+    in_section && /^## / { flush(); emit(); in_section = 0; print; next }
+    in_section && /^### / {
+      flush()
+      category = substr($0, 5)
+      if (!(category in body)) { body[category] = ""; order[++count] = category }
+      next
+    }
+    in_section { buf = buf $0 "\n"; next }
+    /^## \[Unreleased\]/ { print; in_section = 1; category = ""; next }
+    { print }
+    END { if (in_section) { flush(); emit() } }
+  ' CHANGELOG.md > "$tmp"
+  mv "$tmp" CHANGELOG.md
+  bash bin/sync-docs.sh >/dev/null
+
+  echo "check-changelog --fix: collapsed duplicate headings under [Unreleased]:"
+  sed 's/^/  /' <<<"$dups"
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --fix)
+      fix_unreleased
+      exit 0
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "check-changelog: unknown argument: $arg" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
 base="${BASE_REF:-}"
 if [[ -z "$base" ]]; then
   if git rev-parse --verify --quiet origin/main >/dev/null; then

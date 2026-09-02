@@ -214,6 +214,7 @@ func TestRepairTreeRefusesUnsafeRoots(t *testing.T) {
 	}
 	userHome := t.TempDir()
 	t.Setenv("HOME", userHome)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	if _, err := fssecure.RepairTree(userHome, fileIdentity(t, userHome), true); err == nil {
 		t.Fatalf("RepairTree(%q) accepted the entire user home", userHome)
 	}
@@ -227,6 +228,7 @@ func TestRepairTreeRefusesEffectiveHomeThroughSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", userHome)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	if _, err := fssecure.RepairTree(targetParent, fileIdentity(t, targetParent), true); err == nil {
 		t.Fatal("RepairTree accepted an ancestor of the effective user home")
 	}

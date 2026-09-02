@@ -145,6 +145,7 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 	}
 
 	documented := allDocsText(t)
+	source := sourceDocsText(t)
 	recorded := map[string]bool{}
 	for _, name := range undocumentedEnvVars {
 		recorded[name] = true
@@ -155,6 +156,11 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 		case docsMentionEnvVar(documented, name) && recorded[name]:
 			t.Errorf("%s is documented now; drop it from undocumentedEnvVars", name)
 		case !docsMentionEnvVar(documented, name) && !recorded[name]:
+			if docsMentionEnvVar(source, name) {
+				t.Errorf("docs/ names %s but the embedded mirror this check reads does not; "+
+					"run bash bin/sync-docs.sh and commit pkg/docs/", name)
+				break
+			}
 			t.Errorf("no docs page names %s, which the code reads", name)
 		}
 	}
@@ -274,6 +280,35 @@ func allDocsText(t *testing.T) string {
 		}
 		b.WriteString(body)
 		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func sourceDocsText(t *testing.T) string {
+	t.Helper()
+	root := filepath.FromSlash("../../docs")
+	var b strings.Builder
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		if matchesAny(strings.TrimSuffix(filepath.ToSlash(rel), ".md"), versionedPages) {
+			return nil
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		b.Write(body)
+		b.WriteByte('\n')
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("read %s: %v", root, err)
 	}
 	return b.String()
 }

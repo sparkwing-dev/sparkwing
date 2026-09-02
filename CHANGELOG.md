@@ -49,8 +49,35 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **ci:** The pre-commit formatters step and the em-dash and tracker-ID sweeps
+  judge the whole change, not only what is staged. Each reads the staged files
+  when something is staged and the files changed since `origin/main` otherwise,
+  so a clean worktree no longer passes checks the hosted gate fails on the same
+  commits. Each step log names the mode it ran in, and a step refuses to run
+  when the checkout cannot resolve `origin/main`. `SPARKWING_REGEX_SWEEP_ALL=1`
+  still sweeps the whole tree.
+
+### Fixed
+
+- **ci:** The `security-scan` gitleaks job says what it found. It writes
+  `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
+  file, line, fingerprint) in the step log, and the Security workflow uploads
+  the report directory as a build artifact, so a failure is no longer just
+  "leaks found: 1".
+
 ### Security
 
+- **controller + cache:** Code scanning's open findings are triaged. A clone URL
+  is refused when any component begins with `-` -- the whole string, the
+  scp-like host or path, the ssh userinfo, or the parsed host -- where git would
+  read it as an option rather than a repository, and also when it carries a
+  control byte. `git clone` now separates its options from the URL with `--`,
+  the persisted repo-name table is revalidated when the cache loads it so an
+  entry written before validation is dropped with a warning, and the PVC pool
+  logs a caller-supplied job id through `%q` so a newline in it can no longer
+  forge a second log line.
 - **store (Breaking):** Run-store schema 26 makes the `idx_tokens_prefix` index
   unique and minting retries when a prefix is already taken, so two tokens can
   no longer share a prefix and the 12-character handle that
@@ -400,6 +427,17 @@ code change to unlock.
   transaction, so an interrupted upgrade leaves the database on the last
   version it fully applied instead of a half-built schema the next open
   refuses to repair. Postgres already migrated inside one transaction.
+- **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
+  it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
+  of printing a skip and exiting 0, so the comment and `#nosec` annotation
+  policies are no longer waived by a detached, shallow, or unfetched checkout.
+  Pass `-allow-no-diff` to accept a run that gates nothing.
+### Docs
+
+- **helm:** Both chart READMEs now open with the minimal `helm template`
+  invocation. `helm template` stops on the runner bundle's `validate.yaml`
+  until `controller.tokenSecret.name` is set, and `sparkwing-full` takes it
+  under the `sparkwing-runner-bundle.` sub-chart key.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

@@ -26,7 +26,7 @@ var gosecExcludedDirs = []string{"web", "testdata", "dist"}
 
 // SecurityScanArgs are the inputs of the security-scan pipeline.
 type SecurityScanArgs struct {
-	ReportDir string `flag:"report-dir" desc:"Directory that receives gosec.sarif and gosec.json. Default: a fresh temporary directory named in the job log."`
+	ReportDir string `flag:"report-dir" desc:"Directory that receives gosec.sarif, gosec.json, and gitleaks.json. Default: a fresh temporary directory named in the job log."`
 }
 
 // SecurityScan runs the static security scanners against the repository.
@@ -37,7 +37,7 @@ func (SecurityScan) ShortHelp() string {
 }
 
 func (SecurityScan) Help() string {
-	return "Runs four independent scanners: gosec over the public module and the .sparkwing pipeline module, excluding the rules that describe how a CI tool works rather than a defect in it (files and subprocesses named by its inputs, cache directory permissions, and checks the lint gate already owns), writing gosec.json and a repo-relative gosec.sarif for GitHub code scanning; govulncheck in source mode over ./...; gitleaks over the available git history using the .gitleaks.toml allow-list; and `npm audit` over the dashboard's production dependencies. gosec fails this job on any high-severity, high-confidence finding, so a false positive needs a source annotation: the scan runs with -nosec-require-rules and -nosec-require-justification, so every suppression must read `#nosec GNNN -- <reason>`, naming the rules it silences and why. No -nosec-tag alternative is configured, so `grep -rn '#nosec'` lists every one. Code scanning records the SARIF but does not decide this pipeline. The other three scanners fail on any finding. The three Go-based scanners run through `go run` at pinned module versions; npm must be on PATH."
+	return "Runs four independent scanners: gosec over the public module and the .sparkwing pipeline module, excluding the rules that describe how a CI tool works rather than a defect in it (files and subprocesses named by its inputs, cache directory permissions, and checks the lint gate already owns), writing gosec.json and a repo-relative gosec.sarif for GitHub code scanning; govulncheck in source mode over ./...; gitleaks over the available git history using the .gitleaks.toml allow-list, writing gitleaks.json beside the gosec reports and naming every finding (rule, file, line, fingerprint) in the job log; and `npm audit` over the dashboard's production dependencies. gosec fails this job on any high-severity, high-confidence finding, so a false positive needs a source annotation: the scan runs with -nosec-require-rules and -nosec-require-justification, so every suppression must read `#nosec GNNN -- <reason>`, naming the rules it silences and why. No -nosec-tag alternative is configured, so `grep -rn '#nosec'` lists every one. Code scanning records the SARIF but does not decide this pipeline. The other three scanners fail on any finding. The three Go-based scanners run through `go run` at pinned module versions; npm must be on PATH."
 }
 
 func (SecurityScan) Examples() []sparkwing.Example {
@@ -51,22 +51,15 @@ func (SecurityScan) Examples() []sparkwing.Example {
 func (p *SecurityScan) Plan(_ context.Context, plan *sparkwing.Plan, in SecurityScanArgs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, "gosec", func(ctx context.Context) error { return p.gosec(ctx, in) })
 	sparkwing.Job(plan, "govulncheck", p.govulncheck)
-	sparkwing.Job(plan, "gitleaks", p.gitleaks)
+	sparkwing.Job(plan, "gitleaks", func(ctx context.Context) error { return p.gitleaks(ctx, in) })
 	sparkwing.Job(plan, "npm-audit", p.npmAudit)
 	return nil
 }
 
 func (p *SecurityScan) gosec(ctx context.Context, in SecurityScanArgs) error {
-	reportDir := in.ReportDir
-	if reportDir == "" {
-		dir, err := os.MkdirTemp("", "sparkwing-security-scan-*")
-		if err != nil {
-			return fmt.Errorf("create report directory: %w", err)
-		}
-		reportDir = dir
-	}
-	if err := os.MkdirAll(reportDir, 0o755); err != nil {
-		return fmt.Errorf("create report directory: %w", err)
+	reportDir, err := resolveReportDir(in)
+	if err != nil {
+		return err
 	}
 	root := sparkwing.WorkDir()
 
@@ -85,9 +78,9 @@ func (p *SecurityScan) gosec(ctx context.Context, in SecurityScanArgs) error {
 
 	sarif := gosecSARIF(root, issues)
 	sarifPath := filepath.Join(reportDir, "gosec.sarif")
-	data, err := json.MarshalIndent(sarif, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode sarif: %w", err)
+	data, marshalErr := json.MarshalIndent(sarif, "", "  ")
+	if marshalErr != nil {
+		return fmt.Errorf("encode sarif: %w", marshalErr)
 	}
 	if err := os.WriteFile(sarifPath, data, 0o644); err != nil {
 		return fmt.Errorf("write sarif: %w", err)
@@ -149,12 +142,70 @@ func (p *SecurityScan) govulncheck(ctx context.Context) error {
 	return nil
 }
 
-func (p *SecurityScan) gitleaks(ctx context.Context) error {
-	if _, err := sparkwing.Exec(ctx, "go", "run", gitleaksModule, "git", "--no-banner", "--redact", "--exit-code=1", ".").Env("GOWORK", "off").Run(); err != nil {
+func (p *SecurityScan) gitleaks(ctx context.Context, in SecurityScanArgs) error {
+	reportDir, err := resolveReportDir(in)
+	if err != nil {
 		return err
 	}
-	sparkwing.Info(ctx, "gitleaks: no leaks in history")
-	return nil
+	reportPath := filepath.Join(reportDir, "gitleaks.json")
+	_, runErr := sparkwing.Exec(ctx, "go", "run", gitleaksModule, "git", "--no-banner", "--redact",
+		"--exit-code=1", "--report-format=json", "--report-path="+reportPath, ".").Env("GOWORK", "off").Run()
+	findings, readErr := readGitleaksReport(reportPath)
+	switch {
+	case runErr == nil && readErr == nil && len(findings) == 0:
+		sparkwing.Info(ctx, "gitleaks: no leaks in history")
+		return nil
+	case readErr != nil:
+		return errors.Join(runErr, readErr)
+	case len(findings) == 0:
+		return fmt.Errorf("gitleaks: %w", runErr)
+	}
+	for _, f := range findings {
+		sparkwing.Info(ctx, "  %s", f)
+	}
+	return fmt.Errorf("gitleaks: %d finding(s); report in %s", len(findings), reportPath)
+}
+
+func resolveReportDir(in SecurityScanArgs) (string, error) {
+	reportDir := in.ReportDir
+	if reportDir == "" {
+		dir, err := os.MkdirTemp("", "sparkwing-security-scan-*")
+		if err != nil {
+			return "", fmt.Errorf("create report directory: %w", err)
+		}
+		reportDir = dir
+	}
+	if err := os.MkdirAll(reportDir, 0o755); err != nil {
+		return "", fmt.Errorf("create report directory: %w", err)
+	}
+	return reportDir, nil
+}
+
+type gitleaksFinding struct {
+	RuleID      string `json:"RuleID"`
+	File        string `json:"File"`
+	StartLine   int    `json:"StartLine"`
+	Fingerprint string `json:"Fingerprint"`
+}
+
+func (f gitleaksFinding) String() string {
+	return fmt.Sprintf("%s %s:%d fingerprint %s", f.RuleID, f.File, f.StartLine, f.Fingerprint)
+}
+
+func readGitleaksReport(path string) ([]gitleaksFinding, error) {
+	data, err := os.ReadFile(path)
+	// safety: gitleaks writes no report when it cannot start, so a missing file leaves the run error to speak.
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read gitleaks report: %w", err)
+	}
+	var findings []gitleaksFinding
+	if err := json.Unmarshal(data, &findings); err != nil {
+		return nil, fmt.Errorf("decode gitleaks report %s: %w", path, err)
+	}
+	return findings, nil
 }
 
 func (p *SecurityScan) npmAudit(ctx context.Context) error {
