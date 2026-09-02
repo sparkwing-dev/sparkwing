@@ -1,6 +1,9 @@
 package admission
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestWeighted_PromotionBackfillsPastNonFittingHeavyHead(t *testing.T) {
 	l := testLedger(t, 0, 0)
@@ -204,6 +207,28 @@ func TestOwnerAdmissionRankOrdersEqualPriorityDescendants(t *testing.T) {
 
 	_ = older
 	_ = newer
+}
+
+func TestServiceOrderSurvivesSustainedArrivalsFromAnOlderOwner(t *testing.T) {
+	l := testLedger(t, 1, 0)
+	olderOwner := mustGrant(t, l, Request{ID: "owner-older"})
+	mustGrant(t, l, Request{ID: "owner-newer"})
+	holder := mustGrant(t, l, Request{ID: "holder", Cores: 1})
+	mustQueue(t, l, Request{ID: "waiting-first", OwnerID: "owner-newer", Cores: 1})
+
+	for i := range 40 {
+		mustQueue(t, l, Request{ID: fmt.Sprintf("later-%02d", i), OwnerID: "owner-older", Cores: 1})
+		if got := l.Snapshot().Waiters[0].RequestID; got != "waiting-first" {
+			t.Fatalf("arrival %d moved the older participant behind %q", i+1, got)
+		}
+	}
+
+	events := mustRelease(t, l, holder.ID, "holder")
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "waiting-first" {
+		t.Fatalf("first service = %q, want waiting-first", events[1].RequestID)
+	}
+	_ = olderOwner
 }
 
 func TestOwnerAdmissionRankRespectsPriorityAndOwnerlessFIFO(t *testing.T) {
