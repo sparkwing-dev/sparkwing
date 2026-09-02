@@ -115,7 +115,8 @@ code change to unlock.
   and `sparkwing-full` creates an unprivileged `sparkwing-cache-warmer`
   ServiceAccount that the controller's warmer pods now name explicitly.
   Controllers running the warm pool outside that chart must create that
-  ServiceAccount in the pool namespace.
+  ServiceAccount in the pool namespace;
+  `pool.WarmerServiceAccountName` exposes its exact name to Go integrations.
 - **cache:** The cache no longer serves an authenticated endpoint to a request
   that omits `X-Forwarded-For`, so `PUT /bin/<key>`, `PUT /cache/<key>`,
   `POST /upload`, and the sync routes now require the bearer token from every
