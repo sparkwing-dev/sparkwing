@@ -26,6 +26,7 @@ type NodeDispatch struct {
 	InputEnvelope    []byte    `json:"input_envelope_json,omitempty"`
 	InputSizeBytes   int64     `json:"input_size_bytes"`
 	SecretRedactions int       `json:"secret_redactions"`
+	RedactedKeys     []byte    `json:"redacted_keys,omitempty"` // JSON []string
 }
 
 // WriteNodeDispatch persists a snapshot; Seq<0 = auto-assign.
@@ -59,12 +60,14 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 		INSERT INTO node_dispatches (
 			run_id, node_id, seq, dispatched_at,
 			code_version, binary_hash, runner_labels, env_json,
-			workdir, input_envelope_json, input_size_bytes, secret_redactions
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			workdir, input_envelope_json, input_size_bytes, secret_redactions,
+			redacted_keys
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		d.RunID, d.NodeID, seq, d.DispatchedAt.UnixNano(),
 		d.CodeVersion, d.BinaryHash, d.RunnerLabels, d.EnvJSON,
 		d.Workdir, envelope, origSize, d.SecretRedactions,
+		d.RedactedKeys,
 	)
 	return err
 }
@@ -73,7 +76,8 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error) {
 	const cols = `run_id, node_id, seq, dispatched_at,
 	              code_version, binary_hash, runner_labels, env_json,
-	              workdir, input_envelope_json, input_size_bytes, secret_redactions`
+	              workdir, input_envelope_json, input_size_bytes, secret_redactions,
+	              redacted_keys`
 	var row *sql.Row
 	if seq < 0 {
 		row = s.queryRow(ctx, `
@@ -105,7 +109,8 @@ func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([
 	rows, err := s.query(ctx, `
 		SELECT run_id, node_id, seq, dispatched_at,
 		       code_version, binary_hash, runner_labels, env_json,
-		       workdir, input_envelope_json, input_size_bytes, secret_redactions
+		       workdir, input_envelope_json, input_size_bytes, secret_redactions,
+		       redacted_keys
 		  FROM node_dispatches
 		 WHERE run_id = ? AND node_id = ?
 		 ORDER BY seq ASC
@@ -132,6 +137,7 @@ func scanNodeDispatch(scan func(...any) error) (*NodeDispatch, error) {
 		&d.RunID, &d.NodeID, &d.Seq, &dispatchedNS,
 		&d.CodeVersion, &d.BinaryHash, &d.RunnerLabels, &d.EnvJSON,
 		&d.Workdir, &d.InputEnvelope, &d.InputSizeBytes, &d.SecretRedactions,
+		&d.RedactedKeys,
 	); err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -149,26 +151,87 @@ func runDebugRerunCluster(ctx context.Context, t rerunFlags) error {
 	if err != nil {
 		return fmt.Errorf("decode snapshot env: %w", err)
 	}
+	if len(envMap) == 0 {
+		fmt.Fprintln(os.Stderr, "warning: the controller returned no dispatch env; env_json needs an admin token")
+	}
 	envMap["SPARKWING_RERUN"] = "1"
 
 	pod := podName(t.run, t.node)
-	args := []string{
-		"kubectl", "run", pod, "--rm", "-it", "--restart=Never",
-		"--image=" + image,
-		"--labels=sparkwing.dev/rerun-of-run=" + t.run + ",sparkwing.dev/managed-by=sparkwing-debug",
+	manifest, err := rerunPodManifest(pod, image, t.run, envMap)
+	if err != nil {
+		return fmt.Errorf("build pod manifest: %w", err)
 	}
-	for _, k := range sortedKeys(envMap) {
-		args = append(args, "--env="+k+"="+envMap[k])
-	}
-	args = append(args, "--command", "--", "/bin/sh", "-c", "command -v bash >/dev/null && exec bash || exec sh")
 
-	printRerunBanner(os.Stderr, snap, node, "")
-	fmt.Fprintln(os.Stderr, strings.Join(args, " "))
 	bin, err := exec.LookPath("kubectl")
 	if err != nil {
 		return fmt.Errorf("kubectl not found in PATH: %w", err)
 	}
-	return syscall.Exec(bin, args, os.Environ())
+
+	printRerunBanner(os.Stderr, snap, node, "")
+	fmt.Fprintf(os.Stderr, "kubectl create -f -  # pod/%s, %d env vars on stdin\n", pod, len(envMap))
+
+	create := exec.CommandContext(ctx, bin, "create", "-f", "-")
+	create.Stdin = bytes.NewReader(manifest)
+	create.Stdout = os.Stderr
+	create.Stderr = os.Stderr
+	if err := create.Run(); err != nil {
+		return fmt.Errorf("kubectl create pod/%s: %w", pod, err)
+	}
+	defer deleteRerunPod(bin, pod)
+
+	attach := exec.CommandContext(ctx, bin, "attach", "--stdin", "--tty",
+		"--pod-running-timeout="+rerunAttachTimeout.String(), "pod/"+pod)
+	attach.Stdin = os.Stdin
+	attach.Stdout = os.Stdout
+	attach.Stderr = os.Stderr
+	if err := attach.Run(); err != nil {
+		return fmt.Errorf("kubectl attach pod/%s: %w", pod, err)
+	}
+	return nil
+}
+
+const rerunAttachTimeout = 5 * time.Minute
+
+const rerunPodDeadlineSecs = 3600
+
+func rerunPodManifest(pod, image, runID string, env map[string]string) ([]byte, error) {
+	vars := make([]map[string]string, 0, len(env))
+	for _, k := range sortedKeys(env) {
+		vars = append(vars, map[string]string{"name": k, "value": env[k]})
+	}
+	return json.Marshal(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name": pod,
+			"labels": map[string]string{
+				"sparkwing.dev/rerun-of-run": runID,
+				"sparkwing.dev/managed-by":   "sparkwing-debug",
+			},
+		},
+		"spec": map[string]any{
+			"restartPolicy":         "Never",
+			"activeDeadlineSeconds": rerunPodDeadlineSecs,
+			"containers": []map[string]any{{
+				"name":      "rerun",
+				"image":     image,
+				"stdin":     true,
+				"stdinOnce": true,
+				"tty":       true,
+				"command":   []string{"/bin/sh", "-c", "command -v bash >/dev/null && exec bash || exec sh"},
+				"env":       vars,
+			}},
+		},
+	})
+}
+
+func deleteRerunPod(bin, pod string) {
+	del := exec.Command(bin, "delete", "pod", pod, "--ignore-not-found", "--wait=false")
+	del.Stdout = os.Stderr
+	del.Stderr = os.Stderr
+	if err := del.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: pod/%s left behind (%v); delete it with: kubectl delete pod %s\n", pod, err, pod)
+	}
 }
 
 func BuildRerunEnv(snap *store.NodeDispatch, refsDir string, base []string) ([]string, error) {
@@ -208,6 +271,17 @@ func decodeSnapshotEnv(raw []byte) (map[string]string, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func decodeRedactedKeys(raw []byte) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 func materializeLocalRefs(ctx context.Context, st *store.Store, refsDir, runID string, deps []string) error {
@@ -252,6 +326,10 @@ func printRerunBanner(w io.Writer, snap *store.NodeDispatch, node *store.Node, r
 	}
 	if refsDir != "" {
 		fmt.Fprintf(w, "  refs:     %s\n", refsDir)
+	}
+	if keys := decodeRedactedKeys(snap.RedactedKeys); len(keys) > 0 {
+		fmt.Fprintf(w, "  dropped:  %s\n", strings.Join(keys, " "))
+		fmt.Fprintln(w, "            credential-shaped keys are never captured; export them yourself")
 	}
 	if node != nil {
 		if node.Status != "" {

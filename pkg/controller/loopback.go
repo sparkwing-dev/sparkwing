@@ -603,7 +603,7 @@ func (l *Loopback) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request)
 		writeStateError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, d)
+	writeJSON(w, http.StatusOK, dispatchForResponse(r, d))
 }
 
 func (l *Loopback) handleListNodeDispatches(w http.ResponseWriter, r *http.Request) {
@@ -615,7 +615,7 @@ func (l *Loopback) handleListNodeDispatches(w http.ResponseWriter, r *http.Reque
 	if out == nil {
 		out = []*store.NodeDispatch{}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, dispatchesForResponse(r, out))
 }
 
 func (l *Loopback) handleStartNodeStep(w http.ResponseWriter, r *http.Request) {

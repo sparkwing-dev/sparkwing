@@ -90,6 +90,15 @@ code change to unlock.
 
 ### Security
 
+- **orchestrator (Breaking):** Node dispatch snapshots drop credential-shaped
+  environment variables, mask registered secret values in the ones they keep,
+  and name every dropped key in a new `redacted_keys` field so a replay can say
+  what it will not reproduce. Run-store schema 20 adds that column.
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and its list form return
+  `env_json` only to an `admin` principal. Cluster-mode `sparkwing debug rerun`
+  sends the pod manifest to `kubectl` on stdin, keeping env values off the
+  command line and out of the echoed banner. See the
+  [migration guide](docs/migrations/_unreleased.md#dispatch-snapshot-credentials).
 - **cache:** Cached pipeline binaries now carry a verified sha-256 digest
   The cache stores the digest and the writing principal's token fingerprint
   beside each uploaded binary, serves them as `Digest` and `ETag`, and writes
