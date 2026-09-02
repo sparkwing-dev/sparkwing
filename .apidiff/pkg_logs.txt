@@ -29,6 +29,8 @@ type Limits struct {
 
 	MaxRunBytes int64
 
+	MaxInFlightBytes int64
+
 	MinFreeBytes uint64
 
 	Retention time.Duration

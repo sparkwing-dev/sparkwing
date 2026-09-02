@@ -3,6 +3,7 @@ package logs_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -203,12 +205,129 @@ func TestLogs_SweepKeepsEverythingWithoutRetention(t *testing.T) {
 	}
 }
 
+// safety: step-a and step-b hash to different append shards, which TestAppendLockShardsPerStoredFile pins.
 func TestLogs_SlowBodyDoesNotBlockOtherAppends(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fast string
+	}{
+		{"same node", "step-a"},
+		{"different shards", "step-b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := logs.New(dir, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			srv := httptest.NewServer(s.Handler())
+			defer srv.Close()
+
+			pr, pw := io.Pipe()
+			slowDone := make(chan struct{})
+			go func() {
+				defer close(slowDone)
+				req, rerr := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/logs/run-1/step-a", pr)
+				if rerr != nil {
+					return
+				}
+				resp, derr := http.DefaultClient.Do(req)
+				if derr == nil {
+					_, _ = io.Copy(io.Discard, resp.Body)
+					_ = resp.Body.Close()
+				}
+			}()
+			if _, err := pw.Write([]byte("slow start\n")); err != nil {
+				t.Fatal(err)
+			}
+
+			fast := make(chan error, 1)
+			go func() {
+				req, rerr := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/logs/run-1/"+tc.fast,
+					bytes.NewReader([]byte("fast line\n")))
+				if rerr != nil {
+					fast <- rerr
+					return
+				}
+				resp, derr := http.DefaultClient.Do(req)
+				if derr != nil {
+					fast <- derr
+					return
+				}
+				_ = resp.Body.Close()
+				fast <- nil
+			}()
+
+			select {
+			case err := <-fast:
+				if err != nil {
+					t.Fatalf("fast append: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("fast append blocked behind the slow request body")
+			}
+
+			_ = pw.Close()
+			<-slowDone
+		})
+	}
+}
+
+func TestLogs_ConcurrentAppendsHoldTheByteCaps(t *testing.T) {
+	const (
+		capBytes = 1024
+		writers  = 64
+	)
+	cases := []struct {
+		name   string
+		limits logs.Limits
+		node   func(i int) string
+	}{
+		{"node cap", logs.Limits{MaxNodeBytes: capBytes}, func(int) string { return "step-a" }},
+		{"run cap", logs.Limits{MaxRunBytes: capBytes}, func(i int) string { return fmt.Sprintf("step-%d", i) }},
+		{"node id aliases of one file", logs.Limits{MaxNodeBytes: capBytes}, func(i int) string {
+			if i%2 == 0 {
+				return "a/b"
+			}
+			return "a__b"
+		}},
+	}
+	body := bytes.Repeat([]byte("x"), 4096)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, c, dir, stop := newLimitedServer(t, tc.limits)
+			defer stop()
+
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			for i := range writers {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-start
+					_ = c.Append(context.Background(), "run-1", tc.node(i), body)
+				}()
+			}
+			close(start)
+			wg.Wait()
+
+			stored := readRun(t, dir, "run-1")
+			markers := strings.Count(stored, logs.TruncationMarker) * len(logs.TruncationMarker)
+			if payload := len(stored) - markers; payload > capBytes {
+				t.Errorf("stored %d payload bytes across %d concurrent appends, want at most the %d-byte cap",
+					payload, writers, capBytes)
+			}
+		})
+	}
+}
+
+func TestLogs_InFlightBudgetRefusesExcessAppends(t *testing.T) {
 	dir := t.TempDir()
 	s, err := logs.New(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.WithLimits(logs.Limits{MaxInFlightBytes: 8192})
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
@@ -226,36 +345,55 @@ func TestLogs_SlowBodyDoesNotBlockOtherAppends(t *testing.T) {
 			_ = resp.Body.Close()
 		}
 	}()
-	if _, err := pw.Write([]byte("slow start\n")); err != nil {
+	if _, err := pw.Write([]byte("holding the budget\n")); err != nil {
 		t.Fatal(err)
 	}
 
-	fast := make(chan error, 1)
-	go func() {
-		req, rerr := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/logs/run-1/step-a",
-			bytes.NewReader([]byte("fast line\n")))
-		if rerr != nil {
-			fast <- rerr
-			return
+	status := 0
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		resp, perr := http.Post(srv.URL+"/api/v1/logs/run-1/step-b", "text/plain", strings.NewReader("line\n"))
+		if perr != nil {
+			t.Fatalf("second append: %v", perr)
 		}
-		resp, derr := http.DefaultClient.Do(req)
-		if derr != nil {
-			fast <- derr
-			return
-		}
+		status = resp.StatusCode
 		_ = resp.Body.Close()
-		fast <- nil
-	}()
-
-	select {
-	case err := <-fast:
-		if err != nil {
-			t.Fatalf("fast append: %v", err)
+		if status == http.StatusServiceUnavailable {
+			break
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("fast append blocked behind the slow request body")
+		time.Sleep(10 * time.Millisecond)
+	}
+	if status != http.StatusServiceUnavailable {
+		t.Errorf("status=%d, want 503 while a stalled body holds the whole in-flight budget", status)
 	}
 
 	_ = pw.Close()
 	<-slowDone
+}
+
+func TestLogs_SweepSparesRunsWrittenNearTheCutoff(t *testing.T) {
+	s, c, dir, stop := newLimitedServer(t, logs.Limits{Retention: time.Hour, SweepInterval: 10 * time.Minute})
+	defer stop()
+
+	if err := c.Append(context.Background(), "run-1", "step-a", []byte("line\n")); err != nil {
+		t.Fatal(err)
+	}
+	near := time.Now().Add(-65 * time.Minute)
+	run := filepath.Join(dir, "runs", "run-1")
+	if err := os.Chtimes(filepath.Join(run, "step-a.log"), near, near); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(run, near, near); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := s.SweepOnce(time.Now())
+	if err != nil {
+		t.Fatalf("SweepOnce: %v", err)
+	}
+	if removed != 0 {
+		t.Fatalf("removed=%d, want a run written within one sweep of the cutoff to wait a sweep", removed)
+	}
+	if _, err := os.Stat(run); err != nil {
+		t.Errorf("run removed while an append could still be in flight: %v", err)
+	}
 }

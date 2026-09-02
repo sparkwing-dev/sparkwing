@@ -219,6 +219,36 @@ func TestControllerLoginThrottleFlagsRender(t *testing.T) {
 	}
 }
 
+func TestControllerMetricsPortMovesMetricsOffTheAPIPort(t *testing.T) {
+	render := func(sets ...string) string {
+		return helmRender(t, "./sparkwing-full",
+			"templates/controller-deployment.yaml", "sparkwing", sets...)
+	}
+
+	byDefault := render()
+	if got, ok := hasFlag(webArgs(t, byDefault), "--metrics-addr="); ok {
+		t.Fatalf("default metrics flag = %q, want none", got)
+	}
+	if strings.Contains(byDefault, "name: metrics") {
+		t.Fatalf("default Deployment exposes a metrics port:\n%s", byDefault)
+	}
+
+	configured := render("controller.metricsPort=9090")
+	got, ok := hasFlag(webArgs(t, configured), "--metrics-addr=")
+	if !ok || got != "--metrics-addr=:9090" {
+		t.Fatalf("metrics flag = %q, want --metrics-addr=:9090", got)
+	}
+	if !strings.Contains(configured, "containerPort: 9090") {
+		t.Fatalf("configured Deployment exposes no metrics container port:\n%s", configured)
+	}
+
+	service := helmRender(t, "./sparkwing-full",
+		"templates/controller-service.yaml", "sparkwing", "controller.metricsPort=9090")
+	if strings.Contains(service, "9090") {
+		t.Fatalf("controller Service publishes the metrics port:\n%s", service)
+	}
+}
+
 func TestWebAddrIsOverridable(t *testing.T) {
 	defaultArgs := webArgs(t, helmTemplate(t, "sparkwing"))
 	if got, _ := hasFlag(defaultArgs, "--addr="); got != "--addr=0.0.0.0:4343" {
@@ -914,6 +944,41 @@ func TestLogsRefusesToStartUnauthenticatedByDefault(t *testing.T) {
 	if containsArg(args, "--require-auth") {
 		t.Errorf("logs args = %v, want no startup guard once the operator opts out", args)
 	}
+}
+
+func TestLogsQuotaFlagsComeFromValues(t *testing.T) {
+	if args := runnerContainer(t, renderLogs(t)).Args; containsArg(args, "--max-node-bytes") {
+		t.Errorf("logs args = %v, want the binary's own defaults when the operator sets no quota", args)
+	}
+	args := runnerContainer(t, renderLogs(t,
+		"logs.limits.maxNodeBytes=1048576",
+		"logs.limits.maxInflightBytes=0",
+		"logs.limits.retention=168h")).Args
+	for flag, want := range map[string]string{
+		"--max-node-bytes":     "1048576",
+		"--max-inflight-bytes": "0",
+		"--retention":          "168h",
+	} {
+		if !containsArg(args, flag) {
+			t.Errorf("logs args = %v, want %s", args, flag)
+			continue
+		}
+		if got := argValue(args, flag); got != want {
+			t.Errorf("%s = %q, want %q", flag, got, want)
+		}
+	}
+	if containsArg(args, "--max-run-bytes") {
+		t.Errorf("logs args = %v, want no flag for a quota the operator left empty", args)
+	}
+}
+
+func argValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 func TestFullChartControllerURLOverrideWins(t *testing.T) {

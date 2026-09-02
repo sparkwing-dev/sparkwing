@@ -39,6 +39,13 @@ controller:
   # default to keep things readable; operators rarely need to change.
   port: 4344
 
+  # Optional scrape port for Prometheus /metrics on a listener of its
+  # own. 0 leaves /metrics on the API port, where an ingress in front
+  # of the controller publishes pipeline names to anyone who asks. A
+  # port moves the endpoint onto a container port no Service exposes,
+  # so only an in-cluster scraper reaches it.
+  metricsPort: 0
+
   # The controller's warm-PVC pool feature (creates ephemeral
   # warmer pods to pre-pull images onto PVCs). Requires K8s API
   # access in the install namespace; rbac.create must be true.

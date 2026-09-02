@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type artifactManifest struct {
@@ -28,7 +29,10 @@ type artifactEntry struct {
 	Mode   uint32 `json:"mode"`
 }
 
-var errArtifactOutsideWorkspace = errors.New("resolves outside the workspace")
+var (
+	errArtifactOutsideWorkspace = errors.New("resolves outside the workspace")
+	errArtifactUnresolvable     = errors.New("cannot resolve")
+)
 
 func artifactBlobKey(digest string) string { return "artifacts/blobs/" + digest }
 
@@ -70,6 +74,11 @@ func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspac
 		}
 		name, nerr := workspaceRelPath(wsRoot, p)
 		if nerr != nil {
+			// safety: a wildcard sweep or an outside directory publishes nothing, so skip instead of failing the node
+			if errors.Is(nerr, errArtifactOutsideWorkspace) && (!globNamesLiterally(globs, rel) || resolvesToDirectory(p)) {
+				sparkwing.LoggerFromContext(ctx).Log("warn", fmt.Sprintf("artifact %q resolves outside the workspace; skipping", rel))
+				return nil
+			}
 			return fmt.Errorf("artifact %q: %w", rel, nerr)
 		}
 		info, serr := root.Stat(name)
@@ -79,12 +88,9 @@ func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspac
 		if !info.Mode().IsRegular() {
 			return nil
 		}
-		digest, herr := hashFile(root, name)
-		if herr != nil {
-			return fmt.Errorf("artifact %q: %w", rel, herr)
-		}
-		if err := putArtifactBlob(ctx, store, root, name, digest); err != nil {
-			return fmt.Errorf("artifact %q: %w", rel, err)
+		digest, berr := storeArtifactFile(ctx, store, root, name)
+		if berr != nil {
+			return fmt.Errorf("artifact %q: %w", rel, berr)
 		}
 		entries = append(entries, artifactEntry{
 			Path:   rel,
@@ -111,14 +117,15 @@ func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspac
 }
 
 // safety: resolve links before reading a match so a workspace symlink cannot publish a file outside it
+// safety: resolve failures return a fixed error so failure text never carries a path outside the workspace
 func workspaceRelPath(wsRoot, p string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(p)
 	if err != nil {
-		return "", err
+		return "", errArtifactUnresolvable
 	}
 	rel, err := filepath.Rel(wsRoot, resolved)
 	if err != nil {
-		return "", err
+		return "", errArtifactUnresolvable
 	}
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", errArtifactOutsideWorkspace
@@ -126,27 +133,22 @@ func workspaceRelPath(wsRoot, p string) (string, error) {
 	return rel, nil
 }
 
-func putArtifactBlob(ctx context.Context, store storage.ArtifactStore, root *os.Root, name, digest string) error {
-	key := artifactBlobKey(digest)
-	if ok, err := store.Has(ctx, key); err == nil && ok {
-		return nil
+func globNamesLiterally(globs []string, rel string) bool {
+	for _, g := range globs {
+		if filepath.ToSlash(g) == rel && !strings.ContainsAny(g, "*?[") {
+			return true
+		}
 	}
-	f, err := root.Open(name)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	return store.Put(ctx, key, f)
+	return false
 }
 
-func putBytes(ctx context.Context, store storage.ArtifactStore, key string, b []byte) error {
-	if ok, err := store.Has(ctx, key); err == nil && ok {
-		return nil
-	}
-	return store.Put(ctx, key, strings.NewReader(string(b)))
+func resolvesToDirectory(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
 }
 
-func hashFile(root *os.Root, name string) (string, error) {
+// safety: one open serves both the hash and the upload so the stored bytes are the bytes the digest names
+func storeArtifactFile(ctx context.Context, store storage.ArtifactStore, root *os.Root, name string) (string, error) {
 	f, err := root.Open(name)
 	if err != nil {
 		return "", err
@@ -156,7 +158,25 @@ func hashFile(root *os.Root, name string) (string, error) {
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	digest := hex.EncodeToString(h.Sum(nil))
+	key := artifactBlobKey(digest)
+	if ok, herr := store.Has(ctx, key); herr == nil && ok {
+		return digest, nil
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	if err := store.Put(ctx, key, f); err != nil {
+		return "", err
+	}
+	return digest, nil
+}
+
+func putBytes(ctx context.Context, store storage.ArtifactStore, key string, b []byte) error {
+	if ok, err := store.Has(ctx, key); err == nil && ok {
+		return nil
+	}
+	return store.Put(ctx, key, strings.NewReader(string(b)))
 }
 
 func anyGlobMatches(globs []string, rel string) bool {

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -540,6 +542,44 @@ var submittedTriggerEnvKeys = map[string]bool{
 	"SPARKWING_NO_CACHE":         true,
 }
 
+var githubProvenanceEnvKeys = map[string]bool{
+	sparkwing.EnvGitHubEventName: true,
+	sparkwing.EnvPRNumber:        true,
+	sparkwing.EnvPRAction:        true,
+	sparkwing.EnvPRBaseRef:       true,
+	sparkwing.EnvPRBaseSHA:       true,
+	sparkwing.EnvPRHeadRef:       true,
+	sparkwing.EnvPRHeadSHA:       true,
+}
+
+var githubRepoSlug = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
+
+// safety: this key wins over git.repo_url on the runner, so it stays a slug and never becomes a URL.
+func validateSubmittedRepoSlug(env map[string]string) error {
+	repo := env["GITHUB_REPOSITORY"]
+	if repo == "" || githubRepoSlug.MatchString(repo) {
+		return nil
+	}
+	return errors.New("trigger.env GITHUB_REPOSITORY must be an owner/name slug")
+}
+
+// safety: the commit-status reporter spends the controller's GitHub token on whatever these name.
+func refuseForgedGitHubProvenance(ctx context.Context, source string, env map[string]string) error {
+	p, ok := PrincipalFromContext(ctx)
+	if !ok || p.HasScope(ScopeAdmin) {
+		return nil
+	}
+	if source == "github" {
+		return errors.New(`trigger.source "github" is reserved for the verified GitHub webhook`)
+	}
+	for key := range env {
+		if githubProvenanceEnvKeys[key] {
+			return fmt.Errorf("trigger.env %s is reserved for the verified GitHub webhook", key)
+		}
+	}
+	return nil
+}
+
 func sanitizeTriggerEnv(env map[string]string) map[string]string {
 	if len(env) == 0 {
 		return nil
@@ -575,6 +615,14 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 	if body.Trigger.Source == "" {
 		writeError(w, http.StatusBadRequest, errors.New("trigger.source is required"))
+		return
+	}
+	if err := validateSubmittedRepoSlug(body.Trigger.Env); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := refuseForgedGitHubProvenance(r.Context(), body.Trigger.Source, body.Trigger.Env); err != nil {
+		writeError(w, http.StatusForbidden, err)
 		return
 	}
 	if body.Git.RepoURL != "" {
@@ -754,7 +802,7 @@ func (s *Server) handleListTriggers(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("limit"); v != "" {
 		var n int
 		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n > 0 {
-			filter.Limit = n
+			filter.Limit = min(n, store.MaxRunListLimit)
 		}
 	}
 	trigs, err := s.store.ListTriggers(r.Context(), filter)
@@ -1365,7 +1413,7 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, fmt.Errorf("invalid limit"))
 			return
 		}
-		limit = n
+		limit = min(n, store.MaxRunListLimit)
 	}
 	events, err := s.store.ListEventsAfter(r.Context(), runID, afterSeq, limit)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -585,5 +586,190 @@ func TestTrigger_ValidatesRepoURL(t *testing.T) {
 				t.Fatalf("status = %d, want %d (body: %s)", resp.StatusCode, tc.want, body)
 			}
 		})
+	}
+}
+
+func TestTrigger_RequiresAGitHubRepositorySlug(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(&captureDispatcher{})
+	srv := httptest.NewServer(srvController.Handler())
+	t.Cleanup(srv.Close)
+
+	for _, tc := range []struct {
+		name string
+		repo string
+		want int
+	}{
+		{name: "slug", repo: "sparkwing-dev/sparkwing", want: http.StatusAccepted},
+		{name: "absent", repo: "", want: http.StatusAccepted},
+		{name: "https URL", repo: "https://attacker.example/payload.git", want: http.StatusBadRequest},
+		{name: "scp-like URL", repo: "git@attacker.example:payload.git", want: http.StatusBadRequest},
+		{name: "three segments", repo: "owner/name/extra", want: http.StatusBadRequest},
+		{name: "no slash", repo: "sparkwing", want: http.StatusBadRequest},
+		{name: "space", repo: "owner/na me", want: http.StatusBadRequest},
+		{name: "non-ascii", repo: "ownér/name", want: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := map[string]string{}
+			if tc.repo != "" {
+				env["GITHUB_REPOSITORY"] = tc.repo
+			}
+			resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+				"pipeline": "demo",
+				"trigger":  map[string]any{"source": "manual", "env": env},
+			})
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != tc.want {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want %d (body: %s)", resp.StatusCode, tc.want, body)
+			}
+		})
+	}
+}
+
+func TestTrigger_ReservesGitHubProvenanceForTheWebhook(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	now := time.Now().UTC()
+	submitter, _, err := st.CreateToken("ci", store.TokenKindService,
+		[]string{controller.ScopeRunsWrite}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	operator, _, err := st.CreateToken("root", store.TokenKindUser,
+		[]string{controller.ScopeAdmin}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	srvController := controller.New(st, nil).EnableAuthFromStore()
+	srvController.WithDispatcher(&captureDispatcher{})
+	srv := httptest.NewServer(srvController.Handler())
+	t.Cleanup(srv.Close)
+
+	for _, tc := range []struct {
+		name  string
+		token string
+		body  map[string]any
+		want  int
+	}{
+		{
+			name:  "runs.write cannot claim the github source",
+			token: submitter,
+			body: map[string]any{
+				"pipeline": "demo",
+				"trigger":  map[string]any{"source": "github"},
+				"git":      map[string]any{"github_owner": "acme", "github_repo": "widgets"},
+			},
+			want: http.StatusForbidden,
+		},
+		{
+			name:  "runs.write cannot carry pull-request provenance",
+			token: submitter,
+			body: map[string]any{
+				"pipeline": "demo",
+				"trigger": map[string]any{"source": "manual", "env": map[string]string{
+					sparkwing.EnvPRHeadSHA: "deadbeef",
+				}},
+			},
+			want: http.StatusForbidden,
+		},
+		{
+			name:  "runs.write submits its own source",
+			token: submitter,
+			body: map[string]any{
+				"pipeline": "demo",
+				"trigger":  map[string]any{"source": "manual"},
+			},
+			want: http.StatusAccepted,
+		},
+		{
+			name:  "admin still speaks for the webhook",
+			token: operator,
+			body: map[string]any{
+				"pipeline": "demo",
+				"trigger": map[string]any{"source": "github", "env": map[string]string{
+					sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest,
+					sparkwing.EnvPRHeadSHA:       "deadbeef",
+				}},
+				"git": map[string]any{"github_owner": "acme", "github_repo": "widgets"},
+			},
+			want: http.StatusAccepted,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, body := postJSONWithBearer(t, srv.URL+"/api/v1/triggers", tc.token, tc.body)
+			if status != tc.want {
+				t.Fatalf("status = %d, want %d (body: %s)", status, tc.want, body)
+			}
+		})
+	}
+}
+
+func TestListRoutes_ClampTheirLimit(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range store.MaxRunListLimit + 5 {
+		if err := st.CreateTrigger(ctx, store.Trigger{
+			ID:        "tg-" + strconv.Itoa(i),
+			Pipeline:  "push",
+			CreatedAt: time.Unix(int64(i+1), 0),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	t.Cleanup(srv.Close)
+
+	var triggers struct {
+		Triggers []json.RawMessage `json:"triggers"`
+	}
+	getJSON(t, srv.URL+"/api/v1/triggers?limit=1000000000", &triggers)
+	if len(triggers.Triggers) != store.MaxRunListLimit {
+		t.Fatalf("triggers = %d, want %d", len(triggers.Triggers), store.MaxRunListLimit)
+	}
+
+	var events []json.RawMessage
+	getJSON(t, srv.URL+"/api/v1/runs/run-1/events?limit=1000000000", &events)
+	if len(events) != store.MaxRunListLimit {
+		t.Fatalf("events = %d, want %d", len(events), store.MaxRunListLimit)
+	}
+}
+
+func getJSON(t *testing.T, url string, out any) {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET %s status = %d (body: %s)", url, resp.StatusCode, body)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		t.Fatalf("decode %s: %v", url, err)
 	}
 }

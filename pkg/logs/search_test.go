@@ -235,3 +235,28 @@ func TestSearch_StopsOnCanceledRequest(t *testing.T) {
 		t.Fatalf("truncated=false, total=%d; want the canceled request to stop the scan", body.Total)
 	}
 }
+
+func TestSearch_LongLineReportsTruncation(t *testing.T) {
+	root := t.TempDir()
+	seedLog(t, root, "run-1", "node-a", "NEEDLE-before\n"+strings.Repeat("x", 2<<20)+"\nNEEDLE-after\n")
+
+	s, err := New(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/logs/search?q=NEEDLE&run_id=run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body SearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.Truncated {
+		t.Errorf("truncated=false after a line past the scanner buffer hid %d matches", 2-body.Total)
+	}
+}

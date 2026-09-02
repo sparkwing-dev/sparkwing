@@ -80,14 +80,24 @@ code change to unlock.
   See the
   [migration guide](docs/migrations/_unreleased.md#breaking-submitted-runs-carry-an-allow-listed-environment).
 - **logs:** Bound what one runner token can spend on the logs service. Appends
-  read the request body before taking a lock that is now sharded per run and
-  node, so a slow POST no longer stalls every other node's writes. New
-  `--max-node-bytes`, `--max-run-bytes`, `--min-free-bytes`, `--retention`,
-  `--sweep-interval`, `--search-max-bytes`, and `--search-timeout` flags (each
-  with a `SPARKWING_LOGS_*` environment variable) cap stored bytes, expire old
-  runs, and bound one search; `GET /api/v1/logs/search` now requires `run_id`
-  and reports `"truncated": true` when a budget stops the scan. Retention is
-  off unless you set it, so an upgrade deletes no history. See the
+  read the request body before taking a lock that is now sharded per stored
+  file, so a slow POST no longer stalls every other node's writes, and a global
+  in-flight byte budget (`--max-inflight-bytes`, 32MiB) refuses further appends
+  with `503` rather than letting concurrent bodies outgrow the pod's memory.
+  New `--max-node-bytes`, `--max-run-bytes`, `--max-inflight-bytes`,
+  `--min-free-bytes`, `--retention`, `--sweep-interval`, `--search-max-bytes`,
+  and `--search-timeout` flags (each with a `SPARKWING_LOGS_*` environment
+  variable, and each surfaced as `logs.limits.*` in the runner-bundle chart)
+  cap stored bytes, expire old runs, and bound one search; a malformed or
+  negative value now stops the service instead of silently restoring the
+  default. The byte caps are reserved under one lock, so concurrent appends
+  cannot overshoot them and two spellings of one node id share the file's cap.
+  A storage volume the service cannot measure is treated as full.
+  `GET /api/v1/logs/search` now requires `run_id` and reports
+  `"truncated": true` when a budget or an over-long line stops the scan.
+  Retention is off unless you set it, so an upgrade deletes no history, and
+  `GET /api/v1/health` no longer names the storage path or the volume's free
+  bytes to an unauthenticated caller. See the
   [operator checklist](docs/security.md#operator-checklist) and the
   [migration guide](docs/migrations/_unreleased.md).
 - **controller:** GitHub webhook deliveries are bound to the repository that
@@ -153,6 +163,17 @@ code change to unlock.
   --metrics-addr` (`$SPARKWING_METRICS_ADDR`) binds Prometheus `/metrics` to
   its own listener, off the API listener and any ingress in front of it. See
   [the migration note](docs/migrations/_unreleased.md).
+- **controller:** The trigger and event lists cap `?limit=` at 1000 rows like
+  the run list. The clone-URL check now canonicalizes a host before judging it,
+  so `127.1`, `2130706433`, `0x7f000001`, `017700000001`, `localhost.`, and an
+  IPv6 zone id no longer walk past the loopback rule, and carrier-grade NAT and
+  the cloud metadata names are rejected too. `POST /api/v1/triggers` takes
+  `GITHUB_REPOSITORY` only as an `owner/name` slug, and a caller without
+  `admin` can no longer submit `trigger.source: github` or the pull-request
+  environment keys the commit-status reporter spends the controller's GitHub
+  token on. The Git cache register route keeps its half-hour deadline, the
+  controller refuses to start when `--metrics-addr` cannot bind, and
+  `controller.metricsPort` wires that flag into the `sparkwing-full` chart.
 
 ### Security
 
@@ -179,12 +200,15 @@ code change to unlock.
   per-run size cap with the manifest mode masked to `0o777`, so a symlink left
   in a workspace cannot capture the write.
 - **orchestrator:** Artifact capture now resolves each glob match before it
-  reads one and refuses a match that lands outside the workspace, so a symlink
-  planted in a producer's workspace can no longer publish a file the runner
-  happens to be able to read -- a credential file, `/etc/passwd` -- into the
-  artifact store. A link whose target stays inside the workspace is still
-  followed, and every matched file is opened through an `os.Root` on the
-  workspace rather than by the path the walk found.
+  reads one, so a symlink planted in a producer's workspace can no longer
+  publish a file the runner happens to be able to read -- a credential file,
+  `/etc/passwd` -- into the artifact store. The boundary is path-based and
+  catches symlinks only: a hard link to a readable file is still captured. A
+  match that a glob names literally fails the node when it resolves outside
+  the workspace; one a wildcard swept up, or one resolving to an outside
+  directory, is skipped with a warning. A link whose target stays inside the
+  workspace is still followed, and every matched file is opened once through
+  an `os.Root` on the workspace, hashed and uploaded from that one handle.
 
 ### Security
 

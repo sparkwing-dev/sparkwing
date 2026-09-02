@@ -449,10 +449,12 @@ CHANGELOG links here.
   still answers `204`; later appends answer `204` and store nothing, so a
   chatty node degrades its own log rather than failing its run. An append with
   less than `--min-free-bytes` (512MiB) free answers `507`, which the log sink
-  retries and then reports as `logs_dropped`. Search requires `run_id` and
-  answers `400` without one, reads at most `--search-max-bytes` (256MiB) for at
-  most `--search-timeout` (10s), stops when the caller disconnects, and sets
-  `"truncated": true` on a response any of those stopped.
+  retries and then reports as `logs_dropped`, as does an append that arrives
+  while in-flight request bodies already hold `--max-inflight-bytes` (32MiB),
+  which answers `503`. Search requires `run_id` and answers `400` without one,
+  reads at most `--search-max-bytes` (256MiB) for at most `--search-timeout`
+  (10s), stops when the caller disconnects, and sets `"truncated": true` on a
+  response any of those stopped.
 - **Migration:** None for a stock install. Raise `--max-node-bytes` or
   `--max-run-bytes` if a pipeline legitimately emits more than the defaults and
   you would rather spend the disk than read a truncated log; the marker in the
@@ -461,7 +463,12 @@ CHANGELOG links here.
   (`SPARKWING_LOGS_RETENTION`, for example `168h`), which sweeps every run whose
   last write is older than that window on the `--sweep-interval` tick. A caller
   that searched the whole store now passes `run_id`, and one that needs
-  complete results checks `truncated` and narrows the query.
+  complete results checks `truncated` and narrows the query. On Kubernetes the
+  runner-bundle chart carries every one of these as `logs.limits.*`, so sizing
+  them for your volume no longer means forking the chart. A malformed or
+  negative value stops the service at startup instead of quietly restoring the
+  default, so check any `SPARKWING_LOGS_*` you already set (`7d` and `64MiB`
+  are not accepted; use `168h` and `67108864`).
 - **Why:** Every runner holds a token that may append, and one chatty pipeline
   could fill the volume for every other run or pin the service on a whole-store
   scan.
@@ -543,12 +550,19 @@ CHANGELOG links here.
   with 400. Trigger environment keeps only `GITHUB_REPOSITORY`, the GitHub
   pull-request context, and the `SPARKWING_START_AT`, `SPARKWING_STOP_AT`,
   `SPARKWING_ONLY`, `SPARKWING_DRY_RUN`, and `SPARKWING_NO_CACHE`
-  switches. `?limit=` is capped at 1000 rows.
+  switches, with `GITHUB_REPOSITORY` accepted only as an `owner/name`
+  slug. A caller without `admin` cannot submit `trigger.source: github`
+  or the pull-request keys the commit-status reporter trusts; the
+  HMAC-verified webhook still can. `?limit=` is capped at 1000 rows on
+  the run, trigger, and event lists.
 - **Migration:** A hand-rolled client that polls `/api/v1/services`
   anonymously sends `Authorization: Bearer <token>`. One that submits
   triggers carrying its own environment keys moves that data into pipeline
-  args. A dashboard or export that asked for more than 1000 runs in one
-  request pages instead.
+  args, and one that passes a clone URL in `GITHUB_REPOSITORY` passes the
+  slug and puts the URL in `git.repo_url`. A client that submitted
+  `trigger.source: github` to drive commit statuses needs an `admin`
+  token or the webhook. A dashboard or export that asked for more than
+  1000 runs, triggers, or events in one request pages instead.
 - **Why:** The announcement names internal cache and logs URLs, the
   repository URL becomes a clone target on every runner, the trigger
   environment is served whole to every `triggers.read` principal and is
