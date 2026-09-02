@@ -368,9 +368,18 @@ podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65534
   fsGroup: 65534
+  # Required by the Pod Security "restricted" profile. Drop this only
+  # for a workload that needs syscalls the runtime's default profile
+  # blocks; the pods this chart runs do not.
+  seccompProfile:
+    type: RuntimeDefault
 
 containerSecurityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: false
+  # Every path the runner, cache, and logs pods write lives on a
+  # mounted volume: the component's /data volume, the /tmp scratch
+  # emptyDir, and SPARKWING_HOME inside it. Set false only for an
+  # image that writes to its own layer.
+  readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]

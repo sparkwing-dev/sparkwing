@@ -48,6 +48,15 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **helm:** Both charts now default to the Pod Security "restricted" profile:
+  every pod carries `seccompProfile: RuntimeDefault` and every container runs
+  with a read-only root filesystem over a `/tmp` scratch `emptyDir`. The
+  Kubernetes runner Job does the same. `ingress.enabled=true` now fails to
+  render with an empty `ingress.tls` or with `web.requireLogin=false`; set
+  `ingress.allowInsecure=true` to publish the dashboard unencrypted or open
+  anyway.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

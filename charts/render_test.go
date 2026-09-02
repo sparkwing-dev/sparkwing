@@ -280,18 +280,32 @@ type renderedCapabilities struct {
 	Drop []string `yaml:"drop"`
 }
 
+type renderedSeccompProfile struct {
+	Type string `yaml:"type"`
+}
+
 type renderedSecurityContext struct {
-	RunAsNonRoot             *bool                `yaml:"runAsNonRoot"`
-	RunAsUser                *int64               `yaml:"runAsUser"`
-	RunAsGroup               *int64               `yaml:"runAsGroup"`
-	AllowPrivilegeEscalation *bool                `yaml:"allowPrivilegeEscalation"`
-	ReadOnlyRootFilesystem   *bool                `yaml:"readOnlyRootFilesystem"`
-	Capabilities             renderedCapabilities `yaml:"capabilities"`
+	RunAsNonRoot             *bool                   `yaml:"runAsNonRoot"`
+	RunAsUser                *int64                  `yaml:"runAsUser"`
+	RunAsGroup               *int64                  `yaml:"runAsGroup"`
+	AllowPrivilegeEscalation *bool                   `yaml:"allowPrivilegeEscalation"`
+	ReadOnlyRootFilesystem   *bool                   `yaml:"readOnlyRootFilesystem"`
+	SeccompProfile           *renderedSeccompProfile `yaml:"seccompProfile"`
+	Capabilities             renderedCapabilities    `yaml:"capabilities"`
 }
 
 type renderedVolumeMount struct {
 	Name      string `yaml:"name"`
 	MountPath string `yaml:"mountPath"`
+}
+
+type renderedEmptyDir struct {
+	SizeLimit string `yaml:"sizeLimit"`
+}
+
+type renderedVolume struct {
+	Name     string            `yaml:"name"`
+	EmptyDir *renderedEmptyDir `yaml:"emptyDir"`
 }
 
 type renderedContainer struct {
@@ -314,6 +328,7 @@ type renderedDeployment struct {
 				AutomountServiceAccountToken *bool                   `yaml:"automountServiceAccountToken"`
 				InitContainers               []renderedContainer     `yaml:"initContainers"`
 				Containers                   []renderedContainer     `yaml:"containers"`
+				Volumes                      []renderedVolume        `yaml:"volumes"`
 			} `yaml:"spec"`
 		} `yaml:"template"`
 	} `yaml:"spec"`
@@ -1600,5 +1615,88 @@ func TestControllerHasNoCacheURLWhenNoCacheIsDeployed(t *testing.T) {
 		if e.Name == "SPARKWING_CACHE_URL" {
 			t.Errorf("rendered SPARKWING_CACHE_URL=%q with no cache deployed", e.Value)
 		}
+	}
+}
+
+func hasEmptyDirVolume(volumes []renderedVolume, name string) bool {
+	for _, volume := range volumes {
+		if volume.Name == name && volume.EmptyDir != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMount(mounts []renderedVolumeMount, name, path string) bool {
+	for _, mount := range mounts {
+		if mount.Name == name && mount.MountPath == path {
+			return true
+		}
+	}
+	return false
+}
+
+func TestChartsDefaultToARestrictedRuntime(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		chart    string
+		template string
+	}{
+		{name: "controller", chart: "./sparkwing-full", template: "templates/controller-deployment.yaml"},
+		{name: "web", chart: "./sparkwing-full", template: "templates/web-deployment.yaml"},
+		{name: "runner", chart: "./sparkwing-runner-bundle", template: "templates/runner-deployment.yaml"},
+		{name: "cache", chart: "./sparkwing-runner-bundle", template: "templates/cache-deployment.yaml"},
+		{name: "logs", chart: "./sparkwing-runner-bundle", template: "templates/logs-deployment.yaml"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rendered := helmRender(t, test.chart, test.template, "sparkwing")
+			doc := deploymentDocument(t, rendered)
+			pod := doc.Spec.Template.Spec
+			if pod.SecurityContext.SeccompProfile == nil || pod.SecurityContext.SeccompProfile.Type != "RuntimeDefault" {
+				t.Fatalf("pod seccomp profile = %+v, want RuntimeDefault", pod.SecurityContext.SeccompProfile)
+			}
+			container := runnerContainer(t, rendered)
+			if container.SecurityContext.ReadOnlyRootFilesystem == nil || !*container.SecurityContext.ReadOnlyRootFilesystem {
+				t.Fatalf("readOnlyRootFilesystem = %+v, want true", container.SecurityContext.ReadOnlyRootFilesystem)
+			}
+			if !hasMount(container.VolumeMounts, "scratch", "/tmp") {
+				t.Fatalf("volume mounts = %+v, want a scratch mount at /tmp", container.VolumeMounts)
+			}
+			if !hasEmptyDirVolume(pod.Volumes, "scratch") {
+				t.Fatalf("volumes = %+v, want a scratch emptyDir", pod.Volumes)
+			}
+		})
+	}
+}
+
+func TestPublishedDashboardWithoutTLSFailsAtRender(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"ingress.enabled=true", "web.requireLogin=true")
+	if !strings.Contains(out, "ingress.tls") || !strings.Contains(out, "ingress.allowInsecure=true") {
+		t.Fatalf("render error does not name the TLS knob or its opt-out:\n%s", out)
+	}
+}
+
+func TestPublishedDashboardWithoutLoginFailsAtRender(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"ingress.enabled=true", "ingress.tls[0].secretName=sparkwing-tls")
+	if !strings.Contains(out, "web.requireLogin") || !strings.Contains(out, "ingress.allowInsecure=true") {
+		t.Fatalf("render error does not name the login knob or its opt-out:\n%s", out)
+	}
+}
+
+func TestPublishedDashboardRendersOnceTLSAndLoginAreSet(t *testing.T) {
+	rendered := helmRender(t, "./sparkwing-full", "templates/ingress.yaml", "sparkwing",
+		"ingress.enabled=true", "web.requireLogin=true", "ingress.tls[0].secretName=sparkwing-tls")
+	if !strings.Contains(rendered, "kind: Ingress") {
+		t.Fatalf("no Ingress rendered:\n%s", rendered)
+	}
+}
+
+func TestPublishedDashboardAcceptsAnExplicitInsecureOptIn(t *testing.T) {
+	rendered := helmRender(t, "./sparkwing-full", "templates/ingress.yaml", "sparkwing",
+		"ingress.enabled=true", "ingress.allowInsecure=true")
+	if !strings.Contains(rendered, "kind: Ingress") {
+		t.Fatalf("no Ingress rendered:\n%s", rendered)
 	}
 }

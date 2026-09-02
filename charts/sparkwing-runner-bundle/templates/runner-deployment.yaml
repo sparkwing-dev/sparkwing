@@ -143,12 +143,16 @@ spec:
           resources:
             {{- toYaml .Values.runner.resources | nindent 12 }}
           volumeMounts:
+            - name: scratch
+              mountPath: /tmp
             - name: sparkwing-home
               mountPath: /tmp/sparkwing
             {{- with .Values.runner.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
+        - name: scratch
+          emptyDir: {}
         - name: sparkwing-home
           emptyDir: {}
         {{- with .Values.runner.extraVolumes }}
