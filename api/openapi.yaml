@@ -1553,6 +1553,13 @@ paths:
               properties:
                 name: { type: string }
                 password: { type: string }
+                scopes:
+                  type: array
+                  description: >-
+                    Scopes this account's dashboard sessions carry. Omit to
+                    grant admin. Ignored on the bootstrap path, which always
+                    creates an admin.
+                  items: { type: string }
       responses:
         "201":
           description: User created.
@@ -2268,6 +2275,10 @@ components:
       required: [name, created_at]
       properties:
         name: { type: string }
+        scopes:
+          type: array
+          description: Scopes this account's dashboard sessions carry.
+          items: { type: string }
         created_at:
           type: integer
           format: int64

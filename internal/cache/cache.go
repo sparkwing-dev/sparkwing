@@ -35,6 +35,8 @@ type Config struct {
 
 	APIToken string
 
+	AllowUnauthenticated bool
+
 	AutoRegisterRepos string
 
 	SSHKeyDir string
@@ -72,6 +74,15 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.DataDir == "" {
 		return nil, fmt.Errorf("cache: DataDir is required")
+	}
+	if cfg.APIToken == "" {
+		if !cfg.AllowUnauthenticated {
+			return nil, fmt.Errorf("cache: an API token is required: set --api-token (or $SPARKWING_API_TOKEN), " +
+				"or pass --allow-unauthenticated to serve the blob and sync endpoints to anyone who can reach the port")
+		}
+		log.Printf("WARNING: sparkwing-cache is serving the blob and sync endpoints without authentication (--allow-unauthenticated)")
+	} else {
+		log.Printf("sparkwing-cache requires a bearer token on the blob and sync endpoints")
 	}
 	if cfg.ProxyDir == "" {
 		cfg.ProxyDir = filepath.Join(cfg.DataDir, "proxy")

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net/http"
@@ -53,7 +55,9 @@ func (s *fakeCacheServer) handler() http.Handler {
 				http.Error(w, "miss", http.StatusNotFound)
 				return
 			}
+			sum := sha256.Sum256(data)
 			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Digest", "sha-256="+base64.StdEncoding.EncodeToString(sum[:]))
 			_, _ = w.Write(data)
 		case http.MethodPut:
 			s.gotToken[hash] = r.Header.Get("Authorization")
@@ -85,7 +89,7 @@ func TestTryRemoteBinary_Hit(t *testing.T) {
 	defer srv.Close()
 
 	dest := filepath.Join(t.TempDir(), "bin", "pipeline")
-	if err := bincache.TryBinary(srv.URL, "aaaaaaaa-bbbbbbbb", dest); err != nil {
+	if err := bincache.TryBinary(srv.URL, "", "aaaaaaaa-bbbbbbbb", dest); err != nil {
 		t.Fatalf("hit path returned err: %v", err)
 	}
 
@@ -111,7 +115,7 @@ func TestTryRemoteBinary_Miss(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	err := bincache.TryBinary(srv.URL, "cafecafe-deadbeef", filepath.Join(t.TempDir(), "bin"))
+	err := bincache.TryBinary(srv.URL, "", "cafecafe-deadbeef", filepath.Join(t.TempDir(), "bin"))
 	if !errors.Is(err, bincache.ErrMiss) {
 		t.Errorf("want bincache.ErrMiss, got %v", err)
 	}

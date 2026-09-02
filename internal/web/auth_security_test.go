@@ -333,6 +333,7 @@ func TestUnsafeAPIProxyRequiresSessionBoundCSRF(t *testing.T) {
 		if r.URL.Path == "/api/v1/auth/session" {
 			_ = json.NewEncoder(w).Encode(sessionResp{
 				Principal: "admin",
+				Scopes:    []string{"admin"},
 				CSRFToken: "session-token",
 				ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			})
@@ -382,7 +383,7 @@ func TestUnsafeAPIProxyRequiresSessionBoundCSRF(t *testing.T) {
 		{name: "cookie header mismatch", origin: "https://dashboard.example.com", cookieToken: "attacker-token", headerToken: "session-token"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			rec := request("/api/v1/mutate", test.origin, test.cookieToken, test.headerToken)
+			rec := request("/api/v1/runs/r1/cancel", test.origin, test.cookieToken, test.headerToken)
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403", rec.Code)
 			}
@@ -395,7 +396,7 @@ func TestUnsafeAPIProxyRequiresSessionBoundCSRF(t *testing.T) {
 	}
 	mu.Unlock()
 
-	for _, path := range []string{"/api/v1/mutate", "/api/v1/logs/mutate"} {
+	for _, path := range []string{"/api/v1/runs/r1/cancel", "/api/v1/logs/mutate"} {
 		rec := request(path, "https://dashboard.example.com", "session-token", "session-token")
 		if rec.Code != http.StatusNoContent {
 			t.Fatalf("legitimate mutation %s = %d, want 204", path, rec.Code)
@@ -425,7 +426,7 @@ func TestSessionlessProxyPreservesDirectAuthorization(t *testing.T) {
 	}))
 	t.Cleanup(controller.Close)
 	handler := HandlerFromOptionsWithBundle(HandlerOptions{ControllerURL: controller.URL}, authTestBundle)
-	req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/mutate", strings.NewReader("payload"))
+	req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/runs/r1/cancel", strings.NewReader("payload"))
 	req.Header.Set("Origin", "https://attacker.example.com")
 	req.Header.Set("Authorization", "Bearer direct-user-token")
 	req.Header.Set(csrfHeaderName, "browser-token")

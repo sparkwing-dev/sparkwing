@@ -100,6 +100,27 @@ explicit name is provided, fall back to the fullname.
 {{- end }}
 
 {{/*
+Cache and logs ServiceAccount names. The cache and logs servers never
+call the Kubernetes API, so they get their own unbound ServiceAccounts
+instead of sharing the runner's Role.
+*/}}
+{{- define "sparkwing-runner-bundle.cacheServiceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- include "sparkwing-runner-bundle.cache.fullname" . }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{- define "sparkwing-runner-bundle.logsServiceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- include "sparkwing-runner-bundle.logs.fullname" . }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{/*
 Per-component fully qualified resource names (Deployments,
 Services, PVCs). Component suffix keeps the three workloads
 distinct under one release.

@@ -362,7 +362,7 @@ func TestHooksInstall_PriorHookStaysLiveUntilProofPasses(t *testing.T) {
 		t.Fatal("installer did not publish after proof passed")
 	}
 	after := readRepoFile(t, priorPath)
-	if after == priorBody || !strings.Contains(after, "sparkwing run gate") {
+	if after == priorBody || !strings.Contains(after, "sparkwing run 'gate'") {
 		t.Fatalf("passed proof did not atomically publish the replacement:\n%s", after)
 	}
 	if got := f.git(t, "config", "--local", "core.hooksPath"); got != priorConfig {

@@ -73,6 +73,30 @@ browser HTML or JavaScript. CLI and automation clients should authenticate
 directly to the controller through a profile rather than send a bearer to the
 browser-facing dashboard proxy.
 
+## Dashboard authorization
+
+The dashboard proxies a fixed list of controller routes: the run, node,
+approval, agent, and trend reads the SPA renders, plus the trigger, cancel,
+retry, debug-release, approval-resolve, and run-delete writes its buttons
+issue. Every other path under `/api/v1/` answers `404` at the web pod and
+never reaches the controller, so a signed-in tab cannot mint a token, read a
+secret, or create a user through the proxy. The list lives in
+`internal/web/proxy_routes.go`, and a test holds each entry to the scope
+`pkg/controller/server.go` registers for that route.
+
+A browser session carries the scopes of the user who signed in. The proxy
+checks them against the target route before forwarding, so an account holding
+only `runs.read` reads runs and gets `403` on cancel. Create narrower accounts
+with `sparkwing cluster users add --scope runs.read,logs.read`; omitting
+`--scope` grants `admin`. The first-visit bootstrap admin is always `admin`,
+and `sparkwing cluster users list` prints the scope set of every account.
+
+The web pod's own service token needs `runs.read` plus `logs.read`. Add
+`runs.write` where the UI cancels, retries, or releases a debug pause, and
+`approvals.write` where it resolves approval gates. That token bounds what the
+proxy can reach at all; the session's scopes bound what one signed-in user
+reaches through it.
+
 `sparkwing-web --require-login` needs a controller session backend. Pass
 `--controller URL`, or select a `--profile` whose `controller.url` is set. A
 state-only configuration such as `--state-spec=postgres://... --require-login`
@@ -144,8 +168,8 @@ if the users table is empty. An operator can use that token with
 `sparkwing cluster users add` to create the first dashboard user.
 
 After the first admin is created, additional users are added via
-`sparkwing cluster users add` (admin-scoped) like any other operator
-account.
+`sparkwing cluster users add`. Pass `--scope` to bound what that account's
+dashboard sessions reach; omitting it grants `admin`.
 
 ## CLI
 

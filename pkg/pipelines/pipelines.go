@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -19,7 +20,8 @@ type Config struct {
 // One Go entrypoint can back many pipelines, each with its own policy.
 type Pipeline struct {
 	// Name is the invocable name (`sparkwing run <name>`); must equal
-	// the string passed to the SDK's Register call.
+	// the string passed to the SDK's Register call. It must match
+	// `^[A-Za-z0-9][A-Za-z0-9._-]*$`.
 	Name string `yaml:"name"`
 
 	// Entrypoint is the Go pipeline struct type that implements this
@@ -264,6 +266,9 @@ func Parse(r io.Reader) (*Config, error) {
 	return &cfg, nil
 }
 
+// safety: the name reaches shell-rendered git hooks, argv, log lines, and file paths.
+var pipelineNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
 // Validate returns an error describing any structural problem in the
 // config.
 func (c *Config) Validate() error {
@@ -271,6 +276,9 @@ func (c *Config) Validate() error {
 	for i, p := range c.Pipelines {
 		if p.Name == "" {
 			return fmt.Errorf("pipelines[%d]: name is required", i)
+		}
+		if !pipelineNamePattern.MatchString(p.Name) {
+			return fmt.Errorf("pipeline %q: name must match %s", p.Name, pipelineNamePattern)
 		}
 		if p.Entrypoint == "" {
 			return fmt.Errorf("pipeline %q: entrypoint is required", p.Name)

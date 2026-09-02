@@ -91,8 +91,10 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 #   kubectl -n sparkwing create secret generic sparkwing-token \
 #       --from-literal=token=swr_...
 # Tokens carry scopes: a runner token needs `nodes.claim` +
-# `logs.write`, the web pod's needs `runs.read` + `logs.read`; an
-# `admin` token covers both.
+# `logs.write`. The web pod's needs `runs.read` + `logs.read`, plus
+# `runs.write` where operators cancel, retry, or release runs from the
+# dashboard and `approvals.write` where they resolve approval gates.
+# Mint the two separately so neither carries the other's reach.
 ```
 
 ## Install from source
@@ -273,9 +275,10 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    Auth only takes effect on that restart -- the tokens table is read
    once at startup.
 
-2. Stash the token in the `sparkwing-token` Secret (see Pre-install
-   above) and reference it from `web.tokenSecret.name` /
-   `sparkwing-runner-bundle.controller.tokenSecret.name`.
+2. Mint one token per consumer, stash each in a Secret (see Pre-install
+   above), and reference them from `web.tokenSecret.name` /
+   `sparkwing-runner-bundle.controller.tokenSecret.name`. Separate tokens keep
+   the web pod's proxy bearer to the dashboard's scopes.
 
    A configured Secret name requires a non-empty key; the chart rejects
    incomplete pairs. Web, runner, and cache Secret references are required, so
@@ -284,7 +287,8 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
 3. Set `web.requireLogin=true` to gate the dashboard behind `/login`.
    On a fresh cluster `/login` renders a "create first admin" form and
    the account you create there becomes the admin; afterwards, seed
-   users with `sparkwing cluster users add`. Login cookies are `Secure`,
+   users with `sparkwing cluster users add`, whose `--scope` bounds what a
+   signed-in account reaches through the dashboard proxy. Login cookies are `Secure`,
    so configure an HTTPS ingress before signing in. The chart's plain HTTP
    port-forward remains useful for probes but cannot retain a browser login.
 
@@ -352,7 +356,7 @@ create one.
 ```yaml
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.1"
+    version: "0.1.3"
     repository: "file://../sparkwing-runner-bundle"
     condition: sparkwing-runner-bundle.enabled
 ```
