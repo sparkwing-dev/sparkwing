@@ -12,7 +12,7 @@ type proxyRoute struct {
 	scope   string
 }
 
-// safety: only routes the dashboard itself calls are forwarded, so the web pod's bearer cannot be borrowed for anything else.
+// safety: only routes the dashboard calls are forwarded, so its bearer cannot be borrowed for other routes.
 var proxyRoutes = []proxyRoute{
 	{"GET /api/v1/runs", controller.ScopeRunsRead},
 	{"GET /api/v1/runs/{id}", controller.ScopeRunsRead},
