@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -71,6 +72,12 @@ type Options struct {
 	// non-loopback Addr without it.
 	AllowRemote bool
 
+	// AllowOrigins lists browser origins ("https://dash.example") whose
+	// requests the API answers in addition to loopback ones. Only useful
+	// with AllowRemote, where the request Host no longer proves the caller
+	// reached this process over the loopback interface.
+	AllowOrigins []string
+
 	// Version is rendered as a small pill in the dashboard nav. The
 	// caller passes the running CLI's version (typically the value
 	// of cmd/sparkwing.installedVersion()). Empty hides the pill.
@@ -88,7 +95,7 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:4343"
 	}
-	if !opts.AllowRemote && !loopbackBind(opts.Addr) {
+	if !opts.AllowRemote && !LoopbackBind(opts.Addr) {
 		return fmt.Errorf("addr %s is not loopback: set AllowRemote to serve the unauthenticated API to other hosts", opts.Addr)
 	}
 	if err := web.VerifyBundleEmbedded(); err != nil {
@@ -157,45 +164,6 @@ func Run(ctx context.Context, opts Options) error {
 		dashBackend = sb
 	}
 
-	webOpts := web.HandlerOptions{
-		Backend: dashBackend,
-		Paths:   paths,
-		Version: opts.Version,
-	}
-	webHandler := web.HandlerFromOptions(webOpts)
-
-	root := http.NewServeMux()
-	root.Handle("GET /api/v1/version", versionHandler(opts.Version))
-	root.Handle("/api/v1/health/services", webHandler)
-	root.Handle("GET /api/v1/runs/grep", webHandler)
-	root.Handle("GET /api/v1/runs/{id}/logs", webHandler)
-	root.Handle("GET /api/v1/runs/{id}/logs/{node}", webHandler)
-	root.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", webHandler)
-	root.Handle("GET /api/v1/runs/{id}/events/stream", webHandler)
-	root.Handle("GET /api/v1/capabilities", web.CapabilitiesHandler(dashBackend))
-	if useS3OnlyReader {
-		root.Handle("GET /api/v1/runs", web.ListRunsHandler(dashBackend))
-		root.Handle("GET /api/v1/runs/{id}", web.GetRunHandler(dashBackend))
-	}
-	if logsSrv != nil {
-		root.Handle("/api/v1/logs/", logsSrv.Handler())
-	}
-	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
-	root.Handle("GET /api/v1/queue", queueHandler(paths.Root, opts.Version))
-	// safety: the controller claims all of /api/v1/, so dashboard-owned routes
-	// must be named here to remain reachable.
-	root.Handle("GET /api/v1/capacity/profiles", webHandler)
-	root.Handle("GET /api/v1/capacity/profiles/explain", webHandler)
-	if ctrl != nil {
-		ctrlHandler := ctrl.Handler()
-		if opts.ReadOnly {
-			ctrlHandler = readOnlyMiddleware(ctrlHandler)
-		}
-		root.Handle("/api/v1/", ctrlHandler)
-		root.Handle("/webhooks/", ctrlHandler)
-	}
-	root.Handle("/", webHandler)
-
 	baseURL := "http://" + opts.Addr
 	if err := writeDevEnv(paths.Root, baseURL); err != nil {
 		return fmt.Errorf("write dev.env: %w", err)
@@ -206,13 +174,14 @@ func Run(ctx context.Context, opts Options) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var handler http.Handler = root
-	if st != nil {
-		guard := newSchemaGuard(st, cancel)
-		handler = guard.middleware(root)
-		go guard.poll(ctx, schemaPollInterval)
-	}
-	handler = originGuard(handler, opts.AllowRemote)
+	handler := buildHandler(ctx, cancel, opts, handlerParts{
+		paths:        paths,
+		backend:      dashBackend,
+		store:        st,
+		ctrl:         ctrl,
+		logs:         logsSrv,
+		s3OnlyReader: useS3OnlyReader,
+	}, web.BundleFS())
 
 	srv := &http.Server{
 		Addr:              opts.Addr,
@@ -247,6 +216,78 @@ func Run(ctx context.Context, opts Options) error {
 			return nil
 		}
 		return err
+	}
+}
+
+type handlerParts struct {
+	paths        orchestrator.Paths
+	backend      backend.Backend
+	store        *store.Store
+	ctrl         *controller.Server
+	logs         *logs.Server
+	s3OnlyReader bool
+}
+
+func buildHandler(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	opts Options,
+	parts handlerParts,
+	bundle fs.FS,
+) http.Handler {
+	webOpts := web.HandlerOptions{
+		Backend: parts.backend,
+		Paths:   parts.paths,
+		Version: opts.Version,
+	}
+	webHandler := web.HandlerFromOptionsWithBundle(webOpts, bundle)
+
+	root := http.NewServeMux()
+	root.Handle("GET /api/v1/version", versionHandler(opts.Version))
+	root.Handle("/api/v1/health/services", webHandler)
+	root.Handle("GET /api/v1/runs/grep", webHandler)
+	root.Handle("GET /api/v1/runs/{id}/logs", webHandler)
+	root.Handle("GET /api/v1/runs/{id}/logs/{node}", webHandler)
+	root.Handle("GET /api/v1/runs/{id}/logs/{node}/stream", webHandler)
+	root.Handle("GET /api/v1/runs/{id}/events/stream", webHandler)
+	root.Handle("GET /api/v1/capabilities", web.CapabilitiesHandler(parts.backend))
+	if parts.s3OnlyReader {
+		root.Handle("GET /api/v1/runs", web.ListRunsHandler(parts.backend))
+		root.Handle("GET /api/v1/runs/{id}", web.GetRunHandler(parts.backend))
+	}
+	if parts.logs != nil {
+		root.Handle("/api/v1/logs/", parts.logs.Handler())
+	}
+	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
+	root.Handle("GET /api/v1/queue", queueHandler(parts.paths.Root, opts.Version))
+	// safety: the controller claims all of /api/v1/, so dashboard-owned routes
+	// must be named here to remain reachable.
+	root.Handle("GET /api/v1/capacity/profiles", webHandler)
+	root.Handle("GET /api/v1/capacity/profiles/explain", webHandler)
+	if parts.ctrl != nil {
+		ctrlHandler := parts.ctrl.Handler()
+		if opts.ReadOnly {
+			ctrlHandler = readOnlyMiddleware(ctrlHandler)
+		}
+		root.Handle("/api/v1/", ctrlHandler)
+		root.Handle("/webhooks/", ctrlHandler)
+	}
+	root.Handle("/", webHandler)
+
+	var handler http.Handler = root
+	if parts.store != nil {
+		guard := newSchemaGuard(parts.store, cancel)
+		handler = guard.middleware(root)
+		go guard.poll(ctx, schemaPollInterval)
+	}
+	return originGuard(handler, opts.originPolicy())
+}
+
+func (o Options) originPolicy() originPolicy {
+	return originPolicy{
+		allowRemote:  o.AllowRemote,
+		bindHost:     bindOriginHost(o.Addr),
+		allowOrigins: o.AllowOrigins,
 	}
 }
 

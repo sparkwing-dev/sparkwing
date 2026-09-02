@@ -82,6 +82,14 @@ code change to unlock.
 
 ### Security
 
+- **dashboard:** The local listener refuses cross-site subresource loads,
+  not just cross-site writes, so an `img` or `fetch` from another page
+  cannot reach a side-effecting GET. `--allow-remote` now widens the `Host`
+  check alone: a foreign browser `Origin` is still refused unless it is
+  loopback, the `--addr` host, or listed in the new
+  `--allow-origin`. Login, logout, user, bootstrap, token, and secret
+  writes decode through the shared JSON path, so they require an
+  `application/json` body and a bounded one.
 - **storage:** Artifact keys are limited to ASCII letters, digits, `.`, `_`, and
   `-` with no dot-leading segment, and the cache-backed artifact store escapes
   every key segment in its request path, so a double-encoded or `#`/`?` key

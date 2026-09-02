@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -59,7 +58,7 @@ type createTokenResp struct {
 
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	var req createTokenReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
