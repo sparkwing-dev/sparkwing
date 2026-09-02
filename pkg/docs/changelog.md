@@ -75,7 +75,11 @@ code change to unlock.
 - **ci:** Every GitHub Actions workflow now pins its actions to a full commit
   SHA with a version comment, the release job that prepares binaries no longer
   persists checkout credentials, and the canonical gate installs dashboard
-  dependencies with `--ignore-scripts`.
+  dependencies with `--ignore-scripts`. The policy gate parses each workflow as
+  YAML and checks every pin against `.github/action-pins.txt`, so a changed SHA,
+  a renamed owner, or a dropped `persist-credentials: false` fails until the
+  table is updated on purpose, and `.github/dependabot.yml` proposes weekly
+  action, Go module, and dashboard dependency updates.
 
 ### Fixed
 

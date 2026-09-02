@@ -7,7 +7,157 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	yaml "go.yaml.in/yaml/v3"
 )
+
+type workflowStep struct {
+	file    string
+	job     string
+	line    int
+	uses    string
+	comment string
+	with    map[string]string
+}
+
+func (s workflowStep) where() string {
+	return fmt.Sprintf("%s:%d (job %s)", s.file, s.line, s.job)
+}
+
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.DocumentNode && len(node.Content) == 1 {
+		node = node.Content[0]
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func trailingComment(lines []string, line int, value string) string {
+	if line < 1 || line > len(lines) {
+		return ""
+	}
+	raw := lines[line-1]
+	at := strings.Index(raw, value)
+	if at < 0 {
+		return ""
+	}
+	return strings.TrimSpace(raw[at+len(value):])
+}
+
+func workflowUsesSteps(t *testing.T, name string) []workflowStep {
+	t.Helper()
+	body := readHostedCIFile(t, ".github/workflows/"+name)
+	lines := strings.Split(body, "\n")
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatalf("parse %s: %v", name, err)
+	}
+	jobs := mappingValue(&doc, "jobs")
+	if jobs == nil || jobs.Kind != yaml.MappingNode {
+		t.Fatalf("%s has no jobs mapping", name)
+	}
+	var steps []workflowStep
+	for i := 0; i+1 < len(jobs.Content); i += 2 {
+		id := jobs.Content[i].Value
+		seq := mappingValue(jobs.Content[i+1], "steps")
+		if seq == nil || seq.Kind != yaml.SequenceNode {
+			continue
+		}
+		for _, node := range seq.Content {
+			uses := mappingValue(node, "uses")
+			if uses == nil {
+				continue
+			}
+			step := workflowStep{
+				file:    name,
+				job:     id,
+				line:    uses.Line,
+				uses:    uses.Value,
+				comment: trailingComment(lines, uses.Line, uses.Value),
+				with:    map[string]string{},
+			}
+			if with := mappingValue(node, "with"); with != nil && with.Kind == yaml.MappingNode {
+				for j := 0; j+1 < len(with.Content); j += 2 {
+					step.with[with.Content[j].Value] = with.Content[j+1].Value
+				}
+			}
+			steps = append(steps, step)
+		}
+	}
+	return steps
+}
+
+func workflowFileNames(t *testing.T) []string {
+	t.Helper()
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatalf("locate repo root: %v", err)
+	}
+	dir := filepath.Join(root, ".github", "workflows")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	var names []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || (!strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml")) {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+func actionPinTable(t *testing.T) map[string]string {
+	t.Helper()
+	action := regexp.MustCompile(`^[\w.-]+/[\w./-]+@[0-9a-f]{40}$`)
+	version := regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+	table := map[string]string{}
+	for i, line := range strings.Split(readHostedCIFile(t, ".github/action-pins.txt"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 2 || !action.MatchString(fields[0]) || !version.MatchString(fields[1]) {
+			t.Fatalf("action-pins.txt:%d is not %q: %s", i+1, "<owner>/<repo>[/<path>]@<sha> vX.Y.Z", line)
+		}
+		if _, duplicate := table[fields[0]]; duplicate {
+			t.Fatalf("action-pins.txt:%d repeats %s", i+1, fields[0])
+		}
+		table[fields[0]] = fields[1]
+	}
+	if len(table) == 0 {
+		t.Fatal("action-pins.txt records no pins")
+	}
+	return table
+}
+
+func requireCheckoutsDropCredentials(t *testing.T, name string) int {
+	t.Helper()
+	checkouts := 0
+	for _, step := range workflowUsesSteps(t, name) {
+		if !strings.HasPrefix(step.uses, "actions/checkout@") {
+			continue
+		}
+		checkouts++
+		if got, ok := step.with["persist-credentials"]; !ok || got != "false" {
+			t.Errorf("%s: checkout leaves the job token on disk (persist-credentials = %q)", step.where(), got)
+		}
+	}
+	return checkouts
+}
 
 func TestSecurityWorkflowTriggersAndPermissions(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/security.yaml")
@@ -38,10 +188,9 @@ func TestSecurityWorkflowTriggersAndPermissions(t *testing.T) {
 func TestSecurityWorkflowKeepsForksReadOnly(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/security.yaml")
 	requireWorkflowText(t, body,
-		"persist-credentials: false",
 		"if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository",
 	)
-	if got := strings.Count(body, "persist-credentials: false"); got != 2 {
+	if got := requireCheckoutsDropCredentials(t, "security.yaml"); got != 2 {
 		t.Fatalf("non-persisting checkouts = %d, want 2", got)
 	}
 	scanAt := strings.Index(body, `run: '"$RUNNER_TEMP/sparkwing" run security-scan`)
@@ -52,79 +201,58 @@ func TestSecurityWorkflowKeepsForksReadOnly(t *testing.T) {
 }
 
 func TestSecurityWorkflowPinsExternalActions(t *testing.T) {
-	body := readHostedCIFile(t, ".github/workflows/security.yaml")
 	pinned := regexp.MustCompile(`^[0-9a-f]{40}$`)
-	uses := 0
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "- "))
-		if !strings.HasPrefix(line, "uses: ") {
-			continue
-		}
-		uses++
-		action := strings.Fields(strings.TrimPrefix(line, "uses: "))[0]
-		_, ref, ok := strings.Cut(action, "@")
+	steps := workflowUsesSteps(t, "security.yaml")
+	for _, step := range steps {
+		_, ref, ok := strings.Cut(step.uses, "@")
 		if !ok || !pinned.MatchString(ref) {
-			t.Errorf("external action is not pinned to a full commit SHA: %s", action)
+			t.Errorf("%s: external action is not pinned to a full commit SHA: %s", step.where(), step.uses)
 		}
 	}
-	if uses != 8 {
-		t.Fatalf("external action uses = %d, want 8", uses)
+	if len(steps) != 8 {
+		t.Fatalf("external action uses = %d, want 8", len(steps))
 	}
 }
 
 func TestReleaseCheckoutsNeverPersistCredentials(t *testing.T) {
-	body := readHostedCIFile(t, ".github/workflows/release.yaml")
-	checkouts := strings.Count(body, "uses: actions/checkout@")
-	if checkouts == 0 {
+	if requireCheckoutsDropCredentials(t, "release.yaml") == 0 {
 		t.Fatal("release workflow has no checkout steps")
-	}
-	if got := strings.Count(body, "persist-credentials: false"); got != checkouts {
-		t.Fatalf("non-persisting checkouts = %d, want %d", got, checkouts)
 	}
 }
 
 func TestEveryWorkflowPinsActionsByCommitSHA(t *testing.T) {
-	root, err := repoRoot()
-	if err != nil {
-		t.Fatalf("locate repo root: %v", err)
-	}
-	dir := filepath.Join(root, ".github", "workflows")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read %s: %v", dir, err)
-	}
+	table := actionPinTable(t)
 	sha := regexp.MustCompile(`^[0-9a-f]{40}$`)
-	version := regexp.MustCompile(`^# v\d+\.\d+\.\d+$`)
-	workflows := 0
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || (!strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml")) {
-			continue
-		}
-		workflows++
-		for i, line := range strings.Split(readHostedCIFile(t, ".github/workflows/"+name), "\n") {
-			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "- "))
-			if !strings.HasPrefix(line, "uses: ") {
+	names := workflowFileNames(t)
+	if len(names) < 4 {
+		t.Fatalf("workflows scanned = %d, want every file under .github/workflows", len(names))
+	}
+	used := map[string]bool{}
+	for _, name := range names {
+		for _, step := range workflowUsesSteps(t, name) {
+			if strings.HasPrefix(step.uses, "./") {
 				continue
 			}
-			fields := strings.Fields(strings.TrimPrefix(line, "uses: "))
-			action := fields[0]
-			if strings.HasPrefix(action, "./") {
-				continue
-			}
-			where := fmt.Sprintf("%s:%d", name, i+1)
-			_, ref, ok := strings.Cut(action, "@")
+			_, ref, ok := strings.Cut(step.uses, "@")
 			if !ok || !sha.MatchString(ref) {
-				t.Errorf("%s: action is not pinned to a full commit SHA: %s", where, action)
+				t.Errorf("%s: action is not pinned to a full commit SHA: %s", step.where(), step.uses)
 				continue
 			}
-			if comment := strings.Join(fields[1:], " "); !version.MatchString(comment) {
-				t.Errorf("%s: pinned action lacks a %q version comment: %s", where, "# vX.Y.Z", line)
+			want, listed := table[step.uses]
+			if !listed {
+				t.Errorf("%s: %s is not in .github/action-pins.txt", step.where(), step.uses)
+				continue
+			}
+			used[step.uses] = true
+			if step.comment != "# "+want {
+				t.Errorf("%s: version comment is %q, want %q", step.where(), step.comment, "# "+want)
 			}
 		}
 	}
-	if workflows < 4 {
-		t.Fatalf("workflows scanned = %d, want every file under .github/workflows", workflows)
+	for action := range table {
+		if !used[action] {
+			t.Errorf("action-pins.txt lists %s, which no workflow uses", action)
+		}
 	}
 }
 
