@@ -139,6 +139,9 @@ func runSecretGet(args []string) error {
 	if name == "" {
 		return errors.New("secret get: --name is required")
 	}
+	if repo != "" && !fs.Changed("profile") {
+		return errors.New("secret get: --repo needs --profile; the local store has no repository dimension")
+	}
 
 	if !fs.Changed("profile") {
 		src := secrets.NewDotenvSource("")
@@ -291,6 +294,9 @@ func runSecretDelete(args []string) error {
 	on := v.String("profile")
 	if name == "" {
 		return errors.New("secret delete: --name is required")
+	}
+	if repo != "" && !fs.Changed("profile") {
+		return errors.New("secret delete: --repo needs --profile; the local store has no repository dimension")
 	}
 
 	if !fs.Changed("profile") {
