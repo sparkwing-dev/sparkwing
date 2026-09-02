@@ -151,10 +151,19 @@ code change to unlock.
   suffix or an untrusted immediate peer use the TCP peer address. Configure
   `--trusted-proxy-cidrs` or the chart's `web.trustedProxyCIDRs` to retain
   per-client buckets behind a reverse proxy.
-- **logs:** Run and node identifiers must now be a single path segment that
-  `filepath.Clean` leaves unchanged and resolve to one directory under the
-  runs root, so a request carrying a percent-encoded `.` can no longer address
-  the runs root itself and delete every run's logs.
+- **logs:** Run identifiers must now be a single path segment, and every
+  segment of a node identifier must be one that `filepath.Clean` leaves
+  unchanged, so a request carrying a percent-encoded `.` can no longer address
+  the runs root itself and delete every run's logs. Hierarchical node
+  identifiers such as `parent/child`, which spawned children carry, are stored
+  as one flat `parent__child.log` file the way local runs already store them,
+  instead of being rejected until the writer gives up.
+- **logs:** The log service opens, lists, and removes run directories through
+  an `os.Root` confined to the runs root, so a symlink planted at `runs/<name>`
+  can no longer read or delete files outside it. Filesystem failures answer
+  with a generic message instead of the server's absolute path, and the
+  identifier length cap counts the `.log` suffix, so an over-long node id is
+  rejected with a 400 rather than failing as an unretryable 500.
 
 ## [v0.38.2] - 2026-09-01
 
