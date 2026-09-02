@@ -994,6 +994,7 @@ func TestGitHubCommitStatusFailureDoesNotRejectWebhook(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("X-GitHub-Event", "pull_request")
+	req.Header.Set("X-GitHub-Delivery", "delivery-2")
 	req.Header.Set("X-Hub-Signature-256", testGitHubSignature("webhook-secret", body))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

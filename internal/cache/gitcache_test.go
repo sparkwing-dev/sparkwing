@@ -1280,3 +1280,35 @@ func TestMetricsDoNotEnumerateMirrors(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupSSHFailsWhenTheKeyCannotBeStaged(t *testing.T) {
+	saved := sshKeyDir
+	t.Cleanup(func() { sshKeyDir = saved })
+	root := t.TempDir()
+
+	sshKeyDir = filepath.Join(root, "absent")
+	if err := setupSSH(); err != nil {
+		t.Fatalf("setupSSH with no key secret: %v", err)
+	}
+
+	sshKeyDir = filepath.Join(root, "key")
+	if err := os.MkdirAll(sshKeyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sshKeyDir, "id_ed25519"), []byte("private-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	if err := os.WriteFile(home, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
+	err := setupSSH()
+	if err == nil {
+		t.Fatal("setupSSH accepted a home it cannot write, leaving every private-repo mirror keyless")
+	}
+	if !strings.Contains(err.Error(), "stage SSH key") {
+		t.Fatalf("err = %v, want it to name the staging step", err)
+	}
+}

@@ -177,25 +177,30 @@ A foreground run inherits the whole environment of the shell that starts
 it. A submitted run carries a filtered snapshot of it: every `SPARKWING_*`
 and `GITHUB_*` variable, plus `PATH`, `HOME`, `HOSTNAME`, and
 `KUBERNETES_SERVICE_HOST`. Sparkwing drops the credential-shaped part of
-that set -- names carrying `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH` and
-similar, bearer headers, PEM blocks, and URLs carrying a password -- so a
-queued run never writes one to disk. Concurrent submissions cannot inherit
-values from the shell that started the consumer or from another submission.
+that set -- names carrying `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`,
+`PAT` and similar, bearer headers, PEM blocks, JSON documents with a
+credential field, and URLs whose userinfo, query, or path names a
+credential -- so a queued run never writes one to disk. A submission never
+inherits values from the shell that started the consumer or from another
+submission.
 
 Set `SPARKWING_SUBMIT_ENV_ALLOW` to a comma-separated list to widen the
-snapshot; an entry ending in `*` matches a prefix. The credential filter
-still applies to what the list names, so a pipeline that needs a credential
-takes it from the secret store rather than the submitting shell.
+snapshot; an entry ending in `*` matches a prefix, and a bare `*` is
+refused rather than silently allowing nothing. The credential filter still
+applies to what the list names, and logs at warn the names it drops, so a
+pipeline that needs a credential takes it from the secret store rather than
+the submitting shell.
 
 ```bash
-SPARKWING_SUBMIT_ENV_ALLOW='AWS_REGION,AWS_PROFILE,DOCKER_*' \
+SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK' \
   sparkwing runs submit deploy
 ```
 
 Sparkwing stores the snapshot outside the runs database with mode `0600`,
 names it by a hash of the run id, and deletes it when the consumer starts
-the run. A run that a consumer shutdown returns to the queue dispatches
-again from the consumer's own environment, because its snapshot is gone.
+the run. A run that a consumer shutdown returns to the queue no longer has
+a snapshot, so its next dispatch fails rather than running with the
+consumer's environment; submit it again.
 
 Prefer pipeline configuration, secret stores, and pipeline arguments for
 values that should remain independent of a caller's ambient environment.
@@ -376,10 +381,11 @@ it actually lives: the registry, the gitops repo, kubectl. A
 developer with ECR push and gitops write access can deploy with or
 without sparkwing.
 
-A local pipeline runs with the operator's own authority. The pipeline
-process is a child of your shell, holding your kubeconfig, your cloud
-profile, your ssh agent, and your git credentials, and it can do anything
-you can do from that terminal. Read a pipeline before you run it, and run
+A foreground `sparkwing run` executes with the operator's own authority.
+The pipeline process is a child of your shell, holding your kubeconfig,
+your cloud profile, your ssh agent, and your git credentials, and it can do
+anything you can do from that terminal. A submitted run is narrower: it
+carries only the allow-listed snapshot described above. Read a pipeline before you run it, and run
 untrusted pipeline code under an account whose reach you accept.
 
 Sparkwing does protect its laptop-local persistence from other OS users. On

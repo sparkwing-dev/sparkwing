@@ -34,8 +34,12 @@ type submissionEnvironmentSnapshot struct {
 	Environment []string `json:"environment"`
 }
 
-func CaptureSubmissionEnvironment(home, runID string, env []string) error {
+func CaptureSubmissionEnvironment(home, runID string, env []string, logger *slog.Logger) error {
 	layout, err := ConsumerLayoutFor(home)
+	if err != nil {
+		return err
+	}
+	captured, err := filterSubmissionEnvironment(env, logger)
 	if err != nil {
 		return err
 	}
@@ -43,7 +47,7 @@ func CaptureSubmissionEnvironment(home, runID string, env []string) error {
 	if err := fssecure.EnsureDir(dir); err != nil {
 		return fmt.Errorf("secure submission environment directory: %w", err)
 	}
-	body, err := json.Marshal(submissionEnvironmentSnapshot{RunID: runID, Environment: filterSubmissionEnvironment(env)})
+	body, err := json.Marshal(submissionEnvironmentSnapshot{RunID: runID, Environment: captured})
 	if err != nil {
 		return fmt.Errorf("encode submission environment: %w", err)
 	}
@@ -104,7 +108,8 @@ func submissionEnvironment(home string, trig *store.Trigger) ([]string, error) {
 	}
 	body, err := os.ReadFile(submissionEnvironmentPath(home, trig.ID))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		// safety: the snapshot dies at run start, so a redispatch fails closed rather than taking the consumer shell.
+		return nil, errors.New("submission environment snapshot is gone; this run already started once, submit it again")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read submission environment: %w", err)
@@ -119,9 +124,13 @@ func submissionEnvironment(home string, trig *store.Trigger) ([]string, error) {
 	return snapshot.Environment, nil
 }
 
-func filterSubmissionEnvironment(env []string) []string {
-	names, prefixes := submissionEnvironmentAllowList(env)
+func filterSubmissionEnvironment(env []string, logger *slog.Logger) ([]string, error) {
+	names, prefixes, err := submissionEnvironmentAllowList(env)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]string, 0, len(env))
+	var dropped []string
 	for _, entry := range env {
 		key, value, ok := strings.Cut(entry, "=")
 		if !ok || !submissionEnvironmentAllowed(key, names, prefixes) {
@@ -129,14 +138,21 @@ func filterSubmissionEnvironment(env []string) []string {
 		}
 		// safety: the snapshot outlives the shell, so a credential-shaped name or value never reaches it.
 		if envredact.CredentialName(key) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
+			if names[key] {
+				dropped = append(dropped, key)
+			}
 			continue
 		}
 		out = append(out, entry)
 	}
-	return out
+	if len(dropped) > 0 && logger != nil {
+		logger.Warn("submission environment: credential filter dropped allow-listed names",
+			"names", strings.Join(dropped, ","), "allow_key", submissionEnvironmentAllowKey)
+	}
+	return out, nil
 }
 
-func submissionEnvironmentAllowList(env []string) (map[string]bool, []string) {
+func submissionEnvironmentAllowList(env []string) (map[string]bool, []string, error) {
 	names := map[string]bool{}
 	var prefixes []string
 	for _, entry := range env {
@@ -148,6 +164,10 @@ func submissionEnvironmentAllowList(env []string) (map[string]bool, []string) {
 			item = strings.TrimSpace(item)
 			switch {
 			case item == "":
+			case item == "*":
+				return nil, nil, fmt.Errorf(
+					"%s: %q is not a wildcard; name each variable or give a prefix such as AWS_*",
+					submissionEnvironmentAllowKey, item)
 			case strings.HasSuffix(item, "*"):
 				prefixes = append(prefixes, strings.TrimSuffix(item, "*"))
 			default:
@@ -155,7 +175,7 @@ func submissionEnvironmentAllowList(env []string) (map[string]bool, []string) {
 			}
 		}
 	}
-	return names, prefixes
+	return names, prefixes, nil
 }
 
 func submissionEnvironmentAllowed(key string, names map[string]bool, prefixes []string) bool {

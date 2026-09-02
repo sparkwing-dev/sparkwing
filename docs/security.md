@@ -97,11 +97,43 @@ already holds one.
 ## Webhooks
 
 GitHub webhook deliveries are verified by the controller: it checks the
-`X-Hub-Signature-256` HMAC against `GITHUB_WEBHOOK_SECRET` with a
-constant-time compare before doing any work. The handler acts on `push`
-and on `pull_request` (opened / synchronize / reopened, against the PR
-head), and answers `ping`; other event types and other `pull_request`
-actions are accepted and ignored.
+`X-Hub-Signature-256` HMAC with a constant-time compare before doing any
+work. The handler acts on `push` and on `pull_request` (opened /
+synchronize / reopened, against the PR head), and answers `ping`; other
+event types and other `pull_request` actions are accepted and ignored.
+
+`GITHUB_WEBHOOK_SECRET` is one value every configured repository holds,
+so on its own it says only that *some* holder signed the body -- any
+holder could then drive any pipeline against any repository. Bind the
+intake with `GITHUB_WEBHOOK_BINDINGS`, a JSON document:
+
+```json
+{
+  "pipelines": {
+    "sample-app-build": {"repos": ["acme/sample-app"], "secret": "..."}
+  },
+  "repo_secrets": {"acme/sample-app": "..."}
+}
+```
+
+`pipelines` is keyed by the `{pipeline}` path segment and `repo_secrets`
+by repository slug; slugs match case-insensitively. A pipeline with a
+non-empty `repos` list refuses any delivery naming another repository
+with `403`, so a repository owner reaches only the pipelines you bound
+to them. The signing secret resolves most specific first -- the
+pipeline's own secret, then the named repository's secret, then
+`GITHUB_WEBHOOK_SECRET` -- and a delivery that resolves to no secret at
+all answers `503`. Give every bound repository a secret of its own to
+isolate them completely: a repository left without one is verified with
+the shared secret its peers also hold. In the chart, pass the document
+through `controller.extraEnv` from a Kubernetes secret.
+
+Each delivery's `X-GitHub-Delivery` id is stored on the trigger it
+creates under a store-wide unique constraint, so replaying a signed
+delivery -- at the pipeline it was sent to or at another one -- answers
+`409` rather than starting a second run. A delivery arriving without
+that header answers `400`, since there would be nothing to key the
+constraint on.
 
 When `GITHUB_TOKEN` is set, the controller uses it only for outbound
 commit-status requests for `pull_request` webhook runs. Prefer a
@@ -349,6 +381,25 @@ cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
   passing whenever it cannot read the logs service's auth state: no
   announced logs URL, a health body with no `auth` field (an image
   older than the report), or a degraded service.
+- **Size the logs service's quotas for your volume.** `sparkwing-logs`
+  caps what one authenticated runner can spend. Each flag below reads an
+  environment variable of the same meaning, and `0` turns that bound off.
+
+  | Flag (env) | Default | Effect |
+  |------------|---------|--------|
+  | `--max-node-bytes` (`SPARKWING_LOGS_MAX_NODE_BYTES`) | 64MiB | Stored-byte cap for one node's log. Appends past it store a `[sparkwing-logs] truncated` marker once and are then dropped with `204`. |
+  | `--max-run-bytes` (`SPARKWING_LOGS_MAX_RUN_BYTES`) | 1GiB | Same cap across every node log in one run. |
+  | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. |
+  | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off) | Age after a run's last write at which the sweeper deletes its logs. Off by default so an upgrade deletes nothing; `168h` is a common choice. |
+  | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
+  | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
+  | `--search-timeout` (`SPARKWING_LOGS_SEARCH_TIMEOUT`) | 10s | How long one search may scan. |
+
+  A search that hits either budget, or whose caller disconnects, returns
+  the matches it found with `"truncated": true`. Search also requires
+  `run_id`; a query without one is refused with `400` rather than
+  walking every stored run.
+
 - **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
   behind an ingress/proxy that enforces HTTPS.
 - **Pin image digests** rather than floating tags.

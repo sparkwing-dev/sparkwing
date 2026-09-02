@@ -244,6 +244,9 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+  # The render check on this list is presence-only: one entry is enough,
+  # and an entry without `secretName` leaves the ingress controller's
+  # default certificate to terminate TLS, which is the operator's call.
   tls: []
   # - hosts:
   #     - sparkwing.example.com
@@ -252,7 +255,10 @@ ingress:
   # Publish the dashboard without TLS or without a login gate. An
   # Ingress exists to expose the dashboard beyond the cluster, so the
   # render fails on `tls: []` or `web.requireLogin: false` until this
-  # says the exposure is deliberate.
+  # says the exposure is deliberate. Must be a bool: a quoted string
+  # fails the render rather than reading as an opt-out. With `tls: []`
+  # the web Deployment also gets `SPARKWING_WEB_INSECURE_COOKIES=1`, so
+  # a browser can hold a session over plain HTTP.
   allowInsecure: false
 
 # -----------------------------------------------------------------------

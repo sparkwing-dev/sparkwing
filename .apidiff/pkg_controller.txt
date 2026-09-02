@@ -40,6 +40,14 @@ type Cipher interface {
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
+type GitHubWebhookBinding struct {
+	Repos  []string
+	Secret string
+}
+type GitHubWebhookConfig struct {
+	Pipelines   map[string]GitHubWebhookBinding
+	RepoSecrets map[string]string
+}
 type Loopback struct {
 }
 func (l *Loopback) Handler() http.Handler
@@ -118,6 +126,7 @@ func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
+func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
 func (s *Server) WithLogsURL(url string) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
