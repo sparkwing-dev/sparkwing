@@ -276,3 +276,31 @@ func TestSaveLintCache_EmptyCacheDirIsNoop(t *testing.T) {
 		t.Fatalf("empty cache dir: expected no blobs stored, got %d", blobCount)
 	}
 }
+
+func TestRestoreLintCache_SendsCacheTokenAsBearer(t *testing.T) {
+	useWorkDir(t, t.TempDir())
+
+	var authz string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authz = r.Header.Get("Authorization")
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("SPARKWING_CACHE_TOKEN", "blob-token")
+	if _, _, err := sparkwing.RestoreLintCache(context.Background(), srv.URL); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if authz != "Bearer blob-token" {
+		t.Fatalf("Authorization = %q, want %q", authz, "Bearer blob-token")
+	}
+
+	authz = ""
+	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+	if _, _, err := sparkwing.RestoreLintCache(context.Background(), srv.URL); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if authz != "" {
+		t.Fatalf("Authorization = %q, want no header", authz)
+	}
+}

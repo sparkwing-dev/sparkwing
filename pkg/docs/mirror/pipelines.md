@@ -40,7 +40,7 @@ pipelines:
 Each entry has (these are the only valid keys; an unknown field is a
 hard parse error):
 
-- **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", ...)` string
+- **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", ...)` string and match `^[A-Za-z0-9][A-Za-z0-9._-]*$`
 - **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
 - **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (cron expression, UTC; declarative -- recorded, not evaluated), `webhook`, `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
