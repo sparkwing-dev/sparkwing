@@ -50,6 +50,11 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
+- **cache:** The warm-pool controller now accepts only registry references in
+  `warm_images`, logging and dropping every other entry, and passes the list to
+  the privileged warmer pod as container arguments consumed by a fixed script.
+  A ConfigMap writer can no longer smuggle shell into the one privileged
+  workload Sparkwing creates.
 - **logs:** `sparkwing-logs` gains `--require-auth` /
   `SPARKWING_REQUIRE_AUTH`, refusing to start without a controller to resolve
   caller tokens against, reports `"auth"` on `GET /api/v1/health` so
