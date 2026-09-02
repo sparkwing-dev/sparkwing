@@ -136,6 +136,53 @@ func TestLogs_SweepRemovesExpiredRuns(t *testing.T) {
 	}
 }
 
+func TestLogs_DefaultLimitsLeaveRetentionOff(t *testing.T) {
+	defaults := logs.DefaultLimits()
+	if defaults.Retention != 0 {
+		t.Fatalf("default retention=%s, want 0 so an upgrade deletes no history", defaults.Retention)
+	}
+	for _, bound := range []struct {
+		name string
+		on   bool
+	}{
+		{"MaxNodeBytes", defaults.MaxNodeBytes > 0},
+		{"MaxRunBytes", defaults.MaxRunBytes > 0},
+		{"MinFreeBytes", defaults.MinFreeBytes > 0},
+		{"SearchMaxBytes", defaults.SearchMaxBytes > 0},
+		{"SearchTimeout", defaults.SearchTimeout > 0},
+	} {
+		if !bound.on {
+			t.Errorf("default %s is off, want it bounded", bound.name)
+		}
+	}
+
+	dir := t.TempDir()
+	s, err := logs.New(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	c := logs.NewClient(srv.URL, nil)
+	if err := c.Append(context.Background(), "run-1", "step-a", []byte("line\n")); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-9000 * time.Hour)
+	_ = os.Chtimes(filepath.Join(dir, "runs", "run-1", "step-a.log"), stale, stale)
+	_ = os.Chtimes(filepath.Join(dir, "runs", "run-1"), stale, stale)
+
+	removed, err := s.SweepOnce(time.Now())
+	if err != nil {
+		t.Fatalf("SweepOnce: %v", err)
+	}
+	if removed != 0 {
+		t.Fatalf("removed=%d, want a stock server to delete nothing", removed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "runs", "run-1")); err != nil {
+		t.Errorf("stock server deleted history: %v", err)
+	}
+}
+
 func TestLogs_SweepKeepsEverythingWithoutRetention(t *testing.T) {
 	s, c, dir, stop := newLimitedServer(t, logs.Limits{})
 	defer stop()

@@ -331,7 +331,7 @@ cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
   | `--max-node-bytes` (`SPARKWING_LOGS_MAX_NODE_BYTES`) | 64MiB | Stored-byte cap for one node's log. Appends past it store a `[sparkwing-logs] truncated` marker once and are then dropped with `204`. |
   | `--max-run-bytes` (`SPARKWING_LOGS_MAX_RUN_BYTES`) | 1GiB | Same cap across every node log in one run. |
   | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. |
-  | `--retention` (`SPARKWING_LOGS_RETENTION`) | 168h | Age after a run's last write at which the sweeper deletes its logs. |
+  | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off) | Age after a run's last write at which the sweeper deletes its logs. Off by default so an upgrade deletes nothing; `168h` is a common choice. |
   | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
   | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
   | `--search-timeout` (`SPARKWING_LOGS_SEARCH_TIMEOUT`) | 10s | How long one search may scan. |

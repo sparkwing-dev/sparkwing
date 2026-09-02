@@ -26,7 +26,7 @@ type Limits struct {
 	// with 507 rather than filling the volume.
 	MinFreeBytes uint64
 	// Retention is how long a run's logs survive after their last
-	// write. Zero keeps them forever.
+	// write. Zero, the default, keeps them forever.
 	Retention time.Duration
 	// SweepInterval is how often the retention sweeper runs.
 	SweepInterval time.Duration
@@ -37,13 +37,14 @@ type Limits struct {
 }
 
 // DefaultLimits returns the bounds a logs service uses when its
-// operator sets none.
+// operator sets none. Retention is absent: deleting stored history is
+// an operator decision, so the sweeper stays off until Retention is
+// set.
 func DefaultLimits() Limits {
 	return Limits{
 		MaxNodeBytes:   64 << 20,
 		MaxRunBytes:    1 << 30,
 		MinFreeBytes:   512 << 20,
-		Retention:      7 * 24 * time.Hour,
 		SweepInterval:  time.Hour,
 		SearchMaxBytes: 256 << 20,
 		SearchTimeout:  10 * time.Second,

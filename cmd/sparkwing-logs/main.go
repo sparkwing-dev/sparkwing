@@ -50,8 +50,8 @@ func run(args []string) error {
 		"free space on the storage volume below which appends are rejected with 507; "+
 			"0 disables the floor (env: SPARKWING_LOGS_MIN_FREE_BYTES)")
 	retention := fs.Duration("retention", envDuration("SPARKWING_LOGS_RETENTION", defaults.Retention),
-		"how long a run's logs survive after their last write; 0 keeps them forever "+
-			"(env: SPARKWING_LOGS_RETENTION)")
+		"how long a run's logs survive after their last write; 0, the default, keeps them "+
+			"forever, and 168h is a common choice (env: SPARKWING_LOGS_RETENTION)")
 	sweepInterval := fs.Duration("sweep-interval", envDuration("SPARKWING_LOGS_SWEEP_INTERVAL", defaults.SweepInterval),
 		"how often the retention sweeper runs (env: SPARKWING_LOGS_SWEEP_INTERVAL)")
 	searchMaxBytes := fs.Int64("search-max-bytes", envInt64("SPARKWING_LOGS_SEARCH_MAX_BYTES", defaults.SearchMaxBytes),
