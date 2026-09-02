@@ -80,6 +80,13 @@ code change to unlock.
 
 ### Security
 
+- **cache:** Cached pipeline binaries now carry a verified sha-256 digest
+  The cache stores the digest and the writing principal's token fingerprint
+  beside each uploaded binary, serves them as `Digest` and `ETag`, and writes
+  the digest as a companion object in an artifact store. Clients hash what they
+  download and discard a mismatch before the binary lands, so a poisoned or
+  tampered entry is recompiled instead of executed. A download without a digest
+  counts as a miss, so binaries stored by an older cache are recompiled once.
 - **ci:** A `security-scan` pipeline runs gosec, source-mode govulncheck,
   gitleaks, and `npm audit`, and the Security workflow runs it on every pull
   request with gosec findings uploaded to GitHub code scanning alongside CodeQL

@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -822,6 +824,99 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 
 var validBinHash = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}$`)
 
+type binMeta struct {
+	SHA256    string `json:"sha256"`
+	Size      int64  `json:"size"`
+	Principal string `json:"principal"`
+	WrittenAt string `json:"written_at"`
+}
+
+func binMetaPath(hash string) string { return filepath.Join(binsDir, hash+".meta.json") }
+
+func writingPrincipal(r *http.Request) string {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if token == "" {
+		return "anonymous"
+	}
+	// safety: fingerprint the bearer so attribution never persists the credential itself.
+	sum := sha256.Sum256([]byte(token))
+	return "token:" + hex.EncodeToString(sum[:])[:12]
+}
+
+func readBinMeta(hash string) (binMeta, error) {
+	var meta binMeta
+	data, err := os.ReadFile(binMetaPath(hash))
+	if err != nil {
+		return meta, err
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return meta, err
+	}
+	if _, err := hex.DecodeString(meta.SHA256); err != nil || len(meta.SHA256) != 64 {
+		return binMeta{}, fmt.Errorf("bin meta %s: malformed digest", hash)
+	}
+	return meta, nil
+}
+
+func writeBinMeta(hash string, meta binMeta) error {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(binsDir, "meta-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, binMetaPath(hash)); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
+func binDigest(hash string, f *os.File) (string, error) {
+	if meta, err := readBinMeta(hash); err == nil {
+		return meta.SHA256, nil
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	digest := hex.EncodeToString(h.Sum(nil))
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	meta := binMeta{SHA256: digest, Size: info.Size(), Principal: "unknown", WrittenAt: info.ModTime().UTC().Format(time.RFC3339)}
+	if err := writeBinMeta(hash, meta); err != nil {
+		log.Printf("warning: bin meta write %s: %v", hash, err)
+	}
+	return digest, nil
+}
+
+func setBinDigestHeaders(w http.ResponseWriter, digest string) error {
+	raw, err := hex.DecodeString(digest)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Digest", "sha-256="+base64.StdEncoding.EncodeToString(raw))
+	w.Header().Set("ETag", `"`+digest+`"`)
+	return nil
+}
+
 func handleBin(w http.ResponseWriter, r *http.Request) {
 	hash := strings.TrimPrefix(r.URL.Path, "/bin/")
 	if !validBinHash.MatchString(hash) {
@@ -839,6 +934,16 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer f.Close()
+		digest, err := binDigest(hash, f)
+		if err != nil {
+			log.Printf("warning: bin digest %s: %v", hash, err)
+			http.Error(w, "digest unavailable", http.StatusInternalServerError)
+			return
+		}
+		if err := setBinDigestHeaders(w, digest); err != nil {
+			http.Error(w, "digest unavailable", http.StatusInternalServerError)
+			return
+		}
 		info, _ := f.Stat()
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
@@ -854,11 +959,25 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		sum := sha256.Sum256(data)
+		digest := hex.EncodeToString(sum[:])
+		principal := writingPrincipal(r)
+		// safety: record the digest before the blob so a torn write serves a mismatch the client discards.
+		meta := binMeta{SHA256: digest, Size: int64(len(data)), Principal: principal, WrittenAt: time.Now().UTC().Format(time.RFC3339)}
+		if err := writeBinMeta(hash, meta); err != nil {
+			log.Printf("warning: bin meta write %s: %v", hash, err)
+			http.Error(w, "write error", http.StatusInternalServerError)
+			return
+		}
 		if err := os.WriteFile(path, data, 0o755); err != nil {
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("bin cache: stored %s (%d bytes)", hash, len(data))
+		log.Printf("bin cache: stored %s (%d bytes) sha256=%s principal=%s", hash, len(data), digest, principal)
+		if err := setBinDigestHeaders(w, digest); err != nil {
+			http.Error(w, "digest unavailable", http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusCreated)
 
 	default:
