@@ -72,6 +72,7 @@ spec:
             {{- if .Values.controller.pool.namespace }}
             - {{ printf "--pool-namespace=%s" .Values.controller.pool.namespace | quote }}
             {{- end }}
+            - {{ printf "--warmer-service-account=%s" (include "sparkwing-full.warmerServiceAccountName" .) | quote }}
             {{- end }}
             {{- /*
               Announced so a client with no logs: surface of its own -- a

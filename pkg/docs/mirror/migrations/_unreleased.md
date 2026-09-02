@@ -83,3 +83,36 @@ CHANGELOG links here.
 - **Why:** Acceptance evidence should come from the Kubernetes environment the
   product will use, without requiring a memory-heavy local cluster or spending
   cluster capacity on every source change.
+
+## Runner ServiceAccount tokens and RBAC
+
+- **Before:** The runner-bundle Role granted `get`, `list`, and `watch` on the
+  namespace's Secrets, ConfigMaps, pods, and events. Every pod in both charts
+  automounted its ServiceAccount token, so pipeline code could read the
+  controller bearer, the webhook HMAC, and the secrets-at-rest key straight from
+  the API. `--runner k8s` with no `--runner-sa` landed pipeline pods on the
+  namespace default account. The warm-pool warmer pod named no account at all.
+- **After:** The Role carries `rules: []`. No pod mounts a token unless
+  `runner.automountServiceAccountToken=true` asks for one. The runner, cache,
+  and logs pods each have their own ServiceAccount, and `sparkwing-full` creates
+  a release-scoped `<release>-sparkwing-full-cache-warmer` account that the
+  controller names through `--warmer-service-account` (env
+  `SPARKWING_WARMER_SA`).
+- **Migration:** A pipeline that called the Kubernetes API from a runner pod -
+  `kubectl get configmap`, a sealed-secrets read, an in-cluster helm install -
+  stops working: give it its own ServiceAccount and Role outside these charts.
+  A runner running the opt-in Kubernetes trigger runner
+  (`SPARKWING_TRIGGER_RUNNER=k8s`) needs its token back with
+  `--set runner.automountServiceAccountToken=true`, plus a Role that grants
+  `batch/jobs` create; that runner now refuses to start without `--runner-sa`.
+  An install that sets `serviceAccount.create=false` must add
+  `serviceAccount.shareAcrossComponents=true` to accept one account for all
+  three pods. A controller running the warm pool outside `sparkwing-full` must
+  create the warmer ServiceAccount in the pool namespace
+  (`kubectl create serviceaccount sparkwing-cache-warmer -n <pool-namespace>`)
+  or point `--warmer-service-account` at an existing one. On EKS or GKE, a
+  trust policy scoped to the old shared account must name the new `-cache` and
+  `-logs` accounts before the upgrade.
+- **Why:** Pipeline authors are expected to run code on runners. They are not
+  expected to read the key that decrypts every stored secret or the HMAC that
+  authenticates every webhook.

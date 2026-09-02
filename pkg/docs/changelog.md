@@ -111,16 +111,23 @@ code change to unlock.
   `sparkwing cluster users add --scope` creates narrower accounts.
   `store.CreateUser` and `store.CreateFirstUser` now take that scope set. See the
   [migration guide](docs/migrations/_unreleased.md#dashboard-proxy-allow-list).
-- **runner:** Runner Job pods mount no ServiceAccount token, and `--runner k8s`
-  now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead of silently
-  landing pipeline code on the namespace default ServiceAccount.
-- **helm:** The runner Role no longer reads namespace Secrets, ConfigMaps,
-  pods, or events, and no chart pod mounts a ServiceAccount token. The cache
-  and logs pods get their own ServiceAccounts instead of sharing the runner's,
-  and `sparkwing-full` creates an unprivileged `sparkwing-cache-warmer`
-  ServiceAccount that the controller's warmer pods now name explicitly.
-  Controllers running the warm pool outside that chart must create that
-  ServiceAccount in the pool namespace.
+- **runner (Breaking):** Runner Job pods mount no ServiceAccount token, and
+  `--runner k8s` now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead
+  of silently landing pipeline code on the namespace default ServiceAccount.
+  `--trigger-runner k8s` checks the same flag at startup rather than failing
+  once per claimed trigger. See the
+  [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
+- **helm (Breaking):** The runner Role no longer reads namespace Secrets,
+  ConfigMaps, pods, or events, and no chart pod mounts a ServiceAccount token
+  unless `runner.automountServiceAccountToken` asks for one. The cache and logs
+  pods get their own ServiceAccounts instead of sharing the runner's, and
+  `serviceAccount.create=false` now requires
+  `serviceAccount.shareAcrossComponents=true` to accept one shared account.
+  `sparkwing-full` creates a release-scoped, unprivileged cache-warmer
+  ServiceAccount and names it to the controller with
+  `--warmer-service-account`. Controllers running the warm pool outside that
+  chart must create that ServiceAccount in the pool namespace. See the
+  [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
 - **cache:** The cache no longer serves an authenticated endpoint to a request
   that omits `X-Forwarded-For`, so `PUT /bin/<key>`, `PUT /cache/<key>`,
   `POST /upload`, and the sync routes now require the bearer token from every
