@@ -317,6 +317,28 @@ func TestLocateTriggerRepo_RetryRejectsRepositoryIdentityDrift(t *testing.T) {
 	}
 }
 
+func TestLocateTriggerRepo_RetryRejectsARevisionThatIsNotAnObjectID(t *testing.T) {
+	repoDir, _ := writeRetryTestRepo(t, filepath.Join(t.TempDir(), "repo-a"), "git@example.test:owner/repo-a.git", "recorded-behavior")
+	for _, revision := range []string{"--upload-pack=evil", "-x", "HEAD", "main", "abc1234"} {
+		trig := &store.Trigger{
+			Pipeline: "pre-push",
+			Repo:     "owner/repo-a",
+			RetryOf:  "source-run",
+			TriggerEnv: map[string]string{
+				retryprovenance.RepoDirKey:      repoDir,
+				retryprovenance.RepoIdentityKey: "git@example.test:owner/repo-a.git",
+				retryprovenance.RevisionKey:     revision,
+				retryprovenance.PlanHashKey:     "sha256:matching-plan-shape",
+			},
+		}
+		_, err := locateTriggerRepo(context.Background(), trig, "")
+		var unavailable *RetrySourceUnavailableError
+		if !errors.As(err, &unavailable) || !strings.Contains(err.Error(), "not a git object id") {
+			t.Errorf("revision %q: error=%T %v, want a rejected object id", revision, err, err)
+		}
+	}
+}
+
 func TestLocateTriggerRepo_RetryRejectsSamePathSameBasenameReplacement(t *testing.T) {
 	repoDir := filepath.Join(t.TempDir(), "shared")
 	_, shaA := writeRetryTestRepo(t, repoDir, "git@example.test:owner-a/shared.git", "behavior-a")
