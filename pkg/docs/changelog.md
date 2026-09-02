@@ -49,6 +49,23 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Security
+
+- **cache (Breaking):** Every cache route that touches repository content --
+  git clone and registration, archives, files, tree hashes, branch membership,
+  the repo listing, and artifacts -- now requires the bearer token, alongside
+  the blob and sync routes that already did. Registration validates the
+  repository name and refuses to repoint an existing one without the token,
+  responses carry `X-Content-Type-Options: nosniff`, artifacts download as
+  attachments, and workspace snapshot refs expire after
+  `WORKSPACE_SEED_MAX_AGE` instead of wedging at the retention cap. The
+  runner-bundle chart ships a default-deny ingress NetworkPolicy for the cache
+  (`networkPolicy.enabled`), issues the controller a cache token, and refuses
+  to render a non-`ClusterIP` cache Service with no token configured. The
+  dashboard's `/api/v1/gitcache/` mount rejects a request with no bearer
+  credential and caps concurrent Git streams. See the
+  [migration guide](docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
+
 ## [v0.39.0] - 2026-09-02
 ### Docs
 
