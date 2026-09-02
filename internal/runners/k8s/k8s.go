@@ -383,9 +383,11 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 	podSpec := corev1.PodSpec{
 		RestartPolicy:      corev1.RestartPolicyNever,
 		ServiceAccountName: r.cfg.ServiceAccountName,
-		NodeSelector:       r.cfg.NodeSelector,
-		Tolerations:        r.cfg.Tolerations,
-		Containers:         []corev1.Container{container},
+		// safety: pipeline code runs here, so the pod gets no API token
+		AutomountServiceAccountToken: boolPtr(false),
+		NodeSelector:                 r.cfg.NodeSelector,
+		Tolerations:                  r.cfg.Tolerations,
+		Containers:                   []corev1.Container{container},
 		SecurityContext: &corev1.PodSecurityContext{
 			RunAsNonRoot: boolPtr(true),
 			SeccompProfile: &corev1.SeccompProfile{

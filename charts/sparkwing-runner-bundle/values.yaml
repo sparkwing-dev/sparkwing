@@ -254,12 +254,15 @@ logs:
   affinity: {}
 
 # -----------------------------------------------------------------------
-# 5. ServiceAccount. Shared by runner + cache + logs.
+# 5. ServiceAccount. The runner, cache, and logs pods each get their
+#    own; only the runner's is bound to the chart's Role.
 # -----------------------------------------------------------------------
 serviceAccount:
   # Create one (true) or use an existing SA you've already RBAC'd.
   create: true
-  # Empty + create=true => name is generated from .Release.Name.
+  # Names the runner SA; empty + create=true => generated from
+  # .Release.Name. The cache and logs SAs always follow their
+  # component names.
   name: ""
   # Annotations on the SA. Common case: IRSA (EKS) role binding for
   # ECR / S3 access on the runner side.
@@ -267,9 +270,10 @@ serviceAccount:
   annotations: {}
 
 # RBAC. The chart is namespace-scoped: a Role + RoleBinding only.
-# Runners do NOT need cluster-admin. The default permissions cover
-# the runner reading its own pod metadata and surfacing pod events
-# to the controller for debugging.
+# The runner, cache, and logs servers reach the controller over HTTP
+# and never call the Kubernetes API, so the Role carries no rules and
+# no pod in this chart mounts a ServiceAccount token. Pipelines that
+# must reach the API should bring their own Role outside this chart.
 rbac:
   create: true
 

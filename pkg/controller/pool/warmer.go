@@ -14,6 +14,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// WarmerServiceAccountName is the ServiceAccount the warmer pod runs as. It
+// carries no RBAC rules; the sparkwing-full chart creates it alongside the
+// controller whenever the pool is enabled.
+const WarmerServiceAccountName = "sparkwing-cache-warmer"
+
 // WarmPVC runs a short-lived DinD pod that mounts the target PVC at /var/lib/docker
 // and pulls the warm image list into it. Once the pod completes, the PVC contains
 // a pre-populated Docker storage directory.
@@ -36,6 +41,7 @@ func WarmPVC(ctx context.Context, client kubernetes.Interface, namespace, pvcNam
 	script.WriteString("wait $DOCKERD_PID 2>/dev/null || true\n")
 
 	privileged := true
+	automount := false
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -48,6 +54,9 @@ func WarmPVC(ctx context.Context, client kubernetes.Interface, namespace, pvcNam
 		},
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
+			// safety: the warmer runs privileged, so it carries no API token
+			ServiceAccountName:           WarmerServiceAccountName,
+			AutomountServiceAccountToken: &automount,
 			Containers: []corev1.Container{
 				{
 					Name:  "warmer",

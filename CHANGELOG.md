@@ -90,6 +90,16 @@ code change to unlock.
   suffix or an untrusted immediate peer use the TCP peer address. Configure
   `--trusted-proxy-cidrs` or the chart's `web.trustedProxyCIDRs` to retain
   per-client buckets behind a reverse proxy.
+- **helm:** The runner Role no longer reads namespace Secrets, ConfigMaps,
+  pods, or events, and no chart pod mounts a ServiceAccount token. The cache
+  and logs pods get their own ServiceAccounts instead of sharing the runner's,
+  and `sparkwing-full` creates an unprivileged `sparkwing-cache-warmer`
+  ServiceAccount that the controller's warmer pods now name explicitly.
+  Controllers running the warm pool outside that chart must create that
+  ServiceAccount in the pool namespace.
+- **runner:** Runner Job pods mount no ServiceAccount token, and `--runner k8s`
+  now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead of silently
+  landing pipeline code on the namespace default ServiceAccount.
 
 ## [v0.38.2] - 2026-09-01
 
