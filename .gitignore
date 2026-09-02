@@ -6,6 +6,16 @@
 *.test
 *.out
 
+# Command binaries dropped by `go build ./cmd/<name>` in the repo root
+/apidiff
+/sign-manifest
+/sparkwing-cache
+/sparkwing-controller
+/sparkwing-logs
+/sparkwing-runner
+/sparkwing-web
+/verify-release
+
 # Go workspace
 go.work
 go.work.sum

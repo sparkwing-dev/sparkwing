@@ -44,9 +44,10 @@ type violation struct {
 func main() {
 	staged := flag.Bool("staged", false, "only report comments in the staged diff (the pre-commit gate)")
 	base := flag.String("base", "", "only report comments added vs the fork point from this git ref")
+	allowNoDiff := flag.Bool("allow-no-diff", false, "pass instead of failing when the diff cannot be computed; the run gates nothing")
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: commentcheck [-staged | -base ref] <root>")
+		fmt.Fprintln(os.Stderr, "usage: commentcheck [-staged | -base ref] [-allow-no-diff] <root>")
 		os.Exit(2)
 	}
 	root := flag.Arg(0)
@@ -60,7 +61,11 @@ func main() {
 	if *staged || *base != "" {
 		added, aerr := scopedAdds(root, *staged, *base)
 		if aerr != nil {
-			fmt.Fprintf(os.Stderr, "commentcheck: cannot compute diff (%v); skipping gate\n", aerr)
+			if !*allowNoDiff {
+				fmt.Fprintln(os.Stderr, diffFailure(*base, aerr))
+				os.Exit(2)
+			}
+			fmt.Fprintf(os.Stderr, "commentcheck: cannot compute the diff (%v); -allow-no-diff accepted a run that gates nothing\n", aerr)
 			fmt.Println("commentcheck: skipped (no diff)")
 			return
 		}
@@ -72,6 +77,17 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("commentcheck: clean")
+}
+
+func diffFailure(base string, err error) string {
+	scope := "the staged diff"
+	if base != "" {
+		scope = base
+	}
+	return fmt.Sprintf("commentcheck: cannot compute the diff against %s (%v), so nothing was gated.\n"+
+		"Fix: fetch the base ref and name it, for example `git fetch origin main` then "+
+		"`commentcheck -base origin/main <root>`.\n"+
+		"Pass -allow-no-diff to accept a run that gates nothing.", scope, err)
 }
 
 func scan(root string) ([]violation, error) {

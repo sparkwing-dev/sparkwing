@@ -63,6 +63,16 @@ jobs:
           sarif_file: ${{ runner.temp }}/security/gosec.sarif
           category: gosec
 
+      - name: Upload scanner reports
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security/
+          if-no-files-found: ignore
+          retention-days: 14
+
   codeql:
     name: Security / CodeQL ${{ matrix.language }}
     runs-on: ubuntu-latest
