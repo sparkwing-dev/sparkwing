@@ -3,8 +3,9 @@ package main
 import (
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	flag "github.com/spf13/pflag"
+
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
 type lookbackDurationValue time.Duration

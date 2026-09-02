@@ -24,8 +24,10 @@ const SubmissionEnvironmentCapturedKey = "_SPARKWING_SUBMISSION_ENV_CAPTURED"
 
 const submissionEnvironmentAllowKey = "SPARKWING_SUBMIT_ENV_ALLOW"
 
-const submissionEnvironmentDir = "submission-environments"
-const abandonedSubmissionEnvironmentAge = 10 * time.Minute
+const (
+	submissionEnvironmentDir          = "submission-environments"
+	abandonedSubmissionEnvironmentAge = 10 * time.Minute
+)
 
 var submissionEnvironmentReconcileCursors sync.Map
 

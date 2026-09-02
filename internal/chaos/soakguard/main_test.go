@@ -17,8 +17,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-const soakguardHelper = "SPARKWING_SOAKGUARD_HELPER"
-const soakguardLeaderReady = "SPARKWING_SOAKGUARD_LEADER_READY"
+const (
+	soakguardHelper      = "SPARKWING_SOAKGUARD_HELPER"
+	soakguardLeaderReady = "SPARKWING_SOAKGUARD_LEADER_READY"
+)
 
 func TestSoakguardHelperProcess(t *testing.T) {
 	switch os.Getenv(soakguardHelper) {

@@ -612,7 +612,6 @@ func TestRunnerScopes_ClaimScopedReadsExpireAndKeepSecretsNodeOnly(t *testing.T)
 }
 
 func (f scopedFixture) do(t *testing.T, token, method, path, body string) int {
-
 	t.Helper()
 	var reader io.Reader
 	if body != "" {

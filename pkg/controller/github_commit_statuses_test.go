@@ -210,7 +210,6 @@ func TestGitHubCommitStatusRejectedDispatchReleasesRunSlot(t *testing.T) {
 		t.Fatalf("rejected pending status was posted as %q", got)
 	case <-time.After(50 * time.Millisecond):
 	}
-
 }
 
 func TestGitHubCommitStatusReporterSkipsUnresolvedReservation(t *testing.T) {
