@@ -53,6 +53,8 @@ spec:
             - --allow-unauthenticated
           {{- end }}
           env:
+            - name: HOME
+              value: /tmp
             {{- with (include "sparkwing-runner-bundle.cachePublicURL" .) }}
             - name: SPARKWING_CACHE_PUBLIC_URL
               value: {{ . | quote }}

@@ -610,14 +610,14 @@ fixture_sha="$(kube --namespace "$namespace" exec "deployment/$cache_deployment"
 [[ "$fixture_sha" =~ ^[0-9a-f]{40}$ ]] || die "in-cluster Git returned invalid fixture commit $fixture_sha"
 
 webhook_payload() {
-  jq -nc --arg sha "$fixture_sha" '{
+  jq -nc --arg sha "$fixture_sha" --arg nonce "${1:-0}" '{
     ref:"refs/heads/main",
     before:"0000000000000000000000000000000000000000",
     after:$sha,
     deleted:false,
     repository:{full_name:"sparkwing-k8s/e2e"},
     pusher:{name:"k8s-e2e",email:"k8s-e2e@sparkwing.invalid"},
-    head_commit:{id:$sha,message:"Kind golden path"}
+    head_commit:{id:$sha,message:("Kind golden path " + $nonce)}
   }'
 }
 
@@ -626,7 +626,7 @@ send_webhook() {
   local pipeline=$1
   local payload signature response
   webhook_sequence=$((webhook_sequence + 1))
-  payload="$(webhook_payload)"
+  payload="$(webhook_payload "$webhook_sequence")"
   signature="$(printf '%s' "$payload" | openssl dgst -sha256 -hmac "$webhook_secret" -hex | awk '{print $NF}')"
   response="$(curl --fail --silent --show-error --max-time 10 \
     -H 'Content-Type: application/json' \

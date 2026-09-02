@@ -6,7 +6,9 @@ package envredact
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
+	"unicode"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -23,6 +25,14 @@ var credentialSubstrings = []string{
 	"PRIVATE",
 	"PEM",
 	"CERT",
+	"JWT",
+	"COOKIE",
+	"SIGNATURE",
+}
+
+var credentialSegments = map[string]bool{
+	"PAT": true,
+	"SIG": true,
 }
 
 var credentialExact = map[string]bool{
@@ -44,14 +54,18 @@ var nonCredentialExact = map[string]bool{
 	"GIT_AUTHOR_DATE":                       true,
 	"GOPRIVATE":                             true,
 	"SSH_KEY_DIR":                           true,
+	"SSH_AUTH_SOCK":                         true,
 	"DOCKER_TLS_CERTDIR":                    true,
+	"DOCKER_CERT_PATH":                      true,
 	"SPARKWING_REQUIRE_AUTH":                true,
 	"SPARKWING_CACHE_ALLOW_UNAUTHENTICATED": true,
 }
 
-var jsonCredentialFields = []string{"TOKEN", "PASSWORD"}
-
 const jsonScanDepth = 8
+
+const bearerScheme = "BEARER "
+
+const redactedPlaceholder = "redacted"
 
 // CredentialName reports whether an environment variable name is
 // credential-shaped. A short allow-list of well-known configuration
@@ -64,17 +78,14 @@ func CredentialName(name string) bool {
 	if nonCredentialExact[upper] {
 		return false
 	}
-	for _, frag := range credentialSubstrings {
-		if strings.Contains(upper, frag) {
-			return true
-		}
-	}
-	return false
+	return credentialShaped(upper)
 }
 
 // CredentialValue reports whether a value carries a credential that
-// cannot be rewritten in place: a bearer header, a PEM block, or a JSON
-// document with a token or password field. Such values must be dropped.
+// cannot be rewritten in place: a bearer header, a PEM block, a JSON
+// document with a credential-shaped field, or a URL whose query or path
+// names one. Every line of a multi-line value is examined. Such values
+// must be dropped.
 func CredentialValue(value string) bool {
 	v := strings.TrimSpace(value)
 	if v == "" {
@@ -83,30 +94,144 @@ func CredentialValue(value string) bool {
 	if strings.Contains(v, "-----BEGIN ") {
 		return true
 	}
-	if len(v) > len("bearer ") && strings.EqualFold(v[:len("bearer ")], "bearer ") {
+	if credentialJSON(v) {
 		return true
 	}
-	if strings.HasPrefix(v, "{") {
-		var doc map[string]any
-		if json.Unmarshal([]byte(v), &doc) != nil {
-			return false
+	for _, line := range strings.Split(v, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
-		return credentialFieldIn(doc, jsonScanDepth)
+		if bearerIn(line) || credentialJSON(line) || credentialURL(line) {
+			return true
+		}
 	}
 	return false
 }
 
 // RedactValue replaces the userinfo of a URL or DSN value with
-// "redacted", keeping the scheme, host and path. Values that are not
-// URL-shaped come back unchanged.
+// "redacted", and replaces any query parameter value or path segment the
+// URL names like a credential. Values that are not URL-shaped come back
+// unchanged.
 func RedactValue(value string) string {
-	if !strings.Contains(value, "://") || !strings.Contains(value, "@") {
+	out := value
+	if strings.Contains(out, "://") && strings.Contains(out, "@") {
+		if redacted := sourceurl.Redact(out); redacted != "" {
+			out = redacted
+		}
+	}
+	return redactURLCredentials(out)
+}
+
+func credentialShaped(name string) bool {
+	upper := strings.ToUpper(name)
+	for _, frag := range credentialSubstrings {
+		if strings.Contains(upper, frag) {
+			return true
+		}
+	}
+	for _, seg := range strings.FieldsFunc(upper, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if credentialSegments[seg] {
+			return true
+		}
+	}
+	return false
+}
+
+func bearerIn(line string) bool {
+	upper := strings.ToUpper(line)
+	for i := 0; i+len(bearerScheme) <= len(upper); i++ {
+		if upper[i:i+len(bearerScheme)] != bearerScheme {
+			continue
+		}
+		if i > 0 && isNameByte(upper[i-1]) {
+			continue
+		}
+		if strings.TrimSpace(line[i+len(bearerScheme):]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func isNameByte(b byte) bool {
+	return b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
+}
+
+func credentialJSON(value string) bool {
+	if !strings.HasPrefix(value, "{") {
+		return false
+	}
+	var doc map[string]any
+	if json.Unmarshal([]byte(value), &doc) != nil {
+		return false
+	}
+	return credentialFieldIn(doc, jsonScanDepth)
+}
+
+func credentialURL(value string) bool {
+	u := parseCredentialURL(value)
+	if u == nil {
+		return false
+	}
+	for _, seg := range strings.Split(u.Path, "/") {
+		if seg != "" && credentialShaped(seg) {
+			return true
+		}
+	}
+	for _, pair := range strings.Split(u.RawQuery, "&") {
+		if name, _, ok := strings.Cut(pair, "="); ok && credentialShaped(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func redactURLCredentials(value string) string {
+	u := parseCredentialURL(value)
+	if u == nil {
 		return value
 	}
-	if redacted := sourceurl.Redact(value); redacted != "" {
-		return redacted
+	changed := false
+	if u.RawQuery != "" {
+		pairs := strings.Split(u.RawQuery, "&")
+		for i, pair := range pairs {
+			name, _, ok := strings.Cut(pair, "=")
+			if ok && credentialShaped(name) {
+				pairs[i] = name + "=" + redactedPlaceholder
+				changed = true
+			}
+		}
+		if changed {
+			u.RawQuery = strings.Join(pairs, "&")
+		}
 	}
-	return value
+	segments := strings.Split(u.Path, "/")
+	for i, seg := range segments {
+		if seg != "" && credentialShaped(seg) {
+			segments[i] = redactedPlaceholder
+			changed = true
+		}
+	}
+	if !changed {
+		return value
+	}
+	u.Path = strings.Join(segments, "/")
+	u.RawPath = ""
+	return u.String()
+}
+
+func parseCredentialURL(value string) *url.URL {
+	if !strings.Contains(value, "://") {
+		return nil
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.Host == "" {
+		return nil
+	}
+	return u
 }
 
 func credentialFieldIn(doc map[string]any, depth int) bool {
@@ -114,11 +239,8 @@ func credentialFieldIn(doc map[string]any, depth int) bool {
 		return false
 	}
 	for k, v := range doc {
-		upper := strings.ToUpper(k)
-		for _, frag := range jsonCredentialFields {
-			if strings.Contains(upper, frag) {
-				return true
-			}
+		if credentialShaped(k) {
+			return true
 		}
 		if nested, ok := v.(map[string]any); ok && credentialFieldIn(nested, depth-1) {
 			return true

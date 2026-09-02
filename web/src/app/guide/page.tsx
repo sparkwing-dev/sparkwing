@@ -843,13 +843,15 @@ SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | sed 's/.
 curl -X POST http://localhost:9001/webhooks/github/build \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: push" \
+  -H "X-GitHub-Delivery: $(uuidgen)" \
   -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
   -d "$PAYLOAD"
 \`\`\`
 
 **What to verify:**
 - Valid signatures trigger a build
-- Invalid/missing signatures are rejected (403)
+- Invalid/missing signatures are rejected (401)
+- A delivery without \`X-GitHub-Delivery\` is rejected (400), and re-sending an accepted body answers 409
 - Repo URL is validated against allowlist (if set)
 - Git ref is sanitized
 - The correct pipeline is selected based on \`pipelines.yaml\` trigger rules

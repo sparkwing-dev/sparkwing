@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -167,6 +168,53 @@ func TestCaptureArtifacts_BrokenSymlinkInDeclaredPathErrors(t *testing.T) {
 	}
 	if _, err := captureArtifacts(context.Background(), store, ws, []string{"dangling.txt"}); err == nil {
 		t.Fatal("broken symlink in a declared path should error")
+	}
+}
+
+func TestCaptureArtifacts_RefusesSymlinkOutOfWorkspace(t *testing.T) {
+	cases := []struct {
+		name  string
+		globs []string
+		link  func(t *testing.T, ws, outside string)
+	}{
+		{
+			name:  "file link",
+			globs: []string{"report.txt"},
+			link: func(t *testing.T, ws, outside string) {
+				symlinkOrSkip(t, filepath.Join(outside, "secret.txt"), filepath.Join(ws, "report.txt"))
+			},
+		},
+		{
+			name:  "directory link",
+			globs: []string{"dist/**"},
+			link: func(t *testing.T, ws, outside string) {
+				symlinkOrSkip(t, outside, filepath.Join(ws, "dist"))
+			},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ws := t.TempDir()
+			outside := t.TempDir()
+			writeArtifactFile(t, outside, "secret.txt", []byte("credential"), 0o600)
+			store := newTestArtifactStore(t)
+			c.link(t, ws, outside)
+
+			digest, err := captureArtifacts(context.Background(), store, ws, c.globs)
+			if err == nil {
+				t.Fatalf("want refusal, got manifest %+v", readManifest(t, store, digest))
+			}
+			if !errors.Is(err, errArtifactOutsideWorkspace) {
+				t.Fatalf("want escape refusal, got %v", err)
+			}
+		})
+	}
+}
+
+func symlinkOrSkip(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
 	}
 }
 

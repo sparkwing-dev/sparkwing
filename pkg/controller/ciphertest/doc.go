@@ -13,6 +13,11 @@
 //	    })
 //	}
 //
+// An implementation that also satisfies
+// [github.com/sparkwing-dev/sparkwing/pkg/controller.BoundCipher]
+// calls TestBoundCipher the same way to prove an envelope sealed for
+// one row does not open for another.
+//
 // The factory returns a fresh cipher per subtest -- the suite
 // assumes isolation (a Seal in one subtest shouldn't affect Open in
 // another).

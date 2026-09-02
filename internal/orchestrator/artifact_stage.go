@@ -20,6 +20,7 @@ type nodeManifestReader interface {
 
 func stageConsumedArtifacts(ctx context.Context, store storage.ArtifactStore, state nodeManifestReader, runID, workspace string, edges []sparkwing.ConsumeEdge) (int, error) {
 	staged := 0
+	var total int64
 	if len(edges) == 0 {
 		return staged, nil
 	}
@@ -48,7 +49,9 @@ func stageConsumedArtifacts(ctx context.Context, store storage.ArtifactStore, st
 			if err != nil {
 				return staged, fmt.Errorf("producer %q: %w", e.Producer, err)
 			}
-			if err := stageBlob(ctx, store, root, entry, rel); err != nil {
+			n, err := stageBlob(ctx, store, root, entry, rel, maxStagedTotalBytes-total)
+			total += n
+			if err != nil {
 				return staged, fmt.Errorf("producer %q artifact %q: %w", e.Producer, entry.Path, err)
 			}
 			staged++
@@ -74,17 +77,20 @@ func fetchManifest(ctx context.Context, store storage.ArtifactStore, digest stri
 	return m, nil
 }
 
-var maxStagedArtifactBytes = int64(8 << 30)
+var (
+	maxStagedArtifactBytes = int64(8 << 30)
+	maxStagedTotalBytes    = int64(32 << 30)
+)
 
-func stageBlob(ctx context.Context, store storage.ArtifactStore, root *os.Root, entry artifactEntry, rel string) error {
+func stageBlob(ctx context.Context, store storage.ArtifactStore, root *os.Root, entry artifactEntry, rel string, remaining int64) (int64, error) {
 	rc, err := store.Get(ctx, artifactBlobKey(entry.Digest))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = rc.Close() }()
 	if parent := filepath.Dir(rel); parent != "." {
 		if err := root.MkdirAll(parent, 0o755); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	mode := os.FileMode(entry.Mode).Perm()
@@ -93,21 +99,25 @@ func stageBlob(ctx context.Context, store storage.ArtifactStore, root *os.Root, 
 	_ = root.Remove(rel)
 	f, err := root.OpenFile(rel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	n, err := io.Copy(f, io.LimitReader(rc, maxStagedArtifactBytes+1))
+	limit := min(maxStagedArtifactBytes, remaining)
+	n, err := io.Copy(f, io.LimitReader(rc, limit+1))
 	if err != nil {
 		_ = f.Close()
-		return err
+		return n, err
 	}
-	if n > maxStagedArtifactBytes {
+	if n > limit {
 		_ = f.Close()
-		return fmt.Errorf("blob exceeds the staging size limit of %d bytes", maxStagedArtifactBytes)
+		if n > maxStagedArtifactBytes {
+			return n, fmt.Errorf("blob exceeds the staging size limit of %d bytes", maxStagedArtifactBytes)
+		}
+		return n, fmt.Errorf("staged artifacts exceed the total staging limit of %d bytes", maxStagedTotalBytes)
 	}
 	if err := f.Close(); err != nil {
-		return err
+		return n, err
 	}
-	return root.Chmod(rel, mode)
+	return n, root.Chmod(rel, mode)
 }
 
 func stageRel(into, relPath string) (string, error) {

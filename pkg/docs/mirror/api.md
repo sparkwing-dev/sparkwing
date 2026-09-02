@@ -22,9 +22,10 @@ unauthenticated endpoints, and first-visit admin bootstrap are in
 verified by HMAC (`X-Hub-Signature-256`) rather than a bearer token,
 since GitHub can't carry one; the handler acts on `push` and
 `pull_request` (opened/synchronize/reopened) and answers `ping`. A
-delivery naming a repository the pipeline is not bound to answers `403`,
-a replayed `X-GitHub-Delivery` answers `409`, and a missing one answers
-`400`. See [security.md](security.md).
+delivery naming a repository the pipeline is not bound to answers `404`,
+re-sending a body the controller already accepted answers `409` with the
+run the first delivery produced, and a delivery with no
+`X-GitHub-Delivery` header answers `400`. See [security.md](security.md).
 
 ## Logs service
 

@@ -596,7 +596,8 @@ CREATE TABLE IF NOT EXISTS triggers (
     claim_seq             INTEGER NOT NULL DEFAULT 0,
     claim_principal       TEXT NOT NULL DEFAULT '',
     claim_token_prefix    TEXT NOT NULL DEFAULT '',
-    webhook_delivery      TEXT NOT NULL DEFAULT ''
+    webhook_delivery      TEXT NOT NULL DEFAULT '',
+    webhook_replay_key    TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_triggers_pending
@@ -625,6 +626,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_idempotency_key
 -- The partial predicate keeps non-webhook submissions out of the index.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_webhook_delivery
     ON triggers(webhook_delivery) WHERE webhook_delivery != '';
+
+-- One trigger per digest of the signed material a webhook carried.
+-- The delivery id is a header the provider picks and nothing signs, so
+-- keying replay protection on it alone lets anyone who captured one
+-- delivery re-send the same signed body under an id of their own. This
+-- digest covers the pipeline and the request body, which is exactly
+-- what the HMAC covers, so a re-sent body is refused whatever header
+-- rides with it.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_webhook_replay_key
+    ON triggers(webhook_replay_key) WHERE webhook_replay_key != '';
 
 -- Unified concurrency primitive (.Cache DSL).
 -- Capacity per-key on entries; policy per-arrival on waiters.
@@ -843,7 +854,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 24
+const expectedSchemaVersion = 25
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1244,6 +1255,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.ensureColumns("triggers", triggerClaimOwnerCols)
 	case 24:
 		return s.addTriggerWebhookDelivery(ctx)
+	case 25:
+		return s.addTriggerWebhookReplayKey(ctx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1334,6 +1347,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			return err
 		}
 		_, err := tx.ExecContext(ctx, triggerWebhookDeliveryIndex)
+		return err
+	case 25:
+		if err := addColumnsTx(ctx, tx, "triggers", triggerWebhookReplayKeyCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, triggerWebhookReplayKeyIndex)
 		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -1565,6 +1584,10 @@ var triggerWebhookDeliveryCols = map[string]string{
 	"webhook_delivery": "TEXT NOT NULL DEFAULT ''",
 }
 
+var triggerWebhookReplayKeyCols = map[string]string{
+	"webhook_replay_key": "TEXT NOT NULL DEFAULT ''",
+}
+
 // TriggerIdempotencyIndexName is the unique index enforcing at most one
 // trigger per (pipeline, idempotency key). Exported so a schema test can
 // assert the constraint exists by name rather than inferring it from an
@@ -1583,6 +1606,17 @@ const triggerWebhookDeliveryColumn = "webhook_delivery"
 
 const triggerWebhookDeliveryIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TriggerWebhookDeliveryIndexName + `
     ON triggers(` + triggerWebhookDeliveryColumn + `) WHERE ` + triggerWebhookDeliveryColumn + ` != ''`
+
+// TriggerWebhookReplayKeyIndexName is the unique index enforcing at most
+// one trigger per digest of the signed material a webhook delivery
+// carried. Exported so a schema test can assert the constraint exists by
+// name.
+const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
+
+const triggerWebhookReplayKeyColumn = "webhook_replay_key"
+
+const triggerWebhookReplayKeyIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TriggerWebhookReplayKeyIndexName + `
+    ON triggers(` + triggerWebhookReplayKeyColumn + `) WHERE ` + triggerWebhookReplayKeyColumn + ` != ''`
 
 func (s *Store) ensureColumnsAll() error {
 	for _, spec := range columnMigrations {
@@ -1758,6 +1792,29 @@ func (s *Store) addTriggerWebhookDelivery(ctx context.Context) error {
 		}
 	}
 	if _, err := tx.ExecContext(ctx, triggerWebhookDeliveryIndex); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// safety: the column is worthless without the index, so a crash between them must roll back rather than admit replays.
+func (s *Store) addTriggerWebhookReplayKey(ctx context.Context) error {
+	have, err := s.tableColumns("triggers")
+	if err != nil {
+		return err
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if !have[triggerWebhookReplayKeyColumn] {
+		if _, err := tx.ExecContext(ctx,
+			`ALTER TABLE triggers ADD COLUMN "webhook_replay_key" TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, triggerWebhookReplayKeyIndex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2102,6 +2159,8 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	// safety: clamp again here so a non-HTTP caller cannot ask for every row.
+	limit = min(limit, MaxRunListLimit)
 
 	where := ""
 	args := []any{}
@@ -3622,6 +3681,20 @@ type Trigger struct {
 	// names one event at the provider, not one caller's intent: the same
 	// id arriving at two pipelines is a replay, not two requests.
 	WebhookDelivery string `json:"webhook_delivery,omitempty"`
+	// WebhookReplayKey is a digest of the material the webhook's
+	// signature covered -- the pipeline and the request body -- and it
+	// carries the replay decision. At most one trigger may hold any
+	// given non-empty value, so re-sending a body that was already
+	// accepted is refused however its delivery id reads.
+	//
+	// WebhookDelivery cannot carry that decision alone: it is a header
+	// the sender picks and the HMAC does not cover, so anyone who
+	// captured one delivery could re-send it under an id of their own.
+	//
+	// The store writes this field and never reads it back: it exists for
+	// the unique constraint, and [Store.FindTriggerByWebhookReplay]
+	// resolves a collision to the trigger that won it.
+	WebhookReplayKey string `json:"webhook_replay_key,omitempty"`
 }
 
 // DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
@@ -3677,14 +3750,17 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
 		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-		              idempotency_key, webhook_delivery)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		              idempotency_key, webhook_delivery, webhook_replay_key)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
 		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
-		t.IdempotencyKey, t.WebhookDelivery,
+		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey,
 	)
 	if err != nil && isUniqueViolation(err) {
+		if t.WebhookReplayKey != "" && strings.Contains(err.Error(), triggerWebhookReplayKeyColumn) {
+			return fmt.Errorf("%w: replay key %q", ErrDuplicateWebhookDelivery, t.WebhookReplayKey)
+		}
 		if t.WebhookDelivery != "" && strings.Contains(err.Error(), triggerWebhookDeliveryColumn) {
 			return fmt.Errorf("%w: delivery %q", ErrDuplicateWebhookDelivery, t.WebhookDelivery)
 		}
@@ -3731,6 +3807,33 @@ func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key s
 	err := s.queryRow(ctx,
 		`SELECT id FROM triggers WHERE pipeline = ? AND idempotency_key = ?`,
 		pipeline, key).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return s.GetTrigger(ctx, id)
+}
+
+// FindTriggerByWebhookReplay returns the trigger a refused webhook
+// delivery collided with: the one holding replayKey, or failing that the
+// one holding delivery. It reports ErrNotFound when neither is stored.
+//
+// The caller is answering a duplicate, so it needs the run the first
+// delivery produced rather than a bare refusal; a redelivery from the
+// provider is then answered with that run's id instead of a dead end.
+func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error) {
+	if replayKey == "" && delivery == "" {
+		return nil, ErrNotFound
+	}
+	var id string
+	err := s.queryRow(ctx,
+		`SELECT id FROM triggers
+		  WHERE (webhook_replay_key != '' AND webhook_replay_key = ?)
+		     OR (webhook_delivery != '' AND webhook_delivery = ?)
+		  ORDER BY created_at LIMIT 1`,
+		replayKey, delivery).Scan(&id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

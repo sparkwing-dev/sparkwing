@@ -5,6 +5,47 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## (Breaking) Submitted runs carry an allow-listed environment
+
+- **Before:** `sparkwing runs submit` snapshotted the whole submitting shell to
+  disk and handed it to the run, so the queued snapshot held whatever the
+  terminal held: `AWS_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`, a `kubectl` bearer.
+  A run that a consumer shutdown returned to the queue dispatched again from the
+  consumer's own environment.
+- **After:** Capture keeps only `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
+  `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, then drops every credential-shaped
+  name and value from that set. `SPARKWING_SUBMIT_ENV_ALLOW` widens it by name,
+  or by prefix with a trailing `*`; a bare `*` is refused at submission time,
+  and the credential filter logs at warn the names it removes from an entry an
+  operator wrote by hand. The consumer deletes the snapshot when it starts the
+  run, and a run that returns to the queue without its snapshot fails with
+  "submission environment snapshot is gone" rather than running under the
+  consumer's shell.
+- **Migration:** A submitted pipeline that read `AWS_PROFILE`, `AWS_REGION`,
+  `KUBECONFIG`, `DOCKER_HOST`, or `SSH_AUTH_SOCK` from the submitting shell
+  stops seeing them. Most of those fail loudly; `AWS_PROFILE` and `DOCKER_HOST`
+  do not, because the AWS SDK and the Docker client fall back to a default
+  profile and socket, which can point a deploy at the wrong account. Name what
+  each pipeline needs:
+
+  ```bash
+  SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK' \
+    sparkwing runs submit deploy
+  ```
+
+  The credential filter still applies to what the list names, so a value that
+  reads as a secret is dropped even when named; the warn line says which. Take
+  credentials from the secret store instead. Go callers of
+  `orchestrator.CaptureSubmissionEnvironment` pass a `*slog.Logger` as a
+  trailing argument.
+
+  Resubmit any run that was queued when a consumer was interrupted: its
+  snapshot is gone and the requeued dispatch now fails instead of running with
+  the consumer's environment.
+- **Why:** A queued run is a file on disk that outlives the shell that made it.
+  It should not be a copy of every credential that shell happened to export,
+  and losing the snapshot should narrow what a run can reach, not widen it.
+
 ## (Breaking) Runner scopes split out of admin
 
 - **Before:** The routes a runner calls to do its job all required `admin`:
@@ -441,10 +482,83 @@ CHANGELOG links here.
   container runs with a read-only root filesystem over a `/tmp` scratch
   `emptyDir`, and the Kubernetes runner Job does the same. `sparkwing-full`
   refuses to render when `ingress.enabled=true` with an empty `ingress.tls`
-  or with `web.requireLogin=false`.
+  or with `web.requireLogin=false`. `ingress.allowInsecure` must be a bool:
+  a quoted string fails the render instead of reading as an opt-out. Opting
+  in with an empty `ingress.tls` sets `SPARKWING_WEB_INSECURE_COOKIES=1` on
+  the web Deployment, so the login gate still works over plain HTTP. The
+  `ingress.tls` check is presence-only, so an entry without `secretName`
+  leaves TLS to the ingress controller's default certificate.
 - **Migration:** An install that publishes the dashboard sets `ingress.tls`
   and `web.requireLogin=true` before upgrading, or sets
-  `ingress.allowInsecure=true` to keep publishing it unencrypted or open. A
+  `ingress.allowInsecure=true` (a bool, not `"true"`) to keep publishing it
+  unencrypted or open. A
   custom image whose process writes outside `/tmp` needs its own
   `emptyDir` mount for that path, or `securityContext.readOnlyRootFilesystem`
   overridden for that container.
+
+## GitHub webhook bindings and replay protection
+
+- **Before:** Any holder of `GITHUB_WEBHOOK_SECRET` could drive any pipeline
+  against any repository, and a captured delivery could be re-sent without
+  limit.
+- **After:** `GITHUB_WEBHOOK_BINDINGS` binds each pipeline to the repositories
+  allowed to drive it and gives a pipeline or a repository its own signing
+  secret. The document is parsed strictly: an unknown field, a syntax error, or
+  content after the closing brace fails startup, and the controller logs the
+  resolved counts -- pipelines, bound repositories, pipelines refusing every
+  repository, repository secrets -- so a document that parsed to nothing is
+  visible. A `repos` list that is present but empty now refuses every
+  repository; a pipeline the document does not name, or that names no `repos`
+  key, is unchecked as before. A delivery whose `repository.full_name` is not
+  an ASCII `owner/name` slug is refused. Refusals are shaped so the status code
+  does not enumerate the tables: an unbound repository answers `404`, and once
+  any pipeline or repository carries its own secret, a delivery resolving to no
+  secret answers `401` rather than `503`.
+
+  Run-store schema 25 adds `triggers.webhook_replay_key`, a digest of the
+  pipeline and the request body -- exactly what the HMAC signs -- under a
+  store-wide unique constraint, alongside the schema 24 constraint on
+  `X-GitHub-Delivery`. Re-sending an accepted body answers `409` however its
+  delivery header reads, and the `409` body carries the `run_id` the first
+  delivery produced.
+- **Migration:** Upgrade the controller before the runners so the schema-25
+  column exists; older binaries refuse the upgraded SQL store. Review any
+  `GITHUB_WEBHOOK_BINDINGS` document for a `"repos": []` entry, which used to
+  allow every repository and now allows none, and for anything after the
+  closing brace, which used to be discarded and now fails startup. A caller
+  that keyed on the `403` for an unbound repository reads `404` now, and a
+  client that retried a webhook by changing `X-GitHub-Delivery` gets `409` with
+  the original run instead of a second run. `store.Trigger` gains
+  `WebhookReplayKey`, which `store.CreateTrigger` writes and no read returns;
+  `store.FindTriggerByWebhookReplay` resolves a refused delivery to the trigger
+  it collided with. `controller.ParseGitHubWebhookConfig` is the parser for the
+  environment document, moved out of the controller binary.
+- **Why:** A secret shared by every repository proves only that some holder
+  signed the body, and a replay key the sender picks and nothing signs is not a
+  replay key at all.
+
+## Service discovery and trigger submission take a closer look
+
+- **Before:** `GET /api/v1/services` answered anyone who could reach the
+  controller, `POST /api/v1/triggers` stored `git.repo_url` and every
+  trigger environment key it was handed, and `?limit=` on the run list was
+  unbounded.
+- **After:** Service discovery takes any valid bearer, which every client
+  that consumes it already holds. A trigger's `git.repo_url` goes through
+  the clone-URL rules the Git cache routes use, so a local path, a
+  loopback or private address, or a URL carrying credentials is rejected
+  with 400. Trigger environment keeps only `GITHUB_REPOSITORY`, the GitHub
+  pull-request context, and the `SPARKWING_START_AT`, `SPARKWING_STOP_AT`,
+  `SPARKWING_ONLY`, `SPARKWING_DRY_RUN`, and `SPARKWING_NO_CACHE`
+  switches. `?limit=` is capped at 1000 rows.
+- **Migration:** A hand-rolled client that polls `/api/v1/services`
+  anonymously sends `Authorization: Bearer <token>`. One that submits
+  triggers carrying its own environment keys moves that data into pipeline
+  args. A dashboard or export that asked for more than 1000 runs in one
+  request pages instead.
+- **Why:** The announcement names internal cache and logs URLs, the
+  repository URL becomes a clone target on every runner, the trigger
+  environment is served whole to every `triggers.read` principal and is
+  where a local retry reads the repository directory it trusts, and a
+  single unbounded list request loads every run row with its plan and args
+  blobs.

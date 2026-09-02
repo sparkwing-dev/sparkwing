@@ -50,6 +50,35 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
+- **controller:** Secret envelopes are now bound to the fields of the row
+  that decide who may read them -- the secret name, the owning repository,
+  whether an unscoped row is shared with every run, and whether the value is
+  masked in run output -- as additional authenticated data under an `enc:v2:`
+  prefix, so anyone with database write access who copies a ciphertext onto
+  another row, or edits a row to widen its own access, gets a value that
+  fails to open instead of one that answers there. Envelopes written before
+  the binding (`enc:v1:`) still open; `sparkwing secret list` and the
+  secrets API report `bound: false` for them, and the first successful read
+  reseals such a row in place. Secret names holding `..` or an empty path
+  segment are rejected for new rows, while a row that already exists keeps
+  its name and can still be rotated. A `Cipher` supplied through
+  `WithSecretsCipher` may also implement `controller.BoundCipher`, which
+  `ciphertest.TestBoundCipher` checks, to take part in the binding.
+- **cli (Breaking):** `sparkwing runs submit` now snapshots an allow-listed
+  environment instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`,
+  `HOME`, `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every
+  credential-shaped name and value. A submitted pipeline that read
+  `AWS_PROFILE`, `AWS_REGION`, `KUBECONFIG`, `DOCKER_HOST`, or `SSH_AUTH_SOCK`
+  from the submitting shell no longer sees them, and the AWS and Docker
+  clients answer from a default rather than failing, so name what a pipeline
+  needs:
+  `SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK'`.
+  A bare `*` is refused instead of quietly allowing nothing, and the credential
+  filter logs at warn the names it drops from an explicit entry. The consumer
+  deletes the snapshot when it starts the run; a run that returns to the queue
+  without its snapshot fails rather than inheriting the consumer's own shell.
+  See the
+  [migration guide](docs/migrations/_unreleased.md#breaking-submitted-runs-carry-an-allow-listed-environment).
 - **logs:** Bound what one runner token can spend on the logs service. Appends
   read the request body before taking a lock that is now sharded per stored
   file, so a slow POST no longer stalls every other node's writes, and a global
@@ -77,12 +106,16 @@ code change to unlock.
   gives a pipeline an allow-list of repositories and gives a pipeline or a
   repository a signing secret of its own, so handing a repository owner a
   secret no longer hands them every other pipeline: a delivery naming a
-  repository outside the pipeline's list answers `403`, and the shared
+  repository outside the pipeline's list answers `404`, and the shared
   `GITHUB_WEBHOOK_SECRET` stays the fallback for whatever the bindings do not
-  name. Each delivery's `X-GitHub-Delivery` is now stored on its trigger under
-  a store-wide unique constraint (schema 24), so a replayed delivery answers
-  `409` at any pipeline instead of starting a second run, and a delivery
-  arriving without that header answers `400`.
+  name. The claimed slug is normalized once, so no case fold can point the
+  secret lookup and the binding check at different repositories, and a
+  `repos` list that is present but empty refuses every repository rather than
+  none. Each delivery is recorded under both its `X-GitHub-Delivery` id and a
+  digest of the material its signature covered (schema 25), so re-sending an
+  accepted body answers `409` -- naming the run the first delivery produced --
+  however its delivery header reads, and a delivery arriving without that
+  header answers `400`.
 - **controller:** Secret envelopes are now bound to the row they belong to
   -- the secret name and its owning repository -- as additional
   authenticated data under an `enc:v2:` prefix, so a ciphertext copied onto
@@ -98,19 +131,38 @@ code change to unlock.
   Kubernetes runner Job does the same. `ingress.enabled=true` now fails to
   render with an empty `ingress.tls` or with `web.requireLogin=false`; set
   `ingress.allowInsecure=true` to publish the dashboard unencrypted or open
-  anyway.
+  anyway. That opt-out must be a bool, since a quoted string would read as
+  true and drop the guard, and opting in without TLS sets
+  `SPARKWING_WEB_INSECURE_COOKIES=1` on the web Deployment so the login gate
+  still works over plain HTTP.
 - **sdk:** `git.Clone` now authenticates to the git cache named by
-  `SPARKWING_GITCACHE`. The bearer in `SPARKWING_CACHE_TOKEN` travels in the
-  environment as a cache-scoped `http.<cache>/.extraHeader`, never on the
-  command line, and redirects are off for that URL so the header cannot follow
-  the request to another host. A cache that answers 401 no longer breaks the
-  clone: it falls back to the upstream remote, the same as an unreachable
-  cache.
+  `SPARKWING_GITCACHE` or `SPARKWING_GITCACHE_URL`. The bearer in
+  `SPARKWING_CACHE_TOKEN` travels in the environment as a cache-scoped
+  `http.<cache>/.extraHeader`, never on the command line, never to the
+  auto-detected localhost cache, and redirects are off for that URL so the
+  header cannot follow the request to another host. A cache that answers 401
+  or a redirect no longer breaks the clone: it falls back to the upstream
+  remote with one line on stderr, the same as an unreachable cache.
+  `git.Fetch` reuses the bearer when the checkout's `origin` is under that
+  cache, so a clone served by a guarded cache stays fetchable.
 - **cli:** `sparkwing runs submit` now snapshots an allow-listed environment
   instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
   `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every credential-shaped
   name and value, widened by `SPARKWING_SUBMIT_ENV_ALLOW`. The consumer
   deletes the snapshot when it starts the run rather than when the run ends.
+- **controller (Breaking):** Four controller limits, and a way to take `/metrics`
+  off the ingress. `?limit=` on the run list is capped at 1000 rows in the
+  query parser and again in the store. `GET /api/v1/services` now takes any valid bearer
+  instead of announcing the internal cache and logs URLs to anyone who can
+  reach the port. `POST /api/v1/triggers` validates `git.repo_url` with the
+  clone-URL rules the Git cache routes already use, and keeps only the trigger
+  environment keys a run reads, so a submission cannot forge the
+  retry-provenance keys the controller writes for itself. The half-hour Git
+  stream deadline is now applied by the authenticated Git cache handlers rather
+  than by a wrapper that ran before authentication. `sparkwing-controller
+  --metrics-addr` (`$SPARKWING_METRICS_ADDR`) binds Prometheus `/metrics` to
+  its own listener, off the API listener and any ingress in front of it. See
+  [the migration note](docs/migrations/_unreleased.md).
 
 ### Security
 
@@ -126,11 +178,23 @@ code change to unlock.
 - **cache + orchestrator:** The dependency-cache and lint-cache archives now
   extract through one `os.Root`-backed implementation that refuses to follow a
   symlink out of the target directory, so a chain of links inside an archive can
-  no longer land a file outside the cache. Both extractors share one extraction
-  budget, which the lint cache previously lacked entirely, and both mask entry
-  modes to `0o777`. Consumed artifacts stage through the workspace root under a
-  per-blob size cap with the manifest mode masked the same way, so a symlink
-  left in a workspace cannot capture the write.
+  no longer land a file outside the cache. An archived symlink is rejected when
+  its target is absolute, when it climbs past the entry's own depth, or when any
+  ancestor of the entry is itself a symlink, and directory modes are clamped to
+  `0o755` instead of being restored from the archive verbatim. Each extraction
+  is bounded by its own size budget, which the lint cache previously lacked
+  entirely, and the lint cache now expands into a sibling directory that is
+  renamed into place, so a rejected entry leaves the previous cache intact.
+  Consumed artifacts stage through the workspace root under a per-blob and a
+  per-run size cap with the manifest mode masked to `0o777`, so a symlink left
+  in a workspace cannot capture the write.
+- **orchestrator:** Artifact capture now resolves each glob match before it
+  reads one and refuses a match that lands outside the workspace, so a symlink
+  planted in a producer's workspace can no longer publish a file the runner
+  happens to be able to read -- a credential file, `/etc/passwd` -- into the
+  artifact store. A link whose target stays inside the workspace is still
+  followed, and every matched file is opened through an `os.Root` on the
+  workspace rather than by the path the walk found.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

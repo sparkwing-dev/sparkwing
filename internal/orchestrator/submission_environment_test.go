@@ -15,7 +15,7 @@ import (
 func TestSubmissionEnvironmentIsOwnerOnlyAndDiscarded(t *testing.T) {
 	home := t.TempDir()
 	const runID = "run-environment"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev", "PATH=/submit/bin"}); err != nil {
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev", "PATH=/submit/bin"}, quietLogger()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -73,7 +73,7 @@ func TestReconcileSubmissionEnvironmentsRemovesTerminalSnapshots(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
 	const runID = "run-terminal-environment"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}); err != nil {
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}, quietLogger()); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -108,7 +108,7 @@ func TestReconcileSubmissionEnvironmentsRemovesMalformedResidueAndContinues(t *t
 		t.Fatal(err)
 	}
 	const runID = "run-terminal-after-malformed"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}); err != nil {
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}, quietLogger()); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -155,7 +155,7 @@ func TestReconcileSubmissionEnvironmentsPreservesFreshSnapshotBeforeTriggerCommi
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
 	const runID = "run-capture-window"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"MODE=fresh"}); err != nil {
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"MODE=fresh"}, quietLogger()); err != nil {
 		t.Fatal(err)
 	}
 	removed, err := ReconcileSubmissionEnvironments(context.Background(), home, st, 100)
@@ -212,11 +212,38 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 				"AWS_REGION=us-east-1", "DOCKER_HOST=tcp://h:1",
 			},
 		},
+		{
+			name: "carries the allow-listed agent socket and docker certificate directory",
+			env: []string{
+				submissionEnvironmentAllowKey + "=SSH_AUTH_SOCK,DOCKER_CERT_PATH",
+				"SSH_AUTH_SOCK=/tmp/agent.sock", "DOCKER_CERT_PATH=/home/u/.docker",
+			},
+			want: []string{
+				submissionEnvironmentAllowKey + "=SSH_AUTH_SOCK,DOCKER_CERT_PATH",
+				"SSH_AUTH_SOCK=/tmp/agent.sock", "DOCKER_CERT_PATH=/home/u/.docker",
+			},
+		},
+		{
+			name: "drops a credential hidden in a URL query or path",
+			env: []string{
+				"SPARKWING_CACHE_URL=https://cache.example.com/?sig=abc",
+				"SPARKWING_WEBHOOK=https://hooks.example.com/services/T0/zzzSECRET",
+				"SPARKWING_HDR=x\nAuthorization: Bearer abc",
+				"SPARKWING_SA={\"type\":\"service_account\",\"api_key\":\"a\"}",
+				"SPARKWING_PROFILE=dev",
+			},
+			want: []string{"SPARKWING_PROFILE=dev"},
+		},
+		{
+			name: "drops a personal access token named outside the substring set",
+			env:  []string{"GITHUB_PAT=ghp_live", "SPARKWING_PROFILE=dev"},
+			want: []string{"SPARKWING_PROFILE=dev"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			const runID = "run-filter"
-			if err := CaptureSubmissionEnvironment(home, runID, tc.env); err != nil {
+			if err := CaptureSubmissionEnvironment(home, runID, tc.env, quietLogger()); err != nil {
 				t.Fatal(err)
 			}
 			got, err := submissionEnvironment(home, &store.Trigger{
@@ -233,10 +260,21 @@ func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *t
 	}
 }
 
+func TestCaptureSubmissionEnvironmentRejectsABareWildcard(t *testing.T) {
+	err := CaptureSubmissionEnvironment(t.TempDir(), "run-wildcard",
+		[]string{submissionEnvironmentAllowKey + "=*", "AWS_REGION=us-east-1"}, quietLogger())
+	if err == nil {
+		t.Fatal("CaptureSubmissionEnvironment error = nil, want a rejection of the bare wildcard")
+	}
+	if !strings.Contains(err.Error(), submissionEnvironmentAllowKey) {
+		t.Fatalf("error = %v, want it to name %s", err, submissionEnvironmentAllowKey)
+	}
+}
+
 func TestConsumeSubmissionEnvironmentDeletesTheSnapshotAtRunStart(t *testing.T) {
 	home := t.TempDir()
 	const runID = "run-consume"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}); err != nil {
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}, quietLogger()); err != nil {
 		t.Fatal(err)
 	}
 	trig := &store.Trigger{
@@ -253,11 +291,43 @@ func TestConsumeSubmissionEnvironmentDeletesTheSnapshotAtRunStart(t *testing.T) 
 	if _, err := os.Stat(submissionEnvironmentPath(home, runID)); !os.IsNotExist(err) {
 		t.Fatalf("snapshot outlived the start of the run: %v", err)
 	}
-	again, err := consumeSubmissionEnvironment(home, trig, quietLogger())
-	if err != nil {
-		t.Fatal(err)
+	again, againErr := consumeSubmissionEnvironment(home, trig, quietLogger())
+	if againErr == nil {
+		t.Fatalf("redispatch environment = %#v, want a fail-closed error", again)
 	}
 	if again != nil {
-		t.Fatalf("redispatch environment = %#v, want the consumer environment", again)
+		t.Fatalf("redispatch environment = %#v, want nothing", again)
+	}
+}
+
+func TestRequeuedRunDoesNotInheritTheConsumerShell(t *testing.T) {
+	t.Setenv("SPARKWING_DRY_RUN", "1")
+	t.Setenv("SPARKWING_ONLY", "deploy")
+	t.Setenv("SPARKWING_HOME", "/consumer/home")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "consumer-shell-secret")
+
+	home := t.TempDir()
+	const runID = "run-requeue"
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}, quietLogger()); err != nil {
+		t.Fatal(err)
+	}
+	trig := &store.Trigger{ID: runID, TriggerEnv: map[string]string{SubmissionEnvironmentCapturedKey: "1"}}
+	if _, err := consumeSubmissionEnvironment(home, trig, quietLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	env, err := consumeSubmissionEnvironment(home, trig, quietLogger())
+	if err == nil {
+		t.Fatalf("requeued dispatch = %#v, want the missing snapshot to fail the run", env)
+	}
+
+	joined := strings.Join(submissionExecutionEnvironment(nil, home), "\n")
+	for _, forbidden := range []string{"SPARKWING_DRY_RUN", "SPARKWING_ONLY", "/consumer/home"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("uncaptured dispatch environment carries %q", forbidden)
+		}
+	}
+	if !strings.Contains(joined, "SPARKWING_HOME="+home) {
+		t.Fatalf("uncaptured dispatch environment does not force SPARKWING_HOME: %s", joined)
 	}
 }

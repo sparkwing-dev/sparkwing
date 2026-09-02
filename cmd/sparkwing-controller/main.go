@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -34,6 +33,10 @@ func main() {
 func run(args []string) error {
 	fs := flag.NewFlagSet("sparkwing-controller", flag.ExitOnError)
 	addr := fs.String("addr", "127.0.0.1:4344", "bind address")
+	metricsAddr := fs.String("metrics-addr", os.Getenv("SPARKWING_METRICS_ADDR"),
+		"bind address for the Prometheus /metrics endpoint. Set it to move "+
+			"/metrics off the API listener, and off any ingress fronting that "+
+			"listener, onto its own port. Empty serves /metrics on --addr.")
 	poolEnabled := fs.Bool("pool", false,
 		"enable the warm-PVC pool (requires in-cluster K8s access)")
 	poolNamespace := fs.String("pool-namespace", os.Getenv("POD_NAMESPACE"),
@@ -116,10 +119,15 @@ func run(args []string) error {
 				"secret values will be stored at rest as plaintext")
 	}
 
-	webhookCfg, whErr := parseGitHubWebhookConfig(os.Getenv("GITHUB_WEBHOOK_BINDINGS"))
+	webhookCfg, whErr := controller.ParseGitHubWebhookConfig(os.Getenv("GITHUB_WEBHOOK_BINDINGS"))
 	if whErr != nil {
 		return fmt.Errorf("GITHUB_WEBHOOK_BINDINGS: %w", whErr)
 	}
+	wh := webhookCfg.BindingCounts()
+	fmt.Fprintf(os.Stderr,
+		"sparkwing-controller: github webhook bindings: %d pipelines, %d bound repositories, "+
+			"%d pipelines refusing every repository, %d repository secrets\n",
+		wh.Pipelines, wh.Repos, wh.DenyAll, wh.RepoSecrets)
 
 	srv := controller.New(st, nil).
 		WithTrustedProxyCIDRs(trustedProxyCIDRs).
@@ -129,7 +137,8 @@ func run(args []string) error {
 		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), os.Getenv("SPARKWING_DASHBOARD_URL")).
 		WithCachePodURL(*cachePodURL).
 		WithLogsURL(*logsURL).
-		WithCacheURL(*cacheURL)
+		WithCacheURL(*cacheURL).
+		WithMetricsAddr(*metricsAddr)
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)
@@ -244,18 +253,4 @@ func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
 		return nil, fmt.Errorf("kube config: %w", err)
 	}
 	return kubernetes.NewForConfig(rc)
-}
-
-func parseGitHubWebhookConfig(raw string) (controller.GitHubWebhookConfig, error) {
-	var cfg controller.GitHubWebhookConfig
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return cfg, nil
-	}
-	dec := json.NewDecoder(strings.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&cfg); err != nil {
-		return controller.GitHubWebhookConfig{}, err
-	}
-	return cfg, nil
 }

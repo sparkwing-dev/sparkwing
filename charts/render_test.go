@@ -100,6 +100,23 @@ func helmRenderError(t *testing.T, chart, release string, sets ...string) string
 	return string(out)
 }
 
+func helmRenderErrorSetString(t *testing.T, chart, release string, setStrings ...string) string {
+	t.Helper()
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not installed; chart rendering not exercised")
+	}
+	args := helmArgs(chart, release, nil)
+	for _, s := range setStrings {
+		args = append(args, "--set-string", s)
+	}
+	out, err := exec.Command(helm, args...).CombinedOutput()
+	if err == nil {
+		t.Fatalf("helm %s succeeded, want an actionable render failure", strings.Join(args, " "))
+	}
+	return string(out)
+}
+
 func helmTemplate(t *testing.T, release string, sets ...string) string {
 	t.Helper()
 	return helmRender(t, "./sparkwing-full", "templates/web-deployment.yaml", release, sets...)
@@ -299,13 +316,9 @@ type renderedVolumeMount struct {
 	MountPath string `yaml:"mountPath"`
 }
 
-type renderedEmptyDir struct {
-	SizeLimit string `yaml:"sizeLimit"`
-}
-
 type renderedVolume struct {
-	Name     string            `yaml:"name"`
-	EmptyDir *renderedEmptyDir `yaml:"emptyDir"`
+	Name     string         `yaml:"name"`
+	EmptyDir map[string]any `yaml:"emptyDir"`
 }
 
 type renderedContainer struct {
@@ -690,6 +703,12 @@ func renderLogs(t *testing.T, sets ...string) string {
 func renderCache(t *testing.T, sets ...string) string {
 	t.Helper()
 	return helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing", sets...)
+}
+
+func TestCachePinsAWritableHome(t *testing.T) {
+	if got := runnerEnv(t, renderCache(t))["HOME"]; got != "/tmp" {
+		t.Fatalf("cache HOME = %q, want /tmp so the SSH key stages on the scratch volume", got)
+	}
 }
 
 func TestRunnerPackageManagersUseTheBundledDependencyProxy(t *testing.T) {
@@ -1731,6 +1750,49 @@ func TestPublishedDashboardRendersOnceTLSAndLoginAreSet(t *testing.T) {
 func TestPublishedDashboardAcceptsAnExplicitInsecureOptIn(t *testing.T) {
 	rendered := helmRender(t, "./sparkwing-full", "templates/ingress.yaml", "sparkwing",
 		"ingress.enabled=true", "ingress.allowInsecure=true")
+	if !strings.Contains(rendered, "kind: Ingress") {
+		t.Fatalf("no Ingress rendered:\n%s", rendered)
+	}
+}
+
+func TestStringInsecureOptInFailsAtRender(t *testing.T) {
+	for _, value := range []string{"false", "true"} {
+		t.Run(value, func(t *testing.T) {
+			out := helmRenderErrorSetString(t, "./sparkwing-full", "sparkwing",
+				"ingress.enabled=true", "ingress.allowInsecure="+value)
+			if !strings.Contains(out, "ingress.allowInsecure must be a bool") {
+				t.Fatalf("render error does not reject the quoted opt-out:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestInsecureOptInWithoutTLSAllowsSessionCookiesOverHTTP(t *testing.T) {
+	container := runnerContainer(t, helmRender(t, "./sparkwing-full", "templates/web-deployment.yaml", "sparkwing",
+		"ingress.enabled=true", "ingress.allowInsecure=true"))
+	insecure := ""
+	for _, env := range container.Env {
+		if env.Name == "SPARKWING_WEB_INSECURE_COOKIES" {
+			insecure = env.Value
+		}
+	}
+	if insecure != "1" {
+		t.Fatalf("SPARKWING_WEB_INSECURE_COOKIES = %q, want 1 so a browser can hold a session over plain HTTP", insecure)
+	}
+
+	secured := runnerContainer(t, helmRender(t, "./sparkwing-full", "templates/web-deployment.yaml", "sparkwing",
+		"ingress.enabled=true", "web.requireLogin=true", "ingress.tls[0].secretName=sparkwing-tls"))
+	for _, env := range secured.Env {
+		if env.Name == "SPARKWING_WEB_INSECURE_COOKIES" {
+			t.Fatalf("SPARKWING_WEB_INSECURE_COOKIES set behind TLS: %+v", env)
+		}
+	}
+}
+
+func TestPublishedDashboardAcceptsTLSWithoutASecretName(t *testing.T) {
+	rendered := helmRender(t, "./sparkwing-full", "templates/ingress.yaml", "sparkwing",
+		"ingress.enabled=true", "web.requireLogin=true",
+		"ingress.tls[0].hosts[0]=sparkwing.example.com")
 	if !strings.Contains(rendered, "kind: Ingress") {
 		t.Fatalf("no Ingress rendered:\n%s", rendered)
 	}

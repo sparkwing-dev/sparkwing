@@ -141,35 +141,42 @@ func repoHash(repoURL string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(repoURL)))[:12]
 }
 
-func setupSSH() {
+func setupSSH() error {
 	if _, err := os.Stat(sshKeyDir); err != nil {
 		log.Printf("warning: no SSH key at %s -- only public repos will work", sshKeyDir)
-		return
+		return nil
 	}
 
 	home, _ := os.UserHomeDir()
 	sshDir := filepath.Join(home, ".ssh")
+	// safety: a key that cannot be staged makes every private-repo mirror fall back to no key, silently.
 	if err := os.MkdirAll(sshDir, 0o700); err != nil {
-		log.Printf("warning: failed to create %s: %v", sshDir, err)
-		return
+		return fmt.Errorf("cache: stage SSH key: mkdir %s: %w", sshDir, err)
 	}
 
 	// hack: k8s secret mounts strip trailing newlines; OpenSSH requires keys end with one.
-	entries, _ := os.ReadDir(sshKeyDir)
+	entries, err := os.ReadDir(sshKeyDir)
+	if err != nil {
+		return fmt.Errorf("cache: stage SSH key: read %s: %w", sshKeyDir, err)
+	}
 	for _, e := range entries {
-		data, _ := os.ReadFile(filepath.Join(sshKeyDir, e.Name()))
+		data, err := os.ReadFile(filepath.Join(sshKeyDir, e.Name()))
+		if err != nil {
+			return fmt.Errorf("cache: stage SSH key %s: %w", e.Name(), err)
+		}
 		if len(data) > 0 && data[len(data)-1] != '\n' {
 			data = append(data, '\n')
 		}
 		if err := os.WriteFile(filepath.Join(sshDir, e.Name()), data, 0o600); err != nil {
-			log.Printf("warning: failed to write SSH key %s: %v", e.Name(), err)
+			return fmt.Errorf("cache: stage SSH key %s: %w", e.Name(), err)
 		}
 	}
 
 	if err := os.Setenv("GIT_SSH_COMMAND", "ssh -i "+filepath.Join(sshDir, "id_ed25519")+" -o UserKnownHostsFile="+filepath.Join(sshDir, "known_hosts")+" -o StrictHostKeyChecking=yes"); err != nil {
-		log.Printf("warning: failed to set GIT_SSH_COMMAND: %v", err)
+		return fmt.Errorf("cache: stage SSH key: set GIT_SSH_COMMAND: %w", err)
 	}
 	log.Printf("SSH key configured from %s", sshKeyDir)
+	return nil
 }
 
 func bearerToken(r *http.Request) string {
