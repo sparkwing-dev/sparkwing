@@ -26,7 +26,7 @@ var gosecExcludedDirs = []string{"web", "testdata", "dist"}
 // SecurityScanArgs are the inputs of the security-scan pipeline.
 type SecurityScanArgs struct {
 	ReportDir string `flag:"report-dir" desc:"Directory that receives gosec.sarif and gosec.json. Default: a fresh temporary directory named in the job log."`
-	Strict    bool   `flag:"strict" desc:"Fail the gosec job when any high-severity, high-confidence finding remains. Off while the recorded backlog is being resolved; GitHub code scanning blocks new findings meanwhile."`
+	Strict    bool   `flag:"strict" desc:"Fail the gosec job when any high-severity, high-confidence finding remains. Gosec findings are report-only unless this flag is set."`
 }
 
 // SecurityScan runs the static security scanners against the repository.

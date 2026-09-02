@@ -3,9 +3,21 @@ package jobs
 import (
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestSecurityScanStrictFlagDescription(t *testing.T) {
+	field, ok := reflect.TypeFor[SecurityScanArgs]().FieldByName("Strict")
+	if !ok {
+		t.Fatal("SecurityScanArgs.Strict is missing")
+	}
+	want := "Fail the gosec job when any high-severity, high-confidence finding remains. Gosec findings are report-only unless this flag is set."
+	if got := field.Tag.Get("desc"); got != want {
+		t.Fatalf("strict description = %q, want %q", got, want)
+	}
+}
 
 func TestGosecSARIFUsesRepoRelativePaths(t *testing.T) {
 	root := filepath.Join("/", "work", "sparkwing")
