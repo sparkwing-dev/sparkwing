@@ -218,7 +218,11 @@ func (s *Server) claimedBy(next http.Handler) http.Handler {
 			return
 		}
 		runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
-		held, err := s.store.PrincipalHoldsNodeClaim(r.Context(), runID, nodeID, claimIdentity(r), time.Now())
+		claimant := claimIdentity(r)
+		held, err := s.store.PrincipalHoldsNodeClaim(r.Context(), runID, nodeID, claimant, time.Now())
+		if err == nil && !held {
+			held, err = s.store.PrincipalHoldsTriggerClaim(r.Context(), runID, claimant, time.Now())
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -240,6 +244,15 @@ func (s *Server) claimedRun(next http.Handler) http.Handler {
 	return s.runMember(false, next)
 }
 
+// safety: ownership is a live claim on one of the run's nodes or on the trigger the run came from.
+func (s *Server) ownsRun(ctx context.Context, runID string, claimant store.ClaimIdentity) (bool, error) {
+	held, err := s.store.PrincipalHoldsRunClaim(ctx, runID, claimant, time.Now())
+	if err != nil || held {
+		return held, err
+	}
+	return s.store.PrincipalHoldsTriggerClaim(ctx, runID, claimant, time.Now())
+}
+
 // safety: reads a runs.read token already gets stay open; a claim-only token is held to its own runs.
 func (s *Server) readableRun(next http.Handler) http.Handler {
 	return s.runMember(true, next)
@@ -253,7 +266,7 @@ func (s *Server) runMember(readerBypass bool, next http.Handler) http.Handler {
 			return
 		}
 		runID := r.PathValue("id")
-		held, err := s.store.PrincipalHoldsRunClaim(r.Context(), runID, claimIdentity(r), time.Now())
+		held, err := s.ownsRun(r.Context(), runID, claimIdentity(r))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -262,7 +275,7 @@ func (s *Server) runMember(readerBypass bool, next http.Handler) http.Handler {
 			writeAuthError(w, http.StatusForbidden, authErrorBody{
 				Code:      "claim_required",
 				Principal: p.label(),
-				Message:   "run " + runID + " has no node claimed by this principal",
+				Message:   "run " + runID + " is not claimed by this principal",
 			})
 			return
 		}
@@ -353,20 +366,20 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleGetRun)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodes)))
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
-	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, http.HandlerFunc(s.handleFinishRun)))
-	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUpdatePlanSnapshot)))
+	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleFinishRun))))
+	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdatePlanSnapshot))))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateNode)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleCreateNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleStartNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleFinishNode))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUpdateNodeDeps)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdateNodeDeps))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNode))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNodeOutput))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleWriteNodeDispatch))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeDispatch)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeDispatches)))
 
-	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
+	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleAppendEvent))))
 
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
 	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleClaimTrigger)))
@@ -445,7 +458,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRequestNodeBounce)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handlePendingNodeBounce))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleConsumeNodeBounce))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetNodeStatus)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleSetNodeStatus))))
 
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}/request", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRequestApproval)))
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeApprovalsWrite, http.HandlerFunc(s.handleResolveApproval)))

@@ -120,7 +120,8 @@ does not land in shell history.
 | `--value VALUE` | Secret value (prefer --file for long values) |
 | `--file PATH` | Read value from file (keeps value out of shell history) |
 | `--plain` | Store as non-masked config (e.g. REGION, LOG_LEVEL) -- value will NOT be redacted in run logs. Default is masked. |
-| `--repo SLUG` | Scope the secret to one repository slug (controller only); omit for a secret every run can read |
+| `--repo SLUG` | Scope the secret to one repository slug (controller only) |
+| `--shared` | Let every run read this unscoped secret (controller only). Without --repo or --shared the secret answers admin callers only. |
 | `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples
@@ -137,4 +138,7 @@ sparkwing secrets set --name REGION --value us-east-1 --plain --profile prod
 
 # Scope a secret to one repository
 sparkwing secrets set --name DEPLOY_KEY --file ./key --repo acme/web --profile prod
+
+# Let every run read one secret
+sparkwing secrets set --name NPM_TOKEN --file ./npmrc --shared --profile prod
 ```

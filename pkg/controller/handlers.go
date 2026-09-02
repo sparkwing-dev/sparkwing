@@ -95,6 +95,24 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("id, pipeline, status are required"))
 		return
 	}
+	if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(ScopeAdmin) {
+		held, err := s.ownsRun(r.Context(), body.ID, claimIdentity(r))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !held {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:      "claim_required",
+				Principal: p.label(),
+				Message:   "run " + body.ID + " is not claimed by this principal",
+			})
+			return
+		}
+		if !s.bindRunRepoToTrigger(w, r, &body) {
+			return
+		}
+	}
 	if err := s.store.CreateRun(r.Context(), body); err != nil {
 		if errors.Is(err, store.ErrSecretInputHash) {
 			writeError(w, http.StatusBadRequest, err)
@@ -104,6 +122,27 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+// safety: the trigger names the repository a run's secrets resolve against, and the caller never does.
+func (s *Server) bindRunRepoToTrigger(w http.ResponseWriter, r *http.Request, run *store.Run) bool {
+	trig, err := s.store.GetTrigger(r.Context(), run.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if trig == nil {
+		run.Repo, run.RepoURL, run.GithubOwner, run.GithubRepo = "", "", "", ""
+		return true
+	}
+	if run.Repo != "" && run.Repo != trig.Repo {
+		writeError(w, http.StatusBadRequest,
+			fmt.Errorf("repo %q does not match the trigger's repository %q", run.Repo, trig.Repo))
+		return false
+	}
+	run.Repo, run.RepoURL = trig.Repo, trig.RepoURL
+	run.GithubOwner, run.GithubRepo = trig.GithubOwner, trig.GithubRepo
+	return true
 }
 
 type finishRunReq struct {
@@ -763,7 +802,7 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	t, err := s.store.ClaimNextTriggerFor(r.Context(), 0, body.Pipelines, body.TriggerSources)
+	t, err := s.store.ClaimNextTriggerFor(r.Context(), claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			w.WriteHeader(http.StatusNoContent)

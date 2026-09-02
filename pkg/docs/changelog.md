@@ -63,9 +63,14 @@ code change to unlock.
   repository (schema 22, `sparkwing secrets set --repo <slug>`): a
   `secrets.read` caller resolves a name against the repository of the run it
   holds, so a runner token can no longer read another repository's credentials
-  or mint an admin bearer. A secret stored without `--repo` stays readable by
-  every run. `admin` remains a superset, so existing tokens keep working; see
-  the [migration guide](docs/migrations/_unreleased.md#breaking-runner-scopes-split-out-of-admin).
+  or mint an admin bearer. Every `runs.state` write is bound to a run the caller
+  owns, through a node claim or the run's trigger claim, so one runner token
+  cannot finish, re-plan, or forge events on a stranger's run, and a run's
+  repository comes from its trigger and never from the request. An unscoped
+  secret answers `admin` only until `sparkwing secrets set --shared` opens it to
+  every run (schema 23). `admin` remains a superset, so existing tokens keep
+  working; see the
+  [migration guide](docs/migrations/_unreleased.md#breaking-runner-scopes-split-out-of-admin).
 - **cli:** The admission daemon's unix socket is now private to its user. Its
   path stays a pure function of `SPARKWING_HOME`, so every caller resolves the
   same socket whatever its environment. The daemon refuses a base directory

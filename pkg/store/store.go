@@ -593,7 +593,9 @@ CREATE TABLE IF NOT EXISTS triggers (
     retry_of              TEXT NOT NULL DEFAULT '',
     parent_node_id        TEXT NOT NULL DEFAULT '',
     idempotency_key       TEXT NOT NULL DEFAULT '',
-    claim_seq             INTEGER NOT NULL DEFAULT 0
+    claim_seq             INTEGER NOT NULL DEFAULT 0,
+    claim_principal       TEXT NOT NULL DEFAULT '',
+    claim_token_prefix    TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_triggers_pending
@@ -758,8 +760,10 @@ CREATE TABLE IF NOT EXISTS secrets (
     updated_at INTEGER NOT NULL,
     -- masked=0 = non-sensitive config (not redacted in run output).
     masked     INTEGER NOT NULL DEFAULT 1,
-    -- repo='' is unscoped: every run resolves it.
+    -- repo='' is unscoped: only a shared unscoped row answers a run.
     repo       TEXT NOT NULL DEFAULT '',
+    -- shared=1 lets an unscoped row answer a run that names no repo of its own.
+    shared     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (name, repo)
 );
 
@@ -830,7 +834,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 22
+const expectedSchemaVersion = 23
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1224,6 +1228,11 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.rehashSessions(ctx)
 	case 22:
 		return s.addSecretRepoScope(ctx)
+	case 23:
+		if err := s.ensureColumns("secrets", secretsSharedCols); err != nil {
+			return err
+		}
+		return s.ensureColumns("triggers", triggerClaimOwnerCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1304,6 +1313,11 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			}
 		}
 		return nil
+	case 23:
+		if err := addColumnsTx(ctx, tx, "secrets", secretsSharedCols); err != nil {
+			return err
+		}
+		return addColumnsTx(ctx, tx, "triggers", triggerClaimOwnerCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1521,6 +1535,15 @@ var triggerSubmissionCols = map[string]string{
 	"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
 }
 
+var triggerClaimOwnerCols = map[string]string{
+	"claim_principal":    "TEXT NOT NULL DEFAULT ''",
+	"claim_token_prefix": "TEXT NOT NULL DEFAULT ''",
+}
+
+var secretsSharedCols = map[string]string{
+	"shared": "INTEGER NOT NULL DEFAULT 0",
+}
+
 // TriggerIdempotencyIndexName is the unique index enforcing at most one
 // trigger per (pipeline, idempotency key). Exported so a schema test can
 // assert the constraint exists by name rather than inferring it from an
@@ -1640,8 +1663,9 @@ func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 }
 
 // hack: SQLite cannot alter a primary key in place, so widening it to (name, repo) rebuilds the table.
-const secretsRepoRebuildSQLite = `
-CREATE TABLE secrets_repo_scoped (
+var secretsRepoRebuildSQLite = []string{
+	`DROP TABLE IF EXISTS secrets_repo_scoped`,
+	`CREATE TABLE secrets_repo_scoped (
     name       TEXT NOT NULL,
     value      TEXT NOT NULL,
     principal  TEXT NOT NULL,
@@ -1650,11 +1674,12 @@ CREATE TABLE secrets_repo_scoped (
     masked     INTEGER NOT NULL DEFAULT 1,
     repo       TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (name, repo)
-);
-INSERT INTO secrets_repo_scoped (name, value, principal, created_at, updated_at, masked, repo)
-    SELECT name, value, principal, created_at, updated_at, masked, '' FROM secrets;
-DROP TABLE secrets;
-ALTER TABLE secrets_repo_scoped RENAME TO secrets;`
+)`,
+	`INSERT INTO secrets_repo_scoped (name, value, principal, created_at, updated_at, masked, repo)
+    SELECT name, value, principal, created_at, updated_at, masked, '' FROM secrets`,
+	`DROP TABLE secrets`,
+	`ALTER TABLE secrets_repo_scoped RENAME TO secrets`,
+}
 
 var secretRepoScopePostgres = []string{
 	`ALTER TABLE secrets ADD COLUMN IF NOT EXISTS repo TEXT NOT NULL DEFAULT ''`,
@@ -1662,6 +1687,7 @@ var secretRepoScopePostgres = []string{
 	`ALTER TABLE secrets ADD PRIMARY KEY (name, repo)`,
 }
 
+// safety: the rebuild drops the live table, so a crash mid-sequence must roll back rather than leave no secrets table.
 func (s *Store) addSecretRepoScope(ctx context.Context) error {
 	have, err := s.tableColumns("secrets")
 	if err != nil {
@@ -1670,8 +1696,17 @@ func (s *Store) addSecretRepoScope(ctx context.Context) error {
 	if have["repo"] {
 		return nil
 	}
-	_, err = s.exec(ctx, secretsRepoRebuildSQLite)
-	return err
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range secretsRepoRebuildSQLite {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ensureColumns(table string, cols map[string]string) error {
@@ -1779,6 +1814,10 @@ type Run struct {
 // caller's status. Idempotent for the (pending -> running) transition
 // the orchestrator performs at start-of-run; non-pending existing rows
 // are left untouched so this stays a no-op on retry / replay paths.
+// The repository identity (repo, repo URL, GitHub owner and name) is
+// written once, at the insert that first names it, and every later
+// upsert keeps it: secret resolution reads it, so a caller that can
+// upsert a run must not be able to repoint it.
 func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if err := ValidateRunInvocation(r); err != nil {
 		return err
@@ -1814,10 +1853,10 @@ ON CONFLICT(id) DO UPDATE SET
     plan_json       = excluded.plan_json,
     started_at      = excluded.started_at,
     parent_run_id   = excluded.parent_run_id,
-    repo            = excluded.repo,
-    repo_url        = excluded.repo_url,
-    github_owner    = excluded.github_owner,
-    github_repo     = excluded.github_repo,
+    repo            = CASE WHEN runs.repo = '' THEN excluded.repo ELSE runs.repo END,
+    repo_url        = CASE WHEN runs.repo_url = '' THEN excluded.repo_url ELSE runs.repo_url END,
+    github_owner    = CASE WHEN runs.github_owner = '' THEN excluded.github_owner ELSE runs.github_owner END,
+    github_repo     = CASE WHEN runs.github_repo = '' THEN excluded.github_repo ELSE runs.github_repo END,
     retry_of        = excluded.retry_of,
     retried_as      = excluded.retried_as,
     retry_source    = excluded.retry_source,
@@ -2996,6 +3035,30 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, cl
 const nodeClaimLiveSQL = `claimed_by IS NOT NULL
 		    AND lease_expires_at IS NOT NULL AND lease_expires_at > ?`
 
+const triggerClaimLiveSQL = `status = 'claimed'
+		    AND lease_expires_at IS NOT NULL AND lease_expires_at > ?`
+
+// PrincipalHoldsTriggerClaim reports whether claimant holds the
+// trigger's unexpired claim. A trigger id is the id of the run it
+// creates, so this is the ownership proof a dispatcher has before any
+// node of that run is claimed. An unbound claimant holds nothing.
+func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error) {
+	if !claimant.bound() {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM triggers
+		  WHERE id = ? AND claim_principal = ?
+		    AND claim_token_prefix = ?
+		    AND `+triggerClaimLiveSQL,
+		triggerID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
+}
+
 // PrincipalHoldsNodeClaim reports whether claimant holds the node's
 // unexpired claim. An unbound claimant holds nothing, so an
 // unauthenticated caller never passes this check.
@@ -3889,11 +3952,12 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 // ClaimNextTrigger flips the oldest pending trigger to 'claimed'.
 // ErrNotFound when empty. lease=0 uses DefaultLeaseDuration.
 func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error) {
-	return s.ClaimNextTriggerFor(ctx, lease, nil, nil)
+	return s.ClaimNextTriggerFor(ctx, ClaimIdentity{}, lease, nil, nil)
 }
 
-// ClaimNextTriggerFor adds pipeline/source filter sets (AND semantics).
-func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines, sources []string) (*Trigger, error) {
+// ClaimNextTriggerFor adds pipeline/source filter sets (AND semantics)
+// and records claimant as the token the claim answers to.
+func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity, lease time.Duration, pipelines, sources []string) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
@@ -3958,9 +4022,11 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	expires := now.Add(lease)
 	if _, err := tx.ExecContext(
 		ctx,
-		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1
+		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1,
+		        claim_principal = ?, claim_token_prefix = ?
 		  WHERE id = ?`,
-		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(), t.ID,
+		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(),
+		claimant.Principal, claimant.TokenPrefix, t.ID,
 	); err != nil {
 		return nil, err
 	}

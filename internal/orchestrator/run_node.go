@@ -133,7 +133,7 @@ func RunNodeOnce(
 	source := localSecrets
 	if source == nil {
 		source = secrets.SourceFunc(func(name string) (string, bool, error) {
-			sec, gerr := stateClient.GetSecret(ctx, name)
+			sec, gerr := stateClient.GetSecretForRun(ctx, name, runID)
 			if gerr != nil {
 				if errors.Is(gerr, store.ErrNotFound) {
 					return "", false, secrets.ErrSecretMissing

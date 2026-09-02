@@ -29,7 +29,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`                               |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`                   |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start` + `finish` (those two also require the caller's own claim), and PUT `/pipelines/{name}/profile/pin` |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, and PUT `/pipelines/{name}/profile/pin`. Every one is bound to a run the caller owns |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `admin`           | tokens / users / secrets CRUD, node deps / status / mark-ready / revoke-ready, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
@@ -38,10 +38,16 @@ Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
 
 A runner needs `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`,
-and `logs.write`. That set claims work, drives the run it claimed, reads the
-secrets its repository owns, and ships logs. It mints no token, reads no user,
-and lists no secret. A pool that only claims already-created nodes can drop
-`triggers.claim` and `runs.state`.
+and `logs.write`. That set claims work, drives the run it claimed from plan to
+finish, reads the secrets its repository owns, and ships logs. It mints no
+token, reads no user, and lists no secret. A pool replica that executes
+already-created nodes still needs `runs.state`, because `start`, `finish`, and
+event append are its own writes; it can drop `triggers.claim` when a separate
+dispatcher claims triggers.
+
+Marking a node ready stays `admin`, so a warm-pool dispatcher that hands nodes
+to a pool keeps an `admin` token. That is the one process in the runner path
+above the runner scope set.
 
 A route can narrow a field below its route scope. The node dispatch reads
 (`GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and `/dispatches`) admit
@@ -66,10 +72,17 @@ The lease is an authorization window, so the claimant does not choose how long
 it lasts. `lease_secs` above the server cap of 10 minutes is clamped, on the
 claim and on every heartbeat; a runner renews well inside that.
 
-`POST /runs/{id}/nodes/{nodeID}/start` and `finish` follow the same rule: a
-`runs.state` principal may drive only a node whose unexpired claim it holds.
-Run create, run finish, node create, and event append are not claim-bound,
-because the caller creates those objects before any claim exists.
+`POST /api/v1/triggers/claim` binds the same way: the controller records the
+claiming token's prefix on the trigger row. A trigger's id is the id of the run
+it creates, so that claim is what a dispatcher owns a run by before any node of
+it is claimed.
+
+Every `runs.state` write names a run, and the caller must own that run: hold an
+unexpired claim on one of its nodes, or hold the unexpired claim on its
+trigger. That covers run create, run finish, plan snapshot, node create, event
+append, and the per-node `start`, `finish`, `deps`, and `status` writes. A
+runner with the scope and no claim gets `403 claim_required`, so one pool token
+cannot finish, re-plan, or forge events on another run.
 
 `mark-ready` and `revoke-ready` both require `admin`. Readiness is a dispatcher
 decision on both sides, and `revoke-ready` writes only an *unclaimed* node, so
@@ -101,23 +114,27 @@ request that carries no principal is refused.
 
 A secret carries an owning repository slug, or none. Store one with
 `sparkwing secrets set --name DEPLOY_KEY --file ./key --repo acme/web
---profile prod`; omit `--repo` and the secret is unscoped, which means **every
-run in the cluster can read it**. Reserve unscoped secrets for values that are
-genuinely shared.
+--profile prod`. A secret stored with neither `--repo` nor `--shared` answers
+`admin` callers only; `--shared` opens an unscoped secret to **every run in the
+cluster**, so reserve it for values that are genuinely shared, such as a
+registry pull token.
 
 `GET /api/v1/secrets/{name}` resolves differently per principal:
 
 - An `admin` principal reads any row. `?repo=<slug>` selects a repository's
-  row; without it the unscoped row answers.
-- A `secrets.read` principal without `admin` cannot name a repository. The
-  controller resolves the name against the repository of the run whose node
-  claim the caller currently holds, and falls back to the unscoped row only
-  when that repository owns no secret of that name. A caller holding no claim
-  reads unscoped secrets only.
+  row, `?run=<id>` selects the repository of that run, and without either the
+  unscoped row answers.
+- A `secrets.read` principal without `admin` cannot name a repository. It names
+  the run it is executing with `?run=<id>`, and the controller answers only
+  when the caller holds that run's claim; the name then resolves against that
+  run's repository, falling back to an unscoped row only when that row is
+  shared. A caller holding no claim reads nothing. A caller holding claims in
+  one repository may omit `?run`; holding claims in two, it must name the run.
 
 So one runner token cannot lift another repository's deploy credential by
-asking for it by name. `GET /api/v1/secrets` (the list) and the secret writes
-stay `admin`.
+asking for it by name, and a token working two runs cannot read the wrong one's
+credential by accident. `GET /api/v1/secrets` (the list) and the secret writes
+stay `admin`; the list carries each row's repository and shared flag.
 
 Token creation validates scopes against that same set: a scope the
 controller does not honor is rejected with a `400` naming the offending

@@ -54,6 +54,7 @@ func runSecretSet(args []string) error {
 	file := v.String("file")
 	plain := v.Bool("plain")
 	repo := v.String("repo")
+	shared := v.Bool("shared")
 	on := v.String("profile")
 	if !fs.Changed("value") && !fs.Changed("file") {
 		return errors.New("secret set: either --value or --file is required")
@@ -78,6 +79,12 @@ func runSecretSet(args []string) error {
 
 	if repo != "" && !fs.Changed("profile") {
 		return errors.New("secret set: --repo needs --profile; the local store has no repository dimension")
+	}
+	if shared && !fs.Changed("profile") {
+		return errors.New("secret set: --shared needs --profile; the local store has no repository dimension")
+	}
+	if shared && repo != "" {
+		return errors.New("secret set: --shared and --repo are exclusive; a repository's secret is already scoped")
 	}
 
 	if !fs.Changed("profile") {
@@ -106,12 +113,15 @@ func runSecretSet(args []string) error {
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := c.CreateSecretForRepo(ctx, name, raw, repo, masked); err != nil {
+	if err := c.CreateSecretForRepo(ctx, name, raw, repo, masked, shared); err != nil {
 		return fmt.Errorf("secret set: %w", err)
 	}
-	scope := "every repo"
-	if repo != "" {
+	scope := "admin only"
+	switch {
+	case repo != "":
 		scope = repo
+	case shared:
+		scope = "every repo"
 	}
 	fmt.Fprintf(os.Stdout, "secret %q set (on: %s, repo: %s, masked=%v)\n", name, prof.Name, scope, masked)
 	return nil
@@ -268,7 +278,10 @@ func runSecretList(args []string) error {
 	for _, sec := range secs {
 		repo := sec.Repo
 		if repo == "" {
-			repo = "(every repo)"
+			repo = "(admin only)"
+			if sec.Shared {
+				repo = "(every repo)"
+			}
 		}
 		fmt.Fprintf(
 			tw, "%s\t%s\t%v\t%s\t%s\t%s\n",

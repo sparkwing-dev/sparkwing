@@ -78,11 +78,12 @@ func dispatchTrigger(ctx context.Context, self, triggerID, controllerURL, logsUR
 	if logsURL != "" {
 		args = append(args, "--logs", logsURL)
 	}
-	if token != "" {
-		args = append(args, "--token", token)
-	}
 	cmd := exec.CommandContext(ctx, self, args...)
+	// safety: the child reads the bearer from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
 	cmd.Env = os.Environ()
+	if token != "" {
+		cmd.Env = append(cmd.Env, "SPARKWING_AGENT_TOKEN="+token)
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {
