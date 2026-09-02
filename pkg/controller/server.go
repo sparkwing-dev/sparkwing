@@ -297,6 +297,57 @@ func (s *Server) runMember(readerBypass bool, next http.Handler) http.Handler {
 	})
 }
 
+// safety: a node process reads the run and trigger it claimed before it
+// can start work, and the runner scope set carries neither read scope.
+// The route widens by exactly the runs the caller is executing now.
+func (s *Server) scopeOrRunClaim(scope string, next http.Handler) http.Handler {
+	gated := requireScope(scope, next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFromContext(r.Context())
+		if !ok || p.HasScope(ScopeAdmin) || p.HasScope(scope) {
+			gated.ServeHTTP(w, r)
+			return
+		}
+		held, err := s.ownsRun(r.Context(), r.PathValue("id"), claimIdentity(r))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !held {
+			gated.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// safety: a pin outlives the run that sets it, so only a caller with a
+// live claim on a run of that pipeline may write one; admin bypasses.
+func (s *Server) claimedPipeline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFromContext(r.Context())
+		if !ok || p.HasScope(ScopeAdmin) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		pipeline := r.PathValue("name")
+		held, err := s.store.PrincipalHoldsPipelineClaim(r.Context(), pipeline, claimIdentity(r), time.Now())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !held {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:      "claim_required",
+				Principal: p.label(),
+				Message:   "pipeline " + pipeline + " has no run claimed by this principal",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // WithTrustedProxyCIDRs names the proxy source networks allowed to
 // supply X-Forwarded-For for login throttling. Empty keys the login
 // limiter on the TCP peer and ignores forwarded headers.
@@ -377,7 +428,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateRun)))
 	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleListRuns)))
-	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleGetRun)))
+	mux.Handle("GET /api/v1/runs/{id}", s.scopeOrRunClaim(ScopeRunsRead, s.reconcileBeforeRead(s.handleGetRun)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodes)))
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleFinishRun))))
@@ -402,7 +453,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
-	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleGetTrigger)))
+	mux.Handle("GET /api/v1/triggers/{id}", s.scopeOrRunClaim(ScopeTriggersRead, http.HandlerFunc(s.handleGetTrigger)))
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
@@ -420,8 +471,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
 	mux.Handle("GET /api/v1/pipelines/{name}/profile", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetPipelineProfile)))
 	// safety: a pin becomes a hard Kubernetes limit for every later run of that pipeline,
-	// so it is a dispatcher write, not something a node-claiming replica may reach.
-	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeRunsState, http.HandlerFunc(s.handleSetPipelinePin)))
+	// so it is bound to a live claim on a run of that pipeline, not to the scope alone.
+	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleSetPipelinePin))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAddNodeMetric))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeMetrics)))

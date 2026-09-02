@@ -147,7 +147,7 @@ func (l *Loopback) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(l.handleCreateRun)))
-	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleGetRun)))
+	mux.Handle("GET /api/v1/runs/{id}", l.scopeOrOwnRun(ScopeRunsRead, http.HandlerFunc(l.handleGetRun)))
 	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, l.ownRun(l.handleFinishRun)))
 	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeRunsState, l.ownRun(l.handleUpdatePlanSnapshot)))
 	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, l.ownRun(l.handleTouchRunHeartbeat)))
@@ -193,7 +193,7 @@ func (l *Loopback) Handler() http.Handler {
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(l.handleTrigger)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(l.handleFindSpawnedChildTrigger)))
-	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, http.HandlerFunc(l.handleGetTrigger)))
+	mux.Handle("GET /api/v1/triggers/{id}", l.scopeOrOwnRun(ScopeTriggersRead, http.HandlerFunc(l.handleGetTrigger)))
 
 	mux.Handle("GET /api/v1/concurrency/{key}/state", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleConcurrencyState)))
 
@@ -235,6 +235,20 @@ func (l *Loopback) authenticate(next http.Handler) http.Handler {
 		p := *principal
 		p.Authed = time.Now().UTC()
 		next.ServeHTTP(w, r.WithContext(contextWithPrincipal(r.Context(), &p)))
+	})
+}
+
+// safety: mirrors the server's claim admission on these two reads. The
+// loopback's equivalent of a claim is the one run it serves.
+func (l *Loopback) scopeOrOwnRun(scope string, next http.Handler) http.Handler {
+	gated := requireScope(scope, next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFromContext(r.Context())
+		if ok && !p.HasScope(ScopeAdmin) && !p.HasScope(scope) && r.PathValue("id") == l.runID {
+			next.ServeHTTP(w, r)
+			return
+		}
+		gated.ServeHTTP(w, r)
 	})
 }
 
