@@ -521,7 +521,7 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error
 func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
-func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (raw string, tok *Token, err error)
+func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
@@ -655,6 +655,7 @@ func TokenKindFromPrefix(raw string) string
 const TokenKindRunner = "runner"
 const TokenKindService = "service"
 const TokenKindUser = "user"
+const TokenPrefixIndexName = "idx_tokens_prefix"
 const TokenPrefixRunner = "swr"
 const TokenPrefixService = "sws"
 const TokenPrefixUser = "swu"
@@ -740,6 +741,7 @@ type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"
 
 # methods on un-declared receiver types (likely a bug)
+func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
 func (t *storeTx) Commit() error
 func (t *storeTx) Exec(q string, args ...any) (sql.Result, error)
 func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
