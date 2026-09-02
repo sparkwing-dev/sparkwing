@@ -48,13 +48,49 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
 ### Security
 
+- **cache:** The package proxy rewrites the npm and PyPI URLs it serves against
+  `--public-url` (`SPARKWING_CACHE_PUBLIC_URL`, chart: `cache.publicUrl`,
+  defaulting to the in-cluster Service URL) and caches that copy. Without a
+  public URL the upstream body is cached untouched and every response is
+  rewritten from its own request's `Host`, so a forged `Host` no longer poisons
+  the packument each later build reads. `X-Forwarded-Host` and
+  `X-Forwarded-Proto` count only when `--trust-forwarded-host`
+  (`SPARKWING_CACHE_TRUST_FORWARDED_HOST`) is set.
+- **controller (Breaking):** Revoking a token, rotating one, or deleting a user now takes
+  effect on the serving replica immediately: the auth cache drops the affected
+  prefixes and rechecks each cached entry's `expires_at` and `revoked_at` on
+  every hit. Revoke can cut an open rotation grace window short, `grace_secs`
+  is capped at 7 days, and deleting a user also deletes its sessions and
+  revokes its tokens in one transaction. `Store.DeleteUser` takes a `now` and
+  returns the revoked prefixes. See
+  [auth.md](docs/auth.md#how-long-revocation-takes-to-bite) for the window that
+  remains across replicas and the logs service.
+- **web (Breaking):** Dashboard responses carry a Content Security Policy with a
+  per-response script nonce, `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and HSTS
+  when session cookies are `Secure`. The page reads its configuration from
+  `/sparkwing-runtime.js` rather than an inline script, and the controller
+  bearer stays server-side in both login modes, so `--api-url` and the chart's
+  `web.apiUrl` are deprecated and ignored. A token-backed dashboard that binds
+  a non-loopback address without `--require-login` refuses to start. See the
+  [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
+- **store:** Browser sessions are stored as a sha256 digest of the session id,
+  and the CSRF token is derived as an HMAC of that id under a server key
+  instead of being written to the database, so a copy of the state database,
+  its WAL, or a backup no longer yields replayable dashboard sessions. The
+  schema 21 migration deletes existing session rows, so everyone signs in
+  again after the upgrade.
 - **cache:** The warm-pool controller now accepts only registry references in
-  `warm_images`, logging and dropping every other entry, and passes the list to
-  the privileged warmer pod as container arguments consumed by a fixed script.
-  A ConfigMap writer can no longer smuggle shell into the one privileged
-  workload Sparkwing creates.
+  `warm_images` -- a DNS or bracketed IPv6 host, a lowercase path, an optional
+  tag, and a lowercase `sha256` digest -- reads at most 64 entries per config
+  read, summarizes what it dropped in one log line per read, and passes the
+  accepted list to the privileged warmer pod as container arguments consumed by
+  a fixed script. A ConfigMap writer can no longer smuggle shell into the one
+  privileged workload Sparkwing creates, nor flood the controller log with
+  rejections.
 - **controller:** Login now carries per-client, listener-wide, and
   per-account-per-client budgets, bearer verification carries a per-token-prefix
   failure budget, and every argon2id verification passes through a memory-sized
@@ -76,19 +112,25 @@ code change to unlock.
   `controller.tokenSecret.name` now fails at render time instead of serving,
   forging, and deleting every run's logs for anything that reaches its Service;
   set the new `logs.allowUnauthenticated=true` during a bootstrap install.
+- **logs:** `sparkwing-full` now vendors a runner bundle that carries that
+  guard, so a full-chart install refuses to render a logs service with no
+  `sparkwing-runner-bundle.controller.tokenSecret.name` unless
+  `logs.allowUnauthenticated=true`, and the web pod falls back to that Secret so
+  the dashboard's log panes still authenticate. `--require-auth` rejects a
+  controller URL that is not an absolute `http(s)` URL instead of advertising
+  `"auth":"enabled"` on a service whose every token lookup fails, and `sparkwing
+  cluster status` warns instead of passing when it cannot read the logs
+  service's auth state -- no announced logs URL, no `auth` field, or a degraded
+  service -- and when the controller resolves the profile's bearer to its
+  anonymous principal.
 - **ci:** Every GitHub Actions workflow now pins its actions to a full commit
   SHA with a version comment, the release job that prepares binaries no longer
   persists checkout credentials, and the canonical gate installs dashboard
-  dependencies with `--ignore-scripts`.
-
-### Fixed
-
-- **admission:** Equal-priority participants keep their service order while
-  queued, so sustained arrivals from an older owner cannot move an existing
-  request backward indefinitely.
-
-### Security
-
+  dependencies with `--ignore-scripts`. The policy gate parses each workflow as
+  YAML and checks every pin against `.github/action-pins.txt`, so a changed SHA,
+  a renamed owner, or a dropped `persist-credentials: false` fails until the
+  table is updated on purpose, and `.github/dependabot.yml` proposes weekly
+  action, Go module, and dashboard dependency updates.
 - **cache (Breaking):** Every cache route that touches repository content --
   git clone and registration, archives, files, tree hashes, branch membership,
   the repo listing, and artifacts -- now requires the bearer token, alongside
@@ -103,18 +145,12 @@ code change to unlock.
   dashboard's `/api/v1/gitcache/` mount rejects a request with no bearer
   credential and caps concurrent Git streams. See the
   [migration guide](docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
-
-### Security
-
 - **cli:** The admission daemon's unix socket is now private to its user.
   It binds under `$XDG_RUNTIME_DIR` when one is available, refuses a socket
   directory that is not a `0700` directory owned by the current uid, chmods
   the socket to `0600`, and drops accepted connections whose kernel-reported
   peer uid differs. Clients apply the same directory test before dialing, and
   reach a daemon still serving the pre-upgrade `/tmp` path until it exits.
-
-### Security
-
 - **controller (Breaking):** A node claim now binds to the authenticated
   principal as well as to the client-supplied `holder_id`, and the per-node
   write routes admit only the runner holding that unexpired claim. A
@@ -124,6 +160,21 @@ code change to unlock.
   an unauthenticated controller serves the redacted view. Runner tokens
   claiming their own work are unaffected. See the
   [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-principal).
+
+### Added
+
+- **sdk:** `pkg/store` exports the sentinel errors authentication turns on --
+  `ErrInvalidCredentials`, `ErrInvalidToken`, `ErrUnknownToken`,
+  `ErrNoTokenCandidates`, `ErrTokenRevoked`, and `ErrHashingBusy` -- plus
+  `Argon2Slots` and `SetArgon2AcquireTimeout`, so a caller can tell a rejected
+  credential from a controller that could not answer. `pkg/controller` gains
+  `Authenticator.WithTrustedProxyCIDRs` and `Authenticator.WithLogger`.
+
+### Fixed
+
+- **admission:** Equal-priority participants keep their service order while
+  queued, so sustained arrivals from an older owner cannot move an existing
+  request backward indefinitely.
 
 ## [v0.39.0] - 2026-09-02
 ### Docs
