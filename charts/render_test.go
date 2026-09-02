@@ -24,8 +24,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.8" {
-		t.Fatalf("full chart version = %q, want 0.1.7", chart.Version)
+	if chart.Version != "0.1.9" {
+		t.Fatalf("full chart version = %q, want 0.1.9", chart.Version)
 	}
 }
 
@@ -567,6 +567,50 @@ func TestWebConfiguredControllerTokenIsRequired(t *testing.T) {
 	t.Fatal("SPARKWING_AGENT_TOKEN env missing")
 }
 
+func webTokenSecretRef(t *testing.T, sets ...string) *renderedSecretKeyRef {
+	t.Helper()
+	for _, env := range runnerContainer(t, helmTemplate(t, "sparkwing", sets...)).Env {
+		if env.Name != "SPARKWING_AGENT_TOKEN" {
+			continue
+		}
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("SPARKWING_AGENT_TOKEN carries no secretKeyRef: %+v", env)
+		}
+		return env.ValueFrom.SecretKeyRef
+	}
+	return nil
+}
+
+func TestWebInheritsTheBundlesControllerTokenSecret(t *testing.T) {
+	ref := webTokenSecretRef(t,
+		"sparkwing-runner-bundle.controller.tokenSecret.name=bundle-token",
+		"sparkwing-runner-bundle.controller.tokenSecret.key=bearer")
+	if ref == nil {
+		t.Fatal("web pod carries no bearer while the logs service validates one; every dashboard log pane would 401")
+	}
+	if ref.Name != "bundle-token" || ref.Key != "bearer" {
+		t.Errorf("SPARKWING_AGENT_TOKEN secretKeyRef = %+v, want the bundle's Secret", ref)
+	}
+}
+
+func TestWebTokenSecretOverridesTheBundleDefault(t *testing.T) {
+	ref := webTokenSecretRef(t,
+		"sparkwing-runner-bundle.controller.tokenSecret.name=bundle-token",
+		"web.tokenSecret.name=web-token")
+	if ref == nil || ref.Name != "web-token" || ref.Key != "token" {
+		t.Errorf("SPARKWING_AGENT_TOKEN secretKeyRef = %+v, want the explicit web Secret", ref)
+	}
+}
+
+func TestWebCarriesNoTokenOnAnOptedOutInstall(t *testing.T) {
+	if ref := webTokenSecretRef(t,
+		"sparkwing-runner-bundle.controller.tokenSecret.name=",
+		"sparkwing-runner-bundle.cache.allowUnauthenticated=true",
+		"sparkwing-runner-bundle.logs.allowUnauthenticated=true"); ref != nil {
+		t.Errorf("SPARKWING_AGENT_TOKEN secretKeyRef = %+v, want no Secret reference when none is configured", ref)
+	}
+}
+
 func TestControllerGitHubStatusEnvironment(t *testing.T) {
 	defaultController := renderController(t)
 	for _, env := range defaultController.Env {
@@ -712,14 +756,26 @@ func TestFullChartPointsTheRunnerAtItsController(t *testing.T) {
 	}
 }
 
-func TestFullChartLeavesLogsAuthOffWithoutAToken(t *testing.T) {
+func TestFullChartLogsWithoutATokenSecretFailsAtRender(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing",
+		"sparkwing-runner-bundle.controller.tokenSecret.name=",
+		"sparkwing-runner-bundle.cache.allowUnauthenticated=true")
+	for _, want := range []string{"controller.tokenSecret.name", "logs.allowUnauthenticated=true"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render error does not name %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestFullChartLeavesLogsAuthOffOnlyWhenTheOperatorOptsOut(t *testing.T) {
 	rendered := helmRenderInNamespace(t, "./sparkwing-full",
 		"charts/sparkwing-runner-bundle/templates/logs-deployment.yaml", "sparkwing", "sparkwing",
 		"sparkwing-runner-bundle.controller.tokenSecret.name=",
-		"sparkwing-runner-bundle.cache.allowUnauthenticated=true")
+		"sparkwing-runner-bundle.cache.allowUnauthenticated=true",
+		"sparkwing-runner-bundle.logs.allowUnauthenticated=true")
 	args := runnerContainer(t, rendered).Args
-	if containsArg(args, "--controller") {
-		t.Errorf("logs args = %v, want no controller-backed auth in the unauthenticated default install", args)
+	if containsArg(args, "--controller") || containsArg(args, "--require-auth") {
+		t.Errorf("logs args = %v, want an opted-out logs service to carry no auth flags", args)
 	}
 }
 

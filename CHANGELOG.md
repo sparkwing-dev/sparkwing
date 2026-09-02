@@ -72,6 +72,17 @@ code change to unlock.
   `controller.tokenSecret.name` now fails at render time instead of serving,
   forging, and deleting every run's logs for anything that reaches its Service;
   set the new `logs.allowUnauthenticated=true` during a bootstrap install.
+- **logs:** `sparkwing-full` now vendors a runner bundle that carries that
+  guard, so a full-chart install refuses to render a logs service with no
+  `sparkwing-runner-bundle.controller.tokenSecret.name` unless
+  `logs.allowUnauthenticated=true`, and the web pod falls back to that Secret so
+  the dashboard's log panes still authenticate. `--require-auth` rejects a
+  controller URL that is not an absolute `http(s)` URL instead of advertising
+  `"auth":"enabled"` on a service whose every token lookup fails, and `sparkwing
+  cluster status` warns instead of passing when it cannot read the logs
+  service's auth state -- no announced logs URL, no `auth` field, or a degraded
+  service -- and when the controller resolves the profile's bearer to its
+  anonymous principal.
 - **ci:** Every GitHub Actions workflow now pins its actions to a full commit
   SHA with a version comment, the release job that prepares binaries no longer
   persists checkout credentials, and the canonical gate installs dashboard
