@@ -14,3 +14,42 @@ jobs:
     uses: ./.github/workflows/canonical-gates.yaml
     permissions:
       contents: read
+
+  postgres:
+    name: Postgres conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      GOWORK: "off"
+      SPARKWING_REQUIRE_PG: "1"
+      SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            go.sum
+            .sparkwing/go.sum
+
+      - name: Run the Postgres conformance suites
+        run: go test ./pkg/store ./internal/backend ./internal/orchestrator

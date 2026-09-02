@@ -24,6 +24,7 @@ import (
 const (
 	integrationDisableEnv = "SPARKWING_INTEGRATION_DISABLE"
 	pgTestURLEnv          = "SPARKWING_TEST_PG_URL"
+	pgRequireEnv          = "SPARKWING_REQUIRE_PG"
 )
 
 func skipIfIntegrationDisabled(t *testing.T) {
@@ -38,6 +39,9 @@ func openIntegrationPostgres(t *testing.T) *store.Store {
 	skipIfIntegrationDisabled(t)
 	dsn := os.Getenv(pgTestURLEnv)
 	if dsn == "" {
+		if os.Getenv(pgRequireEnv) != "" {
+			t.Fatalf("%s is set, so %s must name a reachable Postgres", pgRequireEnv, pgTestURLEnv)
+		}
 		t.Skipf("%s not set; skipping Postgres integration test", pgTestURLEnv)
 	}
 

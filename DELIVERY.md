@@ -29,6 +29,18 @@ this file is a menu and checklist, not a command that every change must run.
   and stop it with `bash bin/dev-stop.sh`; the browser gate uses deterministic
   API fixtures on OS-assigned local ports and does not replace that product
   exercise or exercise Kubernetes.
+- **Postgres conformance:** the store, backend, and orchestrator Postgres
+  suites skip unless `SPARKWING_TEST_PG_URL` names a reachable database.
+  Start one with `docker run --rm -d --name sw-pg -e
+  POSTGRES_PASSWORD=postgres -p 5433:5432 postgres:17`, then run
+  `SPARKWING_REQUIRE_PG=1
+  SPARKWING_TEST_PG_URL=postgres://postgres:postgres@localhost:5433/postgres?sslmode=disable
+  go test ./pkg/store`. `SPARKWING_REQUIRE_PG` turns those skips into
+  failures, so a lane that promises Postgres coverage cannot lose it
+  silently. The hosted `Postgres conformance` job in
+  `.github/workflows/ci.yaml` sets both on every pull request and push to
+  main; `sparkwing run integration` sets both around its Dockerized
+  Postgres and MinIO.
 - **Kubernetes product path:** `sparkwing run k8s-e2e` proves authenticated
   webhook intake, runner execution, logs, cancellation, retry, restarts, and
   retained state against an explicit Kubernetes context and caller-supplied

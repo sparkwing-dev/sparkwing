@@ -20,7 +20,8 @@ func (Integration) ShortHelp() string {
 
 func (Integration) Help() string {
 	return "Spins up Postgres + MinIO in Docker, waits for readiness via a Verify gate, " +
-		"runs the env-gated integration tests (SPARKWING_TEST_PG_URL + SPARKWING_S3_* ), " +
+		"runs the env-gated integration tests (SPARKWING_TEST_PG_URL + SPARKWING_S3_* ) with " +
+		"SPARKWING_REQUIRE_PG=1 so a Postgres suite that skips fails the run instead, " +
 		"and tears the containers down whether the run passes or fails. " +
 		"Requires Docker, go, curl (the MinIO readiness probe), and the aws CLI (creates the test bucket)."
 }
@@ -104,6 +105,7 @@ func runIntegrationSuite(ctx context.Context) error {
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(),
 		"SPARKWING_TEST_PG_URL="+itPGURL,
+		"SPARKWING_REQUIRE_PG=1",
 		"SPARKWING_S3_TEST_BUCKET="+itBucket,
 		"SPARKWING_S3_ENDPOINT="+itS3Endpt,
 		"AWS_ACCESS_KEY_ID=minioadmin",

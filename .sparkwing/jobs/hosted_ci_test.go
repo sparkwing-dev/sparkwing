@@ -63,6 +63,20 @@ func TestHostedCITriggersCanonicalReadOnlyChecks(t *testing.T) {
 	}
 }
 
+func TestHostedCIProvesThePostgresSuitesRanAgainstARealDatabase(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/ci.yaml")
+	job := workflowJob(t, body, "postgres")
+	requireWorkflowText(t, job,
+		"image: postgres:17",
+		`SPARKWING_REQUIRE_PG: "1"`,
+		"SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable",
+		`--health-cmd "pg_isready -U postgres"`,
+		"go test ./pkg/store ./internal/backend ./internal/orchestrator",
+		"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+		"actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0",
+	)
+}
+
 func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
 	requireWorkflowText(t, body,
