@@ -25,6 +25,13 @@ func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
 func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator
 func (a *Authenticator) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Authenticator
+type BoundCipher interface {
+	Cipher
+
+	SealBound(name, repo, plain string) (string, error)
+
+	OpenBound(name, repo, envelope string) (string, error)
+}
 type Cipher interface {
 	Seal(plain string) (string, error)
 

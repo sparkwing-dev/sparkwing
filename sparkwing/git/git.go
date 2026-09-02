@@ -365,12 +365,17 @@ func PushTag(ctx context.Context, repoDir, tag, message string) error {
 }
 
 func runGit(ctx context.Context, repoDir string, args ...string) (string, error) {
+	return runGitEnv(ctx, repoDir, nil, args...)
+}
+
+func runGitEnv(ctx context.Context, repoDir string, env []string, args ...string) (string, error) {
 	// safety: all public ctx-taking git helpers funnel through here; one guard covers them all.
 	planguard.Guard(ctx, "git "+firstWord(args))
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if repoDir != "" {
 		cmd.Dir = repoDir
 	}
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
