@@ -78,6 +78,7 @@ dashboard is a newer version than this CLI.
 | Flag | Description |
 |---|---|
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
+| `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets. |
 | `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--profile PROFILE` | Profile from ~/.config/sparkwing/profiles.yaml (uses its log_store + artifact_store) |
 | `--log-store URL` | Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |

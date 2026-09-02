@@ -167,3 +167,36 @@ func TestResolveDashboardPaths_UnsetHomeStaysOutOfTheRealHome(t *testing.T) {
 		t.Errorf("home = %q, want a path under the test sandbox %s", dp.home, os.TempDir())
 	}
 }
+
+func TestLoopbackBindAddr(t *testing.T) {
+	cases := []struct {
+		addr string
+		want bool
+	}{
+		{addr: "127.0.0.1:4343", want: true},
+		{addr: "localhost:4343", want: true},
+		{addr: "[::1]:4343", want: true},
+		{addr: "127.0.0.2:4343", want: true},
+		{addr: "0.0.0.0:4343", want: false},
+		{addr: ":4343", want: false},
+		{addr: "192.168.1.20:4343", want: false},
+		{addr: "127.0.0.1.rebind.example:4343", want: false},
+		{addr: "127.0.0.1", want: false},
+	}
+	for _, tc := range cases {
+		if got := loopbackBindAddr(tc.addr); got != tc.want {
+			t.Errorf("loopbackBindAddr(%q) = %v, want %v", tc.addr, got, tc.want)
+		}
+	}
+}
+
+func TestRunDashboardStart_RefusesNonLoopbackAddr(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	err := runDashboardStart([]string{"--addr", "0.0.0.0:4343"})
+	if err == nil {
+		t.Fatal("start accepted a non-loopback --addr without --allow-remote")
+	}
+	if !strings.Contains(err.Error(), "--allow-remote") {
+		t.Fatalf("error = %v, want it to name the opt-in flag", err)
+	}
+}

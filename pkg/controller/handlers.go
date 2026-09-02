@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -731,11 +732,30 @@ func newRunID() string {
 
 func decodeJSON(r *http.Request, v any) error {
 	defer r.Body.Close()
+	// safety: an application/json body forces a CORS preflight, so a page
+	// on another site cannot post one as a simple request.
+	if err := requireJSONContentType(r.Header.Get("Content-Type")); err != nil {
+		return err
+	}
 	body := http.MaxBytesReader(nil, r.Body, 1<<20)
 	dec := json.NewDecoder(body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return err
+	}
+	return nil
+}
+
+func requireJSONContentType(header string) error {
+	if header == "" {
+		return errors.New("content-type application/json required")
+	}
+	mediaType, _, err := mime.ParseMediaType(header)
+	if err != nil {
+		return fmt.Errorf("content-type %q: %w", header, err)
+	}
+	if mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json") {
+		return fmt.Errorf("content-type %q: application/json required", mediaType)
 	}
 	return nil
 }

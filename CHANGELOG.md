@@ -139,6 +139,14 @@ code change to unlock.
   for Go and TypeScript. The release workflow scans the resolved tag commit and
   waits before building artifacts. Govulncheck, gitleaks, and `npm audit` fail
   the gate; gosec and CodeQL report without blocking on findings.
+- **dashboard:** The local dashboard listener now answers only loopback hosts
+  and same-origin or loopback browser origins, so a page on another site can no
+  longer trigger runs or read state through the unauthenticated local API, and
+  a rebound DNS name is refused. `sparkwing dashboard start --addr` requires a
+  loopback address unless `--allow-remote` opts in.
+- **controller:** Mutating JSON routes now require a
+  `Content-Type: application/json` request header, so a cross-site simple
+  request cannot reach a handler without a CORS preflight.
 - **web:** Login throttling now ignores forwarded client addresses unless the
   connecting proxy matches an explicit trusted CIDR. Trusted append-style proxy
   chains use the nearest untrusted address. Malformed entries in the trusted
