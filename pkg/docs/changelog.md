@@ -49,6 +49,12 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **admission:** Equal-priority participants keep their service order while
+  queued, so sustained arrivals from an older owner cannot move an existing
+  request backward indefinitely.
+
 ## [v0.39.0] - 2026-09-02
 ### Docs
 

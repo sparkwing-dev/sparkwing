@@ -161,6 +161,7 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 	if s.ownerAdmit == 0 {
 		s.ownerAdmit = l.admitSeq + 1
 	}
+	s.admit = l.admitSeq + 1
 
 	if !l.fifoBlocked(s) && l.fits(s) {
 		backfillEvents := l.recordFreshBackfill(s)
@@ -1000,7 +1001,7 @@ func waiterPrecedesSpec(w *waiter, s spec) bool {
 	if w.spec.priority != s.priority {
 		return w.spec.priority > s.priority
 	}
-	return w.spec.ownerAdmit <= s.ownerAdmit
+	return w.spec.admit <= s.admit
 }
 
 func anyIn(set map[resource]bool, rs []resource) bool {
