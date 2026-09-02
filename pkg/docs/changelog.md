@@ -51,12 +51,13 @@ code change to unlock.
 
 ### Changed
 
-- **ci:** The pre-commit formatters step judges the whole change, not only what
-  is staged. It checks the staged Go files when something is staged and the Go
-  files changed since `origin/main` otherwise, so a clean worktree no longer
-  passes a check the hosted gate fails on the same commits. The step log names
-  which mode it ran in, and the step refuses to run when the checkout cannot
-  resolve `origin/main`.
+- **ci:** The pre-commit formatters step and the em-dash and tracker-ID sweeps
+  judge the whole change, not only what is staged. Each reads the staged files
+  when something is staged and the files changed since `origin/main` otherwise,
+  so a clean worktree no longer passes checks the hosted gate fails on the same
+  commits. Each step log names the mode it ran in, and a step refuses to run
+  when the checkout cannot resolve `origin/main`. `SPARKWING_REGEX_SWEEP_ALL=1`
+  still sweeps the whole tree.
 
 ### Fixed
 

@@ -570,6 +570,43 @@ func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
 	}
 }
 
+func TestRegexSweepsReadTheRangeWhenNothingIsStaged(t *testing.T) {
+	root := gateFixtureRepo(t)
+	ctx := context.Background()
+	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	writeGoFile(t, filepath.Join(root, "FEEDBACK.md"), "a dash "+emDash+" and a "+trackerID+" id\n")
+	gitCommitAll(t, root, "committed without a gate run")
+
+	if err := checkEmDashes(ctx); err == nil {
+		t.Error("the em-dash sweep passed committed drift the hosted gate would reject")
+	}
+	if err := checkTrackerIDs(ctx); err == nil {
+		t.Error("the tracker-id sweep passed committed drift the hosted gate would reject")
+	}
+}
+
+func TestRegexSweepsIgnoreHistoryBeforeTheBaseline(t *testing.T) {
+	root := gateFixtureRepo(t)
+	ctx := context.Background()
+
+	writeGoFile(t, filepath.Join(root, "FEEDBACK.md"), "a dash "+emDash+" and a "+trackerID+" id\n")
+	gitCommitAll(t, root, "history before the baseline")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	writeGoFile(t, filepath.Join(root, "internal", "clean.go"),
+		"package internal\n\nfunc Clean() int { return 2 }\n")
+	gitCommitAll(t, root, "clean change")
+
+	if err := checkEmDashes(ctx); err != nil {
+		t.Errorf("the em-dash sweep charged the range for untouched history: %v", err)
+	}
+	if err := checkTrackerIDs(ctx); err != nil {
+		t.Errorf("the tracker-id sweep charged the range for untouched history: %v", err)
+	}
+}
+
 func TestRegexSweepAllReadsPastTheStagedChange(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -686,7 +723,7 @@ func TestFormattersRefuseToJudgeWithoutTheBaseline(t *testing.T) {
 	}
 }
 
-func TestStagedGoFilesSkipsNodeModules(t *testing.T) {
+func TestStagedScopeSkipsNodeModules(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")
 
@@ -695,7 +732,7 @@ func TestStagedGoFilesSkipsNodeModules(t *testing.T) {
 		"package internal\n\nfunc Mine() int { return 2 }\n")
 	gitAddAll(t, root)
 
-	files, err := stagedGoFiles(context.Background())
+	files, scope, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -706,6 +743,9 @@ func TestStagedGoFilesSkipsNodeModules(t *testing.T) {
 	}
 	if len(files) != 1 || files[0] != "internal/mine.go" {
 		t.Errorf("the staged Go files are wrong: %v", files)
+	}
+	if !strings.Contains(scope, "staged") {
+		t.Errorf("a staged change resolved to %q", scope)
 	}
 }
 
