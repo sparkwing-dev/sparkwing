@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -152,7 +153,7 @@ func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 		got, _ := io.ReadAll(resp.Body)
 		t.Fatalf("POST /api/v1/runs status = %d, want 400: %s", resp.StatusCode, got)
 	}
-	if _, err := st.GetRun(context.Background(), "old-writer"); err != store.ErrNotFound {
+	if _, err := st.GetRun(context.Background(), "old-writer"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("GetRun error = %v, want ErrNotFound", err)
 	}
 }
