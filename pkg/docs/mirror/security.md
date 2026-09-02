@@ -77,7 +77,8 @@ start without one unless the operator passes `--allow-unauthenticated`
 The guard has no network-location exemption: an in-cluster caller, a
 port-forward, and an ingress request are all rejected without the bearer,
 because a caller-controlled header cannot prove where a request came from.
-Read endpoints (clone, file access, repo listing) carry no token and are
+Artifact upload, listing, and download carry the same bearer. The remaining
+read endpoints (clone, file access, repo listing) carry no token and are
 reachable only in-cluster via the Service, not the ingress.
 
 Off-cluster runners read Git through the controller's admin-scoped

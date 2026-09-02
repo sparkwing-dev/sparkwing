@@ -2,7 +2,10 @@ package bincache_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,7 +99,52 @@ func TestArtifactStoreFetchRejectsTamperedBlob(t *testing.T) {
 	}
 }
 
-func TestArtifactStoreFetchRequiresStoredDigest(t *testing.T) {
+func TestArtifactStoreFetchHealsABlobPublishedWithoutADigest(t *testing.T) {
+	t.Parallel()
+	store, err := fs.NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
+	const key = "abcd1234-ef567890"
+	const payload = "binary published before digests existed"
+	ctx := context.Background()
+	if err := store.Put(ctx, "bin/"+key, strings.NewReader(payload)); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "downloaded")
+	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != payload {
+		t.Errorf("payload = %q, want %q", got, payload)
+	}
+
+	rc, err := store.Get(ctx, "bin/"+key+".sha256")
+	if err != nil {
+		t.Fatalf("companion object was not backfilled: %v", err)
+	}
+	defer rc.Close()
+	raw, _ := io.ReadAll(rc)
+	sum := sha256.Sum256([]byte(payload))
+	if strings.TrimSpace(string(raw)) != hex.EncodeToString(sum[:]) {
+		t.Errorf("backfilled digest = %q, want %q", raw, hex.EncodeToString(sum[:]))
+	}
+
+	if err := store.Put(ctx, "bin/"+key, strings.NewReader("poisoned binary")); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+	healed := filepath.Join(t.TempDir(), "downloaded")
+	if err := bincache.FetchFromArtifactStore(ctx, store, key, healed); !errors.Is(err, bincache.ErrDigest) {
+		t.Fatalf("err = %v, want ErrDigest once the companion exists", err)
+	}
+}
+
+func TestArtifactStoreFetchRejectsAMalformedStoredDigest(t *testing.T) {
 	t.Parallel()
 	store, err := fs.NewArtifactStore(t.TempDir())
 	if err != nil {
@@ -104,8 +152,11 @@ func TestArtifactStoreFetchRequiresStoredDigest(t *testing.T) {
 	}
 	const key = "abcd1234-ef567890"
 	ctx := context.Background()
-	if err := store.Put(ctx, "bin/"+key, strings.NewReader("unattested binary")); err != nil {
+	if err := store.Put(ctx, "bin/"+key, strings.NewReader("some binary")); err != nil {
 		t.Fatalf("Put: %v", err)
+	}
+	if err := store.Put(ctx, "bin/"+key+".sha256", strings.NewReader("not-a-digest")); err != nil {
+		t.Fatalf("Put digest: %v", err)
 	}
 
 	dest := filepath.Join(t.TempDir(), "downloaded")
@@ -113,8 +164,8 @@ func TestArtifactStoreFetchRequiresStoredDigest(t *testing.T) {
 	if !errors.Is(err, bincache.ErrDigest) {
 		t.Fatalf("err = %v, want ErrDigest", err)
 	}
-	if !bincache.IsNotFound(err) {
-		t.Errorf("IsNotFound = false, want a miss the caller can recompile past")
+	if bincache.IsNotFound(err) {
+		t.Error("IsNotFound = true, want a hard failure rather than a recompilable miss")
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
 		t.Fatalf("unattested binary was installed: %v", err)

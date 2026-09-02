@@ -23,9 +23,24 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.7" {
+	if chart.Version != "0.1.8" {
 		t.Fatalf("full chart version = %q, want 0.1.7", chart.Version)
 	}
+}
+
+func tokenSecretDefault(chart string) string {
+	if strings.Contains(chart, "sparkwing-full") {
+		return "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token"
+	}
+	return "controller.tokenSecret.name=sparkwing-token"
+}
+
+func helmArgs(chart, release string, sets []string, extra ...string) []string {
+	args := append([]string{"template", release, chart}, extra...)
+	for _, s := range append([]string{tokenSecretDefault(chart)}, sets...) {
+		args = append(args, "--set", s)
+	}
+	return args
 }
 
 func helmRender(t *testing.T, chart, showOnly, release string, sets ...string) string {
@@ -34,10 +49,7 @@ func helmRender(t *testing.T, chart, showOnly, release string, sets ...string) s
 	if err != nil {
 		t.Skip("helm not installed; chart rendering not exercised")
 	}
-	args := []string{"template", release, chart, "--show-only", showOnly}
-	for _, s := range sets {
-		args = append(args, "--set", s)
-	}
+	args := helmArgs(chart, release, sets, "--show-only", showOnly)
 	out, err := exec.Command(helm, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm %s: %v\n%s", strings.Join(args, " "), err, out)
@@ -51,10 +63,7 @@ func helmRenderInNamespace(t *testing.T, chart, showOnly, release, namespace str
 	if err != nil {
 		t.Skip("helm not installed; chart rendering not exercised")
 	}
-	args := []string{"template", release, chart, "--namespace", namespace, "--show-only", showOnly}
-	for _, s := range sets {
-		args = append(args, "--set", s)
-	}
+	args := helmArgs(chart, release, sets, "--namespace", namespace, "--show-only", showOnly)
 	out, err := exec.Command(helm, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm %s: %v\n%s", strings.Join(args, " "), err, out)
@@ -68,10 +77,7 @@ func helmRenderAll(t *testing.T, chart, release, namespace string, sets ...strin
 	if err != nil {
 		t.Skip("helm not installed; chart rendering not exercised")
 	}
-	args := []string{"template", release, chart, "--namespace", namespace}
-	for _, s := range sets {
-		args = append(args, "--set", s)
-	}
+	args := helmArgs(chart, release, sets, "--namespace", namespace)
 	out, err := exec.Command(helm, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm %s: %v\n%s", strings.Join(args, " "), err, out)
@@ -85,10 +91,7 @@ func helmRenderError(t *testing.T, chart, release string, sets ...string) string
 	if err != nil {
 		t.Skip("helm not installed; chart rendering not exercised")
 	}
-	args := []string{"template", release, chart}
-	for _, s := range sets {
-		args = append(args, "--set", s)
-	}
+	args := helmArgs(chart, release, sets)
 	out, err := exec.Command(helm, args...).CombinedOutput()
 	if err == nil {
 		t.Fatalf("helm %s succeeded, want an actionable render failure", strings.Join(args, " "))
@@ -679,7 +682,9 @@ func TestFullChartPointsTheRunnerAtItsController(t *testing.T) {
 
 func TestFullChartLeavesLogsAuthOffWithoutAToken(t *testing.T) {
 	rendered := helmRenderInNamespace(t, "./sparkwing-full",
-		"charts/sparkwing-runner-bundle/templates/logs-deployment.yaml", "sparkwing", "sparkwing")
+		"charts/sparkwing-runner-bundle/templates/logs-deployment.yaml", "sparkwing", "sparkwing",
+		"sparkwing-runner-bundle.controller.tokenSecret.name=",
+		"sparkwing-runner-bundle.cache.allowUnauthenticated=true")
 	args := runnerContainer(t, rendered).Args
 	if containsArg(args, "--controller") {
 		t.Errorf("logs args = %v, want no controller-backed auth in the unauthenticated default install", args)
@@ -701,7 +706,10 @@ func TestFullChartEnablesLogsAuthAgainstItsController(t *testing.T) {
 }
 
 func TestLogsControllerURLAloneDoesNotEnableAuth(t *testing.T) {
-	args := runnerContainer(t, renderLogs(t, "controller.url=https://controller.example.com")).Args
+	args := runnerContainer(t, renderLogs(t,
+		"controller.url=https://controller.example.com",
+		"controller.tokenSecret.name=",
+		"cache.allowUnauthenticated=true")).Args
 	if containsArg(args, "--controller") {
 		t.Errorf("logs args = %v, want auth disabled without a token Secret", args)
 	}
@@ -1122,5 +1130,63 @@ func TestFullChartVendorsTheTightenedRunnerRBAC(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func envSecretRef(t *testing.T, rendered, envName string) renderedSecretKeyRef {
+	t.Helper()
+	for _, env := range runnerContainer(t, rendered).Env {
+		if env.Name != envName {
+			continue
+		}
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("%s is not a secretKeyRef: %+v", envName, env)
+		}
+		return *env.ValueFrom.SecretKeyRef
+	}
+	t.Fatalf("%s env missing:\n%s", envName, rendered)
+	return renderedSecretKeyRef{}
+}
+
+func TestRunnerAndCacheShareOneCacheTokenSecret(t *testing.T) {
+	sets := []string{
+		"controller.tokenSecret.name=sparkwing-token",
+		"controller.tokenSecret.key=bearer",
+	}
+	runner := envSecretRef(t, renderRunner(t, sets...), "SPARKWING_CACHE_TOKEN")
+	cache := envSecretRef(t, renderCache(t, sets...), "SPARKWING_API_TOKEN")
+	if runner != cache {
+		t.Fatalf("runner SPARKWING_CACHE_TOKEN = %+v, cache SPARKWING_API_TOKEN = %+v; want one source", runner, cache)
+	}
+	if runner.Name != "sparkwing-token" || runner.Key != "bearer" {
+		t.Errorf("token source = %+v, want the configured Secret and key", runner)
+	}
+}
+
+func TestFullChartVendorsTheRunnerCacheToken(t *testing.T) {
+	rendered := helmRenderInNamespace(t, "./sparkwing-full",
+		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing", "sparkwing",
+		"sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
+	if ref := envSecretRef(t, rendered, "SPARKWING_CACHE_TOKEN"); ref.Name != "sparkwing-token" {
+		t.Errorf("SPARKWING_CACHE_TOKEN source = %+v, want the release token Secret", ref)
+	}
+}
+
+func TestCacheWithoutATokenSecretFailsAtRender(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "controller.tokenSecret.name=")
+	for _, want := range []string{"controller.tokenSecret.name", "cache.allowUnauthenticated=true"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render error does not name %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestCacheAllowUnauthenticatedRendersTheOptIn(t *testing.T) {
+	rendered := renderCache(t, "controller.tokenSecret.name=", "cache.allowUnauthenticated=true")
+	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--allow-unauthenticated") {
+		t.Errorf("cache args = %v, want --allow-unauthenticated", args)
+	}
+	if args := runnerContainer(t, renderCache(t)).Args; containsArg(args, "--allow-unauthenticated") {
+		t.Errorf("cache args = %v, want no unauthenticated opt-in by default", args)
 	}
 }

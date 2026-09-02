@@ -91,13 +91,15 @@ helm install runners ./charts/sparkwing-runner-bundle \
     --set runner.labels='{cluster,arch=amd64}'
 ```
 
-For a fully unauthenticated test cluster:
+For a fully unauthenticated test cluster, opt the cache out of its token
+requirement explicitly:
 
 ```bash
 helm install runners ./charts/sparkwing-runner-bundle \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
-    --set controller.url=http://sparkwing-controller.sparkwing.svc.cluster.local
+    --set controller.url=http://sparkwing-controller.sparkwing.svc.cluster.local \
+    --set cache.allowUnauthenticated=true
 ```
 
 ## Values cheat sheet
@@ -116,6 +118,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
+| `cache.allowUnauthenticated` | Serve the cache's blob and sync endpoints without a token. | `false` |
 | `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 | `cache.repos` | `GITCACHE_REPOS` -- comma-separated `alias=url`. | `""` |
 | `cache.sshKeySecret.name` | Required SSH-key Secret when configured. | `""` |
@@ -135,9 +138,15 @@ for controller claims and writes to the logs service. Configuring that Secret
 also enables logs-service auth: the logs service forwards each caller's
 incoming Authorization header to the resolved controller's
 `/api/v1/auth/whoami` endpoint and enforces the returned scopes. It does not
-receive a second service bearer. Leaving the Secret name empty keeps both the
-standalone and full chart's documented test install unauthenticated. Once a
-Secret name is configured, its key and the Secret itself are required.
+receive a second service bearer. The same Secret becomes the runner's
+`SPARKWING_CACHE_TOKEN` and the cache's `SPARKWING_API_TOKEN`, so both sides of
+the binary and dependency cache share one bearer. Once a Secret name is
+configured, its key and the Secret itself are required.
+
+A cache-enabled install without that Secret fails at render time. Set
+`cache.allowUnauthenticated=true` to serve the cache's blob and sync endpoints
+to anything that can reach the Service, which is appropriate only on a
+bootstrap install, before the Secret exists.
 
 Trigger claiming always needs a gitcache because it clones and compiles the
 repository before creating a run. If `cache.enabled=false` while

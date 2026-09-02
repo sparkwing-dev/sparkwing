@@ -138,6 +138,13 @@ cache:
   # starting a runner that exits immediately.
   enabled: true
 
+  # Serve the cache's blob and sync endpoints to anyone who can reach
+  # the Service. false (the default) requires controller.tokenSecret so
+  # the cache and the runner share one bearer; true passes
+  # --allow-unauthenticated to the cache and is only appropriate on a
+  # bootstrap install, before the Secret exists.
+  allowUnauthenticated: false
+
   # RWO PVC -- replicas: 1 is the only safe value.
   replicas: 1
 

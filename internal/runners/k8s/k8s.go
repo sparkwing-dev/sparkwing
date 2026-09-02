@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -360,6 +361,10 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 	}
 	if r.cfg.AgentToken != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_AGENT_TOKEN", Value: r.cfg.AgentToken})
+	}
+	// safety: the pod reads and writes the cache's guarded /bin/ routes, which reject the controller bearer.
+	if tok := bincache.CacheToken(); tok != "" {
+		env = append(env, corev1.EnvVar{Name: "SPARKWING_CACHE_TOKEN", Value: tok})
 	}
 	env = append(env, dependencyProxyEnv(r.cfg.DependencyProxyURL)...)
 

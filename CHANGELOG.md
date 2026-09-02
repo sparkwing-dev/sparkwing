@@ -92,6 +92,20 @@ code change to unlock.
 
 ### Security
 
+- **helm:** `sparkwing-runner-bundle` stamps `SPARKWING_CACHE_TOKEN` on the
+  runner from the same Secret the cache reads `SPARKWING_API_TOKEN` from, and
+  trigger-spawned runner Jobs pass that token through. A cache-enabled install
+  without `controller.tokenSecret.name` now fails at render time instead of
+  crashlooping; set the new `cache.allowUnauthenticated=true` to serve the cache
+  without a token during a bootstrap install.
+- **cache:** `POST /artifacts/{jobID}` requires the bearer token and rejects a
+  job ID that is not one plain path segment, so an anonymous caller can no
+  longer write an executable into the binary cache and have it served back with
+  a matching digest. The bearer scheme is parsed case-insensitively, a header
+  with no `Bearer` scheme is no longer a credential, and a whitespace-only
+  `--api-token` is treated as absent. Uploads to `/bin/<key>` stage the blob
+  before recording its digest, so a failed write leaves no digest attesting
+  bytes that were never stored.
 - **dashboard:** The local listener refuses cross-site subresource loads,
   not just cross-site writes, so an `img` or `fetch` from another page
   cannot reach a side-effecting GET. `--allow-remote` now widens the `Host`
@@ -119,13 +133,17 @@ code change to unlock.
   sends the pod manifest to `kubectl` on stdin, keeping env values off the
   command line and out of the echoed banner. See the
   [migration guide](docs/migrations/_unreleased.md#dispatch-snapshot-credentials).
-- **cache:** Cached pipeline binaries now carry a verified sha-256 digest
+- **cache:** Cached pipeline binaries now carry a verified sha-256 digest.
   The cache stores the digest and the writing principal's token fingerprint
   beside each uploaded binary, serves them as `Digest` and `ETag`, and writes
   the digest as a companion object in an artifact store. Clients hash what they
-  download and discard a mismatch before the binary lands, so a poisoned or
-  tampered entry is recompiled instead of executed. A download without a digest
-  counts as a miss, so binaries stored by an older cache are recompiled once.
+  download and discard a mismatch before the binary lands, so bytes altered in
+  transit or altered on the cache's disk after the upload are recompiled
+  instead of executed. Write authentication, not the digest, is what stops a
+  poisoned upload, because the cache derives the digest from the body it was
+  handed. A download without a digest counts as a miss, and an artifact-store
+  blob published before the companion object existed is hashed and backfilled
+  on its first fetch, so binaries stored by an older cache are recompiled once.
 - **web (Breaking):** The dashboard proxy now forwards only the controller
   routes the dashboard itself calls and checks the signed-in session's scopes
   against each one, so a logged-in browser can no longer mint tokens, read

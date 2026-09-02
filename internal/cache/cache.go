@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -75,6 +76,8 @@ func New(cfg Config) (*Server, error) {
 	if cfg.DataDir == "" {
 		return nil, fmt.Errorf("cache: DataDir is required")
 	}
+	// safety: a Secret key holding only a newline must not count as a configured credential.
+	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
 	if cfg.APIToken == "" {
 		if !cfg.AllowUnauthenticated {
 			return nil, fmt.Errorf("cache: an API token is required: set --api-token (or $SPARKWING_API_TOKEN), " +
@@ -148,7 +151,7 @@ func New(cfg Config) (*Server, error) {
 
 	s.mux.HandleFunc("/archive", handleArchive)
 	s.mux.HandleFunc("/repos", handleRepos)
-	s.mux.HandleFunc("/artifacts/", handleArtifacts)
+	s.mux.HandleFunc("/artifacts/", requireToken(handleArtifacts))
 	s.mux.HandleFunc("/file", handleFile)
 	s.mux.HandleFunc("/tree-hash", handleTreeHash)
 	s.mux.HandleFunc("/branch-contains", handleBranchContains)

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -580,7 +581,7 @@ func TestHandleBinDigestForUnattestedBlob(t *testing.T) {
 	}
 }
 
-func TestHandleBinPutRequiresToken(t *testing.T) {
+func TestRequireTokenBlocksAnUnauthenticatedBinPut(t *testing.T) {
 	oldDir, oldToken := binsDir, apiToken
 	binsDir, apiToken = t.TempDir(), "cache-token"
 	defer func() { binsDir, apiToken = oldDir, oldToken }()
@@ -647,6 +648,11 @@ func TestRequireToken(t *testing.T) {
 		{name: "no header", want: http.StatusUnauthorized},
 		{name: "no header, forwarded", forwarded: "203.0.113.7", want: http.StatusUnauthorized},
 		{name: "wrong bearer, forwarded", authz: "Bearer nope", forwarded: "203.0.113.7", want: http.StatusUnauthorized},
+		{name: "lowercase scheme", authz: "bearer s3cret", want: http.StatusOK},
+		{name: "padded scheme", authz: "Bearer  s3cret", want: http.StatusOK},
+		{name: "no scheme", authz: "s3cret", want: http.StatusUnauthorized},
+		{name: "other scheme", authz: "Basic s3cret", want: http.StatusUnauthorized},
+		{name: "empty credential", authz: "Bearer ", want: http.StatusUnauthorized},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			served := false
@@ -700,5 +706,236 @@ func TestNewRejectsEmptyAPIToken(t *testing.T) {
 		t.Fatal("New accepted an empty API token")
 	} else if !strings.Contains(err.Error(), "--allow-unauthenticated") {
 		t.Errorf("error %q does not name the opt-in flag", err)
+	}
+}
+
+func newTestServer(t *testing.T, token string) *httptest.Server {
+	t.Helper()
+	saved := struct {
+		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir string
+		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken        string
+	}{
+		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir,
+		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken,
+	}
+	t.Cleanup(func() {
+		dataRoot, repoDir, archDir, artifactsDir, binsDir, cacheDir = saved.dataRoot, saved.repoDir, saved.archDir, saved.artifactsDir, saved.binsDir, saved.cacheDir
+		uploadsDir, namesFile, proxyDir, sshKeyDir, apiToken = saved.uploadsDir, saved.namesFile, saved.proxyDir, saved.sshKeyDir, saved.apiToken
+	})
+
+	root := t.TempDir()
+	cfg := DefaultConfig()
+	cfg.DataDir = root
+	cfg.ProxyDir = filepath.Join(root, "proxy")
+	cfg.SSHKeyDir = filepath.Join(root, "no-ssh-key")
+	cfg.APIToken = token
+	cfg.AllowUnauthenticated = token == ""
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	srv := httptest.NewServer(s.mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestMuxGuardsEveryWriteRoute(t *testing.T) {
+	srv := newTestServer(t, "s3cret")
+
+	for _, tc := range []struct {
+		method, path string
+		guarded      bool
+	}{
+		{method: http.MethodGet, path: "/bin/deadbeef-cafebabe", guarded: true},
+		{method: http.MethodPut, path: "/bin/deadbeef-cafebabe", guarded: true},
+		{method: http.MethodPut, path: "/cache/lint", guarded: true},
+		{method: http.MethodPost, path: "/upload", guarded: true},
+		{method: http.MethodGet, path: "/uploads/abc", guarded: true},
+		{method: http.MethodPost, path: "/sync/negotiate", guarded: true},
+		{method: http.MethodPost, path: "/sync/seed", guarded: true},
+		{method: http.MethodPost, path: "/artifacts/job1?path=out.txt", guarded: true},
+		{method: http.MethodGet, path: "/artifacts/job1", guarded: true},
+		{method: http.MethodGet, path: "/health", guarded: false},
+		{method: http.MethodGet, path: "/repos", guarded: false},
+		{method: http.MethodGet, path: "/stats", guarded: false},
+		{method: http.MethodGet, path: "/metrics", guarded: false},
+		{method: http.MethodGet, path: "/git/register", guarded: false},
+		{method: http.MethodGet, path: "/git/refresh", guarded: false},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req, err := http.NewRequest(tc.method, srv.URL+tc.path, strings.NewReader(""))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if got := resp.StatusCode == http.StatusUnauthorized; got != tc.guarded {
+				t.Errorf("status = %d, guarded = %t, want guarded = %t", resp.StatusCode, got, tc.guarded)
+			}
+		})
+	}
+}
+
+func TestArtifactUploadRejectsAJobIDThatEscapesTheRoot(t *testing.T) {
+	srv := newTestServer(t, "s3cret")
+
+	const key = "deadbeef-cafebabe"
+	const escape = "/artifacts/..%2f..%2fx?path=bins/" + key
+	body := "#!/bin/sh\nid\n"
+
+	anon, err := http.NewRequest(http.MethodPost, srv.URL+escape, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := srv.Client().Do(anon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("anonymous traversal upload = %d, want 401", resp.StatusCode)
+	}
+
+	authed, err := http.NewRequest(http.MethodPost, srv.URL+escape, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	authed.Header.Set("Authorization", "Bearer s3cret")
+	resp, err = srv.Client().Do(authed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("authenticated traversal upload = %d, want 400", resp.StatusCode)
+	}
+
+	if _, err := os.Stat(filepath.Join(binsDir, key)); !os.IsNotExist(err) {
+		t.Fatalf("artifact upload wrote into the binary cache: %v", err)
+	}
+	entries, err := os.ReadDir(binsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("bins dir = %v, want empty", entries)
+	}
+}
+
+func TestArtifactUploadKeepsAValidJobInsideItsDirectory(t *testing.T) {
+	srv := newTestServer(t, "s3cret")
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/artifacts/job-1?path=out/report.txt", strings.NewReader("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer s3cret")
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", resp.StatusCode)
+	}
+	got, err := os.ReadFile(filepath.Join(artifactsDir, "job-1", "out", "report.txt"))
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	if string(got) != "hello" {
+		t.Errorf("artifact = %q, want %q", got, "hello")
+	}
+}
+
+func TestNewRejectsAWhitespaceOnlyAPIToken(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DataDir = t.TempDir()
+	cfg.APIToken = " \n"
+
+	if _, err := New(cfg); err == nil {
+		t.Fatal("New accepted a whitespace-only API token")
+	} else if !strings.Contains(err.Error(), "--allow-unauthenticated") {
+		t.Errorf("error %q does not name the opt-in flag", err)
+	}
+}
+
+func TestHandleBinFailedPutLeavesNoSidecar(t *testing.T) {
+	oldDir := binsDir
+	binsDir = t.TempDir()
+	defer func() { binsDir = oldDir }()
+
+	const hash = "deadbeef-cafebabe"
+	if err := os.MkdirAll(filepath.Join(binsDir, hash, "occupied"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	handleBin(w, httptest.NewRequest(http.MethodPut, "/bin/"+hash, strings.NewReader("compiled pipeline bytes")))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("PUT status = %d, want 500", w.Code)
+	}
+	if _, err := os.Stat(binMetaPath(hash)); !os.IsNotExist(err) {
+		t.Fatalf("failed PUT left a sidecar attesting bytes that were never stored: %v", err)
+	}
+	entries, err := os.ReadDir(binsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("failed PUT left a staged blob %s", e.Name())
+		}
+	}
+}
+
+func TestHandleBinLegacyGetRacingAPutKeepsTheSidecarHonest(t *testing.T) {
+	for i := 0; i < 25; i++ {
+		oldDir := binsDir
+		binsDir = t.TempDir()
+
+		const hash = "deadbeef-cafebabe"
+		legacy := bytes.Repeat([]byte("legacy blob "), 1<<18)
+		if err := os.WriteFile(filepath.Join(binsDir, hash), legacy, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		fresh := bytes.Repeat([]byte("fresh blob "), 1<<18)
+
+		var wg sync.WaitGroup
+		get := httptest.NewRecorder()
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			handleBin(get, httptest.NewRequest(http.MethodGet, "/bin/"+hash, nil))
+		}()
+		go func() {
+			defer wg.Done()
+			put := httptest.NewRecorder()
+			handleBin(put, httptest.NewRequest(http.MethodPut, "/bin/"+hash, bytes.NewReader(fresh)))
+		}()
+		wg.Wait()
+
+		blob, err := os.ReadFile(filepath.Join(binsDir, hash))
+		if err != nil {
+			t.Fatal(err)
+		}
+		onDisk := sha256.Sum256(blob)
+		meta, err := readBinMeta(hash)
+		if err != nil {
+			t.Fatalf("readBinMeta: %v", err)
+		}
+		if meta.SHA256 != hex.EncodeToString(onDisk[:]) {
+			t.Fatalf("iteration %d: sidecar %s attests neither blob on disk (%s)", i, meta.SHA256, hex.EncodeToString(onDisk[:]))
+		}
+		if get.Code == http.StatusOK {
+			served := sha256.Sum256(get.Body.Bytes())
+			want := "sha-256=" + base64.StdEncoding.EncodeToString(served[:])
+			if got := get.Header().Get("Digest"); got != want {
+				t.Fatalf("iteration %d: served Digest = %q, body hashes to %q", i, got, want)
+			}
+		}
+		binsDir = oldDir
 	}
 }

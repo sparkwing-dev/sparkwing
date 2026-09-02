@@ -173,3 +173,40 @@ func TestOpen_BadScheme(t *testing.T) {
 	}
 	_ = errors.New
 }
+
+func TestOpenArtifactStore_HTTPSendsTheCacheToken(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
+	seen := map[string]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen[r.Method] = r.Header.Get("Authorization")
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	s, err := OpenArtifactStore(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+	if err := s.Put(ctx, "artifact-key", strings.NewReader("payload")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	rc, err := s.Get(ctx, "artifact-key")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	rc.Close()
+	if _, err := s.Has(ctx, "artifact-key"); err != nil {
+		t.Fatalf("Has: %v", err)
+	}
+
+	for _, method := range []string{http.MethodPut, http.MethodGet, http.MethodHead} {
+		if seen[method] != "Bearer s3cret" {
+			t.Errorf("%s Authorization = %q, want the cache bearer", method, seen[method])
+		}
+	}
+}

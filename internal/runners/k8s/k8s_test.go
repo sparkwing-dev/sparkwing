@@ -538,3 +538,17 @@ func TestBuildJob_MountsNoServiceAccountToken(t *testing.T) {
 		t.Fatalf("automountServiceAccountToken = %v, want false", pod.AutomountServiceAccountToken)
 	}
 }
+
+func TestBuildJob_PassesTheCacheTokenThrough(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
+	if got := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_TOKEN"]; got != "s3cret" {
+		t.Fatalf("SPARKWING_CACHE_TOKEN = %q, want the runner's own cache bearer", got)
+	}
+}
+
+func TestBuildJob_OmitsTheCacheTokenWhenTheRunnerHasNone(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+	if _, ok := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_TOKEN"]; ok {
+		t.Fatal("SPARKWING_CACHE_TOKEN should be absent when the runner has none")
+	}
+}

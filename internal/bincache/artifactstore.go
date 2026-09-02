@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,9 @@ func storedDigest(ctx context.Context, store storage.ArtifactStore, key string) 
 
 func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, key, dest string) error {
 	want, err := storedDigest(ctx, store, key)
-	if err != nil {
+	// safety: a blob published before the companion object existed heals on this fetch rather than failing forever.
+	backfill := errors.Is(err, storage.ErrNotFound)
+	if err != nil && !backfill {
 		return err
 	}
 	rc, err := store.Get(ctx, "bin/"+key)
@@ -66,8 +69,15 @@ func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, ke
 		_ = os.Remove(tmp)
 		return err
 	}
+	got := sum.Sum(nil)
+	if backfill {
+		if err := store.Put(ctx, digestKey(key), strings.NewReader(hex.EncodeToString(got))); err != nil {
+			slog.Default().Warn("artifact-store digest backfill failed", "err", err, "hash", key)
+		}
+		return os.Rename(tmp, dest)
+	}
 	// safety: the key folds source inputs, not content, so only this digest ties the bytes to the cache entry.
-	if !bytes.Equal(sum.Sum(nil), want) {
+	if !bytes.Equal(got, want) {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("%w: bin/%s", ErrDigest, key)
 	}
