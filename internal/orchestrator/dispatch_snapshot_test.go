@@ -362,6 +362,7 @@ func TestCollectDispatchEnv_MasksValues(t *testing.T) {
 
 func TestDispatchSnapshot_RecordsRedactedKeys(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "gh-bearer")
+	t.Setenv("SPARKWING_PG_URL", "postgres://sparkwing:gh-bearer@db.example/sparkwing?sslmode=require")
 	be := &captureBackend{}
 	r := NewNodeExecutor(Backends{State: be})
 	node := buildNode(t, "deploy", &stubJob{})
@@ -380,30 +381,58 @@ func TestDispatchSnapshot_RecordsRedactedKeys(t *testing.T) {
 	if !slices.Contains(keys, "GITHUB_TOKEN") {
 		t.Fatalf("redacted_keys should name GITHUB_TOKEN: %v", keys)
 	}
+	if !slices.Contains(keys, "SPARKWING_PG_URL") {
+		t.Fatalf("redacted_keys should name SPARKWING_PG_URL: %v", keys)
+	}
 }
 
-func TestCredentialEnvName(t *testing.T) {
-	cases := []struct {
-		name string
-		want bool
-	}{
-		{"GITHUB_TOKEN", true},
-		{"SPARKWING_AGENT_TOKEN", true},
-		{"SPARKWING_CACHE_TOKEN", true},
-		{"SPARKWING_LEASE_TOKEN", true},
-		{"SPARKWING_SECRETS_KEY", true},
-		{"AWS_SECRET_ACCESS_KEY", true},
-		{"DB_PASSWORD", true},
-		{"GOOGLE_APPLICATION_CREDENTIALS", true},
-		{"npm_token", true},
-		{"SPARKWING_RUN_ID", false},
-		{"GITHUB_REPOSITORY", false},
-		{"PATH", false},
-		{"HOME", false},
+func TestCollectDispatchEnv_RedactsCredentialValues(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_URL", "postgres://sparkwing:hunter2@db.example/sparkwing?sslmode=require")
+	t.Setenv("SPARKWING_S3_ENDPOINT", "https://api.example/v1")
+
+	node := buildNode(t, "deploy", &stubJob{}).
+		Env("SERVICE_ACCOUNT", `{"kind":"sa","token":"ya29.body"}`).
+		Env("SIGNING_MATERIAL", "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----").
+		Env("UPSTREAM_HEADER", "Bearer abc.def.ghi")
+
+	got := collectDispatchEnv(context.Background(), node, "run-7", nil)
+
+	if v := got.values["SPARKWING_CACHE_URL"]; v != "postgres://redacted@db.example/sparkwing?sslmode=require" {
+		t.Fatalf("DSN userinfo survived capture: %q", v)
 	}
-	for _, c := range cases {
-		if got := credentialEnvName(c.name); got != c.want {
-			t.Errorf("credentialEnvName(%q) = %v, want %v", c.name, got, c.want)
+	if v := got.values["SPARKWING_S3_ENDPOINT"]; v != "https://api.example/v1" {
+		t.Fatalf("a URL without userinfo should be untouched: %q", v)
+	}
+	for _, k := range []string{"SERVICE_ACCOUNT", "SIGNING_MATERIAL", "UPSTREAM_HEADER"} {
+		if _, ok := got.values[k]; ok {
+			t.Fatalf("credential-shaped value survived capture: %s=%q", k, got.values[k])
+		}
+		if !slices.Contains(got.redactedKeys, k) {
+			t.Fatalf("%s should be named in redacted keys: %v", k, got.redactedKeys)
+		}
+	}
+}
+
+func TestCollectDispatchEnv_ExemptsWellKnownNonCredentialNames(t *testing.T) {
+	t.Setenv("SPARKWING_REQUIRE_AUTH", "1")
+	t.Setenv("SPARKWING_CACHE_ALLOW_UNAUTHENTICATED", "0")
+
+	node := buildNode(t, "deploy", &stubJob{}).
+		Env("GIT_AUTHOR_NAME", "Sparkwing Bot").
+		Env("GOPRIVATE", "github.com/sparkwing-dev/*").
+		Env("SSH_KEY_DIR", "/etc/sparkwing/ssh")
+
+	got := collectDispatchEnv(context.Background(), node, "run-7", nil)
+
+	for k, want := range map[string]string{
+		"SPARKWING_REQUIRE_AUTH":                "1",
+		"SPARKWING_CACHE_ALLOW_UNAUTHENTICATED": "0",
+		"GIT_AUTHOR_NAME":                       "Sparkwing Bot",
+		"GOPRIVATE":                             "github.com/sparkwing-dev/*",
+		"SSH_KEY_DIR":                           "/etc/sparkwing/ssh",
+	} {
+		if got.values[k] != want {
+			t.Fatalf("%s = %q, want %q (redacted: %v)", k, got.values[k], want, got.redactedKeys)
 		}
 	}
 }

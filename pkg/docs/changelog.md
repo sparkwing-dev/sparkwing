@@ -92,6 +92,16 @@ code change to unlock.
 
 ### Security
 
+- **orchestrator + controller:** Dispatch snapshots now filter on the value as
+  well as the name. A captured URL or DSN keeps its host and loses its
+  userinfo, a bearer header, PEM block, or JSON body with a token or password
+  field is dropped and named in `redacted_keys`, and `SPARKWING_PG_URL`,
+  `DATABASE_URL`, `PGPASSWORD`, and `PGURL` join the dropped names; a short
+  allow-list keeps well-known configuration such as `GIT_AUTHOR_NAME` and
+  `GOPRIVATE`. `POST /api/v1/triggers` applies the same name rule to
+  `trigger.env`, so a credential-named key no longer reaches the `trigger_env`
+  a `triggers.read` principal can read. Cluster-mode `sparkwing debug rerun`
+  deletes its debug pod on interrupt as well as on normal exit.
 - **helm:** `sparkwing-runner-bundle` stamps `SPARKWING_CACHE_TOKEN` on the
   runner from the same Secret the cache reads `SPARKWING_API_TOKEN` from, and
   trigger-spawned runner Jobs pass that token through. A cache-enabled install

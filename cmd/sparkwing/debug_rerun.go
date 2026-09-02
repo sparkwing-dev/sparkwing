@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -60,7 +61,9 @@ func runDebugRerun(args []string) error {
 		}
 		return err
 	}
-	ctx := context.Background()
+	// safety: the cluster path must survive a signal long enough to delete the debug pod and the plaintext env it carries.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	if t.on != "" {
 		return runDebugRerunCluster(ctx, t)
@@ -192,6 +195,8 @@ func runDebugRerunCluster(ctx context.Context, t rerunFlags) error {
 
 const rerunAttachTimeout = 5 * time.Minute
 
+const rerunDeleteTimeout = 30 * time.Second
+
 const rerunPodDeadlineSecs = 3600
 
 func rerunPodManifest(pod, image, runID string, env map[string]string) ([]byte, error) {
@@ -226,7 +231,9 @@ func rerunPodManifest(pod, image, runID string, env map[string]string) ([]byte, 
 }
 
 func deleteRerunPod(bin, pod string) {
-	del := exec.Command(bin, "delete", "pod", pod, "--ignore-not-found", "--wait=false")
+	ctx, cancel := context.WithTimeout(context.Background(), rerunDeleteTimeout)
+	defer cancel()
+	del := exec.CommandContext(ctx, bin, "delete", "pod", pod, "--ignore-not-found", "--wait=false")
 	del.Stdout = os.Stderr
 	del.Stderr = os.Stderr
 	if err := del.Run(); err != nil {
@@ -329,7 +336,9 @@ func printRerunBanner(w io.Writer, snap *store.NodeDispatch, node *store.Node, r
 	}
 	if keys := decodeRedactedKeys(snap.RedactedKeys); len(keys) > 0 {
 		fmt.Fprintf(w, "  dropped:  %s\n", strings.Join(keys, " "))
-		fmt.Fprintln(w, "            credential-shaped keys are never captured; export them yourself")
+		fmt.Fprintln(w, "            these names or values looked credential-shaped, so the snapshot")
+		fmt.Fprintln(w, "            dropped them and replaced URL passwords with \"redacted\";")
+		fmt.Fprintln(w, "            export what you need yourself")
 	}
 	if node != nil {
 		if node.Status != "" {

@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -469,7 +469,8 @@ func sanitizeTriggerEnv(env map[string]string) map[string]string {
 	}
 	cleaned := make(map[string]string, len(env))
 	for key, value := range env {
-		if key == wingwire.LeaseTokenEnv || key == wingwire.ChildLeaseTokenEnv {
+		// safety: trigger_env is served whole to every triggers.read principal, so no credential-named key may persist.
+		if envredact.CredentialName(key) {
 			continue
 		}
 		cleaned[key] = value

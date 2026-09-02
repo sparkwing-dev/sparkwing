@@ -1026,9 +1026,10 @@ create' against a runner image (--image or $SPARKWING_RERUN_IMAGE),
 carrying the snapshot env on stdin, then attaches to the pod and
 deletes it on exit.
 
-Snapshots never capture credential-shaped variables, and the
-controller serves the captured env only to an admin token. The
-banner names the keys the snapshot dropped; export those yourself.
+Snapshots drop credential-shaped names and values and rewrite the
+userinfo of any URL or DSN they keep, and the controller serves the
+captured env only to an admin token. The banner names the keys the
+snapshot dropped; export those yourself.
 
 Replays do NOT freeze the rest of the cluster: secrets re-resolve
 through the standard sparkwing.Secret API on demand, and the runner
