@@ -5,6 +5,74 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## (Breaking) Runner scopes split out of admin
+
+- **Before:** The routes a runner calls to do its job all required `admin`:
+  `POST /api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`,
+  `POST /api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/nodes`,
+  `/runs/{id}/nodes/{nodeID}/start`, `finish`, `/runs/{id}/events`, and
+  `GET /api/v1/secrets/{name}`. `docs/auth.md` and both chart READMEs said a
+  runner needed `nodes.claim` plus `logs.write`, so an operator who followed
+  them shipped a broken runner and fixed it by granting `admin`. The token in
+  the pod that executes pipeline code could therefore mint tokens, read every
+  user, and read every secret in the cluster.
+- **After:** Three new scopes carry that work. `triggers.claim` unlocks the
+  trigger worker lifecycle. `runs.state` unlocks run create and finish, node
+  create, event append, and per-node `start` and `finish`; the two per-node
+  routes additionally require that the caller holds the node's unexpired claim.
+  `secrets.read` unlocks `GET /api/v1/secrets/{name}` alone. Secrets gained an
+  owning repository: run-store schema 22 widens the secrets primary key to
+  `(name, repo)`, `sparkwing secrets set --repo <slug>` stores a
+  repository-scoped row, and a `secrets.read` principal without `admin`
+  resolves a name against the repository of the run whose claim it holds,
+  falling back to an unscoped row only when that repository owns none. A
+  secret stored without `--repo` stays readable by every run. `admin` remains a
+  superset, so existing tokens keep working. The trigger loop no longer puts
+  `--token` on the child process argv; the child reads
+  `SPARKWING_AGENT_TOKEN` from its environment.
+- **Migration:** Upgrade the controller before the runners so the schema-22
+  table exists; older binaries refuse the upgraded SQL store. Re-mint each
+  runner token with `nodes.claim`, `triggers.claim`, `runs.state`,
+  `secrets.read`, and `logs.write`, and drop `admin` from it. A runner that
+  drives nodes in-process without claiming them first still needs `admin`,
+  because `start` and `finish` are claim-bound; give a warm-pool dispatcher
+  `admin` as before. Scope each repository's credentials with
+  `sparkwing secrets set --repo <slug>` and re-check which of the remaining
+  unscoped secrets should stay readable by every run. Go callers of
+  `store.CreateOrReplaceSecret` pass the repo slug as a new `string` argument
+  before `masked`, and `store.DeleteSecret` takes the slug as a second
+  argument; `client.CreateSecret`, `GetSecret`, and `DeleteSecret` keep their
+  signatures and address the unscoped row, with `CreateSecretForRepo`,
+  `GetSecretForRepo`, and `DeleteSecretForRepo` addressing a repository's own.
+- **Why:** Every pool replica and laptop agent holds a runner token, and the
+  process that executes pipeline code holds it too. A token scoped to run work
+  should not be able to mint an admin bearer or read another repository's
+  deploy key with one `os.Getenv`. Keeping the bearer out of the pipeline
+  body's reach entirely, by brokering these calls through a supervisor process,
+  is the remaining design step.
+
+## Session rows are hashed and the CSRF column is dropped
+
+- **Before:** `sessions` held the raw browser session id and its CSRF token in
+  plain columns. Every migration up to schema 20 was additive, so a replica on
+  an older binary kept working against a newer database.
+- **After:** Schema 21 deletes every row in `sessions`, drops the
+  `sessions.csrf_token` column, and keys rows by `sha256(session id)`. The CSRF
+  token is derived per request as an HMAC of the session id under a key in
+  `sparkwing_meta`. This is the first destructive schema step: an older binary
+  still running against the migrated database selects `csrf_token`, fails, and
+  answers `401` to every dashboard request.
+- **Migration:** Stop every controller sharing the state database, upgrade them
+  all, then start them. Do not roll the upgrade one replica at a time, and do
+  not roll a replica back past schema 21 once it has run. Everyone signed in to
+  the dashboard signs in again; there is no way to carry sessions across the
+  migration, because the pre-21 rows are exactly the replayable ids the change
+  removes. On PostgreSQL the column drop takes an ACCESS EXCLUSIVE lock on
+  `sessions` inside the migration transaction, so run it when the table is idle.
+- **Why:** A copy of the state database, its WAL, or a backup handed the reader
+  a working dashboard session. Storing only the digest, and deriving the CSRF
+  token, means a database reader holds nothing it can replay.
+
 ## The dashboard refuses an unauthenticated remote bind
 
 - **Before:** `sparkwing-web --token ... --addr=0.0.0.0:4343` without
@@ -48,15 +116,52 @@ CHANGELOG links here.
 - **Before:** No chart shipped a NetworkPolicy, and `cache.service.type` was a
   free knob.
 - **After:** `sparkwing-runner-bundle` renders a default-deny ingress
-  NetworkPolicy for the cache pod admitting only the release's runner and
-  controller pods, and fails the render when `cache.service.type` is not
-  `ClusterIP` while no token Secret is configured.
-- **Migration:** A cluster whose CNI enforces NetworkPolicy and whose runners
-  live outside the release adds peers through `networkPolicy.extraIngress`, or
-  points `networkPolicy.controllerPodSelector` at its own controller's pod
-  labels. `networkPolicy.enabled=false` removes the policy. A published cache
-  Service needs `controller.tokenSecret.name` set and
+  NetworkPolicy for the cache pod admitting the release's runner, controller,
+  and dashboard pods plus the Job pods the Kubernetes runner backend creates
+  (`app.kubernetes.io/name: sparkwing-runner`), and fails the render when
+  `cache.service.type` is not `ClusterIP` while no token Secret is configured.
+- **Migration:** A cluster whose CNI enforces NetworkPolicy and whose
+  controller or runner pool lives outside the cluster adds peers through
+  `networkPolicy.extraIngress`, giving the rule an `ipBlock` for the caller's
+  source range. A dashboard or controller under a different release points
+  `networkPolicy.webPodSelector` or `networkPolicy.controllerPodSelector` at
+  its own pod labels, and `networkPolicy.runnerJobPodSelector` matches the
+  runner Jobs. `networkPolicy.enabled=false` removes the policy. A published
+  cache Service needs `controller.tokenSecret.name` set and
   `cache.allowUnauthenticated` left false.
+
+## The controller is told where its cache is
+
+- **Before:** `sparkwing-full` gave the controller `SPARKWING_CACHE_TOKEN` but
+  no cache URL, so every `/api/v1/gitcache/*` route answered
+  `404 gitcache proxy is not configured` and `pipeline trigger --working-tree`
+  from off-cluster failed at the seed.
+- **After:** The controller Deployment also carries `SPARKWING_CACHE_URL`,
+  pointing at the bundled cache Service whenever the sub-chart and its cache
+  are enabled.
+- **Migration:** None for a stock install. A cache you run yourself goes in
+  `controller.cache.url`.
+
+## Cache metrics no longer name repositories
+
+- **Before:** The unauthenticated `/metrics` endpoint exported one fetch and
+  reclone series per mirrored repository, labelled with the repository
+  directory name, which is an offline-computable hash of the clone URL.
+- **After:** Those series carry no `repo` label, so scraping `/metrics` cannot
+  enumerate the mirror set or confirm a guessed repository.
+- **Migration:** A dashboard that broke fetch duration out per repository loses
+  that split. Aggregate views are unchanged.
+
+## Expired workspace seeds are archived, not deleted
+
+- **Before:** A workspace ref older than `WORKSPACE_SEED_MAX_AGE` was deleted
+  on the next seed and its objects were pruned immediately, so retrying an
+  older `pipeline trigger --working-tree` run failed with a missing object.
+- **After:** Expiry moves the ref to `refs/sparkwing-workspace-archive/`, which
+  keeps the objects reachable for another seven times
+  `WORKSPACE_SEED_MAX_AGE` or until 128 archived refs accumulate.
+- **Migration:** None. Raise `WORKSPACE_SEED_MAX_AGE` if your retries run
+  further behind than the archive window; set it negative to disable expiry.
 
 ## Managed Git hooks run locally by default
 

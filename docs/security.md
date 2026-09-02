@@ -21,23 +21,58 @@ scope is the superset.
 
 `POST /api/v1/auth/login` is the controller's only unauthenticated route
 that hashes a password, so it carries its own budgets. One client gets 30
-attempts a minute and the listener as a whole gets 120; both answer `429`
-with `Retry-After` once drained. An account answers `429` after 5 failed
-attempts and recovers one attempt every three minutes. That budget charges
-failures only, so a busy account is never locked out by its successes.
+attempts a minute; the listener as a whole gets 600 per concurrent argon2
+slot, which bounds hashing work without throttling a fleet's real logins.
+Both answer `429` with `Retry-After` once drained.
+
+A failed login also charges a budget keyed on the account **and** the
+client address: 5 failures, refilling one every three minutes. Keying it
+on both is deliberate. An account-only budget would let any stranger lock
+a named user out of the dashboard with 20 requests an hour, so a wrong
+guesser only ever slows itself down; the per-client and listener buckets
+remain the outer bound on how much guessing one source can do. The budget
+charges failures only, so a busy account is never locked out by its
+successes.
+
+Bearer verification carries the same protection, keyed on the client
+address and the 12-character token prefix, which is public
+(`sparkwing tokens list` prints it). Ten failed verifications for one
+prefix from one client in a minute and further attempts answer `429`
+without hashing. Keying on the pair matters for the same reason it does
+for login: a prefix-only budget would let a stranger who reads a prefix
+deny that runner its own token on any cold cache. Only a genuine hash
+mismatch spends the budget, so a prefix that matches no stored row costs
+an indexed `SELECT` and nothing more, and a valid token served from the
+principal cache spends nothing at all. The controller also remembers a
+rejected raw token for five seconds, so a client replaying one wrong
+guess pays for a single hash; that cache evicts its coldest entries when
+full rather than closing to new ones.
 
 Every argon2id verification, login and bearer-token lookup alike, passes
 through a semaphore sized by `--argon2-memory-budget-mb` (chart:
 `controller.argon2MemoryBudgetMB`, default 256). One hash holds 64 MiB
-while it runs, so the default admits four at a time and queues the rest.
-Raise it only alongside the pod's memory limit. The controller also
-remembers a rejected raw token for five seconds, so a client replaying one
-wrong guess pays for a single hash.
+while it runs, so the default admits four at a time. A hash waits at most
+250ms for a slot; past that the request is shed with `503` and a
+`Retry-After` rather than queued, so a flood cannot grow an unbounded
+backlog behind legitimate callers. Raise the budget only alongside the
+pod's memory limit. A runner whose token is in the 60-second principal
+cache never reaches the store or the semaphore at all, so heartbeats are
+unaffected by a login flood.
+
+An unauthenticated caller never sees a store error verbatim. Anything
+that is not an authentication rejection answers `503` with a generic
+message and the detail goes to the controller log.
 
 Login throttling keys on the TCP peer and ignores forwarded headers until
 you name the proxy networks in `--trusted-proxy-cidrs` (chart:
-`controller.trustedProxyCIDRs`). Leaving it empty behind a proxy stays
-safe and turns coarse: every browser then shares the proxy's budget.
+`controller.trustedProxyCIDRs`). The dashboard forwards each browser's
+address to the controller, so that list must include the web pod's source
+or every dashboard login shares one client budget. Set the web pod's
+address where you pin it; where the pod IP is unknown, set the cluster pod
+CIDR (`10.244.0.0/16` on kubeadm and kind, `10.42.0.0/16` on k3s) and
+accept that any pod in that range can then supply `X-Forwarded-For`. List
+the narrowest range that contains the web pod. Leaving it empty stays safe
+and turns coarse: every browser then shares the proxy's budget.
 
 ## Webhooks
 
@@ -124,39 +159,64 @@ seed writes use only `SPARKWING_CACHE_TOKEN`; direct-cache mode never receives
 the controller bearer.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
-cache pod (`networkPolicy.enabled`, on by default) that admits only the
-release's runner and controller pods, and refuses to render a non-`ClusterIP`
-cache Service unless a token Secret is configured. `pipeline trigger
---working-tree` may seed uncommitted source; the cache retains up to 128
-workspace refs per repository and expires them after
-`WORKSPACE_SEED_MAX_AGE` (24 hours by default).
+cache pod (`networkPolicy.enabled`, on by default). It admits the release's
+runner, controller, and dashboard pods plus the Job pods the Kubernetes runner
+backend creates (`app.kubernetes.io/name: sparkwing-runner`), and refuses to
+render a non-`ClusterIP` cache Service unless a token Secret is configured. A
+controller or runner pool outside the cluster reaches the cache through
+`networkPolicy.extraIngress`, which is appended to the rule verbatim and takes
+an `ipBlock` for the caller's source range.
+
+`pipeline trigger --working-tree` may seed uncommitted source; the cache
+retains up to 128 workspace refs per repository and expires them after
+`WORKSPACE_SEED_MAX_AGE` (24 hours by default). Expiry moves the ref into
+`refs/sparkwing-workspace-archive/` rather than dropping it, so a retry of an
+older working-tree run still finds its snapshot; archived refs are dropped
+after seven times `WORKSPACE_SEED_MAX_AGE`, or once 128 of them accumulate.
+
+The cache's unauthenticated `/metrics` carries no per-repository label, so
+scraping it does not enumerate or confirm the mirror set.
 
 ## Local daemon socket
 
 The admission daemon (`wingd`) is a per-user process on the developer's
 own machine. It serves a unix socket at
-`$XDG_RUNTIME_DIR/sparkwing-<uid>-<hash>/d.sock`, falling back to
-`/tmp/sparkwing-<uid>-<hash>/d.sock` when no private runtime directory
-is available or when the runtime path would exceed the operating
-system's `sun_path` limit. The trust boundary is the user account, not
-the machine: everyone logged into the same host as the same user shares
-one daemon and can queue, inspect, cancel, and drain its runs. The
-protocol carries no token, and adding one would not change that -- a
+`/tmp/sparkwing-<uid>-<hash>/d.sock`, where the hash covers
+`SPARKWING_HOME`. The path is a pure function of the home: no
+environment variable moves it, so a cron job, a privilege-elevated
+shell, and an interactive session all resolve the same socket for the
+same home. It sits under `/tmp` rather than under the home because a
+unix socket path is capped at 104 bytes on macOS. Windows uses the
+process temp directory instead. The trust boundary is the user account,
+not the machine: everyone logged into the same host as the same user
+shares one daemon and can queue, inspect, cancel, and drain its runs.
+The protocol carries no token, and adding one would not change that -- a
 token readable by the account is readable by anything running as the
 account.
 
-Other accounts on the host are outside the boundary, and three checks
-keep them out. The daemon creates its socket directory with `Mkdir` and
-refuses to serve if the path already exists as anything but a real
-directory owned by the current uid with mode `0700`, so another account
-cannot pre-create it and collect connections. The bound socket is
-chmodded to `0600`. Every accepted connection is checked against the
-kernel's peer credentials (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on
-macOS and FreeBSD) and dropped when the caller's uid differs, which
-holds even where socket file modes are not enforced on connect. Clients
-apply the same directory test before dialing, so a `sparkwing` command
-refuses to hand a handshake to a socket sitting in a directory this user
-does not own.
+Other accounts on the host are outside the boundary, and four checks
+keep them out. The base directory must be a directory carrying the
+sticky bit, or else not be writable by other accounts, so no one can
+rename this user's socket directory away and substitute their own. The
+daemon then creates its socket directory with `Mkdir` and refuses to
+serve if the path already exists as anything but a real directory owned
+by the current uid with mode `0700`, so another account cannot
+pre-create it and collect connections; a foreign directory at that path
+is a refusal that names it, never a redirect somewhere else. The bound
+socket is chmodded to `0600`. Every accepted connection is checked
+against the kernel's peer credentials (`SO_PEERCRED` on Linux,
+`LOCAL_PEERCRED` on macOS and FreeBSD) and dropped when the caller's uid
+differs, which holds even where socket file modes are not enforced on
+connect. Clients apply the same base and directory tests before dialing,
+including the peer sweep behind `sparkwing doctor`, so a `sparkwing`
+command refuses to hand a handshake to a socket sitting in a directory
+this user does not own.
+
+The ownership, mode, and peer-credential checks are unix-only. Windows
+reports no uid for a unix socket peer and has no sticky bit, so the
+per-user temp directory is the only separation there, and the daemon
+neither refuses a connection on credentials nor sweeps a stale socket
+directory away.
 
 Root is not excluded by any of this; a root account on the host can read
 the daemon's memory whatever the socket says. On a shared host, give

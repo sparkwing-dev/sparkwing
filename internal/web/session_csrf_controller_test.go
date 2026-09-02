@@ -97,3 +97,29 @@ func TestDashboardCSRFAcceptsTheLiveControllerToken(t *testing.T) {
 		t.Errorf("sessions after logout = %d, want 0", remaining)
 	}
 }
+
+func TestDashboardKeepsCookiesWhenTheSessionBackendFaults(t *testing.T) {
+	controllerURL, login, st := liveControllerSession(t)
+	handler := HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controllerURL,
+		RequireLogin:  true,
+	}, authTestBundle)
+	if _, err := st.DB().Exec(`DROP TABLE sessions`); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "https://dashboard.example/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: login.SessionID})
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: login.CSRFToken})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("store fault = %d, want 502", rec.Code)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName || c.Name == csrfCookieName {
+			t.Errorf("store fault cleared cookie %q; the session outlives the fault", c.Name)
+		}
+	}
+}

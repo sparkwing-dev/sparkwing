@@ -4,6 +4,7 @@ package wingd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -67,6 +68,88 @@ func TestPeerUID_ReadsTheConnectingUser(t *testing.T) {
 	}
 	if err := checkPeerCredentials(server); err != nil {
 		t.Fatalf("checkPeerCredentials refused this user's own connection: %v", err)
+	}
+}
+
+func TestCheckPeerCredentials_UsesTheUIDThePlatformReports(t *testing.T) {
+	self := os.Getuid()
+	cases := []struct {
+		name    string
+		uid     int
+		known   bool
+		err     error
+		wantErr string
+	}{
+		{name: "this user", uid: self, known: true},
+		{name: "credentials unavailable", uid: 0, known: false},
+		{name: "another user", uid: self + 1, known: true, wantErr: fmt.Sprintf("refused a connection from uid %d", self+1)},
+		{name: "read failure", uid: 0, known: false, err: errors.New("getsockopt broke"), wantErr: "getsockopt broke"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			restore := readPeerUID
+			readPeerUID = func(net.Conn) (int, bool, error) { return tc.uid, tc.known, tc.err }
+			defer func() { readPeerUID = restore }()
+
+			err := checkPeerCredentials(nil)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("checkPeerCredentials = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("checkPeerCredentials admitted a connection it should refuse")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %q does not report %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDaemon_AcceptLoopClosesAForeignConnection(t *testing.T) {
+	restore := readPeerUID
+	foreign := os.Getuid() + 1
+	readPeerUID = func(net.Conn) (int, bool, error) { return foreign, true, nil }
+	defer func() { readPeerUID = restore }()
+
+	var mu sync.Mutex
+	var logs strings.Builder
+	sock := startLoggingDaemon(t, func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		fmt.Fprintf(&logs, format+"\n", args...)
+	})
+
+	c, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial daemon: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	hello, err := wingwire.Encode(&wingwire.Hello{ProtocolMajor: ProtocolMajor, BinaryVersion: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = c.Write(hello)
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 1)
+	if n, rerr := c.Read(buf); n > 0 || rerr == nil {
+		t.Fatalf("daemon answered a connection reported as uid %d (read %d bytes, err %v)", foreign, n, rerr)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		mu.Lock()
+		got := logs.String()
+		mu.Unlock()
+		if strings.Contains(got, fmt.Sprintf("refused a connection from uid %d", foreign)) {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("daemon log does not record the refusal:\n%s", got)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

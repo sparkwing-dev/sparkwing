@@ -3,6 +3,7 @@ package store_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -122,5 +123,165 @@ func TestSessions_StoreDigestsAndDeriveCSRFTokens(t *testing.T) {
 	}
 	if _, err := reopened.LookupSession(raw, now); err == nil {
 		t.Error("session resolves after DeleteSession")
+	}
+}
+
+func TestCSRFKey_ReadOnlyStoreResolvesSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "readonly.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	raw, csrf, _, err := st.CreateSession("root", []string{"admin"}, time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ro, err := store.OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	sess, err := ro.LookupSession(raw, now)
+	if err != nil {
+		t.Fatalf("read-only LookupSession: %v", err)
+	}
+	if sess.CSRFToken != csrf {
+		t.Errorf("read-only csrf = %q, want %q", sess.CSRFToken, csrf)
+	}
+}
+
+func TestCSRFKey_MintingRotatesLiveSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rotate.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	raw, _, _, err := st.CreateSession("root", []string{"admin"}, time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(
+		`DELETE FROM sparkwing_meta WHERE key = 'session_csrf_key'`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if _, err := reopened.LookupSession(raw, now); err == nil {
+		t.Error("session survives a new signing key, so its csrf token no longer verifies")
+	}
+	var remaining int
+	if err := reopened.DB().QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Errorf("sessions after minting a new key = %d, want 0", remaining)
+	}
+}
+
+func TestCSRFKey_ExistingKeyKeepsSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keep.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	raw, csrf, _, err := st.CreateSession("root", []string{"admin"}, time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	sess, err := reopened.LookupSession(raw, now)
+	if err != nil {
+		t.Fatalf("LookupSession after reopen: %v", err)
+	}
+	if sess.CSRFToken != csrf {
+		t.Errorf("csrf after reopen = %q, want %q", sess.CSRFToken, csrf)
+	}
+}
+
+func TestLookupSession_BackendFaultsAreDistinguishable(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name    string
+		corrupt func(t *testing.T, st *store.Store)
+		backend bool
+	}{
+		{
+			name:    "unknown session",
+			corrupt: func(*testing.T, *store.Store) {},
+		},
+		{
+			name: "malformed signing key",
+			corrupt: func(t *testing.T, st *store.Store) {
+				if _, err := st.DB().Exec(
+					`UPDATE sparkwing_meta SET value = 'zz' WHERE key = 'session_csrf_key'`,
+				); err != nil {
+					t.Fatal(err)
+				}
+			},
+			backend: true,
+		},
+		{
+			name: "missing sessions table",
+			corrupt: func(t *testing.T, st *store.Store) {
+				if _, err := st.DB().Exec(`DROP TABLE sessions`); err != nil {
+					t.Fatal(err)
+				}
+			},
+			backend: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "fault.db")
+			st, err := store.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _, _, err := st.CreateSession("root", []string{"admin"}, time.Hour, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.corrupt(t, st)
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := store.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			if tc.name == "unknown session" {
+				raw = "not-a-session"
+			}
+			_, err = reopened.LookupSession(raw, now)
+			if err == nil {
+				t.Fatal("LookupSession succeeded, want an error")
+			}
+			if got := errors.Is(err, store.ErrSessionBackend); got != tc.backend {
+				t.Errorf("errors.Is(%v, ErrSessionBackend) = %v, want %v", err, got, tc.backend)
+			}
+		})
 	}
 }

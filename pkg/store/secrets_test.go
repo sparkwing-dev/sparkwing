@@ -27,7 +27,7 @@ func TestSecretsCRUD(t *testing.T) {
 		t.Fatalf("GetSecret missing: want ErrNotFound, got %v", err)
 	}
 
-	if err := s.CreateOrReplaceSecret("api_token", "abc123", "alice", true, now); err != nil {
+	if err := s.CreateOrReplaceSecret("api_token", "abc123", "alice", "", true, now); err != nil {
 		t.Fatalf("CreateOrReplaceSecret: %v", err)
 	}
 	got, err := s.GetSecret("api_token")
@@ -42,7 +42,7 @@ func TestSecretsCRUD(t *testing.T) {
 	}
 
 	later := now.Add(5 * time.Minute)
-	if err := s.CreateOrReplaceSecret("api_token", "xyz789", "bot", true, later); err != nil {
+	if err := s.CreateOrReplaceSecret("api_token", "xyz789", "bot", "", true, later); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
 	got, err = s.GetSecret("api_token")
@@ -56,7 +56,7 @@ func TestSecretsCRUD(t *testing.T) {
 		t.Fatalf("replace timestamps: created=%v updated=%v", got.CreatedAt, got.UpdatedAt)
 	}
 
-	if err := s.CreateOrReplaceSecret("db_password", "hunter2", "alice", true, now); err != nil {
+	if err := s.CreateOrReplaceSecret("db_password", "hunter2", "alice", "", true, now); err != nil {
 		t.Fatalf("second create: %v", err)
 	}
 	secs, err := s.ListSecrets()
@@ -70,10 +70,10 @@ func TestSecretsCRUD(t *testing.T) {
 		t.Fatalf("ListSecrets order: %+v", secs)
 	}
 
-	if err := s.DeleteSecret("api_token"); err != nil {
+	if err := s.DeleteSecret("api_token", ""); err != nil {
 		t.Fatalf("DeleteSecret: %v", err)
 	}
-	if err := s.DeleteSecret("api_token"); !errors.Is(err, store.ErrNotFound) {
+	if err := s.DeleteSecret("api_token", ""); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("DeleteSecret twice: want ErrNotFound, got %v", err)
 	}
 }

@@ -28,11 +28,20 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`                               |
+| `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`                   |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/nodes`, `/runs/{id}/events`, and per-node `start` + `finish` (those two also require the caller's own claim) |
+| `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
-| `admin`           | tokens / users / secrets CRUD, run + node state mutation (create, start, finish, deps, events, delete, mark-ready), trigger lifecycle (claim, heartbeat, done), gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, node deps / status / mark-ready, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
+
+A runner needs `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`,
+and `logs.write`. That set claims work, drives the run it claimed, reads the
+secrets its repository owns, and ships logs. It mints no token, reads no user,
+and lists no secret. A pool that only claims already-created nodes can drop
+`triggers.claim` and `runs.state`.
 
 A route can narrow a field below its route scope. The node dispatch reads
 (`GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and `/dispatches`) admit
@@ -50,10 +59,37 @@ runner token gets `403` with `"error": "claim_required"`, and
 principal and the holder id match. `admin` bypasses the check, which is what
 lets a dispatcher mark a node ready, start it, and finish it.
 
+`POST /runs/{id}/nodes/{nodeID}/start` and `finish` follow the same rule: a
+`runs.state` principal may drive only a node whose unexpired claim it holds.
+Run create, run finish, node create, and event append are not claim-bound,
+because the caller creates those objects before any claim exists.
+
 The execution view (`GET /api/v1/runs/{id}?include=secret_values`) follows the
 same rule: it returns plaintext argument values to an `admin` principal, or to
 a `nodes.claim` principal holding an unexpired claim on one of the run's nodes.
 A controller serving unauthenticated returns the redacted view.
+
+## Secret ownership
+
+A secret carries an owning repository slug, or none. Store one with
+`sparkwing secrets set --name DEPLOY_KEY --file ./key --repo acme/web
+--profile prod`; omit `--repo` and the secret is unscoped, which means **every
+run in the cluster can read it**. Reserve unscoped secrets for values that are
+genuinely shared.
+
+`GET /api/v1/secrets/{name}` resolves differently per principal:
+
+- An `admin` principal reads any row. `?repo=<slug>` selects a repository's
+  row; without it the unscoped row answers.
+- A `secrets.read` principal without `admin` cannot name a repository. The
+  controller resolves the name against the repository of the run whose node
+  claim the caller currently holds, and falls back to the unscoped row only
+  when that repository owns no secret of that name. A caller holding no claim
+  reads unscoped secrets only.
+
+So one runner token cannot lift another repository's deploy credential by
+asking for it by name. `GET /api/v1/secrets` (the list) and the secret writes
+stay `admin`.
 
 Token creation validates scopes against that same set: a scope the
 controller does not honor is rejected with a `400` naming the offending
@@ -161,9 +197,12 @@ broader mapped prefixes fail startup. List proxy networks, not client networks.
 
 The controller throttles `POST /api/v1/auth/login` the same way and takes the
 same `--trusted-proxy-cidrs` flag, because it is reachable without going
-through the dashboard. See
-[security.md](security.md#login-and-hashing-budgets) for its budgets and the
-argon2 memory bound.
+through the dashboard. `sparkwing-web` forwards each browser's resolved
+address to the controller as `X-Forwarded-For`, so the controller's list must
+include the web pod's source; otherwise the controller ignores the header and
+keys every dashboard login on the web pod's own address. See
+[security.md](security.md#login-and-hashing-budgets) for its budgets, the
+per-prefix bearer budget, and the argon2 memory bound.
 
 The login, first-admin, and logout forms carry a CSRF token in both a
 `SameSite=Strict` cookie and a hidden field. Sparkwing rejects a missing,
@@ -185,7 +224,9 @@ controller therefore takes effect on the next protected data request rather
 than after a local cache expires. A controller `401` authoritatively clears the
 browser session; a controller outage, `5xx`, or malformed response returns
 `502` and preserves the cookies so a transient failure cannot log out every
-user. Browser redirects preserve the original path and query as one encoded
+user. The controller answers `5xx` when the state store or the session signing
+key is unreadable, so only an unknown or expired session reaches the browser as
+`401`. Browser redirects preserve the original path and query as one encoded
 `next` value and accept only same-origin absolute paths.
 
 Login cookies are `Secure` by default, so a login-required dashboard must be
@@ -282,7 +323,9 @@ Hash parameters (`pkg/store/tokens.go`):
 
 Measured on an arm64 laptop: ~8-15ms per `argon2.IDKey`. Token lookup on
 the hot path is prefix-indexed + cached in-process for 60s, so argon2
-only runs on cold lookups.
+only runs on cold lookups. Concurrent hashing is capped by a memory
+budget, and a hash that waits more than 250ms for a slot is shed with
+`503` and a `Retry-After` instead of queueing.
 
 ## How long revocation takes to bite
 
@@ -312,11 +355,20 @@ next request.
 ## Extension points
 
 - **OIDC / SSO**: not implemented. The `users` + `sessions` tables are
-  shape-compatible; an OIDC callback can populate sessions directly.
+  shape-compatible; an OIDC callback can populate sessions directly by writing
+  `sha256(session id)` into `sessions.hash` and keeping the raw id only in the
+  browser cookie. There is no `csrf_token` column: Sparkwing derives that token
+  per request as an HMAC of the session id under a key in `sparkwing_meta`.
 - **Audit trail**: the principal name is stamped onto the OTel trace
   span. There is no dedicated audit database.
 - **Per-user multi-tenancy**: principals are a free-form label. Adding a
   roles model is orthogonal and doesn't require a wire-shape change.
-- **Fine-grained `admin` split**: the `admin` scope is intentionally
-  broad. It can be split into `cache.write`, `locks.admin`, etc. when a
-  real caller needs that narrower trust.
+- **Fine-grained `admin` split**: `triggers.claim`, `runs.state`, and
+  `secrets.read` carved the runner's work out of `admin`. What remains can be
+  split further into `cache.write`, `locks.admin`, and similar when a real
+  caller needs that narrower trust.
+- **Keeping the bearer away from the pipeline body**: a runner's token still
+  sits in the environment of the process that executes pipeline code, so that
+  code can call every route the token unlocks. Brokering secret and node-state
+  calls through a supervisor process the body cannot reach is the remaining
+  design step.

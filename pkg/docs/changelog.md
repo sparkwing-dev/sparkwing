@@ -51,6 +51,24 @@ code change to unlock.
 
 ### Security
 
+- **controller (Breaking):** Runners no longer need `admin`. New `triggers.claim`,
+  `runs.state`, and `secrets.read` scopes carry the trigger lifecycle, run and
+  node state writes, and single-secret reads, and `start` and `finish` admit
+  only the principal holding that node's claim. Secrets gained an owning
+  repository (schema 22, `sparkwing secrets set --repo <slug>`): a
+  `secrets.read` caller resolves a name against the repository of the run it
+  holds, so a runner token can no longer read another repository's credentials
+  or mint an admin bearer. A secret stored without `--repo` stays readable by
+  every run. `admin` remains a superset, so existing tokens keep working; see
+  the [migration guide](docs/migrations/_unreleased.md#breaking-runner-scopes-split-out-of-admin).
+- **cli:** The admission daemon's unix socket is now private to its user. Its
+  path stays a pure function of `SPARKWING_HOME`, so every caller resolves the
+  same socket whatever its environment. The daemon refuses a base directory
+  that other accounts can write without the sticky bit, refuses a socket
+  directory that is not a `0700` directory owned by the current uid, chmods the
+  socket to `0600`, and drops accepted connections whose kernel-reported peer
+  uid differs. Clients apply the same tests before dialing, including the peer
+  sweep behind `sparkwing doctor`. These checks are unix-only.
 - **cache:** The package proxy rewrites the npm and PyPI URLs it serves against
   `--public-url` (`SPARKWING_CACHE_PUBLIC_URL`, chart: `cache.publicUrl`,
   defaulting to the in-cluster Service URL) and caches that copy. Without a
@@ -77,12 +95,16 @@ code change to unlock.
   `web.apiUrl` are deprecated and ignored. A token-backed dashboard that binds
   a non-loopback address without `--require-login` refuses to start. See the
   [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
-- **store:** Browser sessions are stored as a sha256 digest of the session id,
-  and the CSRF token is derived as an HMAC of that id under a server key
-  instead of being written to the database, so a copy of the state database,
-  its WAL, or a backup no longer yields replayable dashboard sessions. The
-  schema 21 migration deletes existing session rows, so everyone signs in
-  again after the upgrade.
+- **store (Breaking):** Browser sessions are stored as a sha256 digest of the
+  session id, and the CSRF token is derived as an HMAC of that id under a
+  server key instead of being written to the database, so a copy of the state
+  database, its WAL, or a backup no longer yields replayable dashboard
+  sessions. Schema 21 drops the `sessions.csrf_token` column and deletes every
+  session row: everyone signs in again, and it is the first migration a
+  still-running older binary cannot read past. A session lookup that fails on
+  the store or the signing key now answers `500` instead of `401`, so the
+  dashboard reports a backend fault rather than signing the browser out. See
+  the [migration guide](docs/migrations/_unreleased.md#session-rows-are-hashed-and-the-csrf-column-is-dropped).
 - **cache:** The warm-pool controller now accepts only registry references in
   `warm_images` -- a DNS or bracketed IPv6 host, a lowercase path, an optional
   tag, and a lowercase `sha256` digest -- reads at most 64 entries per config
@@ -91,14 +113,18 @@ code change to unlock.
   a fixed script. A ConfigMap writer can no longer smuggle shell into the one
   privileged workload Sparkwing creates, nor flood the controller log with
   rejections.
-- **controller:** Login now carries per-client, listener-wide, and per-account
-  budgets, and every argon2id verification passes through a memory-sized
-  semaphore, so unauthenticated callers can no longer exhaust the pod by
-  hashing. Size the semaphore with `--argon2-memory-budget-mb` (chart:
-  `controller.argon2MemoryBudgetMB`) and name proxy networks with
-  `--trusted-proxy-cidrs` (chart: `controller.trustedProxyCIDRs`) so throttling
-  keys on the real client. A rejected bearer token is remembered for a few
-  seconds, so a replayed wrong guess costs one hash.
+- **controller:** Login now carries per-client, listener-wide, and
+  per-account-per-client budgets, bearer verification carries a per-token-prefix
+  failure budget, and every argon2id verification passes through a memory-sized
+  semaphore that sheds with `503` and a `Retry-After` instead of queueing, so
+  unauthenticated callers can no longer exhaust the pod by hashing and no
+  stranger can lock a named user out. Size the semaphore with
+  `--argon2-memory-budget-mb` (chart: `controller.argon2MemoryBudgetMB`) and
+  name proxy networks with `--trusted-proxy-cidrs` (chart:
+  `controller.trustedProxyCIDRs`, which must include the dashboard pod's source)
+  so throttling keys on the real browser. A rejected bearer token is remembered
+  for a few seconds, so a replayed wrong guess costs one hash; store failures
+  are never cached and never echoed to an unauthenticated caller.
 - **logs:** `sparkwing-logs` gains `--require-auth` /
   `SPARKWING_REQUIRE_AUTH`, refusing to start without a controller to resolve
   caller tokens against, reports `"auth"` on `GET /api/v1/health` so
@@ -134,13 +160,36 @@ code change to unlock.
   repository name and refuses to repoint an existing one without the token,
   responses carry `X-Content-Type-Options: nosniff`, artifacts download as
   attachments, and workspace snapshot refs expire after
-  `WORKSPACE_SEED_MAX_AGE` instead of wedging at the retention cap. The
-  runner-bundle chart ships a default-deny ingress NetworkPolicy for the cache
-  (`networkPolicy.enabled`), issues the controller a cache token, and refuses
-  to render a non-`ClusterIP` cache Service with no token configured. The
-  dashboard's `/api/v1/gitcache/` mount rejects a request with no bearer
-  credential and caps concurrent Git streams. See the
+  `WORKSPACE_SEED_MAX_AGE` instead of wedging at the retention cap. A cache
+  started with `--allow-unauthenticated` still accepts a repoint, so a squatted
+  name is recoverable without a restart. The runner-bundle chart ships a
+  default-deny ingress NetworkPolicy for the cache (`networkPolicy.enabled`)
+  admitting the release's runner, controller, and dashboard pods plus the Job
+  pods the Kubernetes runner backend creates, issues the controller a cache
+  token, and refuses to render a non-`ClusterIP` cache Service with no token
+  configured. An off-cluster controller or runner pool is admitted through
+  `networkPolicy.extraIngress`. The dashboard's `/api/v1/gitcache/` mount
+  requires a Sparkwing machine token shape rather than any string, and a
+  request that arrives at the concurrent-stream cap waits a few seconds for a
+  slot before answering `503` with `Retry-After`. See the
   [migration guide](docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
+- **cache:** The unauthenticated `/metrics` endpoint no longer labels its fetch
+  and reclone series with the repository directory name, which is an
+  offline-computable hash of the clone URL. Scraping the cache can no longer
+  enumerate the mirror set or confirm a guessed repository. See the
+  [migration guide](docs/migrations/_unreleased.md#cache-metrics-no-longer-name-repositories).
+- **cache:** A workspace snapshot ref past `WORKSPACE_SEED_MAX_AGE` is now
+  moved to `refs/sparkwing-workspace-archive/` instead of being deleted with
+  its objects pruned, so retrying an older `pipeline trigger --working-tree`
+  run still finds its source. Archived refs are dropped after seven times the
+  window, or once 128 accumulate. See the
+  [migration guide](docs/migrations/_unreleased.md#expired-workspace-seeds-are-archived-not-deleted).
+- **cache:** `sparkwing-full` now renders `SPARKWING_CACHE_URL` on the
+  controller beside `SPARKWING_CACHE_TOKEN`, so the controller's
+  `/api/v1/gitcache/*` proxy works on a stock install instead of answering
+  `404 gitcache proxy is not configured`. Override it with
+  `controller.cache.url`. See the
+  [migration guide](docs/migrations/_unreleased.md#the-controller-is-told-where-its-cache-is).
 - **cli:** The admission daemon's unix socket is now private to its user.
   It binds under `$XDG_RUNTIME_DIR` when one is available, refuses a socket
   directory that is not a `0700` directory owned by the current uid, chmods
@@ -156,6 +205,15 @@ code change to unlock.
   an unauthenticated controller serves the redacted view. Runner tokens
   claiming their own work are unaffected. See the
   [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-principal).
+
+### Added
+
+- **sdk:** `pkg/store` exports the sentinel errors authentication turns on --
+  `ErrInvalidCredentials`, `ErrInvalidToken`, `ErrUnknownToken`,
+  `ErrNoTokenCandidates`, `ErrTokenRevoked`, and `ErrHashingBusy` -- plus
+  `Argon2Slots` and `SetArgon2AcquireTimeout`, so a caller can tell a rejected
+  credential from a controller that could not answer. `pkg/controller` gains
+  `Authenticator.WithTrustedProxyCIDRs` and `Authenticator.WithLogger`.
 
 ### Fixed
 

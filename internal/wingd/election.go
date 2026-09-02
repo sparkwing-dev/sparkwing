@@ -116,11 +116,9 @@ func PrepareDaemonSocket(home string) (SocketPreparation, error) {
 	}
 	defer func() { _ = flockUnlock(f) }()
 	// safety: holding the election lock proves no daemon serves this home, so a
-	// socket left at the pre-upgrade path is stale and must not divert clients.
-	for _, sock := range []string{l.sock, socketPathIn(tempSocketBaseDir(), l.home)} {
-		if err := os.Remove(sock); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return SocketPreparationCleanupFailed, err
-		}
+	// socket left at the path is stale and must not divert clients.
+	if err := os.Remove(l.sock); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return SocketPreparationCleanupFailed, err
 	}
 	return SocketPreparationReady, nil
 }

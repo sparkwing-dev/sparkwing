@@ -174,6 +174,9 @@ func controllerRouteScopes(t *testing.T) map[string]string {
 		"ScopeLogsRead":       controller.ScopeLogsRead,
 		"ScopeLogsWrite":      controller.ScopeLogsWrite,
 		"ScopeTriggersRead":   controller.ScopeTriggersRead,
+		"ScopeTriggersClaim":  controller.ScopeTriggersClaim,
+		"ScopeRunsState":      controller.ScopeRunsState,
+		"ScopeSecretsRead":    controller.ScopeSecretsRead,
 		"ScopeApprovalsWrite": controller.ScopeApprovalsWrite,
 		"ScopeAdmin":          controller.ScopeAdmin,
 	})
