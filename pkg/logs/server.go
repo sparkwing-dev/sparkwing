@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -804,14 +803,20 @@ func (s *Server) pathFor(runID, nodeID string) (string, error) {
 	return filepath.Join(dir, nodeID+".log"), nil
 }
 
-var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
-
 func validateID(s string) error {
 	if s == "" {
 		return errors.New("empty")
 	}
+	if len(s) > 255 {
+		return errors.New("too long")
+	}
+	for _, r := range s {
+		if r == '/' || r == '\\' || r < 0x20 || r == 0x7f {
+			return errors.New("invalid characters")
+		}
+	}
 	// safety: filepath.Join collapses "." and "..", so only ids that survive Clean unchanged may address a directory.
-	if !idPattern.MatchString(s) || filepath.Clean(s) != s {
+	if s == "." || s == ".." || filepath.Clean(s) != s {
 		return errors.New("invalid characters")
 	}
 	return nil

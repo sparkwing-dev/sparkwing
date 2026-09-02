@@ -165,8 +165,7 @@ func TestLogs_UnsafeIDsRejected(t *testing.T) {
 		{name: "append-encoded-separator", method: http.MethodPost, path: "/api/v1/logs/run-keep/%2Fetc%2Fpasswd"},
 		{name: "append-node-dot", method: http.MethodPost, path: "/api/v1/logs/run-keep/%2e"},
 		{name: "stream-dot-encoded", method: http.MethodGet, path: "/api/v1/logs/%2e/step-a/stream"},
-		{name: "append-leading-dot", method: http.MethodPost, path: "/api/v1/logs/.hidden/step-a"},
-		{name: "append-space-node", method: http.MethodPost, path: "/api/v1/logs/run-keep/%20"},
+		{name: "append-control-node", method: http.MethodPost, path: "/api/v1/logs/run-keep/step%01a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req, err := http.NewRequest(tc.method, srv.URL+tc.path, strings.NewReader("pwn"))

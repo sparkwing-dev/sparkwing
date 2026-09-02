@@ -90,10 +90,10 @@ code change to unlock.
   suffix or an untrusted immediate peer use the TCP peer address. Configure
   `--trusted-proxy-cidrs` or the chart's `web.trustedProxyCIDRs` to retain
   per-client buckets behind a reverse proxy.
-- **logs:** Run and node identifiers must now match
-  `[A-Za-z0-9][A-Za-z0-9._-]{0,127}` and resolve to a single directory under
-  the runs root, so a request carrying a percent-encoded `.` can no longer
-  address the runs root itself and delete every run's logs.
+- **logs:** Run and node identifiers must now be a single path segment that
+  `filepath.Clean` leaves unchanged and resolve to one directory under the
+  runs root, so a request carrying a percent-encoded `.` can no longer address
+  the runs root itself and delete every run's logs.
 
 ## [v0.38.2] - 2026-09-01
 
