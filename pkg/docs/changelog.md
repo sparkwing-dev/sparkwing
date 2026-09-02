@@ -51,6 +51,15 @@ code change to unlock.
 
 ### Security
 
+- **web:** Browser sessions now die at an absolute age. The controller refuses
+  to renew a session older than seven days and deletes it, so a polling tab can
+  no longer slide the twelve-hour TTL forever; embedders set another cap with
+  `Server.WithSessionMaxLifetime`. `SPARKWING_WEB_INSECURE_COOKIES` is now a
+  `HandlerOptions` field the dashboard reads at startup instead of an init-time
+  global, and `sparkwing-web` refuses to start when it is set on a non-loopback
+  bind unless the operator also passes `--allow-insecure-cookies-remote`. The
+  chart renders that flag alongside the variable when `ingress.allowInsecure`
+  publishes the dashboard over plain HTTP, so that opt-in still starts.
 - **controller:** `GET /api/v1/runs/{id}` and `GET /api/v1/triggers/{id}` now
   admit a caller holding a live claim on that run as well as one holding
   `runs.read` or `triggers.read`. Those are the first two calls a node process

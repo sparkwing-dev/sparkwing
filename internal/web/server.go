@@ -104,6 +104,18 @@ type HandlerOptions struct {
 	// the listener then drives the controller with the service token, so
 	// callers must opt in explicitly.
 	AllowUnauthenticatedRemote bool
+
+	// InsecureCookies drops Secure from the session and CSRF cookies so
+	// a browser keeps a session over plain HTTP. ServeWithOptions
+	// accepts it only on a loopback listener unless
+	// AllowInsecureCookiesRemote is also set; a caller that builds its
+	// own listener around HandlerFromOptions owns that check itself.
+	InsecureCookies bool
+
+	// AllowInsecureCookiesRemote accepts InsecureCookies on a
+	// non-loopback listener, for an operator who publishes the dashboard
+	// over plain HTTP through a proxy or ingress and has said so.
+	AllowInsecureCookiesRemote bool
 }
 
 // Serve runs the store-backed dashboard on addr. Backend and Paths come
@@ -132,6 +144,9 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 		return err
 	}
 	if err := validateRemoteExposure(opts, addr); err != nil {
+		return err
+	}
+	if err := validateCookieExposure(opts, addr); err != nil {
 		return err
 	}
 	if err := VerifyBundleEmbedded(); err != nil {
@@ -314,6 +329,17 @@ func validateRemoteExposure(opts HandlerOptions, addr string) error {
 		"dashboard holds a controller token, requires no login, and binds non-loopback address %q: "+
 			"pass --require-login, bind a loopback address, or pass --allow-unauthenticated-remote to accept that "+
 			"every caller who reaches the listener drives the controller", addr)
+}
+
+// safety: a session cookie without Secure rides plain HTTP to every host on the path to a non-loopback listener.
+func validateCookieExposure(opts HandlerOptions, addr string) error {
+	if !opts.InsecureCookies || opts.AllowInsecureCookiesRemote || loopbackBind(addr) {
+		return nil
+	}
+	return fmt.Errorf(
+		"insecure cookies are enabled and the dashboard binds non-loopback address %q: "+
+			"serve HTTPS, bind a loopback address, or pass --allow-insecure-cookies-remote to accept "+
+			"session cookies that travel without TLS", addr)
 }
 
 func loopbackBind(addr string) bool {
