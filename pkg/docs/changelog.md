@@ -54,14 +54,21 @@ code change to unlock.
 - **sparks:** A `sparks:` entry's `source` is checked as a Go module path
   before it reaches `go list`, so a malformed path fails with a named error
   instead of becoming an argument to the go command.
-- **cache + orchestrator:** Every git call that takes a caller-supplied ref or
-  revision now separates it from the option list -- `--` before the positional
-  arguments of `merge-base`, `cat-file`, and `git worktree add`, and
-  `--verify --end-of-options` for `git rev-parse` -- so no such value is read
-  as a flag. `/sync/negotiate` requires each `commits[]` entry to be a 40-64
-  character hex object id, and a retry's recorded revision must be one before
-  the orchestrator materializes it. Short-ref log lines clamp instead of
-  slicing at eight bytes, which crashed the negotiate handler on a shorter ref.
+- **cache + controller + orchestrator:** Every git call that takes a
+  caller-supplied ref or revision now separates it from the option list --
+  `--` before the positional arguments of `merge-base`, `cat-file`, and
+  `git worktree add`, and `--end-of-options` for `git rev-parse`, `git show`,
+  `git fetch`, and `git diff` -- so no such value is read as a flag. This
+  requires git 2.24 or newer on cache and runner hosts. A `git.sha` is
+  rejected at `POST /api/v1/triggers` and `POST /api/v1/runs`, and again
+  before a runner fetches it, unless it is a 40-64 character hex object id;
+  `/sync/negotiate` requires the same of each `commits[]` entry and now caps
+  the list at 256 commits; `/sync/seed` holds its `repo` to the same clone-URL
+  rules as every other cache route, so a seed can no longer point a mirror's
+  `origin` at an arbitrary host. A retry's recorded revision must be an object
+  id before the orchestrator materializes it. Short-ref log lines clamp
+  instead of slicing at eight bytes, which crashed the negotiate handler on a
+  shorter ref.
 - **runner:** The Kubernetes runner now clamps a pipeline's declared resource
   pin to the CPU and memory limits the runner is configured with, so
   `sparkwing.Cores(64)` in one pipeline can no longer request more than a node

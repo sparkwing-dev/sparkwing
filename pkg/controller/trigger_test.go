@@ -259,7 +259,7 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 	resp := postJSON(t, ts.URL+"/api/v1/triggers", map[string]any{
 		"pipeline": "trigger-e2e",
 		"trigger":  map[string]string{"source": "github"},
-		"git":      map[string]string{"branch": "main", "sha": "abc123"},
+		"git":      map[string]string{"branch": "main", "sha": "abc1230000000000000000000000000000000000"},
 	})
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
@@ -331,7 +331,7 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
 		"pipeline": "demo",
 		"trigger":  map[string]string{"source": "github"},
-		"git":      map[string]string{"branch": "main", "sha": "deadbeef"},
+		"git":      map[string]string{"branch": "main", "sha": "deadbeef00000000000000000000000000000000"},
 	})
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
@@ -358,8 +358,8 @@ func TestTrigger_CreatesPendingRunRow(t *testing.T) {
 	if run.Pipeline != "demo" {
 		t.Errorf("Pipeline=%q want demo", run.Pipeline)
 	}
-	if run.GitSHA != "deadbeef" {
-		t.Errorf("GitSHA=%q want deadbeef", run.GitSHA)
+	if run.GitSHA != "deadbeef00000000000000000000000000000000" {
+		t.Errorf("GitSHA=%q want the posted object id", run.GitSHA)
 	}
 	if run.CreatedAt.IsZero() {
 		t.Error("CreatedAt is zero")
@@ -771,5 +771,62 @@ func getJSON(t *testing.T, url string, out any) {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		t.Fatalf("decode %s: %v", url, err)
+	}
+}
+
+func TestTriggerAndCreateRunRejectAGitSHAThatIsNotAnObjectID(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(&captureDispatcher{})
+	srv := httptest.NewServer(srvController.Handler())
+	defer srv.Close()
+
+	for i, sha := range []string{"--upload-pack=evil", "main", "abc1234", "HEAD"} {
+		resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+			"pipeline": "demo",
+			"trigger":  map[string]string{"source": "manual"},
+			"git":      map[string]string{"sha": sha},
+		})
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("trigger sha %q: status=%d want 400: %s", sha, resp.StatusCode, body)
+		}
+
+		runResp := postJSON(t, srv.URL+"/api/v1/runs", store.Run{
+			ID: "run-sha-" + strconv.Itoa(i), Pipeline: "demo", Status: "running",
+			GitSHA: sha, StartedAt: time.Now(),
+		})
+		runBody, _ := io.ReadAll(runResp.Body)
+		_ = runResp.Body.Close()
+		if runResp.StatusCode != http.StatusBadRequest {
+			t.Errorf("run sha %q: status=%d want 400: %s", sha, runResp.StatusCode, runBody)
+		}
+	}
+
+	head := "0123456789abcdef0123456789abcdef01234567"
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline": "demo",
+		"trigger":  map[string]string{"source": "manual"},
+		"git":      map[string]string{"sha": head},
+	})
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("object id trigger: status=%d want 202: %s", resp.StatusCode, body)
+	}
+	runResp := postJSON(t, srv.URL+"/api/v1/runs", store.Run{
+		ID: "run-sha-ok", Pipeline: "demo", Status: "running", GitSHA: head, StartedAt: time.Now(),
+	})
+	runBody, _ := io.ReadAll(runResp.Body)
+	_ = runResp.Body.Close()
+	if runResp.StatusCode != http.StatusCreated {
+		t.Errorf("object id run: status=%d want 201: %s", runResp.StatusCode, runBody)
 	}
 }

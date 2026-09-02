@@ -31,7 +31,7 @@ func TestClaim_TriggerPersistsThenClaims(t *testing.T) {
 	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
 		"pipeline": "claim-demo",
 		"trigger":  map[string]string{"source": "test", "user": "alice"},
-		"git":      map[string]string{"branch": "main", "sha": "abc"},
+		"git":      map[string]string{"branch": "main", "sha": "abc0000000000000000000000000000000000000"},
 		"args":     map[string]string{"foo": "bar"},
 	})
 	defer resp.Body.Close()
@@ -57,7 +57,7 @@ func TestClaim_TriggerPersistsThenClaims(t *testing.T) {
 	if trig.TriggerSource != "test" || trig.TriggerUser != "alice" {
 		t.Errorf("trigger metadata: %+v", trig)
 	}
-	if trig.GitBranch != "main" || trig.GitSHA != "abc" {
+	if trig.GitBranch != "main" || trig.GitSHA != "abc0000000000000000000000000000000000000" {
 		t.Errorf("git metadata: %+v", trig)
 	}
 	if trig.Args["foo"] != "bar" {

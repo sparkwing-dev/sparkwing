@@ -428,6 +428,8 @@ uploading a poisoned binary along with a digest that attests it.
 
 The cache runs as a Deployment in the `sparkwing` namespace:
 
+- **Git**: 2.24 or newer on cache and runner hosts, because every ref
+  argument is passed after `--end-of-options`
 - **Image**: `sparkwing-cache`
 - **Port**: 8090 (service port 80)
 - **Storage**: PVC at `/data`

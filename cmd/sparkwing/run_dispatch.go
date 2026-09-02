@@ -319,7 +319,7 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub strin
 	_ = exec.Command("git", "-C", repoRoot, "fetch", "--quiet", "origin", ref).Run()
 
 	out, err := exec.Command("git", "-C", repoRoot,
-		"worktree", "add", "--detach", "--quiet", tmpDir, ref).CombinedOutput()
+		"worktree", "add", "--detach", "--quiet", "--", tmpDir, ref).CombinedOutput()
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
 		return "", "", nil, fmt.Errorf("git worktree add %s: %w: %s",

@@ -93,6 +93,8 @@ var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9_./-]+$`)
 
 var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
+const maxNegotiateCommits = 256
+
 func validateGitRef(ref string) error {
 	if ref == "" {
 		return fmt.Errorf("empty git ref")
@@ -786,7 +788,7 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 	refreshMirrorBestEffort(hash, bareRepo)
 
 	// #nosec G702 -- git runs as argv with a constant binary and a validated ref leading the object name
-	out, err := exec.Command("git", "-C", bareRepo, "show", branch+":"+filePath).Output()
+	out, err := exec.Command("git", "-C", bareRepo, "show", "--end-of-options", branch+":"+filePath).Output()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("file not found: %s:%s", branch, filePath), http.StatusNotFound)
 		return
@@ -1591,6 +1593,11 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo and commits required", http.StatusBadRequest)
 		return
 	}
+	// safety: every commit costs one git fork, so an unbounded list is a free fork bomb.
+	if len(req.Commits) > maxNegotiateCommits {
+		http.Error(w, fmt.Sprintf("at most %d commits per negotiate request", maxNegotiateCommits), http.StatusBadRequest)
+		return
+	}
 	for _, commit := range req.Commits {
 		// safety: each commit reaches git as a revision argument, so only an object id may pass.
 		if !gitObjectRE.MatchString(commit) {
@@ -1639,6 +1646,13 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo query param required", http.StatusBadRequest)
 		return
 	}
+	// safety: this URL becomes the mirror's origin, which a later request fetches.
+	validRepoURL, err := sourceurl.ValidateCloneURL(repoURL)
+	if err != nil {
+		http.Error(w, "invalid repo URL: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	repoURL = validRepoURL
 	sha := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sha")))
 	if !gitObjectRE.MatchString(sha) {
 		http.Error(w, "sha query param must be a 40-64 character hex object id", http.StatusBadRequest)

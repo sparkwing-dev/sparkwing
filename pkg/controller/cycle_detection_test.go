@@ -220,7 +220,7 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 		"pipeline":"build",
 		"parent_run_id":"parent",
 		"trigger":{"source":"manual"},
-		"git":{"repo":"explicit-repo","branch":"feature","sha":"explicitSHA"}
+		"git":{"repo":"explicit-repo","branch":"feature","sha":"e0c11c1750000000000000000000000000000000"}
 	}`)
 	resp, err := http.Post(srv.URL+"/api/v1/triggers", "application/json", body)
 	if err != nil {
@@ -248,7 +248,7 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	if got.GitBranch != "feature" {
 		t.Errorf("GitBranch: explicit value clobbered: %q", got.GitBranch)
 	}
-	if got.GitSHA != "explicitSHA" {
+	if got.GitSHA != "e0c11c1750000000000000000000000000000000" {
 		t.Errorf("GitSHA: explicit value clobbered: %q", got.GitSHA)
 	}
 	if got.RepoInherited {
