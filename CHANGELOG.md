@@ -51,6 +51,11 @@ code change to unlock.
 
 ### Security
 
+- **controller + cache:** Code scanning's open findings are triaged. A clone
+  URL that begins with `-` is refused before it reaches `git clone`, where git
+  would read it as an option rather than a repository, and the PVC pool logs a
+  caller-supplied job id through `%q` so a newline in it can no longer forge a
+  second log line.
 - **store (Breaking):** Run-store schema 26 makes the `idx_tokens_prefix` index
   unique and minting retries when a prefix is already taken, so two tokens can
   no longer share a prefix and the 12-character handle that
