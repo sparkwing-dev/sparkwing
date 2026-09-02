@@ -114,6 +114,7 @@ func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 	requireWorkflowText(t, body,
 		"sw_a1b2c3d4e5f6g7h8i9j0k1l2m3n4",
 		"abcd1234-ef567890",
+		"artifacts/blobs/0f1e",
 	)
 	ignore := strings.TrimSpace(readHostedCIFile(t, ".gitleaksignore"))
 	if ignore != "49be43e4b2e9c0dc24ee7d50eaf4a0dd0291e147:internal/web/next-out/_next/static/chunks/17mq5rf2.ibbt.js:generic-api-key:55" {
