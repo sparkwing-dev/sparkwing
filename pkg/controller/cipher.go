@@ -21,3 +21,39 @@ type Cipher interface {
 	// wrong-key inputs.
 	Open(envelope string) (string, error)
 }
+
+// BoundCipher is an optional extension of [Cipher] that binds a
+// sealed value to the secret it belongs to -- its name and its owning
+// repository -- so an envelope copied onto another row no longer
+// opens. A [Cipher] that also implements BoundCipher is used through
+// these methods for every secret the controller seals and reads; one
+// that does not keeps the unbound [Cipher.Seal] and [Cipher.Open]
+// path.
+//
+// The implementation in internal/secrets satisfies it.
+type BoundCipher interface {
+	Cipher
+	// SealBound encrypts plain with name and repo as additional
+	// authenticated data; repo is empty for an unscoped secret.
+	// Same nonce requirement as [Cipher.Seal].
+	SealBound(name, repo, plain string) (string, error)
+	// OpenBound decrypts an envelope sealed for name and repo, and
+	// errors when the envelope was sealed for a different pair.
+	// Implementations that also hold envelopes written before
+	// binding open those unchanged.
+	OpenBound(name, repo, envelope string) (string, error)
+}
+
+func sealSecret(c Cipher, name, repo, plain string) (string, error) {
+	if bc, ok := c.(BoundCipher); ok {
+		return bc.SealBound(name, repo, plain)
+	}
+	return c.Seal(plain)
+}
+
+func openSecret(c Cipher, name, repo, envelope string) (string, error) {
+	if bc, ok := c.(BoundCipher); ok {
+		return bc.OpenBound(name, repo, envelope)
+	}
+	return c.Open(envelope)
+}

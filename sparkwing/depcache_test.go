@@ -140,13 +140,13 @@ func TestDepCacheArchiveRoundTrip(t *testing.T) {
 }
 
 func TestExtractDepCacheArchiveRejectsEscape(t *testing.T) {
-	if _, err := securePathJoin("/safe/root", "../evil"); err == nil {
+	if _, err := secureArchiveRel("../evil"); err == nil {
 		t.Fatal("path escaping via .. was not rejected")
 	}
-	if _, err := securePathJoin("/safe/root", "/abs/evil"); err == nil {
+	if _, err := secureArchiveRel("/abs/evil"); err == nil {
 		t.Fatal("absolute path was not rejected")
 	}
-	if _, err := securePathJoin("/safe/root", "ok/nested"); err != nil {
+	if _, err := secureArchiveRel("ok/nested"); err != nil {
 		t.Fatalf("legitimate nested path rejected: %v", err)
 	}
 }
@@ -208,10 +208,49 @@ func TestExtractRejectsEscapingSymlink(t *testing.T) {
 	}
 }
 
+func TestExtractRejectsSymlinkChain(t *testing.T) {
+	base := t.TempDir()
+	dest := filepath.Join(base, "dest")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(base, "x")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "f")
+	if err := os.WriteFile(victim, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	archive := filepath.Join(t.TempDir(), "chain.tar.gz")
+	writeRawDepArchive(t, archive, []*tar.Header{
+		{Name: "d", Typeflag: tar.TypeSymlink, Linkname: ".", Mode: 0o777},
+		{Name: "d/e", Typeflag: tar.TypeSymlink, Linkname: "../x", Mode: 0o777},
+		{Name: "d/e/f", Typeflag: tar.TypeReg, Mode: 0o644, Size: 5},
+	}, map[string][]byte{"d/e/f": []byte("PWNED")})
+
+	rf, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rf.Close()
+	if err := extractDepCacheArchive(rf, dest); err == nil {
+		t.Fatal("symlink chain out of the destination was accepted")
+	}
+	data, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "original" {
+		t.Fatalf("file outside the destination was overwritten: %q", data)
+	}
+}
+
 func TestExtractBoundsDecompression(t *testing.T) {
-	orig := depCacheMaxExtractBytes
-	depCacheMaxExtractBytes = 1 << 10
-	defer func() { depCacheMaxExtractBytes = orig }()
+	orig := maxExtractBytes
+	maxExtractBytes = 1 << 10
+	defer func() { maxExtractBytes = orig }()
 
 	archive := filepath.Join(t.TempDir(), "bomb.tar.gz")
 	big := make([]byte, 64<<10)

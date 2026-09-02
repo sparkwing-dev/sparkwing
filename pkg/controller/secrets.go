@@ -46,7 +46,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	stored := req.Value
 	if s.secretsCipher != nil {
-		sealed, sErr := s.secretsCipher.Seal(req.Value)
+		sealed, sErr := sealSecret(s.secretsCipher, req.Name, req.Repo, req.Value)
 		if sErr != nil {
 			writeError(w, http.StatusInternalServerError, sErr)
 			return
@@ -80,7 +80,7 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	plain := sec.Value
 	if s.secretsCipher != nil {
-		opened, oerr := s.secretsCipher.Open(plain)
+		opened, oerr := openSecret(s.secretsCipher, sec.Name, sec.Repo, plain)
 		if oerr != nil {
 			writeError(w, http.StatusInternalServerError, oerr)
 			return

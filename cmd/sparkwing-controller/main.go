@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -115,10 +116,16 @@ func run(args []string) error {
 				"secret values will be stored at rest as plaintext")
 	}
 
+	webhookCfg, whErr := parseGitHubWebhookConfig(os.Getenv("GITHUB_WEBHOOK_BINDINGS"))
+	if whErr != nil {
+		return fmt.Errorf("GITHUB_WEBHOOK_BINDINGS: %w", whErr)
+	}
+
 	srv := controller.New(st, nil).
 		WithTrustedProxyCIDRs(trustedProxyCIDRs).
 		EnableAuthFromStore().
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
+		WithGitHubWebhookConfig(webhookCfg).
 		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), os.Getenv("SPARKWING_DASHBOARD_URL")).
 		WithCachePodURL(*cachePodURL).
 		WithLogsURL(*logsURL).
@@ -237,4 +244,18 @@ func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
 		return nil, fmt.Errorf("kube config: %w", err)
 	}
 	return kubernetes.NewForConfig(rc)
+}
+
+func parseGitHubWebhookConfig(raw string) (controller.GitHubWebhookConfig, error) {
+	var cfg controller.GitHubWebhookConfig
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return cfg, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
+		return controller.GitHubWebhookConfig{}, err
+	}
+	return cfg, nil
 }

@@ -108,6 +108,8 @@ spec:
             - name: http
               containerPort: {{ .Values.web.port }}
           volumeMounts:
+            - name: scratch
+              mountPath: /tmp
             - name: sparkwing-home
               mountPath: /tmp/sparkwing
           resources:
@@ -125,5 +127,7 @@ spec:
             initialDelaySeconds: 3
             periodSeconds: 5
       volumes:
+        - name: scratch
+          emptyDir: {}
         - name: sparkwing-home
           emptyDir: {}
