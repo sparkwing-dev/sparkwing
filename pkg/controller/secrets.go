@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -28,7 +27,7 @@ type secretJSON struct {
 
 func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	var req secretSetReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONLimit(r, &req, maxSecretJSONBody); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}

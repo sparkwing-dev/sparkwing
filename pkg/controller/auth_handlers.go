@@ -1,9 +1,11 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -29,7 +31,7 @@ type loginResp struct {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -68,7 +70,7 @@ type logoutReq struct {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	var req logoutReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -146,6 +148,19 @@ func requestedUserScopes(req createUserReq) ([]string, error) {
 		// who names no scopes has always received from this route.
 		return []string{ScopeAdmin}, nil
 	}
+	// safety: a blank or repeated entry is dropped on the way to storage, so the
+	// account would sign in holding a narrower scope set than the operator named.
+	seen := make(map[string]struct{}, len(req.Scopes))
+	for _, s := range req.Scopes {
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" {
+			return nil, fmt.Errorf("empty scope (valid: %s)", strings.Join(allScopes, ", "))
+		}
+		if _, dup := seen[trimmed]; dup {
+			return nil, fmt.Errorf("duplicate scope %s", strconv.Quote(trimmed))
+		}
+		seen[trimmed] = struct{}{}
+	}
 	if err := validateScopes(req.Scopes); err != nil {
 		return nil, err
 	}
@@ -154,7 +169,7 @@ func requestedUserScopes(req createUserReq) ([]string, error) {
 
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	var req createUserReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -182,7 +197,7 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req createUserReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -260,7 +275,7 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 	prefix := r.PathValue("prefix")
 	var req rotateReq
 	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := decodeJSON(r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}

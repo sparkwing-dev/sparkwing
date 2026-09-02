@@ -46,6 +46,10 @@ spec:
           imagePullPolicy: {{ .Values.cache.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          {{- if .Values.cache.allowUnauthenticated }}
+          args:
+            - --allow-unauthenticated
+          {{- end }}
           env:
             {{- if .Values.cache.repos }}
             - name: GITCACHE_REPOS

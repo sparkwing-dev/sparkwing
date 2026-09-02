@@ -760,14 +760,25 @@ func newRunID() string {
 	return fmt.Sprintf("run-%s-%s", ts, hex.EncodeToString(suffix[:]))
 }
 
+const (
+	maxJSONBody = 1 << 20
+	// safety: a secret value is caller data, so it gets its own ceiling
+	// rather than an exemption from the shared decode path.
+	maxSecretJSONBody = 8 << 20
+)
+
 func decodeJSON(r *http.Request, v any) error {
+	return decodeJSONLimit(r, v, maxJSONBody)
+}
+
+func decodeJSONLimit(r *http.Request, v any, limit int64) error {
 	defer r.Body.Close()
 	// safety: an application/json body forces a CORS preflight, so a page
 	// on another site cannot post one as a simple request.
 	if err := requireJSONContentType(r.Header.Get("Content-Type")); err != nil {
 		return err
 	}
-	body := http.MaxBytesReader(nil, r.Body, 1<<20)
+	body := http.MaxBytesReader(nil, r.Body, limit)
 	dec := json.NewDecoder(body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {

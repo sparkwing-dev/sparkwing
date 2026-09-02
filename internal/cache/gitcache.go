@@ -7,8 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -167,6 +169,15 @@ func setupSSH() {
 	log.Printf("SSH key configured from %s", sshKeyDir)
 }
 
+func bearerToken(r *http.Request) string {
+	scheme, rest, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	// safety: RFC 7235 makes the scheme case-insensitive, and a header with no scheme is not a credential.
+	if !ok || !strings.EqualFold(scheme, "bearer") {
+		return ""
+	}
+	return strings.TrimSpace(rest)
+}
+
 func requireToken(next http.HandlerFunc) http.HandlerFunc {
 	token := apiToken
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -175,9 +186,8 @@ func requireToken(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
-		auth := r.Header.Get("Authorization")
-		got := strings.TrimPrefix(auth, "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1 {
+		got := bearerToken(r)
+		if got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1 {
 			next(w, r)
 			return
 		}
@@ -831,7 +841,7 @@ type binMeta struct {
 func binMetaPath(hash string) string { return filepath.Join(binsDir, hash+".meta.json") }
 
 func writingPrincipal(r *http.Request) string {
-	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	token := bearerToken(r)
 	if token == "" {
 		return "anonymous"
 	}
@@ -881,6 +891,30 @@ func writeBinMeta(hash string, meta binMeta) error {
 	return nil
 }
 
+func createBinMeta(hash string, meta binMeta) error {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(binMetaPath(hash), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		_ = os.Remove(binMetaPath(hash))
+		return err
+	}
+	return f.Close()
+}
+
+var binKeyLocks sync.Map
+
+func binKeyLock(hash string) *sync.Mutex {
+	mu, _ := binKeyLocks.LoadOrStore(hash, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
 func binDigest(hash string, f *os.File) (string, error) {
 	if meta, err := readBinMeta(hash); err == nil {
 		return meta.SHA256, nil
@@ -898,7 +932,8 @@ func binDigest(hash string, f *os.File) (string, error) {
 		return "", err
 	}
 	meta := binMeta{SHA256: digest, Size: info.Size(), Principal: "unknown", WrittenAt: info.ModTime().UTC().Format(time.RFC3339)}
-	if err := writeBinMeta(hash, meta); err != nil {
+	// safety: never replace a sidecar an upload wrote while this read was hashing the older blob.
+	if err := createBinMeta(hash, meta); err != nil && !errors.Is(err, fs.ErrExist) {
 		log.Printf("warning: bin meta write %s: %v", hash, err)
 	}
 	return digest, nil
@@ -914,6 +949,45 @@ func setBinDigestHeaders(w http.ResponseWriter, digest string) error {
 	return nil
 }
 
+func openBinForRead(hash, path string) (*os.File, string, error) {
+	// safety: an upload replaces the blob by rename, so the fd and its digest must be taken under one lock.
+	mu := binKeyLock(hash)
+	mu.Lock()
+	defer mu.Unlock()
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, "", err
+	}
+	digest, err := binDigest(hash, f)
+	if err != nil {
+		f.Close()
+		return nil, "", err
+	}
+	return f, digest, nil
+}
+
+func stageBinBlob(data []byte) (string, error) {
+	tmp, err := os.CreateTemp(binsDir, "bin-*.tmp")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	return tmpPath, nil
+}
+
 func handleBin(w http.ResponseWriter, r *http.Request) {
 	hash := strings.TrimPrefix(r.URL.Path, "/bin/")
 	if !validBinHash.MatchString(hash) {
@@ -925,18 +999,17 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		f, err := os.Open(path)
+		f, digest, err := openBinForRead(hash, path)
 		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		defer f.Close()
-		digest, err := binDigest(hash, f)
-		if err != nil {
+			if os.IsNotExist(err) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
 			log.Printf("warning: bin digest %s: %v", hash, err)
 			http.Error(w, "digest unavailable", http.StatusInternalServerError)
 			return
 		}
+		defer f.Close()
 		if err := setBinDigestHeaders(w, digest); err != nil {
 			http.Error(w, "digest unavailable", http.StatusInternalServerError)
 			return
@@ -959,14 +1032,30 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		sum := sha256.Sum256(data)
 		digest := hex.EncodeToString(sum[:])
 		principal := writingPrincipal(r)
+
+		mu := binKeyLock(hash)
+		mu.Lock()
+		defer mu.Unlock()
+
+		tmpPath, err := stageBinBlob(data)
+		if err != nil {
+			log.Printf("warning: bin stage %s: %v", hash, err)
+			http.Error(w, "write error", http.StatusInternalServerError)
+			return
+		}
 		// safety: record the digest before the blob so a torn write serves a mismatch the client discards.
 		meta := binMeta{SHA256: digest, Size: int64(len(data)), Principal: principal, WrittenAt: time.Now().UTC().Format(time.RFC3339)}
 		if err := writeBinMeta(hash, meta); err != nil {
+			_ = os.Remove(tmpPath)
 			log.Printf("warning: bin meta write %s: %v", hash, err)
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
-		if err := os.WriteFile(path, data, 0o755); err != nil {
+		if err := os.Rename(tmpPath, path); err != nil {
+			_ = os.Remove(tmpPath)
+			// safety: a digest with no blob behind it would brick the entry for every later reader.
+			_ = os.Remove(binMetaPath(hash))
+			log.Printf("warning: bin write %s: %v", hash, err)
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
@@ -1057,6 +1146,8 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+var validJobID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+
 func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/artifacts/")
 	parts := strings.SplitN(path, "/", 2)
@@ -1065,6 +1156,11 @@ func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jobID := parts[0]
+	// safety: the path is decoded here, so a job ID that is not one segment escapes the root.
+	if jobID == "." || jobID == ".." || !validJobID.MatchString(jobID) {
+		http.Error(w, "invalid job ID: must be 1-128 alphanumeric/dash/underscore/dot chars", http.StatusBadRequest)
+		return
+	}
 
 	switch r.Method {
 	case http.MethodPost:
@@ -1095,9 +1191,10 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 
 	jobDir := filepath.Join(artifactsDir, jobID)
 	dest := filepath.Join(jobDir, artifactPath)
-	absJobDir, _ := filepath.Abs(jobDir)
+	absRoot, _ := filepath.Abs(artifactsDir)
 	absDest, _ := filepath.Abs(dest)
-	if !strings.HasPrefix(absDest, absJobDir+string(filepath.Separator)) {
+	// safety: contain against the artifacts root, not the job directory a job ID could have moved.
+	if !strings.HasPrefix(absDest, absRoot+string(filepath.Separator)) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}

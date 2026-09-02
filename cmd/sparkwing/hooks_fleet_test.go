@@ -22,6 +22,12 @@ const (
   - name: build
     entrypoint: Build
 `
+	unloadableProject = `pipelines:
+  - name: e2e/k8s
+    entrypoint: Gate
+    on:
+      pre_commit: {}
+`
 )
 
 func (f *chainFixture) addRepo(t *testing.T, name, project string) string {
@@ -148,5 +154,78 @@ func TestInstallFleet_SaysSoWhenTheRegistryIsEmpty(t *testing.T) {
 	})
 	if !strings.Contains(out, "sparkwing configure xrepo add") {
 		t.Errorf("an empty registry should say how to fill it:\n%s", out)
+	}
+}
+
+func TestInstallFleet_FailsTheRepoWhoseConfigDoesNotLoad(t *testing.T) {
+	f := newChainFixture(t)
+	f.asProcessEnv(t)
+	broken := f.addRepo(t, "brokenconfig", unloadableProject)
+	f.registerRepos(t, f.repo, broken)
+
+	var err error
+	out := captureStdout(t, func() { err = installFleet(installOptions{}) })
+	if err == nil {
+		t.Fatalf("the sweep passed over a repo whose config does not load:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "brokenconfig") {
+		t.Errorf("the failure does not name the repo: %v", err)
+	}
+	if !strings.Contains(out, "config does not load") {
+		t.Errorf("the sweep does not say why the repo was skipped:\n%s", out)
+	}
+	if !strings.Contains(out, "1 repo(s) armed, 0 with no gate to arm, 0 left ungated, 1 failed") {
+		t.Errorf("an unloadable repo counted as one with no gate to arm:\n%s", out)
+	}
+}
+
+func TestSurveyFleet_ReportsAnUnloadableConfigRatherThanNoGates(t *testing.T) {
+	f := newChainFixture(t)
+	f.asProcessEnv(t)
+	broken := f.addRepo(t, "brokenconfig", unloadableProject)
+	f.registerRepos(t, broken)
+
+	rows, err := surveyFleet(f.tryGit)
+	if err != nil {
+		t.Fatalf("surveyFleet: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want one row", rows)
+	}
+	if rows[0].State != githooks.GateBroken {
+		t.Fatalf("State = %s, want %s", rows[0].State, githooks.GateBroken)
+	}
+	if rows[0].Gated() {
+		t.Error("a repo whose config does not load reported as gated")
+	}
+	var out strings.Builder
+	if err := renderHooksSurvey(&out, rows, "pretty"); err != nil {
+		t.Fatalf("renderHooksSurvey: %v", err)
+	}
+	if !strings.Contains(out.String(), "config does not load") {
+		t.Errorf("the survey does not say the config is the problem:\n%s", out.String())
+	}
+}
+
+func TestStatusHooks_FailsWhenTheConfigNoLongerLoads(t *testing.T) {
+	f := newChainFixture(t)
+	f.asProcessEnv(t)
+	captureStdout(t, func() {
+		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
+			t.Fatalf("installHooks: %v", err)
+		}
+	})
+	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), unloadableProject)
+
+	var err error
+	out := captureStdout(t, func() { err = statusHooks(f.tryGit, f.repo) })
+	if err == nil {
+		t.Fatalf("status reported an unloadable repo as an ungated but healthy one:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "config does not load") {
+		t.Errorf("error should say the config does not load: %v", err)
+	}
+	if !strings.Contains(out, "pre-commit -> gate") {
+		t.Errorf("status should still name the stale hook on disk:\n%s", out)
 	}
 }

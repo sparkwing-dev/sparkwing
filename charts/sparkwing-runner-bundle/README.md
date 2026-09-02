@@ -91,13 +91,15 @@ helm install runners ./charts/sparkwing-runner-bundle \
     --set runner.labels='{cluster,arch=amd64}'
 ```
 
-For a fully unauthenticated test cluster:
+For a fully unauthenticated test cluster, opt the cache out of its token
+requirement explicitly:
 
 ```bash
 helm install runners ./charts/sparkwing-runner-bundle \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
-    --set controller.url=http://sparkwing-controller.sparkwing.svc.cluster.local
+    --set controller.url=http://sparkwing-controller.sparkwing.svc.cluster.local \
+    --set cache.allowUnauthenticated=true
 ```
 
 ## Values cheat sheet
@@ -116,6 +118,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
+| `cache.allowUnauthenticated` | Serve the cache's blob and sync endpoints without a token. | `false` |
 | `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 | `cache.repos` | `GITCACHE_REPOS` -- comma-separated `alias=url`. | `""` |
 | `cache.sshKeySecret.name` | Required SSH-key Secret when configured. | `""` |
@@ -123,7 +126,9 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `cache.storage.storageClassName` | Override default StorageClass. | `""` |
 | `logs.enabled` | Toggle the log-store sidecar. | `true` |
 | `logs.storage.size` | Logs PVC size. | `10Gi` |
+| `runner.automountServiceAccountToken` | Mount the runner pod's API token. Needed only by the k8s trigger runner. | `false` |
 | `serviceAccount.annotations` | Add IRSA / Workload Identity annotations. | `{}` |
+| `serviceAccount.shareAcrossComponents` | Accept one shared account when `serviceAccount.create=false`. | `false` |
 | `imagePullSecrets` | Private-registry pull secrets for all 3 images. | `[]` |
 
 ## Auth
@@ -133,9 +138,15 @@ for controller claims and writes to the logs service. Configuring that Secret
 also enables logs-service auth: the logs service forwards each caller's
 incoming Authorization header to the resolved controller's
 `/api/v1/auth/whoami` endpoint and enforces the returned scopes. It does not
-receive a second service bearer. Leaving the Secret name empty keeps both the
-standalone and full chart's documented test install unauthenticated. Once a
-Secret name is configured, its key and the Secret itself are required.
+receive a second service bearer. The same Secret becomes the runner's
+`SPARKWING_CACHE_TOKEN` and the cache's `SPARKWING_API_TOKEN`, so both sides of
+the binary and dependency cache share one bearer. Once a Secret name is
+configured, its key and the Secret itself are required.
+
+A cache-enabled install without that Secret fails at render time. Set
+`cache.allowUnauthenticated=true` to serve the cache's blob and sync endpoints
+to anything that can reach the Service, which is appropriate only on a
+bootstrap install, before the Secret exists.
 
 Trigger claiming always needs a gitcache because it clones and compiles the
 repository before creating a run. If `cache.enabled=false` while
@@ -190,6 +201,15 @@ token: every pod sets `automountServiceAccountToken: false`, and the
 cache and logs pods run under their own ServiceAccounts rather than the
 runner's.
 
+The one runner configuration that does call the API is the opt-in
+Kubernetes trigger runner (`SPARKWING_TRIGGER_RUNNER=k8s`), which creates
+runner Jobs and cannot load its in-cluster config without a token. Give it
+one back, along with the Role that lets it create Jobs:
+
+```bash
+--set runner.automountServiceAccountToken=true
+```
+
 Pipelines that need to reach the cluster API (e.g. `kubectl apply`,
 sealed-secrets, helm-installs) should bring their own ServiceAccount and
 RBAC outside this chart.
@@ -199,8 +219,14 @@ If you don't want the chart-managed Role at all:
 ```bash
 --set rbac.create=false \
 --set serviceAccount.create=false \
---set serviceAccount.name=my-existing-sa
+--set serviceAccount.name=my-existing-sa \
+--set serviceAccount.shareAcrossComponents=true
 ```
+
+`serviceAccount.create=false` runs all three pods under that one account.
+The render fails without `shareAcrossComponents=true` so the sharing is a
+recorded choice; the chart never invents `-cache` and `-logs` names you
+have not created.
 
 ## Image registry
 

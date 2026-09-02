@@ -92,6 +92,34 @@ code change to unlock.
   `trigger.env`, so a credential-named key no longer reaches the `trigger_env`
   a `triggers.read` principal can read. Cluster-mode `sparkwing debug rerun`
   deletes its debug pod on interrupt as well as on normal exit.
+- **helm:** `sparkwing-runner-bundle` stamps `SPARKWING_CACHE_TOKEN` on the
+  runner from the same Secret the cache reads `SPARKWING_API_TOKEN` from, and
+  trigger-spawned runner Jobs pass that token through. A cache-enabled install
+  without `controller.tokenSecret.name` now fails at render time instead of
+  crashlooping; set the new `cache.allowUnauthenticated=true` to serve the cache
+  without a token during a bootstrap install.
+- **cache:** `POST /artifacts/{jobID}` requires the bearer token and rejects a
+  job ID that is not one plain path segment, so an anonymous caller can no
+  longer write an executable into the binary cache and have it served back with
+  a matching digest. The bearer scheme is parsed case-insensitively, a header
+  with no `Bearer` scheme is no longer a credential, and a whitespace-only
+  `--api-token` is treated as absent. Uploads to `/bin/<key>` stage the blob
+  before recording its digest, so a failed write leaves no digest attesting
+  bytes that were never stored.
+- **dashboard:** The local listener refuses cross-site subresource loads,
+  not just cross-site writes, so an `img` or `fetch` from another page
+  cannot reach a side-effecting GET. `--allow-remote` now widens the `Host`
+  check alone: a foreign browser `Origin` is still refused unless it is
+  loopback, the `--addr` host, or listed in the new
+  `--allow-origin`. Login, logout, user, bootstrap, token, and secret
+  writes decode through the shared JSON path, so they require an
+  `application/json` body and a bounded one.
+- **web:** The dashboard's logs-service proxy now forwards only the four log
+  reads the dashboard makes, each gated on the session's `logs.read` scope, so
+  a signed-in browser can no longer delete a run's logs or append forged log
+  lines with the web pod's service bearer. Creating a dashboard user rejects a
+  blank or repeated scope instead of storing an account that cannot reach any
+  route.
 - **storage:** Artifact keys are limited to ASCII letters, digits, `.`, `_`, and
   `-` with no dot-leading segment, and the cache-backed artifact store escapes
   every key segment in its request path, so a double-encoded or `#`/`?` key
@@ -105,13 +133,17 @@ code change to unlock.
   sends the pod manifest to `kubectl` on stdin, keeping env values off the
   command line and out of the echoed banner. See the
   [migration guide](docs/migrations/_unreleased.md#dispatch-snapshot-credentials).
-- **cache:** Cached pipeline binaries now carry a verified sha-256 digest
+- **cache:** Cached pipeline binaries now carry a verified sha-256 digest.
   The cache stores the digest and the writing principal's token fingerprint
   beside each uploaded binary, serves them as `Digest` and `ETag`, and writes
   the digest as a companion object in an artifact store. Clients hash what they
-  download and discard a mismatch before the binary lands, so a poisoned or
-  tampered entry is recompiled instead of executed. A download without a digest
-  counts as a miss, so binaries stored by an older cache are recompiled once.
+  download and discard a mismatch before the binary lands, so bytes altered in
+  transit or altered on the cache's disk after the upload are recompiled
+  instead of executed. Write authentication, not the digest, is what stops a
+  poisoned upload, because the cache derives the digest from the body it was
+  handed. A download without a digest counts as a miss, and an artifact-store
+  blob published before the companion object existed is hashed and backfilled
+  on its first fetch, so binaries stored by an older cache are recompiled once.
 - **web (Breaking):** The dashboard proxy now forwards only the controller
   routes the dashboard itself calls and checks the signed-in session's scopes
   against each one, so a logged-in browser can no longer mint tokens, read
@@ -121,16 +153,23 @@ code change to unlock.
   `sparkwing cluster users add --scope` creates narrower accounts.
   `store.CreateUser` and `store.CreateFirstUser` now take that scope set. See the
   [migration guide](docs/migrations/_unreleased.md#dashboard-proxy-allow-list).
-- **runner:** Runner Job pods mount no ServiceAccount token, and `--runner k8s`
-  now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead of silently
-  landing pipeline code on the namespace default ServiceAccount.
-- **helm:** The runner Role no longer reads namespace Secrets, ConfigMaps,
-  pods, or events, and no chart pod mounts a ServiceAccount token. The cache
-  and logs pods get their own ServiceAccounts instead of sharing the runner's,
-  and `sparkwing-full` creates an unprivileged `sparkwing-cache-warmer`
-  ServiceAccount that the controller's warmer pods now name explicitly.
-  Controllers running the warm pool outside that chart must create that
-  ServiceAccount in the pool namespace.
+- **runner (Breaking):** Runner Job pods mount no ServiceAccount token, and
+  `--runner k8s` now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead
+  of silently landing pipeline code on the namespace default ServiceAccount.
+  `--trigger-runner k8s` checks the same flag at startup rather than failing
+  once per claimed trigger. See the
+  [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
+- **helm (Breaking):** The runner Role no longer reads namespace Secrets,
+  ConfigMaps, pods, or events, and no chart pod mounts a ServiceAccount token
+  unless `runner.automountServiceAccountToken` asks for one. The cache and logs
+  pods get their own ServiceAccounts instead of sharing the runner's, and
+  `serviceAccount.create=false` now requires
+  `serviceAccount.shareAcrossComponents=true` to accept one shared account.
+  `sparkwing-full` creates a release-scoped, unprivileged cache-warmer
+  ServiceAccount and names it to the controller with
+  `--warmer-service-account`. Controllers running the warm pool outside that
+  chart must create that ServiceAccount in the pool namespace. See the
+  [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
 - **cache:** The cache no longer serves an authenticated endpoint to a request
   that omits `X-Forwarded-For`, so `PUT /bin/<key>`, `PUT /cache/<key>`,
   `POST /upload`, and the sync routes now require the bearer token from every
@@ -138,10 +177,14 @@ code change to unlock.
   `--api-token` unless `--allow-unauthenticated`
   (`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`) is set, and cached-binary and
   lint-cache reads now send `SPARKWING_CACHE_TOKEN`.
-- **cli:** Generated git hooks now single-quote each pipeline name, and
-  `sparkwing.yaml` rejects a pipeline name outside
+- **cli + config (Breaking):** Generated git hooks now single-quote each pipeline
+  name, and `sparkwing.yaml` rejects a pipeline name outside
   `^[A-Za-z0-9][A-Za-z0-9._-]*$`, so a repository's config cannot hand shell
-  execution to anyone who runs `sparkwing pipeline hooks install`.
+  execution to anyone who runs `sparkwing pipeline hooks install`. A config
+  holding a name outside that pattern no longer loads at all, so every command
+  that reads it fails until the pipeline is renamed in the YAML and in the
+  matching `Register(...)` string. See the
+  [migration guide](docs/migrations/_unreleased.md#pipeline-name-charset).
 - **storage:** Artifact keys are now validated before the filesystem store
   joins them to a path, and the store opens every blob through `os.Root`, so
   `GET /api/v1/artifacts/{key}` can no longer read, overwrite, or delete files
@@ -165,10 +208,19 @@ code change to unlock.
   suffix or an untrusted immediate peer use the TCP peer address. Configure
   `--trusted-proxy-cidrs` or the chart's `web.trustedProxyCIDRs` to retain
   per-client buckets behind a reverse proxy.
-- **logs:** Run and node identifiers must now be a single path segment that
-  `filepath.Clean` leaves unchanged and resolve to one directory under the
-  runs root, so a request carrying a percent-encoded `.` can no longer address
-  the runs root itself and delete every run's logs.
+- **logs:** Run identifiers must now be a single path segment, and every
+  segment of a node identifier must be one that `filepath.Clean` leaves
+  unchanged, so a request carrying a percent-encoded `.` can no longer address
+  the runs root itself and delete every run's logs. Hierarchical node
+  identifiers such as `parent/child`, which spawned children carry, are stored
+  as one flat `parent__child.log` file the way local runs already store them,
+  instead of being rejected until the writer gives up.
+- **logs:** The log service opens, lists, and removes run directories through
+  an `os.Root` confined to the runs root, so a symlink planted at `runs/<name>`
+  can no longer read or delete files outside it. Filesystem failures answer
+  with a generic message instead of the server's absolute path, and the
+  identifier length cap counts the `.log` suffix, so an over-long node id is
+  rejected with a 400 rather than failing as an unretryable 500.
 
 ## [v0.38.2] - 2026-09-01
 

@@ -54,6 +54,8 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 			if fetchErr := bincache.TryBinary(gcURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
 				source = "gitcache"
 				return nil
+			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
+				slog.Default().Warn("bin cache fetch failed", "err", fetchErr, "hash", key)
 			}
 		}
 		announceCompile()

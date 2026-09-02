@@ -42,14 +42,22 @@ func runHooksFire(args []string) error {
 			return fmt.Errorf("hooks fire: %w", err)
 		}
 		for _, root := range roots {
-			results = append(results, githooks.Fire(runGit, root, declaredHookNames(root)))
+			declared, err := declaredHookNames(root)
+			if err != nil {
+				return fmt.Errorf("hooks fire: %w", err)
+			}
+			results = append(results, githooks.Fire(runGit, root, declared))
 		}
 	} else {
 		repoRoot, _, err := resolveHooksRepo(*repo)
 		if err != nil {
 			return fmt.Errorf("hooks fire: %w", err)
 		}
-		results = append(results, githooks.Fire(runGit, repoRoot, declaredHookNames(repoRoot)))
+		declared, err := declaredHookNames(repoRoot)
+		if err != nil {
+			return fmt.Errorf("hooks fire: %w", err)
+		}
+		results = append(results, githooks.Fire(runGit, repoRoot, declared))
 	}
 	if err := renderHooksFire(os.Stdout, results, format); err != nil {
 		return err
