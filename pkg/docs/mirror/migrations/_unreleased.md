@@ -502,12 +502,19 @@ CHANGELOG links here.
   with 400. Trigger environment keeps only `GITHUB_REPOSITORY`, the GitHub
   pull-request context, and the `SPARKWING_START_AT`, `SPARKWING_STOP_AT`,
   `SPARKWING_ONLY`, `SPARKWING_DRY_RUN`, and `SPARKWING_NO_CACHE`
-  switches. `?limit=` is capped at 1000 rows.
+  switches, with `GITHUB_REPOSITORY` accepted only as an `owner/name`
+  slug. A caller without `admin` cannot submit `trigger.source: github`
+  or the pull-request keys the commit-status reporter trusts; the
+  HMAC-verified webhook still can. `?limit=` is capped at 1000 rows on
+  the run, trigger, and event lists.
 - **Migration:** A hand-rolled client that polls `/api/v1/services`
   anonymously sends `Authorization: Bearer <token>`. One that submits
   triggers carrying its own environment keys moves that data into pipeline
-  args. A dashboard or export that asked for more than 1000 runs in one
-  request pages instead.
+  args, and one that passes a clone URL in `GITHUB_REPOSITORY` passes the
+  slug and puts the URL in `git.repo_url`. A client that submitted
+  `trigger.source: github` to drive commit statuses needs an `admin`
+  token or the webhook. A dashboard or export that asked for more than
+  1000 runs, triggers, or events in one request pages instead.
 - **Why:** The announcement names internal cache and logs URLs, the
   repository URL becomes a clone target on every runner, the trigger
   environment is served whole to every `triggers.read` principal and is

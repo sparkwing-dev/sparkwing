@@ -86,9 +86,24 @@ switches). Everything else is dropped, including the retry-provenance
 keys the controller writes for itself, so a submission cannot forge the
 repository directory a later local retry trusts.
 
-`GET /api/v1/runs?limit=` is capped at 1000 rows, in the query parser and
-again in the store, so a read-only token cannot ask one request to
-materialize every run row with its plan and args blobs.
+The clone-URL check canonicalizes the host before it decides: a trailing
+dot, an IPv6 zone id, and the decimal, hexadecimal, and octal spellings of
+an address (`127.1`, `2130706433`, `0x7f000001`, `017700000001`) all
+resolve to the same place a resolver sends them, and loopback, private,
+link-local, carrier-grade NAT, and the cloud metadata names are rejected
+in every spelling.
+
+`GITHUB_REPOSITORY` is the one submitted key a runner reads as a clone
+target, and it wins over `git.repo_url`, so it is accepted only as an
+`owner/name` slug. A caller without `admin` also cannot submit
+`trigger.source: github` or the pull-request environment keys: those are
+what the commit-status reporter trusts when it spends the controller's
+GitHub token, and the HMAC-verified webhook is what writes them.
+
+`GET /api/v1/runs?limit=`, `GET /api/v1/triggers?limit=`, and
+`GET /api/v1/runs/{id}/events?limit=` are capped at 1000 rows, in the
+handler and again in the store, so a read-only token cannot ask one
+request to materialize every row with its plan, args, and payload blobs.
 
 `GET /api/v1/services` announces internal cache and logs URLs and needs a
 bearer; any valid token satisfies it, and every client that consumes it

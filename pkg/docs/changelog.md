@@ -135,6 +135,17 @@ code change to unlock.
   --metrics-addr` (`$SPARKWING_METRICS_ADDR`) binds Prometheus `/metrics` to
   its own listener, off the API listener and any ingress in front of it. See
   [the migration note](docs/migrations/_unreleased.md).
+- **controller:** The trigger and event lists cap `?limit=` at 1000 rows like
+  the run list. The clone-URL check now canonicalizes a host before judging it,
+  so `127.1`, `2130706433`, `0x7f000001`, `017700000001`, `localhost.`, and an
+  IPv6 zone id no longer walk past the loopback rule, and carrier-grade NAT and
+  the cloud metadata names are rejected too. `POST /api/v1/triggers` takes
+  `GITHUB_REPOSITORY` only as an `owner/name` slug, and a caller without
+  `admin` can no longer submit `trigger.source: github` or the pull-request
+  environment keys the commit-status reporter spends the controller's GitHub
+  token on. The Git cache register route keeps its half-hour deadline, the
+  controller refuses to start when `--metrics-addr` cannot bind, and
+  `controller.metricsPort` wires that flag into the `sparkwing-full` chart.
 
 ### Security
 
