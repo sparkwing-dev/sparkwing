@@ -1,7 +1,10 @@
 package store
 
 import (
+	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
@@ -12,9 +15,10 @@ import (
 	"time"
 )
 
-// Session is one row in the sessions table.
+// Session is one row in the sessions table. ID holds the raw session id the
+// caller presented; the table keys rows by its digest.
 type Session struct {
-	ID         string // raw id; also the primary key
+	ID         string
 	Principal  string
 	Scopes     []string
 	CSRFToken  string
@@ -36,7 +40,73 @@ type User struct {
 // SessionIDLen is the raw byte length before base64.
 const SessionIDLen = 32
 
-// CreateSession returns a raw session id + CSRF token.
+const metaKeySessionCSRFKey = "session_csrf_key"
+
+func sessionDigest(rawSession string) string {
+	sum := sha256.Sum256([]byte(rawSession))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *Store) csrfSigningKey() ([]byte, error) {
+	s.csrfKeyMu.Lock()
+	defer s.csrfKeyMu.Unlock()
+	if len(s.csrfKey) > 0 {
+		return s.csrfKey, nil
+	}
+	minted := make([]byte, sha256.Size)
+	if _, err := rand.Read(minted); err != nil {
+		return nil, err
+	}
+	// safety: DO NOTHING keeps a concurrent minter's key, so every process derives the same token for a session.
+	if _, err := s.execNoCtx(
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT (key) DO NOTHING`,
+		metaKeySessionCSRFKey, hex.EncodeToString(minted), time.Now().UnixNano(),
+	); err != nil {
+		return nil, fmt.Errorf("sessions: persist csrf key: %w", err)
+	}
+	var stored string
+	if err := s.queryRowNoCtx(
+		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeySessionCSRFKey,
+	).Scan(&stored); err != nil {
+		return nil, fmt.Errorf("sessions: read csrf key: %w", err)
+	}
+	key, err := hex.DecodeString(stored)
+	if err != nil || len(key) == 0 {
+		return nil, errors.New("sessions: malformed csrf key")
+	}
+	s.csrfKey = key
+	return key, nil
+}
+
+func (s *Store) deriveCSRFToken(rawSession string) (string, error) {
+	key, err := s.csrfSigningKey()
+	if err != nil {
+		return "", err
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(rawSession))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+func (s *Store) rehashSessions(ctx context.Context) error {
+	// safety: pre-digest rows hold replayable session ids, so the migration drops them rather than converting them.
+	if _, err := s.exec(ctx, `DELETE FROM sessions`); err != nil {
+		return err
+	}
+	cols, err := s.tableColumns("sessions")
+	if err != nil {
+		return err
+	}
+	if !cols["csrf_token"] {
+		return nil
+	}
+	_, err = s.exec(ctx, `ALTER TABLE sessions DROP COLUMN csrf_token`)
+	return err
+}
+
+// CreateSession returns a raw session id and its CSRF token. The table stores
+// the session digest; the CSRF token is derived on demand and never stored.
 func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error) {
 	if principal == "" {
 		return "", "", nil, errors.New("sessions: principal required")
@@ -50,18 +120,17 @@ func (s *Store) CreateSession(principal string, scopes []string, ttl time.Durati
 	}
 	rawSession = base64.RawURLEncoding.EncodeToString(sessBytes)
 
-	csrfBytes := make([]byte, 24)
-	if _, err := rand.Read(csrfBytes); err != nil {
+	csrfToken, err = s.deriveCSRFToken(rawSession)
+	if err != nil {
 		return "", "", nil, err
 	}
-	csrfToken = base64.RawURLEncoding.EncodeToString(csrfBytes)
 
 	expires := now.Add(ttl).UTC()
 	scopeStr := joinScopes(scopes)
 	_, err = s.execNoCtx(`
-        INSERT INTO sessions (hash, principal, scopes, csrf_token, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    `, rawSession, principal, scopeStr, csrfToken, now.UTC().Unix(), expires.Unix())
+        INSERT INTO sessions (hash, principal, scopes, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?)
+    `, sessionDigest(rawSession), principal, scopeStr, now.UTC().Unix(), expires.Unix())
 	if err != nil {
 		return "", "", nil, fmt.Errorf("sessions: insert: %w", err)
 	}
@@ -81,19 +150,20 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 	if rawSession == "" {
 		return nil, errors.New("empty session")
 	}
+	digest := sessionDigest(rawSession)
 	row := s.queryRowNoCtx(`
-        SELECT principal, scopes, csrf_token,
+        SELECT principal, scopes,
                created_at, expires_at, last_used_at
           FROM sessions
          WHERE hash = ?
-    `, rawSession)
+    `, digest)
 
 	var sess Session
 	var scopes string
 	var lastUsed sql.NullInt64
 	var created, expires int64
 	if err := row.Scan(
-		&sess.Principal, &scopes, &sess.CSRFToken,
+		&sess.Principal, &scopes,
 		&created, &expires, &lastUsed,
 	); err != nil {
 		return nil, errors.New("unknown session")
@@ -109,9 +179,14 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 	if !now.Before(sess.ExpiresAt) {
 		return nil, errors.New("session expired")
 	}
+	csrfToken, err := s.deriveCSRFToken(rawSession)
+	if err != nil {
+		return nil, err
+	}
+	sess.CSRFToken = csrfToken
 	_, _ = s.execNoCtx(
 		`UPDATE sessions SET last_used_at = ? WHERE hash = ?`,
-		now.UTC().Unix(), rawSession,
+		now.UTC().Unix(), digest,
 	)
 	ts := now.UTC()
 	sess.LastUsedAt = &ts
@@ -120,7 +195,7 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 
 // DeleteSession removes the session by its raw id. Idempotent.
 func (s *Store) DeleteSession(rawSession string) error {
-	_, err := s.execNoCtx(`DELETE FROM sessions WHERE hash = ?`, rawSession)
+	_, err := s.execNoCtx(`DELETE FROM sessions WHERE hash = ?`, sessionDigest(rawSession))
 	return err
 }
 
@@ -142,7 +217,7 @@ func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Tim
 	expires := now.Add(ttl).UTC().Unix()
 	_, err := s.execNoCtx(
 		`UPDATE sessions SET expires_at = ? WHERE hash = ?`,
-		expires, rawSession,
+		expires, sessionDigest(rawSession),
 	)
 	return err
 }

@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -88,9 +89,11 @@ const (
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	db      *sql.DB
-	dialect Dialect
-	cleanup func() error
+	db        *sql.DB
+	dialect   Dialect
+	cleanup   func() error
+	csrfKeyMu sync.Mutex
+	csrfKey   []byte
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -718,12 +721,12 @@ CREATE TABLE IF NOT EXISTS tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_tokens_prefix ON tokens(prefix);
 
--- Browser sessions; same hash treatment as tokens.
+-- Browser sessions. hash = sha256 of the raw session id; the CSRF token is
+-- an HMAC of that id under a server key, so neither is stored in the clear.
 CREATE TABLE IF NOT EXISTS sessions (
     hash          TEXT PRIMARY KEY,
     principal     TEXT NOT NULL,
     scopes        TEXT NOT NULL,
-    csrf_token    TEXT NOT NULL,
     created_at    INTEGER NOT NULL,
     expires_at    INTEGER NOT NULL,
     last_used_at  INTEGER
@@ -817,7 +820,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 20
+const expectedSchemaVersion = 21
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1207,6 +1210,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.ensureColumns("users", usersScopesCols)
 	case 20:
 		return s.ensureColumns("node_dispatches", nodeDispatchRedactionCols)
+	case 21:
+		return s.rehashSessions(ctx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1274,6 +1279,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "users", usersScopesCols)
 	case 20:
 		return addColumnsTx(ctx, tx, "node_dispatches", nodeDispatchRedactionCols)
+	case 21:
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN IF EXISTS csrf_token`)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1608,23 +1619,10 @@ func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 }
 
 func (s *Store) ensureColumns(table string, cols map[string]string) error {
-	rows, err := s.queryNoCtx(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+	have, err := s.tableColumns(table)
 	if err != nil {
 		return err
 	}
-	have := map[string]bool{}
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		have[name] = true
-	}
-	_ = rows.Close()
 	for name, typ := range cols {
 		if have[name] {
 			continue
@@ -1638,6 +1636,27 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) tableColumns(table string) (map[string]bool, error) {
+	rows, err := s.queryNoCtx(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+	if err != nil {
+		return nil, err
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		have[name] = true
+	}
+	_ = rows.Close()
+	return have, rows.Err()
 }
 
 func isDuplicateColumnErr(err error) bool {

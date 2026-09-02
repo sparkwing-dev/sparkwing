@@ -50,6 +50,13 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
+- **store:** Browser sessions are stored as a sha256 digest of the session id,
+  and the CSRF token is derived as an HMAC of that id under a server key
+  instead of being written to the database, so a copy of the state database,
+  its WAL, or a backup no longer yields replayable dashboard sessions. The
+  schema 21 migration deletes existing session rows, so everyone signs in
+  again after the upgrade.
+
 - **controller:** Login now carries per-client, listener-wide, and per-account
   budgets, and every argon2id verification passes through a memory-sized
   semaphore, so unauthenticated callers can no longer exhaust the pod by
