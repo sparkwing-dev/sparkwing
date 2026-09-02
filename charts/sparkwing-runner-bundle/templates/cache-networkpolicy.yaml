@@ -25,6 +25,17 @@ spec:
               app.kubernetes.io/instance: {{ .Release.Name }}
               app.kubernetes.io/component: controller
               {{- end }}
+        - podSelector:
+            matchLabels:
+              {{- if .Values.networkPolicy.webPodSelector }}
+              {{- toYaml .Values.networkPolicy.webPodSelector | nindent 14 }}
+              {{- else }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: web
+              {{- end }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.runnerJobPodSelector | nindent 14 }}
       ports:
         - protocol: TCP
           port: {{ .Values.cache.service.targetPort }}

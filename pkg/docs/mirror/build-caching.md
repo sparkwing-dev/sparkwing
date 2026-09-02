@@ -234,9 +234,25 @@ upstream URLs, so the proxy rewrites them onto itself. It rewrites against
 `SPARKWING_CACHE_PUBLIC_URL` when that is set, and caches the rewritten body.
 Unset, the cached copy stays exactly as upstream sent it and each response is
 rewritten from its own request's `Host` header, so a caller who sends a forged
-`Host` only ever changes its own response. Set the public URL whenever every
-client reaches the proxy at one address -- the runner-bundle chart does it for
-you through `cache.publicUrl`, defaulting to the in-cluster Service URL.
+`Host` only ever changes its own response. A per-request response carries
+`Cache-Control: private, max-age=0` and `Vary: Host`, which keeps a shared
+intermediary from handing one client's body to another; a response rewritten
+against the public URL is host-independent and stays `Cache-Control: public`
+for the entry's remaining TTL.
+
+A fixed base is correct only when every client dials the cache at the same
+address, so set it exactly then. The runner-bundle chart does it for you
+through `cache.publicUrl` when `cache.service.type` is `ClusterIP`. On a
+`LoadBalancer` or `NodePort` Service -- or through `kubectl port-forward` --
+clients reach the cache at more than one address, so the chart leaves the
+value empty and the proxy rewrites per request instead. An off-cluster runner
+pool that does share one address can set `cache.publicUrl` itself.
+
+Changing the public URL (setting it, clearing it, or pointing it elsewhere)
+leaves already-cached mutable entries written against the old value. They keep
+being served that way until their TTL expires -- `PROXY_CACHE_TTL`, 10 minutes
+by default -- so plan for that window, or wipe `PROXY_CACHE_DIR` to end it at
+once. Immutable entries carry no upstream URLs and are unaffected.
 
 **Cache policy:**
 
@@ -257,8 +273,14 @@ you through `cache.publicUrl`, defaulting to the in-cluster Service URL.
 - `PROXY_CACHE_TTL` -- metadata TTL (default: `10m`)
 - `PROXY_MAX_AGE` -- cleanup threshold for immutable entries (default: `168h`)
 - `SPARKWING_CACHE_PUBLIC_URL` (`--public-url`) -- base URL clients use to reach
-  the proxy, e.g. `http://sparkwing-cache.sparkwing.svc.cluster.local`. Empty
-  rewrites per request from the `Host` header (default)
+  the proxy, e.g. `http://sparkwing-cache.sparkwing.svc.cluster.local`. A scheme
+  and host, optionally with a `/proxy` path; any other path, a query, or a
+  fragment fails startup with the offending value named. Empty rewrites per
+  request from the `Host` header (default)
 - `SPARKWING_CACHE_TRUST_FORWARDED_HOST` (`--trust-forwarded-host`) -- honor
   `X-Forwarded-Host` and `X-Forwarded-Proto` when rewriting per request. Only
-  set it when a reverse proxy is the only route to the port (default: off)
+  set it when a reverse proxy is the only route to the port (default: off).
+  Proxies append, so the right-most element wins and it has to parse as a
+  host with an optional port; anything else is refused with a 400. The flag is
+  inert when `SPARKWING_CACHE_PUBLIC_URL` is set, because that base ignores the
+  request entirely

@@ -2,10 +2,12 @@ package controller
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -254,5 +256,97 @@ func TestInvalidate_LeavesOtherPrefixesCached(t *testing.T) {
 	a.Invalidate("")
 	if _, ok := a.cache.Load(rawB); !ok {
 		t.Fatalf("Invalidate(\"\") cleared the cache")
+	}
+}
+
+func TestAuthenticate_InvalidateDuringLookupIsNotOverwritten(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatalf("store open: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	now := time.Now().UTC()
+	raw, tok, err := st.CreateToken("victim", store.TokenKindUser, []string{ScopeRunsRead}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	a := NewAuthenticator(st, time.Hour)
+	var once sync.Once
+	a.afterLookup = func() {
+		once.Do(func() {
+			if err := st.RevokeToken(tok.Prefix, time.Now().UTC()); err != nil {
+				t.Errorf("RevokeToken: %v", err)
+			}
+			a.Invalidate(tok.Prefix)
+		})
+	}
+
+	if _, err := a.Authenticate(raw); err != nil {
+		t.Fatalf("in-flight Authenticate: %v", err)
+	}
+	if _, err := a.Authenticate(raw); err == nil {
+		t.Fatalf("a token revoked mid-lookup still authenticates from the cache")
+	}
+}
+
+func TestDeleteUser_KeepsTheCallersOwnToken(t *testing.T) {
+	f := newRevocationFixture(t)
+	now := time.Now().UTC()
+	if _, err := f.store.CreateUser("root", "correct-horse", []string{ScopeAdmin}, now); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	other, _, err := f.store.CreateToken("root", store.TokenKindUser, []string{ScopeRunsRead}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	resp := f.do(t, http.MethodDelete, "/api/v1/users/root", f.admin, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete user = %d, want 204", resp.StatusCode)
+	}
+	if got := f.whoamiStatus(t, f.admin); got != http.StatusOK {
+		t.Fatalf("whoami with the deleting token = %d, want 200", got)
+	}
+	if got := f.whoamiStatus(t, other); got != http.StatusUnauthorized {
+		t.Fatalf("whoami with another token of the deleted principal = %d, want 401", got)
+	}
+}
+
+func TestDeleteUser_UnknownIs404(t *testing.T) {
+	f := newRevocationFixture(t)
+	resp := f.do(t, http.MethodDelete, "/api/v1/users/nobody", f.admin, "")
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("delete an unknown user = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestDeleteUser_StoreFailureIs500WithoutDriverDetail(t *testing.T) {
+	f := newRevocationFixture(t)
+	now := time.Now().UTC()
+	if _, err := f.store.CreateUser("mallory", "correct-horse", []string{ScopeAdmin}, now); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if got := f.whoamiStatus(t, f.admin); got != http.StatusOK {
+		t.Fatalf("whoami = %d, want 200", got)
+	}
+	if err := f.store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	resp := f.do(t, http.MethodDelete, "/api/v1/users/mallory", f.admin, "")
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("delete against a broken store = %d, want 500", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if strings.Contains(string(body), "sql") || strings.Contains(string(body), "users: ") {
+		t.Fatalf("driver detail echoed to the caller: %s", body)
 	}
 }

@@ -491,7 +491,7 @@ func TestGitcacheMachineProxyBypassesBrowserSessionAndPreservesBearer(t *testing
 		RequireLogin:  true,
 	}, authTestBundle)
 	req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/gitcache/seed", strings.NewReader("bundle"))
-	req.Header.Set("Authorization", "Bearer runner-admin-token")
+	req.Header.Set("Authorization", "Bearer swr_0123456789abcdef")
 	req.Header.Set("Proxy-Authorization", "Bearer proxy-secret")
 	req.Header.Set(csrfHeaderName, "browser-token")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "browser-session"})
@@ -500,7 +500,7 @@ func TestGitcacheMachineProxyBypassesBrowserSessionAndPreservesBearer(t *testing
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("machine proxy status = %d, want 204", rec.Code)
 	}
-	if path != "/api/v1/gitcache/seed" || authorization != "Bearer runner-admin-token" || proxyAuthorization != "" || cookie != "" || csrf != "" {
+	if path != "/api/v1/gitcache/seed" || authorization != "Bearer swr_0123456789abcdef" || proxyAuthorization != "" || cookie != "" || csrf != "" {
 		t.Fatalf("machine proxy boundary = path %q Authorization %q Proxy-Authorization %q Cookie %q CSRF %q", path, authorization, proxyAuthorization, cookie, csrf)
 	}
 }
@@ -527,7 +527,7 @@ func TestGitcacheMachineProxyAllowsSlowPackStreamBeyondDefaultDeadline(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Authorization", "Bearer runner-token")
+	req.Header.Set("Authorization", "Bearer swr_0123456789abcdef")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -736,7 +736,10 @@ func TestGitcacheMachineProxyRejectsARequestWithNoBearer(t *testing.T) {
 		RequireLogin:  true,
 	}, authTestBundle)
 
-	for _, authorization := range []string{"", "Basic dXNlcjpwYXNz", "Bearer", "Bearer   "} {
+	for _, authorization := range []string{
+		"", "Basic dXNlcjpwYXNz", "Bearer", "Bearer   ",
+		"Bearer x", "Bearer swr_short", "Bearer nope_0123456789abcdef",
+	} {
 		req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/gitcache/seed", strings.NewReader("bundle"))
 		if authorization != "" {
 			req.Header.Set("Authorization", authorization)
@@ -770,28 +773,14 @@ func TestGitcacheMachineProxyCapsConcurrentStreams(t *testing.T) {
 	releaseOnce := sync.OnceFunc(func() { close(release) })
 	defer releaseOnce()
 
-	stream := func() (int, error) {
-		req, err := http.NewRequest(http.MethodGet,
-			dashboard.URL+"/api/v1/gitcache/git/widgets/info/refs?service=git-upload-pack", nil)
-		if err != nil {
-			return 0, err
-		}
-		req.Header.Set("Authorization", "Bearer runner-token")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return 0, err
-		}
-		defer resp.Body.Close()
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return resp.StatusCode, nil
-	}
+	stream := gitcacheStream(dashboard.URL)
 
 	var wg sync.WaitGroup
 	for range gitcacheStreamLimit {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := stream(); err != nil {
+			if _, _, err := stream(); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -800,13 +789,82 @@ func TestGitcacheMachineProxyCapsConcurrentStreams(t *testing.T) {
 		<-admitted
 	}
 
-	code, err := stream()
+	code, retryAfter, err := stream()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if code != http.StatusServiceUnavailable {
 		t.Errorf("stream past the cap = %d, want 503", code)
 	}
+	if retryAfter == "" {
+		t.Error("503 past the cap carried no Retry-After")
+	}
 	releaseOnce()
 	wg.Wait()
+}
+
+func TestGitcacheMachineProxyQueuesForAFreeStreamSlot(t *testing.T) {
+	release := make(chan struct{})
+	admitted := make(chan struct{}, gitcacheStreamLimit+1)
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		admitted <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer controller.Close()
+	dashboard := httptest.NewServer(HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle))
+	defer dashboard.Close()
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	defer releaseOnce()
+
+	stream := gitcacheStream(dashboard.URL)
+	var wg sync.WaitGroup
+	for range gitcacheStreamLimit {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, _, err := stream(); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	for range gitcacheStreamLimit {
+		<-admitted
+	}
+
+	queued := make(chan int, 1)
+	go func() {
+		code, _, err := stream()
+		if err != nil {
+			t.Error(err)
+		}
+		queued <- code
+	}()
+	time.Sleep(50 * time.Millisecond)
+	releaseOnce()
+	if code := <-queued; code != http.StatusNoContent {
+		t.Errorf("queued stream = %d, want 204 once a slot freed inside the wait", code)
+	}
+	wg.Wait()
+}
+
+func gitcacheStream(dashboardURL string) func() (int, string, error) {
+	return func() (int, string, error) {
+		req, err := http.NewRequest(http.MethodGet,
+			dashboardURL+"/api/v1/gitcache/git/widgets/info/refs?service=git-upload-pack", nil)
+		if err != nil {
+			return 0, "", err
+		}
+		req.Header.Set("Authorization", "Bearer swr_0123456789abcdef")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0, "", err
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode, resp.Header.Get("Retry-After"), nil
+	}
 }

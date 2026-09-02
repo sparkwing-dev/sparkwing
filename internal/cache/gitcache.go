@@ -181,6 +181,12 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(rest)
 }
 
+// safety: repointing a name redirects every clone of it, so a tokened cache demands the token. An open
+// cache has one anonymous caller, and refusing there would make a squatted name permanent.
+func mayRepoint(r *http.Request) bool {
+	return apiToken == "" || authenticated(r)
+}
+
 func authenticated(r *http.Request) bool {
 	if apiToken == "" {
 		return false
@@ -421,8 +427,8 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 			out, err := mirrorFetch(1*time.Minute, bare)
 			mu.Unlock()
 			if gitcacheFetchDur != nil {
-				gitcacheFetchDur.Record(context.Background(), time.Since(fetchStart).Seconds(),
-					metric.WithAttributes(attribute.String("repo", e.Name())))
+				// safety: /metrics is unauthenticated, and a per-repo label enumerates the mirror set.
+				gitcacheFetchDur.Record(context.Background(), time.Since(fetchStart).Seconds())
 			}
 
 			fetched++
@@ -549,9 +555,8 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 			log.Printf("recovery reclone: %s -- fetch failed, recloning from origin (this re-downloads the whole repository): %v %s",
 				hash, err, strings.TrimSpace(out))
 			if gitcacheRecoveryRecl != nil {
-				gitcacheRecoveryRecl.Add(r.Context(), 1, metric.WithAttributes(
-					attribute.String("repo", hash),
-				))
+				// safety: /metrics is unauthenticated, and a per-repo label enumerates the mirror set.
+				gitcacheRecoveryRecl.Add(r.Context(), 1)
 			}
 			if recloneOut, err2 := recloneMirror(repoURL, bareRepo); err2 != nil {
 				log.Printf("recovery reclone: %s failed: %v %s", hash, err2, strings.TrimSpace(recloneOut))
@@ -1159,6 +1164,11 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 
 const workspaceRefPrefix = "refs/sparkwing-workspace/"
 
+const (
+	workspaceArchiveRefPrefix = "refs/sparkwing-workspace-archive/"
+	workspaceArchiveAgeFactor = 7
+)
+
 var validJobID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 func handleArtifacts(w http.ResponseWriter, r *http.Request) {
@@ -1607,23 +1617,47 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "size": size})
 }
 
-func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int, maxAge time.Duration) error {
-	out, err := gitCmd("-C", bareRepo, "for-each-ref", "--format=%(refname)", "--sort=-refname", workspaceRefPrefix)
+type workspaceRef struct {
+	name   string
+	object string
+}
+
+func listWorkspaceRefs(bareRepo, prefix string) ([]workspaceRef, error) {
+	out, err := gitCmd("-C", bareRepo, "for-each-ref", "--format=%(refname) %(objectname)", "--sort=-refname", prefix)
 	if err != nil {
-		return fmt.Errorf("list workspace refs: %w: %s", err, out)
+		return nil, fmt.Errorf("list %s refs: %w: %s", prefix, err, out)
 	}
-	refs := strings.Fields(out)
-	kept := refs[:0]
-	var stale []string
-	now := time.Now().UTC()
-	for _, existing := range refs {
-		if strings.HasSuffix(existing, "/"+sha) || workspaceRefExpired(existing, now, maxAge) {
-			stale = append(stale, existing)
+	var refs []workspaceRef
+	for _, line := range strings.Split(out, "\n") {
+		name, object, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || name == "" || object == "" {
 			continue
 		}
-		kept = append(kept, existing)
+		refs = append(refs, workspaceRef{name: name, object: object})
 	}
-	if len(kept) >= limit {
+	return refs, nil
+}
+
+func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int, maxAge time.Duration) error {
+	refs, err := listWorkspaceRefs(bareRepo, workspaceRefPrefix)
+	if err != nil {
+		return err
+	}
+	kept := 0
+	var superseded []string
+	var expired []workspaceRef
+	now := time.Now().UTC()
+	for _, existing := range refs {
+		switch {
+		case strings.HasSuffix(existing.name, "/"+sha):
+			superseded = append(superseded, existing.name)
+		case workspaceRefExpired(existing.name, workspaceRefPrefix, now, maxAge):
+			expired = append(expired, existing)
+		default:
+			kept++
+		}
+	}
+	if kept >= limit {
 		_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
 		return fmt.Errorf("workspace ref limit %d reached", limit)
 	}
@@ -1631,10 +1665,21 @@ func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int, maxAge time.D
 	if out, err := gitCmd("-C", bareRepo, "update-ref", ref, sha); err != nil {
 		return fmt.Errorf("create workspace ref: %w: %s", err, out)
 	}
-	for _, expired := range stale {
-		if deleted, deleteErr := gitCmd("-C", bareRepo, "update-ref", "-d", expired); deleteErr != nil {
-			return fmt.Errorf("expire workspace ref %s: %w: %s", expired, deleteErr, deleted)
+	// safety: a retry of an older run still fetches its snapshot, so expiry archives the ref instead of dropping objects.
+	for _, aged := range expired {
+		archived := workspaceArchiveRefPrefix + strings.TrimPrefix(aged.name, workspaceRefPrefix)
+		if out, err := gitCmd("-C", bareRepo, "update-ref", archived, aged.object); err != nil {
+			return fmt.Errorf("archive workspace ref %s: %w: %s", aged.name, err, out)
 		}
+		superseded = append(superseded, aged.name)
+	}
+	for _, stale := range superseded {
+		if deleted, deleteErr := gitCmd("-C", bareRepo, "update-ref", "-d", stale); deleteErr != nil {
+			return fmt.Errorf("expire workspace ref %s: %w: %s", stale, deleteErr, deleted)
+		}
+	}
+	if err := pruneWorkspaceArchive(bareRepo, limit, maxAge, now); err != nil {
+		return err
 	}
 	if out, err := gitCmd("-C", bareRepo, "update-ref", "-d", seedRef); err != nil {
 		return fmt.Errorf("remove transient seed ref: %w: %s", err, out)
@@ -1642,11 +1687,27 @@ func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int, maxAge time.D
 	return nil
 }
 
-func workspaceRefExpired(ref string, now time.Time, maxAge time.Duration) bool {
+func pruneWorkspaceArchive(bareRepo string, limit int, maxAge time.Duration, now time.Time) error {
+	archived, err := listWorkspaceRefs(bareRepo, workspaceArchiveRefPrefix)
+	if err != nil {
+		return err
+	}
+	for i, aged := range archived {
+		if i < limit && !workspaceRefExpired(aged.name, workspaceArchiveRefPrefix, now, maxAge*workspaceArchiveAgeFactor) {
+			continue
+		}
+		if out, err := gitCmd("-C", bareRepo, "update-ref", "-d", aged.name); err != nil {
+			return fmt.Errorf("expire archived workspace ref %s: %w: %s", aged.name, err, out)
+		}
+	}
+	return nil
+}
+
+func workspaceRefExpired(ref, prefix string, now time.Time, maxAge time.Duration) bool {
 	if maxAge <= 0 {
 		return false
 	}
-	stamp, _, ok := strings.Cut(strings.TrimPrefix(ref, workspaceRefPrefix), "/")
+	stamp, _, ok := strings.Cut(strings.TrimPrefix(ref, prefix), "/")
 	if !ok {
 		return false
 	}
@@ -1721,11 +1782,15 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 
 	repoNamesMu.Lock()
 	existing, known := repoNames[name]
-	// safety: repointing a name redirects every clone of it, so an unauthenticated caller may not.
-	if known && existing != repoURL && !authenticated(r) {
+	repointing := known && existing != repoURL
+	if repointing && !mayRepoint(r) {
 		repoNamesMu.Unlock()
 		http.Error(w, "name is already registered to another repository", http.StatusConflict)
 		return
+	}
+	if repointing {
+		log.Printf("git register: repointing %q from %s to %s", name,
+			sourceurl.Redact(existing), sourceurl.Redact(repoURL))
 	}
 	repoNames[name] = repoURL
 	saveRepoNames()
@@ -1813,6 +1878,10 @@ func autoRegisterRepos() {
 			continue
 		}
 		name, repoURL := parts[0], parts[1]
+		if !validRepoName.MatchString(name) {
+			log.Printf("auto-register: skipping invalid name %q (want 1-64 alphanumeric/dash/underscore/dot chars)", name)
+			continue
+		}
 		var err error
 		repoURL, err = sourceurl.ValidateCloneURL(repoURL)
 		if err != nil {

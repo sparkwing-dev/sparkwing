@@ -156,9 +156,13 @@ cache:
 
   # Base URL clients use to reach this cache. The package proxy
   # rewrites the upstream URLs inside npm packuments and PyPI simple
-  # pages against it, so it has to be the URL the runner and its build
-  # pods actually dial. Empty uses the in-cluster Service URL; set it
-  # when traffic arrives through an Ingress or a load balancer instead.
+  # pages against it, so a fixed base is correct only when every client
+  # dials the cache at the same address. Empty uses the in-cluster
+  # Service URL when service.type is ClusterIP, and otherwise stays
+  # unset so the proxy rewrites each response from its own request Host
+  # -- which is what an out-of-cluster runner pool or a port-forward
+  # needs. Set it when an Ingress or a load balancer is the one address
+  # every client uses.
   publicUrl: ""
 
   service:
@@ -315,9 +319,28 @@ networkPolicy:
   # installs). Set it to your controller's labels when it runs under a
   # different release in the same namespace.
   controllerPodSelector: {}
+  # Pod labels of the dashboard allowed to probe the cache. Empty
+  # admits this release's own web pod, which reads the cache's
+  # /health on every services-panel refresh. Set it to your
+  # dashboard's labels when it runs under a different release.
+  webPodSelector: {}
+  # Pod labels of the Job pods the k8s runner backend creates. Those
+  # pods carry neither an instance nor a component label, so they need
+  # a peer of their own; they are handed the cache URL and token and
+  # read the dependency proxy through it.
+  runnerJobPodSelector:
+    app.kubernetes.io/name: sparkwing-runner
   # Extra NetworkPolicy ingress rules, appended verbatim. Needed when
-  # an out-of-cluster runner pool or a non-ClusterIP Service has to
-  # reach the cache.
+  # a controller or runner pool runs outside the cluster (give the
+  # rule an ipBlock for its source range), or when a non-ClusterIP
+  # Service has to reach the cache. Example:
+  #   extraIngress:
+  #     - from:
+  #         - ipBlock:
+  #             cidr: 10.42.0.0/16
+  #       ports:
+  #         - protocol: TCP
+  #           port: 8090
   extraIngress: []
 
 # RBAC. The chart is namespace-scoped: a Role + RoleBinding only.

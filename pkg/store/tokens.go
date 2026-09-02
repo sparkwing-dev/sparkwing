@@ -39,6 +39,17 @@ const (
 // 4-11 = 48 bits of entropy.
 const PrefixLen = 12
 
+// Bearer rejection reasons. ErrNoTokenCandidates and ErrUnknownToken
+// carry the same message so the response never tells a caller whether
+// a prefix exists; only ErrUnknownToken means a stored hash was
+// actually compared.
+var (
+	ErrInvalidToken      = errors.New("invalid token")
+	ErrNoTokenCandidates = errors.New("unknown token")
+	ErrUnknownToken      = errors.New("unknown token")
+	ErrTokenRevoked      = errors.New("token is revoked or expired")
+)
+
 // Token is one row in the tokens table.
 type Token struct {
 	Hash       string
@@ -141,7 +152,7 @@ func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Du
 // deadlock if a cursor is still open.
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 	if len(raw) < PrefixLen {
-		return nil, errors.New("invalid token")
+		return nil, ErrInvalidToken
 	}
 	prefix := raw[:PrefixLen]
 
@@ -150,7 +161,7 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 		return nil, err
 	}
 	if len(candidates) == 0 {
-		return nil, errors.New("unknown token")
+		return nil, ErrNoTokenCandidates
 	}
 
 	for i := range candidates {
@@ -163,7 +174,7 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 			continue
 		}
 		if !t.IsValid(now) {
-			return nil, errors.New("token is revoked or expired")
+			return nil, ErrTokenRevoked
 		}
 		_, _ = s.execNoCtx(
 			`UPDATE tokens SET last_used_at = ? WHERE hash = ?`,
@@ -173,7 +184,7 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 		t.LastUsedAt = &ts
 		return t, nil
 	}
-	return nil, errors.New("unknown token")
+	return nil, ErrUnknownToken
 }
 
 func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
@@ -369,7 +380,10 @@ func hashToken(raw string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argonKey(raw, salt)
+	key, err := argonKey(raw, salt)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("argon2id$%s$%s", hex.EncodeToString(salt), hex.EncodeToString(key)), nil
 }
 
@@ -386,7 +400,10 @@ func verifyToken(raw, stored string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	cand := argonKey(raw, salt)
+	cand, err := argonKey(raw, salt)
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(cand, key) == 1, nil
 }
 
