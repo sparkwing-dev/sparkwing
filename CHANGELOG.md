@@ -59,6 +59,16 @@ code change to unlock.
   `controller.tokenSecret.name` now fails at render time instead of serving,
   forging, and deleting every run's logs for anything that reaches its Service;
   set the new `logs.allowUnauthenticated=true` during a bootstrap install.
+- **ci:** Every GitHub Actions workflow now pins its actions to a full commit
+  SHA with a version comment, the release job that prepares binaries no longer
+  persists checkout credentials, and the canonical gate installs dashboard
+  dependencies with `--ignore-scripts`.
+
+### Fixed
+
+- **admission:** Equal-priority participants keep their service order while
+  queued, so sustained arrivals from an older owner cannot move an existing
+  request backward indefinitely.
 
 ## [v0.39.0] - 2026-09-02
 ### Docs
