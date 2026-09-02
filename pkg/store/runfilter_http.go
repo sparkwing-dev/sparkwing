@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// MaxRunListLimit is the largest number of runs a list query may ask
+// for. Higher values are clamped rather than rejected.
+const MaxRunListLimit = 1000
+
 // ParseRunFilter accepts the public run-list query parameters. Unknown
 // parameters are ignored.
 func ParseRunFilter(q url.Values) RunFilter {
@@ -38,7 +42,8 @@ func ParseRunFilter(q url.Values) RunFilter {
 	}
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			f.Limit = n
+			// safety: an unbounded limit materializes every run row, plan and args blobs included.
+			f.Limit = min(n, MaxRunListLimit)
 		}
 	}
 	return f

@@ -78,6 +78,19 @@ code change to unlock.
   `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every credential-shaped
   name and value, widened by `SPARKWING_SUBMIT_ENV_ALLOW`. The consumer
   deletes the snapshot when it starts the run rather than when the run ends.
+- **controller (Breaking):** Four controller limits, and a way to take `/metrics`
+  off the ingress. `?limit=` on the run list is capped at 1000 rows in the
+  query parser and again in the store. `GET /api/v1/services` now takes any valid bearer
+  instead of announcing the internal cache and logs URLs to anyone who can
+  reach the port. `POST /api/v1/triggers` validates `git.repo_url` with the
+  clone-URL rules the Git cache routes already use, and keeps only the trigger
+  environment keys a run reads, so a submission cannot forge the
+  retry-provenance keys the controller writes for itself. The half-hour Git
+  stream deadline is now applied by the authenticated Git cache handlers rather
+  than by a wrapper that ran before authentication. `sparkwing-controller
+  --metrics-addr` (`$SPARKWING_METRICS_ADDR`) binds Prometheus `/metrics` to
+  its own listener, off the API listener and any ingress in front of it. See
+  [the migration note](docs/migrations/_unreleased.md).
 
 ### Security
 

@@ -2048,6 +2048,8 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	// safety: clamp again here so a non-HTTP caller cannot ask for every row.
+	limit = min(limit, MaxRunListLimit)
 
 	where := ""
 	args := []any{}

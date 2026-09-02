@@ -411,3 +411,29 @@ CHANGELOG links here.
   custom image whose process writes outside `/tmp` needs its own
   `emptyDir` mount for that path, or `securityContext.readOnlyRootFilesystem`
   overridden for that container.
+
+## Service discovery and trigger submission take a closer look
+
+- **Before:** `GET /api/v1/services` answered anyone who could reach the
+  controller, `POST /api/v1/triggers` stored `git.repo_url` and every
+  trigger environment key it was handed, and `?limit=` on the run list was
+  unbounded.
+- **After:** Service discovery takes any valid bearer, which every client
+  that consumes it already holds. A trigger's `git.repo_url` goes through
+  the clone-URL rules the Git cache routes use, so a local path, a
+  loopback or private address, or a URL carrying credentials is rejected
+  with 400. Trigger environment keeps only `GITHUB_REPOSITORY`, the GitHub
+  pull-request context, and the `SPARKWING_START_AT`, `SPARKWING_STOP_AT`,
+  `SPARKWING_ONLY`, `SPARKWING_DRY_RUN`, and `SPARKWING_NO_CACHE`
+  switches. `?limit=` is capped at 1000 rows.
+- **Migration:** A hand-rolled client that polls `/api/v1/services`
+  anonymously sends `Authorization: Bearer <token>`. One that submits
+  triggers carrying its own environment keys moves that data into pipeline
+  args. A dashboard or export that asked for more than 1000 runs in one
+  request pages instead.
+- **Why:** The announcement names internal cache and logs URLs, the
+  repository URL becomes a clone target on every runner, the trigger
+  environment is served whole to every `triggers.read` principal and is
+  where a local retry reads the repository directory it trusts, and a
+  single unbounded list request loads every run row with its plan and args
+  blobs.

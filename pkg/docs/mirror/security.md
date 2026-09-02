@@ -74,6 +74,26 @@ accept that any pod in that range can then supply `X-Forwarded-For`. List
 the narrowest range that contains the web pod. Leaving it empty stays safe
 and turns coarse: every browser then shares the proxy's budget.
 
+## Trigger and list-query limits
+
+`POST /api/v1/triggers` validates `git.repo_url` with the same rules the
+Git cache routes use, so a submission cannot point a runner's clone at a
+local path, a loopback or private address, or a URL carrying embedded
+credentials. It also keeps only the trigger environment keys a run
+actually reads (`GITHUB_REPOSITORY`, the GitHub pull-request context, and
+the `SPARKWING_START_AT` / `STOP_AT` / `ONLY` / `DRY_RUN` / `NO_CACHE`
+switches). Everything else is dropped, including the retry-provenance
+keys the controller writes for itself, so a submission cannot forge the
+repository directory a later local retry trusts.
+
+`GET /api/v1/runs?limit=` is capped at 1000 rows, in the query parser and
+again in the store, so a read-only token cannot ask one request to
+materialize every run row with its plan and args blobs.
+
+`GET /api/v1/services` announces internal cache and logs URLs and needs a
+bearer; any valid token satisfies it, and every client that consumes it
+already holds one.
+
 ## Webhooks
 
 GitHub webhook deliveries are verified by the controller: it checks the

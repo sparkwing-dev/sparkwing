@@ -33,6 +33,10 @@ func main() {
 func run(args []string) error {
 	fs := flag.NewFlagSet("sparkwing-controller", flag.ExitOnError)
 	addr := fs.String("addr", "127.0.0.1:4344", "bind address")
+	metricsAddr := fs.String("metrics-addr", os.Getenv("SPARKWING_METRICS_ADDR"),
+		"bind address for the Prometheus /metrics endpoint. Set it to move "+
+			"/metrics off the API listener, and off any ingress fronting that "+
+			"listener, onto its own port. Empty serves /metrics on --addr.")
 	poolEnabled := fs.Bool("pool", false,
 		"enable the warm-PVC pool (requires in-cluster K8s access)")
 	poolNamespace := fs.String("pool-namespace", os.Getenv("POD_NAMESPACE"),
@@ -122,7 +126,8 @@ func run(args []string) error {
 		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), os.Getenv("SPARKWING_DASHBOARD_URL")).
 		WithCachePodURL(*cachePodURL).
 		WithLogsURL(*logsURL).
-		WithCacheURL(*cacheURL)
+		WithCacheURL(*cacheURL).
+		WithMetricsAddr(*metricsAddr)
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)

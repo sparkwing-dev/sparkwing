@@ -1,7 +1,7 @@
 <!-- GENERATED from the route registrations in pkg/controller/server.go and pkg/logs/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->
 # HTTP API reference
 
-Every route the controller and logs service register, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` is the superset that satisfies any scope check. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead).
+Every route the controller and logs service register, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` is the superset that satisfies any scope check. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead); `authenticated` routes take any valid bearer and check no further scope.
 
 ## Controller
 
@@ -14,7 +14,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/auth/login` | `public` |
 | `POST` | `/api/v1/auth/logout` | `public` |
 | `GET` | `/api/v1/auth/session` | `public` |
-| `GET` | `/api/v1/auth/whoami` | `public` |
+| `GET` | `/api/v1/auth/whoami` | `authenticated` |
 | `POST` | `/api/v1/concurrency/{key}/acquire` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
@@ -95,7 +95,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/secrets` | `admin` |
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` |
 | `GET` | `/api/v1/secrets/{name}` | `secrets.read` |
-| `GET` | `/api/v1/services` | `public` |
+| `GET` | `/api/v1/services` | `authenticated` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |

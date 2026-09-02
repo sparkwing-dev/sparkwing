@@ -89,6 +89,22 @@ func metricsHandler() http.Handler {
 	return promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{})
 }
 
+func (s *Server) metricsServer() *http.Server {
+	if s.metricsAddr == "" {
+		return nil
+	}
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("GET /metrics", metricsHandler())
+	return &http.Server{
+		Addr:              s.metricsAddr,
+		Handler:           metricsMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+}
+
 func observeRunFinish(pipeline, status string, duration time.Duration) {
 	if pipeline == "" {
 		pipeline = "unknown"

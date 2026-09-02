@@ -135,7 +135,7 @@ func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
 			"env": map[string]string{
 				"SPARKWING_LEASE_TOKEN":       "stale-local-token",
 				"SPARKWING_CHILD_LEASE_TOKEN": "stale-child-token",
-				"SAFE":                        "kept",
+				"GITHUB_REPOSITORY":           "sparkwing-dev/sparkwing",
 			},
 		},
 	})
@@ -159,12 +159,12 @@ func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
 	if trigger.TriggerEnv["SPARKWING_CHILD_LEASE_TOKEN"] != "" {
 		t.Fatalf("child lease token persisted from public env: %+v", trigger.TriggerEnv)
 	}
-	if trigger.TriggerEnv["SAFE"] != "kept" {
-		t.Fatalf("safe env = %q, want kept", trigger.TriggerEnv["SAFE"])
+	if trigger.TriggerEnv["GITHUB_REPOSITORY"] != "sparkwing-dev/sparkwing" {
+		t.Fatalf("allow-listed env = %q, want sparkwing-dev/sparkwing", trigger.TriggerEnv["GITHUB_REPOSITORY"])
 	}
 }
 
-func TestTrigger_DropsCredentialEnvKeys(t *testing.T) {
+func TestTrigger_DropsEnvKeysOutsideTheAllowList(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -211,17 +211,17 @@ func TestTrigger_DropsCredentialEnvKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
-	for _, key := range []string{"SPARKWING_LEASE_TOKEN", "NPM_TOKEN", "SPARKWING_PG_URL"} {
+	for _, key := range []string{
+		"SPARKWING_LEASE_TOKEN", "NPM_TOKEN", "SPARKWING_PG_URL",
+		retryprovenance.RepoDirKey, retryprovenance.RevisionKey,
+		retryprovenance.PlanHashKey, retryprovenance.RepoIdentityKey,
+	} {
 		if _, ok := trigger.TriggerEnv[key]; ok {
 			t.Fatalf("%s persisted in trigger_env: %+v", key, trigger.TriggerEnv)
 		}
 	}
 	for key, want := range map[string]string{
-		"GITHUB_REPOSITORY":             "sparkwing-dev/sparkwing",
-		retryprovenance.RepoDirKey:      "/src/sparkwing",
-		retryprovenance.RevisionKey:     "deadbeef",
-		retryprovenance.PlanHashKey:     "plan-1",
-		retryprovenance.RepoIdentityKey: "github.com/sparkwing-dev/sparkwing",
+		"GITHUB_REPOSITORY": "sparkwing-dev/sparkwing",
 	} {
 		if trigger.TriggerEnv[key] != want {
 			t.Fatalf("%s = %q, want %q", key, trigger.TriggerEnv[key], want)
@@ -542,6 +542,47 @@ func TestTrigger_RequiresJSONContentType(t *testing.T) {
 			raw, _ := io.ReadAll(resp.Body)
 			if resp.StatusCode != tc.wantStatus {
 				t.Fatalf("status = %d body = %q, want %d", resp.StatusCode, raw, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestTrigger_ValidatesRepoURL(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(&captureDispatcher{})
+	srv := httptest.NewServer(srvController.Handler())
+	defer srv.Close()
+
+	for _, tc := range []struct {
+		name    string
+		repoURL string
+		want    int
+	}{
+		{name: "https", repoURL: "https://github.com/sparkwing-dev/sparkwing.git", want: http.StatusAccepted},
+		{name: "scp-like ssh", repoURL: "git@github.com:sparkwing-dev/sparkwing.git", want: http.StatusAccepted},
+		{name: "empty", repoURL: "", want: http.StatusAccepted},
+		{name: "local path", repoURL: "/tmp/repo", want: http.StatusBadRequest},
+		{name: "file scheme", repoURL: "file:///tmp/repo", want: http.StatusBadRequest},
+		{name: "loopback host", repoURL: "https://127.0.0.1/repo.git", want: http.StatusBadRequest},
+		{name: "embedded credentials", repoURL: "https://user:secret@example.com/repo.git", want: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+				"pipeline": "demo",
+				"trigger":  map[string]any{"source": "manual"},
+				"git":      map[string]any{"repo_url": tc.repoURL},
+			})
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != tc.want {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want %d (body: %s)", resp.StatusCode, tc.want, body)
 			}
 		})
 	}

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
-	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +51,8 @@ type Server struct {
 	logsURL     string
 
 	cacheURL string
+
+	metricsAddr string
 
 	reconcileHook func(context.Context) error
 
@@ -125,6 +126,15 @@ func (s *Server) WithLogsURL(url string) *Server {
 // gitcache seed and refresh routes.
 func (s *Server) WithCacheURL(url string) *Server {
 	s.cacheURL = url
+	return s
+}
+
+// WithMetricsAddr moves the Prometheus endpoint off the main listener
+// onto its own address, so /metrics is reachable only from wherever
+// that address is bound and never through the public ingress. Empty
+// keeps /metrics on the main listener.
+func (s *Server) WithMetricsAddr(addr string) *Server {
+	s.metricsAddr = addr
 	return s
 }
 
@@ -485,6 +495,9 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("GET /api/v1/auth/whoami", http.HandlerFunc(s.handleWhoami))
 
+	// safety: service discovery names internal cache and logs URLs, so any bearer will do but anonymity will not.
+	mux.Handle("GET /api/v1/services", http.HandlerFunc(s.handleServices))
+
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
 
 	mux.Handle("GET /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListUsers)))
@@ -500,25 +513,17 @@ func (s *Server) Handler() http.Handler {
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	router.HandleFunc("GET /api/v1/services", s.handleServices)
 	router.Handle("POST /api/v1/auth/login", s.loginLimit.middleware(http.HandlerFunc(s.handleLogin)))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))
 	router.Handle("GET /api/v1/auth/bootstrap-needed", http.HandlerFunc(s.handleBootstrapNeeded))
-	router.Handle("GET /metrics", metricsHandler())
+	if s.metricsAddr == "" {
+		router.Handle("GET /metrics", metricsHandler())
+	}
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
 	router.Handle("/", authed)
 
-	return gitcacheStreamDeadlineHandler(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
-}
-
-func gitcacheStreamDeadlineHandler(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/gitcache/seed" || strings.HasPrefix(r.URL.Path, "/api/v1/gitcache/git/") {
-			extendGitcacheStreamDeadline(w)
-		}
-		next.ServeHTTP(w, r)
-	})
+	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
 }
 
 // Serve starts the HTTP listener and blocks until ctx is done. On
@@ -555,6 +560,23 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 
 	if s.pool != nil {
 		go s.pool.run(ctx, s.logger)
+	}
+
+	metricsSrv := s.metricsServer()
+	if metricsSrv != nil {
+		go func() {
+			s.logger.Info("controller metrics listening", "addr", metricsSrv.Addr)
+			if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				s.logger.Error("controller metrics listener stopped", "err", err)
+			}
+		}()
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+				s.logger.Warn("controller metrics shutdown incomplete", "err", err)
+			}
+		}()
 	}
 
 	errCh := make(chan error, 1)
