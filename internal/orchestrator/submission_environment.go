@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,11 +15,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const SubmissionEnvironmentCapturedKey = "_SPARKWING_SUBMISSION_ENV_CAPTURED"
+
+const submissionEnvironmentAllowKey = "SPARKWING_SUBMIT_ENV_ALLOW"
 
 const submissionEnvironmentDir = "submission-environments"
 const abandonedSubmissionEnvironmentAge = 10 * time.Minute
@@ -39,7 +43,7 @@ func CaptureSubmissionEnvironment(home, runID string, env []string) error {
 	if err := fssecure.EnsureDir(dir); err != nil {
 		return fmt.Errorf("secure submission environment directory: %w", err)
 	}
-	body, err := json.Marshal(submissionEnvironmentSnapshot{RunID: runID, Environment: env})
+	body, err := json.Marshal(submissionEnvironmentSnapshot{RunID: runID, Environment: filterSubmissionEnvironment(env)})
 	if err != nil {
 		return fmt.Errorf("encode submission environment: %w", err)
 	}
@@ -99,6 +103,9 @@ func submissionEnvironment(home string, trig *store.Trigger) ([]string, error) {
 		return nil, nil
 	}
 	body, err := os.ReadFile(submissionEnvironmentPath(home, trig.ID))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read submission environment: %w", err)
 	}
@@ -110,6 +117,66 @@ func submissionEnvironment(home string, trig *store.Trigger) ([]string, error) {
 		return nil, errors.New("submission environment run ID does not match trigger")
 	}
 	return snapshot.Environment, nil
+}
+
+func filterSubmissionEnvironment(env []string) []string {
+	names, prefixes := submissionEnvironmentAllowList(env)
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || !submissionEnvironmentAllowed(key, names, prefixes) {
+			continue
+		}
+		// safety: the snapshot outlives the shell, so a credential-shaped name or value never reaches it.
+		if envredact.CredentialName(key) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func submissionEnvironmentAllowList(env []string) (map[string]bool, []string) {
+	names := map[string]bool{}
+	var prefixes []string
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key != submissionEnvironmentAllowKey {
+			continue
+		}
+		for _, item := range strings.Split(value, ",") {
+			item = strings.TrimSpace(item)
+			switch {
+			case item == "":
+			case strings.HasSuffix(item, "*"):
+				prefixes = append(prefixes, strings.TrimSuffix(item, "*"))
+			default:
+				names[item] = true
+			}
+		}
+	}
+	return names, prefixes
+}
+
+func submissionEnvironmentAllowed(key string, names map[string]bool, prefixes []string) bool {
+	if envAllowed(key) || names[key] {
+		return true
+	}
+	for _, prefix := range prefixes {
+		if prefix != "" && strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func consumeSubmissionEnvironment(home string, trig *store.Trigger, logger *slog.Logger) ([]string, error) {
+	env, err := submissionEnvironment(home, trig)
+	// safety: the snapshot's life ends when the run starts, not when it finishes.
+	if discardErr := DiscardSubmissionEnvironment(home, trig.ID); discardErr != nil {
+		logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", discardErr)
+	}
+	return env, err
 }
 
 func submissionEnvironmentPath(home, runID string) string {

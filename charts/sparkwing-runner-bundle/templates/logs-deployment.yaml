@@ -64,6 +64,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ .Values.logs.rootPath | quote }}
+            - name: scratch
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.logs.resources | nindent 12 }}
           readinessProbe:
@@ -88,4 +90,6 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: scratch
+          emptyDir: {}
 {{- end }}

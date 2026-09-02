@@ -11,7 +11,13 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
-const envelopePrefix = "enc:v1:"
+const (
+	envelopePrefix      = "enc:v1:"
+	envelopePrefixBound = "enc:v2:"
+)
+
+// safety: NUL joins the fields because a valid secret name holds none, so one pair cannot spell another.
+const boundSeparator = "\x00"
 
 const KeySize = chacha20poly1305.KeySize
 
@@ -31,6 +37,17 @@ func NewCipher(key []byte) (*Cipher, error) {
 }
 
 func (c *Cipher) Seal(plain string) (string, error) {
+	return c.seal(plain, envelopePrefix, nil)
+}
+
+// SealBound seals plain with the secret's name and owning repository
+// as additional authenticated data, so the envelope opens only under
+// that pair. Repo is empty for an unscoped secret.
+func (c *Cipher) SealBound(name, repo, plain string) (string, error) {
+	return c.seal(plain, envelopePrefixBound, boundAAD(name, repo))
+}
+
+func (c *Cipher) seal(plain, prefix string, aad []byte) (string, error) {
 	if c == nil {
 		return "", errors.New("secrets cipher: nil receiver")
 	}
@@ -38,19 +55,39 @@ func (c *Cipher) Seal(plain string) (string, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return "", fmt.Errorf("secrets cipher: nonce: %w", err)
 	}
-	ct := c.aead.Seal(nil, nonce, []byte(plain), nil)
+	ct := c.aead.Seal(nil, nonce, []byte(plain), aad)
 	envelope := append(nonce, ct...)
-	return envelopePrefix + base64.StdEncoding.EncodeToString(envelope), nil
+	return prefix + base64.StdEncoding.EncodeToString(envelope), nil
 }
 
 func (c *Cipher) Open(envelope string) (string, error) {
+	if strings.HasPrefix(envelope, envelopePrefixBound) {
+		return "", errors.New("secrets cipher: envelope is bound to a secret name and repository; open it with those")
+	}
+	return c.open(envelope, envelopePrefix, nil)
+}
+
+// OpenBound decrypts an envelope sealed for name and repo. Envelopes
+// written before binding carry no additional data and open unchanged.
+func (c *Cipher) OpenBound(name, repo, envelope string) (string, error) {
+	if strings.HasPrefix(envelope, envelopePrefixBound) {
+		return c.open(envelope, envelopePrefixBound, boundAAD(name, repo))
+	}
+	return c.open(envelope, envelopePrefix, nil)
+}
+
+func boundAAD(name, repo string) []byte {
+	return []byte(name + boundSeparator + repo)
+}
+
+func (c *Cipher) open(envelope, prefix string, aad []byte) (string, error) {
 	if c == nil {
 		return "", errors.New("secrets cipher: no key configured")
 	}
-	if !IsEncrypted(envelope) {
+	if !strings.HasPrefix(envelope, prefix) {
 		return "", errors.New("secrets cipher: value is not sealed")
 	}
-	body := strings.TrimPrefix(envelope, envelopePrefix)
+	body := strings.TrimPrefix(envelope, prefix)
 	raw, err := base64.StdEncoding.DecodeString(body)
 	if err != nil {
 		return "", fmt.Errorf("secrets cipher: bad envelope encoding: %w", err)
@@ -60,7 +97,7 @@ func (c *Cipher) Open(envelope string) (string, error) {
 		return "", errors.New("secrets cipher: envelope too short")
 	}
 	nonce, ct := raw[:nsz], raw[nsz:]
-	plain, err := c.aead.Open(nil, nonce, ct, nil)
+	plain, err := c.aead.Open(nil, nonce, ct, aad)
 	if err != nil {
 		return "", fmt.Errorf("secrets cipher: open: %w", err)
 	}
@@ -68,7 +105,7 @@ func (c *Cipher) Open(envelope string) (string, error) {
 }
 
 func IsEncrypted(v string) bool {
-	return strings.HasPrefix(v, envelopePrefix)
+	return strings.HasPrefix(v, envelopePrefix) || strings.HasPrefix(v, envelopePrefixBound)
 }
 
 func DecodeKey(s string) ([]byte, error) {

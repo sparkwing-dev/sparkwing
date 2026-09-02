@@ -394,3 +394,50 @@ CHANGELOG links here.
 - **Why:** Pipeline authors are expected to run code on runners. They are not
   expected to read the key that decrypts every stored secret or the HMAC that
   authenticates every webhook.
+
+## Logs service quotas and bounded search
+
+- **Before:** `sparkwing-logs` stored whatever runners posted. Nothing capped a
+  node's log, a run's total, or the volume, and a full disk surfaced as a
+  degraded health probe after the writes had already failed.
+  `GET /api/v1/logs/search` accepted a query with no `run_id`, walked every
+  stored run end to end, and kept scanning after the caller hung up.
+- **After:** A node log stops at `--max-node-bytes` (64MiB) and a run's logs at
+  `--max-run-bytes` (1GiB). The append that crosses either cap stores the bytes
+  that fit, appends `[sparkwing-logs] truncated: byte cap reached` once, and
+  still answers `204`; later appends answer `204` and store nothing, so a
+  chatty node degrades its own log rather than failing its run. An append with
+  less than `--min-free-bytes` (512MiB) free answers `507`, which the log sink
+  retries and then reports as `logs_dropped`. Search requires `run_id` and
+  answers `400` without one, reads at most `--search-max-bytes` (256MiB) for at
+  most `--search-timeout` (10s), stops when the caller disconnects, and sets
+  `"truncated": true` on a response any of those stopped.
+- **Migration:** None for a stock install. Raise `--max-node-bytes` or
+  `--max-run-bytes` if a pipeline legitimately emits more than the defaults and
+  you would rather spend the disk than read a truncated log; the marker in the
+  stored log tells you which runs hit a cap. Retention is off by default, so
+  nothing deletes existing history until you opt in with `--retention`
+  (`SPARKWING_LOGS_RETENTION`, for example `168h`), which sweeps every run whose
+  last write is older than that window on the `--sweep-interval` tick. A caller
+  that searched the whole store now passes `run_id`, and one that needs
+  complete results checks `truncated` and narrows the query.
+- **Why:** Every runner holds a token that may append, and one chatty pipeline
+  could fill the volume for every other run or pin the service on a whole-store
+  scan.
+
+## Restricted pod security and the published-dashboard guard
+
+- **Before:** Neither chart set a seccomp profile, every container could
+  write to its image layers, and `ingress.enabled=true` rendered whatever
+  `ingress.tls` and `web.requireLogin` held.
+- **After:** Every pod carries `seccompProfile: RuntimeDefault`, every
+  container runs with a read-only root filesystem over a `/tmp` scratch
+  `emptyDir`, and the Kubernetes runner Job does the same. `sparkwing-full`
+  refuses to render when `ingress.enabled=true` with an empty `ingress.tls`
+  or with `web.requireLogin=false`.
+- **Migration:** An install that publishes the dashboard sets `ingress.tls`
+  and `web.requireLogin=true` before upgrading, or sets
+  `ingress.allowInsecure=true` to keep publishing it unencrypted or open. A
+  custom image whose process writes outside `/tmp` needs its own
+  `emptyDir` mount for that path, or `securityContext.readOnlyRootFilesystem`
+  overridden for that container.
