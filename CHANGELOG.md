@@ -128,10 +128,14 @@ code change to unlock.
   `--api-token` unless `--allow-unauthenticated`
   (`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`) is set, and cached-binary and
   lint-cache reads now send `SPARKWING_CACHE_TOKEN`.
-- **cli:** Generated git hooks now single-quote each pipeline name, and
-  `sparkwing.yaml` rejects a pipeline name outside
+- **cli + config (Breaking):** Generated git hooks now single-quote each pipeline
+  name, and `sparkwing.yaml` rejects a pipeline name outside
   `^[A-Za-z0-9][A-Za-z0-9._-]*$`, so a repository's config cannot hand shell
-  execution to anyone who runs `sparkwing pipeline hooks install`.
+  execution to anyone who runs `sparkwing pipeline hooks install`. A config
+  holding a name outside that pattern no longer loads at all, so every command
+  that reads it fails until the pipeline is renamed in the YAML and in the
+  matching `Register(...)` string. See the
+  [migration guide](docs/migrations/_unreleased.md#pipeline-name-charset).
 - **storage:** Artifact keys are now validated before the filesystem store
   joins them to a path, and the store opens every blob through `os.Root`, so
   `GET /api/v1/artifacts/{key}` can no longer read, overwrite, or delete files
