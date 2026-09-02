@@ -101,11 +101,12 @@ warning at startup. Provide the key via:
 - `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key, or
 - `--secrets-key-file <path>` -- a file holding the raw or base64 key.
 
-Each envelope is bound to the name of the secret it holds, so a
-ciphertext copied onto another name by anyone with database write
-access fails to open rather than answering under the new name. Values
-sealed before name binding (`enc:v1:` envelopes) still open; re-set
-them to get the binding.
+Each envelope is bound to the row it belongs to -- the secret name and
+the owning repository, empty for an unscoped secret -- so a ciphertext
+copied onto another name, into another repository, or onto the
+unscoped row by anyone with database write access fails to open rather
+than answering there. Values sealed before binding (`enc:v1:`
+envelopes) still open; re-set them to get the binding.
 
 There is no key rotation and no multi-key read path: the controller
 holds one key and the stored envelope carries no key id. Swapping the

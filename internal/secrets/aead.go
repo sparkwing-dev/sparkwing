@@ -13,8 +13,11 @@ import (
 
 const (
 	envelopePrefix      = "enc:v1:"
-	envelopePrefixNamed = "enc:v2:"
+	envelopePrefixBound = "enc:v2:"
 )
+
+// safety: NUL joins the fields because a valid secret name holds none, so one pair cannot spell another.
+const boundSeparator = "\x00"
 
 const KeySize = chacha20poly1305.KeySize
 
@@ -37,10 +40,11 @@ func (c *Cipher) Seal(plain string) (string, error) {
 	return c.seal(plain, envelopePrefix, nil)
 }
 
-// SealNamed seals plain with name as additional authenticated data,
-// so the envelope opens only under that name.
-func (c *Cipher) SealNamed(name, plain string) (string, error) {
-	return c.seal(plain, envelopePrefixNamed, []byte(name))
+// SealBound seals plain with the secret's name and owning repository
+// as additional authenticated data, so the envelope opens only under
+// that pair. Repo is empty for an unscoped secret.
+func (c *Cipher) SealBound(name, repo, plain string) (string, error) {
+	return c.seal(plain, envelopePrefixBound, boundAAD(name, repo))
 }
 
 func (c *Cipher) seal(plain, prefix string, aad []byte) (string, error) {
@@ -57,19 +61,23 @@ func (c *Cipher) seal(plain, prefix string, aad []byte) (string, error) {
 }
 
 func (c *Cipher) Open(envelope string) (string, error) {
-	if strings.HasPrefix(envelope, envelopePrefixNamed) {
-		return "", errors.New("secrets cipher: envelope is bound to a secret name; open it with that name")
+	if strings.HasPrefix(envelope, envelopePrefixBound) {
+		return "", errors.New("secrets cipher: envelope is bound to a secret name and repository; open it with those")
 	}
 	return c.open(envelope, envelopePrefix, nil)
 }
 
-// OpenNamed decrypts an envelope sealed under name. Envelopes written
-// before name binding carry no additional data and open unchanged.
-func (c *Cipher) OpenNamed(name, envelope string) (string, error) {
-	if strings.HasPrefix(envelope, envelopePrefixNamed) {
-		return c.open(envelope, envelopePrefixNamed, []byte(name))
+// OpenBound decrypts an envelope sealed for name and repo. Envelopes
+// written before binding carry no additional data and open unchanged.
+func (c *Cipher) OpenBound(name, repo, envelope string) (string, error) {
+	if strings.HasPrefix(envelope, envelopePrefixBound) {
+		return c.open(envelope, envelopePrefixBound, boundAAD(name, repo))
 	}
 	return c.open(envelope, envelopePrefix, nil)
+}
+
+func boundAAD(name, repo string) []byte {
+	return []byte(name + boundSeparator + repo)
 }
 
 func (c *Cipher) open(envelope, prefix string, aad []byte) (string, error) {
@@ -97,7 +105,7 @@ func (c *Cipher) open(envelope, prefix string, aad []byte) (string, error) {
 }
 
 func IsEncrypted(v string) bool {
-	return strings.HasPrefix(v, envelopePrefix) || strings.HasPrefix(v, envelopePrefixNamed)
+	return strings.HasPrefix(v, envelopePrefix) || strings.HasPrefix(v, envelopePrefixBound)
 }
 
 func DecodeKey(s string) ([]byte, error) {

@@ -22,36 +22,38 @@ type Cipher interface {
 	Open(envelope string) (string, error)
 }
 
-// NamedCipher is an optional extension of [Cipher] that binds a
-// sealed value to the name of the secret it belongs to, so an
-// envelope copied onto another name no longer opens. A [Cipher] that
-// also implements NamedCipher is used through these methods for every
-// secret the controller seals and reads; one that does not keeps the
-// unbound [Cipher.Seal] and [Cipher.Open] path.
+// BoundCipher is an optional extension of [Cipher] that binds a
+// sealed value to the secret it belongs to -- its name and its owning
+// repository -- so an envelope copied onto another row no longer
+// opens. A [Cipher] that also implements BoundCipher is used through
+// these methods for every secret the controller seals and reads; one
+// that does not keeps the unbound [Cipher.Seal] and [Cipher.Open]
+// path.
 //
 // The implementation in internal/secrets satisfies it.
-type NamedCipher interface {
+type BoundCipher interface {
 	Cipher
-	// SealNamed encrypts plain with name as additional
-	// authenticated data. Same nonce requirement as [Cipher.Seal].
-	SealNamed(name, plain string) (string, error)
-	// OpenNamed decrypts an envelope sealed under name, and errors
-	// when the envelope was sealed under a different one.
-	// Implementations that also hold envelopes written before name
+	// SealBound encrypts plain with name and repo as additional
+	// authenticated data; repo is empty for an unscoped secret.
+	// Same nonce requirement as [Cipher.Seal].
+	SealBound(name, repo, plain string) (string, error)
+	// OpenBound decrypts an envelope sealed for name and repo, and
+	// errors when the envelope was sealed for a different pair.
+	// Implementations that also hold envelopes written before
 	// binding open those unchanged.
-	OpenNamed(name, envelope string) (string, error)
+	OpenBound(name, repo, envelope string) (string, error)
 }
 
-func sealSecret(c Cipher, name, plain string) (string, error) {
-	if nc, ok := c.(NamedCipher); ok {
-		return nc.SealNamed(name, plain)
+func sealSecret(c Cipher, name, repo, plain string) (string, error) {
+	if bc, ok := c.(BoundCipher); ok {
+		return bc.SealBound(name, repo, plain)
 	}
 	return c.Seal(plain)
 }
 
-func openSecret(c Cipher, name, envelope string) (string, error) {
-	if nc, ok := c.(NamedCipher); ok {
-		return nc.OpenNamed(name, envelope)
+func openSecret(c Cipher, name, repo, envelope string) (string, error) {
+	if bc, ok := c.(BoundCipher); ok {
+		return bc.OpenBound(name, repo, envelope)
 	}
 	return c.Open(envelope)
 }
