@@ -48,6 +48,20 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **controller:** GitHub webhook deliveries are bound to the repository that
+  sends them and can no longer be replayed. `GITHUB_WEBHOOK_BINDINGS` (JSON:
+  `{"pipelines":{"<pipeline>":{"repos":["owner/name"],"secret":"..."}},"repo_secrets":{"owner/name":"..."}}`)
+  gives a pipeline an allow-list of repositories and gives a pipeline or a
+  repository a signing secret of its own, so handing a repository owner a
+  secret no longer hands them every other pipeline: a delivery naming a
+  repository outside the pipeline's list answers `403`, and the shared
+  `GITHUB_WEBHOOK_SECRET` stays the fallback for whatever the bindings do not
+  name. Each delivery's `X-GitHub-Delivery` is now stored on its trigger under
+  a store-wide unique constraint (schema 24), so a replayed delivery answers
+  `409` at any pipeline instead of starting a second run, and a delivery
+  arriving without that header answers `400`.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

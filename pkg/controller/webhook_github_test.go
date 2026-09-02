@@ -45,6 +45,13 @@ func signWebhook(secret string, body []byte) string {
 
 func newWebhookServer(t *testing.T, secret string) (*httptest.Server, *store.Store) {
 	t.Helper()
+	return newBoundWebhookServer(t, secret, controller.GitHubWebhookConfig{})
+}
+
+func newBoundWebhookServer(
+	t *testing.T, secret string, cfg controller.GitHubWebhookConfig,
+) (*httptest.Server, *store.Store) {
+	t.Helper()
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -52,7 +59,9 @@ func newWebhookServer(t *testing.T, secret string) (*httptest.Server, *store.Sto
 	}
 	t.Cleanup(func() { st.Close() })
 
-	srv := controller.New(st, nil).WithGitHubWebhookSecret(secret)
+	srv := controller.New(st, nil).
+		WithGitHubWebhookSecret(secret).
+		WithGitHubWebhookConfig(cfg)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, st
@@ -60,13 +69,20 @@ func newWebhookServer(t *testing.T, secret string) (*httptest.Server, *store.Sto
 
 func postWebhook(t *testing.T, url, event string, body []byte, sig string) *http.Response {
 	t.Helper()
+	return postWebhookDelivery(t, url, event, "test-delivery-abc", body, sig)
+}
+
+func postWebhookDelivery(t *testing.T, url, event, delivery string, body []byte, sig string) *http.Response {
+	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", event)
-	req.Header.Set("X-GitHub-Delivery", "test-delivery-abc")
+	if delivery != "" {
+		req.Header.Set("X-GitHub-Delivery", delivery)
+	}
 	if sig != "" {
 		req.Header.Set("X-Hub-Signature-256", sig)
 	}
@@ -330,4 +346,154 @@ func TestWebhookGitHub_BodyTooLarge(t *testing.T) {
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("status=%d want 413", resp.StatusCode)
 	}
+}
+
+func pushBodyFor(repo string) []byte {
+	return []byte(fmt.Sprintf(`{
+		"ref": "refs/heads/main",
+		"before": "0000000000000000000000000000000000000000",
+		"after":  "abc123def456abc123def456abc123def456abcd",
+		"repository": {"full_name": %q},
+		"pusher": {"name": "alice", "email": "alice@example.com"}
+	}`, repo))
+}
+
+func TestWebhookGitHub_RepositoryBinding(t *testing.T) {
+	cfg := controller.GitHubWebhookConfig{
+		Pipelines: map[string]controller.GitHubWebhookBinding{
+			"sample-app-build": {Repos: []string{"acme/sample-app"}},
+		},
+	}
+	for _, tc := range []struct {
+		name     string
+		pipeline string
+		repo     string
+		want     int
+	}{
+		{"bound repository dispatches", "sample-app-build", "acme/sample-app", http.StatusAccepted},
+		{"binding ignores slug case", "sample-app-build", "ACME/Sample-App", http.StatusAccepted},
+		{"stranger repository refused", "sample-app-build", "attacker/evil", http.StatusForbidden},
+		{"missing repository refused", "sample-app-build", "", http.StatusForbidden},
+		{"unbound pipeline is unchanged", "legacy-build", "attacker/evil", http.StatusAccepted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, st := newBoundWebhookServer(t, testWebhookSecret, cfg)
+			body := pushBodyFor(tc.repo)
+			resp := postWebhook(t, ts.URL+"/webhooks/github/"+tc.pipeline, "push", body,
+				signWebhook(testWebhookSecret, body))
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != tc.want {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status=%d want %d (body %s)", resp.StatusCode, tc.want, raw)
+			}
+			if tc.want != http.StatusAccepted {
+				expectNoTrigger(t, st)
+			}
+		})
+	}
+}
+
+func TestWebhookGitHub_ScopedSecrets(t *testing.T) {
+	cfg := controller.GitHubWebhookConfig{
+		Pipelines: map[string]controller.GitHubWebhookBinding{
+			"pipeline-scoped": {Secret: "pipeline-secret"},
+		},
+		RepoSecrets: map[string]string{"acme/sample-app": "repo-secret"},
+	}
+	for _, tc := range []struct {
+		name     string
+		pipeline string
+		repo     string
+		signWith string
+		want     int
+	}{
+		{"pipeline secret signs its own pipeline", "pipeline-scoped", "acme/other", "pipeline-secret", http.StatusAccepted},
+		{"shared secret cannot reach a scoped pipeline", "pipeline-scoped", "acme/other", testWebhookSecret, http.StatusUnauthorized},
+		{"pipeline secret outranks the repository secret", "pipeline-scoped", "acme/sample-app", "repo-secret", http.StatusUnauthorized},
+		{"repository secret signs its own repository", "demo", "acme/sample-app", "repo-secret", http.StatusAccepted},
+		{"shared secret cannot forge a scoped repository", "demo", "acme/sample-app", testWebhookSecret, http.StatusUnauthorized},
+		{"repository secret cannot forge a peer", "demo", "acme/other", "repo-secret", http.StatusUnauthorized},
+		{"shared secret still serves unscoped repositories", "demo", "acme/other", testWebhookSecret, http.StatusAccepted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, st := newBoundWebhookServer(t, testWebhookSecret, cfg)
+			body := pushBodyFor(tc.repo)
+			resp := postWebhook(t, ts.URL+"/webhooks/github/"+tc.pipeline, "push", body,
+				signWebhook(tc.signWith, body))
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != tc.want {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status=%d want %d (body %s)", resp.StatusCode, tc.want, raw)
+			}
+			if tc.want != http.StatusAccepted {
+				expectNoTrigger(t, st)
+			}
+		})
+	}
+}
+
+func TestWebhookGitHub_NoSecretResolvesUnavailable(t *testing.T) {
+	cfg := controller.GitHubWebhookConfig{
+		RepoSecrets: map[string]string{"acme/sample-app": "repo-secret"},
+	}
+	ts, _ := newBoundWebhookServer(t, "", cfg)
+	body := pushBodyFor("acme/other")
+	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, signWebhook("repo-secret", body))
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status=%d want 503", resp.StatusCode)
+	}
+}
+
+func TestWebhookGitHub_ReplayedDeliveryConflicts(t *testing.T) {
+	ts, st := newWebhookServer(t, testWebhookSecret)
+	body := pushBodyFor("acme/sample-app")
+	sig := signWebhook(testWebhookSecret, body)
+
+	first := postWebhookDelivery(t, ts.URL+"/webhooks/github/sample-app-build", "push", "delivery-7", body, sig)
+	defer func() { _ = first.Body.Close() }()
+	if first.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(first.Body)
+		t.Fatalf("first status=%d want 202 (body %s)", first.StatusCode, raw)
+	}
+
+	replay := postWebhookDelivery(t, ts.URL+"/webhooks/github/sample-app-build", "push", "delivery-7", body, sig)
+	defer func() { _ = replay.Body.Close() }()
+	if replay.StatusCode != http.StatusConflict {
+		raw, _ := io.ReadAll(replay.Body)
+		t.Fatalf("replay status=%d want 409 (body %s)", replay.StatusCode, raw)
+	}
+
+	crossPipeline := postWebhookDelivery(t, ts.URL+"/webhooks/github/other-build", "push", "delivery-7", body, sig)
+	defer func() { _ = crossPipeline.Body.Close() }()
+	if crossPipeline.StatusCode != http.StatusConflict {
+		raw, _ := io.ReadAll(crossPipeline.Body)
+		t.Fatalf("cross-pipeline replay status=%d want 409 (body %s)", crossPipeline.StatusCode, raw)
+	}
+
+	fresh := postWebhookDelivery(t, ts.URL+"/webhooks/github/sample-app-build", "push", "delivery-8", body, sig)
+	defer func() { _ = fresh.Body.Close() }()
+	if fresh.StatusCode != http.StatusAccepted {
+		t.Errorf("fresh delivery status=%d want 202", fresh.StatusCode)
+	}
+
+	var pending int
+	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM triggers`).Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending != 2 {
+		t.Errorf("triggers = %d, want 2 (one per distinct delivery)", pending)
+	}
+}
+
+func TestWebhookGitHub_MissingDeliveryHeader(t *testing.T) {
+	ts, st := newWebhookServer(t, testWebhookSecret)
+	body := pushBodyFor("acme/sample-app")
+	resp := postWebhookDelivery(t, ts.URL+"/webhooks/github/demo", "push", "", body,
+		signWebhook(testWebhookSecret, body))
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status=%d want 400", resp.StatusCode)
+	}
+	expectNoTrigger(t, st)
 }

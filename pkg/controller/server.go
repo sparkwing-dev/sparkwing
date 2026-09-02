@@ -30,6 +30,7 @@ type Server struct {
 	loginLimit *loginLimiter
 
 	githubWebhookSecret  string
+	githubWebhook        GitHubWebhookConfig
 	githubCommitStatuses *githubCommitStatusReporter
 
 	queueTimeout time.Duration
