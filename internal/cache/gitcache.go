@@ -326,7 +326,7 @@ var mirrorFetch = func(timeout time.Duration, bareRepo string) (string, error) {
 
 var recloneMirror = func(repoURL, bareRepo string) (string, error) {
 	_ = os.RemoveAll(bareRepo)
-	return gitCmd("clone", "--bare", repoURL, bareRepo)
+	return gitCmd("clone", "--bare", "--", repoURL, bareRepo)
 }
 
 const mirrorFetchTimeout = 2 * time.Minute
@@ -552,7 +552,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
 		// #nosec G706 -- the repository URL is validated at registration and redacted here
 		log.Printf("background fetch: cloning %s → %s", sourceurl.Redact(repoURL), hash)
-		if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
+		if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
 			http.Error(w, fmt.Sprintf("clone failed: %s\n%s", err, sshHint(out)), http.StatusInternalServerError)
 			return
 		}
@@ -1853,14 +1853,26 @@ var (
 
 func loadRepoNames() {
 	data, err := os.ReadFile(namesFile)
-	if err == nil {
-		if err := json.Unmarshal(data, &repoNames); err != nil {
-			log.Printf("warning: failed to parse %s: %v", namesFile, err)
-			return
+	if err != nil {
+		return
+	}
+	stored := map[string]string{}
+	if err := json.Unmarshal(data, &stored); err != nil {
+		log.Printf("warning: failed to parse %s: %v", namesFile, err)
+		return
+	}
+	// safety: the table is replayed into git clone, so an entry written before validation is refused here.
+	for name, repoURL := range stored {
+		validated, err := sourceurl.ValidateCloneURL(repoURL)
+		if err != nil {
+			// #nosec G706 -- the repo name is logged quoted and the validator quotes any URL text it echoes
+			log.Printf("warning: dropping repo %q from %s: %v", name, namesFile, err)
+			continue
 		}
-		if len(repoNames) > 0 {
-			log.Printf("loaded %d repo name mappings", len(repoNames))
-		}
+		repoNames[name] = validated
+	}
+	if len(repoNames) > 0 {
+		log.Printf("loaded %d repo name mappings", len(repoNames))
 	}
 }
 
@@ -1924,7 +1936,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 
 		// #nosec G706 -- the repository name is pattern-validated and the URL is redacted
 		log.Printf("git register: cloning %s as %q", sourceurl.Redact(repoURL), name)
-		if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
+		if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
 			log.Printf("git register: clone failed (will need seed): %s %s", err, sshHint(out))
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "hash": hash, "cloned": false})
@@ -2025,7 +2037,7 @@ func autoRegisterRepos() {
 		lock := repoLock(hash)
 		lock.Lock()
 		log.Printf("auto-register: cloning %s (%s)", name, sourceurl.Redact(repoURL))
-		if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
+		if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
 			log.Printf("auto-register: clone failed for %s: %v %s", name, err, sshHint(out))
 		} else {
 			enableSHAFetch(bareRepo)
@@ -2098,7 +2110,7 @@ func resolveGitRepo(name string) (string, error) {
 	}
 	// #nosec G706 -- the repository name is pattern-validated and its URL was validated at registration
 	log.Printf("gitcache: registered repo %q missing on disk; auto-cloning %s", name, repoURL)
-	if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
+	if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
 		return "", fmt.Errorf(
 			"repo %q registered but not cloned -- auto-clone failed (%w%s); seed manually via POST /sync/seed?repo=%s&sha=<commit>",
 			name, err, sshHint(out), repoURL,

@@ -388,3 +388,20 @@ func TestWarmPVCKeepsHostileWarmImagesOutOfThePodSpec(t *testing.T) {
 		}
 	}
 }
+
+func TestAcceptedWarmImagesKeepsAForgedRejectionOnOneLine(t *testing.T) {
+	logged := captureWarmImageLog(t)
+
+	hostile := "alpine\nERROR: forged controller line\rcarriage\x1b[2K"
+	if got := acceptedWarmImages([]string{hostile}); got != nil {
+		t.Fatalf("accepted images = %q, want none", got)
+	}
+
+	line := strings.TrimSpace(logged.String())
+	if strings.ContainsAny(line, "\n\r") {
+		t.Fatalf("rejection log = %q, want a single line", line)
+	}
+	if !strings.Contains(line, `\n`) || !strings.Contains(line, `\r`) || !strings.Contains(line, `\x1b`) {
+		t.Errorf("rejection log = %q, want the control characters escaped", line)
+	}
+}
