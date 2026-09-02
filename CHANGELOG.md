@@ -56,7 +56,10 @@ code change to unlock.
   Kubernetes runner Job does the same. `ingress.enabled=true` now fails to
   render with an empty `ingress.tls` or with `web.requireLogin=false`; set
   `ingress.allowInsecure=true` to publish the dashboard unencrypted or open
-  anyway.
+  anyway. That opt-out must be a bool, since a quoted string would read as
+  true and drop the guard, and opting in without TLS sets
+  `SPARKWING_WEB_INSECURE_COOKIES=1` on the web Deployment so the login gate
+  still works over plain HTTP.
 - **sdk:** `git.Clone` now authenticates to the git cache named by
   `SPARKWING_GITCACHE`. The bearer in `SPARKWING_CACHE_TOKEN` travels in the
   environment as a cache-scoped `http.<cache>/.extraHeader`, never on the

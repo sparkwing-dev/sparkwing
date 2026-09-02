@@ -404,10 +404,16 @@ CHANGELOG links here.
   container runs with a read-only root filesystem over a `/tmp` scratch
   `emptyDir`, and the Kubernetes runner Job does the same. `sparkwing-full`
   refuses to render when `ingress.enabled=true` with an empty `ingress.tls`
-  or with `web.requireLogin=false`.
+  or with `web.requireLogin=false`. `ingress.allowInsecure` must be a bool:
+  a quoted string fails the render instead of reading as an opt-out. Opting
+  in with an empty `ingress.tls` sets `SPARKWING_WEB_INSECURE_COOKIES=1` on
+  the web Deployment, so the login gate still works over plain HTTP. The
+  `ingress.tls` check is presence-only, so an entry without `secretName`
+  leaves TLS to the ingress controller's default certificate.
 - **Migration:** An install that publishes the dashboard sets `ingress.tls`
   and `web.requireLogin=true` before upgrading, or sets
-  `ingress.allowInsecure=true` to keep publishing it unencrypted or open. A
+  `ingress.allowInsecure=true` (a bool, not `"true"`) to keep publishing it
+  unencrypted or open. A
   custom image whose process writes outside `/tmp` needs its own
   `emptyDir` mount for that path, or `securityContext.readOnlyRootFilesystem`
   overridden for that container.
