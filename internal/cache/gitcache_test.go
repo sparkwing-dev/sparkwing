@@ -587,10 +587,7 @@ func TestHandleBinPutRequiresToken(t *testing.T) {
 
 	const hash = "deadbeef-cafebabe"
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/bin/"+hash, strings.NewReader("poisoned"))
-	req.Header.Set("Authorization", "Bearer wrong-token")
-	req.Header.Set("X-Forwarded-For", "203.0.113.7")
-	requireToken(handleBin)(w, req)
+	requireToken(handleBin)(w, httptest.NewRequest(http.MethodPut, "/bin/"+hash, strings.NewReader("poisoned")))
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", w.Code)
@@ -618,7 +615,7 @@ func TestHandleBinClientRejectsPoisonedBlob(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "pipeline")
-	if err := bincache.TryBinary(srv.URL, hash, dest); err != nil {
+	if err := bincache.TryBinary(srv.URL, "writer-token", hash, dest); err != nil {
 		t.Fatalf("TryBinary: %v", err)
 	}
 
@@ -626,10 +623,82 @@ func TestHandleBinClientRejectsPoisonedBlob(t *testing.T) {
 		t.Fatal(err)
 	}
 	poisoned := filepath.Join(t.TempDir(), "pipeline")
-	if err := bincache.TryBinary(srv.URL, hash, poisoned); !errors.Is(err, bincache.ErrDigest) {
+	if err := bincache.TryBinary(srv.URL, "writer-token", hash, poisoned); !errors.Is(err, bincache.ErrDigest) {
 		t.Fatalf("err = %v, want ErrDigest", err)
 	}
 	if _, err := os.Stat(poisoned); !os.IsNotExist(err) {
 		t.Fatalf("poisoned binary was installed: %v", err)
+	}
+}
+
+func TestRequireToken(t *testing.T) {
+	old := apiToken
+	apiToken = "s3cret"
+	defer func() { apiToken = old }()
+
+	for _, tc := range []struct {
+		name      string
+		authz     string
+		forwarded string
+		want      int
+	}{
+		{name: "correct bearer", authz: "Bearer s3cret", want: http.StatusOK},
+		{name: "wrong bearer", authz: "Bearer nope", want: http.StatusUnauthorized},
+		{name: "no header", want: http.StatusUnauthorized},
+		{name: "no header, forwarded", forwarded: "203.0.113.7", want: http.StatusUnauthorized},
+		{name: "wrong bearer, forwarded", authz: "Bearer nope", forwarded: "203.0.113.7", want: http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			served := false
+			h := requireToken(func(w http.ResponseWriter, _ *http.Request) {
+				served = true
+				w.WriteHeader(http.StatusOK)
+			})
+			req := httptest.NewRequest(http.MethodPut, "/bin/abc", nil)
+			if tc.authz != "" {
+				req.Header.Set("Authorization", tc.authz)
+			}
+			if tc.forwarded != "" {
+				req.Header.Set("X-Forwarded-For", tc.forwarded)
+			}
+			w := httptest.NewRecorder()
+			h(w, req)
+
+			if w.Code != tc.want {
+				t.Errorf("status = %d, want %d", w.Code, tc.want)
+			}
+			if served != (tc.want == http.StatusOK) {
+				t.Errorf("handler served = %t, want %t", served, tc.want == http.StatusOK)
+			}
+		})
+	}
+}
+
+func TestRequireTokenServesEveryoneWhenUnauthenticated(t *testing.T) {
+	old := apiToken
+	apiToken = ""
+	defer func() { apiToken = old }()
+
+	served := false
+	h := requireToken(func(w http.ResponseWriter, _ *http.Request) {
+		served = true
+		w.WriteHeader(http.StatusOK)
+	})
+	w := httptest.NewRecorder()
+	h(w, httptest.NewRequest(http.MethodPut, "/bin/abc", nil))
+
+	if !served || w.Code != http.StatusOK {
+		t.Errorf("served = %t, status = %d, want true and 200", served, w.Code)
+	}
+}
+
+func TestNewRejectsEmptyAPIToken(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.DataDir = t.TempDir()
+
+	if _, err := New(cfg); err == nil {
+		t.Fatal("New accepted an empty API token")
+	} else if !strings.Contains(err.Error(), "--allow-unauthenticated") {
+		t.Errorf("error %q does not name the opt-in flag", err)
 	}
 }

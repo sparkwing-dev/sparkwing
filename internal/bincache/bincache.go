@@ -67,10 +67,13 @@ func parseDigestHeader(value string) ([]byte, error) {
 	return nil, fmt.Errorf("%w: response carried no sha-256 digest", ErrDigest)
 }
 
-func TryBinary(gcURL, hash, dest string) error {
+func TryBinary(gcURL, token, hash, dest string) error {
 	req, err := http.NewRequest(http.MethodGet, gcURL+"/bin/"+hash, nil)
 	if err != nil {
 		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	cli := &http.Client{
 		Timeout: 30 * time.Second,

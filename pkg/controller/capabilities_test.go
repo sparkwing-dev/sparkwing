@@ -17,9 +17,11 @@ import (
 
 type fakeArtifactStore struct {
 	objects map[string][]byte
+	gets    []string
 }
 
 func (f *fakeArtifactStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	f.gets = append(f.gets, key)
 	b, ok := f.objects[key]
 	if !ok {
 		return nil, storage.ErrNotFound
@@ -89,6 +91,47 @@ func TestArtifactsEndpoint_RoundTrip(t *testing.T) {
 	if resp2.StatusCode != http.StatusNotFound {
 		t.Errorf("missing status = %d", resp2.StatusCode)
 	}
+}
+
+func TestArtifactsEndpoint_RejectsTraversalKey(t *testing.T) {
+	t.Parallel()
+	const target = "/api/v1/artifacts/..%2f..%2fetc%2fpasswd"
+
+	t.Run("server", func(t *testing.T) {
+		t.Parallel()
+		art := &fakeArtifactStore{}
+		dir := t.TempDir()
+		st, err := store.Open(filepath.Join(dir, "state.db"))
+		if err != nil {
+			t.Fatalf("open store: %v", err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
+		h := controller.New(st, nil).WithArtifactStore(art).Handler()
+
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", rec.Code)
+		}
+		if len(art.gets) != 0 {
+			t.Errorf("store reached with keys %v", art.gets)
+		}
+	})
+
+	t.Run("loopback", func(t *testing.T) {
+		t.Parallel()
+		art := &fakeArtifactStore{}
+		h := controller.NewLoopback(nil, "run-1", "", nil).WithArtifactStore(art).Handler()
+
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", rec.Code)
+		}
+		if len(art.gets) != 0 {
+			t.Errorf("store reached with keys %v", art.gets)
+		}
+	})
 }
 
 func TestPoolRoutes_AbsentWhenUnattached(t *testing.T) {

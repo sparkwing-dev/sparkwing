@@ -170,6 +170,7 @@ func setupSSH() {
 func requireToken(next http.HandlerFunc) http.HandlerFunc {
 	token := apiToken
 	return func(w http.ResponseWriter, r *http.Request) {
+		// safety: an empty token reaches here only when the operator asked for it at startup.
 		if token == "" {
 			next(w, r)
 			return
@@ -177,10 +178,6 @@ func requireToken(next http.HandlerFunc) http.HandlerFunc {
 		auth := r.Header.Get("Authorization")
 		got := strings.TrimPrefix(auth, "Bearer ")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1 {
-			next(w, r)
-			return
-		}
-		if r.Header.Get("X-Forwarded-For") == "" {
 			next(w, r)
 			return
 		}

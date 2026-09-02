@@ -408,7 +408,7 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 	}
 	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
 		if binaryCacheURL != "" {
-			if fetchErr := bincache.TryBinary(binaryCacheURL, key, tempPath); fetchErr == nil {
+			if fetchErr := bincache.TryBinary(binaryCacheURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
 				logger.Warn("trigger loop: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)
