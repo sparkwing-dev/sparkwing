@@ -77,6 +77,10 @@ func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sq
 	return e.s.exec(ctx, q, args...)
 }
 
+func (e storeExecer) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return e.s.query(ctx, q, args...)
+}
+
 func rewritePh(dialect Dialect, q string) string {
 	if dialect != DialectPostgres {
 		return q

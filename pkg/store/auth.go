@@ -145,19 +145,19 @@ func (s *Store) deriveCSRFToken(rawSession string) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-func (s *Store) rehashSessions(ctx context.Context) error {
+func rehashSessions(ctx context.Context, tx *storeTx) error {
 	// safety: pre-digest rows hold replayable session ids, so the migration drops them rather than converting them.
-	if _, err := s.exec(ctx, `DELETE FROM sessions`); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
 		return err
 	}
-	cols, err := s.tableColumns("sessions")
+	cols, err := tableColumns(ctx, tx, "sessions")
 	if err != nil {
 		return err
 	}
 	if !cols["csrf_token"] {
 		return nil
 	}
-	_, err = s.exec(ctx, `ALTER TABLE sessions DROP COLUMN csrf_token`)
+	_, err = tx.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN csrf_token`)
 	return err
 }
 

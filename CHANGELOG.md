@@ -393,6 +393,14 @@ code change to unlock.
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
 
+### Fixed
+
+- **store:** A SQLite schema migration that fails partway now rolls back
+  completely. Each schema version and its version stamp commit as one
+  transaction, so an interrupted upgrade leaves the database on the last
+  version it fully applied instead of a half-built schema the next open
+  refuses to repair. Postgres already migrated inside one transaction.
+
 ## [v0.40.0] - 2026-09-02
 ### Security
 
