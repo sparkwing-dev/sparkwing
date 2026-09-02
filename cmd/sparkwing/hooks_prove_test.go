@@ -606,14 +606,22 @@ func TestDeclaredHookNames_ReadsTheTriggersThePipelinesDeclare(t *testing.T) {
       pre_commit: {}
       pre_push: {}
 `)
-	got := strings.Join(declaredHookNames(f.repo), ",")
+	names, err := declaredHookNames(f.repo)
+	if err != nil {
+		t.Fatalf("declaredHookNames: %v", err)
+	}
+	got := strings.Join(names, ",")
 	if got != "pre-commit,pre-push" {
 		t.Errorf("declaredHookNames = %q, want %q", got, "pre-commit,pre-push")
 	}
 }
 
 func TestDeclaredHookNames_UnreadableProjectDeclaresNothing(t *testing.T) {
-	if got := declaredHookNames(t.TempDir()); got != nil {
+	got, err := declaredHookNames(t.TempDir())
+	if err != nil {
+		t.Fatalf("declaredHookNames: %v", err)
+	}
+	if got != nil {
 		t.Errorf("declaredHookNames = %v, want nil for a directory with no project", got)
 	}
 }
