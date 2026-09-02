@@ -17,6 +17,28 @@ endpoints, and first-visit admin bootstrap -- is in
 [auth.md](auth.md). Sparkwing does not have a "root token"; the `admin`
 scope is the superset.
 
+## Login and hashing budgets
+
+`POST /api/v1/auth/login` is the controller's only unauthenticated route
+that hashes a password, so it carries its own budgets. One client gets 30
+attempts a minute and the listener as a whole gets 120; both answer `429`
+with `Retry-After` once drained. An account answers `429` after 5 failed
+attempts and recovers one attempt every three minutes. That budget charges
+failures only, so a busy account is never locked out by its successes.
+
+Every argon2id verification, login and bearer-token lookup alike, passes
+through a semaphore sized by `--argon2-memory-budget-mb` (chart:
+`controller.argon2MemoryBudgetMB`, default 256). One hash holds 64 MiB
+while it runs, so the default admits four at a time and queues the rest.
+Raise it only alongside the pod's memory limit. The controller also
+remembers a rejected raw token for five seconds, so a client replaying one
+wrong guess pays for a single hash.
+
+Login throttling keys on the TCP peer and ignores forwarded headers until
+you name the proxy networks in `--trusted-proxy-cidrs` (chart:
+`controller.trustedProxyCIDRs`). Leaving it empty behind a proxy stays
+safe and turns coarse: every browser then shares the proxy's budget.
+
 ## Webhooks
 
 GitHub webhook deliveries are verified by the controller: it checks the

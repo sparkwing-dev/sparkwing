@@ -48,6 +48,16 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **controller:** Login now carries per-client, listener-wide, and per-account
+  budgets, and every argon2id verification passes through a memory-sized
+  semaphore, so unauthenticated callers can no longer exhaust the pod by
+  hashing. Size the semaphore with `--argon2-memory-budget-mb` (chart:
+  `controller.argon2MemoryBudgetMB`) and name proxy networks with
+  `--trusted-proxy-cidrs` (chart: `controller.trustedProxyCIDRs`) so throttling
+  keys on the real client. A rejected bearer token is remembered for a few
+  seconds, so a replayed wrong guess costs one hash.
 
 ## [v0.39.0] - 2026-09-02
 ### Docs

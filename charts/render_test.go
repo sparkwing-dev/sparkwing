@@ -170,6 +170,37 @@ func TestWebTrustedProxyCIDRsRenderAsOneFlag(t *testing.T) {
 	}
 }
 
+func TestControllerLoginThrottleFlagsRender(t *testing.T) {
+	controllerArgs := func(sets ...string) []string {
+		return webArgs(t, helmRender(t, "./sparkwing-full",
+			"templates/controller-deployment.yaml", "sparkwing", sets...))
+	}
+
+	defaultArgs := controllerArgs()
+	if got, ok := hasFlag(defaultArgs, "--trusted-proxy-cidrs="); ok {
+		t.Fatalf("default trusted proxy flag = %q", got)
+	}
+	if got, ok := hasFlag(defaultArgs, "--argon2-memory-budget-mb="); !ok || got != "--argon2-memory-budget-mb=256" {
+		t.Fatalf("argon2 budget flag = %q, want the 256 MiB default", got)
+	}
+
+	configured := controllerArgs(
+		"controller.trustedProxyCIDRs[0]=10.0.0.0/8",
+		"controller.trustedProxyCIDRs[1]=192.168.0.0/16",
+		"controller.argon2MemoryBudgetMB=128",
+	)
+	got, ok := hasFlag(configured, "--trusted-proxy-cidrs=")
+	if !ok {
+		t.Fatalf("no trusted proxy flag in %v", configured)
+	}
+	if want := "--trusted-proxy-cidrs=10.0.0.0/8,192.168.0.0/16"; got != want {
+		t.Fatalf("trusted proxy flag = %q, want %q", got, want)
+	}
+	if got, _ := hasFlag(configured, "--argon2-memory-budget-mb="); got != "--argon2-memory-budget-mb=128" {
+		t.Fatalf("argon2 budget flag = %q, want the override", got)
+	}
+}
+
 func TestWebCacheURLOverrideWins(t *testing.T) {
 	args := webArgs(t, helmTemplate(t, "sparkwing", "web.cache.url=http://cache.elsewhere:8090"))
 	if got, _ := hasFlag(args, "--cache="); got != "--cache=http://cache.elsewhere:8090" {

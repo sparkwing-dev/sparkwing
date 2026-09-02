@@ -86,6 +86,12 @@ spec:
             {{- if $logsURL }}
             - {{ printf "--logs-url=%s" $logsURL | quote }}
             {{- end }}
+            {{- with .Values.controller.trustedProxyCIDRs }}
+            - {{ printf "--trusted-proxy-cidrs=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with .Values.controller.argon2MemoryBudgetMB }}
+            - {{ printf "--argon2-memory-budget-mb=%d" (int .) | quote }}
+            {{- end }}
           env:
             - name: SPARKWING_HOME
               value: /data
