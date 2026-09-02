@@ -358,6 +358,7 @@ func printRerunBanner(w io.Writer, snap *store.NodeDispatch, node *store.Node, r
 
 func pickShell() string {
 	if s := os.Getenv("SHELL"); s != "" {
+		// #nosec G703 -- the shell path comes from this user's own environment
 		if _, err := os.Stat(s); err == nil {
 			return s
 		}

@@ -26,6 +26,7 @@ var targetPortRE = regexp.MustCompile(`->\s*(\d+)`)
 func checkServicePorts(contentDir, repoRoot string) bool {
 	canonical := map[string]string{}
 	for _, s := range services {
+		// #nosec G703 -- a build-time tool reading paths the operator names
 		data, err := os.ReadFile(filepath.Join(repoRoot, s.mainFile))
 		if err != nil {
 			fmt.Printf("service-ports: read %s: %v\n", s.mainFile, err)
@@ -41,6 +42,7 @@ func checkServicePorts(contentDir, repoRoot string) bool {
 
 	var mismatches []string
 	var checked int
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	_ = filepath.Walk(contentDir, func(path string, info os.FileInfo, werr error) error {
 		if werr != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return werr
@@ -48,6 +50,7 @@ func checkServicePorts(contentDir, repoRoot string) bool {
 		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
 			return nil
 		}
+		// #nosec G122 -- the walk stays inside the repository this check runs in
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return rerr

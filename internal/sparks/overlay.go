@@ -55,6 +55,7 @@ func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]
 		return false, nil
 	}
 
+	// #nosec G703 -- the overlay file inside this repository's own .sparkwing directory
 	if err := os.WriteFile(overlayPath, overlayBytes, 0o644); err != nil {
 		return false, fmt.Errorf("sparks: write overlay: %w", err)
 	}
@@ -140,6 +141,7 @@ func goWorkInScope(workDir string) (string, bool) {
 		return "", false
 	case "":
 	default:
+		// #nosec G703 -- the GOWORK path comes from this process's own environment
 		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
 			return env, true
 		}

@@ -40,6 +40,7 @@ func nativeProcessTable(withSessions bool) ([]Info, bool) {
 	}
 	processes := make([]Info, 0, len(raw)/size)
 	for start := 0; start+size <= len(raw); start += size {
+		// #nosec G103 -- decodes a fixed-size kernel struct from a bounds-checked buffer
 		process := *(*unix.KinfoProc)(unsafe.Pointer(&raw[start]))
 		pid := int(process.Proc.P_pid)
 		if pid <= 0 {

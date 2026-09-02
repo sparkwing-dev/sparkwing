@@ -25,6 +25,7 @@ func runQueueExecCommand(command []string) error {
 	signal.Notify(term, syscall.SIGTERM)
 	defer signal.Stop(term)
 
+	// #nosec G702 -- the command this user asked the queue to run, as argv without a shell
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	commandErr := cmd.Run()

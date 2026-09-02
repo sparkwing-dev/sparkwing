@@ -11,11 +11,13 @@ import (
 var failureConstRE = regexp.MustCompile(`Failure\w+\s*=\s*"([a-z_]+)"`)
 
 func checkFailureReasons(contentDir, repoRoot string) bool {
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	store, err := os.ReadFile(filepath.Join(repoRoot, "pkg", "store", "store.go"))
 	if err != nil {
 		fmt.Println("failure-reasons: read store.go:", err)
 		return false
 	}
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	doc, err := os.ReadFile(filepath.Join(contentDir, "observability.md"))
 	if err != nil {
 		fmt.Println("failure-reasons: read observability.md:", err)

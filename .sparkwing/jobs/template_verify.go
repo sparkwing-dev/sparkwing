@@ -323,6 +323,7 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 	if !found {
 		return errors.New("go.mod has no module directive")
 	}
+	// #nosec G703 -- a pipeline job writing under the repository it runs in
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
 		return err
 	}
@@ -330,6 +331,7 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".go" {
 			return err
 		}
+		// #nosec G122 -- the walk stays inside the repository this job runs in
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
@@ -338,6 +340,7 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 		if bytes.Equal(data, updated) {
 			return nil
 		}
+		// #nosec G122,G703 -- the walk stays inside the repository this job runs in
 		return os.WriteFile(path, updated, info.Mode())
 	})
 }
@@ -482,6 +485,7 @@ func sparksCoreRootFromGoWork(repoRoot string) string {
 }
 
 func isDir(p string) bool {
+	// #nosec G703 -- a pipeline job stating paths under the repository it runs in
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()
 }

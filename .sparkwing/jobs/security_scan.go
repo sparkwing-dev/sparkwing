@@ -26,7 +26,6 @@ var gosecExcludedDirs = []string{"web", "testdata", "dist"}
 // SecurityScanArgs are the inputs of the security-scan pipeline.
 type SecurityScanArgs struct {
 	ReportDir string `flag:"report-dir" desc:"Directory that receives gosec.sarif and gosec.json. Default: a fresh temporary directory named in the job log."`
-	Strict    bool   `flag:"strict" desc:"Fail the gosec job when any high-severity, high-confidence finding remains. Gosec findings are report-only unless this flag is set."`
 }
 
 // SecurityScan runs the static security scanners against the repository.
@@ -37,14 +36,14 @@ func (SecurityScan) ShortHelp() string {
 }
 
 func (SecurityScan) Help() string {
-	return "Runs four independent scanners: gosec over the public module and the .sparkwing pipeline module, excluding the rules that describe how a CI tool works rather than a defect in it (files and subprocesses named by its inputs, cache directory permissions, and checks the lint gate already owns), writing gosec.json and a repo-relative gosec.sarif for GitHub code scanning; govulncheck in source mode over ./...; gitleaks over the available git history using the .gitleaks.toml allow-list; and `npm audit` over the dashboard's production dependencies. gosec reports without failing unless --strict is set; code scanning records its findings but does not make this pipeline fail. The other three scanners fail on any finding. The three Go-based scanners run through `go run` at pinned module versions; npm must be on PATH."
+	return "Runs four independent scanners: gosec over the public module and the .sparkwing pipeline module, excluding the rules that describe how a CI tool works rather than a defect in it (files and subprocesses named by its inputs, cache directory permissions, and checks the lint gate already owns), writing gosec.json and a repo-relative gosec.sarif for GitHub code scanning; govulncheck in source mode over ./...; gitleaks over the available git history using the .gitleaks.toml allow-list; and `npm audit` over the dashboard's production dependencies. gosec fails this job on any high-severity, high-confidence finding, so a false positive needs a source annotation: the scan runs with -nosec-require-rules and -nosec-require-justification, so every suppression must read `#nosec GNNN -- <reason>`, naming the rules it silences and why. No -nosec-tag alternative is configured, so `grep -rn '#nosec'` lists every one. Code scanning records the SARIF but does not decide this pipeline. The other three scanners fail on any finding. The three Go-based scanners run through `go run` at pinned module versions; npm must be on PATH."
 }
 
 func (SecurityScan) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Run every scanner and print the gosec summary", Command: "sparkwing run security-scan"},
 		{Comment: "Write the SARIF where a workflow can upload it", Command: "sparkwing run security-scan --report-dir=/tmp/security"},
-		{Comment: "Fail on remaining high-severity, high-confidence gosec findings", Command: "sparkwing run security-scan --strict"},
+		{Comment: "List every gosec suppression the tree carries", Command: "grep -rn '#nosec' --include='*.go' ."},
 	}
 }
 
@@ -98,24 +97,28 @@ func (p *SecurityScan) gosec(ctx context.Context, in SecurityScanArgs) error {
 	for _, line := range summary.lines {
 		sparkwing.Info(ctx, "  %s", line)
 	}
-	if in.Strict && summary.highHigh > 0 {
+	if summary.highHigh > 0 {
 		return fmt.Errorf("gosec: %d high-severity, high-confidence finding(s) remain (see %s)", summary.highHigh, sarifPath)
 	}
 	return nil
 }
 
-func runGosec(ctx context.Context, dir, out string) ([]gosecIssue, error) {
+func gosecArgs(out string) []string {
 	args := []string{
 		"run", gosecModule,
 		"-quiet", "-no-fail", "-exclude-generated",
+		"-nosec-require-rules", "-nosec-require-justification",
 		"-exclude=" + strings.Join(gosecExcludedRules, ","),
 		"-fmt=json", "-out=" + out,
 	}
 	for _, d := range gosecExcludedDirs {
 		args = append(args, "-exclude-dir="+d)
 	}
-	args = append(args, "./...")
-	if _, err := sparkwing.Exec(ctx, "go", args...).Dir(dir).Env("GOWORK", "off").Run(); err != nil {
+	return append(args, "./...")
+}
+
+func runGosec(ctx context.Context, dir, out string) ([]gosecIssue, error) {
+	if _, err := sparkwing.Exec(ctx, "go", gosecArgs(out)...).Dir(dir).Env("GOWORK", "off").Run(); err != nil {
 		return nil, err
 	}
 	data, err := os.ReadFile(out)

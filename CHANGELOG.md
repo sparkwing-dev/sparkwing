@@ -50,6 +50,18 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
+- **ci:** The `security-scan` pipeline now fails on any high-severity,
+  high-confidence gosec finding instead of only reporting one, and the
+  `--strict` flag is gone. The recorded backlog is triaged in place: every
+  remaining finding carries a `#nosec GNNN -- <reason>` annotation, which the
+  scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
+  so a naked suppression silences nothing.
+- **cache:** The artifact download endpoint now ends `tar`'s option list with
+  `--` before the matched file names, so an artifact whose name begins with a
+  dash is archived rather than parsed as a `tar` option. Artifact and proxy
+  log lines quote the caller-supplied path, so a newline in it can no longer
+  forge a log record.
+
 - **controller:** Secret envelopes are now bound to the fields of the row
   that decide who may read them -- the secret name, the owning repository,
   whether an unscoped row is shared with every run, and whether the value is

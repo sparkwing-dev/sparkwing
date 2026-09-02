@@ -183,6 +183,7 @@ pipelines:
 
 func ensureGitignoreEntry(repoRoot, entry string) error {
 	path := filepath.Join(repoRoot, ".gitignore")
+	// #nosec G703 -- the .gitignore of the repository this command was invoked in
 	body, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -205,6 +206,7 @@ func ensureGitignoreEntry(repoRoot, entry string) error {
 	b.WriteString("\n# sparkwing: cached pipeline binary, regenerated on each `sparkwing run` invocation\n")
 	b.WriteString(entry)
 	b.WriteByte('\n')
+	// #nosec G703 -- the .gitignore of the repository this command was invoked in
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 

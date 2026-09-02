@@ -170,6 +170,7 @@ func darwinProcesses() ([]unix.KinfoProc, bool) {
 	procs := make([]unix.KinfoProc, 0, count)
 	for i := 0; i < count; i++ {
 		start := i * size
+		// #nosec G103 -- decodes a fixed-size kernel struct from a bounds-checked buffer
 		procs = append(procs, *(*unix.KinfoProc)(unsafe.Pointer(&raw[start])))
 	}
 	return procs, true

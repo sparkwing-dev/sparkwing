@@ -5,6 +5,7 @@ package main
 import "os"
 
 func atomicReplace(source, target string) error {
+	// #nosec G703 -- paths the updater staged in its own install directory
 	return os.Rename(source, target)
 }
 

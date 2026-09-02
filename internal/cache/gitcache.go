@@ -167,6 +167,7 @@ func setupSSH() error {
 		if len(data) > 0 && data[len(data)-1] != '\n' {
 			data = append(data, '\n')
 		}
+		// #nosec G703 -- SSH keys staged from the operator's own mounted secret directory
 		if err := os.WriteFile(filepath.Join(sshDir, e.Name()), data, 0o600); err != nil {
 			return fmt.Errorf("cache: stage SSH key %s: %w", e.Name(), err)
 		}
@@ -535,6 +536,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	bareRepo := filepath.Join(repoDir, hash+".git")
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
+		// #nosec G706 -- the repository URL is validated at registration and redacted here
 		log.Printf("background fetch: cloning %s → %s", sourceurl.Redact(repoURL), hash)
 		if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
 			http.Error(w, fmt.Sprintf("clone failed: %s\n%s", err, sshHint(out)), http.StatusInternalServerError)
@@ -578,6 +580,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
 	commitBytes, err := exec.Command("git", "-C", bareRepo, "rev-parse", branch).Output()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("branch %q not found", branch), http.StatusNotFound)
@@ -591,7 +594,9 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	shortCommit := commit[:8]
 
 	tarball := filepath.Join(archDir, hash+"-"+shortCommit+".tar.gz")
+	// #nosec G703 -- the archive name is a repository hash plus a validated commit
 	if _, err := os.Stat(tarball); err == nil {
+		// #nosec G706 -- the repository hash and the short commit are pattern-validated
 		log.Printf("cache hit: %s@%s", hash, shortCommit)
 		if gitcacheCacheHits != nil {
 			gitcacheCacheHits.Add(r.Context(), 1)
@@ -607,13 +612,16 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		gitcacheCacheMisses.Add(r.Context(), 1)
 	}
 
+	// #nosec G706 -- the repository hash and the short commit are pattern-validated
 	log.Printf("cache hit: archiving %s@%s", hash, shortCommit)
 	tmpTar := tarball + ".tmp"
 	if err := archiveToFile(bareRepo, branch, tmpTar); err != nil {
+		// #nosec G703 -- a temporary archive this handler created in its own cache directory
 		_ = os.Remove(tmpTar)
 		http.Error(w, fmt.Sprintf("archive failed: %s", err), http.StatusInternalServerError)
 		return
 	}
+	// #nosec G703 -- a temporary archive this handler created in its own cache directory
 	if err := os.Rename(tmpTar, tarball); err != nil {
 		_ = os.Remove(tmpTar)
 		http.Error(w, fmt.Sprintf("rename archive failed: %s", err), http.StatusInternalServerError)
@@ -628,6 +636,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 func serveTarball(w http.ResponseWriter, r *http.Request, path, hash, commit string) {
 	w.Header().Set("X-Commit", commit)
 	w.Header().Set("X-Repo-Hash", hash)
+	// #nosec G703 -- the archive name is a repository hash plus a validated commit
 	http.ServeFile(w, r, path)
 }
 
@@ -683,6 +692,7 @@ func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
 			cap(gitForkSem), strings.Join(args, " "))
 	}
 
+	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
 	cmd := exec.CommandContext(ctx, "git", args...)
 	// safety: process group kill prevents SSH child orphans on timeout.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -697,6 +707,7 @@ func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
 }
 
 func archiveToFile(bareRepo, branch, outPath string) error {
+	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
 	gitArchive := exec.Command("git", "-C", bareRepo, "archive", "--format=tar", "--", branch)
 	gzipCmd := exec.Command("gzip")
 
@@ -706,6 +717,7 @@ func archiveToFile(bareRepo, branch, outPath string) error {
 	}
 	gzipCmd.Stdin = pipe
 
+	// #nosec G703 -- an output path this handler built in its own cache directory
 	outFile, err := os.Create(outPath)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
@@ -757,6 +769,7 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 
 	refreshMirrorBestEffort(hash, bareRepo)
 
+	// #nosec G702 -- git runs as argv with a constant binary and a validated ref leading the object name
 	out, err := exec.Command("git", "-C", bareRepo, "show", branch+":"+filePath).Output()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("file not found: %s:%s", branch, filePath), http.StatusNotFound)
@@ -768,6 +781,7 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
+	// #nosec G705 -- the response is text/plain, never HTML
 	w.Write(out)
 }
 
@@ -802,6 +816,7 @@ func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 		ref = branch + ":" + path
 	}
 
+	// #nosec G702 -- git runs as argv with a constant binary and a validated ref leading the object name
 	out, err := exec.Command("git", "-C", bareRepo, "rev-parse", ref).Output()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("path not found: %s", ref), http.StatusNotFound)
@@ -809,6 +824,7 @@ func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
+	// #nosec G705 -- the response is text/plain, never HTML
 	w.Write([]byte(strings.TrimSpace(string(out))))
 }
 
@@ -842,6 +858,7 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 
 	refreshMirrorBestEffort(hash, bareRepo)
 
+	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
 	err := exec.Command("git", "-C", bareRepo, "merge-base", "--is-ancestor", commit, branch).Run()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("commit %s is not on branch %s", commit, branch), http.StatusNotFound)
@@ -849,6 +866,7 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+	// #nosec G705 -- the ref and the commit are pattern-validated and the body is not HTML
 	fmt.Fprintf(w, "commit %s is on branch %s", commit, branch)
 }
 
@@ -957,6 +975,7 @@ func binDigest(hash string, f *os.File) (string, error) {
 	meta := binMeta{SHA256: digest, Size: info.Size(), Principal: "unknown", WrittenAt: info.ModTime().UTC().Format(time.RFC3339)}
 	// safety: never replace a sidecar an upload wrote while this read was hashing the older blob.
 	if err := createBinMeta(hash, meta); err != nil && !errors.Is(err, fs.ErrExist) {
+		// #nosec G706 -- the blob hash is pattern-validated
 		log.Printf("warning: bin meta write %s: %v", hash, err)
 	}
 	return digest, nil
@@ -977,6 +996,7 @@ func openBinForRead(hash, path string) (*os.File, string, error) {
 	mu := binKeyLock(hash)
 	mu.Lock()
 	defer mu.Unlock()
+	// #nosec G703 -- the blob path is built from a pattern-validated hash
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, "", err
@@ -1028,6 +1048,7 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "not found", http.StatusNotFound)
 				return
 			}
+			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin digest %s: %v", hash, err)
 			http.Error(w, "digest unavailable", http.StatusInternalServerError)
 			return
@@ -1041,6 +1062,7 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 		if _, err := io.Copy(w, f); err != nil {
+			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin copy %s: %v", hash, err)
 		}
 
@@ -1062,6 +1084,7 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 
 		tmpPath, err := stageBinBlob(data)
 		if err != nil {
+			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin stage %s: %v", hash, err)
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
@@ -1070,18 +1093,22 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 		meta := binMeta{SHA256: digest, Size: int64(len(data)), Principal: principal, WrittenAt: time.Now().UTC().Format(time.RFC3339)}
 		if err := writeBinMeta(hash, meta); err != nil {
 			_ = os.Remove(tmpPath)
+			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin meta write %s: %v", hash, err)
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
+		// #nosec G703 -- the blob path is built from a pattern-validated hash
 		if err := os.Rename(tmpPath, path); err != nil {
 			_ = os.Remove(tmpPath)
 			// safety: a digest with no blob behind it would brick the entry for every later reader.
 			_ = os.Remove(binMetaPath(hash))
+			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin write %s: %v", hash, err)
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
+		// #nosec G706 -- the blob hash is pattern-validated
 		log.Printf("bin cache: stored %s (%d bytes) sha256=%s principal=%s", hash, len(data), digest, principal)
 		if err := setBinDigestHeaders(w, digest); err != nil {
 			http.Error(w, "digest unavailable", http.StatusInternalServerError)
@@ -1107,6 +1134,7 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodHead:
+		// #nosec G703 -- the blob path is built from a pattern-validated hash
 		if _, err := os.Stat(path); err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -1114,6 +1142,7 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 
 	case http.MethodGet:
+		// #nosec G703 -- the blob path is built from a pattern-validated hash
 		f, err := os.Open(path)
 		if err != nil {
 			if gitcacheCacheMisses != nil {
@@ -1131,10 +1160,12 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 				attribute.String("type", "dependency"),
 			))
 		}
+		// #nosec G706 -- the cache key is pattern-validated
 		log.Printf("cache hit: %s (%d bytes)", key, info.Size())
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 		if _, err := io.Copy(w, f); err != nil {
+			// #nosec G706 -- the cache key is pattern-validated
 			log.Printf("warning: cache copy %s: %v", key, err)
 		}
 
@@ -1156,11 +1187,13 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// #nosec G703 -- the cache key is pattern-validated
 		if err := os.Rename(tmpPath, path); err != nil {
 			_ = os.Remove(tmpPath)
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
+		// #nosec G706 -- the cache key is pattern-validated
 		log.Printf("cache store: %s (%d bytes)", key, n)
 		w.WriteHeader(http.StatusCreated)
 
@@ -1230,10 +1263,12 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 	}
 
 	destDir := filepath.Dir(dest)
+	// #nosec G703 -- the destination is contained under the artifacts root
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// #nosec G703 -- the destination is contained under the artifacts root
 	f, err := os.Create(dest)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1247,7 +1282,8 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		return
 	}
 
-	log.Printf("describe: artifact uploaded %s/%s (%d bytes)", jobID, artifactPath, n)
+	// #nosec G706 -- %q escapes control characters in the caller-supplied path
+	log.Printf("describe: artifact uploaded %s/%q (%d bytes)", jobID, artifactPath, n)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"path": artifactPath, "size": n})
 }
@@ -1256,12 +1292,14 @@ func artifactDownload(w http.ResponseWriter, r *http.Request, jobID string) {
 	glob := r.URL.Query().Get("glob")
 	jobDir := filepath.Join(artifactsDir, jobID)
 
+	// #nosec G703 -- the job directory is built from a pattern-validated job ID
 	if _, err := os.Stat(jobDir); os.IsNotExist(err) {
 		http.Error(w, "no artifacts for job "+jobID, http.StatusNotFound)
 		return
 	}
 
 	var matches []string
+	// #nosec G703 -- the job directory is built from a pattern-validated job ID
 	if err := filepath.Walk(jobDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return err
@@ -1288,15 +1326,18 @@ func artifactDownload(w http.ResponseWriter, r *http.Request, jobID string) {
 		// safety: an artifact is caller-supplied content, so it downloads instead of rendering in place.
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", attachmentDisposition(filepath.Base(matches[0])))
+		// #nosec G703 -- the match came from walking the job directory itself
 		http.ServeFile(w, r, filepath.Join(jobDir, matches[0]))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", attachmentDisposition(jobID+".tar"))
-	cmd := exec.Command("tar", append([]string{"-cf", "-", "-C", jobDir}, matches...)...)
+	// #nosec G702 -- tar runs as argv with a constant binary and -- ends its option list
+	cmd := exec.Command("tar", append([]string{"-cf", "-", "-C", jobDir, "--"}, matches...)...)
 	cmd.Stdout = w
 	if err := cmd.Run(); err != nil {
+		// #nosec G706 -- the job ID is pattern-validated
 		log.Printf("warning: tar artifacts for %s: %v", jobID, err)
 	}
 }
@@ -1308,6 +1349,7 @@ func attachmentDisposition(name string) string {
 func artifactList(w http.ResponseWriter, r *http.Request, jobID string) {
 	jobDir := filepath.Join(artifactsDir, jobID)
 
+	// #nosec G703 -- the job directory is built from a pattern-validated job ID
 	if _, err := os.Stat(jobDir); os.IsNotExist(err) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]string{})
@@ -1315,6 +1357,7 @@ func artifactList(w http.ResponseWriter, r *http.Request, jobID string) {
 	}
 
 	var files []string
+	// #nosec G703 -- the job directory is built from a pattern-validated job ID
 	if err := filepath.Walk(jobDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return err
@@ -1438,6 +1481,7 @@ func handleIncrementalUpload(diffData []byte, repoURL, base string) (string, int
 
 	id := fmt.Sprintf("%x", sha256.Sum256(combined))[:16]
 	path := filepath.Join(uploadsDir, id+".tar.gz")
+	// #nosec G703 -- the upload name is a sha256 digest of the bundle
 	if err := os.WriteFile(path, combined, 0o644); err != nil {
 		return "", 0, err
 	}
@@ -1446,6 +1490,7 @@ func handleIncrementalUpload(diffData []byte, repoURL, base string) (string, int
 }
 
 func archiveToDir(bareRepo, ref, dir string) error {
+	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
 	gitArchive := exec.Command("git", "-C", bareRepo, "archive", "--format=tar", "--", ref)
 	tarExtract := exec.Command("tar", "-xf", "-", "-C", dir)
 
@@ -1478,11 +1523,13 @@ func handleUploadDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := filepath.Join(uploadsDir, id+".tar.gz")
+	// #nosec G703 -- Join keeps the upload id under the uploads directory
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		http.Error(w, "upload not found: "+id, http.StatusNotFound)
 		return
 	}
 
+	// #nosec G703 -- ServeFile rejects a request path that contains a dot-dot element
 	http.ServeFile(w, r, path)
 }
 
@@ -1581,6 +1628,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
+		// #nosec G706 -- the repository hash and the commit are pattern-validated
 		log.Printf("seed: creating bare repo from bundle for %s at %s", hash, sha[:8])
 		if out, err := gitCmd("init", "--bare", bareRepo); err != nil {
 			http.Error(w, fmt.Sprintf("init bare repo failed: %s\n%s", err, out), http.StatusInternalServerError)
@@ -1595,6 +1643,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 		enableSHAFetch(bareRepo)
 	} else {
 		enableSHAFetch(bareRepo)
+		// #nosec G706 -- the repository hash and the commit are pattern-validated
 		log.Printf("seed: updating bare repo from bundle for %s at %s", hash, sha[:8])
 		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), bundleRef+":"+seedRef); err != nil {
 			http.Error(w, fmt.Sprintf("fetch seed ref failed: %s\n%s", err, out), http.StatusBadRequest)
@@ -1619,6 +1668,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	}
 	pruneUnreachableSeedObjects(bareRepo)
 
+	// #nosec G706 -- the repository hash and the commit are pattern-validated
 	log.Printf("seed: %s seeded %s (%d bytes)", hash, sha[:8], size)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "size": size})
@@ -1796,6 +1846,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if repointing {
+		// #nosec G706 -- the repository name is pattern-validated and the URL is redacted
 		log.Printf("git register: repointing %q from %s to %s", name,
 			sourceurl.Redact(existing), sourceurl.Redact(repoURL))
 	}
@@ -1810,6 +1861,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		lock.Lock()
 		defer lock.Unlock()
 
+		// #nosec G706 -- the repository name is pattern-validated and the URL is redacted
 		log.Printf("git register: cloning %s as %q", sourceurl.Redact(repoURL), name)
 		if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
 			log.Printf("git register: clone failed (will need seed): %s %s", err, sshHint(out))
@@ -1822,6 +1874,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		enableSHAFetch(bareRepo)
 	}
 
+	// #nosec G706 -- the repository name is pattern-validated and the URL is redacted
 	log.Printf("git register: %s → %s (%s)", name, sourceurl.Redact(repoURL), hash)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "hash": hash, "cloned": true})
@@ -1982,6 +2035,7 @@ func resolveGitRepo(name string) (string, error) {
 	if _, err := os.Stat(bareRepo); err == nil {
 		return bareRepo, nil
 	}
+	// #nosec G706 -- the repository name is pattern-validated and its URL was validated at registration
 	log.Printf("gitcache: registered repo %q missing on disk; auto-cloning %s", name, repoURL)
 	if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
 		return "", fmt.Errorf(
@@ -1990,12 +2044,14 @@ func resolveGitRepo(name string) (string, error) {
 		)
 	}
 	enableSHAFetch(bareRepo)
+	// #nosec G706 -- the repository name is pattern-validated
 	log.Printf("gitcache: auto-clone complete for %q at %s", name, bareRepo)
 	return bareRepo, nil
 }
 
 func handleInfoRefs(w http.ResponseWriter, r *http.Request, bareRepo, service string) {
 	gitCmd := strings.TrimPrefix(service, "git-")
+	// #nosec G702 -- the git subcommand is one of two literals, run as argv without a shell
 	cmd := exec.Command("git", gitCmd, "--stateless-rpc", "--advertise-refs", bareRepo)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -2010,6 +2066,7 @@ func handleInfoRefs(w http.ResponseWriter, r *http.Request, bareRepo, service st
 	w.Header().Set("Cache-Control", "no-cache")
 
 	header := fmt.Sprintf("# service=%s\n", service)
+	// #nosec G705 -- the response is a git protocol advertisement, never HTML
 	fmt.Fprintf(w, "%04x%s0000", len(header)+4, header)
 	w.Write([]byte(stdout.String()))
 }
@@ -2028,6 +2085,7 @@ func handleGitUploadPack(w http.ResponseWriter, r *http.Request, bareRepo string
 }
 
 func handleGitReceivePack(w http.ResponseWriter, _ *http.Request, _, repoName string) {
+	// #nosec G706 -- the repository name is pattern-validated
 	log.Printf("git receive-pack rejected for %s -- gitcache is read-only", repoName)
 	http.Error(w, "gitcache is read-only -- push directly to GitHub", http.StatusForbidden)
 }

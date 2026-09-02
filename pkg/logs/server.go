@@ -661,6 +661,7 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	if rerr != nil {
 		return
 	}
+	// #nosec G705 -- the response is text/plain, never HTML
 	_, _ = w.Write(filter.apply(data))
 }
 
@@ -836,9 +837,11 @@ func (s *Server) handleReadRun(w http.ResponseWriter, r *http.Request) {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
+		// #nosec G705 -- the response is text/plain, never HTML
 		fmt.Fprintf(w, "=== %s ===\n", nodeID)
 		f, err := root.Open(filepath.Join(runID, name))
 		if err != nil {
+			// #nosec G705 -- the response is text/plain, never HTML
 			fmt.Fprintf(w, "(error reading %s)\n", nodeID)
 			continue
 		}

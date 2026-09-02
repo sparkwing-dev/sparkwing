@@ -136,6 +136,7 @@ func writeThroughRoot(root *os.Root, rel string, r io.Reader) error {
 
 func createTemp(root *os.Root, dir string) (*os.File, string, error) {
 	for range 1000 {
+		// #nosec G404 -- a candidate name; the exclusive create, not the generator, keeps it unique
 		name := filepath.Join(dir, ".put-"+strconv.FormatUint(rand.Uint64(), 36))
 		f, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 		if err == nil {

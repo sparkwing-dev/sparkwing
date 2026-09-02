@@ -75,6 +75,7 @@ func superviseMode(args []string) {
 	if err != nil {
 		fail("locate own binary: %v", err)
 	}
+	// #nosec G702 -- a test program re-executing its own binary as argv without a shell
 	cmd := exec.Command(self, append([]string{"wingd", "run"}, args...)...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {

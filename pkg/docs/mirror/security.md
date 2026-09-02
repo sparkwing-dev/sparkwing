@@ -361,9 +361,13 @@ commit and waits for every security job before building release artifacts.
   with the rules that describe how a CI tool works (file inclusion and
   subprocess arguments named by its inputs, cache directory permissions)
   excluded. The pipeline writes a repository-relative SARIF file that the
-  workflow uploads to GitHub code scanning. Gosec findings remain report-only
-  until the pipeline runs with `--strict`; they do not block a pull request or
-  release by themselves.
+  workflow uploads to GitHub code scanning. The gosec job fails on any
+  high-severity, high-confidence finding, so a false positive goes quiet only
+  through a source annotation. The scan runs with `-nosec-require-rules` and
+  `-nosec-require-justification`, so every suppression reads
+  `#nosec GNNN -- <reason>`, naming the rules it silences and why, and no
+  `-nosec-tag` alternative is configured, so `grep -rn '#nosec' --include='*.go' .`
+  lists every one for review.
 - **govulncheck** in source mode over `./...`, in addition to the
   binary-mode scan the `pre-push` gate runs against every shipped
   executable.
@@ -379,7 +383,8 @@ The hosted workflow also runs CodeQL for Go and TypeScript with the
 pins external actions to commit SHAs, and the three Go-based local scanners use
 pinned module versions. The installed npm version and advisory database supply
 `npm audit`; CodeQL has no local pipeline step. A release stops when a scanner
-cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
+cannot complete or when gosec, govulncheck, gitleaks, or `npm audit` finds a
+failure.
 
 ## Operator checklist
 

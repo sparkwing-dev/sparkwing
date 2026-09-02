@@ -139,6 +139,7 @@ func signFile(priv ed25519.PrivateKey, inPath, outPath string) error {
 		return fmt.Errorf("read %s: %w", inPath, err)
 	}
 	sig := ed25519.Sign(priv, msg)
+	// #nosec G703 -- a release tool writing the output path the operator named
 	if err := os.WriteFile(outPath, sig, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", outPath, err)
 	}

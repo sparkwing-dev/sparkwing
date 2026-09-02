@@ -127,6 +127,7 @@ func SDKWorkspaceOverride(sparkwingDir string) string {
 }
 
 func modulePathOf(dir string) string {
+	// #nosec G703 -- the go.mod of a checkout this user's fleet configuration names
 	body, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil {
 		return ""

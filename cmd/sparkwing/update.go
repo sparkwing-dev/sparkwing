@@ -330,6 +330,7 @@ func downloadFile(url, dst string, maxBytes int64) error {
 }
 
 func sha256OfFile(path string) (string, error) {
+	// #nosec G703 -- a file the updater downloaded into its own staging directory
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err

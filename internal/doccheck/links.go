@@ -13,10 +13,12 @@ var mdLinkRE = regexp.MustCompile(`\[[^\]]*\]\(([^)\s]+)\)`)
 func checkLinks(contentDir string) bool {
 	var broken []string
 	var checked int
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	_ = filepath.Walk(contentDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
 		}
+		// #nosec G122 -- the walk stays inside the repository this check runs in
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return rerr
@@ -38,6 +40,7 @@ func checkLinks(contentDir string) bool {
 				}
 				checked++
 				resolved := filepath.Join(filepath.Dir(path), file)
+				// #nosec G703 -- a build-time tool reading paths the operator names
 				if _, statErr := os.Stat(resolved); statErr != nil {
 					broken = append(broken, fmt.Sprintf("%s:%d: %q -> missing %s", rel, ln+1, target, file))
 				}

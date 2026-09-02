@@ -178,6 +178,7 @@ func makeTreeWritable(root string) error {
 		if ierr != nil {
 			return ierr
 		}
+		// #nosec G122 -- the walk stays inside the vendor tree this process just created
 		return os.Chmod(p, info.Mode()|0o200)
 	})
 }
@@ -195,6 +196,7 @@ func addReplaceDirective(goModPath string, rawGoMod []byte, modulePath, relRepla
 	if err != nil {
 		return fmt.Errorf("sparks: format %s: %w", goModPath, err)
 	}
+	// #nosec G703 -- the go.mod inside this repository's own .sparkwing directory
 	if err := os.WriteFile(goModPath, formatted, 0o644); err != nil {
 		return fmt.Errorf("sparks: write %s: %w", goModPath, err)
 	}

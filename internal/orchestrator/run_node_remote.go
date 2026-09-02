@@ -65,6 +65,7 @@ func runNodeRemote(
 		"run_id", runID, "node_id", nodeID, "repo", sourceurl.Redact(repoURL), "branch", branch)
 
 	workDir := filepath.Join(bincache.SparkwingHome(), "node-runner", runID+"-"+nodeID)
+	// #nosec G703 -- a work directory under this user's own Sparkwing home
 	defer func() { _ = os.RemoveAll(workDir) }()
 	if err := fssecure.EnsureDir(workDir); err != nil {
 		return runner.Result{}, fmt.Errorf("create private work directory: %w", err)
@@ -99,6 +100,7 @@ func runNodeRemote(
 		remoteChildMarker+"=1",
 	)
 
+	// #nosec G702 -- the node runner binary this process resolved, run as argv without a shell
 	cmd := exec.CommandContext(ctx, binary.path, "run-node", runID, nodeID)
 	cmd.Dir = filepath.Dir(sparkwingDir)
 	cmd.Env = childEnv

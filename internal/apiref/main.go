@@ -53,6 +53,7 @@ func main() {
 }
 
 func collectScopes(into map[string]string, file string) {
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	data, err := os.ReadFile(file)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "apiref read:", err)
@@ -66,6 +67,7 @@ func collectScopes(into map[string]string, file string) {
 }
 
 func writeRoutes(b *strings.Builder, title string, scopes map[string]string, file string) {
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	data, err := os.ReadFile(file)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "apiref read:", err)

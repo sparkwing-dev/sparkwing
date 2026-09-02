@@ -26,6 +26,7 @@ const generatedMarkerPrefix = "<!-- GENERATED"
 
 func checkFrozenCounts(contentDir string) bool {
 	var hits []string
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	_ = filepath.Walk(contentDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
@@ -36,6 +37,7 @@ func checkFrozenCounts(contentDir string) bool {
 		if isGeneratedDoc(path) {
 			return nil
 		}
+		// #nosec G122 -- the walk stays inside the repository this check runs in
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return rerr

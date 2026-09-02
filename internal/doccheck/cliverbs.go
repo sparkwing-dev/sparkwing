@@ -40,6 +40,7 @@ func checkCLIVerbs(contentDir, repoRoot string) bool {
 	}
 
 	var invocations []cliVerb
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	_ = filepath.Walk(contentDir, func(path string, info os.FileInfo, werr error) error {
 		if werr != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return werr
@@ -50,6 +51,7 @@ func checkCLIVerbs(contentDir, repoRoot string) bool {
 		if isGeneratedDoc(path) {
 			return nil
 		}
+		// #nosec G122 -- the walk stays inside the repository this check runs in
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return rerr
@@ -82,6 +84,7 @@ func checkCLIVerbs(contentDir, repoRoot string) bool {
 }
 
 func loadRegistry(repoRoot string) (valid, posArgs map[string]bool, err error) {
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	data, err := os.ReadFile(filepath.Join(repoRoot, "cmd", "sparkwing", "help_registry.go"))
 	if err != nil {
 		return nil, nil, err

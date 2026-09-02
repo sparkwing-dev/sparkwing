@@ -20,6 +20,7 @@ func main() {
 		os.Exit(2)
 	}
 	outDir := os.Args[1]
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		die("mkdir %s: %v", outDir, err)
 	}
@@ -37,6 +38,7 @@ func main() {
 			die("%s: %v", p, err)
 		}
 		outName := strings.ReplaceAll(p, "/", "_") + ".txt"
+		// #nosec G703 -- a build-time tool reading paths the operator names
 		if err := os.WriteFile(filepath.Join(outDir, outName), []byte(snap), 0o644); err != nil {
 			die("write %s: %v", outName, err)
 		}

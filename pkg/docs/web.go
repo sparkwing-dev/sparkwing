@@ -467,6 +467,7 @@ func (c *WebClient) ClearCache() (int, error) {
 		if info.IsDir() {
 			return nil
 		}
+		// #nosec G122 -- the walk stays inside the documentation cache this process owns
 		if rerr := os.Remove(p); rerr != nil {
 			return rerr
 		}
@@ -480,6 +481,7 @@ func (c *WebClient) ClearCache() (int, error) {
 		if !info.IsDir() || p == c.CacheDir {
 			return nil
 		}
+		// #nosec G122 -- the walk stays inside the documentation cache this process owns
 		_ = os.Remove(p)
 		return nil
 	})

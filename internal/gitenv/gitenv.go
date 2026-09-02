@@ -37,6 +37,7 @@ func GateIndex() string {
 	if path == "" {
 		return ""
 	}
+	// #nosec G703 -- the gate index path comes from this process's own environment
 	if _, err := os.Stat(path); err != nil {
 		return ""
 	}

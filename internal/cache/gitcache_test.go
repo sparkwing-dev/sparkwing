@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -137,6 +139,73 @@ func TestArtifactDownload_SingleFile(t *testing.T) {
 	body, _ := io.ReadAll(w.Body)
 	if !strings.Contains(string(body), "html content") {
 		t.Errorf("expected html content, got %s", body)
+	}
+}
+
+func TestArtifactUpload_LogEscapesTheCallerPath(t *testing.T) {
+	oldDir := artifactsDir
+	artifactsDir = t.TempDir()
+	defer func() { artifactsDir = oldDir }()
+
+	var logged bytes.Buffer
+	oldWriter := log.Writer()
+	log.SetOutput(&logged)
+	defer log.SetOutput(oldWriter)
+
+	req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path=a%0Afake.txt", strings.NewReader("x"))
+	w := httptest.NewRecorder()
+	handleArtifacts(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(logged.String(), `a\nfake.txt`) {
+		t.Errorf("log line did not escape the newline: %q", logged.String())
+	}
+}
+
+func TestArtifactDownload_OptionLikeNameIsNotATarFlag(t *testing.T) {
+	if _, err := exec.LookPath("tar"); err != nil {
+		t.Skip("tar is not on PATH")
+	}
+	oldDir := artifactsDir
+	artifactsDir = t.TempDir()
+	defer func() { artifactsDir = oldDir }()
+
+	job := filepath.Join(artifactsDir, "job123")
+	if err := os.MkdirAll(job, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"--sparkwing-not-an-option", "report.txt"}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(job, name), []byte("content"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123?glob=*", nil)
+	w := httptest.NewRecorder()
+	handleArtifacts(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var got []string
+	tr := tar.NewReader(w.Body)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read tar stream: %v", err)
+		}
+		got = append(got, hdr.Name)
+	}
+	for _, name := range names {
+		if !slices.Contains(got, name) {
+			t.Errorf("archive %v is missing %q", got, name)
+		}
 	}
 }
 

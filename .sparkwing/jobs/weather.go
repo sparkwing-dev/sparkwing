@@ -49,6 +49,7 @@ func (j *weatherStamp) run(ctx context.Context) (WeatherOut, error) {
 		return WeatherOut{}, err
 	}
 	forecasts := []string{"sunny", "partly cloudy", "overcast", "light rain", "thunderstorms"}
+	// #nosec G404 -- sample data for the example pipeline, not a security decision
 	out := WeatherOut{
 		Forecast: forecasts[rand.IntN(len(forecasts))],
 		TempF:    55 + rand.IntN(35),

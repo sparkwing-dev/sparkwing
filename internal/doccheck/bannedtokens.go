@@ -135,6 +135,7 @@ var bannedNarrative = []bannedPattern{
 
 func checkBannedTokens(contentDir, repoRoot string) bool {
 	targets := []string{filepath.Join(repoRoot, "cmd", "sparkwing", "help_registry.go")}
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	_ = filepath.Walk(contentDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
@@ -148,6 +149,7 @@ func checkBannedTokens(contentDir, repoRoot string) bool {
 
 	var hits []string
 	for _, path := range targets {
+		// #nosec G703 -- a build-time tool reading paths the operator names
 		data, err := os.ReadFile(path)
 		if err != nil {
 			fmt.Println("banned-tokens: read error:", err)

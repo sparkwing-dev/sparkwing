@@ -47,6 +47,7 @@ func installVerifiedAsset(asset verifiedReleaseAsset, currentBin string) error {
 	backupOwned := true
 	defer func() {
 		if backupOwned {
+			// #nosec G703 -- a temporary file the updater staged in its own install directory
 			_ = os.Remove(backup)
 		}
 	}()

@@ -146,6 +146,7 @@ func writeRebasedGoMod(baseGoMod, dst, baseDir string) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G703 -- a build-time generator writing into the directory it was given
 	return os.WriteFile(dst, out, 0o644)
 }
 
@@ -154,6 +155,7 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G703 -- a build-time generator writing into the directory it was given
 	return os.WriteFile(dst, b, 0o644)
 }
 

@@ -1444,6 +1444,7 @@ var columnMigrations = []columnSpec{
 		"annotations_json": "BLOB",
 		"summary":          "TEXT NOT NULL DEFAULT ''",
 	}},
+	// #nosec G101 -- column names, not credentials
 	{"nodes", map[string]string{
 		"ready_at":           "INTEGER",
 		"claimed_by":         "TEXT",
@@ -1571,6 +1572,7 @@ var triggerSubmissionCols = map[string]string{
 	"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
 }
 
+// #nosec G101 -- column names, not credentials
 var triggerClaimOwnerCols = map[string]string{
 	"claim_principal":    "TEXT NOT NULL DEFAULT ''",
 	"claim_token_prefix": "TEXT NOT NULL DEFAULT ''",

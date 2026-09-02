@@ -188,6 +188,7 @@ func goWorkInScope(sparkwingDir string) (string, bool) {
 		return "", false
 	case "":
 	default:
+		// #nosec G703 -- the path comes from this user's own environment
 		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
 			return env, true
 		}
