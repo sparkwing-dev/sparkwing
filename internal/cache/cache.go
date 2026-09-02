@@ -164,13 +164,14 @@ func New(cfg Config) (*Server, error) {
 
 	loadRepoNames()
 	initProxy()
+
+	s := &Server{cfg: cfg}
+	// bug: instruments bind to the meter provider current when they are created, so telemetry starts first.
+	s.tel = otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
 	initGitcacheMetrics()
 	initProxyMetrics()
 	setupSSH()
 	autoRegisterRepos()
-
-	s := &Server{cfg: cfg}
-	s.tel = otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
 
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("/health", handleHealthCombined)

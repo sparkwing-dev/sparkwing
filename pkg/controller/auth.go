@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -41,6 +43,19 @@ const (
 	ScopeLogsRead     = "logs.read"
 	ScopeLogsWrite    = "logs.write"
 	ScopeTriggersRead = "triggers.read"
+	// ScopeTriggersClaim gates the trigger worker lifecycle: claim,
+	// heartbeat, and done. It carries no authority over run or node
+	// state.
+	ScopeTriggersClaim = "triggers.claim"
+	// ScopeRunsState gates run and node state writes: run create and
+	// finish, node create, start, finish, and run event append. The
+	// per-node routes are additionally bound to the caller's own
+	// claim.
+	ScopeRunsState = "runs.state"
+	// ScopeSecretsRead gates GET /api/v1/secrets/{name}. A non-admin
+	// holder resolves a name against the repository of the run it
+	// currently holds a claim in.
+	ScopeSecretsRead = "secrets.read"
 	// ScopeApprovalsWrite gates POST /api/v1/runs/{run}/approvals/{node}.
 	// Any principal with this scope can resolve any approval. Reads
 	// are covered by runs.read.
@@ -55,6 +70,9 @@ var allScopes = []string{
 	ScopeLogsRead,
 	ScopeLogsWrite,
 	ScopeTriggersRead,
+	ScopeTriggersClaim,
+	ScopeRunsState,
+	ScopeSecretsRead,
 	ScopeApprovalsWrite,
 	ScopeAdmin,
 }
@@ -100,7 +118,9 @@ type Authenticator struct {
 	generations sync.Map
 	negCache    sync.Map
 	negCount    atomic.Int64
-	negTTL      time.Duration
+	prefixes    *ratelimit.Limiter
+	trusted     []netip.Prefix
+	logger      *slog.Logger
 	now         func() time.Time
 	afterLookup func()
 }
@@ -123,36 +143,71 @@ func (e *authCacheEntry) tokenLive(now time.Time) bool {
 }
 
 type authFailureEntry struct {
-	reason  string
+	reason  error
 	expires time.Time
 }
 
 const (
-	negativeAuthCacheTTL = 5 * time.Second
-	negativeAuthCacheCap = 4096
+	negativeAuthCacheTTL    = 5 * time.Second
+	negativeAuthCacheCap    = 4096
+	negativeAuthCacheTarget = negativeAuthCacheCap * 7 / 8
+
+	// safety: a token prefix is public, so only a per-prefix budget stops a guesser that varies the secret half.
+	authPrefixFailureBurst  = 10
+	authPrefixFailureWindow = time.Minute
+
+	authBusyRetryAfter        = time.Second
+	authUnavailableRetryAfter = 5 * time.Second
+)
+
+var (
+	errMissingBearer = errors.New("missing bearer token")
+	errInvalidBearer = errors.New("invalid bearer token")
+	errAuthThrottled = errors.New("too many failed authentication attempts for this token prefix")
 )
 
 // NewAuthenticator constructs an Authenticator over the given store.
-// Pass cacheTTL=0 to disable caching.
+// Pass cacheTTL=0 to disable caching of successful lookups; the
+// failure budgets that bound unauthenticated hashing stay on either
+// way.
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator {
-	negTTL := time.Duration(0)
-	if cacheTTL > 0 {
-		negTTL = min(negativeAuthCacheTTL, cacheTTL)
-	}
 	return &Authenticator{
 		store:    st,
 		cacheTTL: cacheTTL,
-		negTTL:   negTTL,
+		prefixes: ratelimit.New(authPrefixFailureBurst, authPrefixFailureWindow),
+		logger:   slog.Default(),
 		now:      func() time.Time { return time.Now().UTC() },
 	}
+}
+
+// WithTrustedProxyCIDRs names the proxy source networks allowed to
+// supply X-Forwarded-For when the bearer failure budget resolves a
+// caller's address. Empty keys it on the TCP peer.
+func (a *Authenticator) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Authenticator {
+	a.trusted = prefixes
+	return a
+}
+
+// WithLogger routes the detail of failures that are not authentication
+// rejections to the given logger. The caller sees only a generic
+// message.
+func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator {
+	if l != nil {
+		a.logger = l
+	}
+	return a
 }
 
 // Authenticate resolves a raw bearer token to a Principal or an
 // error. Returned errors are safe to surface to the caller as a 401
 // body; they never contain the token itself or the stored hash.
 func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
+	return a.authenticate(raw, "")
+}
+
+func (a *Authenticator) authenticate(raw, client string) (*Principal, error) {
 	if raw == "" {
-		return nil, errors.New("missing bearer token")
+		return nil, errMissingBearer
 	}
 	now := a.now()
 
@@ -165,7 +220,7 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
 			// safety: a cached entry outlives the row's own clock, so expiry and revocation are rechecked on every hit.
 			case !e.tokenLive(now):
 				a.cache.Delete(raw)
-				return nil, errors.New("token is revoked or expired")
+				return nil, store.ErrTokenRevoked
 			default:
 				cp := *e.principal
 				cp.Authed = now
@@ -174,18 +229,28 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
 		}
 	}
 
-	if store.TokenKindFromPrefix(raw) == "" {
-		return nil, errors.New("invalid bearer token")
+	if store.TokenKindFromPrefix(raw) == "" || len(raw) < store.PrefixLen {
+		return nil, errInvalidBearer
 	}
 	// safety: a replayed wrong guess answers from this cache, so one raw token costs at most one argon2 verification.
 	if reason, ok := a.recentFailure(raw, now); ok {
-		return nil, errors.New(reason)
+		return nil, reason
+	}
+	// safety: a guesser varying the secret half never repeats a raw token, so only this budget bounds its hashing.
+	budget := failureKey(raw[:store.PrefixLen], client)
+	if !a.prefixes.Peek(budget, now) {
+		return nil, errAuthThrottled
 	}
 	prefix := tokenPrefixOf(raw)
 	gen := a.generation(prefix)
 	tok, err := a.store.LookupToken(raw, now)
 	if err != nil {
-		a.rememberFailure(raw, err, now)
+		if errors.Is(err, store.ErrUnknownToken) {
+			a.prefixes.Penalize(budget, now)
+		}
+		if authRejection(err) {
+			a.rememberFailure(raw, err, now)
+		}
 		return nil, err
 	}
 	if a.afterLookup != nil {
@@ -218,6 +283,22 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
 		})
 	}
 	return principal, nil
+}
+
+// safety: only "this credential does not authenticate" is safe to cache and safe to echo; a fault is neither.
+func authRejection(err error) bool {
+	switch {
+	case errors.Is(err, errMissingBearer), errors.Is(err, errInvalidBearer):
+		return true
+	case errors.Is(err, store.ErrInvalidToken), errors.Is(err, store.ErrNoTokenCandidates):
+		return true
+	case errors.Is(err, store.ErrUnknownToken), errors.Is(err, store.ErrTokenRevoked):
+		return true
+	case errors.Is(err, store.ErrInvalidCredentials):
+		return true
+	default:
+		return false
+	}
 }
 
 // Invalidate drops every cached authentication for a token prefix, so
@@ -259,36 +340,43 @@ func (a *Authenticator) bumpGeneration(prefix string) {
 	v.(*atomic.Uint64).Add(1)
 }
 
-func (a *Authenticator) recentFailure(raw string, now time.Time) (string, bool) {
-	if a.negTTL <= 0 {
-		return "", false
-	}
+func (a *Authenticator) recentFailure(raw string, now time.Time) (error, bool) {
 	v, ok := a.negCache.Load(raw)
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	e := v.(*authFailureEntry)
 	if !now.Before(e.expires) {
 		a.forgetFailure(raw)
-		return "", false
+		return nil, false
 	}
 	return e.reason, true
 }
 
 func (a *Authenticator) rememberFailure(raw string, reason error, now time.Time) {
-	if a.negTTL <= 0 {
+	// safety: a store or capacity error is transient, so caching it would answer 401 for a valid token after recovery.
+	if !authRejection(reason) {
 		return
 	}
 	if a.negCount.Load() >= negativeAuthCacheCap {
-		a.sweepFailures(now)
-		if a.negCount.Load() >= negativeAuthCacheCap {
-			return
-		}
+		a.evictFailures(now)
 	}
-	entry := &authFailureEntry{reason: reason.Error(), expires: now.Add(a.negTTL)}
+	entry := &authFailureEntry{reason: reason, expires: now.Add(negativeAuthCacheTTL)}
 	if _, loaded := a.negCache.Swap(raw, entry); !loaded {
 		a.negCount.Add(1)
 	}
+}
+
+// safety: refusing new entries at the cap would let cheap failures pin the cache and restore a hash per replayed guess.
+func (a *Authenticator) evictFailures(now time.Time) {
+	a.sweepFailures(now)
+	a.negCache.Range(func(k, _ any) bool {
+		if a.negCount.Load() < negativeAuthCacheTarget {
+			return false
+		}
+		a.forgetFailure(k.(string))
+		return true
+	})
 }
 
 func (a *Authenticator) forgetFailure(raw string) {
@@ -328,18 +416,12 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, err := extractBearer(r)
 		if err != nil {
-			writeAuthError(w, http.StatusUnauthorized, authErrorBody{
-				Code:    "unauthenticated",
-				Message: err.Error(),
-			})
+			a.writeAuthFailure(w, err)
 			return
 		}
-		p, err := a.Authenticate(raw)
+		p, err := a.authenticate(raw, ratelimit.ClientIP(r, a.trusted))
 		if err != nil {
-			writeAuthError(w, http.StatusUnauthorized, authErrorBody{
-				Code:    "unauthenticated",
-				Message: err.Error(),
-			})
+			a.writeAuthFailure(w, err)
 			return
 		}
 		ctx := contextWithPrincipal(r.Context(), p)
@@ -348,11 +430,48 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// safety: a rejection carries its reason; a controller fault answers a generic 503 and logs the detail instead.
+func (a *Authenticator) writeAuthFailure(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errAuthThrottled):
+		setRetryAfter(w, authPrefixFailureWindow)
+		writeAuthError(w, http.StatusTooManyRequests, authErrorBody{
+			Code:    "too_many_attempts",
+			Message: err.Error(),
+		})
+	case errors.Is(err, store.ErrHashingBusy):
+		setRetryAfter(w, authBusyRetryAfter)
+		writeAuthError(w, http.StatusServiceUnavailable, authErrorBody{
+			Code:    "unavailable",
+			Message: "authentication is busy, retry shortly",
+		})
+	case authRejection(err):
+		writeAuthError(w, http.StatusUnauthorized, authErrorBody{
+			Code:    "unauthenticated",
+			Message: err.Error(),
+		})
+	default:
+		a.log().Error("auth.unavailable", "error", err.Error())
+		setRetryAfter(w, authUnavailableRetryAfter)
+		writeAuthError(w, http.StatusServiceUnavailable, authErrorBody{
+			Code:    "unavailable",
+			Message: "authentication is temporarily unavailable",
+		})
+	}
+}
+
+func (a *Authenticator) log() *slog.Logger {
+	if a.logger == nil {
+		return slog.Default()
+	}
+	return a.logger
+}
+
 func extractBearer(r *http.Request) (string, error) {
 	h := r.Header.Get("Authorization")
 	const prefix = "Bearer "
 	if !strings.HasPrefix(h, prefix) {
-		return "", errors.New("missing bearer token")
+		return "", errMissingBearer
 	}
 	return strings.TrimSpace(strings.TrimPrefix(h, prefix)), nil
 }

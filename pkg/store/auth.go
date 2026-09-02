@@ -40,6 +40,11 @@ type User struct {
 // SessionIDLen is the raw byte length before base64.
 const SessionIDLen = 32
 
+// ErrInvalidCredentials reports a username that does not exist or a
+// password that does not match. One error covers both so the response
+// is not a user-existence oracle.
+var ErrInvalidCredentials = errors.New("invalid username or password")
+
 const metaKeySessionCSRFKey = "session_csrf_key"
 
 func sessionDigest(rawSession string) string {
@@ -364,15 +369,21 @@ func (s *Store) CountUsers() (int, error) {
 func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error) {
 	u, err := s.lookupUser(name)
 	if err != nil {
-		_, _ = hashPassword(password)
-		return nil, errors.New("invalid username or password")
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("users: lookup: %w", err)
+		}
+		// safety: the unknown-user path hashes too, so response time does not disclose which names exist.
+		if _, herr := hashPassword(password); errors.Is(herr, ErrHashingBusy) {
+			return nil, herr
+		}
+		return nil, ErrInvalidCredentials
 	}
 	ok, err := verifyPassword(password, u.PWHash)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, errors.New("invalid username or password")
+		return nil, ErrInvalidCredentials
 	}
 	_, _ = s.execNoCtx(
 		`UPDATE users SET last_login_at = ? WHERE name = ?`,
@@ -522,7 +533,10 @@ func hashPassword(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argonKey(password, salt)
+	key, err := argonKey(password, salt)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("argon2id$%s$%s", hex.EncodeToString(salt), hex.EncodeToString(key)), nil
 }
 
@@ -539,6 +553,9 @@ func verifyPassword(password, stored string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	cand := argonKey(password, salt)
+	cand, err := argonKey(password, salt)
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(cand, key) == 1, nil
 }

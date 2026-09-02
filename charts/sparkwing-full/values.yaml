@@ -66,9 +66,16 @@ controller:
     key: token
 
   # Proxy source CIDRs allowed to supply X-Forwarded-For for login
-  # throttling. Empty ignores forwarded headers and keys the login
-  # limiter on the TCP peer, which collapses every browser behind a
-  # proxy into one budget. List proxy networks, not client networks.
+  # throttling. This must include the dashboard pod's address: the web
+  # deployment forwards each browser's address to the controller, and
+  # an untrusted source is ignored, which collapses every dashboard
+  # login into one budget. Set the web pod's address when you pin it;
+  # when the pod IP is unknown, set the cluster pod CIDR, for example
+  # 10.244.0.0/16 (kubeadm/kind), 10.42.0.0/16 (k3s), or the value of
+  # `kubectl cluster-info dump | grep cluster-cidr`. Every pod in the
+  # listed range can then supply X-Forwarded-For, so list the
+  # narrowest range that contains the web pod. Empty keys the limiter
+  # on the TCP peer. List proxy networks, not client networks.
   trustedProxyCIDRs: []
 
   # Memory ceiling in MiB for concurrent argon2id password and token
@@ -80,6 +87,15 @@ controller:
   # Query-free HTTP(S) dashboard base URL used for commit-status run links.
   # Empty or invalid keeps reporting enabled but omits the target URL.
   dashboardURL: ""
+
+  cache:
+    # Which sparkwing-cache the controller's gitcache proxy forwards
+    # to, so off-cluster callers can clone and seed through
+    # /api/v1/gitcache/. Empty = auto-generate to point at the bundled
+    # sparkwing-runner-bundle's cache Service; if that sub-chart or its
+    # cache is disabled, the controller runs without a cache URL and
+    # the proxy routes answer 404.
+    url: ""
 
   # Secrets-store encryption key. When set, the controller encrypts
   # secret values stored in the state DB at rest. Without it, the

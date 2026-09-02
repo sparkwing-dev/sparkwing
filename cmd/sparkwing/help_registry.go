@@ -3031,6 +3031,7 @@ does not land in shell history.`,
 		{Name: "value", Type: FlagString, Argument: "VALUE", Desc: "Secret value (prefer --file for long values)", RequiredWhen: "when --file is not set", ConflictsWith: []string{"file"}, Group: "Input"},
 		{Name: "file", Type: FlagString, Argument: "PATH", Desc: "Read value from file (keeps value out of shell history)", RequiredWhen: "when --value is not set", ConflictsWith: []string{"value"}, Group: "Input"},
 		{Name: "plain", Type: FlagBool, Desc: "Store as non-masked config (e.g. REGION, LOG_LEVEL) -- value will NOT be redacted in run logs. Default is masked.", Group: "Input"},
+		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Scope the secret to one repository slug (controller only); omit for a secret every run can read", Group: "Input"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
@@ -3038,6 +3039,7 @@ does not land in shell history.`,
 		{"Set a local masked secret", "sparkwing secrets set --name API_TOKEN --value abc123"},
 		{"Set from a file", "sparkwing secrets set --name TLS_CERT --file ./tls.crt --profile prod"},
 		{"Set non-masked config", "sparkwing secrets set --name REGION --value us-east-1 --plain --profile prod"},
+		{"Scope a secret to one repository", "sparkwing secrets set --name DEPLOY_KEY --file ./key --repo acme/web --profile prod"},
 	},
 }
 
@@ -3049,6 +3051,7 @@ named profile's controller. Prints only the raw value (no trailing newline)
 so it can be piped into another command. Use 'secrets list' for metadata.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name", Required: true, Group: "Input"},
+		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Read the row owned by one repository slug (controller only); omit for the unscoped row", Group: "Input"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
@@ -3080,6 +3083,7 @@ var cmdSecretDelete = Command{
 	Description: `Deletes the secret from local files when --profile is omitted, or from the named profile's controller. Pipelines that reference the name will fail to resolve until the secret is re-added.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name to remove", Required: true, Group: "Input"},
+		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Remove the row owned by one repository slug (controller only); omit for the unscoped row", Group: "Input"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},

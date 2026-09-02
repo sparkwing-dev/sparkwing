@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -29,8 +30,10 @@ func TestArgon2Concurrency(t *testing.T) {
 
 func TestArgon2SemaphoreBoundsConcurrentHashes(t *testing.T) {
 	restore := argonIDKey
+	prevWait := SetArgon2AcquireTimeout(time.Minute)
 	t.Cleanup(func() {
 		argonIDKey = restore
+		SetArgon2AcquireTimeout(prevWait)
 		SetArgon2MemoryBudget(DefaultArgon2MemoryBudget)
 	})
 
@@ -81,5 +84,89 @@ func TestSetArgon2MemoryBudgetIgnoresNonPositive(t *testing.T) {
 	}
 	if got := SetArgon2MemoryBudget(-1); got != 3 {
 		t.Fatalf("negative budget changed concurrency to %d, want 3", got)
+	}
+}
+
+func TestArgon2SaturationShedsInsteadOfQueueing(t *testing.T) {
+	restore := argonIDKey
+	prevWait := SetArgon2AcquireTimeout(20 * time.Millisecond)
+	t.Cleanup(func() {
+		argonIDKey = restore
+		SetArgon2AcquireTimeout(prevWait)
+		SetArgon2MemoryBudget(DefaultArgon2MemoryBudget)
+	})
+
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	argonIDKey = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
+		entered <- struct{}{}
+		<-release
+		return make([]byte, keyLen)
+	}
+	if got := SetArgon2MemoryBudget(Argon2HashBytes); got != 1 {
+		t.Fatalf("SetArgon2MemoryBudget returned %d, want 1", got)
+	}
+
+	held := make(chan struct{})
+	go func() {
+		defer close(held)
+		_, _ = hashPassword("holder")
+	}()
+	<-entered
+	defer func() {
+		close(release)
+		<-held
+	}()
+
+	start := time.Now()
+	_, err := hashPassword("shed me")
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrHashingBusy) {
+		t.Fatalf("saturated hash returned %v, want ErrHashingBusy", err)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("saturated hash waited %v, want it shed near the acquire timeout", elapsed)
+	}
+}
+
+func TestVerifyUserShedsWhenHashingIsSaturated(t *testing.T) {
+	restore := argonIDKey
+	prevWait := SetArgon2AcquireTimeout(20 * time.Millisecond)
+	t.Cleanup(func() {
+		argonIDKey = restore
+		SetArgon2AcquireTimeout(prevWait)
+		SetArgon2MemoryBudget(DefaultArgon2MemoryBudget)
+	})
+
+	st := newTestStore(t)
+	now := time.Now().UTC()
+	if _, err := st.CreateUser("alice", "correct horse battery", []string{"admin"}, now); err != nil {
+		t.Fatalf("create alice: %v", err)
+	}
+
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	argonIDKey = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
+		entered <- struct{}{}
+		<-release
+		return make([]byte, keyLen)
+	}
+	SetArgon2MemoryBudget(Argon2HashBytes)
+
+	held := make(chan struct{})
+	go func() {
+		defer close(held)
+		_, _ = st.VerifyUser("alice", "correct horse battery", now)
+	}()
+	<-entered
+	defer func() {
+		close(release)
+		<-held
+	}()
+
+	for _, name := range []string{"alice", "nobody"} {
+		if _, err := st.VerifyUser(name, "whatever", now); !errors.Is(err, ErrHashingBusy) {
+			t.Fatalf("VerifyUser(%q) under saturation returned %v, want ErrHashingBusy", name, err)
+		}
 	}
 }

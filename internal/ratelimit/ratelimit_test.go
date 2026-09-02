@@ -84,14 +84,42 @@ func TestLimiter_KeySpaceIsBounded(t *testing.T) {
 	for i := range MaxKeys {
 		l.Allow(fmt.Sprintf("client-%d", i), now)
 	}
-	if l.Allow("one-too-many", now) {
-		t.Fatalf("expected deny once the key space is exhausted")
+	if !l.Allow("one-too-many", now) {
+		t.Fatalf("a full key space must evict, not deny an unseen client")
 	}
 	if l.Len() > MaxKeys {
 		t.Fatalf("tracked %d keys, want at most %d", l.Len(), MaxKeys)
 	}
 	if !l.Allow("after-gc", now.Add(10*time.Minute)) {
 		t.Fatalf("idle buckets should be reclaimed for new keys")
+	}
+}
+
+func TestLimiter_EvictionKeepsServingNewClients(t *testing.T) {
+	l := New(1, time.Minute)
+	now := time.Unix(0, 0)
+	for i := range MaxKeys {
+		l.Allow(fmt.Sprintf("client-%d", i), now.Add(time.Duration(i)*time.Microsecond))
+	}
+	warm := fmt.Sprintf("client-%d", MaxKeys-1)
+	warmAt := now.Add(time.Duration(MaxKeys-1) * time.Microsecond)
+	if l.Peek(warm, warmAt) {
+		t.Fatalf("the warm bucket should already be drained")
+	}
+
+	flood := now.Add(time.Second)
+	for i := range 100 {
+		fresh := fmt.Sprintf("fresh-%d", i)
+		if !l.Allow(fresh, flood) {
+			t.Fatalf("%s denied at a full key space", fresh)
+		}
+		if l.Len() > MaxKeys {
+			t.Fatalf("tracked %d keys after %s, want at most %d", l.Len(), fresh, MaxKeys)
+		}
+	}
+	// safety: the coldest buckets go first, so a key flood cannot forget the client that just spent its budget.
+	if l.Peek(warm, flood) {
+		t.Fatalf("a recently used drained bucket was evicted, handing the flood a fresh budget")
 	}
 }
 

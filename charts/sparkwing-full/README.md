@@ -90,8 +90,9 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # so create this Secret AFTER the first `helm install` -- see Auth below.
 #   kubectl -n sparkwing create secret generic sparkwing-token \
 #       --from-literal=token=swr_...
-# Tokens carry scopes: a runner token needs `nodes.claim` +
-# `logs.write`. The web pod's needs `runs.read` + `logs.read`, plus
+# Tokens carry scopes: a runner token needs `nodes.claim`,
+# `triggers.claim`, `runs.state`, `secrets.read`, and `logs.write`.
+# The web pod's needs `runs.read` + `logs.read`, plus
 # `runs.write` where operators cancel, retry, or release runs from the
 # dashboard and `approvals.write` where they resolve approval gates.
 # Deleting a run from the dashboard needs `admin` on the web token AND
@@ -206,7 +207,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for commit-status run links; invalid values omit the link. | `""` |
 | `controller.secretsKey.name` | Secret holding 32-byte encryption key. | `""` |
 | `controller.pool.enabled` | Enable warm-PVC pool (needs RBAC). | `true` |
-| `controller.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. | `[]` |
+| `controller.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. Include the web pod's source, or dashboard logins all share one budget; when the pod IP is unknown, use the cluster pod CIDR. | `[]` |
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
 
 ### Web
