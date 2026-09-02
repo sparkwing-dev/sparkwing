@@ -588,7 +588,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, fmt.Errorf("ensure sparkwing root: %w", err)
 	}
-	if opts.SecretSource == nil {
+	if opts.LocalOnly || opts.SecretSource == nil {
 		opts.SecretSource = secrets.NewDotenvSource("")
 	}
 	if opts.DefaultStateDB == "" {
@@ -998,7 +998,13 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if flags := buildRunFlags(opts); len(flags) > 0 {
 		inv["flags"] = flags
 	}
-	if opts.Profile != nil && opts.ProfileChain != nil {
+	if opts.LocalOnly {
+		inv["backends"] = map[string]any{
+			"state": "sqlite",
+			"logs":  "filesystem",
+			"cache": "filesystem",
+		}
+	} else if opts.Profile != nil && opts.ProfileChain != nil {
 		state, logs, cache := opts.Profile.SurfaceStrings()
 		inv["profile"] = map[string]any{
 			"name":         opts.ProfileChain.Selected,
@@ -1047,6 +1053,9 @@ func buildRunFlags(opts Options) map[string]any {
 	if opts.DryRun {
 		flags["dry_run"] = true
 	}
+	if opts.LocalOnly {
+		flags["local_only"] = true
+	}
 	if opts.StartAt != "" {
 		flags["start_at"] = opts.StartAt
 	}
@@ -1065,11 +1074,13 @@ func buildRunFlags(opts Options) map[string]any {
 	if os.Getenv("SPARKWING_NO_UPDATE") == "1" {
 		flags["no_update"] = true
 	}
-	if v := os.Getenv("SPARKWING_PROFILE"); v != "" {
-		flags["profile"] = v
-	}
-	if v := os.Getenv("SPARKWING_SECRETS_PROFILE"); v != "" {
-		flags["secrets"] = v
+	if !opts.LocalOnly {
+		if v := os.Getenv("SPARKWING_PROFILE"); v != "" {
+			flags["profile"] = v
+		}
+		if v := os.Getenv("SPARKWING_SECRETS_PROFILE"); v != "" {
+			flags["secrets"] = v
+		}
 	}
 	if v := os.Getenv("SPARKWING_MODE"); v != "" {
 		flags["mode"] = v
@@ -1110,6 +1121,9 @@ func buildReproducer(opts Options, _ string) string {
 			continue
 		}
 		flagName := "--" + strings.ReplaceAll(k, "_", "-")
+		if k == "local_only" {
+			flagName = "--sw-local-only"
+		}
 		switch v := flags[k].(type) {
 		case bool:
 			if v {

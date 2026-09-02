@@ -4,12 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func applySecretsProfileOverride(opts *Options) error {
+	if opts.LocalOnly {
+		return nil
+	}
+	prof := os.Getenv("SPARKWING_SECRETS_PROFILE")
+	if prof == "" {
+		return nil
+	}
+	src, err := remoteSecretSource(prof)
+	if err != nil {
+		return err
+	}
+	opts.SecretSource = src
+	return nil
+}
 
 func remoteSecretSource(profName string) (secrets.Source, error) {
 	if profName == "" {

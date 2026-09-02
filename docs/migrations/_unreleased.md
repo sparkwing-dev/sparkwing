@@ -5,6 +5,22 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## Managed Git hooks run locally by default
+
+- **Before:** A managed hook installed without `--profile` inherited the
+  pipeline or project default profile. Its proof and later Git actions could
+  fail when that profile's controller was offline.
+- **After:** Installing or reinstalling without `--profile` proves and renders
+  the hook with `--sw-local-only`. An explicit `--profile NAME` still pins the
+  hook to shared storage. Local-only coordinated nodes no longer reopen remote
+  cache, logs, or secrets.
+- **Migration:** Run `sparkwing pipeline hooks install` again to adopt the
+  local default. If a hook needs shared storage, reinstall it with
+  `sparkwing pipeline hooks install --profile NAME`. Existing hook files do not
+  change until reinstalled.
+- **Why:** A local Git action should not require an intermittently available
+  controller unless the repository owner opts into that dependency.
+
 ## Secret input hash migration
 
 - **Before:** Run-store schema 17 persisted a deterministic `inputs_hash` even

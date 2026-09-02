@@ -178,13 +178,9 @@ func Main() {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", applyErr)
 		os.Exit(1)
 	}
-	if prof := os.Getenv("SPARKWING_SECRETS_PROFILE"); prof != "" {
-		src, perr := remoteSecretSource(prof)
-		if perr != nil {
-			fmt.Fprintln(os.Stderr, "sparkwing run: --sw-secrets:", perr)
-			os.Exit(1)
-		}
-		opts.SecretSource = src
+	if secretsErr := applySecretsProfileOverride(&opts); secretsErr != nil {
+		fmt.Fprintln(os.Stderr, "sparkwing run: --sw-secrets:", secretsErr)
+		os.Exit(1)
 	}
 
 	res, err := RunLocal(context.Background(), paths, opts)

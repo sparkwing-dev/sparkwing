@@ -21,7 +21,7 @@ func selectSecretResolver(ctx context.Context, opts Options) (secrets.Source, er
 }
 
 func effectiveSecretsSpec(opts Options) *backends.Spec {
-	if opts.Profile == nil {
+	if opts.LocalOnly || opts.Profile == nil {
 		return nil
 	}
 	return opts.Profile.Surfaces().Secrets

@@ -348,7 +348,7 @@ func TestHooksInstall_PriorHookStaysLiveUntilProofPasses(t *testing.T) {
 	}
 	f.git(t, "add", "-A")
 	f.git(t, "commit", "-m", "invoke prior hook during proof")
-	if ran := f.ranPipelines(t); !strings.Contains(ran, "run old-gate") || strings.Contains(ran, "run gate\n") {
+	if ran := f.ranPipelines(t); !strings.Contains(ran, "run old-gate --sw-local-only") || strings.Contains(ran, "run gate --sw-local-only") {
 		t.Fatalf("commit during proof did not run only the prior hook: %q", ran)
 	}
 
@@ -371,7 +371,7 @@ func TestHooksInstall_PriorHookStaysLiveUntilProofPasses(t *testing.T) {
 	writeRepoFile(t, filepath.Join(f.repo, "after-proof"), "published\n")
 	f.git(t, "add", "-A")
 	f.git(t, "commit", "-m", "invoke replacement hook")
-	if ran := f.ranPipelines(t); !strings.Contains(ran, "run gate\n") {
+	if ran := f.ranPipelines(t); !strings.Contains(ran, "run gate --sw-local-only") {
 		t.Fatalf("published replacement hook did not fire: %q", ran)
 	}
 }

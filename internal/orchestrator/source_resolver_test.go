@@ -6,6 +6,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -75,6 +76,32 @@ func TestRun_NoSecretsBackend_FallsBackToOptionsSecretSource(t *testing.T) {
 	}
 	if capturedEnvSecret != "from-options-fallback" {
 		t.Errorf("step body saw Token = %q, want from-options-fallback", capturedEnvSecret)
+	}
+}
+
+func TestRun_LocalOnlyReplacesOptionsSecretSourceWithDotenv(t *testing.T) {
+	p := newPaths(t)
+	if err := secrets.WriteDotenvEntry("", "TOKEN", "from-local-dotenv"); err != nil {
+		t.Fatalf("seed local secret: %v", err)
+	}
+	if value, _, err := secrets.NewDotenvSource("").Read("TOKEN"); err != nil || value != "from-local-dotenv" {
+		t.Fatalf("local dotenv precondition = %q, %v", value, err)
+	}
+
+	capturedEnvSecret = ""
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		Pipeline:     "env-reading-pipe",
+		LocalOnly:    true,
+		SecretSource: staticSource{"TOKEN": "from-remote-override"},
+	})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("status = %q (err=%v); want success", res.Status, res.Error)
+	}
+	if capturedEnvSecret != "from-local-dotenv" {
+		t.Errorf("step body saw Token = %q, want local dotenv", capturedEnvSecret)
 	}
 }
 

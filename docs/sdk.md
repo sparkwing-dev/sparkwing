@@ -1006,7 +1006,7 @@ prefixing every one of them with `sw-`:
     --sw-stop-at STEP     // stop the run after STEP
     --sw-only GLOB        // run only matching jobs (+ their Needs)
     --sw-no-cache         // ignore cached per-node results
-    --sw-local-only       // force local state/cache/logs
+    --sw-local-only       // force local secrets/state/cache/logs
     --sw-dry-run          // run each step's dry-run probe
     --sw-allow LABEL,...  // authorize risk-labeled steps
     --sw-no-update        // skip the sparks auto-resolve step

@@ -54,6 +54,14 @@ code change to unlock.
 - **security:** The security policy now identifies the supported release and
   provides a private GitHub vulnerability-reporting path.
 
+### Changed
+
+- **hooks (Breaking):** Managed Git hooks installed without `--profile` now
+  prove and run with `--sw-local-only`, so a project's default profile cannot
+  make local Git actions depend on a controller. Pass `--profile NAME` to keep
+  shared storage. See the
+  [migration guide](docs/migrations/_unreleased.md#managed-git-hooks-run-locally-by-default).
+
 ### Fixed
 
 - **security (Breaking):** Run-store schema 18 removes `inputs_hash` from runs
@@ -66,6 +74,8 @@ code change to unlock.
 - **helm:** A configured web controller-token Secret is now required, so a
   missing Secret or key keeps the web pod unready instead of starting a proxy
   without its controller credential.
+- **orchestrator:** `--sw-local-only` now keeps coordinated child cache, logs,
+  and secrets local instead of reopening the run's resolved profile.
 - **docs:** Self-hosting guidance now points operators to direct local
   execution or the complete Helm chart. The unsupported Docker Compose example
   and its private image coordinates have been removed, with migration guidance

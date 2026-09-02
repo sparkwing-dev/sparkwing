@@ -145,6 +145,10 @@ sparkwing pipeline hooks survey      # report which registered repos git gates a
 sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 ```
 
+Hooks installed without `--profile` prove and run their pipelines with
+`--sw-local-only`, even when the project selects a default profile. Pass
+`--profile NAME` to install a hook that uses shared storage.
+
 Each managed hook carries a marker comment so `uninstall` and `status`
 can distinguish sparkwing-installed hooks from hand-written ones.
 Existing unmanaged hooks are skipped on install with a warning.

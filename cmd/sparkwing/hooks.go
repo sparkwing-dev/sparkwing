@@ -56,21 +56,21 @@ func runHooksInstall(args []string) error {
 	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	fleet := fs.Bool("fleet", false, "install into every registered repo")
 	noProve := fs.Bool("no-prove", false, "claim core.hooksPath without running the gate first")
-	profileName := fs.String("profile", "", "pin the hook's runs to this storage profile (default: whatever the project's config selects)")
+	profileName := fs.String("profile", "", "pin the hook's runs to this storage profile (default: local-only)")
 	if err := parseAndCheck(cmdHooksInstall, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	opts := installOptions{prove: runPipelineForProof, profile: *profileName}
-	if *noProve {
-		opts.prove = nil
-	}
+	opts := installOptions{profile: *profileName}
 	if opts.profile != "" {
 		if _, err := resolveProfileFlag(opts.profile); err != nil {
 			return fmt.Errorf("hooks install: %w", err)
 		}
+	}
+	if !*noProve {
+		opts.prove = runPipelineForProof(opts.profile)
 	}
 	if *fleet {
 		if *repo != "" {
@@ -639,15 +639,23 @@ func proveGates(prove Prover, repoRoot string, hooksToRun map[string][]string) m
 	return failed
 }
 
-func runPipelineForProof(repoRoot, pipeline string) error {
-	cmd := exec.Command("sparkwing", "run", pipeline)
-	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "SPARKWING_LOG_FORMAT=quiet")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return nil
+func runPipelineForProof(profileName string) Prover {
+	return func(repoRoot, pipeline string) error {
+		args := []string{"run", pipeline, "--sw-local-only"}
+		if profileName != "" {
+			args = []string{"run", pipeline, "--profile", profileName}
+		}
+		cmd := exec.Command("sparkwing", args...)
+		cmd.Dir = repoRoot
+		env := removeEnv(os.Environ(), "SPARKWING_PROFILE")
+		env = removeEnv(env, "SPARKWING_SECRETS_PROFILE")
+		cmd.Env = append(env, "SPARKWING_LOG_FORMAT=quiet")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		return fmt.Errorf("%w: %s", err, lastLine(out))
 	}
-	return fmt.Errorf("%w: %s", err, lastLine(out))
 }
 
 func lastLine(out []byte) string {
@@ -948,8 +956,8 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool, profile
 		b.WriteString("(\n")
 		b.WriteString(gitenv.ShellUnbind())
 
-		b.WriteString("unset SPARKWING_PROFILE\n")
-		flag := ""
+		b.WriteString("unset SPARKWING_PROFILE SPARKWING_SECRETS_PROFILE\n")
+		flag := " --sw-local-only"
 		if profileName != "" {
 			flag = " --profile " + shellSingleQuote(profileName)
 		}

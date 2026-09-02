@@ -2868,6 +2868,9 @@ atomic rename; a later installation error restores every prior managed hook,
 global-hook forwarder, file mode, and config value. No partial set is armed.
 --no-prove arms anyway.
 
+Hooks installed without --profile prove and run their pipelines with
+--sw-local-only. Pass --profile NAME when the gate should use shared storage.
+
 --fleet counts as armed only the repos a gate now fires in. A repo whose gates
 could not run is named as left ungated, and one that declares no pre_commit or
 pre_push trigger is counted apart: nothing there can refuse a commit, so there
@@ -2876,7 +2879,7 @@ was never a gate to arm.`,
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Install into every registered repo instead of one", Group: "Input"},
 		{Name: "no-prove", Desc: "Claim core.hooksPath without running the gate first", Group: "Behavior"},
-		{Name: "profile", Argument: "NAME", Desc: "Pin the hook's runs to this storage profile (default: whatever the project's config selects)", Group: "Storage"},
+		{Name: "profile", Argument: "NAME", Desc: "Pin the hook's runs to this storage profile (default: local-only)", Group: "Storage"},
 	},
 	Examples: []Example{
 		{"Install in the current repo", "sparkwing pipeline hooks install"},
