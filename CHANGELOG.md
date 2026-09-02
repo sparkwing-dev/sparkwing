@@ -397,8 +397,9 @@ code change to unlock.
 - **runner (Breaking):** Runner Job pods mount no ServiceAccount token, and
   `--runner k8s` now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead
   of silently landing pipeline code on the namespace default ServiceAccount.
-  `--trigger-runner k8s` checks the same flag at startup rather than failing
-  once per claimed trigger. See the
+  `--trigger-runner k8s` now requires `--trigger-runner-sa` (or
+  `SPARKWING_RUNNER_SA`) at startup rather than failing once per claimed
+  trigger. See the
   [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
 - **controller (Breaking):** `controller.PoolConfig` adds
   `WarmerServiceAccount`, and `pool.WarmPVC` and `pool.WarmingLoop` now accept

@@ -377,6 +377,9 @@ The full-chart path is
 `sparkwing-runner-bundle.runner.automountServiceAccountToken: true`. The
 default remains `inprocess` and renders an empty Role. Warm mode adds only the
 Job lifecycle and pod-read permissions the Kubernetes fallback calls.
+For a manually launched runner, `SPARKWING_RUNNER_SA` supplies the service
+account used by `--runner k8s`, `--trigger-runner k8s`, and warm fallback Jobs;
+the matching command-line flags take precedence.
 
 The first remote-machine deployment assumes a trusted single-tenant boundary.
 Give each device its own short-lived runner token, revoke it when the device
