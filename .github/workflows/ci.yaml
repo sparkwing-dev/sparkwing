@@ -53,3 +53,14 @@ jobs:
 
       - name: Run the Postgres conformance suites
         run: go test ./pkg/store ./internal/backend ./internal/orchestrator
+
+      - name: Prove the Postgres-gated tests did not skip
+        run: |
+          set -euo pipefail
+          go test -v -count=1 -run 'Postgres|Pg' ./pkg/store ./internal/backend ./internal/orchestrator \
+            | tee "$RUNNER_TEMP/postgres-gated.log"
+          if grep -q -- '--- SKIP' "$RUNNER_TEMP/postgres-gated.log"; then
+            echo 'a Postgres-gated test skipped on the lane that promises Postgres coverage:' >&2
+            grep -- '--- SKIP' "$RUNNER_TEMP/postgres-gated.log" >&2
+            exit 1
+          fi

@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,5 +68,52 @@ func TestMigrateSQLite_FailedVersionLeavesNoPartialSchema(t *testing.T) {
 		if found != 0 {
 			t.Errorf("triggers.%s survived the failed migration", column)
 		}
+	}
+}
+
+// The min-binary-version stamp belongs to the newest version's transaction.
+// Stamped after the loop instead, a failure here would leave the version row
+// committed, and the next open would skip both the version and the stamp.
+func TestMigrateSQLite_FailedMinVersionStampRollsBackTheVersionRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stamp.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newest := store.ExpectedSchemaVersion()
+	for _, stmt := range []string{
+		`DROP TABLE sparkwing_meta`,
+		fmt.Sprintf(`DELETE FROM sparkwing_schema_version WHERE version >= %d`, newest),
+	} {
+		if _, err := st.DB().Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := store.Open(path)
+	if err == nil {
+		_ = reopened.Close()
+		t.Fatal("Open succeeded; want the min version stamp to fail")
+	}
+	if !strings.Contains(err.Error(), "stamp min version") {
+		t.Fatalf("Open err = %v, want it to name the min version stamp", err)
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var stamped int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM sparkwing_schema_version WHERE version = ?`, newest).Scan(&stamped); err != nil {
+		t.Fatalf("count version %d: %v", newest, err)
+	}
+	if stamped != 0 {
+		t.Errorf("version %d committed without its min version stamp", newest)
 	}
 }

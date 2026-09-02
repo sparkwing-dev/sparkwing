@@ -34,16 +34,29 @@ func skipIfIntegrationDisabled(t *testing.T) {
 	}
 }
 
-func openIntegrationPostgres(t *testing.T) *store.Store {
+func requirePGDSN(t *testing.T) string {
 	t.Helper()
-	skipIfIntegrationDisabled(t)
 	dsn := os.Getenv(pgTestURLEnv)
-	if dsn == "" {
-		if os.Getenv(pgRequireEnv) != "" {
+	if os.Getenv(pgRequireEnv) != "" {
+		if dsn == "" {
 			t.Fatalf("%s is set, so %s must name a reachable Postgres", pgRequireEnv, pgTestURLEnv)
 		}
+		if os.Getenv(integrationDisableEnv) == "1" {
+			t.Fatalf("%s is set, so %s=1 cannot switch the Postgres suites off",
+				pgRequireEnv, integrationDisableEnv)
+		}
+		return dsn
+	}
+	skipIfIntegrationDisabled(t)
+	if dsn == "" {
 		t.Skipf("%s not set; skipping Postgres integration test", pgTestURLEnv)
 	}
+	return dsn
+}
+
+func openIntegrationPostgres(t *testing.T) *store.Store {
+	t.Helper()
+	dsn := requirePGDSN(t)
 
 	schema := "sw_it_" + sanitizeName(t.Name()) + "_" + uniqSuffix()
 
@@ -78,10 +91,7 @@ func openIntegrationPostgres(t *testing.T) *store.Store {
 
 func openIntegrationPostgresAt(t *testing.T, src *store.Store) *store.Store {
 	t.Helper()
-	dsn := os.Getenv(pgTestURLEnv)
-	if dsn == "" {
-		t.Skipf("%s not set; skipping", pgTestURLEnv)
-	}
+	dsn := requirePGDSN(t)
 	var searchPath string
 	if err := src.DB().QueryRow(`SHOW search_path`).Scan(&searchPath); err != nil {
 		t.Fatalf("read search_path: %v", err)

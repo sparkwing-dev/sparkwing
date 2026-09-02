@@ -894,12 +894,11 @@ func resolveBinaryVersion() string {
 	return "(devel)"
 }
 
-func (s *Store) stampMinVersion(ctx context.Context) error {
-	now := time.Now()
-	_, err := s.exec(ctx,
+func stampMinVersionTx(ctx context.Context, tx *storeTx) error {
+	_, err := tx.ExecContext(ctx,
 		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		metaKeyMinVersion, resolveBinaryVersion(), now.UnixNano())
+		metaKeyMinVersion, resolveBinaryVersion(), time.Now().UnixNano())
 	return err
 }
 
@@ -1112,11 +1111,6 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 			return err
 		}
 	}
-	if current < expectedSchemaVersion {
-		if err := s.stampMinVersion(ctx); err != nil {
-			return fmt.Errorf("stamp min version: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -1134,6 +1128,11 @@ func (s *Store) applyVersionSQLite(ctx context.Context, version int) error {
 		 ON CONFLICT (version) DO NOTHING`,
 		version, time.Now().UnixNano()); err != nil {
 		return fmt.Errorf("record schema version v%d: %w", version, err)
+	}
+	if version == expectedSchemaVersion {
+		if err := stampMinVersionTx(ctx, tx); err != nil {
+			return fmt.Errorf("stamp min version: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration v%d: %w", version, err)
@@ -1182,10 +1181,7 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 			return fmt.Errorf("record schema version v%d: %w", v, err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		metaKeyMinVersion, resolveBinaryVersion(), time.Now().UnixNano()); err != nil {
+	if err := stampMinVersionTx(ctx, tx); err != nil {
 		return fmt.Errorf("stamp min version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

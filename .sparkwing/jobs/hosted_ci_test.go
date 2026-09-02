@@ -72,9 +72,16 @@ func TestHostedCIProvesThePostgresSuitesRanAgainstARealDatabase(t *testing.T) {
 		"SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable",
 		`--health-cmd "pg_isready -U postgres"`,
 		"go test ./pkg/store ./internal/backend ./internal/orchestrator",
+		"go test -v -count=1 -run 'Postgres|Pg' ./pkg/store ./internal/backend ./internal/orchestrator",
+		`grep -q -- '--- SKIP' "$RUNNER_TEMP/postgres-gated.log"`,
 		"actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
 		"actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0",
 	)
+	proveAt := strings.Index(job, "- name: Prove the Postgres-gated tests did not skip")
+	failAt := strings.Index(job, "exit 1")
+	if proveAt < 0 || failAt < proveAt {
+		t.Fatal("the lane reports a Postgres skip without failing on it")
+	}
 }
 
 func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
