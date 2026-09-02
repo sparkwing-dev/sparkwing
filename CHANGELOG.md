@@ -402,6 +402,12 @@ code change to unlock.
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
 
+- **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
+  it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
+  of printing a skip and exiting 0, so the comment and `#nosec` annotation
+  policies are no longer waived by a detached, shallow, or unfetched checkout.
+  Pass `-allow-no-diff` to accept a run that gates nothing.
+
 ## [v0.40.0] - 2026-09-02
 ### Security
 
