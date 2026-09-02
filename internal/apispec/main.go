@@ -23,6 +23,7 @@ func main() {
 	}
 	root, specPath := os.Args[1], os.Args[2]
 
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "apispec:", err)

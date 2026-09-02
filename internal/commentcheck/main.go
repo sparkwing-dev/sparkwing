@@ -23,6 +23,8 @@ var tagRE = regexp.MustCompile(`(?i)^// ?(hack|safety|bug|perf):[[:space:]]*\S`)
 
 var outputRE = regexp.MustCompile(`(?i)^// (Unordered output|Output):`)
 
+var nosecRE = regexp.MustCompile(`^// ?#nosec G\d{3}(,G\d{3})* -- \S`)
+
 var opaqueTicketRE = regexp.MustCompile(`(?i)\bBW-\d+\b`)
 
 var skipDirs = map[string]bool{
@@ -154,7 +156,7 @@ func checkFile(path string) ([]violation, error) {
 			}
 			continue
 		}
-		if tagRE.MatchString(first) {
+		if tagRE.MatchString(first) || nosecRE.MatchString(first) {
 			reason := tagGroupViolation(cg)
 			if reason == "" {
 				continue

@@ -196,6 +196,7 @@ func writeLintCacheArchive(w io.Writer, cacheDir, workdir string) error {
 		if d.IsDir() {
 			return nil
 		}
+		// #nosec G122 -- the walk stays inside the tool cache this process owns
 		f, err := os.Open(path)
 		if err != nil {
 			return err

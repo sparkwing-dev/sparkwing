@@ -88,6 +88,7 @@ func checkGoBlocks(contentDir, repoRoot string) bool {
 		src := harness(b)
 		dir := filepath.Join(tmp, fmt.Sprintf("b%03d", i))
 		_ = os.MkdirAll(dir, 0o755)
+		// #nosec G703 -- a build-time tool reading paths the operator names
 		if err := os.WriteFile(filepath.Join(dir, "doc.go"), []byte(src), 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, "write:", err)
 			os.Exit(2)
@@ -155,6 +156,7 @@ func sdkDriftLines(out string) []string {
 func extract(dir, lang string) ([]block, error) {
 	fenceOpen := regexp.MustCompile("^```" + lang + `(\s|$)`)
 	var out []block
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
@@ -162,6 +164,7 @@ func extract(dir, lang string) ([]block, error) {
 		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
 			return nil
 		}
+		// #nosec G122 -- the walk stays inside the repository this check runs in
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err

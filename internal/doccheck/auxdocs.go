@@ -80,6 +80,7 @@ func checkAuxDocs(repoRoot string) bool {
 					continue
 				}
 				links++
+				// #nosec G703 -- a build-time tool reading paths the operator names
 				if _, statErr := os.Stat(filepath.Join(filepath.Dir(path), target)); statErr != nil {
 					hits = append(hits, fmt.Sprintf("%s:%d: broken link -> missing %s", rel, ln+1, target))
 				}
@@ -98,6 +99,7 @@ func checkAuxDocs(repoRoot string) bool {
 	}
 
 	for _, path := range nonMD {
+		// #nosec G703 -- a build-time tool reading paths the operator names
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			fmt.Fprintln(os.Stderr, "aux-docs: read error:", rerr)
@@ -165,6 +167,7 @@ type sidebar struct {
 }
 
 func checkSidebar(contentDir string) bool {
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	data, err := os.ReadFile(filepath.Join(contentDir, "_sidebar.json"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sidebar: read:", err)
@@ -181,6 +184,7 @@ func checkSidebar(contentDir string) bool {
 	for _, c := range sb.Categories {
 		for _, s := range c.Slugs {
 			listed[s] = true
+			// #nosec G703 -- a build-time tool reading paths the operator names
 			if _, statErr := os.Stat(filepath.Join(contentDir, s+".md")); statErr != nil {
 				problems = append(problems, fmt.Sprintf("category %q lists %q but docs/%s.md does not exist", c.Label, s, s))
 			}
@@ -201,6 +205,7 @@ func checkSidebar(contentDir string) bool {
 		if !strings.HasSuffix(e, "/") {
 			target += ".md"
 		}
+		// #nosec G703 -- a build-time tool reading paths the operator names
 		if _, statErr := os.Stat(target); statErr != nil {
 			problems = append(problems, fmt.Sprintf("excluded entry %q names nothing in docs/ -- stale exclusion", e))
 		}

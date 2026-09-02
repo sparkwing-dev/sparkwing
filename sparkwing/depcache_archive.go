@@ -51,6 +51,7 @@ func writeDepCacheArchive(w io.Writer, dir string) error {
 		if !info.Mode().IsRegular() {
 			return nil
 		}
+		// #nosec G122 -- the walk stays inside the dependency cache this process owns
 		f, err := os.Open(path)
 		if err != nil {
 			return err

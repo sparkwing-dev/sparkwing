@@ -116,6 +116,7 @@ func announceCompile() {
 }
 
 func runExec(bin string, args []string, dir string, env []string) error {
+	// #nosec G702 -- the pipeline binary this command just built, run as argv without a shell
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout

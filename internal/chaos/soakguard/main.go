@@ -24,6 +24,7 @@ func run(args []string, signals <-chan os.Signal, started chan<- int) int {
 		fmt.Fprintln(os.Stderr, "usage: soakguard command [args...]")
 		return 2
 	}
+	// #nosec G702 -- the command named on this operator's command line, as argv without a shell
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

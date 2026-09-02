@@ -67,6 +67,7 @@ func assertGitDir(path string) error {
 	if path == "" {
 		return errors.New("empty path")
 	}
+	// #nosec G703 -- a repository directory this user pointed the resolver at
 	fi, err := os.Stat(filepath.Join(path, ".git"))
 	if err != nil {
 		return err

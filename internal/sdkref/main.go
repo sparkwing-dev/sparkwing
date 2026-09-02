@@ -101,10 +101,12 @@ func writeSplit(dir string, fset *token.FileSet, dpkg *doc.Package, subs []subpa
 	var wrote, unchanged, removed int
 	for _, name := range names {
 		path := filepath.Join(dir, name)
+		// #nosec G703 -- a build-time tool reading paths the operator names
 		if prev, err := os.ReadFile(path); err == nil && string(prev) == files[name] {
 			unchanged++
 			continue
 		}
+		// #nosec G703 -- a build-time tool reading paths the operator names
 		if err := os.WriteFile(path, []byte(files[name]), 0o644); err != nil {
 			return err
 		}
@@ -123,10 +125,12 @@ func writeSplit(dir string, fset *token.FileSet, dpkg *doc.Package, subs []subpa
 		if _, ok := files[name]; ok {
 			continue
 		}
+		// #nosec G703 -- a build-time tool reading paths the operator names
 		data, rerr := os.ReadFile(filepath.Join(dir, name))
 		if rerr != nil || !strings.HasPrefix(string(data), markerPrefix) {
 			continue
 		}
+		// #nosec G703 -- a build-time tool reading paths the operator names
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			return err
 		}

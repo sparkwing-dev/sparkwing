@@ -185,6 +185,7 @@ func resolveSampler() sdktrace.Sampler {
 		if v, err := strconv.ParseFloat(raw, 64); err == nil && v >= 0 && v <= 1 {
 			ratio = v
 		} else {
+			// #nosec G706 -- %q escapes control characters in the environment value
 			log.Printf("warning: OTEL_TRACES_SAMPLER_ARG=%q is not a float in [0,1]; defaulting to 1.0", raw)
 		}
 	}

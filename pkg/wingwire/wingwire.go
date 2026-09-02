@@ -136,7 +136,7 @@ func (f ProtocolFloors) Newest() (floor ProtocolFloor, ok bool) {
 // LeaseTokenEnv is the current execution lease token inherited by child
 // processes. A child presents this token as [AdmissionRequest].ParentLeaseToken
 // unless [ChildLeaseTokenEnv] carries a more specific child-attach token.
-const LeaseTokenEnv = "SPARKWING_LEASE_TOKEN"
+const LeaseTokenEnv = "SPARKWING_LEASE_TOKEN" // #nosec G101 -- the environment variable's name, not its value
 
 // ChildLeaseTokenEnv is the token child Sparkwing runs attach to when it
 // differs from the current execution lease. A node can hold a short-lived host

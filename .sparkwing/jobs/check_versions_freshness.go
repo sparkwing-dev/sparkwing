@@ -475,6 +475,7 @@ func regenerateScaffoldAPISnapshot(ctx context.Context, repoRoot string) error {
 	if err != nil {
 		return fmt.Errorf("read regenerated scaffold API snapshot: %w", err)
 	}
+	// #nosec G703 -- a pipeline job writing under the repository it runs in
 	if err := os.WriteFile(filepath.Join(repoRoot, filepath.FromSlash(scaffoldAPISnapshotRel)), snapshot, 0o644); err != nil {
 		return fmt.Errorf("write scaffold API snapshot: %w", err)
 	}
@@ -517,6 +518,7 @@ func bumpFallbackSDKVersionFile(repoRoot, version string) error {
 		return fmt.Errorf("FallbackSDKVersion pattern not found in %s", path)
 	}
 	updated := scaffoldFallbackVersionRe.ReplaceAllLiteral(data, []byte(`FallbackSDKVersion = "`+version+`"`))
+	// #nosec G703 -- a pipeline job writing under the repository it runs in
 	return os.WriteFile(path, updated, 0o644)
 }
 

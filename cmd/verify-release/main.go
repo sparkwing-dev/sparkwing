@@ -80,6 +80,7 @@ func process(dist string, privateKey ed25519.PrivateKey, publicKey ed25519.Publi
 		if err != nil {
 			return err
 		}
+		// #nosec G703 -- a release tool writing beside the assets the operator named
 		if err := os.WriteFile(signaturePath, signature, 0o600); err != nil {
 			return err
 		}

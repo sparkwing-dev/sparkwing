@@ -341,3 +341,63 @@ func TestTagRE_OnlyTheFourTags(t *testing.T) {
 		}
 	}
 }
+
+func TestNosecRE_RequiresRuleAndReason(t *testing.T) {
+	allow := []string{
+		"// #nosec G703 -- the path comes from this user's own environment",
+		"//#nosec G404 -- retry jitter, not a security decision",
+		"// #nosec G122,G703 -- the walk stays inside a directory this process owns",
+	}
+	for _, s := range allow {
+		if !nosecRE.MatchString(s) {
+			t.Errorf("expected %q to match the nosec allowlist", s)
+		}
+	}
+	deny := []string{
+		"// #nosec",
+		"// #nosec G703",
+		"// #nosec G703 --",
+		"// #nosec -- no rule named",
+		"// #nosec g703 -- lowercase rule",
+		"// nosec G703 -- no hash",
+	}
+	for _, s := range deny {
+		if nosecRE.MatchString(s) {
+			t.Errorf("expected %q NOT to match the nosec allowlist", s)
+		}
+	}
+}
+
+func TestCheckFile_AllowsAnnotatedNosec(t *testing.T) {
+	src := `package widget
+
+import "os"
+
+func annotated() {
+	// #nosec G703 -- the path comes from this user's own environment
+	_, _ = os.Stat(os.Getenv("WIDGET_PATH"))
+}
+
+func naked() {
+	// #nosec
+	_, _ = os.Stat(os.Getenv("WIDGET_PATH"))
+}
+
+func unjustified() {
+	// #nosec G703
+	_, _ = os.Stat(os.Getenv("WIDGET_PATH"))
+}
+`
+	path := filepath.Join(t.TempDir(), "widget.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+	if len(got) != 2 || got[0].line != 11 || got[1].line != 16 {
+		t.Fatalf("violations = %+v, want the naked and unjustified annotations", got)
+	}
+}

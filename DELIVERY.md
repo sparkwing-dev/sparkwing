@@ -21,7 +21,7 @@ this file is a menu and checklist, not a command that every change must run.
   source-mode govulncheck, gitleaks, and `npm audit`. The Security workflow runs
   it on every pull request and uploads gosec findings to code scanning. The
   release workflow runs it and hosted CodeQL against the resolved tag commit
-  before any artifact build. Gosec and CodeQL report alerts; govulncheck,
+  before any artifact build. CodeQL reports alerts; gosec, govulncheck,
   gitleaks, and `npm audit` fail the gate. Run the local pipeline when a change
   touches an HTTP handler, auth, file paths built from input, subprocess
   arguments, or a dependency. Verify dashboard changes against real local state

@@ -159,6 +159,7 @@ func Run(t testing.TB, cfg Config) {
 		t.Fatalf("journal: %v", err)
 	}
 
+	// #nosec G404 -- a seeded generator so a chaos run replays deterministically
 	h := &Harness{
 		cfg:     cfg,
 		t:       t,

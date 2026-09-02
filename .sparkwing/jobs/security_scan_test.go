@@ -4,18 +4,46 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
 
-func TestSecurityScanStrictFlagDescription(t *testing.T) {
-	field, ok := reflect.TypeFor[SecurityScanArgs]().FieldByName("Strict")
-	if !ok {
-		t.Fatal("SecurityScanArgs.Strict is missing")
+func TestSecurityScanArgsHasNoStrictFlag(t *testing.T) {
+	if _, ok := reflect.TypeFor[SecurityScanArgs]().FieldByName("Strict"); ok {
+		t.Error("SecurityScanArgs still carries Strict; the gosec job fails on high-severity, high-confidence findings by default")
 	}
-	want := "Fail the gosec job when any high-severity, high-confidence finding remains. Gosec findings are report-only unless this flag is set."
-	if got := field.Tag.Get("desc"); got != want {
-		t.Fatalf("strict description = %q, want %q", got, want)
+}
+
+func TestGosecArgsCarryTheNosecPolicy(t *testing.T) {
+	args := gosecArgs("/tmp/gosec.json")
+	for _, want := range []string{"-nosec-require-rules", "-nosec-require-justification", "-out=/tmp/gosec.json"} {
+		if !slices.Contains(args, want) {
+			t.Errorf("gosec args %v are missing %s", args, want)
+		}
+	}
+	if slices.Contains(args, "-nosec-tag") {
+		t.Error("an alternative nosec tag would hide suppressions from a #nosec grep")
+	}
+	if args[len(args)-1] != "./..." {
+		t.Errorf("gosec args must end at the package pattern, got %v", args)
+	}
+}
+
+func TestSecurityScanHelpStatesTheNosecPolicy(t *testing.T) {
+	help := SecurityScan{}.Help()
+	for _, want := range []string{
+		"fails this job on any high-severity, high-confidence finding",
+		"-nosec-require-rules",
+		"-nosec-require-justification",
+		"#nosec GNNN -- <reason>",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("security-scan help does not state %q", want)
+		}
+	}
+	if strings.Contains(help, "--strict") {
+		t.Error("security-scan help still advertises the removed --strict flag")
 	}
 }
 
@@ -124,5 +152,15 @@ func TestFirstInt(t *testing.T) {
 		if got := firstInt(in); got != want {
 			t.Errorf("firstInt(%q) = %d, want %d", in, got, want)
 		}
+	}
+}
+
+func TestReadGosecReportTreatsAMissingFileAsNoFindings(t *testing.T) {
+	issues, err := readGosecReport(filepath.Join(t.TempDir(), "gosec.json"))
+	if err != nil {
+		t.Fatalf("missing report: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("issues = %d, want none", len(issues))
 	}
 }

@@ -63,5 +63,6 @@ func jitter(d time.Duration) time.Duration {
 		return 0
 	}
 	half := int64(d / 2)
+	// #nosec G404 -- retry jitter, not a security decision
 	return d/2 + time.Duration(rand.Int64N(half+1))
 }

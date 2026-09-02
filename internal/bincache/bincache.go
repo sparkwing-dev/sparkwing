@@ -815,6 +815,7 @@ func goWorkInScope(sparkwingDir string) (string, bool) {
 		return "", false
 	case "":
 	default:
+		// #nosec G703 -- the GOWORK path comes from this process's own environment
 		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
 			return env, true
 		}
@@ -1117,6 +1118,7 @@ func replaceLabel(old module.Version) string {
 
 func moduleLabelOf(dir string) (string, error) {
 	p := filepath.Join(dir, "go.mod")
+	// #nosec G703 -- the go.mod of a workspace module this process resolved
 	data, err := os.ReadFile(p)
 	if err != nil {
 		return "", fmt.Errorf("workspace module %s: %w", dir, err)

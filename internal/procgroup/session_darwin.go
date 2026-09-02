@@ -19,6 +19,7 @@ func sessionIdentity(pid int) (int, string, error) {
 	}
 	size := int(unsafe.Sizeof(unix.KinfoProc{}))
 	for start := 0; size > 0 && start+size <= len(raw); start += size {
+		// #nosec G103 -- decodes a fixed-size kernel struct from a bounds-checked buffer
 		process := *(*unix.KinfoProc)(unsafe.Pointer(&raw[start]))
 		if int(process.Proc.P_pid) != pid {
 			continue

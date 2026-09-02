@@ -409,6 +409,7 @@ func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 		return nil
 	}
 	if changed {
+		// #nosec G703 -- a pipeline job writing under the repository it runs in
 		if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 			return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 		}
@@ -653,6 +654,7 @@ func restoreSelfReplaceIn(ctx context.Context, repoDir string) error {
 		sparkwing.Info(ctx, ".sparkwing/go.mod self-replace already present; skipping")
 		return nil
 	}
+	// #nosec G703 -- a pipeline job writing under the repository it runs in
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}

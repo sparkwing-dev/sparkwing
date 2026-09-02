@@ -17,6 +17,7 @@ func waitLeaderExit(pid int) error {
 			syscall.SYS_WAITID,
 			1,
 			uintptr(pid),
+			// #nosec G103 -- decodes a fixed-size kernel struct from a bounds-checked buffer
 			uintptr(unsafe.Pointer(&info[0])),
 			uintptr(unix.WEXITED|unix.WNOWAIT),
 			0,
