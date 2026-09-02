@@ -39,7 +39,7 @@ func lintFixtureRepo(t *testing.T) string {
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs.go"),
 		"package pipelines\n\nfunc Jobs() int { return 1 }\n")
 	gitCommitAll(t, root, "clean base")
-	runTestGit(t, root, "update-ref", "refs/remotes/"+lintBaselineRef, "HEAD")
+	runTestGit(t, root, "update-ref", "refs/remotes/"+gateBaselineRef, "HEAD")
 
 	prev := sparkwing.WorkDir()
 	sparkwing.SetWorkDir(root)
@@ -102,7 +102,7 @@ func TestLintRefusesToRunWhenTheBaselineRefIsMissing(t *testing.T) {
 	root := lintFixtureRepo(t)
 	ctx := context.Background()
 
-	runTestGit(t, root, "update-ref", "-d", "refs/remotes/"+lintBaselineRef)
+	runTestGit(t, root, "update-ref", "-d", "refs/remotes/"+gateBaselineRef)
 
 	err := runGolangciLint(ctx)
 	if err == nil {
@@ -112,7 +112,7 @@ func TestLintRefusesToRunWhenTheBaselineRefIsMissing(t *testing.T) {
 	if !strings.Contains(got, "could not run") {
 		t.Errorf("a missing baseline did not report could-not-run: %s", got)
 	}
-	if !strings.Contains(got, lintBaselineRef) {
+	if !strings.Contains(got, gateBaselineRef) {
 		t.Errorf("a missing baseline did not name the ref that went missing: %s", got)
 	}
 	if !strings.Contains(got, "git fetch") {

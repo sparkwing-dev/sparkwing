@@ -1538,6 +1538,7 @@ func TestSetupSSHFailsWhenTheKeyCannotBeStaged(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	err := setupSSH()
 	if err == nil {
@@ -1545,5 +1546,51 @@ func TestSetupSSHFailsWhenTheKeyCannotBeStaged(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "stage SSH key") {
 		t.Fatalf("err = %v, want it to name the staging step", err)
+	}
+}
+
+func TestLoadRepoNamesDropsEntriesTheCloneValidatorRefuses(t *testing.T) {
+	root := t.TempDir()
+	oldNamesFile := namesFile
+	namesFile = filepath.Join(root, "names.json")
+	t.Cleanup(func() {
+		namesFile = oldNamesFile
+		repoNamesMu.Lock()
+		delete(repoNames, "good-entry")
+		delete(repoNames, "hostile-entry")
+		repoNamesMu.Unlock()
+	})
+
+	stored := map[string]string{
+		"good-entry":    "https://git.example.com/acme/widgets.git",
+		"hostile-entry": "--upload-pack=/tmp/pwned",
+	}
+	data, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(namesFile, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	loadRepoNames()
+
+	repoNamesMu.RLock()
+	good, okGood := repoNames["good-entry"]
+	_, okHostile := repoNames["hostile-entry"]
+	repoNamesMu.RUnlock()
+
+	if !okGood || good != stored["good-entry"] {
+		t.Errorf("repoNames[good-entry] = %q, %v, want the stored URL", good, okGood)
+	}
+	if okHostile {
+		t.Error("repoNames kept an entry whose URL git would read as an option")
+	}
+	if !strings.Contains(logged.String(), `dropping repo "hostile-entry"`) {
+		t.Errorf("log = %q, want it to name the dropped entry", logged.String())
 	}
 }

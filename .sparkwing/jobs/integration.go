@@ -20,7 +20,9 @@ func (Integration) ShortHelp() string {
 
 func (Integration) Help() string {
 	return "Spins up Postgres + MinIO in Docker, waits for readiness via a Verify gate, " +
-		"runs the env-gated integration tests (SPARKWING_TEST_PG_URL + SPARKWING_S3_* ), " +
+		"runs the env-gated integration tests (SPARKWING_TEST_PG_URL + SPARKWING_S3_* ) with " +
+		"SPARKWING_REQUIRE_PG=1, re-runs the Postgres-gated tests verbosely and fails on any " +
+		"reported skip, " +
 		"and tears the containers down whether the run passes or fails. " +
 		"Requires Docker, go, curl (the MinIO readiness probe), and the aws CLI (creates the test bucket)."
 }
@@ -95,15 +97,18 @@ func fixturesReady(ctx context.Context) error {
 	return nil
 }
 
+const pgGatedRun = "Postgres|Pg"
+
+var pgGatedPackages = []string{"./pkg/store", "./internal/backend", "./internal/orchestrator"}
+
 func runIntegrationSuite(ctx context.Context) error {
 	root, err := mainModuleRoot()
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "go", "test", "./...")
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(),
+	env := append(os.Environ(),
 		"SPARKWING_TEST_PG_URL="+itPGURL,
+		"SPARKWING_REQUIRE_PG=1",
 		"SPARKWING_S3_TEST_BUCKET="+itBucket,
 		"SPARKWING_S3_ENDPOINT="+itS3Endpt,
 		"AWS_ACCESS_KEY_ID=minioadmin",
@@ -111,13 +116,40 @@ func runIntegrationSuite(ctx context.Context) error {
 		"AWS_REGION=us-east-1",
 	)
 	sparkwing.Info(ctx, "go test ./... with integration backends (root=%s)", root)
-	out, err := cmd.CombinedOutput()
-	sparkwing.Info(ctx, "%s", strings.TrimSpace(string(out)))
-	if err != nil {
+	if _, err := goTest(ctx, root, env, []string{"./..."}); err != nil {
 		return fmt.Errorf("integration tests failed: %w", err)
+	}
+	sparkwing.Info(ctx, "re-running the Postgres-gated tests verbosely")
+	args := append([]string{"-v", "-count=1", "-run", pgGatedRun}, pgGatedPackages...)
+	out, err := goTest(ctx, root, env, args)
+	if err != nil {
+		return fmt.Errorf("postgres-gated tests failed: %w", err)
+	}
+	if skipped := skippedTests(out); len(skipped) > 0 {
+		return fmt.Errorf("postgres-gated tests skipped against a live postgres:\n%s",
+			strings.Join(skipped, "\n"))
 	}
 	sparkwing.Annotate(ctx, "integration suite passed against postgres + minio")
 	return nil
+}
+
+func goTest(ctx context.Context, root string, env, args []string) (string, error) {
+	cmd := exec.CommandContext(ctx, "go", append([]string{"test"}, args...)...)
+	cmd.Dir = root
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	sparkwing.Info(ctx, "%s", strings.TrimSpace(string(out)))
+	return string(out), err
+}
+
+func skippedTests(out string) []string {
+	var skipped []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "--- SKIP") {
+			skipped = append(skipped, strings.TrimSpace(line))
+		}
+	}
+	return skipped
 }
 
 func teardownFixtures(ctx context.Context) error {

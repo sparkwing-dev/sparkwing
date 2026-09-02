@@ -19,12 +19,24 @@ func ValidateCloneURL(raw string) (string, error) {
 	if strings.ContainsAny(raw, " \t\r\n") {
 		return "", fmt.Errorf("repo URL contains whitespace")
 	}
+	// safety: ESC, VT and NUL survive the whitespace check and the scp-like branch never reaches url.Parse.
+	if strings.IndexFunc(raw, isControl) >= 0 {
+		return "", fmt.Errorf("repo URL contains a control character")
+	}
+	// safety: git reads a leading dash as an option rather than a repository.
+	if strings.HasPrefix(raw, "-") {
+		return "", fmt.Errorf("repo URL must not begin with '-'")
+	}
 	if match := scpLikeRE.FindStringSubmatch(raw); match != nil {
 		if err := validateHost(match[1]); err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(match[2]) == "" {
 			return "", fmt.Errorf("repo URL path required")
+		}
+		// safety: git passes the scp-like path to ssh as its own argv word.
+		if strings.HasPrefix(match[2], "-") {
+			return "", fmt.Errorf("repo URL path must not begin with '-'")
 		}
 		return raw, nil
 	}
@@ -44,6 +56,10 @@ func ValidateCloneURL(raw string) (string, error) {
 		if _, ok := u.User.Password(); ok {
 			return "", fmt.Errorf("repo URL must not include userinfo password")
 		}
+		// safety: the userinfo becomes the leading token of the ssh destination argument.
+		if strings.HasPrefix(u.User.Username(), "-") {
+			return "", fmt.Errorf("repo URL userinfo must not begin with '-'")
+		}
 	}
 	if err := validateHost(u.Hostname()); err != nil {
 		return "", err
@@ -52,6 +68,10 @@ func ValidateCloneURL(raw string) (string, error) {
 		return "", fmt.Errorf("repo URL path required")
 	}
 	return raw, nil
+}
+
+func isControl(r rune) bool {
+	return r < 0x20 || r == 0x7f
 }
 
 func Redact(raw string) string {
@@ -71,6 +91,10 @@ func Redact(raw string) string {
 }
 
 func validateHost(host string) error {
+	// safety: git reads a leading dash as an option rather than a host.
+	if strings.HasPrefix(host, "-") {
+		return fmt.Errorf("repo URL host must not begin with '-'")
+	}
 	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
 	// safety: a trailing dot is an equally resolvable spelling of the same name.
 	host = strings.TrimRight(host, ".")

@@ -5,8 +5,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 fixture="$(mktemp -d "${TMPDIR:-/tmp}/sparkwing-changelog-test.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
 
-mkdir -p "$fixture/bin" "$fixture/sparkwing"
+mkdir -p "$fixture/bin" "$fixture/sparkwing" "$fixture/docs" "$fixture/pkg/docs"
 cp "$root/bin/check-changelog.sh" "$fixture/bin/check-changelog.sh"
+cp "$root/bin/sync-docs.sh" "$fixture/bin/sync-docs.sh"
+printf 'placeholder\n' > "$fixture/docs/index.md"
 printf '# Changelog\n\n## [Unreleased]\n' > "$fixture/CHANGELOG.md"
 git -C "$fixture" init -q
 git -C "$fixture" config user.email test@example.com
@@ -44,3 +46,65 @@ fi
 
 printf '\n- Added fixture.\n' >> "$fixture/CHANGELOG.md"
 /bin/bash "$fixture/bin/check-changelog.sh"
+
+cat > "$fixture/CHANGELOG.md" <<'CHANGELOG'
+# Changelog
+
+## [Unreleased]
+
+### Security
+
+- **store:** first landing.
+
+### Added
+
+- **cli:** unrelated.
+
+### Security
+
+- **controller:** second landing.
+  Follow-up prose.
+
+## [v0.1.0] - 2026-01-01
+
+### Security
+
+- **store:** released.
+CHANGELOG
+/bin/bash "$fixture/bin/check-changelog.sh" --fix >/dev/null
+
+cat > "$fixture/CHANGELOG.want" <<'CHANGELOG'
+# Changelog
+
+## [Unreleased]
+
+### Security
+
+- **store:** first landing.
+- **controller:** second landing.
+  Follow-up prose.
+
+### Added
+
+- **cli:** unrelated.
+
+## [v0.1.0] - 2026-01-01
+
+### Security
+
+- **store:** released.
+CHANGELOG
+if ! diff -u "$fixture/CHANGELOG.want" "$fixture/CHANGELOG.md"; then
+  echo "check-changelog-test: --fix did not collapse the duplicate ### Security block" >&2
+  exit 1
+fi
+if ! cmp -s "$fixture/CHANGELOG.md" "$fixture/pkg/docs/changelog.md"; then
+  echo "check-changelog-test: --fix left the embedded changelog mirror stale" >&2
+  exit 1
+fi
+
+/bin/bash "$fixture/bin/check-changelog.sh" --fix >/dev/null
+if ! cmp -s "$fixture/CHANGELOG.want" "$fixture/CHANGELOG.md"; then
+  echo "check-changelog-test: --fix is not idempotent" >&2
+  exit 1
+fi

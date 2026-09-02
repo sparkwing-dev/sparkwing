@@ -49,8 +49,77 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **ci:** The pre-commit formatters step and the em-dash and tracker-ID sweeps
+  judge the whole change, not only what is staged. Each reads the staged files
+  when something is staged and the files changed since `origin/main` otherwise,
+  so a clean worktree no longer passes checks the hosted gate fails on the same
+  commits. Each step log names the mode it ran in, and a step refuses to run
+  when the checkout cannot resolve `origin/main`. `SPARKWING_REGEX_SWEEP_ALL=1`
+  still sweeps the whole tree.
+- **release + template-verify:** `sparkwing run template-verify` now reuses a
+  recorded proof for any template whose proof inputs are unchanged, and takes
+  `--exhaustive` to verify everything regardless. The digest covers the
+  template's registry files, its verification manifest fields, the exact
+  state of the sparkwing and sparks-core checkouts (including the gitignored
+  `go.work` and embedded web bundle), the Go toolchain, and the identity of
+  every host tool the template needs, down to whether the Docker daemon
+  answers. Reuse is refused whenever any input cannot be established, a
+  template whose run step was skipped for a missing toolchain records no proof,
+  and the release pipeline always runs the exhaustive proof. See DELIVERY.md
+  for the input set and where proofs are stored.
+
+- **release:** The release pipeline now runs a contract preflight before the
+  root Go suite. It proves the embedded documentation mirror and a named set of
+  documentation, help, registry, and environment-variable contract checks in
+  under a second, and every named check must report a pass, so renaming or
+  removing one fails the release rather than quietly shrinking the preflight.
+  The full gates keep their existing coverage.
+
+### Fixed
+
+- **ci:** The `security-scan` gitleaks job says what it found. It writes
+  `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
+  file, line, fingerprint) in the step log, and the Security workflow uploads
+  the report directory as a build artifact, so a failure is no longer just
+  "leaks found: 1".
+- **store:** A SQLite schema migration that fails partway now rolls back
+  completely. Each schema version and its version stamp commit as one
+  transaction, so an interrupted upgrade leaves the database on the last
+  version it fully applied instead of a half-built schema the next open
+  refuses to repair. Postgres already migrated inside one transaction.
+- **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
+  it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
+  of printing a skip and exiting 0, so the comment and `#nosec` annotation
+  policies are no longer waived by a detached, shallow, or unfetched checkout.
+  Pass `-allow-no-diff` to accept a run that gates nothing.
+- **orchestrator + cli:** A daemon that cannot read the runs store no longer
+  reads as exhausted capacity. The daemon now sends the store failure verbatim
+  with its eviction, and the client reports a full slot only for a concurrency
+  group the run actually claimed, so a stale daemon against a migrated store
+  names both schema versions instead of sending the operator to
+  `sparkwing queue` after a holder that does not exist. The handshake also
+  advertises the daemon's runs-store schema, so a newer client refuses before
+  requesting admission and names the remedies that work: install a matching
+  sparkwing, or point `SPARKWING_WINGD_BIN` at one, since a daemon restart
+  respawns the same build. Node-level concurrency failures get the same
+  treatment as plan-level ones. `sparkwing daemon status` reports
+  `daemon_schema_version` against `store_schema_version`, marks a diverged pair
+  unhealthy, says when a restart will not help, and reports a store that exists
+  but cannot be read as `store_schema_error` instead of as an absent store.
+
 ### Security
 
+- **controller + cache:** Code scanning's open findings are triaged. A clone URL
+  is refused when any component begins with `-` -- the whole string, the
+  scp-like host or path, the ssh userinfo, or the parsed host -- where git would
+  read it as an option rather than a repository, and also when it carries a
+  control byte. `git clone` now separates its options from the URL with `--`,
+  the persisted repo-name table is revalidated when the cache loads it so an
+  entry written before validation is dropped with a warning, and the PVC pool
+  logs a caller-supplied job id through `%q` so a newline in it can no longer
+  forge a second log line.
 - **store (Breaking):** Run-store schema 26 makes the `idx_tokens_prefix` index
   unique and minting retries when a prefix is already taken, so two tokens can
   no longer share a prefix and the 12-character handle that
@@ -393,43 +462,12 @@ code change to unlock.
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
 
-### Changed
+### Docs
 
-- **release + template-verify:** `sparkwing run template-verify` now reuses a
-  recorded proof for any template whose proof inputs are unchanged, and takes
-  `--exhaustive` to verify everything regardless. The digest covers the
-  template's registry files, its verification manifest fields, the exact
-  state of the sparkwing and sparks-core checkouts (including the gitignored
-  `go.work` and embedded web bundle), the Go toolchain, and the identity of
-  every host tool the template needs, down to whether the Docker daemon
-  answers. Reuse is refused whenever any input cannot be established, a
-  template whose run step was skipped for a missing toolchain records no proof,
-  and the release pipeline always runs the exhaustive proof. See DELIVERY.md
-  for the input set and where proofs are stored.
-
-- **release:** The release pipeline now runs a contract preflight before the
-  root Go suite. It proves the embedded documentation mirror and a named set of
-  documentation, help, registry, and environment-variable contract checks in
-  under a second, and every named check must report a pass, so renaming or
-  removing one fails the release rather than quietly shrinking the preflight.
-  The full gates keep their existing coverage.
-
-### Fixed
-
-- **orchestrator + cli:** A daemon that cannot read the runs store no longer
-  reads as exhausted capacity. The daemon now sends the store failure verbatim
-  with its eviction, and the client reports a full slot only for a concurrency
-  group the run actually claimed, so a stale daemon against a migrated store
-  names both schema versions instead of sending the operator to
-  `sparkwing queue` after a holder that does not exist. The handshake also
-  advertises the daemon's runs-store schema, so a newer client refuses before
-  requesting admission and names the remedies that work: install a matching
-  sparkwing, or point `SPARKWING_WINGD_BIN` at one, since a daemon restart
-  respawns the same build. Node-level concurrency failures get the same
-  treatment as plan-level ones. `sparkwing daemon status` reports
-  `daemon_schema_version` against `store_schema_version`, marks a diverged pair
-  unhealthy, says when a restart will not help, and reports a store that exists
-  but cannot be read as `store_schema_error` instead of as an absent store.
+- **helm:** Both chart READMEs now open with the minimal `helm template`
+  invocation. `helm template` stops on the runner bundle's `validate.yaml`
+  until `controller.tokenSecret.name` is set, and `sparkwing-full` takes it
+  under the `sparkwing-runner-bundle.` sub-chart key.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

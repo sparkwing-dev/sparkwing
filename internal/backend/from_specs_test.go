@@ -99,6 +99,9 @@ func TestFromSpecs_SQLite(t *testing.T) {
 func TestFromSpecs_Postgres(t *testing.T) {
 	dsn := os.Getenv("SPARKWING_TEST_PG_URL")
 	if dsn == "" {
+		if os.Getenv("SPARKWING_REQUIRE_PG") != "" {
+			t.Fatal("SPARKWING_REQUIRE_PG is set, so SPARKWING_TEST_PG_URL must name a reachable Postgres")
+		}
 		t.Skip("SPARKWING_TEST_PG_URL not set; skipping pg FromSpecs test")
 	}
 	paths := newTempPaths(t, t.TempDir())

@@ -894,12 +894,11 @@ func resolveBinaryVersion() string {
 	return "(devel)"
 }
 
-func (s *Store) stampMinVersion(ctx context.Context) error {
-	now := time.Now()
-	_, err := s.exec(ctx,
+func stampMinVersionTx(ctx context.Context, tx *storeTx) error {
+	_, err := tx.ExecContext(ctx,
 		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		metaKeyMinVersion, resolveBinaryVersion(), now.UnixNano())
+		metaKeyMinVersion, resolveBinaryVersion(), time.Now().UnixNano())
 	return err
 }
 
@@ -1108,20 +1107,35 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 		}
 	}
 	for v := current + 1; v <= expectedSchemaVersion; v++ {
-		if err := s.applyMigrationSQLite(ctx, v); err != nil {
-			return fmt.Errorf("apply migration v%d: %w", v, err)
-		}
-		if _, err := s.exec(ctx,
-			`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)
-			 ON CONFLICT (version) DO NOTHING`,
-			v, time.Now().UnixNano()); err != nil {
-			return fmt.Errorf("record schema version v%d: %w", v, err)
+		if err := s.applyVersionSQLite(ctx, v); err != nil {
+			return err
 		}
 	}
-	if current < expectedSchemaVersion {
-		if err := s.stampMinVersion(ctx); err != nil {
+	return nil
+}
+
+func (s *Store) applyVersionSQLite(ctx context.Context, version int) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin migration v%d: %w", version, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := applyMigrationSQLite(ctx, tx, version); err != nil {
+		return fmt.Errorf("apply migration v%d: %w", version, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)
+		 ON CONFLICT (version) DO NOTHING`,
+		version, time.Now().UnixNano()); err != nil {
+		return fmt.Errorf("record schema version v%d: %w", version, err)
+	}
+	if version == expectedSchemaVersion {
+		if err := stampMinVersionTx(ctx, tx); err != nil {
 			return fmt.Errorf("stamp min version: %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration v%d: %w", version, err)
 	}
 	return nil
 }
@@ -1167,98 +1181,96 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 			return fmt.Errorf("record schema version v%d: %w", v, err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		metaKeyMinVersion, resolveBinaryVersion(), time.Now().UnixNano()); err != nil {
+	if err := stampMinVersionTx(ctx, tx); err != nil {
 		return fmt.Errorf("stamp min version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return s.backfillRunAnnotationRollup()
+	return backfillRunAnnotationRollup(ctx, storeExecer{s: s})
 }
 
-func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
+// safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
+func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	switch version {
 	case 1:
-		if _, err := s.exec(ctx, schemaSQLite); err != nil {
+		if _, err := tx.ExecContext(ctx, schemaSQLite); err != nil {
 			return err
 		}
-		if err := s.ensureColumnsAll(); err != nil {
+		if err := ensureColumnsAllSQLite(ctx, tx); err != nil {
 			return err
 		}
-		return s.backfillRunAnnotationRollup()
+		return backfillRunAnnotationRollup(ctx, tx)
 	case 2, 3:
-		return s.ensureColumnsAll()
+		return ensureColumnsAllSQLite(ctx, tx)
 	case 4:
-		_, err := s.exec(ctx, metaTableSQLite)
+		_, err := tx.ExecContext(ctx, metaTableSQLite)
 		return err
 	case 5:
-		return s.ensureColumnsAll()
+		return ensureColumnsAllSQLite(ctx, tx)
 	case 6:
-		return s.ensureColumnsAll()
+		return ensureColumnsAllSQLite(ctx, tx)
 	case 7:
-		_, err := s.exec(ctx, pipelineProfilesTableSQLite)
+		_, err := tx.ExecContext(ctx, pipelineProfilesTableSQLite)
 		return err
 	case 8:
-		if err := s.ensureColumns("pipeline_profiles", pipelineProfilesCPUMeasuredCols); err != nil {
+		if err := ensureColumnsSQLite(ctx, tx, "pipeline_profiles", pipelineProfilesCPUMeasuredCols); err != nil {
 			return err
 		}
-		_, err := s.exec(ctx, pipelineProfilesCPUMeasuredBackfill)
+		_, err := tx.ExecContext(ctx, pipelineProfilesCPUMeasuredBackfill)
 		return err
 	case 9:
-		return s.ensureColumns("pipeline_profiles", pipelineProfilesWaitCols)
+		return ensureColumnsSQLite(ctx, tx, "pipeline_profiles", pipelineProfilesWaitCols)
 	case 10:
-		return s.ensureColumns("pipeline_profiles", pipelineProfilesContendedCols)
+		return ensureColumnsSQLite(ctx, tx, "pipeline_profiles", pipelineProfilesContendedCols)
 	case 11:
-		return s.ensureColumns("pipeline_profiles", pipelineProfilesVersioningCols)
+		return ensureColumnsSQLite(ctx, tx, "pipeline_profiles", pipelineProfilesVersioningCols)
 	case 12:
-		return s.ensureColumns("triggers", triggerRepoInheritedCols)
+		return ensureColumnsSQLite(ctx, tx, "triggers", triggerRepoInheritedCols)
 	case 13:
-		if err := s.ensureColumns("triggers", triggerSubmissionCols); err != nil {
+		if err := ensureColumnsSQLite(ctx, tx, "triggers", triggerSubmissionCols); err != nil {
 			return err
 		}
-		_, err := s.exec(ctx, triggerIdempotencyIndex)
+		_, err := tx.ExecContext(ctx, triggerIdempotencyIndex)
 		return err
 	case 14:
-		if err := s.ensureColumns("pipeline_profiles", pipelineProfilesSustainedCols); err != nil {
+		if err := ensureColumnsSQLite(ctx, tx, "pipeline_profiles", pipelineProfilesSustainedCols); err != nil {
 			return err
 		}
-		_, err := s.exec(ctx, pipelineProfilesSustainedBackfill)
+		_, err := tx.ExecContext(ctx, pipelineProfilesSustainedBackfill)
 		return err
 	case 15:
-		if err := s.ensureColumns("nodes", nodesUsageCols); err != nil {
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesUsageCols); err != nil {
 			return err
 		}
-		return s.ensureColumns("node_metrics", nodeMetricsCPUTimeCols)
+		return ensureColumnsSQLite(ctx, tx, "node_metrics", nodeMetricsCPUTimeCols)
 	case 16:
-		_, err := s.exec(ctx, nodeBouncesTableSQLite)
+		_, err := tx.ExecContext(ctx, nodeBouncesTableSQLite)
 		return err
 	case 17:
-		_, err := s.exec(ctx, runIdentityIndexes)
+		_, err := tx.ExecContext(ctx, runIdentityIndexes)
 		return err
 	case 18:
-		return scrubSecretInputHashes(ctx, s.db)
+		return scrubSecretInputHashes(ctx, tx)
 	case 19:
-		return s.ensureColumns("users", usersScopesCols)
+		return ensureColumnsSQLite(ctx, tx, "users", usersScopesCols)
 	case 20:
-		return s.ensureColumns("node_dispatches", nodeDispatchRedactionCols)
+		return ensureColumnsSQLite(ctx, tx, "node_dispatches", nodeDispatchRedactionCols)
 	case 21:
-		return s.rehashSessions(ctx)
+		return rehashSessions(ctx, tx)
 	case 22:
-		return s.addSecretRepoScope(ctx)
+		return addSecretRepoScope(ctx, tx)
 	case 23:
-		if err := s.ensureColumns("secrets", secretsSharedCols); err != nil {
+		if err := ensureColumnsSQLite(ctx, tx, "secrets", secretsSharedCols); err != nil {
 			return err
 		}
-		return s.ensureColumns("triggers", triggerClaimOwnerCols)
+		return ensureColumnsSQLite(ctx, tx, "triggers", triggerClaimOwnerCols)
 	case 24:
-		return s.addTriggerWebhookDelivery(ctx)
+		return addTriggerWebhookDelivery(ctx, tx)
 	case 25:
-		return s.addTriggerWebhookReplayKey(ctx)
+		return addTriggerWebhookReplayKey(ctx, tx)
 	case 26:
-		return s.uniqueTokenPrefixIndex(ctx)
+		return uniqueTokenPrefixIndexTx(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1627,7 +1639,7 @@ const triggerWebhookReplayKeyIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + Trig
 // TokenPrefixIndexName is the unique index enforcing one token row per
 // prefix. Exported so a schema test can assert the constraint exists by
 // name.
-const TokenPrefixIndexName = "idx_tokens_prefix"
+const TokenPrefixIndexName = "idx_tokens_prefix" // #nosec G101 -- an index name, not a credential
 
 const tokenPrefixColumn = "prefix"
 
@@ -1636,11 +1648,12 @@ const tokenPrefixIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TokenPrefixIndex
 
 const tokenPrefixIndexDrop = `DROP INDEX IF EXISTS ` + TokenPrefixIndexName
 
+// #nosec G101 -- a query over the prefix column, which holds a token handle and no secret
 const tokenPrefixDuplicates = `SELECT prefix FROM tokens GROUP BY prefix HAVING COUNT(*) > 1 ORDER BY prefix`
 
-func (s *Store) ensureColumnsAll() error {
+func ensureColumnsAllSQLite(ctx context.Context, tx *storeTx) error {
 	for _, spec := range columnMigrations {
-		if err := s.ensureColumns(spec.table, spec.cols); err != nil {
+		if err := ensureColumnsSQLite(ctx, tx, spec.table, spec.cols); err != nil {
 			return err
 		}
 	}
@@ -1670,8 +1683,8 @@ func translateColumnType(t string) string {
 	return r.Replace(t)
 }
 
-func (s *Store) backfillRunAnnotationRollup() error {
-	rows, err := s.queryNoCtx(`SELECT id FROM runs WHERE annotation_count = 0`)
+func backfillRunAnnotationRollup(ctx context.Context, q migrationQueryExecer) error {
+	rows, err := q.QueryContext(ctx, `SELECT id FROM runs WHERE annotation_count = 0`)
 	if err != nil {
 		return err
 	}
@@ -1686,7 +1699,7 @@ func (s *Store) backfillRunAnnotationRollup() error {
 	}
 	_ = rows.Close()
 	for _, id := range ids {
-		gathered, err := s.gatherRunAnnotations(id)
+		gathered, err := gatherRunAnnotations(ctx, q, id)
 		if err != nil {
 			return err
 		}
@@ -1694,7 +1707,7 @@ func (s *Store) backfillRunAnnotationRollup() error {
 			continue
 		}
 		blob, _ := json.Marshal(gathered)
-		if _, err := s.execNoCtx(`
+		if _, err := q.ExecContext(ctx, `
 UPDATE runs SET annotation_count = ?, top_annotation = ?, annotations_json = ?
 WHERE id = ?`, len(gathered), gathered[len(gathered)-1], blob, id); err != nil {
 			return err
@@ -1703,9 +1716,9 @@ WHERE id = ?`, len(gathered), gathered[len(gathered)-1], blob, id); err != nil {
 	return nil
 }
 
-func (s *Store) gatherRunAnnotations(runID string) ([]string, error) {
+func gatherRunAnnotations(ctx context.Context, q migrationQueryExecer, runID string) ([]string, error) {
 	var out []string
-	rows, err := s.queryNoCtx(`
+	rows, err := q.QueryContext(ctx, `
 SELECT annotations_json FROM nodes WHERE run_id = ? AND annotations_json IS NOT NULL AND annotations_json != ''
 UNION ALL
 SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS NOT NULL AND annotations_json != ''`,
@@ -1772,84 +1785,50 @@ var secretRepoScopePostgres = []string{
 	`ALTER TABLE secrets ADD PRIMARY KEY (name, repo)`,
 }
 
-// safety: the rebuild drops the live table, so a crash mid-sequence must roll back rather than leave no secrets table.
-func (s *Store) addSecretRepoScope(ctx context.Context) error {
-	have, err := s.tableColumns("secrets")
+func addSecretRepoScope(ctx context.Context, tx *storeTx) error {
+	have, err := tableColumns(ctx, tx, "secrets")
 	if err != nil {
 		return err
 	}
 	if have["repo"] {
 		return nil
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 	for _, stmt := range secretsRepoRebuildSQLite {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
-// safety: the column is worthless without the index, so a crash between them must roll back rather than admit replays.
-func (s *Store) addTriggerWebhookDelivery(ctx context.Context) error {
-	have, err := s.tableColumns("triggers")
+func addTriggerWebhookDelivery(ctx context.Context, tx *storeTx) error {
+	have, err := tableColumns(ctx, tx, "triggers")
 	if err != nil {
 		return err
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if !have["webhook_delivery"] {
+	if !have[triggerWebhookDeliveryColumn] {
 		if _, err := tx.ExecContext(ctx,
 			`ALTER TABLE triggers ADD COLUMN "webhook_delivery" TEXT NOT NULL DEFAULT ''`); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, triggerWebhookDeliveryIndex); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err = tx.ExecContext(ctx, triggerWebhookDeliveryIndex)
+	return err
 }
 
-// safety: the column is worthless without the index, so a crash between them must roll back rather than admit replays.
-func (s *Store) addTriggerWebhookReplayKey(ctx context.Context) error {
-	have, err := s.tableColumns("triggers")
+func addTriggerWebhookReplayKey(ctx context.Context, tx *storeTx) error {
+	have, err := tableColumns(ctx, tx, "triggers")
 	if err != nil {
 		return err
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 	if !have[triggerWebhookReplayKeyColumn] {
 		if _, err := tx.ExecContext(ctx,
 			`ALTER TABLE triggers ADD COLUMN "webhook_replay_key" TEXT NOT NULL DEFAULT ''`); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, triggerWebhookReplayKeyIndex); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (s *Store) uniqueTokenPrefixIndex(ctx context.Context) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := uniqueTokenPrefixIndexTx(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err = tx.ExecContext(ctx, triggerWebhookReplayKeyIndex)
+	return err
 }
 
 func uniqueTokenPrefixIndexTx(ctx context.Context, q migrationQueryExecer) error {
@@ -1887,8 +1866,8 @@ func duplicateTokenPrefixes(ctx context.Context, q migrationQueryExecer) ([]stri
 	return out, rows.Err()
 }
 
-func (s *Store) ensureColumns(table string, cols map[string]string) error {
-	have, err := s.tableColumns(table)
+func ensureColumnsSQLite(ctx context.Context, tx *storeTx, table string, cols map[string]string) error {
+	have, err := tableColumns(ctx, tx, table)
 	if err != nil {
 		return err
 	}
@@ -1897,7 +1876,7 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 			continue
 		}
 		stmt := fmt.Sprintf(`ALTER TABLE %q ADD COLUMN %q %s`, table, name, typ)
-		if _, err := s.execNoCtx(stmt); err != nil {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			if isDuplicateColumnErr(err) {
 				continue
 			}
@@ -1907,8 +1886,8 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 	return nil
 }
 
-func (s *Store) tableColumns(table string) (map[string]bool, error) {
-	rows, err := s.queryNoCtx(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+func tableColumns(ctx context.Context, tx *storeTx, table string) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%q)`, table))
 	if err != nil {
 		return nil, err
 	}

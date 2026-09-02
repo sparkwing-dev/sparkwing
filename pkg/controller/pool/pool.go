@@ -108,7 +108,8 @@ func (p *Pool) Reconcile(ctx context.Context, heartbeatTimeout, startupGrace tim
 		}
 
 		if age > threshold {
-			log.Printf("pool: reclaiming abandoned PVC %s (%s %s ago, owned by %s)",
+			// safety: the owner annotation is the job id its caller supplied, so %q escapes it.
+			log.Printf("pool: reclaiming abandoned PVC %s (%s %s ago, owned by %q)",
 				pvc.Name, source, age.Round(time.Second),
 				pvc.Annotations[AnnCheckedOutBy])
 			if err := p.setState(ctx, pvc.Name, StateDirty, map[string]string{
@@ -215,7 +216,8 @@ func (p *Pool) Checkout(ctx context.Context, jobID string) (string, error) {
 			}
 			return "", err
 		}
-		log.Printf("pool: checked out PVC %s for job %s", pvc.Name, jobID)
+		// safety: %q escapes a caller-supplied job id that would otherwise forge a log line.
+		log.Printf("pool: checked out PVC %s for job %q", pvc.Name, jobID)
 		return pvc.Name, nil
 	}
 	return "", nil

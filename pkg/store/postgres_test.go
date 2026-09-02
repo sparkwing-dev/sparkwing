@@ -13,10 +13,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+const requirePGEnv = "SPARKWING_REQUIRE_PG"
+
 func pgTestDSN(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("SPARKWING_TEST_PG_URL")
 	if dsn == "" {
+		if os.Getenv(requirePGEnv) != "" {
+			t.Fatalf("%s is set, so SPARKWING_TEST_PG_URL must name a reachable Postgres", requirePGEnv)
+		}
 		t.Skip("SPARKWING_TEST_PG_URL not set; skipping Postgres conformance test")
 	}
 	return dsn

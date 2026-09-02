@@ -77,6 +77,20 @@ this file is a menu and checklist, not a command that every change must run.
   are atomic, and recording prunes anything older than 14 days. Delete the
   directory to force full verification without `--exhaustive`.
 
+- **Postgres conformance:** the store, backend, and orchestrator Postgres
+  suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is
+  set to a database they cannot reach. Start one with `docker run --rm -d
+  --name sw-pg -e POSTGRES_PASSWORD=postgres -p 5433:5432 postgres:17`,
+  then run `SPARKWING_REQUIRE_PG=1
+  SPARKWING_TEST_PG_URL=postgres://postgres:postgres@localhost:5433/postgres?sslmode=disable
+  go test -v -run 'Postgres|Pg' ./pkg/store ./internal/backend
+  ./internal/orchestrator`. `SPARKWING_REQUIRE_PG` turns an unset URL and
+  `SPARKWING_INTEGRATION_DISABLE=1` into failures. That is not proof on
+  its own, so both lanes that promise Postgres coverage run those suites
+  verbosely and fail on any `--- SKIP` line: the hosted `Postgres
+  conformance` job in `.github/workflows/ci.yaml` on every pull request
+  and push to main, and `sparkwing run integration` against its
+  Dockerized Postgres and MinIO.
 - **Kubernetes product path:** `sparkwing run k8s-e2e` proves authenticated
   webhook intake, runner execution, logs, cancellation, retry, restarts, and
   retained state against an explicit Kubernetes context and caller-supplied
@@ -93,6 +107,14 @@ this file is a menu and checklist, not a command that every change must run.
 - **Documentation:** keep README, CLI help, source docs, examples, generated
   references, and `pkg/docs/mirror/` aligned with behavior. Run the owning drift
   check instead of editing generated mirrors by hand.
+- **Generated files:** `bash bin/regen-all.sh` rewrites every derived file
+  (cli/config/sdk/api references, `api/openapi.yaml`, `.apidiff/`,
+  `pkg/docs/mirror/`, and the vendored runner-bundle tarball) in one pass and
+  is a no-op on a clean tree. Resolve a merge conflict in any of them by
+  taking either side, running that script, and committing the result.
+  `bash bin/check-changelog.sh --fix` does the same for `CHANGELOG.md`,
+  collapsing the duplicate `###` headings that parallel landings leave under
+  `[Unreleased]`.
 - **Changelog:** notable adopter-facing behavior belongs in `[Unreleased]` and
   follows `docs/changelog-style.md`. Mark breaking changes and supply migration
   guidance before release. Keep the embedded changelog mirror byte-identical.

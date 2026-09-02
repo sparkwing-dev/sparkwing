@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -162,5 +163,53 @@ func TestReadGosecReportTreatsAMissingFileAsNoFindings(t *testing.T) {
 	}
 	if len(issues) != 0 {
 		t.Fatalf("issues = %d, want none", len(issues))
+	}
+}
+
+const gitleaksReportFixture = `[
+  {
+    "RuleID": "generic-api-key",
+    "File": "pkg/store/argon2.go",
+    "StartLine": 17,
+    "Secret": "REDACTED",
+    "Match": "REDACTED",
+    "Fingerprint": "cef3d45478670f750782eb8f4df38ae30cdaf360:pkg/store/argon2.go:generic-api-key:17"
+  }
+]`
+
+func TestReadGitleaksReportNamesTheFindingWithoutTheSecret(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gitleaks.json")
+	if err := os.WriteFile(path, []byte(gitleaksReportFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := readGitleaksReport(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings = %d, want 1", len(findings))
+	}
+	line := findings[0].String()
+	for _, want := range []string{
+		"generic-api-key",
+		"pkg/store/argon2.go:17",
+		"cef3d45478670f750782eb8f4df38ae30cdaf360:pkg/store/argon2.go:generic-api-key:17",
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the finding line does not name %s: %s", want, line)
+		}
+	}
+	if strings.Contains(line, "REDACTED") {
+		t.Errorf("the finding line carries the matched value: %s", line)
+	}
+}
+
+func TestReadGitleaksReportTreatsAMissingFileAsNoFindings(t *testing.T) {
+	findings, err := readGitleaksReport(filepath.Join(t.TempDir(), "gitleaks.json"))
+	if err != nil {
+		t.Fatalf("missing report: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("findings = %d, want none", len(findings))
 	}
 }
