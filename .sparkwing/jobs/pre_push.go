@@ -285,6 +285,12 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "api-reference: current")
 	}
 
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-spec.sh").Run(); err != nil {
+		failures = append(failures, "openapi: stale -- run `bash bin/gen-api-docs.sh`")
+	} else {
+		sparkwing.Info(ctx, "openapi: current")
+	}
+
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Run(); err != nil {
 		failures = append(failures, "api-snapshot: drift -- run `bash bin/regen-api-snapshot.sh` and commit .apidiff/")
 	} else {
