@@ -58,6 +58,25 @@ code change to unlock.
   `--trusted-proxy-cidrs` (chart: `controller.trustedProxyCIDRs`) so throttling
   keys on the real client. A rejected bearer token is remembered for a few
   seconds, so a replayed wrong guess costs one hash.
+- **logs:** `sparkwing-logs` gains `--require-auth` /
+  `SPARKWING_REQUIRE_AUTH`, refusing to start without a controller to resolve
+  caller tokens against, reports `"auth"` on `GET /api/v1/health` so
+  `sparkwing cluster status` warns on an open logs service, and rejects the
+  anonymous principal an unauthenticated controller returns from `whoami`. A
+  logs-enabled `sparkwing-runner-bundle` install without
+  `controller.tokenSecret.name` now fails at render time instead of serving,
+  forging, and deleting every run's logs for anything that reaches its Service;
+  set the new `logs.allowUnauthenticated=true` during a bootstrap install.
+- **ci:** Every GitHub Actions workflow now pins its actions to a full commit
+  SHA with a version comment, the release job that prepares binaries no longer
+  persists checkout credentials, and the canonical gate installs dashboard
+  dependencies with `--ignore-scripts`.
+
+### Fixed
+
+- **admission:** Equal-priority participants keep their service order while
+  queued, so sustained arrivals from an older owner cannot move an existing
+  request backward indefinitely.
 
 ## [v0.39.0] - 2026-09-02
 ### Docs

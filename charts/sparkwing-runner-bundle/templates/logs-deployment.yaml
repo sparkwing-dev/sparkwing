@@ -55,6 +55,9 @@ spec:
             - --controller
             - {{ $controllerURL | quote }}
             {{- end }}
+            {{- if not .Values.logs.allowUnauthenticated }}
+            - --require-auth
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.logs.service.targetPort }}

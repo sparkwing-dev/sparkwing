@@ -197,6 +197,16 @@ cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
   instead -- once you are past bootstrap -- set `SPARKWING_REQUIRE_AUTH=1`
   (or `--require-auth`) so the pod refuses to start with an empty tokens
   table. See [auth.md](auth.md).
+- **Point the logs service at a controller.** Without `--controller`
+  (`SPARKWING_CONTROLLER_URL`) `sparkwing-logs` resolves no tokens, so
+  anything that reaches its Service can read, forge, and delete every
+  run's logs. It reports `"auth": "disabled"` on `GET /api/v1/health`
+  and `sparkwing cluster status` flags the logs probe as a warning. Set
+  `SPARKWING_REQUIRE_AUTH=1` (or `--require-auth`) so the pod refuses to
+  start without one. The runner-bundle chart wires the controller URL
+  from `controller.tokenSecret`, and a logs-enabled install without that
+  Secret fails at render time unless you set
+  `logs.allowUnauthenticated=true`.
 - **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
   behind an ingress/proxy that enforces HTTPS.
 - **Pin image digests** rather than floating tags.
