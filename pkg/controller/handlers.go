@@ -497,6 +497,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID := newRunID()
+	repoInherited := body.ParentRunID != "" && body.Git.Repo == ""
 
 	if body.ParentRunID != "" {
 		ancestors, err := s.store.GetRunAncestorPipelines(r.Context(), body.ParentRunID)
@@ -567,6 +568,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		ParentRunID:   body.ParentRunID,
 		ParentNodeID:  body.ParentNodeID,
 		RetryOf:       body.RetryOf,
+		RepoInherited: repoInherited,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
 		return

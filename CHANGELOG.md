@@ -66,6 +66,9 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** Same-repository `RunAndAwait` calls keep their routing
+  provenance, so local execution resolves the caller's checkout instead of an
+  unrelated registered checkout.
 - **security (Breaking):** Run-store schema 18 removes `inputs_hash` from runs
   with caller-supplied secret arguments, eliminating an offline guessing
   oracle from SQL stores, run APIs, logs, receipts, and new state dumps. Older
