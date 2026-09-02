@@ -415,3 +415,48 @@ containerSecurityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
+
+# -----------------------------------------------------------------------
+# 8. Namespace resource guards. The runner clamps a pipeline's declared
+#    pin to the CPU and memory limits it is configured with, so these are
+#    the cluster-side backstop for anything the runner does not create:
+#    a LimitRange bounds one container, a ResourceQuota bounds the
+#    namespace total. Both are off by default because an install that
+#    already sizes its pods elsewhere would start failing admission the
+#    moment a quota appears.
+# -----------------------------------------------------------------------
+limitRange:
+  # true creates the LimitRange below. Every container in the namespace,
+  # including the Job pods the k8s runner backend creates, is then held
+  # to it: a pod asking for more than max is rejected at admission.
+  enabled: false
+  # Ceiling for one container. Size it above the runner's own limits and
+  # above the largest pin you expect, remembering the runner asks for a
+  # burst limit of twice a pinned core count and 1.25x pinned memory.
+  max:
+    cpu: "16"
+    memory: 64Gi
+  # Floor for one container. Empty leaves containers free to ask for
+  # less; set it to keep a mis-sized pipeline off a shared node.
+  min: {}
+  # Limits given to a container that declares none.
+  default:
+    cpu: "2"
+    memory: 2Gi
+  # Requests given to a container that declares none.
+  defaultRequest:
+    cpu: 100m
+    memory: 128Mi
+
+resourceQuota:
+  # true creates the ResourceQuota below. Once it exists, every pod in
+  # the namespace must declare the requests and limits it counts, so
+  # turn it on together with limitRange.default and defaultRequest.
+  enabled: false
+  # Namespace totals, passed through verbatim as spec.hard. Add object
+  # counts (pods, persistentvolumeclaims) here when you want them.
+  hard:
+    requests.cpu: "32"
+    requests.memory: 64Gi
+    limits.cpu: "64"
+    limits.memory: 128Gi

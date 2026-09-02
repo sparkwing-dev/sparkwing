@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
@@ -38,6 +39,8 @@ const (
 // PrefixLen is 12: chars 0-2 = kind marker, char 3 = underscore, chars
 // 4-11 = 48 bits of entropy.
 const PrefixLen = 12
+
+const mintAttempts = 5
 
 // Bearer rejection reasons. ErrNoTokenCandidates and ErrUnknownToken
 // carry the same message so the response never tells a caller whether
@@ -107,14 +110,6 @@ func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Du
 	if !ok {
 		return "", nil, fmt.Errorf("tokens: unknown kind %q", kind)
 	}
-	raw, err = mintRaw(prefix)
-	if err != nil {
-		return "", nil, err
-	}
-	hash, err := hashToken(raw)
-	if err != nil {
-		return "", nil, err
-	}
 	var expires *time.Time
 	if ttl > 0 {
 		t := now.Add(ttl)
@@ -122,16 +117,32 @@ func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Du
 	}
 
 	scopeStr := strings.Join(dedupeScopes(scopes), ",")
-	_, err = s.execNoCtx(
-		`
+	var hash string
+	for attempt := 1; ; attempt++ {
+		raw, err = mintRaw(prefix)
+		if err != nil {
+			return "", nil, err
+		}
+		hash, err = hashToken(raw)
+		if err != nil {
+			return "", nil, err
+		}
+		_, err = s.execNoCtx(
+			`
         INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
-		hash, raw[:PrefixLen], principal, kind, scopeStr,
-		now.UTC().Unix(),
-		expiresUnix(expires),
-	)
-	if err != nil {
+			hash, raw[:PrefixLen], principal, kind, scopeStr,
+			now.UTC().Unix(),
+			expiresUnix(expires),
+		)
+		if err == nil {
+			break
+		}
+		// safety: the unique index refuses a prefix already in use, so mint again rather than store a twin
+		if attempt < mintAttempts && isUniqueViolation(err) {
+			continue
+		}
 		return "", nil, fmt.Errorf("tokens: insert: %w", err)
 	}
 
@@ -236,22 +247,32 @@ func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
 // already carrying a future revoked_at from a rotation grace window is
 // clamped down to now, so an operator can cut a leaked token short.
 func (s *Store) RevokeToken(prefix string, now time.Time) error {
+	ctx := context.Background()
 	ts := now.UTC().Unix()
-	res, err := s.execNoCtx(
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("tokens: revoke: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx,
 		`UPDATE tokens SET revoked_at = ? WHERE prefix = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
 		ts, prefix, ts,
 	)
 	if err != nil {
 		return fmt.Errorf("tokens: revoke: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("tokens: revoke: %w", err)
+	}
 	if n == 0 {
 		return errors.New("token not found or already revoked")
 	}
+	// safety: an ambiguous prefix rolls back, so a stranger's token stays live
 	if n > 1 {
 		return fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, n)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ListTokens returns matching rows. Empty kind = all.
@@ -314,7 +335,8 @@ func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error) {
 	return out, nil
 }
 
-// LookupTokenByPrefix returns the first matching row.
+// LookupTokenByPrefix returns the one row carrying prefix. More than one
+// match names no single principal, so it is an error rather than a guess.
 func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error) {
 	rows, err := s.selectTokensByPrefix(prefix)
 	if err != nil {
@@ -322,6 +344,9 @@ func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error) {
 	}
 	if len(rows) == 0 {
 		return nil, errors.New("token not found")
+	}
+	if len(rows) > 1 {
+		return nil, fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, len(rows))
 	}
 	return &rows[0], nil
 }

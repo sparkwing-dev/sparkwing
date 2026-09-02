@@ -10,6 +10,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 )
@@ -89,7 +90,7 @@ func gatherConfigureInit(dryRun bool) (ConfigureInit, error) {
 
 	if !dirExists(configDir) {
 		if !dryRun {
-			if err := os.MkdirAll(configDir, 0o755); err != nil {
+			if err := fssecure.EnsureDir(configDir); err != nil {
 				return out, fmt.Errorf("configure init: create %s: %w", configDir, err)
 			}
 			out.Created = true

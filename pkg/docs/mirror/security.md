@@ -277,6 +277,18 @@ updaters trust the replacement. The release gate rejects a signer outside the
 embedded trust set. Updaters without the replacement key fail closed rather
 than accepting an unknown signer.
 
+Container images follow the same rule. The release scans each image by
+digest, signs that digest with cosign, then moves `vX.Y.Z` onto it with
+`docker buildx imagetools create`. Before the move it resolves what the tag
+already points at and fails when the answer is a different digest, so a
+`workflow_dispatch` rerun cannot swap bytes under an operator who pinned the
+tag; the `force_retag` dispatch input is the only override. The floating
+`latest` tag is exempt because it is meant to move. Each release publishes an
+`image-digests.json` asset naming every image, its tag, and its digest, so
+operators can pin digests and diff them between releases. That asset is a
+convenience listing; the cosign signature over the digest is what a verifier
+checks.
+
 ## Cache service
 
 `sparkwing-cache` requires a bearer token (`--api-token`, falling back to
@@ -511,7 +523,8 @@ failure.
 
 - **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
   behind an ingress/proxy that enforces HTTPS.
-- **Pin image digests** rather than floating tags.
+- **Pin image digests** rather than floating tags. Each release lists them
+  in its `image-digests.json` asset.
 - **Encrypt etcd / your secret store.** Kubernetes Secrets are
   base64, not encrypted, unless the cluster enables it.
 - **Rotate the GitHub credentials and cache SSH key** periodically.

@@ -89,6 +89,10 @@ func (r *Resolver) Resolve(ctx context.Context, m *Manifest) (map[string]string,
 }
 
 func (r *Resolver) resolveOne(ctx context.Context, lib Library) (string, error) {
+	// safety: the source reaches `go list` as a module argument, so it must be a module path.
+	if err := module.CheckPath(lib.Source); err != nil {
+		return "", fmt.Errorf("invalid source %q: %w", lib.Source, err)
+	}
 	if semver.IsValid(lib.Version) && !isRangePrefix(lib.Version) {
 		return lib.Version, nil
 	}
