@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.39.0] - 2026-09-02
 ### Docs
 
 - **docs:** The warm-pool guide's outcome list renders as a list again, and the
