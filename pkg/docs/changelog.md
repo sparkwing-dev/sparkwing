@@ -249,6 +249,13 @@ code change to unlock.
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
   so a naked suppression silences nothing, and the comment gate keeps each
   annotation alone on one line so free prose cannot ride behind one.
+- **release:** The release workflow now resolves a version tag's published
+  image digest before it retags, and fails when that tag already points at
+  different bytes. A `workflow_dispatch` rerun with `publish_images: true`
+  used to move `vX.Y.Z` to a freshly built digest, so an operator who pinned
+  the tag got layers nobody audited; moving it now takes the new `force_retag`
+  input. Each release also carries an `image-digests.json` asset listing every
+  published image, its tag, and its digest, so operators can pin and diff them.
 
 ### Added
 
