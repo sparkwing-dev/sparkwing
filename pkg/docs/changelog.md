@@ -56,7 +56,11 @@ code change to unlock.
   its WAL, or a backup no longer yields replayable dashboard sessions. The
   schema 21 migration deletes existing session rows, so everyone signs in
   again after the upgrade.
-
+- **cache:** The warm-pool controller now accepts only registry references in
+  `warm_images`, logging and dropping every other entry, and passes the list to
+  the privileged warmer pod as container arguments consumed by a fixed script.
+  A ConfigMap writer can no longer smuggle shell into the one privileged
+  workload Sparkwing creates.
 - **controller:** Login now carries per-client, listener-wide, and per-account
   budgets, and every argon2id verification passes through a memory-sized
   semaphore, so unauthenticated callers can no longer exhaust the pod by
@@ -84,6 +88,44 @@ code change to unlock.
 - **admission:** Equal-priority participants keep their service order while
   queued, so sustained arrivals from an older owner cannot move an existing
   request backward indefinitely.
+
+### Security
+
+- **cache (Breaking):** Every cache route that touches repository content --
+  git clone and registration, archives, files, tree hashes, branch membership,
+  the repo listing, and artifacts -- now requires the bearer token, alongside
+  the blob and sync routes that already did. Registration validates the
+  repository name and refuses to repoint an existing one without the token,
+  responses carry `X-Content-Type-Options: nosniff`, artifacts download as
+  attachments, and workspace snapshot refs expire after
+  `WORKSPACE_SEED_MAX_AGE` instead of wedging at the retention cap. The
+  runner-bundle chart ships a default-deny ingress NetworkPolicy for the cache
+  (`networkPolicy.enabled`), issues the controller a cache token, and refuses
+  to render a non-`ClusterIP` cache Service with no token configured. The
+  dashboard's `/api/v1/gitcache/` mount rejects a request with no bearer
+  credential and caps concurrent Git streams. See the
+  [migration guide](docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
+
+### Security
+
+- **cli:** The admission daemon's unix socket is now private to its user.
+  It binds under `$XDG_RUNTIME_DIR` when one is available, refuses a socket
+  directory that is not a `0700` directory owned by the current uid, chmods
+  the socket to `0600`, and drops accepted connections whose kernel-reported
+  peer uid differs. Clients apply the same directory test before dialing, and
+  reach a daemon still serving the pre-upgrade `/tmp` path until it exits.
+
+### Security
+
+- **controller (Breaking):** A node claim now binds to the authenticated
+  principal as well as to the client-supplied `holder_id`, and the per-node
+  write routes admit only the runner holding that unexpired claim. A
+  `nodes.claim` token can no longer write another runner's node, stamp
+  `ready_at` (now `admin`, so a runner cannot skip a node's dependencies), or
+  read a run's plaintext secret arguments without a claim on one of its nodes;
+  an unauthenticated controller serves the redacted view. Runner tokens
+  claiming their own work are unaffected. See the
+  [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-principal).
 
 ## [v0.39.0] - 2026-09-02
 ### Docs

@@ -92,26 +92,76 @@ than accepting an unknown signer.
 
 ## Cache service
 
-`sparkwing-cache` requires a bearer token on its blob and sync endpoints
-(`--api-token`, falling back to `$SPARKWING_API_TOKEN`), and refuses to
-start without one unless the operator passes `--allow-unauthenticated`
-(`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which logs a startup warning.
-The guard has no network-location exemption: an in-cluster caller, a
-port-forward, and an ingress request are all rejected without the bearer,
-because a caller-controlled header cannot prove where a request came from.
-Artifact upload, listing, and download carry the same bearer. The remaining
-read endpoints (clone, file access, repo listing) carry no token and are
-reachable only in-cluster via the Service, not the ingress.
+`sparkwing-cache` requires a bearer token (`--api-token`, falling back to
+`$SPARKWING_API_TOKEN`) on every route that touches repository content: git
+clone and registration, archives, single files, tree hashes, branch
+membership, the repo listing, artifacts, and the blob and sync endpoints. It
+refuses to start without one unless the operator passes
+`--allow-unauthenticated` (`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which
+logs a startup warning. The guard has no network-location exemption: an
+in-cluster caller, a port-forward, and an ingress request are all rejected
+without the bearer, because a caller-controlled header cannot prove where a
+request came from. `/health`, `/metrics`, `/stats`, and the pull-through
+package proxy under `/proxy/` stay open, because package managers fetch
+through the proxy without a credential and it serves upstream registry bytes
+rather than repository content.
+
+Registering a repository name validates it against
+`^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a
+different repository requires the token even on an unauthenticated cache.
+Every response carries `X-Content-Type-Options: nosniff`, and artifact
+downloads are served as `application/octet-stream` attachments.
 
 Off-cluster runners read Git through the controller's admin-scoped
-`/api/v1/gitcache/git/...` proxy. The controller removes its bearer before the
-internal request and permits only registration and upload-pack reads. A
-login-enabled dashboard exposes that path to machine bearers without accepting
-browser session credentials. Direct-cache binary and seed writes use only
-`SPARKWING_CACHE_TOKEN`; direct-cache mode never receives the controller bearer.
-Keep the raw cache Service private: `pipeline trigger --working-tree` may seed
-uncommitted source, and the cache retains up to 128 workspace refs per
-repository.
+`/api/v1/gitcache/git/...` proxy. The controller drops the caller's bearer and
+presents its own `SPARKWING_CACHE_TOKEN` to the cache, and permits only
+registration and upload-pack reads. A login-enabled dashboard exposes that path
+to machine bearers without accepting browser session credentials: the mount
+rejects a request carrying no bearer credential before it extends the
+half-hour stream deadline or proxies anything, and caps concurrent Git streams
+so one caller cannot hold every long-lived connection. Direct-cache binary and
+seed writes use only `SPARKWING_CACHE_TOKEN`; direct-cache mode never receives
+the controller bearer.
+
+The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
+cache pod (`networkPolicy.enabled`, on by default) that admits only the
+release's runner and controller pods, and refuses to render a non-`ClusterIP`
+cache Service unless a token Secret is configured. `pipeline trigger
+--working-tree` may seed uncommitted source; the cache retains up to 128
+workspace refs per repository and expires them after
+`WORKSPACE_SEED_MAX_AGE` (24 hours by default).
+
+## Local daemon socket
+
+The admission daemon (`wingd`) is a per-user process on the developer's
+own machine. It serves a unix socket at
+`$XDG_RUNTIME_DIR/sparkwing-<uid>-<hash>/d.sock`, falling back to
+`/tmp/sparkwing-<uid>-<hash>/d.sock` when no private runtime directory
+is available or when the runtime path would exceed the operating
+system's `sun_path` limit. The trust boundary is the user account, not
+the machine: everyone logged into the same host as the same user shares
+one daemon and can queue, inspect, cancel, and drain its runs. The
+protocol carries no token, and adding one would not change that -- a
+token readable by the account is readable by anything running as the
+account.
+
+Other accounts on the host are outside the boundary, and three checks
+keep them out. The daemon creates its socket directory with `Mkdir` and
+refuses to serve if the path already exists as anything but a real
+directory owned by the current uid with mode `0700`, so another account
+cannot pre-create it and collect connections. The bound socket is
+chmodded to `0600`. Every accepted connection is checked against the
+kernel's peer credentials (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on
+macOS and FreeBSD) and dropped when the caller's uid differs, which
+holds even where socket file modes are not enforced on connect. Clients
+apply the same directory test before dialing, so a `sparkwing` command
+refuses to hand a handshake to a socket sitting in a directory this user
+does not own.
+
+Root is not excluded by any of this; a root account on the host can read
+the daemon's memory whatever the socket says. On a shared host, give
+each user their own `SPARKWING_HOME`, which is the unit of daemon
+isolation.
 
 ## Container hardening
 

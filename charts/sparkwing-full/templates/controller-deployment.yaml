@@ -117,6 +117,15 @@ spec:
             - name: SPARKWING_DASHBOARD_URL
               value: {{ .Values.controller.dashboardURL | quote }}
             {{- end }}
+            {{- $bundle := index .Values "sparkwing-runner-bundle" }}
+            {{- $bundleToken := index $bundle "controller" "tokenSecret" }}
+            {{- if and (index $bundle "enabled") (index $bundle "cache" "enabled") (index $bundleToken "name") (index $bundleToken "key") }}
+            - name: SPARKWING_CACHE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ index $bundleToken "name" | quote }}
+                  key: {{ index $bundleToken "key" | quote }}
+            {{- end }}
             {{- if .Values.controller.secretsKey.name }}
             - name: SPARKWING_SECRETS_KEY
               valueFrom:

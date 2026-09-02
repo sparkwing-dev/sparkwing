@@ -485,7 +485,7 @@ func seedTriggerSource(prof *profile.Profile, cacheURL string, discoveryErr erro
 	}
 	if cacheURL != "" {
 		refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err = bincache.RefreshRepo(refreshCtx, cacheURL, repoURL)
+		err = bincache.RefreshRepo(refreshCtx, cacheURL, bincache.CacheToken(), repoURL)
 		cancel()
 		if err == nil {
 			return

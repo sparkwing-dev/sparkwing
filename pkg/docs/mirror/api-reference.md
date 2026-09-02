@@ -71,7 +71,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatches` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `admin` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `admin` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `nodes.claim` |
