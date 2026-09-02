@@ -65,6 +65,7 @@ kubectl create serviceaccount sparkwing-cache-warmer -n <pool-namespace>
 ```
 
 It needs no Role or RoleBinding.
+
 - On success: marks PVC `clean`, updates `warmed-at`
 - On failure: marks PVC `dirty` for retry
 

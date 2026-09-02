@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Docs
 
+- **docs:** The warm-pool guide's outcome list renders as a list again, and the
+  `sparkwing runs` reference is regenerated from the CLI help.
 - **security:** The security policy now identifies the supported release and
   provides a private GitHub vulnerability-reporting path.
 
