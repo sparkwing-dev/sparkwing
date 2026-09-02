@@ -10,6 +10,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
@@ -57,7 +58,7 @@ func Load(path string) (*Config, error) {
 
 func Save(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := fssecure.EnsureDir(dir); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	buf, err := yaml.Marshal(cfg)

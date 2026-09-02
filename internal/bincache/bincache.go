@@ -336,6 +336,11 @@ func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, r
 }
 
 func fetchExactSHA(gcURL, cloneURL, token, sha, dest string) error {
+	// safety: the sha reaches git as a fetch argument, so only an object id may pass.
+	sha, err := validateGitObject(sha)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}
@@ -348,7 +353,7 @@ func fetchExactSHA(gcURL, cloneURL, token, sha, dest string) error {
 	steps := [][]string{
 		{"init", "--quiet"},
 		{"remote", "add", "origin", cloneURL},
-		{"fetch", "--depth", "1", "origin", sha},
+		{"fetch", "--depth", "1", "--end-of-options", "origin", sha},
 		{"-c", "core.attributesFile=/dev/null", "checkout", "--quiet", "FETCH_HEAD"},
 	}
 	for _, step := range steps {

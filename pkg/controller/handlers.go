@@ -88,6 +88,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// safety: a stored sha reaches a runner's git as a revision argument, so only an object id may pass.
+func validateGitSHA(sha string) error {
+	if sha == "" || gitObjectSHA.MatchString(sha) {
+		return nil
+	}
+	return errors.New("git.sha must be a 40-64 character hex object id")
+}
+
 func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	var body store.Run
 	if err := decodeJSON(r, &body); err != nil {
@@ -96,6 +104,10 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.ID == "" || body.Pipeline == "" || body.Status == "" {
 		writeError(w, http.StatusBadRequest, errors.New("id, pipeline, status are required"))
+		return
+	}
+	if err := validateGitSHA(body.GitSHA); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(ScopeAdmin) {
@@ -623,6 +635,10 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := refuseForgedGitHubProvenance(r.Context(), body.Trigger.Source, body.Trigger.Env); err != nil {
 		writeError(w, http.StatusForbidden, err)
+		return
+	}
+	if err := validateGitSHA(body.Git.SHA); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	if body.Git.RepoURL != "" {

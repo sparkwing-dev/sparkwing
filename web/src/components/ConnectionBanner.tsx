@@ -14,7 +14,10 @@ export default function ConnectionBanner() {
 
   if (status === "ok") return null;
 
-  const messages: Record<Exclude<ConnectionStatus, "ok">, { text: string; hint: string }> = {
+  const messages: Record<
+    Exclude<ConnectionStatus, "ok">,
+    { text: string; hint: string; signIn?: boolean }
+  > = {
     unreachable: {
       text: "Cannot reach the sparkwing controller",
       hint: "The API may be down or your network connection was interrupted. Data shown may be stale.",
@@ -23,15 +26,25 @@ export default function ConnectionBanner() {
       text: "Authentication failed",
       hint: "The API token is missing or invalid. Check that SPARKWING_API_TOKEN is set in the web deployment.",
     },
+    "session-expired": {
+      text: "Your session ended",
+      hint: "Sessions expire after a fixed lifetime.",
+      signIn: true,
+    },
   };
 
-  const { text, hint } = messages[status];
+  const { text, hint, signIn } = messages[status];
 
   return (
     <div className="bg-red-900/80 border-b border-red-700 px-4 py-2 text-sm text-red-100 flex items-center gap-2">
       <span className="inline-block w-2 h-2 rounded-full bg-red-400 animate-pulse" />
       <span className="font-medium">{text}</span>
       <span className="text-red-300">&mdash; {hint}</span>
+      {signIn ? (
+        <a className="underline font-medium" href="/login">
+          Sign in again
+        </a>
+      ) : null}
     </div>
   );
 }

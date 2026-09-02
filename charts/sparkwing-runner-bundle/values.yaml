@@ -112,6 +112,16 @@ runner:
       cpu: "2"
       memory: 2Gi
 
+  # Hard ceiling on the Job pods this runner creates, as Kubernetes
+  # quantities. A pipeline's own .Resources() pin, and the charge
+  # sparkwing measured for it, are both clamped to these before the pod
+  # is created, requests and burst limits alike. Empty means no ceiling,
+  # so a pin becomes the pod size verbatim. Set them at or under
+  # limitRange.max, and at or under what one node can actually schedule.
+  jobCeiling:
+    cpu: ""
+    memory: ""
+
   # Optional Pod-level scheduling controls. Empty = no constraints.
   nodeSelector: {}
   tolerations: []
@@ -415,3 +425,54 @@ containerSecurityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
+
+# -----------------------------------------------------------------------
+# 8. Namespace resource guards. The runner clamps a pipeline's declared
+#    pin to runner.jobCeiling, so these are the cluster-side backstop for
+#    anything the runner does not create:
+#    a LimitRange bounds one container, a ResourceQuota bounds the
+#    namespace total. Both are off by default because an install that
+#    already sizes its pods elsewhere would start failing admission the
+#    moment a quota appears.
+# -----------------------------------------------------------------------
+limitRange:
+  # true creates the LimitRange below. Every container in the namespace,
+  # including the Job pods the k8s runner backend creates, is then held
+  # to it: a pod asking for more than max is rejected at admission.
+  enabled: false
+  # Ceiling for one container. Size it above the runner, cache, and logs
+  # pods' own limits. It binds on a runner Job only when it sits under
+  # runner.jobCeiling, which the runner already enforces per pod: a pod
+  # asks for a burst limit of twice its core charge and 1.25x its memory,
+  # both capped at runner.jobCeiling.
+  max:
+    cpu: "16"
+    memory: 64Gi
+  # Floor for one container. A pod asking for less is rejected, which is
+  # what stops a pipeline pinning a sliver of a core that no quota counts.
+  # Empty leaves containers free to ask for anything.
+  min:
+    cpu: 10m
+    memory: 16Mi
+  # Limits given to a container that declares none.
+  default:
+    cpu: "2"
+    memory: 2Gi
+  # Requests given to a container that declares none.
+  defaultRequest:
+    cpu: 100m
+    memory: 128Mi
+
+resourceQuota:
+  # true creates the ResourceQuota below. Once it exists, every pod in
+  # the namespace must declare the requests and limits it counts, so
+  # this requires limitRange.enabled=true for its default and
+  # defaultRequest; the chart refuses to render without it.
+  enabled: false
+  # Namespace totals, passed through verbatim as spec.hard. Add object
+  # counts (pods, persistentvolumeclaims) here when you want them.
+  hard:
+    requests.cpu: "32"
+    requests.memory: 64Gi
+    limits.cpu: "64"
+    limits.memory: 128Gi

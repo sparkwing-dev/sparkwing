@@ -35,6 +35,10 @@ func runHandleTriggerCLI(args []string) error {
 			"empty derives it from SPARKWING_GITCACHE_URL, \"off\" disables (env: SPARKWING_DEPENDENCY_PROXY_URL)")
 	imagePullPolicy := fs.String("image-pull-policy", os.Getenv("SPARKWING_IMAGE_PULL_POLICY"),
 		"imagePullPolicy for runner pods: Always | IfNotPresent | Never (default IfNotPresent; env: SPARKWING_IMAGE_PULL_POLICY)")
+	k8sCPUCeiling := fs.String("k8s-cpu-ceiling", os.Getenv("SPARKWING_K8S_CPU_CEILING"),
+		"hard CPU ceiling for runner pods as a Kubernetes quantity (8, 500m); a pipeline pin or measured charge above it is clamped (empty = no ceiling; env: SPARKWING_K8S_CPU_CEILING)")
+	k8sMemoryCeiling := fs.String("k8s-memory-ceiling", os.Getenv("SPARKWING_K8S_MEMORY_CEILING"),
+		"hard memory ceiling for runner pods as a Kubernetes quantity (8Gi); a pipeline pin or measured charge above it is clamped (empty = no ceiling; env: SPARKWING_K8S_MEMORY_CEILING)")
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
 	k8sNodeSelector := stringSliceFlag(splitEnvList(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR")))
 	fs.Var(&k8sNodeSelector, "runner-node-selector", "node selector for runner pods, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
@@ -98,6 +102,8 @@ func runHandleTriggerCLI(args []string) error {
 			DependencyProxyURL:         *dependencyProxy,
 			DependencyProxyFallbackURL: os.Getenv("SPARKWING_GITCACHE_URL"),
 			ImagePullPolicy:            *imagePullPolicy,
+			CPUCeiling:                 *k8sCPUCeiling,
+			MemoryCeiling:              *k8sMemoryCeiling,
 		})
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)
@@ -129,6 +135,8 @@ func runHandleTriggerCLI(args []string) error {
 				DependencyProxyURL:         *dependencyProxy,
 				DependencyProxyFallbackURL: os.Getenv("SPARKWING_GITCACHE_URL"),
 				ImagePullPolicy:            *imagePullPolicy,
+				CPUCeiling:                 *k8sCPUCeiling,
+				MemoryCeiling:              *k8sMemoryCeiling,
 			})
 			if err != nil {
 				return fmt.Errorf("warm runner (fallback k8s): %w", err)

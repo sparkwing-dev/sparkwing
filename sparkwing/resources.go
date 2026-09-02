@@ -12,9 +12,10 @@ import (
 // pipeline actually costs. Pins are the exception, not the norm -- the
 // posture is "declare nothing, sparkwing measures; pin sparingly and
 // sparkwing polices the pin." An absent pin means admission measures the
-// pipeline and admits from those measurements. A pin is still not a limit
-// -- work that exceeds it is not throttled or killed; it sets the charge
-// admission reserves, nothing more.
+// pipeline and admits from those measurements. A pin sets the charge
+// admission reserves; local execution throttles and kills nothing that
+// exceeds it, while the Kubernetes backend turns the pin into the pod's
+// requests and limits, capped by the operator's configured ceiling.
 type ResourceHints struct {
 	// Cores is the pinned peak number of CPU cores the work uses.
 	// Fractional values are meaningful (0.5 = half a core). Zero means
@@ -59,8 +60,10 @@ func MemoryGB(n float64) ResourceHint {
 // work that must never share the host, or pre-sizing a brand-new pipeline
 // before any profile exists. A pin is authoritative, so sparkwing polices
 // it: when a pin drifts far from what the pipeline actually costs, the run
-// ends with a one-line warning to update or remove it. A pin is not a
-// limit -- it never caps or kills the work.
+// ends with a one-line warning to update or remove it. Locally a pin is not
+// a limit: it caps nothing and kills nothing. On the Kubernetes backend it
+// becomes the pod's requests and limits, so there it does bound the work, and
+// an operator who configured a runner ceiling caps the pin at that ceiling.
 //
 //	func (p *Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in Inputs, rc sparkwing.RunContext) error {
 //	    plan.Resources(sparkwing.Cores(4), sparkwing.MemoryGB(8))
@@ -87,7 +90,8 @@ func (p *Plan) ResourceHints() *ResourceHints {
 
 // Resources pins this node's peak CPU and memory. Same semantics as
 // [Plan.Resources], scoped to one node: an explicit, authoritative charge
-// admission uses instead of measuring, policed for drift, never a limit.
+// admission uses instead of measuring, policed for drift, enforced as a pod
+// limit (under the operator's runner ceiling) only on the Kubernetes backend.
 // Pin sparingly -- prefer letting sparkwing measure.
 //
 //	sw.Job(plan, "integration", &Integration{}).

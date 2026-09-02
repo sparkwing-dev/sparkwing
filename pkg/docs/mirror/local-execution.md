@@ -399,6 +399,20 @@ For a manually launched runner, `SPARKWING_RUNNER_SA` supplies the service
 account used by `--runner k8s`, `--trigger-runner k8s`, and warm fallback Jobs;
 the matching command-line flags take precedence.
 
+On Kubernetes a pipeline's `.Resources()` pin becomes the Job pod's requests
+and limits, so an operator bounds it: `--k8s-cpu-ceiling` and
+`--k8s-memory-ceiling` (or `SPARKWING_K8S_CPU_CEILING` and
+`SPARKWING_K8S_MEMORY_CEILING`, which the Helm values
+`runner.jobCeiling.cpu` and `runner.jobCeiling.memory` set) take Kubernetes
+quantities such as `8` and `16Gi`. A pin or a measured charge above the
+ceiling is clamped to it, burst limit included, and the runner logs the pin,
+the ceiling, and the size it settled on, and writes the same line to the run
+as a `resource_clamped` event. Both default to empty, which means no ceiling
+and a pin that becomes the pod size verbatim. A value that is not a positive
+Kubernetes quantity fails at startup rather than at pod creation. The
+namespace-wide backstop is the chart's `limitRange` and `resourceQuota`; see
+the `sparkwing-runner-bundle` README.
+
 The first remote-machine deployment assumes a trusted single-tenant boundary.
 Give each device its own short-lived runner token, revoke it when the device
 leaves the pool, and do not expose a raw unauthenticated cache outside a

@@ -218,6 +218,19 @@ func TestFetchPipelineSource_BadSHA(t *testing.T) {
 	}
 }
 
+func TestFetchExactSHARejectsARevisionThatIsNotAnObjectID(t *testing.T) {
+	for _, sha := range []string{"--upload-pack=evil", "main", "abc1234", "HEAD", ""} {
+		dest := t.TempDir()
+		err := fetchExactSHA("https://cache.example", "https://cache.example/git/widgets", "", sha, dest)
+		if err == nil || !strings.Contains(err.Error(), "hex object id") {
+			t.Errorf("fetchExactSHA(%q) error = %v, want a rejected object id", sha, err)
+		}
+		if _, statErr := os.Stat(filepath.Join(dest, ".git")); statErr == nil {
+			t.Errorf("fetchExactSHA(%q) ran git before validating the revision", sha)
+		}
+	}
+}
+
 func TestFetchPipelineSource_NoSparkwingDir(t *testing.T) {
 	repoParent := t.TempDir()
 	work := filepath.Join(t.TempDir(), "noSparkwing-work")

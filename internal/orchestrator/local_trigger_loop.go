@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
+
+var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
 func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileName, parentRepoDir string, logger *slog.Logger, wedgeBudget time.Duration) {
 	if logger == nil {
@@ -211,7 +214,7 @@ func prepareTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir 
 		}
 	}
 	snapshotDir := filepath.Join(tempRoot, "checkout")
-	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "add", "--detach", snapshotDir, revision)
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "add", "--detach", "--", snapshotDir, revision)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.RemoveAll(tempRoot)
 		return "", func() {}, &RetrySourceUnavailableError{
@@ -309,6 +312,12 @@ func locateRetryRepo(ctx context.Context, trig *store.Trigger) (string, error) {
 	expectedRevision := strings.TrimSpace(trig.TriggerEnv[retryprovenance.RevisionKey])
 	if expectedRevision == "" {
 		return "", &RetrySourceUnavailableError{Reason: "source run did not record a Git revision"}
+	}
+	// safety: the recorded revision reaches git as a positional argument, so only an object id may pass.
+	if !gitObjectRE.MatchString(expectedRevision) {
+		return "", &RetrySourceUnavailableError{
+			Reason: fmt.Sprintf("recorded revision %q is not a git object id", expectedRevision),
+		}
 	}
 	repoDir := filepath.Clean(trig.TriggerEnv[retryprovenance.RepoDirKey])
 	if repoDir == "." || repoDir == "" {

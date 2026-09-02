@@ -110,8 +110,11 @@ exist on other commands; profiles are the only config surface.
 Register a new connection profile
 
 Creates a new entry in profiles.yaml. --name and --controller
-are required; --token is optional. Configure storage and service
-backends by editing profiles.yaml.
+are required; the token is optional. --token-stdin reads the
+token from stdin and prompts without echo when stdin is a
+terminal; prefer it over --token, which is visible to other
+processes in the process list and recorded in shell history.
+Configure storage and service backends by editing profiles.yaml.
 
 ### Flags
 
@@ -119,13 +122,17 @@ backends by editing profiles.yaml.
 |---|---|
 | `--name NAME` | Profile name (unique per profiles.yaml) (required) |
 | `--controller URL` | Controller base URL (required) |
-| `--token TOKEN` | Bearer token (omit for local/unauthed stacks) |
+| `--token TOKEN` | Bearer token, visible to other processes and shell history (omit for local/unauthed stacks) |
+| `--token-stdin` | Read the bearer token from stdin, prompting without echo on a terminal |
 
 ### Examples
 
 ```sh
-# Add a prod profile
-sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN
+# Add a prod profile, prompting for the token
+sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token-stdin
+
+# Add a prod profile from a piped token
+printf %s "$TOKEN" | sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token-stdin
 
 # Add a local profile without auth
 sparkwing configure profiles add --name local --controller http://127.0.0.1:4344
@@ -199,8 +206,13 @@ sparkwing configure profiles remove --name old-stage
 Update fields on an existing profile
 
 Only flags you pass are overwritten. --token="" explicitly
-clears the token (empty value, not an omitted flag). Use
---show-token on 'profiles show' afterward to confirm.
+clears the token (empty value, not an omitted flag), and
+--token-stdin with empty input clears it too. --token-stdin
+reads the token from stdin and prompts without echo when stdin
+is a terminal; prefer it over --token, which is visible to
+other processes in the process list and recorded in shell
+history. Use --show-token on 'profiles show' afterward to
+confirm.
 
 ### Flags
 
@@ -208,13 +220,14 @@ clears the token (empty value, not an omitted flag). Use
 |---|---|
 | `--name NAME` | Profile name to mutate (required) |
 | `--controller URL` | New controller URL |
-| `--token TOKEN` | New bearer token (empty string clears) |
+| `--token TOKEN` | New bearer token, visible to other processes and shell history (empty string clears) |
+| `--token-stdin` | Read the new bearer token from stdin, prompting without echo on a terminal |
 
 ### Examples
 
 ```sh
 # Rotate a profile's token
-sparkwing configure profiles set --name prod --token $NEW_TOKEN
+sparkwing configure profiles set --name prod --token-stdin
 
 # Change a profile's controller
 sparkwing configure profiles set --name prod --controller https://api.sparkwing.example

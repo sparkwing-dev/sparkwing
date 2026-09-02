@@ -93,6 +93,8 @@ var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9_./-]+$`)
 
 var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
+const maxNegotiateCommits = 256
+
 func validateGitRef(ref string) error {
 	if ref == "" {
 		return fmt.Errorf("empty git ref")
@@ -108,6 +110,13 @@ func validateGitRef(ref string) error {
 		return fmt.Errorf("invalid git ref %q: contains '..'", ref)
 	}
 	return nil
+}
+
+func short(ref string) string {
+	if len(ref) <= 8 {
+		return ref
+	}
+	return ref[:8]
 }
 
 var (
@@ -351,11 +360,11 @@ func (fs *fetchState) problems() []string {
 		msgs = append(msgs, "All git fetches are failing -- SSH may be broken or the pod is resource-exhausted")
 	}
 	for name, rs := range fs.repos {
-		short := strings.TrimSuffix(name, ".git")
+		repoName := strings.TrimSuffix(name, ".git")
 		if recent := recentReclones(rs.reclones); recent > 1 {
 			msgs = append(msgs, fmt.Sprintf(
 				"repo %s: recovery reclone ran %d times in 24h -- persistent fetch failure; investigate the underlying git error; recloning on every archive request is expensive",
-				short, recent))
+				repoName, recent))
 		}
 		if rs.lastError == "" {
 			continue
@@ -363,7 +372,7 @@ func (fs *fetchState) problems() []string {
 		if time.Since(rs.lastErrorAt) > 10*time.Minute {
 			continue
 		}
-		msg := fmt.Sprintf("repo %s: %s", short, friendlyFetchError(rs.lastError))
+		msg := fmt.Sprintf("repo %s: %s", repoName, friendlyFetchError(rs.lastError))
 		msgs = append(msgs, msg)
 	}
 	return msgs
@@ -586,7 +595,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// #nosec G702 -- git runs as argv with a constant binary and a ref that cannot begin with a dash
-	commitBytes, err := exec.Command("git", "-C", bareRepo, "rev-parse", branch).Output()
+	commitBytes, err := exec.Command("git", "-C", bareRepo, "rev-parse", "--verify", "--end-of-options", branch).Output()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("branch %q not found", branch), http.StatusNotFound)
 		return
@@ -597,7 +606,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("unexpected commit hash for branch %q: %q", branch, commit), http.StatusInternalServerError)
 		return
 	}
-	shortCommit := commit[:8]
+	shortCommit := short(commit)
 
 	tarball := filepath.Join(archDir, hash+"-"+shortCommit+".tar.gz")
 	// #nosec G703 -- the archive name is a repository hash plus a hex-validated commit prefix
@@ -779,7 +788,7 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 	refreshMirrorBestEffort(hash, bareRepo)
 
 	// #nosec G702 -- git runs as argv with a constant binary and a validated ref leading the object name
-	out, err := exec.Command("git", "-C", bareRepo, "show", branch+":"+filePath).Output()
+	out, err := exec.Command("git", "-C", bareRepo, "show", "--end-of-options", branch+":"+filePath).Output()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("file not found: %s:%s", branch, filePath), http.StatusNotFound)
 		return
@@ -826,7 +835,7 @@ func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// #nosec G702 -- git runs as argv with a constant binary and a ref that cannot begin with a dash
-	out, err := exec.Command("git", "-C", bareRepo, "rev-parse", ref).Output()
+	out, err := exec.Command("git", "-C", bareRepo, "rev-parse", "--verify", "--end-of-options", ref).Output()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("path not found: %s", ref), http.StatusNotFound)
 		return
@@ -868,7 +877,7 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 	refreshMirrorBestEffort(hash, bareRepo)
 
 	// #nosec G702 -- git runs as argv with a constant binary and refs that cannot begin with a dash
-	err := exec.Command("git", "-C", bareRepo, "merge-base", "--is-ancestor", commit, branch).Run()
+	err := exec.Command("git", "-C", bareRepo, "merge-base", "--is-ancestor", "--", commit, branch).Run()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("commit %s is not on branch %s", commit, branch), http.StatusNotFound)
 		return
@@ -1431,7 +1440,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("warning: incremental upload failed, storing as-is: %v", err)
 		} else {
-			log.Printf("describe: upload %s (incremental from %s, %d bytes)", id, base[:8], size)
+			log.Printf("describe: upload %s (incremental from %s, %d bytes)", id, short(base), size)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "size": size})
 			return
@@ -1469,7 +1478,7 @@ func handleIncrementalUpload(diffData []byte, repoURL, base string) (string, int
 	defer func() { _ = os.RemoveAll(workDir) }()
 
 	if err := archiveToDir(bareRepo, base, workDir); err != nil {
-		return "", 0, fmt.Errorf("checkout base %s: %w", base[:8], err)
+		return "", 0, fmt.Errorf("checkout base %s: %w", short(base), err)
 	}
 
 	tmpDiff, err := os.CreateTemp("", "sparkwing-diff-*.tar.gz")
@@ -1584,6 +1593,18 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo and commits required", http.StatusBadRequest)
 		return
 	}
+	// safety: every commit costs one git fork, so an unbounded list is a free fork bomb.
+	if len(req.Commits) > maxNegotiateCommits {
+		http.Error(w, fmt.Sprintf("at most %d commits per negotiate request", maxNegotiateCommits), http.StatusBadRequest)
+		return
+	}
+	for _, commit := range req.Commits {
+		// safety: each commit reaches git as a revision argument, so only an object id may pass.
+		if !gitObjectRE.MatchString(commit) {
+			http.Error(w, "each commit must be a 40-64 character hex object id", http.StatusBadRequest)
+			return
+		}
+	}
 
 	hash := repoHash(req.Repo)
 	bareRepo := filepath.Join(repoDir, hash+".git")
@@ -1600,9 +1621,9 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 	lock.Unlock()
 
 	for _, commit := range req.Commits {
-		err := exec.Command("git", "-C", bareRepo, "cat-file", "-t", commit).Run()
+		err := exec.Command("git", "-C", bareRepo, "cat-file", "-t", "--", commit).Run()
 		if err == nil {
-			log.Printf("sync negotiate: found common ancestor %s for %s", commit[:8], hash)
+			log.Printf("sync negotiate: found common ancestor %s for %s", short(commit), hash)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": commit, "found": true})
 			return
@@ -1625,6 +1646,13 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo query param required", http.StatusBadRequest)
 		return
 	}
+	// safety: this URL becomes the mirror's origin, which a later request fetches.
+	validRepoURL, err := sourceurl.ValidateCloneURL(repoURL)
+	if err != nil {
+		http.Error(w, "invalid repo URL: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	repoURL = validRepoURL
 	sha := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sha")))
 	if !gitObjectRE.MatchString(sha) {
 		http.Error(w, "sha query param must be a 40-64 character hex object id", http.StatusBadRequest)
@@ -1662,7 +1690,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
 		// #nosec G706 -- the repository hash and the commit are pattern-validated
-		log.Printf("seed: creating bare repo from bundle for %s at %s", hash, sha[:8])
+		log.Printf("seed: creating bare repo from bundle for %s at %s", hash, short(sha))
 		if out, err := gitCmd("init", "--bare", bareRepo); err != nil {
 			http.Error(w, fmt.Sprintf("init bare repo failed: %s\n%s", err, out), http.StatusInternalServerError)
 			return
@@ -1677,7 +1705,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	} else {
 		enableSHAFetch(bareRepo)
 		// #nosec G706 -- the repository hash and the commit are pattern-validated
-		log.Printf("seed: updating bare repo from bundle for %s at %s", hash, sha[:8])
+		log.Printf("seed: updating bare repo from bundle for %s at %s", hash, short(sha))
 		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), bundleRef+":"+seedRef); err != nil {
 			http.Error(w, fmt.Sprintf("fetch seed ref failed: %s\n%s", err, out), http.StatusBadRequest)
 			return
@@ -1702,7 +1730,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	pruneUnreachableSeedObjects(bareRepo)
 
 	// #nosec G706 -- the repository hash and the commit are pattern-validated
-	log.Printf("seed: %s seeded %s (%d bytes)", hash, sha[:8], size)
+	log.Printf("seed: %s seeded %s (%d bytes)", hash, short(sha), size)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "size": size})
 }

@@ -264,8 +264,9 @@ ingress:
   # render fails on `tls: []` or `web.requireLogin: false` until this
   # says the exposure is deliberate. Must be a bool: a quoted string
   # fails the render rather than reading as an opt-out. With `tls: []`
-  # the web Deployment also gets `SPARKWING_WEB_INSECURE_COOKIES=1`, so
-  # a browser can hold a session over plain HTTP.
+  # the web Deployment also gets `SPARKWING_WEB_INSECURE_COOKIES=1` and
+  # `--allow-insecure-cookies-remote`, so a browser can hold a session
+  # over plain HTTP.
   allowInsecure: false
 
 # -----------------------------------------------------------------------
