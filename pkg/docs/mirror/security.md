@@ -369,7 +369,8 @@ cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
   |------------|---------|--------|
   | `--max-node-bytes` (`SPARKWING_LOGS_MAX_NODE_BYTES`) | 64MiB | Stored-byte cap for one node's log. Appends past it store a `[sparkwing-logs] truncated` marker once and are then dropped with `204`. |
   | `--max-run-bytes` (`SPARKWING_LOGS_MAX_RUN_BYTES`) | 1GiB | Same cap across every node log in one run. |
-  | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. |
+  | `--max-inflight-bytes` (`SPARKWING_LOGS_MAX_INFLIGHT_BYTES`) | 32MiB | Request-body bytes all in-flight appends may hold in memory at once; further appends are refused with `503`. Keep it well under the pod's memory limit. |
+  | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. A volume the service cannot measure is treated as full. |
   | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off) | Age after a run's last write at which the sweeper deletes its logs. Off by default so an upgrade deletes nothing; `168h` is a common choice. |
   | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
   | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
@@ -379,6 +380,15 @@ cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
   the matches it found with `"truncated": true`. Search also requires
   `run_id`; a query without one is refused with `400` rather than
   walking every stored run.
+
+  The runner-bundle chart passes these through as `logs.limits.*`
+  (`maxNodeBytes`, `maxRunBytes`, `maxInflightBytes`, `minFreeBytes`,
+  `retention`, `sweepInterval`, `searchMaxBytes`, `searchTimeout`); an
+  empty value keeps the binary's default. Size them against
+  `logs.storage.size`, because a volume left to fill answers `507` to
+  every append until you turn on retention or delete runs. A malformed
+  or negative value stops the service at startup rather than falling
+  back to the default.
 
 - **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
   behind an ingress/proxy that enforces HTTPS.

@@ -273,6 +273,33 @@ logs:
     storageClassName: ""
     keepOnUninstall: true
 
+  # Resource quotas passed to sparkwing-logs. Each entry becomes the
+  # flag of the same name; leave one empty to keep the binary's
+  # default, and set it to 0 to turn that bound off. Size them against
+  # storage.size above: on the defaults the volume fills to
+  # min-free-bytes and every further append answers 507 until you turn
+  # on retention or delete runs. See docs/security.md.
+  limits:
+    # Stored-byte cap for one node's log (default 64MiB).
+    maxNodeBytes: ""
+    # Stored-byte cap for every node log in one run (default 1GiB).
+    maxRunBytes: ""
+    # Request-body bytes all in-flight appends may hold at once
+    # (default 32MiB). Keep it well under resources.limits.memory.
+    maxInflightBytes: ""
+    # Free space below which appends are rejected with 507
+    # (default 512MiB).
+    minFreeBytes: ""
+    # Age after a run's last write at which the sweeper deletes it.
+    # Off unless you set it, so an upgrade deletes no history.
+    retention: ""
+    # How often the sweeper runs (default 1h).
+    sweepInterval: ""
+    # Bytes one log search may read (default 256MiB).
+    searchMaxBytes: ""
+    # How long one log search may scan (default 10s).
+    searchTimeout: ""
+
   resources:
     requests:
       cpu: 10m

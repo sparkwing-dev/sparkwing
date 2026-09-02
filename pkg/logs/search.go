@@ -145,6 +145,10 @@ func scanNode(f *os.File, needle, runID, nodeID string, limit int, budget *searc
 			})
 		}
 	}
+	// safety: a line past the scanner's buffer ends the scan early, so the response must not claim completeness.
+	if scanner.Err() != nil {
+		resp.Truncated = true
+	}
 }
 
 type searchBudget struct {
@@ -168,7 +172,7 @@ func (b *searchBudget) spent() bool {
 	if b.stopped {
 		return true
 	}
-	if b.ctx.Err() != nil {
+	if b.ctx.Err() != nil || (!b.deadline.IsZero() && time.Now().After(b.deadline)) {
 		b.stopped = true
 	}
 	return b.stopped
@@ -188,10 +192,7 @@ func (b *searchBudget) charge(n int64) bool {
 	if b.lines%searchClockEvery != 0 {
 		return false
 	}
-	if b.ctx.Err() != nil || (!b.deadline.IsZero() && time.Now().After(b.deadline)) {
-		b.stopped = true
-	}
-	return b.stopped
+	return b.spent()
 }
 
 func writeJSONResponse(w http.ResponseWriter, status int, body any) {

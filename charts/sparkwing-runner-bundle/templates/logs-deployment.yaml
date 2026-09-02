@@ -58,6 +58,24 @@ spec:
             {{- if not .Values.logs.allowUnauthenticated }}
             - --require-auth
             {{- end }}
+            {{- $limits := .Values.logs.limits | default dict }}
+            {{- range $limit := list
+                  (dict "flag" "--max-node-bytes" "value" $limits.maxNodeBytes)
+                  (dict "flag" "--max-run-bytes" "value" $limits.maxRunBytes)
+                  (dict "flag" "--max-inflight-bytes" "value" $limits.maxInflightBytes)
+                  (dict "flag" "--min-free-bytes" "value" $limits.minFreeBytes)
+                  (dict "flag" "--retention" "value" $limits.retention)
+                  (dict "flag" "--sweep-interval" "value" $limits.sweepInterval)
+                  (dict "flag" "--search-max-bytes" "value" $limits.searchMaxBytes)
+                  (dict "flag" "--search-timeout" "value" $limits.searchTimeout) }}
+            {{- $value := $limit.value }}
+            {{- if not (kindIs "invalid" $value) }}
+            {{- if ne (toString $value) "" }}
+            - {{ $limit.flag }}
+            - {{ $value | toString | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.logs.service.targetPort }}

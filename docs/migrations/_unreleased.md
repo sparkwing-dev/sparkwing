@@ -408,10 +408,12 @@ CHANGELOG links here.
   still answers `204`; later appends answer `204` and store nothing, so a
   chatty node degrades its own log rather than failing its run. An append with
   less than `--min-free-bytes` (512MiB) free answers `507`, which the log sink
-  retries and then reports as `logs_dropped`. Search requires `run_id` and
-  answers `400` without one, reads at most `--search-max-bytes` (256MiB) for at
-  most `--search-timeout` (10s), stops when the caller disconnects, and sets
-  `"truncated": true` on a response any of those stopped.
+  retries and then reports as `logs_dropped`, as does an append that arrives
+  while in-flight request bodies already hold `--max-inflight-bytes` (32MiB),
+  which answers `503`. Search requires `run_id` and answers `400` without one,
+  reads at most `--search-max-bytes` (256MiB) for at most `--search-timeout`
+  (10s), stops when the caller disconnects, and sets `"truncated": true` on a
+  response any of those stopped.
 - **Migration:** None for a stock install. Raise `--max-node-bytes` or
   `--max-run-bytes` if a pipeline legitimately emits more than the defaults and
   you would rather spend the disk than read a truncated log; the marker in the
@@ -420,7 +422,12 @@ CHANGELOG links here.
   (`SPARKWING_LOGS_RETENTION`, for example `168h`), which sweeps every run whose
   last write is older than that window on the `--sweep-interval` tick. A caller
   that searched the whole store now passes `run_id`, and one that needs
-  complete results checks `truncated` and narrows the query.
+  complete results checks `truncated` and narrows the query. On Kubernetes the
+  runner-bundle chart carries every one of these as `logs.limits.*`, so sizing
+  them for your volume no longer means forking the chart. A malformed or
+  negative value stops the service at startup instead of quietly restoring the
+  default, so check any `SPARKWING_LOGS_*` you already set (`7d` and `64MiB`
+  are not accepted; use `168h` and `67108864`).
 - **Why:** Every runner holds a token that may append, and one chatty pipeline
   could fill the volume for every other run or pin the service on a whole-store
   scan.

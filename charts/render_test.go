@@ -897,6 +897,41 @@ func TestLogsRefusesToStartUnauthenticatedByDefault(t *testing.T) {
 	}
 }
 
+func TestLogsQuotaFlagsComeFromValues(t *testing.T) {
+	if args := runnerContainer(t, renderLogs(t)).Args; containsArg(args, "--max-node-bytes") {
+		t.Errorf("logs args = %v, want the binary's own defaults when the operator sets no quota", args)
+	}
+	args := runnerContainer(t, renderLogs(t,
+		"logs.limits.maxNodeBytes=1048576",
+		"logs.limits.maxInflightBytes=0",
+		"logs.limits.retention=168h")).Args
+	for flag, want := range map[string]string{
+		"--max-node-bytes":     "1048576",
+		"--max-inflight-bytes": "0",
+		"--retention":          "168h",
+	} {
+		if !containsArg(args, flag) {
+			t.Errorf("logs args = %v, want %s", args, flag)
+			continue
+		}
+		if got := argValue(args, flag); got != want {
+			t.Errorf("%s = %q, want %q", flag, got, want)
+		}
+	}
+	if containsArg(args, "--max-run-bytes") {
+		t.Errorf("logs args = %v, want no flag for a quota the operator left empty", args)
+	}
+}
+
+func argValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
 func TestFullChartControllerURLOverrideWins(t *testing.T) {
 	rendered := helmRender(t, "./sparkwing-full",
 		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing",

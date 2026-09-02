@@ -73,3 +73,43 @@ func TestEnvTruthyReadsOnlyExplicitOptIns(t *testing.T) {
 		}
 	}
 }
+
+func TestRunRejectsMalformedLimitEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		env   string
+		value string
+	}{
+		{name: "duration with a day suffix", env: "SPARKWING_LOGS_RETENTION", value: "7d"},
+		{name: "byte count with a unit", env: "SPARKWING_LOGS_MAX_NODE_BYTES", value: "64MiB"},
+		{name: "negative byte count", env: "SPARKWING_LOGS_MIN_FREE_BYTES", value: "-1"},
+		{name: "negative duration", env: "SPARKWING_LOGS_SWEEP_INTERVAL", value: "-1h"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.env, tc.value)
+			err := run(nil)
+			if err == nil {
+				t.Fatalf("run accepted %s=%q and fell back to the default bound", tc.env, tc.value)
+			}
+			if !strings.Contains(err.Error(), tc.env) {
+				t.Errorf("err = %v, want it to name %s", err, tc.env)
+			}
+		})
+	}
+}
+
+func TestRunRejectsNegativeLimitFlags(t *testing.T) {
+	for _, flag := range []string{"--max-node-bytes", "--max-run-bytes", "--max-inflight-bytes", "--retention"} {
+		value := "-1"
+		if flag == "--retention" {
+			value = "-1h"
+		}
+		err := run([]string{flag, value})
+		if err == nil {
+			t.Fatalf("run accepted %s=%s, which turns that bound off instead of failing", flag, value)
+		}
+		if !strings.Contains(err.Error(), flag) {
+			t.Errorf("err = %v, want it to name %s", err, flag)
+		}
+	}
+}

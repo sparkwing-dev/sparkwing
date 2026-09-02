@@ -51,14 +51,24 @@ code change to unlock.
 ### Security
 
 - **logs:** Bound what one runner token can spend on the logs service. Appends
-  read the request body before taking a lock that is now sharded per run and
-  node, so a slow POST no longer stalls every other node's writes. New
-  `--max-node-bytes`, `--max-run-bytes`, `--min-free-bytes`, `--retention`,
-  `--sweep-interval`, `--search-max-bytes`, and `--search-timeout` flags (each
-  with a `SPARKWING_LOGS_*` environment variable) cap stored bytes, expire old
-  runs, and bound one search; `GET /api/v1/logs/search` now requires `run_id`
-  and reports `"truncated": true` when a budget stops the scan. Retention is
-  off unless you set it, so an upgrade deletes no history. See the
+  read the request body before taking a lock that is now sharded per stored
+  file, so a slow POST no longer stalls every other node's writes, and a global
+  in-flight byte budget (`--max-inflight-bytes`, 32MiB) refuses further appends
+  with `503` rather than letting concurrent bodies outgrow the pod's memory.
+  New `--max-node-bytes`, `--max-run-bytes`, `--max-inflight-bytes`,
+  `--min-free-bytes`, `--retention`, `--sweep-interval`, `--search-max-bytes`,
+  and `--search-timeout` flags (each with a `SPARKWING_LOGS_*` environment
+  variable, and each surfaced as `logs.limits.*` in the runner-bundle chart)
+  cap stored bytes, expire old runs, and bound one search; a malformed or
+  negative value now stops the service instead of silently restoring the
+  default. The byte caps are reserved under one lock, so concurrent appends
+  cannot overshoot them and two spellings of one node id share the file's cap.
+  A storage volume the service cannot measure is treated as full.
+  `GET /api/v1/logs/search` now requires `run_id` and reports
+  `"truncated": true` when a budget or an over-long line stops the scan.
+  Retention is off unless you set it, so an upgrade deletes no history, and
+  `GET /api/v1/health` no longer names the storage path or the volume's free
+  bytes to an unauthenticated caller. See the
   [operator checklist](docs/security.md#operator-checklist) and the
   [migration guide](docs/migrations/_unreleased.md).
 - **controller:** GitHub webhook deliveries are bound to the repository that
