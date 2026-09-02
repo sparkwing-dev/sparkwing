@@ -39,37 +39,56 @@ func run(args []string) error {
 			"deletes every run's logs for anyone who can reach it. Leave unset "+
 			"for laptop-local use.")
 
-	defaults := logs.DefaultLimits()
-	maxNodeBytes := fs.Int64("max-node-bytes", envInt64("SPARKWING_LOGS_MAX_NODE_BYTES", defaults.MaxNodeBytes),
+	defaults, err := limitsFromEnv(logs.DefaultLimits())
+	if err != nil {
+		return err
+	}
+	maxNodeBytes := fs.Int64("max-node-bytes", defaults.MaxNodeBytes,
 		"stored-byte cap for one node's log; further appends land a truncation marker instead. "+
 			"0 disables the cap (env: SPARKWING_LOGS_MAX_NODE_BYTES)")
-	maxRunBytes := fs.Int64("max-run-bytes", envInt64("SPARKWING_LOGS_MAX_RUN_BYTES", defaults.MaxRunBytes),
+	maxRunBytes := fs.Int64("max-run-bytes", defaults.MaxRunBytes,
 		"stored-byte cap for all node logs in one run; 0 disables the cap "+
 			"(env: SPARKWING_LOGS_MAX_RUN_BYTES)")
-	minFreeBytes := fs.Int64("min-free-bytes", envInt64("SPARKWING_LOGS_MIN_FREE_BYTES", int64(defaults.MinFreeBytes)),
+	maxInFlightBytes := fs.Int64("max-inflight-bytes", defaults.MaxInFlightBytes,
+		"request-body bytes all in-flight appends may hold in memory at once; further appends "+
+			"are refused with 503. 0 disables the bound (env: SPARKWING_LOGS_MAX_INFLIGHT_BYTES)")
+	minFreeBytes := fs.Int64("min-free-bytes", int64(defaults.MinFreeBytes),
 		"free space on the storage volume below which appends are rejected with 507; "+
 			"0 disables the floor (env: SPARKWING_LOGS_MIN_FREE_BYTES)")
-	retention := fs.Duration("retention", envDuration("SPARKWING_LOGS_RETENTION", defaults.Retention),
+	retention := fs.Duration("retention", defaults.Retention,
 		"how long a run's logs survive after their last write; 0, the default, keeps them "+
 			"forever, and 168h is a common choice (env: SPARKWING_LOGS_RETENTION)")
-	sweepInterval := fs.Duration("sweep-interval", envDuration("SPARKWING_LOGS_SWEEP_INTERVAL", defaults.SweepInterval),
+	sweepInterval := fs.Duration("sweep-interval", defaults.SweepInterval,
 		"how often the retention sweeper runs (env: SPARKWING_LOGS_SWEEP_INTERVAL)")
-	searchMaxBytes := fs.Int64("search-max-bytes", envInt64("SPARKWING_LOGS_SEARCH_MAX_BYTES", defaults.SearchMaxBytes),
+	searchMaxBytes := fs.Int64("search-max-bytes", defaults.SearchMaxBytes,
 		"bytes one search request may read before it returns a truncated result; "+
 			"0 disables the cap (env: SPARKWING_LOGS_SEARCH_MAX_BYTES)")
-	searchTimeout := fs.Duration("search-timeout", envDuration("SPARKWING_LOGS_SEARCH_TIMEOUT", defaults.SearchTimeout),
+	searchTimeout := fs.Duration("search-timeout", defaults.SearchTimeout,
 		"how long one search request may scan before it returns a truncated result; "+
 			"0 disables the deadline (env: SPARKWING_LOGS_SEARCH_TIMEOUT)")
 	_ = fs.Parse(args)
 
+	if err := checkNonNegative(
+		flagValue{"--max-node-bytes", *maxNodeBytes},
+		flagValue{"--max-run-bytes", *maxRunBytes},
+		flagValue{"--max-inflight-bytes", *maxInFlightBytes},
+		flagValue{"--min-free-bytes", *minFreeBytes},
+		flagValue{"--search-max-bytes", *searchMaxBytes},
+		flagValue{"--retention", int64(*retention)},
+		flagValue{"--sweep-interval", int64(*sweepInterval)},
+		flagValue{"--search-timeout", int64(*searchTimeout)},
+	); err != nil {
+		return err
+	}
 	limits := logs.Limits{
-		MaxNodeBytes:   nonNegative(*maxNodeBytes),
-		MaxRunBytes:    nonNegative(*maxRunBytes),
-		MinFreeBytes:   uint64(nonNegative(*minFreeBytes)),
-		Retention:      *retention,
-		SweepInterval:  *sweepInterval,
-		SearchMaxBytes: nonNegative(*searchMaxBytes),
-		SearchTimeout:  *searchTimeout,
+		MaxNodeBytes:     *maxNodeBytes,
+		MaxRunBytes:      *maxRunBytes,
+		MaxInFlightBytes: *maxInFlightBytes,
+		MinFreeBytes:     uint64(*minFreeBytes),
+		Retention:        *retention,
+		SweepInterval:    *sweepInterval,
+		SearchMaxBytes:   *searchMaxBytes,
+		SearchTimeout:    *searchTimeout,
 	}
 
 	if *requireAuth {
@@ -103,35 +122,79 @@ func run(args []string) error {
 	})
 }
 
-func nonNegative(n int64) int64 {
-	if n < 0 {
-		return 0
-	}
-	return n
+type flagValue struct {
+	name string
+	n    int64
 }
 
-func envInt64(name string, def int64) int64 {
+// safety: a negative bound would silently disable the cap it names, so it stops the service instead.
+func checkNonNegative(values ...flagValue) error {
+	for _, v := range values {
+		if v.n < 0 {
+			return fmt.Errorf("%s must not be negative; pass 0 to turn that bound off", v.name)
+		}
+	}
+	return nil
+}
+
+// safety: a value the operator meant as a bound must not decay into the default without saying so.
+func limitsFromEnv(def logs.Limits) (logs.Limits, error) {
+	var err error
+	if def.MaxNodeBytes, err = envInt64("SPARKWING_LOGS_MAX_NODE_BYTES", def.MaxNodeBytes); err != nil {
+		return def, err
+	}
+	if def.MaxRunBytes, err = envInt64("SPARKWING_LOGS_MAX_RUN_BYTES", def.MaxRunBytes); err != nil {
+		return def, err
+	}
+	if def.MaxInFlightBytes, err = envInt64("SPARKWING_LOGS_MAX_INFLIGHT_BYTES", def.MaxInFlightBytes); err != nil {
+		return def, err
+	}
+	minFree, err := envInt64("SPARKWING_LOGS_MIN_FREE_BYTES", int64(def.MinFreeBytes))
+	if err != nil {
+		return def, err
+	}
+	def.MinFreeBytes = uint64(minFree)
+	if def.Retention, err = envDuration("SPARKWING_LOGS_RETENTION", def.Retention); err != nil {
+		return def, err
+	}
+	if def.SweepInterval, err = envDuration("SPARKWING_LOGS_SWEEP_INTERVAL", def.SweepInterval); err != nil {
+		return def, err
+	}
+	if def.SearchMaxBytes, err = envInt64("SPARKWING_LOGS_SEARCH_MAX_BYTES", def.SearchMaxBytes); err != nil {
+		return def, err
+	}
+	def.SearchTimeout, err = envDuration("SPARKWING_LOGS_SEARCH_TIMEOUT", def.SearchTimeout)
+	return def, err
+}
+
+func envInt64(name string, def int64) (int64, error) {
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
-		return def
+		return def, nil
 	}
 	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || n < 0 {
-		return def
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not a byte count", name, raw)
 	}
-	return n
+	if n < 0 {
+		return 0, fmt.Errorf("%s=%q must not be negative; pass 0 to turn that bound off", name, raw)
+	}
+	return n, nil
 }
 
-func envDuration(name string, def time.Duration) time.Duration {
+func envDuration(name string, def time.Duration) (time.Duration, error) {
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
-		return def
+		return def, nil
 	}
 	d, err := time.ParseDuration(raw)
-	if err != nil || d < 0 {
-		return def
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not a duration such as 168h or 30m", name, raw)
 	}
-	return d
+	if d < 0 {
+		return 0, fmt.Errorf("%s=%q must not be negative; pass 0 to turn that bound off", name, raw)
+	}
+	return d, nil
 }
 
 // safety: --require-auth advertises auth on /api/v1/health, so a URL that resolves no token must not start.

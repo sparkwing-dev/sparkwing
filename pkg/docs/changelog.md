@@ -80,14 +80,24 @@ code change to unlock.
   See the
   [migration guide](docs/migrations/_unreleased.md#breaking-submitted-runs-carry-an-allow-listed-environment).
 - **logs:** Bound what one runner token can spend on the logs service. Appends
-  read the request body before taking a lock that is now sharded per run and
-  node, so a slow POST no longer stalls every other node's writes. New
-  `--max-node-bytes`, `--max-run-bytes`, `--min-free-bytes`, `--retention`,
-  `--sweep-interval`, `--search-max-bytes`, and `--search-timeout` flags (each
-  with a `SPARKWING_LOGS_*` environment variable) cap stored bytes, expire old
-  runs, and bound one search; `GET /api/v1/logs/search` now requires `run_id`
-  and reports `"truncated": true` when a budget stops the scan. Retention is
-  off unless you set it, so an upgrade deletes no history. See the
+  read the request body before taking a lock that is now sharded per stored
+  file, so a slow POST no longer stalls every other node's writes, and a global
+  in-flight byte budget (`--max-inflight-bytes`, 32MiB) refuses further appends
+  with `503` rather than letting concurrent bodies outgrow the pod's memory.
+  New `--max-node-bytes`, `--max-run-bytes`, `--max-inflight-bytes`,
+  `--min-free-bytes`, `--retention`, `--sweep-interval`, `--search-max-bytes`,
+  and `--search-timeout` flags (each with a `SPARKWING_LOGS_*` environment
+  variable, and each surfaced as `logs.limits.*` in the runner-bundle chart)
+  cap stored bytes, expire old runs, and bound one search; a malformed or
+  negative value now stops the service instead of silently restoring the
+  default. The byte caps are reserved under one lock, so concurrent appends
+  cannot overshoot them and two spellings of one node id share the file's cap.
+  A storage volume the service cannot measure is treated as full.
+  `GET /api/v1/logs/search` now requires `run_id` and reports
+  `"truncated": true` when a budget or an over-long line stops the scan.
+  Retention is off unless you set it, so an upgrade deletes no history, and
+  `GET /api/v1/health` no longer names the storage path or the volume's free
+  bytes to an unauthenticated caller. See the
   [operator checklist](docs/security.md#operator-checklist) and the
   [migration guide](docs/migrations/_unreleased.md).
 - **controller:** GitHub webhook deliveries are bound to the repository that
@@ -96,12 +106,16 @@ code change to unlock.
   gives a pipeline an allow-list of repositories and gives a pipeline or a
   repository a signing secret of its own, so handing a repository owner a
   secret no longer hands them every other pipeline: a delivery naming a
-  repository outside the pipeline's list answers `403`, and the shared
+  repository outside the pipeline's list answers `404`, and the shared
   `GITHUB_WEBHOOK_SECRET` stays the fallback for whatever the bindings do not
-  name. Each delivery's `X-GitHub-Delivery` is now stored on its trigger under
-  a store-wide unique constraint (schema 24), so a replayed delivery answers
-  `409` at any pipeline instead of starting a second run, and a delivery
-  arriving without that header answers `400`.
+  name. The claimed slug is normalized once, so no case fold can point the
+  secret lookup and the binding check at different repositories, and a
+  `repos` list that is present but empty refuses every repository rather than
+  none. Each delivery is recorded under both its `X-GitHub-Delivery` id and a
+  digest of the material its signature covered (schema 25), so re-sending an
+  accepted body answers `409` -- naming the run the first delivery produced --
+  however its delivery header reads, and a delivery arriving without that
+  header answers `400`.
 - **controller:** Secret envelopes are now bound to the row they belong to
   -- the secret name and its owning repository -- as additional
   authenticated data under an `enc:v2:` prefix, so a ciphertext copied onto
