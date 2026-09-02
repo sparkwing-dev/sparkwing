@@ -20,6 +20,17 @@ type nodeManifestReader interface {
 
 func stageConsumedArtifacts(ctx context.Context, store storage.ArtifactStore, state nodeManifestReader, runID, workspace string, edges []sparkwing.ConsumeEdge) (int, error) {
 	staged := 0
+	if len(edges) == 0 {
+		return staged, nil
+	}
+	// safety: every staged path is resolved through the workspace root, so a
+	// symlink planted by an earlier node cannot redirect a write out of it.
+	root, err := os.OpenRoot(workspace)
+	if err != nil {
+		return staged, err
+	}
+	defer func() { _ = root.Close() }()
+
 	for _, e := range edges {
 		node, err := state.GetNode(ctx, runID, e.Producer)
 		if err != nil {
@@ -33,11 +44,11 @@ func stageConsumedArtifacts(ctx context.Context, store storage.ArtifactStore, st
 			return staged, fmt.Errorf("producer %q manifest: %w", e.Producer, err)
 		}
 		for _, entry := range manifest.Entries {
-			dest, err := stageDest(workspace, e.Into, entry.Path)
+			rel, err := stageRel(e.Into, entry.Path)
 			if err != nil {
 				return staged, fmt.Errorf("producer %q: %w", e.Producer, err)
 			}
-			if err := stageBlob(ctx, store, entry, dest); err != nil {
+			if err := stageBlob(ctx, store, root, entry, rel); err != nil {
 				return staged, fmt.Errorf("producer %q artifact %q: %w", e.Producer, entry.Path, err)
 			}
 			staged++
@@ -63,41 +74,51 @@ func fetchManifest(ctx context.Context, store storage.ArtifactStore, digest stri
 	return m, nil
 }
 
-func stageBlob(ctx context.Context, store storage.ArtifactStore, entry artifactEntry, dest string) error {
+var maxStagedArtifactBytes = int64(8 << 30)
+
+func stageBlob(ctx context.Context, store storage.ArtifactStore, root *os.Root, entry artifactEntry, rel string) error {
 	rc, err := store.Get(ctx, artifactBlobKey(entry.Digest))
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rc.Close() }()
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return err
+	if parent := filepath.Dir(rel); parent != "." {
+		if err := root.MkdirAll(parent, 0o755); err != nil {
+			return err
+		}
 	}
-	mode := os.FileMode(entry.Mode)
-	f, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	mode := os.FileMode(entry.Mode).Perm()
+	// safety: replace an existing destination instead of opening through it,
+	// so a symlink left in the workspace cannot capture the write.
+	_ = root.Remove(rel)
+	f, err := root.OpenFile(rel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, rc); err != nil {
+	n, err := io.Copy(f, io.LimitReader(rc, maxStagedArtifactBytes+1))
+	if err != nil {
 		_ = f.Close()
 		return err
+	}
+	if n > maxStagedArtifactBytes {
+		_ = f.Close()
+		return fmt.Errorf("blob exceeds the staging size limit of %d bytes", maxStagedArtifactBytes)
 	}
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Chmod(dest, mode)
+	return root.Chmod(rel, mode)
 }
 
-func stageDest(workspace, into, relPath string) (string, error) {
+func stageRel(into, relPath string) (string, error) {
 	into = filepath.FromSlash(into)
 	relPath = filepath.FromSlash(relPath)
 	if filepath.IsAbs(into) || filepath.IsAbs(relPath) {
 		return "", fmt.Errorf("staged path %q must be relative to the workspace", relPath)
 	}
-	rel := filepath.Join(into, relPath)
-	dest := filepath.Join(workspace, rel)
-	clean := filepath.Clean(workspace)
-	if dest != clean && !strings.HasPrefix(dest, clean+string(os.PathSeparator)) {
+	rel := filepath.Clean(filepath.Join(into, relPath))
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("staged path %q escapes workspace", rel)
 	}
-	return dest, nil
+	return rel, nil
 }

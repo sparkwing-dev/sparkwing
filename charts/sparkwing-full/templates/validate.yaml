@@ -11,3 +11,11 @@
 {{- if and .Values.web.tokenSecret.name (not .Values.web.tokenSecret.key) -}}
 {{- fail "sparkwing-full: web.tokenSecret.key is required when web.tokenSecret.name is set" -}}
 {{- end -}}
+{{- if and .Values.ingress.enabled (not .Values.ingress.allowInsecure) -}}
+{{- if not .Values.ingress.tls -}}
+{{- fail "sparkwing-full: ingress.enabled=true with an empty ingress.tls publishes the dashboard over plain HTTP, and its login cookies are Secure so no browser can hold a session. Set ingress.tls, or set ingress.allowInsecure=true to publish it unencrypted anyway" -}}
+{{- end -}}
+{{- if not .Values.web.requireLogin -}}
+{{- fail "sparkwing-full: ingress.enabled=true with web.requireLogin=false publishes a dashboard that anyone reaching the Ingress can drive. Set web.requireLogin=true once the admin user exists, or set ingress.allowInsecure=true to publish it open anyway" -}}
+{{- end -}}
+{{- end -}}
