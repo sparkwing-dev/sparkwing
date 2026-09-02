@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -121,6 +122,8 @@ var (
 
 	recloneCooldown = 1 * time.Hour
 
+	workspaceSeedMaxAge = 24 * time.Hour
+
 	repoLocks   = map[string]*sync.Mutex{}
 	repoLocksMu sync.Mutex
 )
@@ -176,6 +179,14 @@ func bearerToken(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(rest)
+}
+
+func authenticated(r *http.Request) bool {
+	if apiToken == "" {
+		return false
+	}
+	got := bearerToken(r)
+	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(apiToken)) == 1
 }
 
 func requireToken(next http.HandlerFunc) http.HandlerFunc {
@@ -1146,6 +1157,8 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+const workspaceRefPrefix = "refs/sparkwing-workspace/"
+
 var validJobID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 func handleArtifacts(w http.ResponseWriter, r *http.Request) {
@@ -1255,16 +1268,24 @@ func artifactDownload(w http.ResponseWriter, r *http.Request, jobID string) {
 	}
 
 	if len(matches) == 1 {
+		// safety: an artifact is caller-supplied content, so it downloads instead of rendering in place.
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", attachmentDisposition(filepath.Base(matches[0])))
 		http.ServeFile(w, r, filepath.Join(jobDir, matches[0]))
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/tar")
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", attachmentDisposition(jobID+".tar"))
 	cmd := exec.Command("tar", append([]string{"-cf", "-", "-C", jobDir}, matches...)...)
 	cmd.Stdout = w
 	if err := cmd.Run(); err != nil {
 		log.Printf("warning: tar artifacts for %s: %v", jobID, err)
 	}
+}
+
+func attachmentDisposition(name string) string {
+	return "attachment; filename=" + strconv.Quote(strings.ReplaceAll(name, `"`, ""))
 }
 
 func artifactList(w http.ResponseWriter, r *http.Request, jobID string) {
@@ -1572,7 +1593,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if workspace {
-		if err := retainWorkspaceSeed(bareRepo, seedRef, sha, 128); err != nil {
+		if err := retainWorkspaceSeed(bareRepo, seedRef, sha, 128, workspaceSeedMaxAge); err != nil {
 			_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
 			pruneUnreachableSeedObjects(bareRepo)
 			http.Error(w, "retain workspace seed: "+err.Error(), http.StatusInternalServerError)
@@ -1586,17 +1607,18 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "size": size})
 }
 
-func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int) error {
-	out, err := gitCmd("-C", bareRepo, "for-each-ref", "--format=%(refname)", "--sort=-refname", "refs/sparkwing-workspace/")
+func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int, maxAge time.Duration) error {
+	out, err := gitCmd("-C", bareRepo, "for-each-ref", "--format=%(refname)", "--sort=-refname", workspaceRefPrefix)
 	if err != nil {
 		return fmt.Errorf("list workspace refs: %w: %s", err, out)
 	}
 	refs := strings.Fields(out)
 	kept := refs[:0]
-	var duplicates []string
+	var stale []string
+	now := time.Now().UTC()
 	for _, existing := range refs {
-		if strings.HasSuffix(existing, "/"+sha) {
-			duplicates = append(duplicates, existing)
+		if strings.HasSuffix(existing, "/"+sha) || workspaceRefExpired(existing, now, maxAge) {
+			stale = append(stale, existing)
 			continue
 		}
 		kept = append(kept, existing)
@@ -1605,19 +1627,34 @@ func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int) error {
 		_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
 		return fmt.Errorf("workspace ref limit %d reached", limit)
 	}
-	ref := fmt.Sprintf("refs/sparkwing-workspace/%020d/%s", time.Now().UTC().UnixNano(), sha)
+	ref := fmt.Sprintf(workspaceRefPrefix+"%020d/%s", now.UnixNano(), sha)
 	if out, err := gitCmd("-C", bareRepo, "update-ref", ref, sha); err != nil {
 		return fmt.Errorf("create workspace ref: %w: %s", err, out)
 	}
-	for _, duplicate := range duplicates {
-		if deleted, deleteErr := gitCmd("-C", bareRepo, "update-ref", "-d", duplicate); deleteErr != nil {
-			return fmt.Errorf("refresh workspace ref %s: %w: %s", duplicate, deleteErr, deleted)
+	for _, expired := range stale {
+		if deleted, deleteErr := gitCmd("-C", bareRepo, "update-ref", "-d", expired); deleteErr != nil {
+			return fmt.Errorf("expire workspace ref %s: %w: %s", expired, deleteErr, deleted)
 		}
 	}
 	if out, err := gitCmd("-C", bareRepo, "update-ref", "-d", seedRef); err != nil {
 		return fmt.Errorf("remove transient seed ref: %w: %s", err, out)
 	}
 	return nil
+}
+
+func workspaceRefExpired(ref string, now time.Time, maxAge time.Duration) bool {
+	if maxAge <= 0 {
+		return false
+	}
+	stamp, _, ok := strings.Cut(strings.TrimPrefix(ref, workspaceRefPrefix), "/")
+	if !ok {
+		return false
+	}
+	nanos, err := strconv.ParseInt(stamp, 10, 64)
+	if err != nil {
+		return false
+	}
+	return now.Sub(time.Unix(0, nanos)) > maxAge
 }
 
 func pruneUnreachableSeedObjects(bareRepo string) {
@@ -1655,6 +1692,8 @@ func saveRepoNames() {
 	}
 }
 
+var validRepoName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
 func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -1667,6 +1706,10 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name and repo required", http.StatusBadRequest)
 		return
 	}
+	if !validRepoName.MatchString(name) {
+		http.Error(w, "invalid name: must be 1-64 alphanumeric/dash/underscore/dot chars", http.StatusBadRequest)
+		return
+	}
 	var err error
 	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
 	if err != nil {
@@ -1677,6 +1720,13 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	hash := repoHash(repoURL)
 
 	repoNamesMu.Lock()
+	existing, known := repoNames[name]
+	// safety: repointing a name redirects every clone of it, so an unauthenticated caller may not.
+	if known && existing != repoURL && !authenticated(r) {
+		repoNamesMu.Unlock()
+		http.Error(w, "name is already registered to another repository", http.StatusConflict)
+		return
+	}
 	repoNames[name] = repoURL
 	saveRepoNames()
 	repoNamesMu.Unlock()

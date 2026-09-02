@@ -51,16 +51,19 @@ func run(args []string) error {
 		"cleanup threshold for immutable proxy entries (content-addressed files). Falls back to $PROXY_MAX_AGE.")
 	fs.StringVar(&cfg.APIToken, "api-token",
 		envOr("SPARKWING_API_TOKEN", cfg.APIToken),
-		"bearer token required on the blob and sync endpoints. Required unless --allow-unauthenticated is set. Falls back to $SPARKWING_API_TOKEN.")
+		"bearer token required on the git, blob, artifact, and sync endpoints. Required unless --allow-unauthenticated is set. Falls back to $SPARKWING_API_TOKEN.")
 	fs.BoolVar(&cfg.AllowUnauthenticated, "allow-unauthenticated",
 		envBool("SPARKWING_CACHE_ALLOW_UNAUTHENTICATED", cfg.AllowUnauthenticated),
-		"start without a bearer token, leaving the blob and sync endpoints open to anyone who can reach the port. Falls back to $SPARKWING_CACHE_ALLOW_UNAUTHENTICATED.")
+		"start without a bearer token, leaving the git, blob, artifact, and sync endpoints open to anyone who can reach the port. Falls back to $SPARKWING_CACHE_ALLOW_UNAUTHENTICATED.")
 	fs.StringVar(&cfg.AutoRegisterRepos, "auto-register-repos",
 		envOr("GITCACHE_REPOS", cfg.AutoRegisterRepos),
 		"comma-separated name=url pairs cloned into the gitcache on startup. Falls back to $GITCACHE_REPOS.")
 	fs.StringVar(&cfg.SSHKeyDir, "ssh-key-dir",
 		envOr("SSH_KEY_DIR", cfg.SSHKeyDir),
 		"directory containing the SSH key + known_hosts (typically a k8s secret mount). Falls back to $SSH_KEY_DIR.")
+	fs.DurationVar(&cfg.WorkspaceSeedMaxAge, "workspace-seed-max-age",
+		envDuration("WORKSPACE_SEED_MAX_AGE", cfg.WorkspaceSeedMaxAge),
+		"how long a working-tree snapshot ref is retained before the next seed expires it. Negative disables expiry. Falls back to $WORKSPACE_SEED_MAX_AGE.")
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")

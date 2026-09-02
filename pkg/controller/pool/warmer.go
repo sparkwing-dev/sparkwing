@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,30 +21,52 @@ import (
 // controller.
 const WarmerServiceAccountName = "sparkwing-cache-warmer"
 
+// safety: the warmer runs privileged, so every entry must parse as a registry reference before it reaches the pod
+var imageReferencePattern = regexp.MustCompile(`^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*(?::[0-9]{1,5})?/)?` +
+	`[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*` +
+	`(?::[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})?(?:@sha256:[a-f0-9]{64})?$`)
+
+// safety: the list arrives as positional arguments so no entry is ever part of the script text
+const warmerScript = `set -e
+echo 'starting dockerd...'
+dockerd --host=unix:///var/run/docker.sock --data-root=/var/lib/docker &
+DOCKERD_PID=$!
+echo 'waiting for docker daemon...'
+until docker info > /dev/null 2>&1; do sleep 1; done
+echo 'docker ready'
+for img in "$@"; do
+	echo "==> pull $img"
+	docker pull "$img" || echo "WARN: failed to pull $img"
+done
+echo 'warmer complete'
+kill $DOCKERD_PID
+wait $DOCKERD_PID 2>/dev/null || true
+`
+
+func acceptedWarmImages(images []string) []string {
+	var accepted []string
+	for _, img := range images {
+		if !imageReferencePattern.MatchString(img) {
+			log.Printf("warmer: rejecting warm image %q: not a valid image reference", img)
+			continue
+		}
+		accepted = append(accepted, img)
+	}
+	return accepted
+}
+
 // WarmPVC runs a short-lived DinD pod that mounts the target PVC at /var/lib/docker
 // and pulls the warm image list into it. Once the pod completes, the PVC contains
-// a pre-populated Docker storage directory. An empty serviceAccount falls back
-// to [WarmerServiceAccountName].
+// a pre-populated Docker storage directory. Entries that do not parse as image
+// references are logged and dropped rather than passed to the pod. An empty
+// serviceAccount falls back to [WarmerServiceAccountName].
 func WarmPVC(ctx context.Context, client kubernetes.Interface, namespace, pvcName, serviceAccount string, warmImages []string) error {
 	if serviceAccount == "" {
 		serviceAccount = WarmerServiceAccountName
 	}
 	podName := fmt.Sprintf("sparkwing-cache-warmer-%s-%d", strings.TrimPrefix(pvcName, "sparkwing-cache-pool-"), time.Now().Unix())
 
-	var script strings.Builder
-	script.WriteString("set -e\n")
-	script.WriteString("echo 'starting dockerd...'\n")
-	script.WriteString("dockerd --host=unix:///var/run/docker.sock --data-root=/var/lib/docker &\n")
-	script.WriteString("DOCKERD_PID=$!\n")
-	script.WriteString("echo 'waiting for docker daemon...'\n")
-	script.WriteString("until docker info > /dev/null 2>&1; do sleep 1; done\n")
-	script.WriteString("echo 'docker ready'\n")
-	for _, img := range warmImages {
-		fmt.Fprintf(&script, "echo '==> pull %s'; docker pull %s || echo 'WARN: failed to pull %s'\n", img, img, img)
-	}
-	script.WriteString("echo 'warmer complete'\n")
-	script.WriteString("kill $DOCKERD_PID\n")
-	script.WriteString("wait $DOCKERD_PID 2>/dev/null || true\n")
+	images := acceptedWarmImages(warmImages)
 
 	privileged := true
 	automount := false
@@ -64,11 +87,10 @@ func WarmPVC(ctx context.Context, client kubernetes.Interface, namespace, pvcNam
 			AutomountServiceAccountToken: &automount,
 			Containers: []corev1.Container{
 				{
-					Name:  "warmer",
-					Image: "docker:27-dind@sha256:f649ef046008ca7f926a2571c32b0ac22e5c59eb61b959617f9acc2a4c638cf5",
-					Command: []string{
-						"sh", "-c", script.String(),
-					},
+					Name:    "warmer",
+					Image:   "docker:27-dind@sha256:f649ef046008ca7f926a2571c32b0ac22e5c59eb61b959617f9acc2a4c638cf5",
+					Command: []string{"sh", "-c", warmerScript, "warmer"},
+					Args:    images,
 					SecurityContext: &corev1.SecurityContext{
 						Privileged: &privileged,
 					},

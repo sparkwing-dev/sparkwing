@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 
 	flag "github.com/spf13/pflag"
 
@@ -28,7 +30,19 @@ func run(args []string) error {
 	root := fs.String("root", "", "storage root; explicit roots keep shared/PVC creation modes subject to umask (default: private $SPARKWING_HOME/logs-service)")
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
 		"controller URL used to resolve sw*_ tokens via /api/v1/auth/whoami; empty disables auth (env: SPARKWING_CONTROLLER_URL)")
+	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
+		"refuse to start when --controller is empty, guarding against "+
+			"accidentally deploying a logs service that serves, forges, and "+
+			"deletes every run's logs for anyone who can reach it. Leave unset "+
+			"for laptop-local use.")
 	_ = fs.Parse(args)
+
+	if *requireAuth && *controllerURL == "" {
+		return errors.New("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +
+			"--controller (SPARKWING_CONTROLLER_URL) is empty; point the logs " +
+			"service at a controller so it can resolve caller tokens, or drop " +
+			"--require-auth for laptop-local use")
+	}
 
 	privateRoot := *root == ""
 	if privateRoot {
@@ -50,4 +64,13 @@ func run(args []string) error {
 		return logs.ServePrivateWithTokens(ctx, *root, *addr, *controllerURL, nil)
 	}
 	return logs.ServeWithTokens(ctx, *root, *addr, *controllerURL, nil)
+}
+
+func envTruthy(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
