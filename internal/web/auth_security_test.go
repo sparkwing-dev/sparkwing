@@ -396,16 +396,17 @@ func TestUnsafeAPIProxyRequiresSessionBoundCSRF(t *testing.T) {
 	}
 	mu.Unlock()
 
-	for _, path := range []string{"/api/v1/runs/r1/cancel", "/api/v1/logs/mutate"} {
-		rec := request(path, "https://dashboard.example.com", "session-token", "session-token")
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("legitimate mutation %s = %d, want 204", path, rec.Code)
-		}
+	rec := request("/api/v1/runs/r1/cancel", "https://dashboard.example.com", "session-token", "session-token")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("legitimate mutation = %d, want 204", rec.Code)
+	}
+	if forged := request("/api/v1/logs/r1", "https://dashboard.example.com", "session-token", "session-token"); forged.Code != http.StatusNotFound {
+		t.Fatalf("logs write = %d, want 404", forged.Code)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(requests) != 2 {
-		t.Fatalf("upstream requests = %+v, want controller and logs mutation", requests)
+	if len(requests) != 1 {
+		t.Fatalf("upstream requests = %+v, want the controller mutation only", requests)
 	}
 	for _, got := range requests {
 		if got.body != `{"action":"cancel"}` || got.authorization != "Bearer service-token" ||

@@ -83,11 +83,13 @@ browser-facing dashboard proxy.
 The dashboard proxies a fixed list of controller routes: the run, node,
 approval, agent, and trend reads the SPA renders, plus the trigger, cancel,
 retry, debug-release, approval-resolve, and run-delete writes its buttons
-issue. Every other path under `/api/v1/` answers `404` at the web pod and
-never reaches the controller, so a signed-in tab cannot mint a token, read a
-secret, or create a user through the proxy. The list lives in
+issue. A second list covers the logs service and carries reads only, so the
+browser cannot delete a run's logs or append a forged line through the web pod.
+Every other path under `/api/v1/` answers `404` at the web pod and never
+reaches the upstream, so a signed-in tab cannot mint a token, read a secret, or
+create a user through the proxy. Both lists live in
 `internal/web/proxy_routes.go`, and a test holds each entry to the scope
-`pkg/controller/server.go` registers for that route.
+`pkg/controller/server.go` and `pkg/logs/server.go` register for that route.
 
 A browser session carries the scopes of the user who signed in. The proxy
 checks them against the target route before forwarding, so an account holding
@@ -101,6 +103,12 @@ The web pod's own service token needs `runs.read` plus `logs.read`. Add
 `approvals.write` where it resolves approval gates. That token bounds what the
 proxy can reach at all; the session's scopes bound what one signed-in user
 reaches through it.
+
+Deleting a run from the dashboard needs `admin` on both sides, because the
+controller registers `DELETE /api/v1/runs/{id}` at `admin`: the web pod's token
+must carry `admin` and so must the signed-in account. Leave `admin` off that
+token where operators should delete runs with the CLI instead; the dashboard
+button then reports `delete needs the admin scope` and nothing is removed.
 
 `sparkwing-web --require-login` needs a controller session backend. Pass
 `--controller URL`, or select a `--profile` whose `controller.url` is set. A

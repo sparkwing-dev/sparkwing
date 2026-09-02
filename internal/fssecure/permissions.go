@@ -43,6 +43,10 @@ func OpenFile(path string, flag int) (*os.File, error) {
 	return f, nil
 }
 
+// TightenOpen applies the private file mode to a file the caller has
+// already opened, such as through an [os.Root].
+func TightenOpen(f *os.File) error { return tightenOpen(f, FileMode) }
+
 func WriteFile(path string, data []byte) error {
 	f, err := OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
 	if err != nil {

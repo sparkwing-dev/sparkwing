@@ -32,12 +32,30 @@ var proxyRoutes = []proxyRoute{
 	{"DELETE /api/v1/runs/{id}", controller.ScopeAdmin},
 }
 
+// safety: the dashboard reads logs on behalf of a browser session, so the logs bearer
+// never carries a delete or an append off the browser-facing listener.
+var logsProxyRoutes = []proxyRoute{
+	{"GET /api/v1/logs/search", controller.ScopeLogsRead},
+	{"GET /api/v1/logs/{runID}", controller.ScopeLogsRead},
+	{"GET /api/v1/logs/{runID}/{nodeID}", controller.ScopeLogsRead},
+	{"GET /api/v1/logs/{runID}/{nodeID}/stream", controller.ScopeLogsRead},
+}
+
 func proxyAllowList(proxy http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	for _, route := range proxyRoutes {
 		mux.Handle(route.pattern, requireSessionScope(route.scope, proxy))
 	}
 	mux.HandleFunc("/api/v1/", routeNotProxied)
+	return mux
+}
+
+func logsProxyAllowList(proxy http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	for _, route := range logsProxyRoutes {
+		mux.Handle(route.pattern, requireSessionScope(route.scope, proxy))
+	}
+	mux.HandleFunc("/api/v1/logs/", routeNotProxied)
 	return mux
 }
 
