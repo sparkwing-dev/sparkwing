@@ -7,6 +7,56 @@ Report suspected vulnerabilities through
 not a public issue. The repository [security policy](https://github.com/sparkwing-dev/sparkwing/security/policy)
 defines supported versions and the information to include.
 
+## Trust model
+
+Read this before deciding who holds a token and which repositories share a
+deployment.
+
+**One controller is one trust domain.** Every token authenticates against
+the same store, and every run, secret, and concurrency key lives in it.
+Scopes narrow what a token may do; they do not partition the deployment by
+repository, team, or environment. Two projects that must not read each
+other's runs need two controllers, not two tokens in one.
+
+**Pipeline authors run code on runners.** A pipeline is Go that the runner
+compiles and executes, and the runner's bearer sits in the environment of
+that process, so pipeline code can call every route the token unlocks: read
+the secrets its repository owns, write node state, ship logs. Merging a
+change under `.sparkwing/` therefore hands the author the runner's
+authority, and the review that gates that merge is the control. Keeping the
+bearer out of the pipeline body is an open design step; see the extension
+points in [auth.md](auth.md).
+
+**A warm pool shares one process across repositories.** `sparkwing cluster
+runner` claims nodes in a loop and executes them in its own process until
+`--max-claims-before-restart` recycles the container. The controller hands
+out whatever node is ready, so consecutive nodes commonly belong to
+different repositories and share that process's memory, filesystem, and
+token. A pipeline that writes a credential to disk or leaves one in the
+environment leaves it where the next repository's pipeline reads it. Run
+`sparkwing cluster worker --runner k8s` to give each node its own Job pod
+where repositories do not trust each other; see
+[warm-pool.md](warm-pool.md).
+
+**`runs.read` is deployment-wide.** `GET /api/v1/runs` filters on the query
+the caller supplies, never on the caller. One `runs.read` token lists every
+run of every pipeline and repository the controller holds, along with the
+plan, the arguments, the event stream, the trends aggregate, and the queue
+view. Argument values the pipeline declared `secret:"true"` are masked;
+nothing else is. Give `runs.read` to a principal you would show the whole
+deployment's history.
+
+**The laptop dashboard serves an unauthenticated controller.** `sparkwing
+dashboard start` mounts the controller API and the dashboard on one
+listener with no token check, so anything that reaches the port can trigger
+pipelines and read secrets. The boundary is the bind address: the process
+refuses a non-loopback `--addr` unless the operator passes `--allow-remote`,
+and a browser request carrying a foreign `Origin` is refused unless the
+operator named that origin in `--allow-origin`. See
+[local-execution.md](local-execution.md#the-laptop-boundary). The
+cluster-mode controller is the authenticated deployment; laptop mode is a
+single-user tool on a single-user machine.
+
 ## Authentication and authorization
 
 Controller and logs requests carry a bearer token; each route declares
@@ -182,7 +232,7 @@ onto the unscoped row, or who edits a row to widen its own access, gets
 a value that fails to open rather than one that answers there.
 
 Values sealed before binding (`enc:v1:` envelopes) still open, and they
-are still substitutable until they are rebound. `sparkwing secret list`
+are still substitutable until they are rebound. `sparkwing secrets list`
 reports `BOUND false` for them (`"bound": false` on the API), and the
 controller reseals such a row into a bound envelope the first time it
 is read, so rows migrate as they are used. Re-setting a secret rebinds

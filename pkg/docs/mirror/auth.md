@@ -22,9 +22,9 @@ mapping is in the generated [api-reference.md](api-reference.md):
 
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
-| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/trends`, `/agents`, per-node metrics GETs  |
-| `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`                                   |
-| `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, and the per-node write routes (`activity`, `annotations`, `summary`, `steps/*`, `dispatch`, `metrics`, and similar); GET `nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce` |
+| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, per-node metrics GETs, and similar deployment-wide reads |
+| `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, `/gitcache/refresh` |
+| `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, and the per-node write routes (`activity`, `annotations`, `summary`, `steps/*`, `dispatch`, `metrics`, and similar); GET `nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`, `/pipelines/{name}/profile` |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`                               |

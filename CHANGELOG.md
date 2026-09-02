@@ -186,6 +186,21 @@ code change to unlock.
   followed, and every matched file is opened through an `os.Root` on the
   workspace rather than by the path the walk found.
 
+### Security
+
+- **docs:** The security documents now state what the code enforces. A Trust
+  model section in `docs/security.md` names one controller as one trust domain,
+  records that pipeline authors run code on runners with the runner's token in
+  the environment, that a warm pool executes work from different repositories
+  in one process, that `runs.read` reaches every run in the deployment, and
+  that `sparkwing dashboard start` serves an unauthenticated controller behind
+  a loopback bind; `docs/local-execution.md` states that same laptop boundary
+  beside the admission daemon's. `api/openapi.yaml` now describes every
+  registered controller route and carries each route's authorization as
+  `x-sparkwing-scope` instead of prose that could disagree with the router:
+  `bash bin/gen-api-docs.sh` writes it from `pkg/controller/server.go` and
+  `bash bin/check-api-spec.sh` fails the `pre-push` gate when the two drift.
+
 ## [v0.40.0] - 2026-09-02
 ### Security
 

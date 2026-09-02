@@ -398,6 +398,33 @@ binaries. Portable Go file modes do not describe Windows DACLs, so doctor
 reports that audit as unverified on Windows rather than claiming the ACL is
 private.
 
+### The laptop boundary
+
+Laptop mode trusts the user account on the machine, and nothing narrower.
+
+`sparkwing dashboard start` serves the controller API and the dashboard from
+one process with no bearer check, so every caller that reaches the listener
+can trigger pipelines, read secrets, and delete runs. It binds
+`127.0.0.1:4343` and refuses a non-loopback `--addr` unless you pass
+`--allow-remote`; a browser request whose `Origin` is neither loopback nor
+named in `--allow-origin` is refused too. Those checks are the whole
+boundary. Passing `--allow-remote` hands every host that can reach the port
+the authority of your account, which is why the flag exists rather than a
+quieter default.
+
+The admission daemon draws the same line. `wingd` listens on a unix socket
+whose path is a function of `SPARKWING_HOME`, and everything running as your
+account shares that daemon and can queue, inspect, cancel, and drain its
+runs. The socket carries no token, because a token your account can read is
+a token anything running as your account can read. Give each user of a
+shared host their own `SPARKWING_HOME`; see
+[security.md](security.md#local-daemon-socket) for the ownership, mode, and
+peer-credential checks that keep other accounts out.
+
+Cluster mode is where authentication lives. A controller reached over a
+network authenticates every request and scopes it per principal; see
+[auth.md](auth.md).
+
 **What sparkwing controls:**
 
 - Which clusters a pipeline can dispatch to (via the `--profile` target's
