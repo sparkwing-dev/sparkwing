@@ -411,3 +411,44 @@ CHANGELOG links here.
   custom image whose process writes outside `/tmp` needs its own
   `emptyDir` mount for that path, or `securityContext.readOnlyRootFilesystem`
   overridden for that container.
+
+## GitHub webhook bindings and replay protection
+
+- **Before:** Any holder of `GITHUB_WEBHOOK_SECRET` could drive any pipeline
+  against any repository, and a captured delivery could be re-sent without
+  limit.
+- **After:** `GITHUB_WEBHOOK_BINDINGS` binds each pipeline to the repositories
+  allowed to drive it and gives a pipeline or a repository its own signing
+  secret. The document is parsed strictly: an unknown field, a syntax error, or
+  content after the closing brace fails startup, and the controller logs the
+  resolved counts -- pipelines, bound repositories, pipelines refusing every
+  repository, repository secrets -- so a document that parsed to nothing is
+  visible. A `repos` list that is present but empty now refuses every
+  repository; a pipeline the document does not name, or that names no `repos`
+  key, is unchecked as before. A delivery whose `repository.full_name` is not
+  an ASCII `owner/name` slug is refused. Refusals are shaped so the status code
+  does not enumerate the tables: an unbound repository answers `404`, and once
+  any pipeline or repository carries its own secret, a delivery resolving to no
+  secret answers `401` rather than `503`.
+
+  Run-store schema 25 adds `triggers.webhook_replay_key`, a digest of the
+  pipeline and the request body -- exactly what the HMAC signs -- under a
+  store-wide unique constraint, alongside the schema 24 constraint on
+  `X-GitHub-Delivery`. Re-sending an accepted body answers `409` however its
+  delivery header reads, and the `409` body carries the `run_id` the first
+  delivery produced.
+- **Migration:** Upgrade the controller before the runners so the schema-25
+  column exists; older binaries refuse the upgraded SQL store. Review any
+  `GITHUB_WEBHOOK_BINDINGS` document for a `"repos": []` entry, which used to
+  allow every repository and now allows none, and for anything after the
+  closing brace, which used to be discarded and now fails startup. A caller
+  that keyed on the `403` for an unbound repository reads `404` now, and a
+  client that retried a webhook by changing `X-GitHub-Delivery` gets `409` with
+  the original run instead of a second run. `store.Trigger` gains
+  `WebhookReplayKey`, which `store.CreateTrigger` writes and no read returns;
+  `store.FindTriggerByWebhookReplay` resolves a refused delivery to the trigger
+  it collided with. `controller.ParseGitHubWebhookConfig` is the parser for the
+  environment document, moved out of the controller binary.
+- **Why:** A secret shared by every repository proves only that some holder
+  signed the body, and a replay key the sender picks and nothing signs is not a
+  replay key at all.

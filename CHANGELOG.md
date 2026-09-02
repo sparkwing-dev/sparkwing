@@ -56,12 +56,16 @@ code change to unlock.
   gives a pipeline an allow-list of repositories and gives a pipeline or a
   repository a signing secret of its own, so handing a repository owner a
   secret no longer hands them every other pipeline: a delivery naming a
-  repository outside the pipeline's list answers `403`, and the shared
+  repository outside the pipeline's list answers `404`, and the shared
   `GITHUB_WEBHOOK_SECRET` stays the fallback for whatever the bindings do not
-  name. Each delivery's `X-GitHub-Delivery` is now stored on its trigger under
-  a store-wide unique constraint (schema 24), so a replayed delivery answers
-  `409` at any pipeline instead of starting a second run, and a delivery
-  arriving without that header answers `400`.
+  name. The claimed slug is normalized once, so no case fold can point the
+  secret lookup and the binding check at different repositories, and a
+  `repos` list that is present but empty refuses every repository rather than
+  none. Each delivery is recorded under both its `X-GitHub-Delivery` id and a
+  digest of the material its signature covered (schema 25), so re-sending an
+  accepted body answers `409` -- naming the run the first delivery produced --
+  however its delivery header reads, and a delivery arriving without that
+  header answers `400`.
 - **controller:** Secret envelopes are now bound to the row they belong to
   -- the secret name and its owning repository -- as additional
   authenticated data under an `enc:v2:` prefix, so a ciphertext copied onto

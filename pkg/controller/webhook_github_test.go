@@ -362,6 +362,7 @@ func TestWebhookGitHub_RepositoryBinding(t *testing.T) {
 	cfg := controller.GitHubWebhookConfig{
 		Pipelines: map[string]controller.GitHubWebhookBinding{
 			"sample-app-build": {Repos: []string{"acme/sample-app"}},
+			"deny-all":         {Repos: []string{}},
 		},
 	}
 	for _, tc := range []struct {
@@ -372,9 +373,12 @@ func TestWebhookGitHub_RepositoryBinding(t *testing.T) {
 	}{
 		{"bound repository dispatches", "sample-app-build", "acme/sample-app", http.StatusAccepted},
 		{"binding ignores slug case", "sample-app-build", "ACME/Sample-App", http.StatusAccepted},
-		{"stranger repository refused", "sample-app-build", "attacker/evil", http.StatusForbidden},
-		{"missing repository refused", "sample-app-build", "", http.StatusForbidden},
+		{"stranger repository refused", "sample-app-build", "attacker/evil", http.StatusNotFound},
+		{"missing repository refused", "sample-app-build", "", http.StatusNotFound},
 		{"unbound pipeline is unchanged", "legacy-build", "attacker/evil", http.StatusAccepted},
+		{"non-ascii fold refused", "sample-app-build", "acme/\u017fample-app", http.StatusNotFound},
+		{"non-ascii fold refused at an unbound pipeline too", "legacy-build", "acme/\u017fample-app", http.StatusNotFound},
+		{"an empty repos list refuses every repository", "deny-all", "acme/sample-app", http.StatusNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ts, st := newBoundWebhookServer(t, testWebhookSecret, cfg)
@@ -432,17 +436,47 @@ func TestWebhookGitHub_ScopedSecrets(t *testing.T) {
 	}
 }
 
-func TestWebhookGitHub_NoSecretResolvesUnavailable(t *testing.T) {
+func TestWebhookGitHub_NoSecretMatchesTheSignatureRefusal(t *testing.T) {
 	cfg := controller.GitHubWebhookConfig{
 		RepoSecrets: map[string]string{"acme/sample-app": "repo-secret"},
 	}
 	ts, _ := newBoundWebhookServer(t, "", cfg)
-	body := pushBodyFor("acme/other")
-	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, signWebhook("repo-secret", body))
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("status=%d want 503", resp.StatusCode)
+	for _, tc := range []struct {
+		name string
+		repo string
+	}{
+		{"a repository with a secret answers the signature refusal", "acme/sample-app"},
+		{"a repository without one answers the same", "acme/other"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := pushBodyFor(tc.repo)
+			resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, "sha256=deadbeef")
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("status=%d want 401", resp.StatusCode)
+			}
+		})
 	}
+}
+
+func TestWebhookGitHub_NonASCIIFoldCannotSplitSecretFromBinding(t *testing.T) {
+	cfg := controller.GitHubWebhookConfig{
+		Pipelines: map[string]controller.GitHubWebhookBinding{
+			"demo": {Repos: []string{"acme/service"}},
+		},
+		RepoSecrets: map[string]string{"acme/service": "per-repo-secret"},
+	}
+	ts, st := newBoundWebhookServer(t, testWebhookSecret, cfg)
+
+	body := pushBodyFor("acme/\u017fervice")
+	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body,
+		signWebhook(testWebhookSecret, body))
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNotFound {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want 404 (body %s)", resp.StatusCode, raw)
+	}
+	expectNoTrigger(t, st)
 }
 
 func TestWebhookGitHub_ReplayedDeliveryConflicts(t *testing.T) {
@@ -471,10 +505,21 @@ func TestWebhookGitHub_ReplayedDeliveryConflicts(t *testing.T) {
 		t.Fatalf("cross-pipeline replay status=%d want 409 (body %s)", crossPipeline.StatusCode, raw)
 	}
 
-	fresh := postWebhookDelivery(t, ts.URL+"/webhooks/github/sample-app-build", "push", "delivery-8", body, sig)
-	defer func() { _ = fresh.Body.Close() }()
-	if fresh.StatusCode != http.StatusAccepted {
-		t.Errorf("fresh delivery status=%d want 202", fresh.StatusCode)
+	relabeled := postWebhookDelivery(t, ts.URL+"/webhooks/github/sample-app-build", "push", "delivery-8", body, sig)
+	defer func() { _ = relabeled.Body.Close() }()
+	if relabeled.StatusCode != http.StatusConflict {
+		raw, _ := io.ReadAll(relabeled.Body)
+		t.Fatalf("relabeled replay status=%d want 409 (body %s)", relabeled.StatusCode, raw)
+	}
+
+	fresh := pushBodyFor("acme/sample-app")
+	fresh = append(fresh[:len(fresh)-1], []byte(`, "deleted": false}`)...)
+	freshResp := postWebhookDelivery(t, ts.URL+"/webhooks/github/sample-app-build", "push", "delivery-9",
+		fresh, signWebhook(testWebhookSecret, fresh))
+	defer func() { _ = freshResp.Body.Close() }()
+	if freshResp.StatusCode != http.StatusAccepted {
+		raw, _ := io.ReadAll(freshResp.Body)
+		t.Fatalf("fresh delivery status=%d want 202 (body %s)", freshResp.StatusCode, raw)
 	}
 
 	var pending int
@@ -482,7 +527,45 @@ func TestWebhookGitHub_ReplayedDeliveryConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if pending != 2 {
-		t.Errorf("triggers = %d, want 2 (one per distinct delivery)", pending)
+		t.Errorf("triggers = %d, want 2 (one per distinct signed body)", pending)
+	}
+}
+
+func TestWebhookGitHub_DuplicateNamesTheRunItAlreadyMade(t *testing.T) {
+	ts, _ := newWebhookServer(t, testWebhookSecret)
+	body := pushBodyFor("acme/sample-app")
+	sig := signWebhook(testWebhookSecret, body)
+
+	first := postWebhookDelivery(t, ts.URL+"/webhooks/github/sample-app-build", "push", "delivery-7", body, sig)
+	defer func() { _ = first.Body.Close() }()
+	var accepted struct {
+		RunID  string `json:"run_id"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(first.Body).Decode(&accepted); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+	if accepted.RunID == "" {
+		t.Fatal("first delivery returned no run_id")
+	}
+
+	redelivery := postWebhookDelivery(t, ts.URL+"/webhooks/github/sample-app-build", "push", "delivery-7", body, sig)
+	defer func() { _ = redelivery.Body.Close() }()
+	if redelivery.StatusCode != http.StatusConflict {
+		t.Fatalf("redelivery status=%d want 409", redelivery.StatusCode)
+	}
+	var duplicate struct {
+		RunID  string `json:"run_id"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(redelivery.Body).Decode(&duplicate); err != nil {
+		t.Fatalf("decode redelivery response: %v", err)
+	}
+	if duplicate.RunID != accepted.RunID {
+		t.Errorf("duplicate run_id = %q, want the accepted run %q", duplicate.RunID, accepted.RunID)
+	}
+	if duplicate.Status != "duplicate" {
+		t.Errorf("duplicate status = %q, want duplicate", duplicate.Status)
 	}
 }
 
@@ -496,4 +579,48 @@ func TestWebhookGitHub_MissingDeliveryHeader(t *testing.T) {
 		t.Errorf("status=%d want 400", resp.StatusCode)
 	}
 	expectNoTrigger(t, st)
+}
+
+func TestParseGitHubWebhookConfig_MalformedDocuments(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"a second document after the first", `{"pipelines":{"a":{"repos":["x/y"]}}} {"repo_secrets":{"x/y":"s"}}`},
+		{"trailing text that is not json", `{"pipelines":{"a":{"repos":["x/y"]}}} this is not json at all`},
+		{"an unknown top-level field", `{"pipelines":{},"repo_allowlist":["x/y"]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := controller.ParseGitHubWebhookConfig(tc.raw); err == nil {
+				t.Fatal("ParseGitHubWebhookConfig accepted a malformed document")
+			}
+		})
+	}
+}
+
+func TestParseGitHubWebhookConfig_DuplicateReposKeyDeniesEveryRepository(t *testing.T) {
+	cfg, err := controller.ParseGitHubWebhookConfig(`{"pipelines":{"a":{"repos":["x/y"],"repos":[]}}}`)
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhookConfig: %v", err)
+	}
+	binding := cfg.Pipelines["a"]
+	if binding.Repos == nil || len(binding.Repos) != 0 {
+		t.Fatalf("Repos = %#v, want a present-but-empty list", binding.Repos)
+	}
+	if got := cfg.BindingCounts(); got.DenyAll != 1 {
+		t.Errorf("BindingCounts().DenyAll = %d, want 1", got.DenyAll)
+	}
+}
+
+func TestParseGitHubWebhookConfig_BindingCounts(t *testing.T) {
+	cfg, err := controller.ParseGitHubWebhookConfig(
+		`{"pipelines":{"a":{"repos":["x/y","x/z"]},"b":{"repos":[]},"c":{"secret":"s"}},` +
+			`"repo_secrets":{"x/y":"s"}}`)
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhookConfig: %v", err)
+	}
+	want := controller.GitHubWebhookBindingCounts{Pipelines: 3, Repos: 2, DenyAll: 1, RepoSecrets: 1}
+	if got := cfg.BindingCounts(); got != want {
+		t.Errorf("BindingCounts() = %+v, want %+v", got, want)
+	}
 }

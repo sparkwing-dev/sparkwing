@@ -534,6 +534,7 @@ func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
+func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
 func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
@@ -690,6 +691,8 @@ type Trigger struct {
 	ClaimSeq int64
 
 	WebhookDelivery string
+
+	WebhookReplayKey string
 }
 type TriggerFilter struct {
 	Statuses  []string
@@ -699,6 +702,7 @@ type TriggerFilter struct {
 }
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
+const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
 type User struct {
 	Name        string
 	PWHash      string

@@ -44,10 +44,17 @@ type GitHubWebhookBinding struct {
 	Repos  []string
 	Secret string
 }
+type GitHubWebhookBindingCounts struct {
+	Pipelines   int
+	Repos       int
+	DenyAll     int
+	RepoSecrets int
+}
 type GitHubWebhookConfig struct {
 	Pipelines   map[string]GitHubWebhookBinding
 	RepoSecrets map[string]string
 }
+func (c GitHubWebhookConfig) BindingCounts() GitHubWebhookBindingCounts
 type Loopback struct {
 }
 func (l *Loopback) Handler() http.Handler
@@ -72,6 +79,7 @@ type NoopDispatcher struct {
 	Logger *slog.Logger
 }
 func (n NoopDispatcher) Dispatch(_ context.Context, req RunRequest) error
+func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
 type PoolConfig struct {
 	Client kubernetes.Interface
 

@@ -19,6 +19,8 @@ import (
 
 const webhookBodyLimit = 1 << 20
 
+var errGitHubWebhookUnbound = errors.New("no pipeline is bound to this repository")
+
 // WithGitHubWebhookSecret installs the shared secret used to verify
 // incoming GitHub webhook signatures. It is the fallback for
 // deliveries that no narrower secret in [GitHubWebhookConfig] covers;
@@ -35,10 +37,11 @@ func (s *Server) WithGitHubWebhookSecret(secret string) *Server {
 //
 // A non-empty Repos list is an allow-list of "owner/name" slugs matched
 // case-insensitively: a delivery naming any other repository is
-// refused with 403, so holding a secret no longer means holding every
-// pipeline. An empty list binds no repository and leaves the delivery's
-// repository unchecked, which is the behavior of an unconfigured
-// pipeline.
+// refused with 404, so holding a secret no longer means holding every
+// pipeline. A Repos list that is present but empty binds no repository
+// and refuses every delivery. Omitting Repos altogether leaves the
+// delivery's repository unchecked, which is the behavior of a pipeline
+// the document does not name at all.
 type GitHubWebhookBinding struct {
 	Repos  []string `json:"repos,omitempty"`
 	Secret string   `json:"secret,omitempty"`
@@ -75,32 +78,138 @@ func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server {
 	return s
 }
 
+// ParseGitHubWebhookConfig decodes the GITHUB_WEBHOOK_BINDINGS document
+// into a [GitHubWebhookConfig], refusing anything it cannot account for:
+// an unknown field, a syntax error, or content after the document. The
+// empty string parses to the zero config, which binds nothing.
+func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error) {
+	var cfg GitHubWebhookConfig
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return cfg, nil
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
+		return GitHubWebhookConfig{}, err
+	}
+	// safety: Decode stops after one value, so trailing text would drop half a document and open the intake.
+	if dec.More() {
+		return GitHubWebhookConfig{}, errors.New("trailing content after the bindings document")
+	}
+	return cfg, nil
+}
+
+// GitHubWebhookBindingCounts summarizes what a bindings document
+// resolved to. The controller logs it at startup so an operator can see
+// whether the document they installed took effect.
+type GitHubWebhookBindingCounts struct {
+	Pipelines   int
+	Repos       int
+	DenyAll     int
+	RepoSecrets int
+}
+
+// BindingCounts reports the resolved shape of the document: how many
+// pipelines it names, how many repository slugs those pipelines bind,
+// how many of them bind an empty list and so refuse every delivery, and
+// how many repositories carry a secret of their own.
+func (c GitHubWebhookConfig) BindingCounts() GitHubWebhookBindingCounts {
+	counts := GitHubWebhookBindingCounts{
+		Pipelines:   len(c.Pipelines),
+		RepoSecrets: len(c.RepoSecrets),
+	}
+	for _, b := range c.Pipelines {
+		counts.Repos += len(b.Repos)
+		if b.Repos != nil && len(b.Repos) == 0 {
+			counts.DenyAll++
+		}
+	}
+	return counts
+}
+
 func (s *Server) githubWebhookSecretFor(pipeline, repo string) string {
 	if b, ok := s.githubWebhook.Pipelines[pipeline]; ok && b.Secret != "" {
 		return b.Secret
 	}
 	if repo != "" {
-		if secret := s.githubWebhook.RepoSecrets[strings.ToLower(repo)]; secret != "" {
+		if secret := s.githubWebhook.RepoSecrets[repo]; secret != "" {
 			return secret
 		}
 	}
 	return s.githubWebhookSecret
 }
 
+func (s *Server) githubWebhookHasScopedSecret() bool {
+	if len(s.githubWebhook.RepoSecrets) > 0 {
+		return true
+	}
+	for _, b := range s.githubWebhook.Pipelines {
+		if b.Secret != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) githubWebhookRepoAllowed(pipeline, repo string) bool {
 	b, ok := s.githubWebhook.Pipelines[pipeline]
-	if !ok || len(b.Repos) == 0 {
+	if !ok || b.Repos == nil {
 		return true
 	}
 	if repo == "" {
 		return false
 	}
 	for _, bound := range b.Repos {
-		if strings.EqualFold(bound, repo) {
+		if strings.ToLower(bound) == repo {
 			return true
 		}
 	}
 	return false
+}
+
+// safety: one normalized slug drives the secret lookup and the binding check, so no fold can split them apart.
+func normalizeGitHubRepo(slug string) (string, bool) {
+	owner, name, ok := strings.Cut(slug, "/")
+	if !ok || !asciiSlugPart(owner) || !asciiSlugPart(name) {
+		return "", false
+	}
+	return strings.ToLower(slug), true
+}
+
+func asciiSlugPart(part string) bool {
+	if part == "" || len(part) > 100 {
+		return false
+	}
+	for i := range len(part) {
+		c := part[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '-', c == '_', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// safety: the replay key covers what the signature covers, so a re-sent body cannot pass under a fresh header.
+func githubWebhookReplayKey(pipeline string, body []byte) string {
+	sum := sha256.New()
+	sum.Write([]byte(pipeline))
+	sum.Write([]byte{0})
+	sum.Write(body)
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+func (s *Server) writeGitHubDuplicate(w http.ResponseWriter, r *http.Request, pipeline, delivery string, body []byte) {
+	existing, err := s.store.FindTriggerByWebhookReplay(
+		r.Context(), githubWebhookReplayKey(pipeline, body), delivery)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusConflict, errors.New("delivery already accepted"))
+		return
+	}
+	writeJSON(w, http.StatusConflict, triggerResp{RunID: existing.ID, Status: "duplicate"})
 }
 
 func githubPayloadRepo(body []byte) string {
@@ -147,9 +256,15 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// safety: the repository comes from the unverified body only to choose which secret must have signed it.
-	claimedRepo := githubPayloadRepo(body)
+	rawRepo := githubPayloadRepo(body)
+	claimedRepo, repoWellFormed := normalizeGitHubRepo(rawRepo)
 	secret := s.githubWebhookSecretFor(pipeline, claimedRepo)
 	if secret == "" {
+		// safety: answering 503 only for a slug that has no secret of its own would read out the secret table.
+		if s.githubWebhookHasScopedSecret() {
+			writeError(w, http.StatusUnauthorized, errors.New("signature mismatch"))
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable,
 			errors.New("github webhook secret not configured on controller"))
 		return
@@ -160,11 +275,18 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if rawRepo != "" && !repoWellFormed {
+		s.logger.Warn("github webhook rejected",
+			"pipeline", pipeline, "reason", "repository is not an ascii owner/name slug")
+		writeError(w, http.StatusNotFound, errGitHubWebhookUnbound)
+		return
+	}
+
+	// safety: 404 rather than 403 so the status cannot be walked to enumerate the binding table.
 	if !s.githubWebhookRepoAllowed(pipeline, claimedRepo) {
 		s.logger.Warn("github webhook rejected",
 			"pipeline", pipeline, "repo", claimedRepo, "reason", "repository not bound to pipeline")
-		writeError(w, http.StatusForbidden,
-			errors.New("repository is not bound to this pipeline"))
+		writeError(w, http.StatusNotFound, errGitHubWebhookUnbound)
 		return
 	}
 
@@ -253,10 +375,12 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 		GithubOwner:     owner,
 		GithubRepo:      repoName,
 		WebhookDelivery: delivery,
-		CreatedAt:       time.Now(),
+		// safety: the delivery id is an unsigned header, so the digest of the signed body is what refuses a replay.
+		WebhookReplayKey: githubWebhookReplayKey(pipeline, body),
+		CreatedAt:        time.Now(),
 	}); err != nil {
 		if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
-			writeError(w, http.StatusConflict, errors.New("delivery already accepted"))
+			s.writeGitHubDuplicate(w, r, pipeline, delivery, body)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
@@ -370,10 +494,12 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 		GithubOwner:     owner,
 		GithubRepo:      repoName,
 		WebhookDelivery: delivery,
-		CreatedAt:       time.Now(),
+		// safety: the delivery id is an unsigned header, so the digest of the signed body is what refuses a replay.
+		WebhookReplayKey: githubWebhookReplayKey(pipeline, body),
+		CreatedAt:        time.Now(),
 	}); err != nil {
 		if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
-			writeError(w, http.StatusConflict, errors.New("delivery already accepted"))
+			s.writeGitHubDuplicate(w, r, pipeline, delivery, body)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
