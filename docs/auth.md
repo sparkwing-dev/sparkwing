@@ -8,7 +8,7 @@ and per-endpoint scope annotations.
 Raw tokens are `<prefix>_<entropy>`:
 
 - `swu_...` -- user. Created for humans (`sparkwing cluster tokens create --type user`).
-- `swr_...` -- runner. Created for laptop agents or pool replicas.
+- `swr_...` -- runner. Created for remote machine agents or pool replicas.
 - `sws_...` -- service. Created for in-cluster back-channel callers.
 
 The **prefix segment** is the first 12 characters of a raw token. It's

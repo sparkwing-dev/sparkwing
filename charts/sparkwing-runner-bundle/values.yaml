@@ -88,6 +88,12 @@ runner:
   # to trigger-claiming and leave the others node-only.
   alsoClaimTriggers: true
 
+  triggerRunner:
+    # inprocess executes nodes inside the trigger worker. warm offers nodes
+    # to remote agents first, then sends eligible overflow to Kubernetes.
+    # k8s sends every node to Kubernetes.
+    kind: inprocess
+
   # Optional metrics scrape port. The Prometheus client registry on
   # the runner serves /metrics here. Disable by setting to 0.
   metricsPort: 9090

@@ -212,7 +212,7 @@ func runRunnerCLI(args []string) error {
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
 	triggerRunnerKind := fs.String("trigger-runner", os.Getenv("SPARKWING_TRIGGER_RUNNER"),
-		"node runner used by claimed triggers: inprocess | k8s")
+		"node runner used by claimed triggers: inprocess | k8s | warm")
 	triggerRunnerNamespace := fs.String("trigger-runner-namespace", os.Getenv("POD_NAMESPACE"),
 		"namespace for trigger-spawned runner Jobs (k8s)")
 	triggerRunnerImage := fs.String("trigger-runner-image", os.Getenv("SPARKWING_RUNNER_IMAGE"),
@@ -252,6 +252,9 @@ func runRunnerCLI(args []string) error {
 	if *controllerURL == "" {
 		fs.Usage()
 		return errors.New("--controller is required")
+	}
+	if *triggerRunnerKind == "warm" && *claimNodes {
+		return errors.New("--trigger-runner=warm requires --claim-nodes=false so this process does not race remote agents")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

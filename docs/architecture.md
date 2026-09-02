@@ -84,9 +84,9 @@ pending nodes. For per-node isolation it launches a Kubernetes Job that
 runs `sparkwing run-node`. The runner downloads code from the cache,
 compiles and runs the pipeline, and reports results.
 
-Off-cluster runners (laptops, bare-metal) connect to the controller and
-claim nodes through its claim API; the route set and scopes are in
-[api-reference.md](api-reference.md).
+Off-cluster runners (developer machines, workstations, and servers) connect to
+the controller and claim nodes through its claim API; the route set and scopes
+are in [api-reference.md](api-reference.md).
 
 ### Cache
 

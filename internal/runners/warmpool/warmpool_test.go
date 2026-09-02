@@ -1,0 +1,318 @@
+package warmpool
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+type fallbackRunner struct {
+	calls atomic.Int64
+}
+
+func quietTestLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func (f *fallbackRunner) RunNode(context.Context, runner.Request) runner.Result {
+	f.calls.Add(1)
+	return runner.Result{Outcome: sparkwing.Success}
+}
+
+func newWarmPoolFixture(
+	t *testing.T,
+	needsLabels []string,
+	wrap func(http.Handler, *store.Store) http.Handler,
+) (*store.Store, *client.Client, func()) {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(context.Background(), store.Run{
+		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(context.Background(), store.Node{
+		RunID: "run-1", NodeID: "build", Status: "pending", NeedsLabels: needsLabels,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler := controller.New(st, quietTestLogger()).Handler()
+	if wrap != nil {
+		handler = wrap(handler, st)
+	}
+	srv := httptest.NewServer(handler)
+	cleanup := func() {
+		srv.Close()
+		_ = st.Close()
+	}
+	return st, client.New(srv.URL, nil), cleanup
+}
+
+func TestRunnerUsesRemoteClaimBeforeFallback(t *testing.T) {
+	_, ctrl, cleanup := newWarmPoolFixture(t, nil, nil)
+	defer cleanup()
+	fallback := &fallbackRunner{}
+	r := New(ctrl, fallback, Config{
+		PollInterval:     5 * time.Millisecond,
+		ClaimWaitTimeout: 200 * time.Millisecond,
+	}, quietTestLogger())
+
+	done := make(chan runner.Result, 1)
+	go func() {
+		done <- r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var claimed *store.Node
+	for claimed == nil {
+		var err error
+		claimed, err = ctrl.ClaimNode(ctx, "agent:remote-workstation", nil, time.Minute, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if claimed == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	if err := ctrl.FinishNode(ctx, "run-1", "build", string(sparkwing.Success), "", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-done:
+		if result.Outcome != sparkwing.Success || result.Err != nil {
+			t.Fatalf("result = %+v", result)
+		}
+	case <-ctx.Done():
+		t.Fatal("warm runner did not observe remote completion")
+	}
+	if fallback.calls.Load() != 0 {
+		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())
+	}
+}
+
+func TestRunnerFallsBackAfterClaimWindow(t *testing.T) {
+	st, ctrl, cleanup := newWarmPoolFixture(t, nil, nil)
+	defer cleanup()
+	fallback := &fallbackRunner{}
+	r := New(ctrl, fallback, Config{
+		PollInterval:     5 * time.Millisecond,
+		ClaimWaitTimeout: 20 * time.Millisecond,
+	}, quietTestLogger())
+
+	result := r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
+	if result.Outcome != sparkwing.Success || result.Err != nil {
+		t.Fatalf("result = %+v", result)
+	}
+	if fallback.calls.Load() != 1 {
+		t.Fatalf("fallback calls = %d, want 1", fallback.calls.Load())
+	}
+	node, err := st.GetNode(context.Background(), "run-1", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.ReadyAt != nil {
+		t.Fatalf("ready_at = %v, want revoked before fallback", node.ReadyAt)
+	}
+}
+
+func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
+	claimed := make(chan struct{})
+	st, ctrl, cleanup := newWarmPoolFixture(t, nil, func(next http.Handler, st *store.Store) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if strings.HasSuffix(req.URL.Path, "/revoke-ready") {
+				node, err := st.ClaimNextReadyNode(req.Context(), "agent:remote-workstation", time.Minute, nil)
+				if err != nil {
+					t.Errorf("claim during handoff: %v", err)
+				} else if node.NodeID != "build" {
+					t.Errorf("claimed node = %q, want build", node.NodeID)
+				}
+				close(claimed)
+			}
+			next.ServeHTTP(w, req)
+		})
+	})
+	defer cleanup()
+	fallback := &fallbackRunner{}
+	r := New(ctrl, fallback, Config{
+		PollInterval:     5 * time.Millisecond,
+		ClaimWaitTimeout: 10 * time.Millisecond,
+	}, quietTestLogger())
+
+	done := make(chan runner.Result, 1)
+	go func() {
+		done <- r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
+	}()
+
+	select {
+	case <-claimed:
+	case <-time.After(time.Second):
+		t.Fatal("runner never attempted the fallback handoff")
+	}
+	if err := st.FinishNode(context.Background(), "run-1", "build", string(sparkwing.Failed), "remote failure", []byte(`{"remote":true}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-done:
+		if result.Outcome != sparkwing.Failed || result.Err == nil || result.Err.Error() != "remote failure" {
+			t.Fatalf("result = %+v, want remote completion", result)
+		}
+		if got, ok := result.Output.([]byte); !ok || string(got) != `{"remote":true}` {
+			t.Fatalf("output = %#v, want remote output", result.Output)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runner did not observe remote completion")
+	}
+	if fallback.calls.Load() != 0 {
+		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())
+	}
+}
+
+func TestRunnerDoesNotFallbackLabeledNode(t *testing.T) {
+	st, ctrl, cleanup := newWarmPoolFixture(t, []string{"os=windows", "gpu"}, nil)
+	defer cleanup()
+	fallback := &fallbackRunner{}
+	r := New(ctrl, fallback, Config{
+		PollInterval:     5 * time.Millisecond,
+		ClaimWaitTimeout: 10 * time.Millisecond,
+	}, quietTestLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan runner.Result, 1)
+	go func() {
+		done <- r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	}()
+	time.Sleep(40 * time.Millisecond)
+	if fallback.calls.Load() != 0 {
+		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())
+	}
+	node, err := st.GetNode(context.Background(), "run-1", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.ReadyAt == nil {
+		t.Fatal("labeled node was removed from the compatible remote-agent queue")
+	}
+
+	cancel()
+	select {
+	case result := <-done:
+		if result.Outcome != sparkwing.Cancelled {
+			t.Fatalf("result = %+v, want cancelled", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runner did not stop after cancellation")
+	}
+}
+
+func TestRunnerCancellationRevokesUnclaimedNode(t *testing.T) {
+	st, ctrl, cleanup := newWarmPoolFixture(t, nil, nil)
+	defer cleanup()
+	fallback := &fallbackRunner{}
+	r := New(ctrl, fallback, Config{
+		PollInterval:     5 * time.Millisecond,
+		ClaimWaitTimeout: time.Minute,
+	}, quietTestLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan runner.Result, 1)
+	go func() {
+		done <- r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	}()
+	for {
+		node, err := st.GetNode(context.Background(), "run-1", "build")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if node.ReadyAt != nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case result := <-done:
+		if result.Outcome != sparkwing.Cancelled {
+			t.Fatalf("result = %+v, want cancelled", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runner did not stop after cancellation")
+	}
+	node, err := st.GetNode(context.Background(), "run-1", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.ReadyAt != nil {
+		t.Fatalf("ready_at = %v, want revoked on cancellation", node.ReadyAt)
+	}
+	if fallback.calls.Load() != 0 {
+		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())
+	}
+}
+
+func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
+	st, ctrl, cleanup := newWarmPoolFixture(t, nil, nil)
+	defer cleanup()
+	fallback := &fallbackRunner{}
+	r := New(ctrl, fallback, Config{
+		PollInterval:     5 * time.Millisecond,
+		ClaimWaitTimeout: time.Second,
+	}, quietTestLogger())
+
+	done := make(chan runner.Result, 1)
+	go func() {
+		done <- r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
+	}()
+	for {
+		node, err := st.ClaimNextReadyNode(context.Background(), "agent:offline-server", time.Millisecond, nil)
+		if err == nil {
+			if node.NodeID != "build" {
+				t.Fatalf("claimed node = %q, want build", node.NodeID)
+			}
+			break
+		}
+		if err != store.ErrNotFound {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(2 * time.Millisecond)
+	pairs, err := store.Maintenance.FailExpiredNodeClaims(st, context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pairs) != 1 {
+		t.Fatalf("expired claims = %v, want run-1/build", pairs)
+	}
+
+	select {
+	case result := <-done:
+		if result.Outcome != sparkwing.Failed || result.Err == nil || result.Err.Error() != "runner heartbeat expired" {
+			t.Fatalf("result = %+v, want bounded agent-lost failure", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runner did not observe expired claim failure")
+	}
+	if fallback.calls.Load() != 0 {
+		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())
+	}
+}

@@ -62,6 +62,12 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	for {
 		select {
 		case <-ctx.Done():
+			revokeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			if _, err := r.ctrl.RevokeNodeReady(revokeCtx, req.RunID, req.NodeID); err != nil {
+				r.logger.Debug("warmpool: cancellation revoke failed",
+					"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+			}
+			cancel()
 			return runner.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
 		case <-poll.C:
 			n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
@@ -100,14 +106,14 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 					continue
 				}
 				if !revoked {
-					// safety: pod claimed between GetNode and RevokeNodeReady; let it finish
+					// safety: an agent claimed between GetNode and RevokeNodeReady; let it finish
 					claimedSeen = true
 					continue
 				}
 				if r.fallback == nil {
 					return runner.Result{
 						Outcome: sparkwing.Failed,
-						Err:     errors.New("warmpool: no pod claimed and no fallback configured"),
+						Err:     errors.New("warmpool: no agent claimed and no fallback configured"),
 					}
 				}
 				r.logger.Warn("warmpool: no claim in window; falling back",
@@ -145,7 +151,7 @@ func resultFromNode(n *store.Node) runner.Result {
 	if len(n.Output) > 0 {
 		res.Output = n.Output
 	}
-	// safety: empty outcome means the pod wrote done without an outcome; treat as Failed
+	// safety: empty outcome means the agent wrote done without an outcome; treat as Failed
 	if oc == "" {
 		res.Outcome = sparkwing.Failed
 		if res.Err == nil {

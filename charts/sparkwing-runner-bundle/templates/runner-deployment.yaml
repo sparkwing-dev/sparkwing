@@ -1,4 +1,5 @@
 {{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . -}}
+{{- $runnerImage := include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,7 +44,7 @@ spec:
       {{- if .Values.volumePermissions.enabled }}
       initContainers:
         - name: volume-permissions
-          image: {{ include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) | quote }}
+          image: {{ $runnerImage | quote }}
           imagePullPolicy: {{ .Values.runner.image.pullPolicy }}
           securityContext:
             runAsNonRoot: false
@@ -64,7 +65,7 @@ spec:
       {{- end }}
       containers:
         - name: runner
-          image: {{ include "sparkwing-runner-bundle.image" (dict "img" .Values.runner.image "root" .) | quote }}
+          image: {{ $runnerImage | quote }}
           imagePullPolicy: {{ .Values.runner.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
@@ -93,6 +94,19 @@ spec:
             {{- end }}
             {{- if .Values.runner.alsoClaimTriggers }}
             - --also-claim-triggers
+            {{- if eq .Values.runner.triggerRunner.kind "warm" }}
+            - --claim-nodes=false
+            {{- end }}
+            {{- if ne .Values.runner.triggerRunner.kind "inprocess" }}
+            - {{ printf "--trigger-runner=%s" .Values.runner.triggerRunner.kind | quote }}
+            - {{ printf "--trigger-runner-namespace=%s" .Release.Namespace | quote }}
+            - {{ printf "--trigger-runner-image=%s" $runnerImage | quote }}
+            - {{ printf "--trigger-runner-sa=%s" (include "sparkwing-runner-bundle.serviceAccountName" .) | quote }}
+            - {{ printf "--trigger-runner-image-pull-policy=%s" .Values.runner.image.pullPolicy | quote }}
+            {{- if .Values.cache.enabled }}
+            - {{ printf "--trigger-artifact-store=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
+            {{- end }}
+            {{- end }}
             {{- end }}
             {{- if gt (int .Values.runner.maxClaimsBeforeRestart) 0 }}
             - {{ printf "--max-claims-before-restart=%d" (int .Values.runner.maxClaimsBeforeRestart) | quote }}

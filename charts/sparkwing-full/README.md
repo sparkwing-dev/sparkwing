@@ -241,6 +241,7 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.controller.tokenSecret.name` | Bearer-token Secret. | `""` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
+| `sparkwing-runner-bundle.runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
 | `sparkwing-runner-bundle.volumePermissions.enabled` | Run a CHOWN-only init before the runner. | `true` |
 | `sparkwing-runner-bundle.cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 
@@ -251,6 +252,15 @@ the chart stops at render time with this instruction when the URL is missing.
 Nested `sparkwing-runner-bundle.nameOverride` and `fullnameOverride` values are
 included in the web and controller URLs for the bundled logs and cache
 Services.
+
+Set `sparkwing-runner-bundle.runner.triggerRunner.kind=warm` to offer
+unlabeled nodes to outbound-only remote agents before using Kubernetes Jobs
+for overflow. This mode reuses the bundled runner image, namespace, service
+account, pull policy, and cache. It adds namespace-scoped Job CRUD to the
+runner Role. The default `inprocess` mode keeps the existing behavior and does
+not grant Job mutation.
+The fallback `run-node` process receives the runner token in its environment,
+so use warm mode only for trusted pipeline code and rotate short-lived tokens.
 
 ## Auth
 

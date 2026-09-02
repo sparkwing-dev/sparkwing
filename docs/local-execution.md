@@ -345,6 +345,46 @@ placement source.
 Do not leave an unrestricted cluster runner racing for the same trigger source
 when testing deterministic placement.
 
+### Remote machine capacity
+
+`sparkwing-runner agent` lets eligible Windows, macOS, and Linux computers
+contribute node capacity through the same controller claim protocol. Developer
+laptops, desktops, office workstations, home or build servers, and cloud
+servers are peers in this pool. Windows is an initial proof target, not a
+scheduling boundary.
+
+The agent opens no listener. It polls the controller and sends claim,
+heartbeat, log, and result traffic over outbound HTTP(S). Tailscale is not
+required; a private network may instead expose a direct cache while the
+controller proxy remains the portable path. Labels constrain compatible work,
+and the agent reports concurrency plus available CPU and memory with claims
+and heartbeats. The controller's agent view derives from that traffic rather
+than a separate idle registration.
+
+With the Helm value `runner.triggerRunner.kind: warm`, a trigger worker offers
+each node to remote agents first. If no agent claims an unlabeled node within
+the internal window, the worker atomically removes the offer and creates a
+Kubernetes Job with the chart's existing image, namespace, service account,
+pull policy, and cache settings. A concurrent agent claim defeats revocation,
+so fallback cannot double-execute the node. Labeled nodes stay agent-only
+because the fallback Job does not advertise labels. Saturated or offline
+agents therefore spill generic work to Kubernetes without weakening placement
+requirements.
+
+The full-chart path is
+`sparkwing-runner-bundle.runner.triggerRunner.kind: warm`. The default remains
+`inprocess` and grants no Job mutation. Warm mode adds namespace-scoped Job
+create, get, list, watch, and delete permissions to the runner Role.
+
+The first remote-machine deployment assumes a trusted single-tenant boundary.
+Give each device its own short-lived runner token, revoke it when the device
+leaves the pool, and do not expose a raw unauthenticated cache outside a
+trusted private network. Kubernetes fallback supplies its runner token to the
+`run-node` process as `SPARKWING_AGENT_TOKEN`, so pipeline code in that Job can
+read the controller credential. Source snapshots remain immutable, and
+Sparkwing does not send the token to raw cache reads or embed it into cached
+source and binary objects.
+
 A follow exits on the run's outcome, the same way a local `sparkwing run`
 does: 0 when the run succeeded, 1 when it failed or was cancelled, with the
 run's status block and failing-node errors printed to stderr so a

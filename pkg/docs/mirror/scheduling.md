@@ -6,13 +6,13 @@ controller hands each job to a runner whose labels satisfy it.**
 
 ## The model in one paragraph
 
-Each cluster runner advertises a set of **labels** (opaque equality
+Each controller-connected runner advertises a set of **labels** (opaque equality
 strings like `arm64`, `os=linux`, `gpu`). A job declares the labels it
 needs -- per node via the Go SDK (`.Requires(...)`) or for the whole
 pipeline via `requires:` in `sparkwing.yaml`. The controller's claim
 query matches a job to a runner when the runner's advertised labels
-satisfy the job's needed labels. A node whose labels no connected runner
-advertises is never claimed: it waits in the queue and the controller
+satisfy the job's needed labels. A node whose labels no eligible polling
+runner advertises is never claimed: it waits in the queue and the controller
 fails it with `queue_timeout` once the queue deadline (default 15m)
 passes.
 
@@ -108,7 +108,7 @@ sparkwing-runner runner --label arm64 --label os=linux --label gpu
 ```
 
 The controller's claim query keeps only runners whose advertised set
-satisfies a job's needed labels. When no connected runner advertises the
+satisfies a job's needed labels. When no eligible polling runner advertises the
 required labels, the warm pool logs a hint once and the node waits:
 
 ```
@@ -121,6 +121,31 @@ from a profile's controller and dispatches each one to `handle-trigger`,
 a child process that compiles and runs the pipeline. It works at the
 trigger layer, unlike the cluster runner (`sparkwing-runner runner`),
 which claims nodes.
+
+## Agent-first execution with Kubernetes overflow
+
+The `warm` trigger runner offers nodes to remote agents first. An agent is the
+same `sparkwing-runner agent` process on a Windows, macOS, or Linux developer
+machine, workstation, home server, build server, or cloud server. It polls the
+controller over outbound HTTP(S), so the machine needs no inbound listener or
+mandatory private-network product. A LAN, VPN, or tailnet may still provide a
+direct cache path.
+
+The agent advertises labels, concurrency, and available CPU and memory on its
+claim and heartbeat calls. The controller infers the agent from those calls;
+there is no separate idle-agent registration. Saturated and offline agents
+stop claiming. After a short internal window, an unclaimed unlabeled node is
+atomically removed from the agent queue and sent to the configured Kubernetes
+runner. A claim that wins that handoff owns the node, so the Kubernetes
+fallback cannot execute it a second time. Labeled nodes never use this
+fallback because Kubernetes Jobs do not advertise the agent labels; they wait
+for a compatible agent and remain subject to the normal queue timeout.
+
+In the runner-bundle chart, set `runner.triggerRunner.kind: warm`. In the full
+chart, the path is
+`sparkwing-runner-bundle.runner.triggerRunner.kind: warm`. The default remains
+`inprocess`. Warm mode reuses the chart's existing Kubernetes runner settings
+and grants only namespace-scoped Job CRUD needed by overflow.
 
 ## Direct (`sparkwing run`) vs dispatched (`trigger`)
 

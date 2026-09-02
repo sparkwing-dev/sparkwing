@@ -16,6 +16,11 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps", "secrets"]
     verbs: ["get", "list", "watch"]
+  {{- if and .Values.runner.alsoClaimTriggers (or (eq .Values.runner.triggerRunner.kind "k8s") (eq .Values.runner.triggerRunner.kind "warm")) }}
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

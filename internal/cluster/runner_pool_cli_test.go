@@ -156,3 +156,15 @@ func TestRunRunnerCLI_ClaimNodesFalseRequiresTriggerLoop(t *testing.T) {
 		t.Fatalf("runRunnerCLI() error = %v, want claim-nodes/trigger-loop validation", err)
 	}
 }
+
+func TestRunRunnerCLI_WarmTriggerRunnerRefusesDirectNodeClaims(t *testing.T) {
+	err := runRunnerCLI([]string{
+		"--controller=http://controller",
+		"--metrics-addr=",
+		"--also-claim-triggers",
+		"--trigger-runner=warm",
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires --claim-nodes=false") {
+		t.Fatalf("runRunnerCLI() error = %v, want remote-agent race validation", err)
+	}
+}

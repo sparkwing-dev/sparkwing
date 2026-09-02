@@ -36,8 +36,11 @@ admission, and runs that exact snapshot without pushing it to the origin. The
 capture rejects conflicts, submodules, sparse checkouts, and Git content
 filters. It also requires a complete SHA-1 repository. Both modes require an
 `origin` URL as the cache namespace.
-A runner started with `--trigger-runner k8s` instead creates one Kubernetes
-Job per node; that is opt-in and neither Helm chart enables it.
+A runner started with `--trigger-runner k8s` creates one Kubernetes Job per
+node. `--trigger-runner warm` offers nodes to remote agents first and uses
+Kubernetes for unlabeled overflow. Both modes are opt-in; the runner-bundle
+chart exposes them through `runner.triggerRunner.kind`, while `inprocess`
+remains the default.
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and

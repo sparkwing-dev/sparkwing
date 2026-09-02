@@ -49,6 +49,15 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **runner + charts:** `--trigger-runner=warm` and
+  `runner.triggerRunner.kind: warm` offer nodes to outbound-only remote
+  Windows, macOS, and Linux agents before using Kubernetes Jobs for unlabeled
+  overflow. Agent claims win atomically over fallback, labels remain hard
+  placement constraints, and the chart reuses its existing fallback settings
+  while granting only namespace-scoped Job CRUD. Defaults remain `inprocess`.
+
 ## [v0.38.2] - 2026-09-01
 
 ### Added

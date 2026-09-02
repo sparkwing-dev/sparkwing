@@ -113,6 +113,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.labels` | `--label` flags for `Requires` matching. | `[cluster]` |
 | `runner.maxConcurrent` | Per-pod node concurrency. | `2` |
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
+| `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
 | `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
@@ -125,6 +126,24 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `logs.storage.size` | Logs PVC size. | `10Gi` |
 | `serviceAccount.annotations` | Add IRSA / Workload Identity annotations. | `{}` |
 | `imagePullSecrets` | Private-registry pull secrets for all 3 images. | `[]` |
+
+### Remote capacity before Kubernetes
+
+Set `runner.triggerRunner.kind=warm` to offer each unlabeled pipeline node to
+remote agents before creating a Kubernetes Job. Remote agents may run on
+Windows, macOS, or Linux workstations and servers. They poll the controller
+over outbound HTTP(S); they need no inbound route, and Tailscale is optional.
+Labels and advertised capacity keep incompatible or saturated machines from
+claiming work. An offline or saturated pool therefore sends unlabeled work to
+Kubernetes after a short internal claim window. A labeled node stays queued
+for a matching agent because the fallback Job does not advertise agent labels.
+
+Warm mode reuses the runner image, pull policy, namespace, service account,
+and cache configuration already present in this chart. It also grants the
+runner Role namespace-scoped create, get, list, watch, and delete access to
+Jobs. The default `inprocess` mode retains the prior arguments and RBAC.
+The fallback `run-node` process receives the runner token in its environment,
+so use warm mode only for trusted pipeline code and rotate short-lived tokens.
 
 ## Auth
 
