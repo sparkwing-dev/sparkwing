@@ -1,7 +1,12 @@
 package cache
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +16,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
 
 func TestHandleHealth(t *testing.T) {
@@ -487,6 +494,140 @@ func TestContains(t *testing.T) {
 	}
 	if contains(s, "d") {
 		t.Error("should not contain d")
+	}
+}
+
+func TestHandleBinDigest(t *testing.T) {
+	oldDir := binsDir
+	binsDir = t.TempDir()
+	defer func() { binsDir = oldDir }()
+
+	const hash = "deadbeef-cafebabe"
+	body := []byte("compiled pipeline bytes")
+	sum := sha256.Sum256(body)
+	wantDigest := "sha-256=" + base64.StdEncoding.EncodeToString(sum[:])
+
+	put := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/bin/"+hash, bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer writer-token")
+	handleBin(put, req)
+	if put.Code != http.StatusCreated {
+		t.Fatalf("PUT status = %d: %s", put.Code, put.Body.String())
+	}
+	if got := put.Header().Get("Digest"); got != wantDigest {
+		t.Errorf("PUT Digest = %q, want %q", got, wantDigest)
+	}
+
+	meta, err := readBinMeta(hash)
+	if err != nil {
+		t.Fatalf("readBinMeta: %v", err)
+	}
+	if meta.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Errorf("stored digest = %q, want %q", meta.SHA256, hex.EncodeToString(sum[:]))
+	}
+	if !strings.HasPrefix(meta.Principal, "token:") {
+		t.Errorf("principal = %q, want a token fingerprint", meta.Principal)
+	}
+	if strings.Contains(meta.Principal, "writer-token") {
+		t.Errorf("principal %q leaks the bearer", meta.Principal)
+	}
+
+	get := httptest.NewRecorder()
+	handleBin(get, httptest.NewRequest(http.MethodGet, "/bin/"+hash, nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("GET status = %d", get.Code)
+	}
+	if got := get.Header().Get("Digest"); got != wantDigest {
+		t.Errorf("GET Digest = %q, want %q", got, wantDigest)
+	}
+	if got := get.Header().Get("ETag"); got != `"`+hex.EncodeToString(sum[:])+`"` {
+		t.Errorf("GET ETag = %q", got)
+	}
+	if !bytes.Equal(get.Body.Bytes(), body) {
+		t.Errorf("GET body = %q, want %q", get.Body.Bytes(), body)
+	}
+}
+
+func TestHandleBinDigestForUnattestedBlob(t *testing.T) {
+	oldDir := binsDir
+	binsDir = t.TempDir()
+	defer func() { binsDir = oldDir }()
+
+	const hash = "deadbeef-cafebabe"
+	body := []byte("blob written before digests were recorded")
+	if err := os.WriteFile(filepath.Join(binsDir, hash), body, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+
+	w := httptest.NewRecorder()
+	handleBin(w, httptest.NewRequest(http.MethodGet, "/bin/"+hash, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET status = %d", w.Code)
+	}
+	if got := w.Header().Get("Digest"); got != "sha-256="+base64.StdEncoding.EncodeToString(sum[:]) {
+		t.Errorf("GET Digest = %q", got)
+	}
+	if !bytes.Equal(w.Body.Bytes(), body) {
+		t.Errorf("GET body = %q, want %q", w.Body.Bytes(), body)
+	}
+	meta, err := readBinMeta(hash)
+	if err != nil {
+		t.Fatalf("readBinMeta: %v", err)
+	}
+	if meta.Principal != "unknown" {
+		t.Errorf("principal = %q, want unknown", meta.Principal)
+	}
+}
+
+func TestHandleBinPutRequiresToken(t *testing.T) {
+	oldDir, oldToken := binsDir, apiToken
+	binsDir, apiToken = t.TempDir(), "cache-token"
+	defer func() { binsDir, apiToken = oldDir, oldToken }()
+
+	const hash = "deadbeef-cafebabe"
+	w := httptest.NewRecorder()
+	requireToken(handleBin)(w, httptest.NewRequest(http.MethodPut, "/bin/"+hash, strings.NewReader("poisoned")))
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+	if _, err := os.Stat(filepath.Join(binsDir, hash)); !os.IsNotExist(err) {
+		t.Fatalf("unauthorized PUT stored a blob: %v", err)
+	}
+}
+
+func TestHandleBinClientRejectsPoisonedBlob(t *testing.T) {
+	oldDir := binsDir
+	binsDir = t.TempDir()
+	defer func() { binsDir = oldDir }()
+
+	const hash = "deadbeef-cafebabe"
+	srv := httptest.NewServer(http.HandlerFunc(handleBin))
+	defer srv.Close()
+
+	src := filepath.Join(t.TempDir(), "pipeline")
+	if err := os.WriteFile(src, []byte("compiled pipeline bytes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := bincache.UploadBinary(srv.URL, "writer-token", hash, src); err != nil {
+		t.Fatalf("UploadBinary: %v", err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "pipeline")
+	if err := bincache.TryBinary(srv.URL, "writer-token", hash, dest); err != nil {
+		t.Fatalf("TryBinary: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(binsDir, hash), []byte("poisoned bytes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	poisoned := filepath.Join(t.TempDir(), "pipeline")
+	if err := bincache.TryBinary(srv.URL, "writer-token", hash, poisoned); !errors.Is(err, bincache.ErrDigest) {
+		t.Fatalf("err = %v, want ErrDigest", err)
+	}
+	if _, err := os.Stat(poisoned); !os.IsNotExist(err) {
+		t.Fatalf("poisoned binary was installed: %v", err)
 	}
 }
 

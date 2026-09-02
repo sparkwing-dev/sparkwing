@@ -353,10 +353,16 @@ startup so an unauthenticated deployment is visible.
 
 ### Binary & Dependency Cache
 
+A `/bin/<name>` key folds the repository's `.sparkwing/` source inputs, not the
+binary's content, so the cache records the sha-256 of each uploaded body and the
+writing principal's token fingerprint beside the blob and serves that digest on
+every download. Clients hash what they download and discard a mismatch before
+the binary lands, and treat a response without a digest as a miss.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/bin/<name>` | Download cached binary (auth required) |
-| PUT | `/bin/<name>` | Upload binary to cache (auth required) |
+| GET | `/bin/<name>` | Download cached binary; carries `Digest: sha-256=<base64>` and `ETag` (auth required) |
+| PUT | `/bin/<name>` | Upload binary to cache; returns its digest (auth required) |
 | GET | `/cache/<key>` | Download cached dependency archive (auth required) |
 | HEAD | `/cache/<key>` | Check if cache entry exists (auth required) |
 | PUT | `/cache/<key>` | Upload dependency archive to cache (auth required) |

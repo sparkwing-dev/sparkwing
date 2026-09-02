@@ -45,7 +45,7 @@ func TestBootstrap_PostBootstrapRequiresAuth(t *testing.T) {
 	base, st, cleanup := newAuthedTestServer(t)
 	defer cleanup()
 
-	if _, err := st.CreateUser("preexisting", "correctbatteryhorse", timeNowUTC()); err != nil {
+	if _, err := st.CreateUser("preexisting", "correctbatteryhorse", []string{controller.ScopeAdmin}, timeNowUTC()); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 

@@ -90,6 +90,22 @@ code change to unlock.
 
 ### Security
 
+- **cache:** Cached pipeline binaries now carry a verified sha-256 digest
+  The cache stores the digest and the writing principal's token fingerprint
+  beside each uploaded binary, serves them as `Digest` and `ETag`, and writes
+  the digest as a companion object in an artifact store. Clients hash what they
+  download and discard a mismatch before the binary lands, so a poisoned or
+  tampered entry is recompiled instead of executed. A download without a digest
+  counts as a miss, so binaries stored by an older cache are recompiled once.
+- **web (Breaking):** The dashboard proxy now forwards only the controller
+  routes the dashboard itself calls and checks the signed-in session's scopes
+  against each one, so a logged-in browser can no longer mint tokens, read
+  secrets, or create users with the web pod's service bearer. Sessions carry
+  the scopes of their user rather than a fixed `admin`, run-store schema 19
+  adds a `users.scopes` column defaulting existing accounts to `admin`, and
+  `sparkwing cluster users add --scope` creates narrower accounts.
+  `store.CreateUser` and `store.CreateFirstUser` now take that scope set. See the
+  [migration guide](docs/migrations/_unreleased.md#dashboard-proxy-allow-list).
 - **runner:** Runner Job pods mount no ServiceAccount token, and `--runner k8s`
   now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead of silently
   landing pipeline code on the namespace default ServiceAccount.

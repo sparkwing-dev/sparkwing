@@ -43,8 +43,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
-	scopes := []string{ScopeAdmin}
-	rawSession, csrf, sess, err := s.store.CreateSession(u.Name, scopes, sessionTTL, now)
+	rawSession, csrf, sess, err := s.store.CreateSession(u.Name, u.Scopes, sessionTTL, now)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -58,7 +57,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SessionID: rawSession,
 		CSRFToken: csrf,
 		Principal: u.Name,
-		Scopes:    scopes,
+		Scopes:    u.Scopes,
 		ExpiresAt: sess.ExpiresAt.Unix(),
 	})
 }
@@ -129,14 +128,28 @@ func extractSessionHeader(r *http.Request) string {
 }
 
 type createUserReq struct {
-	Name     string `json:"name"`
-	Password string `json:"password"`
+	Name     string   `json:"name"`
+	Password string   `json:"password"`
+	Scopes   []string `json:"scopes,omitempty"`
 }
 
 type userJSON struct {
-	Name        string `json:"name"`
-	CreatedAt   int64  `json:"created_at"`
-	LastLoginAt *int64 `json:"last_login_at,omitempty"`
+	Name        string   `json:"name"`
+	Scopes      []string `json:"scopes"`
+	CreatedAt   int64    `json:"created_at"`
+	LastLoginAt *int64   `json:"last_login_at,omitempty"`
+}
+
+func requestedUserScopes(req createUserReq) ([]string, error) {
+	if len(req.Scopes) == 0 {
+		// safety: an omitted scope set grants admin, matching what an operator
+		// who names no scopes has always received from this route.
+		return []string{ScopeAdmin}, nil
+	}
+	if err := validateScopes(req.Scopes); err != nil {
+		return nil, err
+	}
+	return req.Scopes, nil
 }
 
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -145,14 +158,20 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	u, err := s.store.CreateUser(req.Name, req.Password, time.Now().UTC())
+	scopes, err := requestedUserScopes(req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	s.logger.Info("user created", "name", u.Name)
+	u, err := s.store.CreateUser(req.Name, req.Password, scopes, time.Now().UTC())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	s.logger.Info("user created", "name", u.Name, "scopes", u.Scopes)
 	writeJSON(w, http.StatusCreated, userJSON{
 		Name:      u.Name,
+		Scopes:    u.Scopes,
 		CreatedAt: u.CreatedAt.Unix(),
 	})
 }
@@ -167,7 +186,7 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	u, err := s.store.CreateFirstUser(req.Name, req.Password, time.Now().UTC())
+	u, err := s.store.CreateFirstUser(req.Name, req.Password, []string{ScopeAdmin}, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, store.ErrBootstrapClosed) {
 			s.markBootstrapClosed()
@@ -187,6 +206,7 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 	s.markBootstrapClosed()
 	writeJSON(w, http.StatusCreated, userJSON{
 		Name:      u.Name,
+		Scopes:    u.Scopes,
 		CreatedAt: u.CreatedAt.Unix(),
 	})
 }
@@ -205,7 +225,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]userJSON, 0, len(users))
 	for _, u := range users {
-		row := userJSON{Name: u.Name, CreatedAt: u.CreatedAt.Unix()}
+		row := userJSON{Name: u.Name, Scopes: u.Scopes, CreatedAt: u.CreatedAt.Unix()}
 		if u.LastLoginAt != nil {
 			v := u.LastLoginAt.Unix()
 			row.LastLoginAt = &v

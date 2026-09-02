@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net/http"
@@ -53,7 +55,9 @@ func (s *fakeCacheServer) handler() http.Handler {
 				http.Error(w, "miss", http.StatusNotFound)
 				return
 			}
+			sum := sha256.Sum256(data)
 			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Digest", "sha-256="+base64.StdEncoding.EncodeToString(sum[:]))
 			_, _ = w.Write(data)
 		case http.MethodPut:
 			s.gotToken[hash] = r.Header.Get("Authorization")

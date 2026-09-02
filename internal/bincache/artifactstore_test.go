@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -64,5 +65,58 @@ func TestArtifactStoreFetchMissReturnsNotFound(t *testing.T) {
 	}
 	if !bincache.IsNotFound(err) {
 		t.Errorf("IsNotFound = false on ErrNotFound")
+	}
+}
+
+func TestArtifactStoreFetchRejectsTamperedBlob(t *testing.T) {
+	t.Parallel()
+	store, err := fs.NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
+	src := filepath.Join(t.TempDir(), "fake-binary")
+	if err := os.WriteFile(src, []byte("honest binary"), 0o755); err != nil {
+		t.Fatalf("write src: %v", err)
+	}
+	const key = "abcd1234-ef567890"
+	ctx := context.Background()
+	if err := bincache.UploadToArtifactStore(ctx, store, key, src); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if err := store.Put(ctx, "bin/"+key, strings.NewReader("poisoned binary")); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "downloaded")
+	if err := bincache.FetchFromArtifactStore(ctx, store, key, dest); !errors.Is(err, bincache.ErrDigest) {
+		t.Fatalf("err = %v, want ErrDigest", err)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("tampered binary was installed: %v", err)
+	}
+}
+
+func TestArtifactStoreFetchRequiresStoredDigest(t *testing.T) {
+	t.Parallel()
+	store, err := fs.NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
+	const key = "abcd1234-ef567890"
+	ctx := context.Background()
+	if err := store.Put(ctx, "bin/"+key, strings.NewReader("unattested binary")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "downloaded")
+	err = bincache.FetchFromArtifactStore(ctx, store, key, dest)
+	if !errors.Is(err, bincache.ErrDigest) {
+		t.Fatalf("err = %v, want ErrDigest", err)
+	}
+	if !bincache.IsNotFound(err) {
+		t.Errorf("IsNotFound = false, want a miss the caller can recompile past")
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("unattested binary was installed: %v", err)
 	}
 }
