@@ -3369,6 +3369,7 @@ func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int6
 	if limit <= 0 {
 		limit = 500
 	}
+	limit = min(limit, MaxRunListLimit)
 	rows, err := s.query(ctx, `
 SELECT run_id, seq, node_id, kind, ts, payload
   FROM events
@@ -4671,6 +4672,7 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 	if limit <= 0 {
 		limit = 20
 	}
+	limit = min(limit, MaxRunListLimit)
 
 	where := ""
 	args := []any{}
