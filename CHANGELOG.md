@@ -51,6 +51,24 @@ code change to unlock.
 
 ### Security
 
+- **logs:** CLI log output now filters terminal escape sequences out of
+  pipeline output. Plain format drops every escape sequence and every C0
+  control byte except tab, so one log record stays one line; the colored
+  format keeps only the SGR codes the web log viewer renders. A pipeline can
+  no longer retitle the operator's terminal, plant an OSC 8 hyperlink, reset
+  the terminal with `ESC c`, or forge a Sparkwing status line in the output of
+  `sparkwing runs logs`.
+- **deploy:** The `mode3-postgres` Terraform module now commits its
+  `.terraform.lock.hcl` and pins providers with `~>` instead of `>=`, so
+  `terraform init` installs the checksummed versions the module was tested
+  against rather than whatever the registry serves that day; the lock records
+  `linux_amd64` and `darwin_arm64`. `allowed_cidr_blocks` now rejects
+  `0.0.0.0/0` and `::/0` at plan time instead of quietly opening the database
+  port to the internet. `install/install.sh` creates `agent.yaml` at mode 600
+  before it writes the token, closing the window a permissive umask left
+  between the heredoc and the `chmod`, and refuses a token carrying anything
+  outside `[A-Za-z0-9_.-]`, which could otherwise close the YAML quote and
+  inject config.
 - **controller:** `GET /api/v1/runs/{id}` and `GET /api/v1/triggers/{id}` now
   admit a caller holding a live claim on that run as well as one holding
   `runs.read` or `triggers.read`. Those are the first two calls a node process
@@ -249,13 +267,13 @@ code change to unlock.
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
   so a naked suppression silences nothing, and the comment gate keeps each
   annotation alone on one line so free prose cannot ride behind one.
-- **logs:** CLI log output now filters terminal escape sequences out of
-  pipeline output. Plain format drops every escape sequence and every C0
-  control byte except tab, so one log record stays one line; the colored
-  format keeps only the SGR codes the web log viewer renders. A pipeline can
-  no longer retitle the operator's terminal, plant an OSC 8 hyperlink, reset
-  the terminal with `ESC c`, or forge a Sparkwing status line in the output of
-  `sparkwing runs logs`.
+- **release:** The release workflow now resolves a version tag's published
+  image digest before it retags, and fails when that tag already points at
+  different bytes. A `workflow_dispatch` rerun with `publish_images: true`
+  used to move `vX.Y.Z` to a freshly built digest, so an operator who pinned
+  the tag got layers nobody audited; moving it now takes the new `force_retag`
+  input. Each release also carries an `image-digests.json` asset listing every
+  published image, its tag, and its digest, so operators can pin and diff them.
 
 ### Added
 
