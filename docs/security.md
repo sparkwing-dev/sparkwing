@@ -253,10 +253,15 @@ cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
   run's logs. It reports `"auth": "disabled"` on `GET /api/v1/health`
   and `sparkwing cluster status` flags the logs probe as a warning. Set
   `SPARKWING_REQUIRE_AUTH=1` (or `--require-auth`) so the pod refuses to
-  start without one. The runner-bundle chart wires the controller URL
+  start without an absolute `http(s)` controller URL, which keeps a
+  typo from advertising `"auth": "enabled"` on a service whose every
+  token lookup fails. The runner-bundle chart wires the controller URL
   from `controller.tokenSecret`, and a logs-enabled install without that
   Secret fails at render time unless you set
-  `logs.allowUnauthenticated=true`.
+  `logs.allowUnauthenticated=true`. `cluster status` warns rather than
+  passing whenever it cannot read the logs service's auth state: no
+  announced logs URL, a health body with no `auth` field (an image
+  older than the report), or a degraded service.
 - **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
   behind an ingress/proxy that enforces HTTPS.
 - **Pin image digests** rather than floating tags.
