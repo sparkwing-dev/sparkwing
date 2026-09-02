@@ -133,8 +133,6 @@ func TestRun_RejectsCrossSiteAndReboundRequests(t *testing.T) {
 		t.Errorf("rebound host status = %d, want 403", got)
 	}
 
-	// the guard passes these through; the handler then rejects the
-	// incomplete trigger body, which is what proves they reached it.
 	reachedHandler := func(t *testing.T, label string, headers map[string]string) {
 		t.Helper()
 		status, body := post(t, "", headers)
