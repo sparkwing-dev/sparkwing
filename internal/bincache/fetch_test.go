@@ -39,6 +39,20 @@ func TestRepoNameFromURL(t *testing.T) {
 	}
 }
 
+func TestClaimedRepoNameFromURL_DistinguishesEqualBasenames(t *testing.T) {
+	first := ClaimedRepoNameFromURL("https://git.example.com/acme/widgets.git")
+	second := ClaimedRepoNameFromURL("https://git.example.com/other/widgets.git")
+	if first == second {
+		t.Fatalf("claim-scoped names collide: %q", first)
+	}
+	if !strings.HasPrefix(first, "repo-") || len(first) != 64 {
+		t.Fatalf("claim-scoped name = %q", first)
+	}
+	if got := ClaimedRepoNameFromURL("  https://git.example.com/acme/widgets.git  "); got != first {
+		t.Fatalf("normalized claim-scoped name = %q, want %q", got, first)
+	}
+}
+
 func gitExecPath(t *testing.T) string {
 	t.Helper()
 	out, err := exec.Command("git", "--exec-path").Output()
@@ -484,6 +498,66 @@ func TestControllerGitcacheToken_RequiresExactControllerOriginAndPath(t *testing
 		"https://controller.example:8443/sparkwing/api/v1/gitcache/", controllerURL+"/", token,
 	); got != token {
 		t.Fatalf("token = %q, want %q", got, token)
+	}
+}
+
+func TestControllerRunGitcacheURL_UsesClaimBoundControllerPath(t *testing.T) {
+	controller := "https://controller.example:8443/sparkwing"
+	base := controller + "/api/v1/gitcache"
+	want := controller + "/api/v1/runs/run-123/gitcache"
+	if got := ControllerRunGitcacheURL(base, controller, "run-123"); got != want {
+		t.Fatalf("ControllerRunGitcacheURL = %q, want %q", got, want)
+	}
+	if got := ControllerGitcacheToken(want, controller, "runner-token"); got != "runner-token" {
+		t.Fatalf("claim-bound controller token = %q, want runner-token", got)
+	}
+	direct := "https://cache.tail.example"
+	if got := ControllerRunGitcacheURL(direct, controller, "run-123"); got != direct {
+		t.Fatalf("direct cache URL changed to %q", got)
+	}
+}
+
+func TestControllerRunGitcacheURL_UsesClaimScopedRepoIdentity(t *testing.T) {
+	controller := "https://controller.example"
+	gcURL := controller + "/api/v1/runs/run-123/gitcache"
+	repoURL := "https://git.example.com/acme/widgets.git"
+	if got := controllerClaimedRepoName(gcURL, controller, repoURL); got != ClaimedRepoNameFromURL(repoURL) {
+		t.Fatalf("claim-scoped name = %q", got)
+	}
+	if got := controllerClaimedRepoName("https://cache.example", controller, repoURL); got != "" {
+		t.Fatalf("direct-cache name override = %q", got)
+	}
+}
+
+func TestFetchPipelineSourceWithCredentials_UsesOnlyTheDirectCacheToken(t *testing.T) {
+	repoParent := t.TempDir()
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	execPath := gitExecPath(t)
+	if execPath == "" {
+		t.Skip("git --exec-path unavailable")
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/git/register", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	mux.Handle("/git/", &cgi.Handler{
+		Path: filepath.Join(execPath, "git-http-backend"),
+		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
+		Root: "/git",
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer cache-token" {
+			http.Error(w, "wrong bearer", http.StatusUnauthorized)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	if _, err := FetchPipelineSourceWithCredentials(srv.URL, "https://controller.example",
+		"controller-token", "cache-token", "git@github.com:sparkwing-dev/sparkwing.git",
+		"main", tipSHA, t.TempDir()); err != nil {
+		t.Fatal(err)
 	}
 }
 

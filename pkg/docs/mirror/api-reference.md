@@ -42,7 +42,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs` | `runs.read` |
 | `POST` | `/api/v1/runs` | `runs.state` |
 | `DELETE` | `/api/v1/runs/{id}` | `admin` |
-| `GET` | `/api/v1/runs/{id}` | `runs.read` |
+| `GET` | `/api/v1/runs/{id}` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/approvals` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/approvals/{nodeID}` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
@@ -54,6 +54,9 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/events` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/events` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/finish` | `runs.state` |
+| `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
+| `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
@@ -106,7 +109,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/triggers` | `runs.write` |
 | `POST` | `/api/v1/triggers/claim` | `triggers.claim` |
 | `GET` | `/api/v1/triggers/spawned-child` | `triggers.read` |
-| `GET` | `/api/v1/triggers/{id}` | `triggers.read` |
+| `GET` | `/api/v1/triggers/{id}` | `triggers.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
 | `GET` | `/api/v1/users` | `admin` |

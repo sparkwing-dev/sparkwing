@@ -116,6 +116,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.labels` | `--label` flags for `Requires` matching. | `[cluster]` |
 | `runner.maxConcurrent` | Per-pod node concurrency. | `2` |
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
+| `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
 | `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
@@ -129,10 +130,32 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `logs.enabled` | Toggle the log-store sidecar. | `true` |
 | `logs.allowUnauthenticated` | Serve every run's logs without a token. | `false` |
 | `logs.storage.size` | Logs PVC size. | `10Gi` |
-| `runner.automountServiceAccountToken` | Mount the runner pod's API token. Needed only by the k8s trigger runner. | `false` |
+| `runner.automountServiceAccountToken` | Mount the runner pod's API token. Required by the `k8s` and `warm` trigger runners. | `false` |
 | `serviceAccount.annotations` | Add IRSA / Workload Identity annotations. | `{}` |
 | `serviceAccount.shareAcrossComponents` | Accept one shared account when `serviceAccount.create=false`. | `false` |
 | `imagePullSecrets` | Private-registry pull secrets for all 3 images. | `[]` |
+
+### Remote capacity before Kubernetes
+
+Set `runner.triggerRunner.kind=warm` and
+`runner.automountServiceAccountToken=true` to offer each unlabeled pipeline
+node to remote agents before creating a Kubernetes Job. Remote agents may run on
+Windows, macOS, or Linux workstations and servers. They poll the controller
+over outbound HTTP(S); they need no inbound route, and Tailscale is optional.
+Labels and advertised capacity keep incompatible or saturated machines from
+claiming work. An offline or saturated pool therefore sends unlabeled work to
+Kubernetes after a short internal claim window. A labeled node stays queued
+for a matching agent because the fallback Job does not advertise agent labels.
+
+Warm mode reuses the runner image, pull policy, namespace, service account,
+and cache configuration already present in this chart. It grants the runner
+Role namespace-scoped Job create, get, and delete plus pod list. The default
+`inprocess` mode retains the prior arguments and empty Role.
+The fallback `run-node` process receives the runner token in its environment,
+so use warm mode only for trusted pipeline code and rotate short-lived tokens.
+The compiled pipeline binary interprets `runner.triggerRunner.kind=warm`.
+Upgrade the controller, runner, and pipeline module to the same Sparkwing
+release before enabling it.
 
 ## Auth
 
@@ -216,10 +239,8 @@ token: every pod sets `automountServiceAccountToken: false`, and the
 cache and logs pods run under their own ServiceAccounts rather than the
 runner's.
 
-The one runner configuration that does call the API is the opt-in
-Kubernetes trigger runner (`SPARKWING_TRIGGER_RUNNER=k8s`), which creates
-runner Jobs and cannot load its in-cluster config without a token. Give it
-one back, along with the Role that lets it create Jobs:
+The opt-in `k8s` and `warm` trigger runners call the API to create and inspect
+runner Jobs. Give the runner pod a token when selecting either mode:
 
 ```bash
 --set runner.automountServiceAccountToken=true

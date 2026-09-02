@@ -20,6 +20,8 @@ func TestAgentConfig_RoundTripFromYAML(t *testing.T) {
 	yaml := `
 controller: http://localhost:4344
 logs: http://localhost:4345
+gitcache: http://localhost:4344/api/v1/gitcache
+cache_token: cache-abc
 profile: dev
 token: tok-abc
 max_concurrent: 3
@@ -39,6 +41,9 @@ spawn_policy: return-to-queue
 	}
 	if cfg.Controller != "http://localhost:4344" {
 		t.Fatalf("controller: %q", cfg.Controller)
+	}
+	if cfg.Gitcache != "http://localhost:4344/api/v1/gitcache" || cfg.CacheToken != "cache-abc" {
+		t.Fatalf("gitcache credentials: url=%q token=%q", cfg.Gitcache, cfg.CacheToken)
 	}
 	if cfg.Token != "tok-abc" || cfg.MaxConcurrent != 3 {
 		t.Fatalf("unexpected cfg: %+v", cfg)
@@ -81,6 +86,9 @@ func TestAgentConfig_DefaultsSpawnPolicy(t *testing.T) {
 	}
 	if norm.SpawnPolicy != "return-to-queue" {
 		t.Fatalf("default: %q", norm.SpawnPolicy)
+	}
+	if norm.Gitcache != "http://x/api/v1/gitcache" {
+		t.Fatalf("gitcache default = %q, want controller proxy", norm.Gitcache)
 	}
 }
 

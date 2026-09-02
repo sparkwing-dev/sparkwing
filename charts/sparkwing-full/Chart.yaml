@@ -25,7 +25,7 @@ type: application
 # Chart version: SemVer for this chart's *templates / values surface*.
 # Independent of appVersion. Bump on any user-facing values.yaml
 # change or template structural change.
-version: 0.1.9
+version: 0.1.10
 
 # appVersion is retained as Helm metadata and the empty-tag fallback. The
 # current value is not a compatible public image-set guarantee; operators
@@ -65,7 +65,7 @@ maintainers:
 # work from the in-cluster controller.
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.6"
+    version: "0.1.7"
     repository: "file://../sparkwing-runner-bundle"
     # condition lets operators disable the runner side entirely
     # (e.g. they already have runners deployed elsewhere and just

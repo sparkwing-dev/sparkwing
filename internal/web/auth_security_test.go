@@ -505,6 +505,35 @@ func TestGitcacheMachineProxyBypassesBrowserSessionAndPreservesBearer(t *testing
 	}
 }
 
+func TestClaimedRunGitcacheMachineProxyBypassesBrowserSession(t *testing.T) {
+	t.Parallel()
+	var authorization, cookie, path string
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		cookie = r.Header.Get("Cookie")
+		path = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(controller.Close)
+	handler := HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle)
+	req := httptest.NewRequest(http.MethodGet,
+		"https://dashboard.example.com/api/v1/runs/run-1/gitcache/git/widgets/info/refs?service=git-upload-pack", nil)
+	req.Header.Set("Authorization", "Bearer swr_0123456789abcdef")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "browser-session"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("machine proxy status = %d, want 204", rec.Code)
+	}
+	if path != "/api/v1/runs/run-1/gitcache/git/widgets/info/refs" ||
+		authorization != "Bearer swr_0123456789abcdef" || cookie != "" {
+		t.Fatalf("machine proxy boundary = path %q Authorization %q Cookie %q", path, authorization, cookie)
+	}
+}
+
 func TestGitcacheMachineProxyAllowsSlowPackStreamBeyondDefaultDeadline(t *testing.T) {
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

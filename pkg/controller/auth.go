@@ -476,14 +476,18 @@ func extractBearer(r *http.Request) (string, error) {
 	return strings.TrimSpace(strings.TrimPrefix(h, prefix)), nil
 }
 
-func requireScope(scope string, next http.Handler) http.Handler {
+func requireScope(scope string, next http.Handler, alternatives ...string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := PrincipalFromContext(r.Context())
 		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if p.HasScope(ScopeAdmin) || p.HasScope(scope) {
+		allowed := p.HasScope(ScopeAdmin) || p.HasScope(scope)
+		for _, alternative := range alternatives {
+			allowed = allowed || p.HasScope(alternative)
+		}
+		if allowed {
 			next.ServeHTTP(w, r)
 			return
 		}

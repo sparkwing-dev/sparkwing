@@ -16,7 +16,8 @@ import (
 type Config struct {
 	PollInterval time.Duration
 
-	ClaimWaitTimeout time.Duration
+	ClaimWaitTimeout  time.Duration
+	HeartbeatInterval time.Duration
 }
 
 type Runner struct {
@@ -32,6 +33,9 @@ func New(ctrl *client.Client, fallback runner.Runner, cfg Config, logger *slog.L
 	}
 	if cfg.ClaimWaitTimeout <= 0 {
 		cfg.ClaimWaitTimeout = 5 * time.Second
+	}
+	if cfg.HeartbeatInterval <= 0 {
+		cfg.HeartbeatInterval = 5 * time.Second
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -49,7 +53,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 
 	hbCtx, stopHB := context.WithCancel(ctx)
 	defer stopHB()
-	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, r.logger)
+	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, r.cfg.HeartbeatInterval, r.logger)
 
 	poll := time.NewTicker(r.cfg.PollInterval)
 	defer poll.Stop()
@@ -62,6 +66,12 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	for {
 		select {
 		case <-ctx.Done():
+			revokeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			if _, err := r.ctrl.RevokeNodeReady(revokeCtx, req.RunID, req.NodeID); err != nil {
+				r.logger.Debug("warmpool: cancellation revoke failed",
+					"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+			}
+			cancel()
 			return runner.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
 		case <-poll.C:
 			n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
@@ -75,6 +85,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			}
 			if n.ClaimedBy != "" {
 				if !claimedSeen {
+					stopHB()
 					_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID,
 						fmt.Sprintf("claimed by %s", n.ClaimedBy))
 				}
@@ -100,14 +111,15 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 					continue
 				}
 				if !revoked {
-					// safety: pod claimed between GetNode and RevokeNodeReady; let it finish
+					// safety: an agent claimed between GetNode and RevokeNodeReady; let it finish
+					stopHB()
 					claimedSeen = true
 					continue
 				}
 				if r.fallback == nil {
 					return runner.Result{
 						Outcome: sparkwing.Failed,
-						Err:     errors.New("warmpool: no pod claimed and no fallback configured"),
+						Err:     errors.New("warmpool: no agent claimed and no fallback configured"),
 					}
 				}
 				r.logger.Warn("warmpool: no claim in window; falling back",
@@ -119,9 +131,15 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	}
 }
 
-func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) {
+func heartbeatLoop(
+	ctx context.Context,
+	ctrl *client.Client,
+	runID, nodeID string,
+	interval time.Duration,
+	logger *slog.Logger,
+) {
 	_ = ctrl.TouchNodeHeartbeat(ctx, runID, nodeID)
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
@@ -145,7 +163,7 @@ func resultFromNode(n *store.Node) runner.Result {
 	if len(n.Output) > 0 {
 		res.Output = n.Output
 	}
-	// safety: empty outcome means the pod wrote done without an outcome; treat as Failed
+	// safety: empty outcome means the agent wrote done without an outcome; treat as Failed
 	if oc == "" {
 		res.Outcome = sparkwing.Failed
 		if res.Err == nil {

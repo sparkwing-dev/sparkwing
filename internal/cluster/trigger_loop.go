@@ -295,7 +295,6 @@ func triggerRunnerArgs(opts TriggerLoopOptions) []string {
 	appendFlag("--kubeconfig", opts.Kubeconfig)
 	appendFlag("--artifact-store", opts.ArtifactStore)
 	appendFlag("--image-pull-policy", opts.K8sImagePullPolicy)
-
 	if opts.DependencyProxy != "" {
 		args = append(args, "--dependency-proxy", opts.DependencyProxy)
 	} else {

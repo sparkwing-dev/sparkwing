@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
 )
 
 func runHandleTriggerCLI(args []string) error {
@@ -20,7 +22,7 @@ func runHandleTriggerCLI(args []string) error {
 		"bearer token for controller + logs calls (env: SPARKWING_AGENT_TOKEN)")
 	heartbeat := fs.Duration("heartbeat", 5*time.Second,
 		"heartbeat cadence for the claim lease (cluster mode only)")
-	runnerKind := fs.String("runner", "inprocess", "node runner: inprocess | k8s")
+	runnerKind := fs.String("runner", "inprocess", "node runner: inprocess | k8s | warm")
 	k8sNamespace := fs.String("namespace", os.Getenv("POD_NAMESPACE"), "namespace for runner Jobs (k8s)")
 	k8sImage := fs.String("image", os.Getenv("SPARKWING_RUNNER_IMAGE"), "runner image (k8s)")
 	k8sSA := fs.String("runner-sa", os.Getenv("SPARKWING_RUNNER_SA"), "service account name for runner pods (k8s)")
@@ -101,8 +103,41 @@ func runHandleTriggerCLI(args []string) error {
 			return fmt.Errorf("k8s runner: %w", err)
 		}
 		opts.RunnerFactory = factory
+	case "warm":
+		fallbackFactory := opts.RunnerFactory
+		if *k8sImage != "" {
+			nodeSelector, err := parseK8sNodeSelector(k8sNodeSelector)
+			if err != nil {
+				return err
+			}
+			tolerations, err := parseK8sTolerations(k8sTolerations)
+			if err != nil {
+				return err
+			}
+			factory, err := BuildK8sRunnerFactory(K8sRunnerFactoryConfig{
+				Kubeconfig:                 *kubeconfig,
+				Namespace:                  *k8sNamespace,
+				Image:                      *k8sImage,
+				ServiceAccount:             *k8sSA,
+				ImagePullSecret:            *k8sPullSecret,
+				ControllerURL:              firstNonEmpty(*k8sCtrlURL, *controllerURL),
+				LogsURL:                    firstNonEmpty(*k8sLogsURL, *logsURL),
+				ArtifactStoreURL:           *artifactStoreURL,
+				AgentToken:                 *token,
+				NodeSelector:               nodeSelector,
+				Tolerations:                tolerations,
+				DependencyProxyURL:         *dependencyProxy,
+				DependencyProxyFallbackURL: os.Getenv("SPARKWING_GITCACHE_URL"),
+				ImagePullPolicy:            *imagePullPolicy,
+			})
+			if err != nil {
+				return fmt.Errorf("warm runner (fallback k8s): %w", err)
+			}
+			fallbackFactory = factory
+		}
+		opts.RunnerFactory = BuildWarmRunnerFactory(*controllerURL, *token, warmpool.Config{}, fallbackFactory)
 	default:
-		return fmt.Errorf("--runner %q: expected inprocess or k8s", *runnerKind)
+		return fmt.Errorf("--runner %q: expected inprocess, k8s, or warm", *runnerKind)
 	}
 	if err := HandleClaimedTrigger(ctx, opts, triggerID); err != nil {
 		return fmt.Errorf("handle %s: %w", triggerID, err)

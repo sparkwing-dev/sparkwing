@@ -230,7 +230,9 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, bootstrapSubmitHandler(opts))))
 	router.Handle("POST /logout", csrfFormMiddleware(logoutHandler(opts)))
 	if opts.ControllerURL != "" {
-		router.Handle("/api/v1/gitcache/", gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false)))
+		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false))
+		router.Handle("/api/v1/gitcache/", gitcacheProxy)
+		router.Handle("/api/v1/runs/{id}/gitcache/", gitcacheProxy)
 	}
 	router.Handle("/", sessionAuthMiddleware(opts, bundleFS, authedMux))
 	return securityHeadersMiddleware(opts, router)

@@ -178,7 +178,7 @@ paths:
   /api/v1/runs/{id}:
     parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
-      x-sparkwing-scope: runs.read
+      x-sparkwing-scope: runs.read or nodes.claim or triggers.claim
       tags: [runs]
       summary: Fetch a single run, optionally with its nodes.
       description: |
@@ -1142,7 +1142,7 @@ paths:
   /api/v1/triggers/{id}:
     parameters: [{$ref: "#/components/parameters/TriggerID"}]
     get:
-      x-sparkwing-scope: triggers.read
+      x-sparkwing-scope: triggers.read or nodes.claim or triggers.claim
       tags: [triggers]
       summary: Fetch a single trigger by ID.
       responses:
@@ -2412,6 +2412,42 @@ paths:
           content:
             text/plain:
               schema: {type: string}
+
+  /api/v1/runs/{id}/gitcache/git/register:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/gitcache/git/{path}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: path
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: nodes.claim
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+    post:
+      x-sparkwing-scope: nodes.claim
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
 
 components:
   securitySchemes:

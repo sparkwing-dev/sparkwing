@@ -88,11 +88,16 @@ runner:
   # to trigger-claiming and leave the others node-only.
   alsoClaimTriggers: true
 
+  triggerRunner:
+    # inprocess executes nodes inside the trigger worker. warm offers nodes
+    # to remote agents first, then sends eligible overflow to Kubernetes.
+    # k8s sends every node to Kubernetes.
+    kind: inprocess
+
   # Mount the runner pod's ServiceAccount token. The runner reaches the
   # controller over HTTP and needs no API access, so this stays false.
-  # Set it true only for the opt-in Kubernetes trigger runner
-  # (SPARKWING_TRIGGER_RUNNER=k8s), which calls the API to create runner
-  # Jobs and cannot load its in-cluster config without a token.
+  # Set it true for triggerRunner.kind k8s or warm, whose trigger worker
+  # creates and inspects runner Jobs through the Kubernetes API.
   automountServiceAccountToken: false
 
   # Optional metrics scrape port. The Prometheus client registry on

@@ -120,7 +120,7 @@ func stampDocumented(paths *yaml.Node, registered map[string]apiroutes.Route, sc
 			}
 			documented[opKey] = true
 			op := item.Content[j+1]
-			setScalar(op, scopeKey, route.Scope, true)
+			setScalar(op, scopeKey, strings.ReplaceAll(route.Scope, "`", ""), true)
 			if claim := scopeProse(op, scopes); claim != "" {
 				prose = append(prose, opKey+": "+claim)
 			}

@@ -375,3 +375,5 @@ sparkwing-runner-bundle:
       - cluster
     maxConcurrent: 2
     alsoClaimTriggers: true
+    triggerRunner:
+      kind: inprocess

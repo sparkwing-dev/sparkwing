@@ -8,7 +8,7 @@ and per-endpoint scope annotations.
 Raw tokens are `<prefix>_<entropy>`:
 
 - `swu_...` -- user. Created for humans (`sparkwing cluster tokens create --type user`).
-- `swr_...` -- runner. Created for laptop agents or pool replicas.
+- `swr_...` -- runner. Created for remote machine agents or pool replicas.
 - `sws_...` -- service. Created for in-cluster back-channel callers.
 
 The **prefix segment** is the first 12 characters of a raw token. It's
@@ -22,13 +22,13 @@ mapping is in the generated [api-reference.md](api-reference.md):
 
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
-| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a caller holding a live claim on that run |
+| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, `/gitcache/refresh` |
-| `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, and the per-node write routes (`activity`, `annotations`, `summary`, `steps/*`, `dispatch`, `metrics`, and similar); GET `nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`, `/pipelines/{name}/profile` |
+| `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
-| `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a caller holding a live claim on that run |
-| `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`                   |
+| `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
+| `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run |
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
@@ -40,7 +40,8 @@ scope check passes if the principal carries `admin`.
 A runner needs `nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`,
 and `logs.write`. That set claims work, drives the run it claimed from plan to
 finish, reads the secrets its repository owns, and ships logs. It mints no
-token, reads no user, and lists no secret. A pool replica that executes
+token, reads no user, lists no secret, and cannot read cached source for an
+unclaimed run. A pool replica that executes
 already-created nodes still needs `runs.state`, because `start`, `finish`, and
 event append are its own writes; it can drop `triggers.claim` when a separate
 dispatcher claims triggers.
@@ -83,6 +84,11 @@ claiming token's prefix on the trigger row. A trigger's id is the id of the run
 it creates, so that claim is what a dispatcher owns a run by before any node of
 it is claimed.
 
+`GET /api/v1/runs/{id}` accepts `runs.read` or a live `nodes.claim` or
+`triggers.claim` owner of that run. `GET /api/v1/triggers/{id}` likewise
+accepts `triggers.read` or either live claim. Claim-scoped access expires with
+the lease and never widens list routes.
+
 Every `runs.state` write names a run, and the caller must own that run: hold an
 unexpired claim on one of its nodes, or hold the unexpired claim on its
 trigger. That covers run create, run finish, plan snapshot, node create, event
@@ -122,6 +128,8 @@ single write that a live claim authorized moments earlier.
 The execution view (`GET /api/v1/runs/{id}?include=secret_values`) follows the
 same rule: it returns plaintext argument values to an `admin` principal, or to
 a `nodes.claim` principal holding an unexpired claim on one of the run's nodes.
+A trigger claimant may read the run record but receives redacted secret values
+until it holds a node claim.
 A controller serving unauthenticated returns **plaintext**, because the whole
 API is open in that mode and handing a runner `***` as a real argument value
 would corrupt the run rather than protect it. Once authentication is on, a

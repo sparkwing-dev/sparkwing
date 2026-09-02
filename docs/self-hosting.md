@@ -68,6 +68,11 @@ and maximum concurrent jobs. On macOS it installs a LaunchAgent under
 `~/Library/LaunchAgents/`. On Linux it installs a systemd user unit under
 `~/.config/systemd/user/`.
 
+The agent defaults `gitcache` to the controller's claim-scoped proxy. Set
+`SPARKWING_GITCACHE_URL` and `SPARKWING_CACHE_TOKEN` only for a direct cache on
+a trusted LAN, VPN, or tailnet. The same values are stored in the mode-0600
+agent configuration.
+
 For unattended installation, supply the same values as environment variables:
 
 ```bash
@@ -82,6 +87,11 @@ bash install/install.sh --yes
 The installer writes the token to `~/.config/sparkwing/agent.yaml` with mode
 `0600`. The service uses that file rather than embedding the token in its
 launchd plist or systemd unit.
+
+The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
+--config <path>` command, but the bundled installer does not create a Windows
+service. Supervise it with the service manager you already use, or run the
+Linux installer inside WSL when systemd user services are enabled.
 
 ### Operate the service
 
@@ -115,9 +125,9 @@ remain active after logout.
 triggered and that the runner can reach the configured controller and logs
 URLs.
 
-**A private repository cannot be cloned.** The runner process needs credentials
-for that repository. Confirm that its service environment can reach the
-configured SSH agent or other Git credential source.
+**A private repository cannot be cloned.** Confirm that the controller has a
+cache URL, that the agent's claim is still live, and that the cache service can
+reach the repository with its configured Git credentials.
 
 **A Docker step fails.** Docker is a pipeline dependency, not a Sparkwing
 service requirement. Install and start Docker only on machines assigned jobs

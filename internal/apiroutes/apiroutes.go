@@ -32,7 +32,7 @@ const Authenticated = "authenticated"
 var (
 	handleRE = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
 
-	scopeRefRE = regexp.MustCompile(`(?:requireScope|scopeOr\w+)\((\w+),`)
+	scopeRefRE = regexp.MustCompile(`\b((?:Scope|scope)[A-Za-z]\w*)\b`)
 
 	scopeConstRE = regexp.MustCompile(`\b([A-Za-z]\w*)\s*=\s*"([a-z][a-z.]*)"`)
 )
@@ -85,12 +85,20 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 		if receiver == "mux" {
 			scope = Authenticated
 		}
-		if sm := scopeRefRE.FindStringSubmatch(rest); sm != nil {
-			if v, ok := scopes[sm[1]]; ok {
-				scope = v
-			} else {
-				scope = sm[1]
+		if matches := scopeRefRE.FindAllStringSubmatch(rest, -1); len(matches) > 0 {
+			seen := map[string]bool{}
+			var accepted []string
+			for _, match := range matches {
+				value := scopes[match[1]]
+				if value == "" {
+					value = match[1]
+				}
+				if !seen[value] {
+					accepted = append(accepted, value)
+					seen[value] = true
+				}
 			}
+			scope = strings.Join(accepted, "` or `")
 		}
 		routes = append(routes, Route{Method: method, Path: path, Scope: scope})
 	}

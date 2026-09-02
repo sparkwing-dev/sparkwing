@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -151,25 +149,10 @@ func runWorkerCLI(args []string) error {
 			PollInterval:     *warmPoll,
 			ClaimWaitTimeout: *warmWait,
 		}
-		opts.RunnerFactory = buildWarmPoolFactory(*controllerURL, *token, warmCfg, k8sFactory)
+		opts.RunnerFactory = orchestrator.BuildWarmRunnerFactory(*controllerURL, *token, warmCfg, k8sFactory)
 	default:
 		return fmt.Errorf("--runner %q: expected inprocess, k8s, or warm", *runnerKind)
 	}
 
 	return RunWorker(ctx, opts)
-}
-
-func buildWarmPoolFactory(
-	controllerURL, token string,
-	cfg warmpool.Config,
-	k8sFactory func(orchestrator.Backends, *store.Trigger) runner.Runner,
-) func(orchestrator.Backends, *store.Trigger) runner.Runner {
-	return func(b orchestrator.Backends, t *store.Trigger) runner.Runner {
-		ctrl := client.NewWithToken(controllerURL, &http.Client{Timeout: 30 * time.Second}, token)
-		var fallback runner.Runner
-		if k8sFactory != nil {
-			fallback = k8sFactory(b, t)
-		}
-		return warmpool.New(ctrl, fallback, cfg, slog.Default())
-	}
 }

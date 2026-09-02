@@ -81,9 +81,9 @@ generated artifact, not checked into the repository), so
 you run `bash bin/build-web.sh` from a repo checkout first. The prebuilt
 release binary has no such limitation.
 
-The cluster-mode runner Service (`sparkwing-runner`) is Linux/macOS
-only; Windows users dispatch pipelines to remote Linux/macOS runners
-or to a remote cluster.
+The bundled `sparkwing-runner` service installer supports Linux and macOS.
+On Windows, supervise `sparkwing-runner.exe agent` yourself or use the Linux
+installer inside WSL when systemd user services are enabled.
 
 ## Quick Start
 

@@ -36,14 +36,14 @@ admission, and runs that exact snapshot without pushing it to the origin. The
 capture rejects conflicts, submodules, sparse checkouts, and Git content
 filters. It also requires a complete SHA-1 repository. Both modes require an
 `origin` URL as the cache namespace.
-A runner started with `--trigger-runner k8s` instead creates one Kubernetes
-Job per node; that is opt-in and neither Helm chart enables it. It requires
-`--runner-sa` (or `SPARKWING_RUNNER_SA`) so the Job pods run under a named
-ServiceAccount rather than the namespace default, and the runner refuses to
-start without it. Those pods mount no ServiceAccount token. The runner pod
-itself does need one to create the Jobs: set
-`runner.automountServiceAccountToken=true` when you run this mode from the
-runner bundle, along with a Role that grants `batch/jobs` create.
+A runner started with `--trigger-runner k8s` creates one Kubernetes Job per
+node. `--trigger-runner warm` offers nodes to remote agents first and uses
+Kubernetes for unlabeled overflow. Both modes are opt-in; the runner-bundle
+chart exposes them through `runner.triggerRunner.kind`, while `inprocess`
+remains the default. The chart supplies the named runner ServiceAccount,
+namespace-scoped Job and pod-read permissions, and requires
+`runner.automountServiceAccountToken=true` so the trigger worker can call the
+Kubernetes API. The spawned Jobs mount no ServiceAccount token.
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and

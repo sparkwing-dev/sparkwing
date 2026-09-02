@@ -73,7 +73,8 @@ func RunNodeOnce(
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
 
 	if shouldRunRemote(trigger) {
-		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, runID, nodeID, token, logger)
+		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheToken,
+			runID, nodeID, token, logger)
 	}
 
 	var art storage.ArtifactStore

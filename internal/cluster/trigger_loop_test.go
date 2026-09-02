@@ -89,6 +89,23 @@ func TestTriggerRunnerArgsForwardsDependencyProxyOptOut(t *testing.T) {
 	}
 }
 
+func TestTriggerRunnerArgsWarm(t *testing.T) {
+	got := triggerRunnerArgs(TriggerLoopOptions{
+		RunnerKind:   "warm",
+		K8sNamespace: "sparkwing",
+		K8sImage:     "example.com/sparkwing-runner:v1",
+	})
+	want := []string{
+		"--runner", "warm",
+		"--namespace", "sparkwing",
+		"--image", "example.com/sparkwing-runner:v1",
+		"--dependency-proxy", "off",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("triggerRunnerArgs() = %#v, want %#v", got, want)
+	}
+}
+
 func TestTriggerRunnerArgsDefaultInProcess(t *testing.T) {
 	if got := triggerRunnerArgs(TriggerLoopOptions{}); len(got) != 0 {
 		t.Fatalf("triggerRunnerArgs(default) = %#v, want empty", got)

@@ -157,6 +157,30 @@ func TestRunRunnerCLI_ClaimNodesFalseRequiresTriggerLoop(t *testing.T) {
 	}
 }
 
+func TestRunRunnerCLI_WarmTriggerRunnerRefusesDirectNodeClaims(t *testing.T) {
+	err := runRunnerCLI([]string{
+		"--controller=http://controller",
+		"--metrics-addr=",
+		"--also-claim-triggers",
+		"--trigger-runner=warm",
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires --claim-nodes=false") {
+		t.Fatalf("runRunnerCLI() error = %v, want remote-agent race validation", err)
+	}
+}
+
+func TestRunRunnerCLI_TriggerRunnerRequiresTriggerLoop(t *testing.T) {
+	err := runRunnerCLI([]string{
+		"--controller=http://controller",
+		"--metrics-addr=",
+		"--trigger-runner=warm",
+		"--claim-nodes=false",
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires --also-claim-triggers") {
+		t.Fatalf("runRunnerCLI() error = %v, want trigger-loop validation", err)
+	}
+}
+
 func TestRunRunnerCLI_K8sTriggerRunnerRequiresAServiceAccount(t *testing.T) {
 	t.Setenv("SPARKWING_RUNNER_SA", "")
 	err := runRunnerCLI([]string{
@@ -167,7 +191,23 @@ func TestRunRunnerCLI_K8sTriggerRunnerRequiresAServiceAccount(t *testing.T) {
 		"--trigger-runner=k8s",
 		"--trigger-runner-image=img",
 	})
-	if err == nil || !strings.Contains(err.Error(), "--runner-sa (or SPARKWING_RUNNER_SA) is required with --runner k8s") {
+	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa (or SPARKWING_RUNNER_SA) is required with --trigger-runner=k8s") {
 		t.Fatalf("runRunnerCLI() error = %v, want the same rejection BuildK8sRunnerFactory returns", err)
+	}
+}
+
+func TestRunRunnerCLI_WarmKubernetesFallbackRequiresAServiceAccount(t *testing.T) {
+	t.Setenv("SPARKWING_RUNNER_SA", "")
+	err := runRunnerCLI([]string{
+		"--controller=http://controller",
+		"--metrics-addr=",
+		"--also-claim-triggers",
+		"--claim-nodes=false",
+		"--gitcache=http://cache",
+		"--trigger-runner=warm",
+		"--trigger-runner-image=img",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--trigger-runner-sa (or SPARKWING_RUNNER_SA) is required with --trigger-runner=warm") {
+		t.Fatalf("runRunnerCLI() error = %v, want warm fallback service-account validation", err)
 	}
 }

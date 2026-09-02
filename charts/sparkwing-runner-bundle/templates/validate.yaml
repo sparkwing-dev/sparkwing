@@ -21,6 +21,15 @@
 {{- if and .Values.runner.alsoClaimTriggers (not .Values.cache.enabled) (not $externalGitcache) -}}
 {{- fail "sparkwing-runner-bundle: runner.alsoClaimTriggers=true requires cache.enabled=true or runner.extraEnv SPARKWING_GITCACHE_URL with an external gitcache URL" -}}
 {{- end -}}
+{{- if not (has .Values.runner.triggerRunner.kind (list "inprocess" "k8s" "warm")) -}}
+{{- fail "sparkwing-runner-bundle: runner.triggerRunner.kind must be inprocess, k8s, or warm" -}}
+{{- end -}}
+{{- if and (ne .Values.runner.triggerRunner.kind "inprocess") (not .Values.runner.alsoClaimTriggers) -}}
+{{- fail "sparkwing-runner-bundle: runner.triggerRunner.kind k8s or warm requires runner.alsoClaimTriggers=true" -}}
+{{- end -}}
+{{- if and .Values.runner.alsoClaimTriggers (ne .Values.runner.triggerRunner.kind "inprocess") (not .Values.runner.automountServiceAccountToken) -}}
+{{- fail "sparkwing-runner-bundle: runner.triggerRunner.kind k8s or warm requires runner.automountServiceAccountToken=true so the trigger worker can create and inspect fallback Jobs" -}}
+{{- end -}}
 {{- if and (not .Values.serviceAccount.create) (not .Values.serviceAccount.shareAcrossComponents) -}}
 {{- fail "sparkwing-runner-bundle: serviceAccount.create=false puts the runner, cache, and logs pods on one ServiceAccount; set serviceAccount.shareAcrossComponents=true to accept that, or leave create=true for one account per component" -}}
 {{- end -}}

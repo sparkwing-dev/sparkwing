@@ -40,5 +40,5 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage: sparkwing-runner <runner|worker|agent> [flags]")
 	fmt.Fprintln(os.Stderr, "  runner  - long-lived warm pool pod (claims triggers + nodes)")
 	fmt.Fprintln(os.Stderr, "  worker  - legacy trigger-only claim loop (prefer 'runner --also-claim-triggers')")
-	fmt.Fprintln(os.Stderr, "  agent   - laptop agent (YAML-configured, off-cluster)")
+	fmt.Fprintln(os.Stderr, "  agent   - remote machine agent (YAML-configured, off-cluster)")
 }

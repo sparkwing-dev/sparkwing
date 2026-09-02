@@ -11,9 +11,10 @@ lint` -- see [authoring-pipelines.md](authoring-pipelines.md).
 > default. On Windows, install
 > [Git for Windows](https://git-scm.com/download/win) and run pipelines
 > from the Git Bash terminal it ships -- `sparkwing.Exec` (no-shell,
-> arg-vector form) works without it. The cluster-mode `sparkwing-runner`
-> Service is Linux/macOS only; Windows users dispatch pipelines to
-> remote runners or to a remote cluster.
+> arg-vector form) works without it. The bundled `sparkwing-runner` service
+> installer supports Linux and macOS. On Windows, supervise
+> `sparkwing-runner.exe agent` yourself or use the Linux installer inside WSL
+> when systemd user services are enabled.
 
 ## Pipeline registry
 

@@ -1164,6 +1164,15 @@ func TestGitRegisterValidatesTheName(t *testing.T) {
 	}
 }
 
+func TestGitRegisterAcceptsClaimScopedRepoName(t *testing.T) {
+	srv := newTestServer(t, "s3cret")
+	repoURL := "https://example.invalid/acme/widgets.git"
+	name := bincache.ClaimedRepoNameFromURL(repoURL)
+	if code := registerName(t, srv, name, repoURL, "s3cret"); code != http.StatusOK {
+		t.Fatalf("register claim-scoped name length %d = %d, want 200", len(name), code)
+	}
+}
+
 func isolateRepoNames(t *testing.T) {
 	t.Helper()
 	repoNamesMu.Lock()

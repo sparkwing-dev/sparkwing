@@ -299,16 +299,16 @@ different repository requires the token even on an unauthenticated cache.
 Every response carries `X-Content-Type-Options: nosniff`, and artifact
 downloads are served as `application/octet-stream` attachments.
 
-Off-cluster runners read Git through the controller's admin-scoped
-`/api/v1/gitcache/git/...` proxy. The controller drops the caller's bearer and
-presents its own `SPARKWING_CACHE_TOKEN` to the cache, and permits only
-registration and upload-pack reads. A login-enabled dashboard exposes that path
-to machine bearers without accepting browser session credentials: the mount
-rejects a request carrying no bearer credential before it extends the
-half-hour stream deadline or proxies anything, and caps concurrent Git streams
-so one caller cannot hold every long-lived connection. Direct-cache binary and
-seed writes use only `SPARKWING_CACHE_TOKEN`; direct-cache mode never receives
-the controller bearer.
+Off-cluster runners read Git through
+`/api/v1/runs/<run>/gitcache/git/...`. That route requires `nodes.claim`, a
+live claim on the named run, and the repository recorded on its trigger. The
+unscoped `/api/v1/gitcache/git/...` route remains admin-only. The controller
+drops the caller's bearer and presents its own cache credential upstream, and
+permits only registration and upload-pack reads. A login-enabled dashboard
+exposes those paths to machine bearers without accepting browser sessions:
+the mount rejects a request carrying no bearer before it extends the half-hour
+stream deadline or proxies anything, and caps concurrent Git streams. A
+direct cache uses the separately configured `cache_token` instead.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
 cache pod (`networkPolicy.enabled`, on by default). It admits the release's

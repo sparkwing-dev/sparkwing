@@ -20,6 +20,8 @@ import (
 type AgentConfig struct {
 	Controller    string        `yaml:"controller"`
 	Logs          string        `yaml:"logs"`
+	Gitcache      string        `yaml:"gitcache"`
+	CacheToken    string        `yaml:"cache_token"`
 	Profile       string        `yaml:"profile"`
 	Token         string        `yaml:"token"`
 	MaxConcurrent int           `yaml:"max_concurrent"`
@@ -51,6 +53,9 @@ func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
 	out := in
 	if out.Controller == "" {
 		return out, errors.New("agent.yaml: controller is required")
+	}
+	if out.Gitcache == "" {
+		out.Gitcache = strings.TrimRight(out.Controller, "/") + "/api/v1/gitcache"
 	}
 	if out.SpawnPolicy == "" {
 		out.SpawnPolicy = "return-to-queue"
@@ -129,6 +134,7 @@ func RunAgentCLI(args []string) error {
 		"config", *configPath,
 		"profile", cfg.Profile,
 		"controller", cfg.Controller,
+		"gitcache", cfg.Gitcache,
 		"labels", cfg.Labels,
 		"max_concurrent", cfg.MaxConcurrent,
 		"spawn_policy", cfg.SpawnPolicy,
@@ -147,6 +153,8 @@ func RunAgentCLI(args []string) error {
 	return RunPoolLoop(ctx, PoolLoopConfig{
 		ControllerURL:     cfg.Controller,
 		LogsURL:           cfg.Logs,
+		GitcacheURL:       cfg.Gitcache,
+		CacheToken:        cfg.CacheToken,
 		Token:             cfg.Token,
 		HolderPrefix:      prefix,
 		Labels:            cfg.Labels,

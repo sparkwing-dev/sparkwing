@@ -109,15 +109,16 @@ cache Service, so set both: `--cache-pod-url` for the
 externally-reachable URL operators hit directly, `--cache-url` for the
 controller-to-cache proxy target.
 
-Off-cluster runners can set `SPARKWING_GITCACHE_URL` to
-`https://<controller>/api/v1/gitcache`. The controller exposes admin-scoped
-registration and read-only smart-Git proxy routes at that prefix and removes
-the caller's bearer before contacting the internal cache. This keeps the raw
-Git cache private while a laptop, desktop, or bare-metal runner uses outbound
-HTTPS only. The dashboard ingress exposes this prefix as a machine-bearer route
-even when browser login is required. A direct cache URL over a LAN, VPN, or
-tailnet remains supported; direct binary and seed writes use only
-`SPARKWING_CACHE_TOKEN`, never the runner's controller token.
+Off-cluster agents default `gitcache` to
+`https://<controller>/api/v1/gitcache`. During node execution the runner
+narrows that URL to `/api/v1/runs/<run>/gitcache`; the `nodes.claim` bearer may
+register and read only the repository of its live run claim. The controller
+removes that bearer before contacting the internal cache. The unscoped
+`/api/v1/gitcache/git/...` routes remain admin-only. This keeps the raw cache
+private while a workstation or server uses outbound HTTPS only. The dashboard
+ingress exposes these routes to machine bearers without accepting browser
+session credentials. A direct cache URL over a LAN, VPN, or tailnet remains
+supported through `agent.yaml` `gitcache` and `cache_token`.
 
 ## Background Fetch
 

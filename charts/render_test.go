@@ -24,8 +24,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.9" {
-		t.Fatalf("full chart version = %q, want 0.1.9", chart.Version)
+	if chart.Version != "0.1.10" {
+		t.Fatalf("full chart version = %q, want 0.1.10", chart.Version)
 	}
 }
 
@@ -386,8 +386,9 @@ type renderedPolicyRule struct {
 type renderedResource struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {
-		Name   string            `yaml:"name"`
-		Labels map[string]string `yaml:"labels"`
+		Name      string            `yaml:"name"`
+		Namespace string            `yaml:"namespace"`
+		Labels    map[string]string `yaml:"labels"`
 	} `yaml:"metadata"`
 	Rules []renderedPolicyRule `yaml:"rules"`
 	Spec  struct {
@@ -618,6 +619,137 @@ func runnerEnv(t *testing.T, rendered string) map[string]string {
 func renderRunner(t *testing.T, sets ...string) string {
 	t.Helper()
 	return helmRender(t, "./sparkwing-runner-bundle", "templates/runner-deployment.yaml", "sparkwing", sets...)
+}
+
+func renderRunnerInNamespace(t *testing.T, namespace string, sets ...string) string {
+	t.Helper()
+	return helmRenderInNamespace(t, "./sparkwing-runner-bundle", "templates/runner-deployment.yaml", "sparkwing", namespace, sets...)
+}
+
+func TestRunnerTriggerRunnerDefaultsToInProcess(t *testing.T) {
+	args := runnerContainer(t, renderRunner(t)).Args
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--trigger-runner") || arg == "--claim-nodes=false" {
+			t.Errorf("default runner args include warm execution flag %q", arg)
+		}
+	}
+
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default"))
+	for _, resource := range resources {
+		for _, rule := range resource.Rules {
+			if reflect.DeepEqual(rule.Resources, []string{"jobs"}) {
+				t.Fatalf("default %s/%s grants Job mutation: %+v", resource.Kind, resource.Metadata.Name, rule)
+			}
+		}
+	}
+}
+
+func TestRunnerWarmTriggerRunnerUsesRemoteCapacityBeforeKubernetes(t *testing.T) {
+	args := runnerContainer(t, renderRunnerInNamespace(t, "capacity",
+		"runner.triggerRunner.kind=warm",
+		"runner.automountServiceAccountToken=true",
+		"runner.image.repository=registry.example/sparkwing-runner",
+		"runner.image.tag=remote",
+		"runner.image.pullPolicy=Always",
+		"serviceAccount.create=false",
+		"serviceAccount.name=remote-fallback",
+		"serviceAccount.shareAcrossComponents=true",
+	)).Args
+	want := []string{
+		"--claim-nodes=false",
+		"--trigger-runner=warm",
+		"--trigger-runner-namespace=capacity",
+		"--trigger-runner-image=registry.example/sparkwing-runner:remote",
+		"--trigger-runner-sa=remote-fallback",
+		"--trigger-runner-image-pull-policy=Always",
+		"--trigger-artifact-store=http://sparkwing-sparkwing-runner-bundle-cache.capacity.svc.cluster.local",
+	}
+	for _, arg := range want {
+		if !containsArg(args, arg) {
+			t.Errorf("warm runner args = %v, want %q", args, arg)
+		}
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--trigger-warm-") || strings.HasPrefix(arg, "--warm-claim-") || strings.HasPrefix(arg, "--warm-poll") {
+			t.Errorf("warm runner args expose internal timing flag %q", arg)
+		}
+	}
+}
+
+func TestRunnerWarmTriggerRunnerGrantsNamespaceJobCRUD(t *testing.T) {
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "capacity",
+		"runner.triggerRunner.kind=warm", "runner.automountServiceAccountToken=true"))
+	var jobRule *renderedPolicyRule
+	var podRule *renderedPolicyRule
+	for i := range resources {
+		if resources[i].Kind == "ClusterRole" {
+			t.Fatalf("warm mode rendered cluster-scoped RBAC: %+v", resources[i].Metadata)
+		}
+		if resources[i].Kind != "Role" {
+			continue
+		}
+		if resources[i].Metadata.Namespace != "capacity" {
+			t.Fatalf("Role namespace = %q, want capacity", resources[i].Metadata.Namespace)
+		}
+		for j := range resources[i].Rules {
+			if reflect.DeepEqual(resources[i].Rules[j].Resources, []string{"jobs"}) {
+				jobRule = &resources[i].Rules[j]
+			} else if reflect.DeepEqual(resources[i].Rules[j].Resources, []string{"pods"}) {
+				podRule = &resources[i].Rules[j]
+			} else {
+				t.Errorf("warm mode grants unrelated resources: %+v", resources[i].Rules[j])
+			}
+		}
+	}
+	if jobRule == nil {
+		t.Fatal("warm mode rendered no Job rule")
+	}
+	if !reflect.DeepEqual(jobRule.APIGroups, []string{"batch"}) ||
+		!reflect.DeepEqual(jobRule.Verbs, []string{"create", "get", "delete"}) {
+		t.Fatalf("Job rule = %+v, want the exact fallback lifecycle verbs", *jobRule)
+	}
+	if podRule == nil || len(podRule.APIGroups) != 1 || podRule.APIGroups[0] != "" ||
+		!reflect.DeepEqual(podRule.Verbs, []string{"list"}) {
+		t.Fatalf("Pod rule = %+v, want the exact fallback inspection verb", podRule)
+	}
+}
+
+func TestRunnerClusterTriggerRunnersRequireAnAPIToken(t *testing.T) {
+	for _, kind := range []string{"k8s", "warm"} {
+		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "runner.triggerRunner.kind="+kind)
+		if !strings.Contains(out, "runner.automountServiceAccountToken=true") {
+			t.Errorf("%s render error does not name the required token setting:\n%s", kind, out)
+		}
+	}
+}
+
+func TestRunnerClusterTriggerRunnersRequireTheTriggerLoop(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
+		"runner.triggerRunner.kind=warm", "runner.alsoClaimTriggers=false")
+	if !strings.Contains(out, "runner.alsoClaimTriggers=true") {
+		t.Fatalf("render error does not name the required trigger loop:\n%s", out)
+	}
+}
+
+func TestRunnerTriggerRunnerKindRejectsInvalidValue(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "runner.triggerRunner.kind=remote")
+	if !strings.Contains(out, "runner.triggerRunner.kind must be inprocess, k8s, or warm") {
+		t.Fatalf("render error does not identify trigger runner kinds:\n%s", out)
+	}
+}
+
+func TestRunnerWarmTimingIsNotChartConfiguration(t *testing.T) {
+	for _, path := range []string{"sparkwing-runner-bundle/values.yaml", "sparkwing-full/values.yaml"} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, removed := range []string{"warmClaimWait", "warmPollInterval", "claimNodes"} {
+			if strings.Contains(string(body), removed) {
+				t.Errorf("%s exposes removed setting %q", path, removed)
+			}
+		}
+	}
 }
 
 func renderController(t *testing.T, sets ...string) renderedContainer {
@@ -863,6 +995,23 @@ func TestFullChartCarriesTheDependencyProxyWiring(t *testing.T) {
 	if got := env["GOPROXY"]; got != "http://"+host+"/proxy/golang|https://proxy.golang.org,direct" {
 		t.Errorf("GOPROXY = %q; the vendored sub-chart may be stale. "+
 			"Fix: helm dep up ./charts/sparkwing-full", got)
+	}
+}
+
+func TestFullChartVendorsWarmTriggerRunner(t *testing.T) {
+	rendered := helmRenderInNamespace(t, "./sparkwing-full",
+		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing", "capacity",
+		"sparkwing-runner-bundle.runner.triggerRunner.kind=warm",
+		"sparkwing-runner-bundle.runner.automountServiceAccountToken=true")
+	args := runnerContainer(t, rendered).Args
+	for _, want := range []string{
+		"--trigger-runner=warm",
+		"--claim-nodes=false",
+		"--trigger-runner-namespace=capacity",
+	} {
+		if !containsArg(args, want) {
+			t.Errorf("vendored runner args = %v, want %q", args, want)
+		}
 	}
 }
 
