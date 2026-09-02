@@ -57,6 +57,20 @@ code change to unlock.
   the request to another host. A cache that answers 401 no longer breaks the
   clone: it falls back to the upstream remote, the same as an unreachable
   cache.
+- **cli:** `sparkwing runs submit` now snapshots an allow-listed environment
+  instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
+  `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every credential-shaped
+  name and value, widened by `SPARKWING_SUBMIT_ENV_ALLOW`. The consumer
+  deletes the snapshot when it starts the run rather than when the run ends.
+
+### Security
+
+- **controller:** First-admin bootstrap is now atomic on Postgres. The
+  check-then-insert locks a single `sparkwing_meta` latch row inside its
+  transaction, so two concurrent bootstrap requests can no longer both read an
+  empty `users` table and each create an admin under a different name. The
+  transaction also ran raw `?` placeholders that Postgres rejects, so bootstrap
+  now goes through the dialect-aware transaction helper.
 
 ## [v0.40.0] - 2026-09-02
 ### Security
