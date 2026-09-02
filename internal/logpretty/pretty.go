@@ -107,7 +107,16 @@ func (p *PrettyRenderer) color(s, code string) string {
 	return code + s + ansiReset
 }
 
+// safety: pipeline output reaches the terminal here, so escape sequences are filtered before printing.
+func (p *PrettyRenderer) sanitize(s string) string {
+	if p.useColor {
+		return SanitizeANSI(s)
+	}
+	return StripANSI(s)
+}
+
 func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
+	rec.Msg = p.sanitize(rec.Msg)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	sink := p.w
@@ -154,7 +163,7 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		fmt.Fprintln(sink, line)
 		if errMsg, ok := p.pendingStepEnd.Attrs["error"].(string); ok && errMsg != "" {
 			for _, errLine := range strings.Split(strings.TrimRight(errMsg, "\n"), "\n") {
-				fmt.Fprintln(sink, "    "+p.color(errLine, ansiRed))
+				fmt.Fprintln(sink, "    "+p.color(p.sanitize(errLine), ansiRed))
 			}
 		}
 		p.pendingStepEnd = nil
@@ -626,15 +635,15 @@ func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.L
 			lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 			crumb := p.color(e.nodeID, p.hueFor(e.nodeID))
 			if stepID != "" {
-				crumb += p.color(" › ", ansiDim) + p.color(stepID, ansiDim)
+				crumb += p.color(" › ", ansiDim) + p.color(p.sanitize(stepID), ansiDim)
 			}
 			crumb += p.color(" │ ", ansiDim)
 			for i, line := range lines {
 				prefix := "  "
 				if i == 0 {
-					fmt.Fprintln(w, prefix+crumb+p.color(line, ansiRed))
+					fmt.Fprintln(w, prefix+crumb+p.color(p.sanitize(line), ansiRed))
 				} else {
-					fmt.Fprintln(w, prefix+"  "+p.color(line, ansiRed))
+					fmt.Fprintln(w, prefix+"  "+p.color(p.sanitize(line), ansiRed))
 				}
 			}
 		}
@@ -644,7 +653,7 @@ func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.L
 		if errMsg, ok := finish.Attrs["error"].(string); ok && errMsg != "" &&
 			!strings.HasPrefix(errMsg, "nodes failed:") && !strings.HasPrefix(errMsg, "nodes cancelled:") {
 			fmt.Fprintln(w)
-			fmt.Fprintln(w, "  "+p.color("error  ", ansiDim)+" "+p.color(errMsg, ansiRed))
+			fmt.Fprintln(w, "  "+p.color("error  ", ansiDim)+" "+p.color(p.sanitize(errMsg), ansiRed))
 		}
 	}
 
@@ -735,7 +744,7 @@ func (p *PrettyRenderer) writeFailureHeadline(w io.Writer, nodes []any) {
 		if msg, _ := m["error"].(string); msg != "" {
 			_, body := splitStepErrorPrefix(msg)
 			if tail := errorTail(body); tail != "" {
-				line += p.color(" │ ", ansiDim) + p.color(tail, ansiRed)
+				line += p.color(" │ ", ansiDim) + p.color(p.sanitize(tail), ansiRed)
 			}
 		}
 		fmt.Fprintln(w, line)
@@ -954,7 +963,7 @@ func (p *PrettyRenderer) writeStepEnd(w io.Writer, rec sparkwing.LogRecord) {
 	fmt.Fprintln(w, p.color(fmt.Sprintf("  %s %s", glyph, rec.Msg), code)+tail)
 	if errMsg, ok := rec.Attrs["error"].(string); ok && errMsg != "" {
 		for _, errLine := range strings.Split(strings.TrimRight(errMsg, "\n"), "\n") {
-			fmt.Fprintln(w, "      "+p.color(errLine, ansiRed))
+			fmt.Fprintln(w, "      "+p.color(p.sanitize(errLine), ansiRed))
 		}
 	}
 }
@@ -1161,32 +1170,6 @@ func asMillis(v any) (int64, bool) {
 		return int64(n), true
 	}
 	return 0, false
-}
-
-func StripANSI(s string) string {
-	if !strings.ContainsRune(s, 0x1b) {
-		return s
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); {
-		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
-			j := i + 2
-			for j < len(s) {
-				c := s[j]
-				if c >= 0x40 && c <= 0x7e {
-					j++
-					break
-				}
-				j++
-			}
-			i = j
-			continue
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
 }
 
 func RenderMarkdownSummary(out io.Writer, prefix, md string) {
