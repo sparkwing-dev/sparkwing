@@ -82,6 +82,10 @@ code change to unlock.
 
 ### Security
 
+- **storage:** Artifact keys are limited to ASCII letters, digits, `.`, `_`, and
+  `-` with no dot-leading segment, and the cache-backed artifact store escapes
+  every key segment in its request path, so a double-encoded or `#`/`?` key
+  cannot reach an object store as a different path.
 - **orchestrator (Breaking):** Node dispatch snapshots drop credential-shaped
   environment variables, mask registered secret values in the ones they keep,
   and name every dropped key in a new `redacted_keys` field so a replay can say

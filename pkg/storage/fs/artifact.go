@@ -51,7 +51,7 @@ var _ storage.ArtifactStore = (*ArtifactStore)(nil)
 // safety: keys arrive from HTTP path segments, so a key is validated and
 // its shard join confirmed inside the root before any filesystem call.
 func relPath(key string) (string, error) {
-	if err := storage.SafeRelPath(key); err != nil {
+	if err := storage.SafeArtifactKey(key); err != nil {
 		return "", err
 	}
 	shard := "_"
@@ -206,6 +206,9 @@ func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error)
 		}
 		key := keyFromRelPath(rel)
 		if key == "" {
+			return nil
+		}
+		if _, err := relPath(key); err != nil {
 			return nil
 		}
 		if prefix == "" || strings.HasPrefix(key, prefix) {
