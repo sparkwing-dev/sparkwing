@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -165,10 +166,10 @@ func TestCreateRun_RejectsSecretInputHash(t *testing.T) {
 			store.InvocationSecretArgsKey: []string{"token"},
 		},
 	}
-	if err := st.CreateRun(context.Background(), run); err != store.ErrSecretInputHash {
+	if err := st.CreateRun(context.Background(), run); !errors.Is(err, store.ErrSecretInputHash) {
 		t.Fatalf("CreateRun error = %v, want ErrSecretInputHash", err)
 	}
-	if _, err := st.GetRun(context.Background(), run.ID); err != store.ErrNotFound {
+	if _, err := st.GetRun(context.Background(), run.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("GetRun error = %v, want ErrNotFound", err)
 	}
 }
