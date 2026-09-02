@@ -2,7 +2,7 @@ module sparkwing-k8s-e2e-pipelines
 
 go 1.26.0
 
-require github.com/sparkwing-dev/sparkwing v0.38.2
+require github.com/sparkwing-dev/sparkwing v0.39.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
