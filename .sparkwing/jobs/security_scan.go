@@ -26,7 +26,7 @@ var gosecExcludedDirs = []string{"web", "testdata", "dist"}
 // SecurityScanArgs are the inputs of the security-scan pipeline.
 type SecurityScanArgs struct {
 	ReportDir string `flag:"report-dir" desc:"Directory that receives gosec.sarif and gosec.json. Default: a fresh temporary directory named in the job log."`
-	Strict    bool   `flag:"strict" desc:"Fail the gosec job when any high-severity, high-confidence finding remains. Off while the recorded backlog is being resolved; GitHub code scanning blocks new findings meanwhile."`
+	Strict    bool   `flag:"strict" desc:"Fail the gosec job when any high-severity, high-confidence finding remains. Gosec findings are report-only unless this flag is set."`
 }
 
 // SecurityScan runs the static security scanners against the repository.
@@ -37,7 +37,7 @@ func (SecurityScan) ShortHelp() string {
 }
 
 func (SecurityScan) Help() string {
-	return "Runs four independent scanners: gosec over the public module and the .sparkwing pipeline module, excluding the rules that describe how a CI tool works rather than a defect in it (files and subprocesses named by its inputs, cache directory permissions, and checks the lint gate already owns), writing gosec.json and a repo-relative gosec.sarif for GitHub code scanning; govulncheck in source mode over ./...; gitleaks over the full git history using the .gitleaks.toml allow-list; and `npm audit` over the dashboard's production dependencies. gosec reports without failing unless --strict is set, because the existing backlog is tracked as tickets and code scanning gates new findings on pull requests. The other three scanners fail on any finding. Every tool runs through `go run` at a pinned version except npm, which must be on PATH."
+	return "Runs four independent scanners: gosec over the public module and the .sparkwing pipeline module, excluding the rules that describe how a CI tool works rather than a defect in it (files and subprocesses named by its inputs, cache directory permissions, and checks the lint gate already owns), writing gosec.json and a repo-relative gosec.sarif for GitHub code scanning; govulncheck in source mode over ./...; gitleaks over the available git history using the .gitleaks.toml allow-list; and `npm audit` over the dashboard's production dependencies. gosec reports without failing unless --strict is set; code scanning records its findings but does not make this pipeline fail. The other three scanners fail on any finding. The three Go-based scanners run through `go run` at pinned module versions; npm must be on PATH."
 }
 
 func (SecurityScan) Examples() []sparkwing.Example {
