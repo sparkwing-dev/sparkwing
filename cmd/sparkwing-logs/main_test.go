@@ -29,6 +29,39 @@ func TestRunRefusesToStartWithoutAControllerWhenAuthIsRequired(t *testing.T) {
 	}
 }
 
+func TestRunRefusesAControllerURLItCouldNeverResolveTokensAgainst(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{name: "blank", url: "   "},
+		{name: "no scheme", url: "controller.example.com"},
+		{name: "no host", url: "http://"},
+		{name: "wrong scheme", url: "ftp://controller.example.com"},
+		{name: "a path, not a URL", url: "/var/run/controller.sock"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SPARKWING_CONTROLLER_URL", "")
+			t.Setenv("SPARKWING_REQUIRE_AUTH", "")
+			err := run([]string{"--require-auth", "--controller", tc.url})
+			if err == nil {
+				t.Fatalf("run started with --controller %q; health would advertise auth enabled while every whoami fails", tc.url)
+			}
+			if !strings.Contains(err.Error(), "--require-auth") {
+				t.Errorf("err = %v, want it to name --require-auth", err)
+			}
+		})
+	}
+}
+
+func TestCheckControllerURLAcceptsAbsoluteHTTPURLs(t *testing.T) {
+	for _, url := range []string{"http://controller.default.svc.cluster.local", "https://controller.example.com/base"} {
+		if err := checkControllerURL(url); err != nil {
+			t.Errorf("checkControllerURL(%q) = %v, want it accepted", url, err)
+		}
+	}
+}
+
 func TestEnvTruthyReadsOnlyExplicitOptIns(t *testing.T) {
 	for value, want := range map[string]bool{
 		"1": true, "true": true, "YES": true, " on ": true,

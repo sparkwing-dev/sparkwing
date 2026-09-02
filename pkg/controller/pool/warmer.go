@@ -6,7 +6,9 @@ import (
 	"io"
 	"log"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -22,7 +24,7 @@ import (
 const WarmerServiceAccountName = "sparkwing-cache-warmer"
 
 // safety: the warmer runs privileged, so every entry must parse as a registry reference before it reaches the pod
-var imageReferencePattern = regexp.MustCompile(`^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*(?::[0-9]{1,5})?/)?` +
+var imageReferencePattern = regexp.MustCompile(`^(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*|\[[0-9a-fA-F:.]+\])(?::[0-9]{1,5})?/)?` +
 	`[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*` +
 	`(?::[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127})?(?:@sha256:[a-f0-9]{64})?$`)
 
@@ -43,22 +45,91 @@ kill $DOCKERD_PID
 wait $DOCKERD_PID 2>/dev/null || true
 `
 
+// safety: a ConfigMap writer controls the list length, so only the first entries are read and rejections are summarized
+const (
+	maxWarmImages         = 64
+	maxNamedRejections    = 3
+	maxRejectionNameChars = 100
+)
+
+var (
+	warmImageLogMu       sync.Mutex
+	lastWarmImageWarning string
+)
+
 func acceptedWarmImages(images []string) []string {
-	var accepted []string
-	for _, img := range images {
+	considered := images
+	unread := 0
+	if len(considered) > maxWarmImages {
+		unread = len(considered) - maxWarmImages
+		considered = considered[:maxWarmImages]
+	}
+
+	accepted := make([]string, 0, len(considered))
+	var rejected []string
+	for _, img := range considered {
 		if !imageReferencePattern.MatchString(img) {
-			log.Printf("warmer: rejecting warm image %q: not a valid image reference", img)
+			rejected = append(rejected, img)
 			continue
 		}
 		accepted = append(accepted, img)
 	}
+
+	logWarmImageRejections(len(images), rejected, unread)
+	if len(accepted) == 0 {
+		return nil
+	}
 	return accepted
+}
+
+func logWarmImageRejections(total int, rejected []string, unread int) {
+	line := ""
+	if len(rejected) > 0 || unread > 0 {
+		var msg strings.Builder
+		fmt.Fprintf(&msg, "warmer: rejected %d of %d warm images", len(rejected)+unread, total)
+		if len(rejected) > 0 {
+			named := rejected
+			if len(named) > maxNamedRejections {
+				named = named[:maxNamedRejections]
+			}
+			quoted := make([]string, 0, len(named))
+			for _, img := range named {
+				quoted = append(quoted, strconv.Quote(truncateForLog(img)))
+			}
+			fmt.Fprintf(&msg, ": %s", strings.Join(quoted, ", "))
+			if more := len(rejected) - len(named); more > 0 {
+				fmt.Fprintf(&msg, " and %d more", more)
+			}
+		}
+		if unread > 0 {
+			fmt.Fprintf(&msg, "; %d entries past the %d entry limit were not read", unread, maxWarmImages)
+		}
+		line = msg.String()
+	}
+
+	warmImageLogMu.Lock()
+	defer warmImageLogMu.Unlock()
+	if line == lastWarmImageWarning {
+		return
+	}
+	lastWarmImageWarning = line
+	if line != "" {
+		log.Print(line)
+	}
+}
+
+func truncateForLog(img string) string {
+	if len(img) <= maxRejectionNameChars {
+		return img
+	}
+	return img[:maxRejectionNameChars] + "..."
 }
 
 // WarmPVC runs a short-lived DinD pod that mounts the target PVC at /var/lib/docker
 // and pulls the warm image list into it. Once the pod completes, the PVC contains
-// a pre-populated Docker storage directory. Entries that do not parse as image
-// references are logged and dropped rather than passed to the pod. An empty
+// a pre-populated Docker storage directory. At most 64 entries are read, and
+// those that do not parse as image references are dropped rather than passed to
+// the pod; one summary line per read reports what was dropped. An empty
 // serviceAccount falls back to [WarmerServiceAccountName].
 func WarmPVC(ctx context.Context, client kubernetes.Interface, namespace, pvcName, serviceAccount string, warmImages []string) error {
 	if serviceAccount == "" {

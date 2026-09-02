@@ -19,6 +19,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
@@ -329,7 +330,7 @@ func (s *Server) whoami(ctx context.Context, rawToken string) (*logsPrincipal, e
 		return nil, fmt.Errorf("whoami decode: %w", err)
 	}
 	// safety: an unauthenticated controller answers whoami 200 for any string, so its anonymous principal is not a caller.
-	if body.Kind == "none" || body.Principal == "unauthed" {
+	if body.Kind == authwire.AnonymousKind || body.Principal == authwire.AnonymousPrincipal {
 		return nil, errors.New("controller resolved the token to its unauthenticated principal")
 	}
 	return &logsPrincipal{

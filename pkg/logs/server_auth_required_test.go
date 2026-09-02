@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func newHealthServer(t *testing.T, controllerURL string) *Server {
@@ -110,5 +114,26 @@ func TestAnonymousPrincipalIsNotCached(t *testing.T) {
 
 	if _, cached := s.authCache.Load("swu_whatever"); cached {
 		t.Error("the controller's anonymous principal was cached and would be trusted for the TTL")
+	}
+}
+
+func TestALiveControllerWithNoTokensIsNotACaller(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	ctrl := httptest.NewServer(controller.New(st, nil).Handler())
+	defer ctrl.Close()
+
+	s := newHealthServer(t, ctrl.URL)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/logs/run-1/step-a", nil)
+	req.Header.Set("Authorization", "Bearer swu_whatever")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 -- a controller with no tokens answers whoami for any bearer; body %s",
+			rec.Code, rec.Body.String())
 	}
 }

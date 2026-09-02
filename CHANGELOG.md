@@ -51,6 +51,22 @@ code change to unlock.
 
 ### Security
 
+- **cli:** The admission daemon's unix socket is now private to its user. Its
+  path stays a pure function of `SPARKWING_HOME`, so every caller resolves the
+  same socket whatever its environment. The daemon refuses a base directory
+  that other accounts can write without the sticky bit, refuses a socket
+  directory that is not a `0700` directory owned by the current uid, chmods the
+  socket to `0600`, and drops accepted connections whose kernel-reported peer
+  uid differs. Clients apply the same tests before dialing, including the peer
+  sweep behind `sparkwing doctor`. These checks are unix-only.
+- **cache:** The package proxy rewrites the npm and PyPI URLs it serves against
+  `--public-url` (`SPARKWING_CACHE_PUBLIC_URL`, chart: `cache.publicUrl`,
+  defaulting to the in-cluster Service URL) and caches that copy. Without a
+  public URL the upstream body is cached untouched and every response is
+  rewritten from its own request's `Host`, so a forged `Host` no longer poisons
+  the packument each later build reads. `X-Forwarded-Host` and
+  `X-Forwarded-Proto` count only when `--trust-forwarded-host`
+  (`SPARKWING_CACHE_TRUST_FORWARDED_HOST`) is set.
 - **controller (Breaking):** Revoking a token, rotating one, or deleting a user now takes
   effect on the serving replica immediately: the auth cache drops the affected
   prefixes and rechecks each cached entry's `expires_at` and `revoked_at` on
@@ -69,17 +85,24 @@ code change to unlock.
   `web.apiUrl` are deprecated and ignored. A token-backed dashboard that binds
   a non-loopback address without `--require-login` refuses to start. See the
   [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
-- **store:** Browser sessions are stored as a sha256 digest of the session id,
-  and the CSRF token is derived as an HMAC of that id under a server key
-  instead of being written to the database, so a copy of the state database,
-  its WAL, or a backup no longer yields replayable dashboard sessions. The
-  schema 21 migration deletes existing session rows, so everyone signs in
-  again after the upgrade.
+- **store (Breaking):** Browser sessions are stored as a sha256 digest of the
+  session id, and the CSRF token is derived as an HMAC of that id under a
+  server key instead of being written to the database, so a copy of the state
+  database, its WAL, or a backup no longer yields replayable dashboard
+  sessions. Schema 21 drops the `sessions.csrf_token` column and deletes every
+  session row: everyone signs in again, and it is the first migration a
+  still-running older binary cannot read past. A session lookup that fails on
+  the store or the signing key now answers `500` instead of `401`, so the
+  dashboard reports a backend fault rather than signing the browser out. See
+  the [migration guide](docs/migrations/_unreleased.md#session-rows-are-hashed-and-the-csrf-column-is-dropped).
 - **cache:** The warm-pool controller now accepts only registry references in
-  `warm_images`, logging and dropping every other entry, and passes the list to
-  the privileged warmer pod as container arguments consumed by a fixed script.
-  A ConfigMap writer can no longer smuggle shell into the one privileged
-  workload Sparkwing creates.
+  `warm_images` -- a DNS or bracketed IPv6 host, a lowercase path, an optional
+  tag, and a lowercase `sha256` digest -- reads at most 64 entries per config
+  read, summarizes what it dropped in one log line per read, and passes the
+  accepted list to the privileged warmer pod as container arguments consumed by
+  a fixed script. A ConfigMap writer can no longer smuggle shell into the one
+  privileged workload Sparkwing creates, nor flood the controller log with
+  rejections.
 - **controller:** Login now carries per-client, listener-wide, and per-account
   budgets, and every argon2id verification passes through a memory-sized
   semaphore, so unauthenticated callers can no longer exhaust the pod by
@@ -97,6 +120,17 @@ code change to unlock.
   `controller.tokenSecret.name` now fails at render time instead of serving,
   forging, and deleting every run's logs for anything that reaches its Service;
   set the new `logs.allowUnauthenticated=true` during a bootstrap install.
+- **logs:** `sparkwing-full` now vendors a runner bundle that carries that
+  guard, so a full-chart install refuses to render a logs service with no
+  `sparkwing-runner-bundle.controller.tokenSecret.name` unless
+  `logs.allowUnauthenticated=true`, and the web pod falls back to that Secret so
+  the dashboard's log panes still authenticate. `--require-auth` rejects a
+  controller URL that is not an absolute `http(s)` URL instead of advertising
+  `"auth":"enabled"` on a service whose every token lookup fails, and `sparkwing
+  cluster status` warns instead of passing when it cannot read the logs
+  service's auth state -- no announced logs URL, no `auth` field, or a degraded
+  service -- and when the controller resolves the profile's bearer to its
+  anonymous principal.
 - **ci:** Every GitHub Actions workflow now pins its actions to a full commit
   SHA with a version comment, the release job that prepares binaries no longer
   persists checkout credentials, and the canonical gate installs dashboard
