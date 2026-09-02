@@ -101,13 +101,13 @@ profiles:
 		t.Fatalf("write: %v", err)
 	}
 
-	if _, err := remoteSecretSource(""); err == nil {
+	if _, err := remoteSecretSource("", ""); err == nil {
 		t.Fatal("empty profile name must error")
 	}
-	if _, err := remoteSecretSource("ghost"); err == nil {
+	if _, err := remoteSecretSource("ghost", ""); err == nil {
 		t.Fatal("unknown profile must error")
 	}
-	if _, err := remoteSecretSource("only"); err == nil {
+	if _, err := remoteSecretSource("only", ""); err == nil {
 		t.Fatal("profile without controller must error")
 	}
 }

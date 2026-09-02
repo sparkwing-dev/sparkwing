@@ -20,7 +20,7 @@ func applySecretsProfileOverride(opts *Options) error {
 	if prof == "" {
 		return nil
 	}
-	src, err := remoteSecretSource(prof)
+	src, err := remoteSecretSource(prof, opts.RunID)
 	if err != nil {
 		return err
 	}
@@ -28,7 +28,7 @@ func applySecretsProfileOverride(opts *Options) error {
 	return nil
 }
 
-func remoteSecretSource(profName string) (secrets.Source, error) {
+func remoteSecretSource(profName, runID string) (secrets.Source, error) {
 	if profName == "" {
 		return nil, errors.New("profile name is required")
 	}
@@ -49,7 +49,7 @@ func remoteSecretSource(profName string) (secrets.Source, error) {
 	}
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	return secrets.SourceFunc(func(name string) (string, bool, error) {
-		sec, gerr := c.GetSecret(context.Background(), name)
+		sec, gerr := c.GetSecretForRun(context.Background(), name, runID)
 		if gerr != nil {
 			if errors.Is(gerr, store.ErrNotFound) {
 				return "", false, secrets.ErrSecretMissing
