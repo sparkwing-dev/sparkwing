@@ -709,9 +709,33 @@ func TestLogsControllerURLAloneDoesNotEnableAuth(t *testing.T) {
 	args := runnerContainer(t, renderLogs(t,
 		"controller.url=https://controller.example.com",
 		"controller.tokenSecret.name=",
-		"cache.allowUnauthenticated=true")).Args
+		"cache.allowUnauthenticated=true",
+		"logs.allowUnauthenticated=true")).Args
 	if containsArg(args, "--controller") {
 		t.Errorf("logs args = %v, want auth disabled without a token Secret", args)
+	}
+}
+
+func TestLogsWithoutATokenSecretFailsAtRender(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
+		"controller.tokenSecret.name=", "cache.allowUnauthenticated=true")
+	for _, want := range []string{"controller.tokenSecret.name", "logs.allowUnauthenticated=true"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("render error does not name %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestLogsRefusesToStartUnauthenticatedByDefault(t *testing.T) {
+	if args := runnerContainer(t, renderLogs(t)).Args; !containsArg(args, "--require-auth") {
+		t.Errorf("logs args = %v, want --require-auth so an open pod crashes instead of serving", args)
+	}
+	args := runnerContainer(t, renderLogs(t,
+		"controller.tokenSecret.name=",
+		"cache.allowUnauthenticated=true",
+		"logs.allowUnauthenticated=true")).Args
+	if containsArg(args, "--require-auth") {
+		t.Errorf("logs args = %v, want no startup guard once the operator opts out", args)
 	}
 }
 
@@ -1182,7 +1206,8 @@ func TestCacheWithoutATokenSecretFailsAtRender(t *testing.T) {
 }
 
 func TestCacheAllowUnauthenticatedRendersTheOptIn(t *testing.T) {
-	rendered := renderCache(t, "controller.tokenSecret.name=", "cache.allowUnauthenticated=true")
+	rendered := renderCache(t, "controller.tokenSecret.name=",
+		"cache.allowUnauthenticated=true", "logs.allowUnauthenticated=true")
 	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--allow-unauthenticated") {
 		t.Errorf("cache args = %v, want --allow-unauthenticated", args)
 	}

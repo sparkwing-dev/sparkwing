@@ -48,6 +48,17 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **logs:** `sparkwing-logs` gains `--require-auth` /
+  `SPARKWING_REQUIRE_AUTH`, refusing to start without a controller to resolve
+  caller tokens against, reports `"auth"` on `GET /api/v1/health` so
+  `sparkwing cluster status` warns on an open logs service, and rejects the
+  anonymous principal an unauthenticated controller returns from `whoami`. A
+  logs-enabled `sparkwing-runner-bundle` install without
+  `controller.tokenSecret.name` now fails at render time instead of serving,
+  forging, and deleting every run's logs for anything that reaches its Service;
+  set the new `logs.allowUnauthenticated=true` during a bootstrap install.
 
 ## [v0.39.0] - 2026-09-02
 ### Docs
