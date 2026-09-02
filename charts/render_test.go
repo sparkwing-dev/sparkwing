@@ -202,6 +202,25 @@ func TestControllerLoginThrottleFlagsRender(t *testing.T) {
 	}
 }
 
+func TestWebAddrIsOverridable(t *testing.T) {
+	defaultArgs := webArgs(t, helmTemplate(t, "sparkwing"))
+	if got, _ := hasFlag(defaultArgs, "--addr="); got != "--addr=0.0.0.0:4343" {
+		t.Errorf("default addr flag = %q, want the Service-reachable bind", got)
+	}
+
+	loopback := webArgs(t, helmTemplate(t, "sparkwing", "web.addr=127.0.0.1:4343"))
+	if got, _ := hasFlag(loopback, "--addr="); got != "--addr=127.0.0.1:4343" {
+		t.Errorf("addr flag = %q, want the loopback override", got)
+	}
+}
+
+func TestWebDeploymentDropsAPIURL(t *testing.T) {
+	args := webArgs(t, helmTemplate(t, "sparkwing", "web.apiUrl=https://api.example"))
+	if got, ok := hasFlag(args, "--api-url="); ok {
+		t.Errorf("api-url flag = %q, want the deprecated flag gone", got)
+	}
+}
+
 func TestWebCacheURLOverrideWins(t *testing.T) {
 	args := webArgs(t, helmTemplate(t, "sparkwing", "web.cache.url=http://cache.elsewhere:8090"))
 	if got, _ := hasFlag(args, "--cache="); got != "--cache=http://cache.elsewhere:8090" {
@@ -686,6 +705,22 @@ func TestCachePublicURLMatchesTheProxyURLRunnersDial(t *testing.T) {
 func TestCachePublicURLOverrideWins(t *testing.T) {
 	env := runnerEnv(t, renderCache(t, "cache.publicUrl=https://cache.example.com"))
 	if got := env["SPARKWING_CACHE_PUBLIC_URL"]; got != "https://cache.example.com" {
+		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want the explicit override", got)
+	}
+}
+
+func TestCachePublicURLIsUnsetWhenClientsDialMoreThanOneAddress(t *testing.T) {
+	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
+		env := runnerEnv(t, renderCache(t, "cache.service.type="+serviceType))
+		if got, ok := env["SPARKWING_CACHE_PUBLIC_URL"]; ok {
+			t.Errorf("%s Service set SPARKWING_CACHE_PUBLIC_URL = %q, want it unset so the proxy rewrites per request", serviceType, got)
+		}
+	}
+
+	env := runnerEnv(t, renderCache(t,
+		"cache.service.type=LoadBalancer",
+		"cache.publicUrl=http://cache.example.com"))
+	if got := env["SPARKWING_CACHE_PUBLIC_URL"]; got != "http://cache.example.com" {
 		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want the explicit override", got)
 	}
 }

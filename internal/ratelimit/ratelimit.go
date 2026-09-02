@@ -219,6 +219,14 @@ func remoteIP(remoteAddr string) (netip.Addr, bool) {
 	return ip.Unmap(), true
 }
 
+// PeerIsTrustedProxy reports whether a request's TCP peer address, in
+// host:port or bare host form, sits inside one of the trusted proxy
+// prefixes. Callers use it before believing any forwarded header.
+func PeerIsTrustedProxy(remoteAddr string, trustedProxyCIDRs []netip.Prefix) bool {
+	ip, ok := remoteIP(remoteAddr)
+	return ok && isTrustedProxy(ip, trustedProxyCIDRs)
+}
+
 func isTrustedProxy(ip netip.Addr, trustedProxyCIDRs []netip.Prefix) bool {
 	for _, prefix := range trustedProxyCIDRs {
 		if prefix.Contains(ip) {

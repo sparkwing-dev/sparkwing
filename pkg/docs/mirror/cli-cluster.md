@@ -483,8 +483,10 @@ sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod
 Remove a dashboard user
 
 Deletes the user row, every session that user holds, and
-revokes every token minted under that principal name, in one
-transaction. Cookies and tokens stop working immediately.
+revokes every token minted under that principal name except the token
+this request authenticates with, in one transaction. The sessions and
+tokens are revoked and the auth cache on the serving replica is
+cleared; auth.md describes the windows that remain elsewhere.
 
 ### Flags
 

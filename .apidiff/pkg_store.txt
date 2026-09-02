@@ -167,6 +167,7 @@ var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argu
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrTokenRevoked = errors.New("token is revoked or expired")
 var ErrUnknownToken = errors.New("unknown token")
+var ErrUserNotFound = errors.New("user not found")
 type Event struct {
 	RunID   string
 	Seq     int64
@@ -520,7 +521,7 @@ func (s *Store) DB() *sql.DB
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name, repo string) error
 func (s *Store) DeleteSession(rawSession string) error
-func (s *Store) DeleteUser(name string, now time.Time) ([]string, error)
+func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error)
 func (s *Store) Dialect() Dialect
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error

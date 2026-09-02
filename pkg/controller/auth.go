@@ -112,15 +112,17 @@ func quoteScopes(scopes []string) string {
 // verify only on matched rows. An in-memory cache keeps repeated
 // lookups cheap.
 type Authenticator struct {
-	store    *store.Store
-	cache    sync.Map
-	cacheTTL time.Duration
-	negCache sync.Map
-	negCount atomic.Int64
-	prefixes *ratelimit.Limiter
-	trusted  []netip.Prefix
-	logger   *slog.Logger
-	now      func() time.Time
+	store       *store.Store
+	cache       sync.Map
+	cacheTTL    time.Duration
+	generations sync.Map
+	negCache    sync.Map
+	negCount    atomic.Int64
+	prefixes    *ratelimit.Limiter
+	trusted     []netip.Prefix
+	logger      *slog.Logger
+	now         func() time.Time
+	afterLookup func()
 }
 
 type authCacheEntry struct {
@@ -239,6 +241,8 @@ func (a *Authenticator) authenticate(raw, client string) (*Principal, error) {
 	if !a.prefixes.Peek(budget, now) {
 		return nil, errAuthThrottled
 	}
+	prefix := tokenPrefixOf(raw)
+	gen := a.generation(prefix)
 	tok, err := a.store.LookupToken(raw, now)
 	if err != nil {
 		if errors.Is(err, store.ErrUnknownToken) {
@@ -248,6 +252,9 @@ func (a *Authenticator) authenticate(raw, client string) (*Principal, error) {
 			a.rememberFailure(raw, err, now)
 		}
 		return nil, err
+	}
+	if a.afterLookup != nil {
+		a.afterLookup()
 	}
 	if tok.RevokedAt != nil && tok.ReplacedBy != "" {
 		slog.Warn(
@@ -266,7 +273,8 @@ func (a *Authenticator) authenticate(raw, client string) (*Principal, error) {
 		Authed:      now,
 	}
 
-	if a.cacheTTL > 0 {
+	// safety: an Invalidate that landed during this read must win, or the revoked row is re-cached for a full TTL.
+	if a.cacheTTL > 0 && a.generation(prefix) == gen {
 		a.cache.Store(raw, &authCacheEntry{
 			principal: principal,
 			expires:   now.Add(a.cacheTTL),
@@ -301,6 +309,7 @@ func (a *Authenticator) Invalidate(prefix string) {
 	if a == nil || prefix == "" {
 		return
 	}
+	a.bumpGeneration(prefix)
 	a.cache.Range(func(k, v any) bool {
 		e, ok := v.(*authCacheEntry)
 		if ok && e.principal != nil && e.principal.TokenPrefix == prefix {
@@ -308,6 +317,27 @@ func (a *Authenticator) Invalidate(prefix string) {
 		}
 		return true
 	})
+}
+
+func tokenPrefixOf(raw string) string {
+	if len(raw) < store.PrefixLen {
+		return raw
+	}
+	return raw[:store.PrefixLen]
+}
+
+func (a *Authenticator) generation(prefix string) uint64 {
+	v, ok := a.generations.Load(prefix)
+	if !ok {
+		return 0
+	}
+	return v.(*atomic.Uint64).Load()
+}
+
+// safety: only Invalidate creates a cell, so unauthenticated traffic carrying invented prefixes cannot grow this map.
+func (a *Authenticator) bumpGeneration(prefix string) {
+	v, _ := a.generations.LoadOrStore(prefix, new(atomic.Uint64))
+	v.(*atomic.Uint64).Add(1)
 }
 
 func (a *Authenticator) recentFailure(raw string, now time.Time) (error, bool) {

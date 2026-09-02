@@ -200,8 +200,13 @@ credentials, a query, or a fragment.
 Every dashboard response carries `Content-Security-Policy`
 (`default-src 'self'` plus a per-response nonce for the bundle's inline
 scripts), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
-`Referrer-Policy: same-origin`, and adds `Strict-Transport-Security` when
-session cookies are `Secure`. The page reads its configuration from
+`Referrer-Policy: same-origin`, and adds `Strict-Transport-Security` when the
+request carries evidence of TLS: the listener terminates TLS itself, a peer
+inside `--trusted-proxy-cidrs` forwarded `X-Forwarded-Proto: https`, or the
+operator passed `--hsts` because TLS terminates somewhere that forwards no
+trusted header. That same evidence decides the scheme the CSRF origin check
+expects, so a dashboard behind an HTTPS proxy keeps `Secure` cookies without
+the insecure-cookie override. The page reads its configuration from
 `/sparkwing-runtime.js`, which carries the dashboard version and the login
 mode. The service bearer stays in the web process and rides only its
 server-side proxy, so the browser talks to one origin and `connect-src 'self'`
@@ -210,8 +215,11 @@ holds.
 A dashboard that carries `--token`, runs without `--require-login`, and binds a
 non-loopback address refuses to start, because every caller that reaches the
 listener would drive the controller with that token. Pass `--require-login`,
-bind a loopback address, or accept the exposure with
+bind a loopback address (chart: `web.addr`), or accept the exposure with
 `--allow-unauthenticated-remote` (chart: `web.allowUnauthenticatedRemote`).
+`--token` with no controller, logs, or profile backend is a startup error too:
+nothing would authenticate with it, so the dashboard would serve
+unauthenticated while the flag suggested otherwise.
 
 Login throttling uses the TCP peer address and ignores forwarded headers by
 default. When a reverse proxy fronts `sparkwing-web`, pass its egress networks
@@ -331,9 +339,12 @@ you started before learning the old token leaked can still be stopped.
 
 Deleting a user removes the user row, deletes every session that user
 holds, and revokes every token whose principal is that name, in one
-transaction. Principals are free-form labels, so a token minted for an
-unrelated caller under the same name is revoked too; keep human account
-names and service principal names distinct.
+transaction. The token the delete request authenticates with is left
+alone, so an operator whose admin token shares a name with the account
+being deleted keeps working. Principals are free-form labels, so any
+other token minted under the same name is revoked too, including one
+minted for an unrelated caller; keep human account names and service
+principal names distinct.
 
 Profiles are the only path for targeting a remote cluster, which keeps
 it hard to accidentally point at the wrong one. The
@@ -363,13 +374,19 @@ so the next request on that replica re-reads the row and gets `401`.
 A cached entry also carries the row's `expires_at` and `revoked_at`,
 which are rechecked on every hit, so a token that expires or whose
 rotation grace closes mid-cache stops authenticating on time rather
-than at the end of the cache window.
+than at the end of the cache window. An authentication that was already
+reading the row when the revoke landed does not install its entry, so it
+cannot put the revoked row back into the cache.
 
-Two windows remain:
+Three windows remain:
 
 - **Other controller replicas.** Invalidation is in-process. A replica
   that did not serve the revoke keeps its cached entry for up to 60
   seconds. Restart or scale the controller to zero to close it now.
+- **The loopback controller each run starts.** A local run serves the
+  admin API from the orchestrator process over the same tokens table,
+  behind its own 60-second cache that a controller restart does not
+  reach. It is bound to loopback and exits with the run.
 - **The logs service.** `sparkwing-logs` resolves callers through the
   controller's `whoami` and caches the answer for its own TTL (60s by
   default), on top of whatever the controller replica held. Its worst

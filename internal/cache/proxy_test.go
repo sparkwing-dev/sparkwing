@@ -7,10 +7,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -521,21 +523,66 @@ func TestProxyBaseForRequest(t *testing.T) {
 		forwardedHost string
 		forwardedProt string
 		want          string
+		wantOK        bool
 	}{
-		{name: "request host", host: "cache.internal:8090", want: "http://cache.internal:8090/proxy"},
+		{name: "request host", host: "cache.internal:8090", want: "http://cache.internal:8090/proxy", wantOK: true},
 		{
 			name:          "forwarded host ignored by default",
 			host:          "cache.internal",
 			forwardedHost: "evil.example.com",
 			want:          "http://cache.internal/proxy",
+			wantOK:        true,
 		},
 		{
-			name:          "forwarded host honored when trusted",
+			name:          "right-most forwarded host wins when trusted",
 			trustForward:  true,
 			host:          "cache.internal",
-			forwardedHost: "cache.example.com, hop.example.com",
-			forwardedProt: "https",
+			forwardedHost: "evil.example.com, cache.example.com",
+			forwardedProt: "http, https",
 			want:          "https://cache.example.com/proxy",
+			wantOK:        true,
+		},
+		{
+			name:          "malformed forwarded host is rejected",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: `x"}}`,
+			wantOK:        false,
+		},
+		{
+			name:          "forwarded host with a path is rejected",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: "evil.example.com/proxy/npm",
+			wantOK:        false,
+		},
+		{
+			name:          "container host names are accepted",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: "sparkwing_cache:8090",
+			want:          "http://sparkwing_cache:8090/proxy",
+			wantOK:        true,
+		},
+		{
+			name:          "bracketed ipv6 forwarded host is accepted",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: "[2001:db8::1]:8090",
+			want:          "http://[2001:db8::1]:8090/proxy",
+			wantOK:        true,
+		},
+		{
+			name:          "empty host without a trusted forwarded host is rejected",
+			forwardedHost: "cache.example.com",
+			wantOK:        false,
+		},
+		{
+			name:          "empty host falls back to a trusted forwarded host",
+			trustForward:  true,
+			forwardedHost: "cache.example.com",
+			want:          "http://cache.example.com/proxy",
+			wantOK:        true,
 		},
 		{
 			name:          "configured base wins",
@@ -544,6 +591,7 @@ func TestProxyBaseForRequest(t *testing.T) {
 			host:          "cache.internal",
 			forwardedHost: "evil.example.com",
 			want:          "http://configured.internal/proxy",
+			wantOK:        true,
 		},
 	}
 
@@ -561,7 +609,11 @@ func TestProxyBaseForRequest(t *testing.T) {
 			if tt.forwardedProt != "" {
 				req.Header.Set("X-Forwarded-Proto", tt.forwardedProt)
 			}
-			if got := proxyBaseForRequest(req); got != tt.want {
+			got, ok := proxyBaseForRequest(req)
+			if ok != tt.wantOK {
+				t.Fatalf("proxyBaseForRequest() ok = %v, want %v (got %q)", ok, tt.wantOK, got)
+			}
+			if ok && got != tt.want {
 				t.Errorf("proxyBaseForRequest() = %q, want %q", got, tt.want)
 			}
 		})
@@ -582,6 +634,11 @@ func TestNormalizeProxyPublicBase(t *testing.T) {
 		{in: "cache.internal:8090", wantErr: true},
 		{in: "ftp://cache.internal", wantErr: true},
 		{in: "://", wantErr: true},
+		{in: "http://cache.internal//", wantErr: true},
+		{in: "http://cache.internal/proxy/npm", wantErr: true},
+		{in: "http://cache.internal/a/b/", wantErr: true},
+		{in: "http://cache.internal/?a=b", wantErr: true},
+		{in: "http://cache.internal/#frag", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -601,4 +658,211 @@ func TestNormalizeProxyPublicBase(t *testing.T) {
 			}
 		})
 	}
+}
+
+func writeCachedProxyEntry(t *testing.T, registry, path string, body []byte, immutable bool) {
+	t.Helper()
+	key := proxyCacheKey(registry, path)
+	meta := proxyMeta{
+		Path:        path,
+		ContentType: "application/json",
+		CachedAt:    time.Now().Unix(),
+		Size:        int64(len(body)),
+		Immutable:   immutable,
+		StatusCode:  200,
+	}
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proxyDir, registry, key+".body"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proxyDir, registry, key+".meta"), metaJSON, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func largePackument(t *testing.T, upstream string, size int) []byte {
+	t.Helper()
+	filler := strings.Repeat("x", 4096)
+	var b strings.Builder
+	for b.Len() < size {
+		fmt.Fprintf(&b, `{"tarball":"%s/pkg/-/pkg-1.0.0.tgz","pad":"%s"}`+"\n", upstream, filler)
+	}
+	return []byte(b.String())
+}
+
+func TestHandleProxy_HeadOnLargeMutableEntryDoesNotReadTheBody(t *testing.T) {
+	const upstream = "https://registry.npmjs.org"
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: upstream, RewriteBody: true},
+	}, func() {
+		body := largePackument(t, upstream, 8<<20)
+		writeCachedProxyEntry(t, "npm", "pkg", body, false)
+
+		req := httptest.NewRequest(http.MethodHead, "/proxy/npm/pkg", nil)
+		req.Host = "cache.internal"
+		w := httptest.NewRecorder()
+
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		handleProxy(w, req)
+		runtime.ReadMemStats(&after)
+
+		if w.Header().Get("X-Proxy-Cache") != "HIT" {
+			t.Fatalf("expected a cache HIT, got %q", w.Header().Get("X-Proxy-Cache"))
+		}
+		if w.Body.Len() != 0 {
+			t.Errorf("HEAD wrote %d body bytes", w.Body.Len())
+		}
+		allocated := after.TotalAlloc - before.TotalAlloc
+		t.Logf("HEAD on a %d byte cached entry allocated %d bytes", len(body), allocated)
+		if limit := uint64(len(body) / 8); allocated > limit {
+			t.Errorf("HEAD on a %d byte entry allocated %d bytes, want under %d", len(body), allocated, limit)
+		}
+
+		get := httptest.NewRequest(http.MethodGet, "/proxy/npm/pkg", nil)
+		get.Host = "cache.internal"
+		gw := httptest.NewRecorder()
+		handleProxy(gw, get)
+		if strings.Contains(gw.Body.String(), upstream) {
+			t.Error("streamed GET should have rewritten every upstream URL")
+		}
+		if want := strings.Count(string(body), upstream); strings.Count(gw.Body.String(), "http://cache.internal/proxy/npm/") != want {
+			t.Errorf("streamed GET rewrote %d occurrences, want %d",
+				strings.Count(gw.Body.String(), "http://cache.internal/proxy/npm/"), want)
+		}
+	})
+}
+
+func TestProxyStreamReplace(t *testing.T) {
+	const old = "https://registry.npmjs.org"
+	const replacement = "http://cache.internal/proxy/npm"
+
+	offsets := []int{0, 17, proxyRewriteChunk - len(old) - 1, proxyRewriteChunk - len(old)/2, proxyRewriteChunk - 1, 2*proxyRewriteChunk + 5}
+	for _, offset := range offsets {
+		t.Run(fmt.Sprintf("offset-%d", offset), func(t *testing.T) {
+			body := strings.Repeat("a", offset) + old + strings.Repeat("b", proxyRewriteChunk)
+			var out strings.Builder
+			if err := proxyStreamReplace(&out, strings.NewReader(body), old, replacement); err != nil {
+				t.Fatal(err)
+			}
+			if want := strings.ReplaceAll(body, old, replacement); out.String() != want {
+				t.Errorf("stream rewrite differs from a whole-body rewrite at offset %d", offset)
+			}
+		})
+	}
+
+	t.Run("one byte reads", func(t *testing.T) {
+		body := "head " + old + " tail " + old
+		var out strings.Builder
+		if err := proxyStreamReplace(&out, iotest.OneByteReader(strings.NewReader(body)), old, replacement); err != nil {
+			t.Fatal(err)
+		}
+		if want := strings.ReplaceAll(body, old, replacement); out.String() != want {
+			t.Errorf("proxyStreamReplace() = %q, want %q", out.String(), want)
+		}
+	})
+
+	t.Run("no rule copies through", func(t *testing.T) {
+		var out strings.Builder
+		if err := proxyStreamReplace(&out, strings.NewReader("body"), "", ""); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != "body" {
+			t.Errorf("proxyStreamReplace() = %q, want %q", out.String(), "body")
+		}
+	})
+}
+
+func TestHandleProxy_ServeTimeRewritesAreNotSharedCacheable(t *testing.T) {
+	var upstream *httptest.Server
+	upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"name":"pkg","dist":{"tarball":"%s/pkg/-/pkg-1.0.0.tgz"}}`, upstream.URL)
+	}))
+	defer upstream.Close()
+
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: upstream.URL, RewriteBody: true},
+	}, func() {
+		miss := httptest.NewRecorder()
+		handleProxy(miss, npmProxyRequest("cache.internal", "pkg"))
+		if got := miss.Header().Get("Cache-Control"); got != "private, max-age=0" {
+			t.Errorf("MISS Cache-Control = %q, want %q", got, "private, max-age=0")
+		}
+		if got := miss.Header().Get("Vary"); got != "Host" {
+			t.Errorf("MISS Vary = %q, want %q", got, "Host")
+		}
+
+		hit := httptest.NewRecorder()
+		handleProxy(hit, npmProxyRequest("cache.internal", "pkg"))
+		if got := hit.Header().Get("Cache-Control"); got != "private, max-age=0" {
+			t.Errorf("HIT Cache-Control = %q, want %q", got, "private, max-age=0")
+		}
+		if got := hit.Header().Get("Vary"); got != "Host" {
+			t.Errorf("HIT Vary = %q, want %q", got, "Host")
+		}
+
+		proxyTrustForwardedHost = true
+		trusted := httptest.NewRecorder()
+		handleProxy(trusted, npmProxyRequest("cache.internal", "pkg"))
+		if got := trusted.Header().Get("Vary"); got != "Host, X-Forwarded-Host" {
+			t.Errorf("trusted Vary = %q, want %q", got, "Host, X-Forwarded-Host")
+		}
+	})
+}
+
+func TestHandleProxy_ConfiguredBaseStaysPubliclyCacheable(t *testing.T) {
+	var upstream *httptest.Server
+	upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"name":"pkg","dist":{"tarball":"%s/pkg/-/pkg-1.0.0.tgz"}}`, upstream.URL)
+	}))
+	defer upstream.Close()
+
+	oldTTL := proxyCacheTTL
+	proxyCacheTTL = 10 * time.Minute
+	defer func() { proxyCacheTTL = oldTTL }()
+
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: upstream.URL, RewriteBody: true},
+	}, func() {
+		proxyPublicBase = "http://cache.internal:8090/proxy"
+
+		miss := httptest.NewRecorder()
+		handleProxy(miss, npmProxyRequest("cache.internal:8090", "pkg"))
+		if got := miss.Header().Get("Cache-Control"); got != "public, max-age=600" {
+			t.Errorf("MISS Cache-Control = %q, want %q", got, "public, max-age=600")
+		}
+		if got := miss.Header().Get("Vary"); got != "" {
+			t.Errorf("MISS Vary = %q, want none", got)
+		}
+
+		hit := httptest.NewRecorder()
+		handleProxy(hit, npmProxyRequest("cache.internal:8090", "pkg"))
+		if got := hit.Header().Get("Cache-Control"); !strings.HasPrefix(got, "public, max-age=") {
+			t.Errorf("HIT Cache-Control = %q, want a public max-age", got)
+		}
+	})
+}
+
+func TestHandleProxy_MissingHostIsRejected(t *testing.T) {
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: "https://registry.npmjs.org", RewriteBody: true},
+	}, func() {
+		req := httptest.NewRequest(http.MethodGet, "/proxy/npm/pkg", nil)
+		req.Host = ""
+		req.Header.Set("X-Forwarded-Host", "evil.example.com")
+		w := httptest.NewRecorder()
+		handleProxy(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for a request with no usable Host, got %d", w.Code)
+		}
+		if strings.Contains(w.Body.String(), "evil.example.com") {
+			t.Errorf("untrusted forwarded host leaked into the response: %s", w.Body.String())
+		}
+	})
 }

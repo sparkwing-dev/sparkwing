@@ -71,30 +71,52 @@ code change to unlock.
   sweep behind `sparkwing doctor`. These checks are unix-only.
 - **cache:** The package proxy rewrites the npm and PyPI URLs it serves against
   `--public-url` (`SPARKWING_CACHE_PUBLIC_URL`, chart: `cache.publicUrl`,
-  defaulting to the in-cluster Service URL) and caches that copy. Without a
-  public URL the upstream body is cached untouched and every response is
-  rewritten from its own request's `Host`, so a forged `Host` no longer poisons
-  the packument each later build reads. `X-Forwarded-Host` and
+  defaulting to the in-cluster Service URL on a `ClusterIP` Service and empty on
+  any other, where clients dial more than one address) and caches that copy.
+  Without a public URL the upstream body is cached untouched and every response
+  is rewritten from its own request's `Host`, so a forged `Host` no longer
+  poisons the packument each later build reads. That rewrite streams and `HEAD`
+  answers from the cached metadata, so entry size no longer becomes memory, and
+  the responses carry `Cache-Control: private, max-age=0` plus `Vary: Host` so
+  no shared intermediary hands one client's body to another; a fixed base stays
+  `Cache-Control: public` for the entry TTL. `X-Forwarded-Host` and
   `X-Forwarded-Proto` count only when `--trust-forwarded-host`
-  (`SPARKWING_CACHE_TRUST_FORWARDED_HOST`) is set.
+  (`SPARKWING_CACHE_TRUST_FORWARDED_HOST`) is set, are read right-most first,
+  and must parse as a host with an optional port; a request with no usable
+  `Host` is refused with `400`. A public URL with a path beyond `/proxy`, a
+  query, or a fragment now fails startup naming the value.
 - **controller (Breaking):** Revoking a token, rotating one, or deleting a user now takes
   effect on the serving replica immediately: the auth cache drops the affected
   prefixes and rechecks each cached entry's `expires_at` and `revoked_at` on
-  every hit. Revoke can cut an open rotation grace window short, `grace_secs`
-  is capped at 7 days, and deleting a user also deletes its sessions and
-  revokes its tokens in one transaction. `Store.DeleteUser` takes a `now` and
-  returns the revoked prefixes. See
-  [auth.md](docs/auth.md#how-long-revocation-takes-to-bite) for the window that
-  remains across replicas and the logs service.
+  every hit, and an authentication that was already reading the row when the
+  revoke landed no longer re-caches it. Revoke can cut an open rotation grace
+  window short, `grace_secs` is capped at 7 days, and deleting a user also
+  deletes its sessions and revokes its tokens in one transaction, except the
+  token the delete request itself authenticates with. `Store.DeleteUser` takes
+  a `now` and a token prefix to keep, returns the deleted session count and the
+  revoked prefixes, and reports a missing user as `store.ErrUserNotFound`; the
+  route answers `404` only for that and `500` for a storage failure. See
+  [auth.md](docs/auth.md#how-long-revocation-takes-to-bite) for the windows that
+  remain across replicas, the per-run loopback controller, and the logs service.
 - **web (Breaking):** Dashboard responses carry a Content Security Policy with a
   per-response script nonce, `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and HSTS
-  when session cookies are `Secure`. The page reads its configuration from
+  when the request arrives over TLS. The page reads its configuration from
   `/sparkwing-runtime.js` rather than an inline script, and the controller
-  bearer stays server-side in both login modes, so `--api-url` and the chart's
-  `web.apiUrl` are deprecated and ignored. A token-backed dashboard that binds
-  a non-loopback address without `--require-login` refuses to start. See the
-  [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
+  bearer stays server-side in both login modes, so `--api-url` is deprecated
+  and ignored and the chart no longer renders it. A token-backed dashboard that
+  binds a non-loopback address without `--require-login` refuses to start. See
+  the [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
+- **web:** `Strict-Transport-Security` now needs evidence that browsers reach
+  the dashboard over TLS: a TLS listener, `X-Forwarded-Proto: https` from a
+  peer inside `--trusted-proxy-cidrs`, or the new `--hsts` flag for operators
+  who terminate TLS elsewhere. The same evidence, rather than the
+  `SPARKWING_WEB_INSECURE_COOKIES` override, decides the scheme the login CSRF
+  check expects, so a login behind an HTTPS proxy works with `Secure` cookies
+  intact. `sparkwing dashboard` carries the headers on its API routes too,
+  `--token` without a controller, logs, or profile backend is now a startup
+  error, and `sparkwing-full` gains `web.addr` (default `0.0.0.0:<port>`) so a
+  loopback bind is expressible from the chart.
 - **store (Breaking):** Browser sessions are stored as a sha256 digest of the
   session id, and the CSRF token is derived as an HMAC of that id under a
   server key instead of being written to the database, so a copy of the state

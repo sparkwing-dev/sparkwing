@@ -1,12 +1,16 @@
 package web
 
 import (
+	"context"
+	"crypto/tls"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 func testBundle() fs.FS {
@@ -46,23 +50,147 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 			if got := header.Get("Referrer-Policy"); got != "same-origin" {
 				t.Errorf("Referrer-Policy = %q, want same-origin", got)
 			}
-			if got := header.Get("Strict-Transport-Security"); got != hstsValue {
-				t.Errorf("Strict-Transport-Security = %q, want %q", got, hstsValue)
+			if got := header.Get("Strict-Transport-Security"); got != "" {
+				t.Errorf("Strict-Transport-Security = %q, want none over plain HTTP", got)
 			}
 		})
 	}
 }
 
-func TestSecurityHeadersDropHSTSWithInsecureCookies(t *testing.T) {
-	restore := cookieSecure
-	cookieSecure = false
-	t.Cleanup(func() { cookieSecure = restore })
+func TestHSTSNeedsTLSEvidence(t *testing.T) {
+	trusted, err := ratelimit.ParseTrustedProxyCIDRs("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("parse CIDRs: %v", err)
+	}
+	for _, tc := range []struct {
+		name      string
+		opts      HandlerOptions
+		peer      string
+		forwarded string
+		tls       bool
+		want      string
+	}{
+		{name: "plain HTTP", peer: "10.1.2.3:9999"},
+		{name: "TLS listener", tls: true, want: hstsValue},
+		{
+			name:      "trusted forwarded https",
+			opts:      HandlerOptions{TrustedProxyCIDRs: trusted},
+			peer:      "10.1.2.3:9999",
+			forwarded: "https",
+			want:      hstsValue,
+		},
+		{
+			name:      "untrusted forwarded https",
+			opts:      HandlerOptions{TrustedProxyCIDRs: trusted},
+			peer:      "203.0.113.9:9999",
+			forwarded: "https",
+		},
+		{
+			name:      "trusted forwarded http",
+			opts:      HandlerOptions{TrustedProxyCIDRs: trusted},
+			peer:      "10.1.2.3:9999",
+			forwarded: "http",
+		},
+		{
+			name:      "forwarded https without trusted CIDRs",
+			peer:      "10.1.2.3:9999",
+			forwarded: "https",
+		},
+		{name: "operator asserts TLS", opts: HandlerOptions{HSTS: true}, want: hstsValue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tc.peer != "" {
+				req.RemoteAddr = tc.peer
+			}
+			if tc.forwarded != "" {
+				req.Header.Set("X-Forwarded-Proto", tc.forwarded)
+			}
+			if tc.tls {
+				req.TLS = &tls.ConnectionState{}
+			}
+			rec := httptest.NewRecorder()
+			HandlerFromOptionsWithBundle(tc.opts, testBundle()).ServeHTTP(rec, req)
+			if got := rec.Header().Get("Strict-Transport-Security"); got != tc.want {
+				t.Errorf("Strict-Transport-Security = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
 
+func TestNonceInlineScriptsCoversTagVariations(t *testing.T) {
+	const nonce = "test-nonce"
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "bare", in: "<script>x()</script>", want: `<script nonce="test-nonce">x()</script>`},
+		{
+			name: "with attribute",
+			in:   `<script id="_R_">x()</script>`,
+			want: `<script id="_R_" nonce="test-nonce">x()</script>`,
+		},
+		{name: "upper case", in: "<SCRIPT>x()</SCRIPT>", want: `<SCRIPT nonce="test-nonce">x()</SCRIPT>`},
+		{name: "trailing space", in: "<script >x()</script>", want: `<script nonce="test-nonce" >x()</script>`},
+		{
+			name: "type module",
+			in:   `<script type="module" defer>x()</script>`,
+			want: `<script type="module" defer nonce="test-nonce">x()</script>`,
+		},
+		{name: "external", in: `<script src="/a.js"></script>`, want: `<script src="/a.js"></script>`},
+		{
+			name: "external unquoted",
+			in:   `<script defer src=/a.js></script>`,
+			want: `<script defer src=/a.js></script>`,
+		},
+		{name: "angle in attribute", in: `<script data-x="a>b">x()</script>`, want: `<script data-x="a>b" nonce="test-nonce">x()</script>`},
+		{name: "not a script tag", in: "<scriptish>x</scriptish>", want: "<scriptish>x</scriptish>"},
+		{name: "no tags", in: "plain body", want: "plain body"},
+		{name: "unterminated", in: "<script", want: "<script"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := string(nonceInlineScripts([]byte(tc.in), nonce)); got != tc.want {
+				t.Errorf("nonceInlineScripts(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestServedHTMLNoncesEveryInlineScriptShape(t *testing.T) {
+	bundle := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte(
+			`<html><head><script src="/sparkwing-runtime.js"></script>` +
+				`<script id="x">a()</script><SCRIPT>b()</SCRIPT></head><body></body></html>`,
+		)},
+	}
 	rec := httptest.NewRecorder()
-	HandlerFromOptionsWithBundle(HandlerOptions{}, testBundle()).
+	HandlerFromOptionsWithBundle(HandlerOptions{}, bundle).
 		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if got := rec.Header().Get("Strict-Transport-Security"); got != "" {
-		t.Errorf("Strict-Transport-Security = %q, want none when cookies are not Secure", got)
+
+	_, rest, ok := strings.Cut(rec.Header().Get("Content-Security-Policy"), "'nonce-")
+	if !ok {
+		t.Fatalf("no script nonce in the policy: %q", rec.Header().Get("Content-Security-Policy"))
+	}
+	nonce, _, _ := strings.Cut(rest, "'")
+	body := rec.Body.String()
+	for _, want := range []string{
+		`<script id="x" nonce="` + nonce + `">a()`,
+		`<SCRIPT nonce="` + nonce + `">b()`,
+		`<script src="/sparkwing-runtime.js">`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("served HTML missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestServeWithOptionsRefusesRemoteTokenBind(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := ServeWithOptions(ctx, HandlerOptions{Token: "service-token"}, "0.0.0.0:0")
+	if err == nil || !strings.Contains(err.Error(), "non-loopback") {
+		t.Fatalf("ServeWithOptions error = %v, want the non-loopback refusal", err)
 	}
 }
 

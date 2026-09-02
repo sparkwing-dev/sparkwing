@@ -156,9 +156,13 @@ cache:
 
   # Base URL clients use to reach this cache. The package proxy
   # rewrites the upstream URLs inside npm packuments and PyPI simple
-  # pages against it, so it has to be the URL the runner and its build
-  # pods actually dial. Empty uses the in-cluster Service URL; set it
-  # when traffic arrives through an Ingress or a load balancer instead.
+  # pages against it, so a fixed base is correct only when every client
+  # dials the cache at the same address. Empty uses the in-cluster
+  # Service URL when service.type is ClusterIP, and otherwise stays
+  # unset so the proxy rewrites each response from its own request Host
+  # -- which is what an out-of-cluster runner pool or a port-forward
+  # needs. Set it when an Ingress or a load balancer is the one address
+  # every client uses.
   publicUrl: ""
 
   service:

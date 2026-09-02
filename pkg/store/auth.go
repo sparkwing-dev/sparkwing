@@ -426,49 +426,61 @@ func (s *Store) ListUsers() ([]User, error) {
 	return out, nil
 }
 
+// ErrUserNotFound reports that the named user row does not exist, so a
+// caller can answer 404 for it and 500 for every other DeleteUser
+// failure.
+var ErrUserNotFound = errors.New("user not found")
+
 // DeleteUser removes the user, deletes every session it opened, and
-// revokes every token minted for it, in one transaction. It returns the
-// prefixes of the tokens it revoked so the caller can drop them from an
-// authentication cache.
-func (s *Store) DeleteUser(name string, now time.Time) ([]string, error) {
+// revokes every token minted for it, in one transaction. keepPrefix
+// names one token prefix to leave alone, so a caller deleting a user
+// does not revoke the token it is authenticating with; pass "" to
+// revoke every one. It returns how many sessions it deleted and the
+// prefixes of the tokens it revoked, so the caller can drop them from
+// an authentication cache.
+func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error) {
 	tx, err := s.beginTx(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("users: begin: %w", err)
+		return 0, nil, fmt.Errorf("users: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.Exec(`DELETE FROM users WHERE name = ?`, name)
 	if err != nil {
-		return nil, fmt.Errorf("users: delete: %w", err)
+		return 0, nil, fmt.Errorf("users: delete: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return nil, errors.New("user not found")
+		return 0, nil, ErrUserNotFound
 	}
-	if _, err := tx.Exec(`DELETE FROM sessions WHERE principal = ?`, name); err != nil {
-		return nil, fmt.Errorf("users: delete sessions: %w", err)
+	sessRes, err := tx.Exec(`DELETE FROM sessions WHERE principal = ?`, name)
+	if err != nil {
+		return 0, nil, fmt.Errorf("users: delete sessions: %w", err)
 	}
+	sessions, _ := sessRes.RowsAffected()
 
 	ts := now.UTC().Unix()
-	prefixes, err := livePrefixesForPrincipal(tx, name, ts)
+	prefixes, err := livePrefixesForPrincipal(tx, name, keepPrefix, ts)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	if _, err := tx.Exec(
-		`UPDATE tokens SET revoked_at = ? WHERE principal = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		ts, name, ts,
+		`UPDATE tokens SET revoked_at = ?
+          WHERE principal = ? AND prefix <> ? AND (revoked_at IS NULL OR revoked_at > ?)`,
+		ts, name, keepPrefix, ts,
 	); err != nil {
-		return nil, fmt.Errorf("users: revoke tokens: %w", err)
+		return 0, nil, fmt.Errorf("users: revoke tokens: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("users: commit: %w", err)
+		return 0, nil, fmt.Errorf("users: commit: %w", err)
 	}
-	return prefixes, nil
+	return int(sessions), prefixes, nil
 }
 
-func livePrefixesForPrincipal(tx *storeTx, name string, ts int64) ([]string, error) {
+func livePrefixesForPrincipal(tx *storeTx, name, keepPrefix string, ts int64) ([]string, error) {
 	rows, err := tx.Query(
-		`SELECT prefix FROM tokens WHERE principal = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		name, ts,
+		`SELECT prefix FROM tokens
+          WHERE principal = ? AND prefix <> ? AND (revoked_at IS NULL OR revoked_at > ?)`,
+		name, keepPrefix, ts,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("users: select tokens: %w", err)
