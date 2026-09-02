@@ -50,7 +50,7 @@ func Scopes(files ...string) (map[string]string, error) {
 	for _, file := range files {
 		// #nosec G703 -- a build-time tool reading paths the operator names
 		// #nosec G703 -- a build-time tool reading paths the operator names
-	data, err := os.ReadFile(file)
+		data, err := os.ReadFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("read scopes: %w", err)
 		}
