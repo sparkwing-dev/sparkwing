@@ -51,16 +51,17 @@ code change to unlock.
 
 ### Security
 
-- **store (Breaking):** Two live tokens can no longer share a prefix. Run-store
-  schema 26 makes the `idx_tokens_prefix` index unique and minting retries when
-  a prefix is already taken, so the 12-character handle
+- **store (Breaking):** Run-store schema 26 makes the `idx_tokens_prefix` index
+  unique and minting retries when a prefix is already taken, so two tokens can
+  no longer share a prefix and the 12-character handle that
   `sparkwing cluster tokens revoke --prefix` accepts names one principal.
-  Revoking runs its update inside a transaction and rolls back when the prefix
-  matched more than one row, rather than revoking every match and reporting the
-  ambiguity afterwards, and `store.LookupTokenByPrefix` -- the read behind
-  rotation -- errors on an ambiguous prefix instead of returning the first row.
-  A database that already holds two tokens on one prefix refuses to migrate and
-  names the prefix; see the
+  Revoking and rotating each run inside a transaction that commits only when
+  exactly one row matched, and rotation now re-reads the row it replaces inside
+  that transaction, so a revoke that lands while the replacement is hashing is
+  no longer undone. `store.LookupTokenByPrefix` -- the read behind rotation --
+  errors on an ambiguous prefix instead of returning the first row. A database
+  that already holds two tokens on one prefix refuses to migrate and names the
+  prefix; see the
   [migration guide](docs/migrations/_unreleased.md#token-prefixes-are-unique).
 - **sparks:** A `sparks:` entry's `source` is checked as a Go module path
   before it reaches `go list`, so a malformed path fails with a named error

@@ -578,13 +578,25 @@ CHANGELOG links here.
   only then reported the ambiguity, and the read behind rotation returned
   whichever row the store listed first.
 - **After:** Run-store schema 26 makes the `idx_tokens_prefix` index unique and
-  minting retries on a collision. Revoking runs in a transaction that commits
-  only when exactly one row matched, so an ambiguous prefix leaves every token
-  live. `store.LookupTokenByPrefix` returns an error rather than the first of
+  minting retries on a collision. Revoking and rotating each run in a
+  transaction that commits only when exactly one row matched, so an ambiguous
+  prefix leaves every token live and a revoke that lands while a rotation is
+  minting the replacement is no longer undone.
+  `store.LookupTokenByPrefix` returns an error rather than the first of
   several rows, which is what `store.RotateToken` reports as well.
 - **Migration:** Upgrade the controller before the runners; older binaries
   refuse the upgraded SQL store. A database that already holds two tokens on
-  one prefix fails to open and names the prefix -- delete or re-mint the extra
-  rows, then upgrade.
+  one prefix fails to open and names the prefix. Revoked rows are kept for
+  audit, so the pair can be historical; list it with
+
+  ```sql
+  SELECT prefix, hash, principal, revoked_at FROM tokens
+   WHERE prefix IN (SELECT prefix FROM tokens
+                     GROUP BY prefix HAVING COUNT(*) > 1);
+  ```
+
+  then delete the revoked duplicates, keep the one live row, and upgrade. The
+  controller cannot open the database until the prefix is unique, so run the
+  query against the file with `sqlite3` or against the server with `psql`.
 - **Why:** Revoke and rotate are the operator's emergency tools, and neither
   should touch a token other than the one named.

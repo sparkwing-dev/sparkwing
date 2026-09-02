@@ -102,11 +102,33 @@ func TokenKindFromPrefix(raw string) string {
 
 // CreateToken mints a token. Returns the RAW string only once; the
 // hash is one-way.
-func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (raw string, tok *Token, err error) {
+func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error) {
+	ctx := context.Background()
+	for attempt := 1; ; attempt++ {
+		raw, tok, err := createTokenRow(ctx, storeExecer{s: s}, principal, kind, scopes, ttl, now)
+		if err == nil {
+			return raw, tok, nil
+		}
+		// safety: only a prefix collision is cured by minting again, so any other unique column fails now
+		if attempt < mintAttempts && isTokenPrefixCollision(err) {
+			continue
+		}
+		return "", nil, err
+	}
+}
+
+type tokenExecer interface {
+	ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
+}
+
+func createTokenRow(
+	ctx context.Context, e tokenExecer,
+	principal, kind string, scopes []string, ttl time.Duration, now time.Time,
+) (string, *Token, error) {
 	if principal == "" {
 		return "", nil, errors.New("tokens: principal is required")
 	}
-	prefix, ok := prefixForKind(kind)
+	marker, ok := prefixForKind(kind)
 	if !ok {
 		return "", nil, fmt.Errorf("tokens: unknown kind %q", kind)
 	}
@@ -115,47 +137,39 @@ func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Du
 		t := now.Add(ttl)
 		expires = &t
 	}
-
-	scopeStr := strings.Join(dedupeScopes(scopes), ",")
-	var hash string
-	for attempt := 1; ; attempt++ {
-		raw, err = mintRaw(prefix)
-		if err != nil {
-			return "", nil, err
-		}
-		hash, err = hashToken(raw)
-		if err != nil {
-			return "", nil, err
-		}
-		_, err = s.execNoCtx(
-			`
+	raw, err := mintRaw(marker)
+	if err != nil {
+		return "", nil, err
+	}
+	hash, err := hashToken(raw)
+	if err != nil {
+		return "", nil, err
+	}
+	scoped := dedupeScopes(scopes)
+	if _, err := e.ExecContext(ctx, `
         INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at, expires_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
-			hash, raw[:PrefixLen], principal, kind, scopeStr,
-			now.UTC().Unix(),
-			expiresUnix(expires),
-		)
-		if err == nil {
-			break
-		}
-		// safety: the unique index refuses a prefix already in use, so mint again rather than store a twin
-		if attempt < mintAttempts && isUniqueViolation(err) {
-			continue
-		}
+		hash, raw[:PrefixLen], principal, kind, strings.Join(scoped, ","),
+		now.UTC().Unix(),
+		expiresUnix(expires),
+	); err != nil {
 		return "", nil, fmt.Errorf("tokens: insert: %w", err)
 	}
-
-	tok = &Token{
+	return raw, &Token{
 		Hash:      hash,
 		Prefix:    raw[:PrefixLen],
 		Principal: principal,
 		Kind:      kind,
-		Scopes:    dedupeScopes(scopes),
+		Scopes:    scoped,
 		CreatedAt: now.UTC(),
 		ExpiresAt: expires,
-	}
-	return raw, tok, nil
+	}, nil
+}
+
+func isTokenPrefixCollision(err error) bool {
+	return isUniqueViolation(err) &&
+		strings.Contains(strings.ToLower(err.Error()), tokenPrefixColumn)
 }
 
 // LookupToken authenticates and bumps last_used_at. Materialize the
@@ -198,19 +212,32 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 	return nil, ErrUnknownToken
 }
 
-func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
-	rows, err := s.queryNoCtx(`
+const selectTokensByPrefixSQL = `
         SELECT hash, prefix, principal, kind, scopes,
                created_at, expires_at, last_used_at, revoked_at,
                COALESCE(replaced_by, '')
           FROM tokens
-         WHERE prefix = ?
-    `, prefix)
+         WHERE prefix = ?`
+
+func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
+	rows, err := s.queryNoCtx(selectTokensByPrefixSQL, prefix)
 	if err != nil {
 		return nil, fmt.Errorf("tokens: query: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
+	return scanTokenRows(rows)
+}
 
+func selectTokensByPrefixTx(ctx context.Context, tx *storeTx, prefix string) ([]Token, error) {
+	rows, err := tx.QueryContext(ctx, selectTokensByPrefixSQL+tx.forUpdate(), prefix)
+	if err != nil {
+		return nil, fmt.Errorf("tokens: query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanTokenRows(rows)
+}
+
+func scanTokenRows(rows *sql.Rows) ([]Token, error) {
 	var out []Token
 	for rows.Next() {
 		var t Token
@@ -302,37 +329,7 @@ func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error) {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-
-	var out []Token
-	for rows.Next() {
-		var t Token
-		var scopes string
-		var expiresAt, lastUsedAt, revokedAt sql.NullInt64
-		var created int64
-		if err := rows.Scan(
-			&t.Hash, &t.Prefix, &t.Principal, &t.Kind, &scopes,
-			&created, &expiresAt, &lastUsedAt, &revokedAt,
-			&t.ReplacedBy,
-		); err != nil {
-			return nil, err
-		}
-		t.Scopes = splitScopes(scopes)
-		t.CreatedAt = time.Unix(created, 0).UTC()
-		if expiresAt.Valid {
-			et := time.Unix(expiresAt.Int64, 0).UTC()
-			t.ExpiresAt = &et
-		}
-		if lastUsedAt.Valid {
-			lt := time.Unix(lastUsedAt.Int64, 0).UTC()
-			t.LastUsedAt = &lt
-		}
-		if revokedAt.Valid {
-			rt := time.Unix(revokedAt.Int64, 0).UTC()
-			t.RevokedAt = &rt
-		}
-		out = append(out, t)
-	}
-	return out, nil
+	return scanTokenRows(rows)
 }
 
 // LookupTokenByPrefix returns the one row carrying prefix. More than one
@@ -351,31 +348,78 @@ func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error) {
 	return &rows[0], nil
 }
 
-// RotateToken mints a peer and revokes the original at now+grace.
+// RotateToken mints a peer and revokes the original at now+grace. The
+// read of the original, the mint, and the revocation share one
+// transaction, so a revoke that lands while the replacement is hashing
+// wins and the rotation rolls back rather than reviving the token.
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error) {
-	oldTok, err = s.LookupTokenByPrefix(prefix)
+	ctx := context.Background()
+	for attempt := 1; ; attempt++ {
+		raw, newTok, oldTok, err = s.rotateToken(ctx, prefix, grace, ttl, now)
+		if err == nil {
+			return raw, newTok, oldTok, nil
+		}
+		if attempt < mintAttempts && isTokenPrefixCollision(err) {
+			continue
+		}
+		return "", nil, nil, err
+	}
+}
+
+func (s *Store) rotateToken(
+	ctx context.Context, prefix string, grace, ttl time.Duration, now time.Time,
+) (string, *Token, *Token, error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("tokens: rotate: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := selectTokensByPrefixTx(ctx, tx, prefix)
 	if err != nil {
 		return "", nil, nil, err
 	}
+	if len(rows) == 0 {
+		return "", nil, nil, errors.New("token not found")
+	}
+	if len(rows) > 1 {
+		return "", nil, nil, fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, len(rows))
+	}
+	oldTok := &rows[0]
 	if oldTok.RevokedAt != nil {
 		return "", nil, nil, errors.New("token is already revoked")
 	}
 
-	raw, newTok, err = s.CreateToken(oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now)
+	raw, newTok, err := createTokenRow(ctx, tx, oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now)
 	if err != nil {
 		return "", nil, nil, err
 	}
 
 	revokeAt := now.Add(grace).UTC()
-	_, err = s.execNoCtx(
-		`UPDATE tokens SET revoked_at = ?, replaced_by = ? WHERE prefix = ?`,
-		revokeAt.Unix(), newTok.Prefix, prefix,
+	res, err := tx.ExecContext(ctx,
+		`UPDATE tokens SET revoked_at = ?, replaced_by = ?
+          WHERE prefix = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
+		revokeAt.Unix(), newTok.Prefix, prefix, revokeAt.Unix(),
 	)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("tokens: rotate update: %w", err)
 	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("tokens: rotate update: %w", err)
+	}
+	// safety: a revoke that landed since the read leaves no row to update, so the rotation rolls back
+	if n == 0 {
+		return "", nil, nil, errors.New("token is already revoked")
+	}
+	if n > 1 {
+		return "", nil, nil, fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, n)
+	}
 	oldTok.RevokedAt = &revokeAt
 	oldTok.ReplacedBy = newTok.Prefix
+	if err := tx.Commit(); err != nil {
+		return "", nil, nil, fmt.Errorf("tokens: rotate: %w", err)
+	}
 	return raw, newTok, oldTok, nil
 }
 
