@@ -35,6 +35,15 @@ ask_secret() {
   echo "$answer"
 }
 
+# safety: every value below lands in a double-quoted YAML scalar, so a quote, backslash or control character could close the quote and inject config
+reject_unsafe_value() {
+  local label="$1"
+  local value="$2"
+  if [ "$value" != "$(printf '%s' "$value" | LC_ALL=C tr -d '"\\[:cntrl:]')" ]; then
+    err "$label contains a double quote, backslash, newline or control character. Remove it and re-run: the value is written into the runner config as a quoted YAML string."
+  fi
+}
+
 detect_platform() {
   case "$(uname -s)" in
     Darwin) echo "macos" ;;
@@ -116,6 +125,12 @@ fi
 if [ -z "$MAX_CONCURRENT" ]; then
   MAX_CONCURRENT="$(ask 'Max concurrent jobs' '2')"
 fi
+
+reject_unsafe_value "Controller URL" "$CONTROLLER_URL"
+reject_unsafe_value "Logs service URL" "$LOGS_URL"
+reject_unsafe_value "Gitcache URL" "$GITCACHE_URL"
+reject_unsafe_value "Cache token" "$CACHE_TOKEN"
+reject_unsafe_value "Runner name" "$RUNNER_NAME"
 
 log ""
 log "config summary:"

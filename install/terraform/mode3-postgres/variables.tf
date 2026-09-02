@@ -50,8 +50,16 @@ variable "allowed_cidr_blocks" {
   default     = []
 
   validation {
-    condition     = alltrue([for cidr in var.allowed_cidr_blocks : !contains(["0.0.0.0/0", "::/0"], trimspace(cidr))])
-    error_message = "allowed_cidr_blocks must not contain 0.0.0.0/0 or ::/0. Scope ingress to the runners' networks, or use allowed_security_group_ids."
+    condition     = alltrue([for cidr in var.allowed_cidr_blocks : trimspace(cidr) != "0.0.0.0/0"])
+    error_message = "allowed_cidr_blocks must not contain 0.0.0.0/0. Scope ingress to the runners' networks, or use allowed_security_group_ids."
+  }
+
+  validation {
+    condition = alltrue([
+      for cidr in var.allowed_cidr_blocks :
+      try(cidrnetmask(trimspace(cidr)) != "" && tonumber(split("/", trimspace(cidr))[1]) >= 8, false)
+    ])
+    error_message = "allowed_cidr_blocks must list IPv4 CIDRs no wider than /8, so a set of blocks cannot cover the internet the way 0.0.0.0/1 and 128.0.0.0/1 do. Scope ingress to the runners' networks, or use allowed_security_group_ids."
   }
 }
 

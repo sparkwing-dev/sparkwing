@@ -63,6 +63,34 @@ code change to unlock.
   that already holds two tokens on one prefix refuses to migrate and names the
   prefix; see the
   [migration guide](docs/migrations/_unreleased.md#token-prefixes-are-unique).
+- **web:** Browser sessions now die at an absolute age. The controller refuses
+  to renew a session older than seven days and deletes it, so a polling tab can
+  no longer slide the twelve-hour TTL forever; embedders set another cap with
+  `Server.WithSessionMaxLifetime`. `SPARKWING_WEB_INSECURE_COOKIES` is now a
+  `HandlerOptions` field the dashboard reads at startup instead of an init-time
+  global, and `sparkwing-web` refuses to start when it is set on a non-loopback
+  bind unless the operator also passes `--allow-insecure-cookies-remote`. The
+  chart renders that flag alongside the variable when `ingress.allowInsecure`
+  publishes the dashboard over plain HTTP, so that opt-in still starts.
+- **cli:** `~/.config/sparkwing` is now created and kept at `0700` by every
+  writer. `sparkwing configure profiles add/set`, `configure init`, the repos
+  registry, and the dotenv secrets store all route through `fssecure`, and
+  `profiles.yaml` is staged through a randomly named temporary file instead of
+  a predictable `profiles.yaml.tmp`. `configure profiles add` and
+  `configure profiles set` take `--token-stdin`, which prompts without echo on
+  a terminal and reads a pipe otherwise; `--token` still works and its help now
+  says the value is visible in the process list and shell history.
+- **store (Breaking):** Two live tokens can no longer share a prefix. Run-store
+  schema 26 makes the `idx_tokens_prefix` index unique and minting retries when
+  a prefix is already taken, so the 12-character handle
+  `sparkwing cluster tokens revoke --prefix` accepts names one principal.
+  Revoking runs its update inside a transaction and rolls back when the prefix
+  matched more than one row, rather than revoking every match and reporting the
+  ambiguity afterwards, and `store.LookupTokenByPrefix` -- the read behind
+  rotation -- errors on an ambiguous prefix instead of returning the first row.
+  A database that already holds two tokens on one prefix refuses to migrate and
+  names the prefix; see the
+  [migration guide](docs/migrations/_unreleased.md#token-prefixes-are-unique).
 - **sparks:** A `sparks:` entry's `source` is checked as a Go module path
   before it reaches `go list`, so a malformed path fails with a named error
   instead of becoming an argument to the go command.
@@ -93,13 +121,19 @@ code change to unlock.
   `.terraform.lock.hcl` and pins providers with `~>` instead of `>=`, so
   `terraform init` installs the checksummed versions the module was tested
   against rather than whatever the registry serves that day; the lock records
-  `linux_amd64` and `darwin_arm64`. `allowed_cidr_blocks` now rejects
-  `0.0.0.0/0` and `::/0` at plan time instead of quietly opening the database
-  port to the internet. `install/install.sh` creates `agent.yaml` at mode 600
-  before it writes the token, closing the window a permissive umask left
-  between the heredoc and the `chmod`, and refuses a token carrying anything
-  outside `[A-Za-z0-9_.-]`, which could otherwise close the YAML quote and
-  inject config.
+  `linux_amd64` and `darwin_arm64`. `allowed_cidr_blocks` now requires every
+  entry to be an IPv4 CIDR no wider than `/8`, so neither `0.0.0.0/0` nor a
+  pair of halves such as `0.0.0.0/1` and `128.0.0.0/1` opens the database
+  port to the internet at plan time; the module's ingress is IPv4 only and
+  exposes no `ipv6_cidr_blocks` knob, so it has no IPv6 ingress path to
+  guard. `install/install.sh` creates `agent.yaml` at mode 600 before it
+  writes the token, closing the window a permissive umask left between the
+  heredoc and the `chmod`, refuses a token carrying anything outside
+  `[A-Za-z0-9_.-]`, and refuses a controller URL, logs URL, gitcache URL,
+  cache token or runner name carrying a double quote, backslash, newline or
+  control character. Each of those lands in a quoted YAML scalar, where an
+  unfiltered value could close the quote and inject config, or leave behind
+  a config the runner cannot parse while the installer reports success.
 - **controller:** `GET /api/v1/runs/{id}` and `GET /api/v1/triggers/{id}` now
   admit a caller holding a live claim on that run as well as one holding
   `runs.read` or `triggers.read`. Those are the first two calls a node process
@@ -298,13 +332,18 @@ code change to unlock.
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
   so a naked suppression silences nothing, and the comment gate keeps each
   annotation alone on one line so free prose cannot ride behind one.
-- **release:** The release workflow now resolves a version tag's published
-  image digest before it retags, and fails when that tag already points at
-  different bytes. A `workflow_dispatch` rerun with `publish_images: true`
-  used to move `vX.Y.Z` to a freshly built digest, so an operator who pinned
-  the tag got layers nobody audited; moving it now takes the new `force_retag`
-  input. Each release also carries an `image-digests.json` asset listing every
-  published image, its tag, and its digest, so operators can pin and diff them.
+- **release:** The release workflow now resolves every version tag's published
+  image digest before it retags any of them, and fails when a tag already
+  points at different bytes. A `workflow_dispatch` rerun with
+  `publish_images: true` used to move `vX.Y.Z` to a freshly built digest, so an
+  operator who pinned the tag got layers nobody audited; moving it now takes
+  the new `force_retag` input. A registry lookup that fails for any other
+  reason stops the run rather than reading as an absent tag, and each tag is
+  re-read after the move to prove it resolves to the pushed digest. The step's
+  shell lives in `bin/publish-image-tags.sh` so a stubbed-registry table test
+  covers those paths. Each release also carries a signed `image-digests.json`
+  asset listing every published image, its tag, and its digest, so operators
+  can pin and diff them.
 
 ### Added
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -142,7 +143,7 @@ func WriteDotenvEntry(path, name, value string) error {
 		}
 		path = p
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := fssecure.EnsureDir(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
 	existing, err := parseDotenvFile(path)
@@ -199,11 +200,8 @@ func writeDotenvFile(path string, data map[string]string) error {
 			fmt.Fprintf(&b, "%s=%s\n", k, v)
 		}
 	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+	if err := fssecure.WriteFile(path, []byte(b.String())); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod %s 0600: %w", path, err)
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
@@ -157,7 +158,7 @@ func (p *Profile) validateSurfaceFields() error {
 
 func Save(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := fssecure.EnsureDir(dir); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 	out := &Config{Profiles: map[string]*Profile{}}
@@ -173,9 +174,23 @@ func Save(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal profiles: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, buf, 0o600); err != nil {
+	// safety: a random name plus O_EXCL keeps a pre-created path from receiving the token.
+	f, err := os.CreateTemp(dir, ".profiles-*.yaml")
+	if err != nil {
+		return fmt.Errorf("create temp file in %s: %w", dir, err)
+	}
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if err := fssecure.TightenOpen(f); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("secure %s: %w", tmp, err)
+	}
+	if _, err := f.Write(buf); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("rename %s: %w", tmp, err)
