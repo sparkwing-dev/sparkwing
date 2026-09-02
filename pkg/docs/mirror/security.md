@@ -132,23 +132,43 @@ intake with `GITHUB_WEBHOOK_BINDINGS`, a JSON document:
 ```
 
 `pipelines` is keyed by the `{pipeline}` path segment and `repo_secrets`
-by repository slug; slugs match case-insensitively. A pipeline with a
-non-empty `repos` list refuses any delivery naming another repository
-with `403`, so a repository owner reaches only the pipelines you bound
-to them. The signing secret resolves most specific first -- the
-pipeline's own secret, then the named repository's secret, then
-`GITHUB_WEBHOOK_SECRET` -- and a delivery that resolves to no secret at
-all answers `503`. Give every bound repository a secret of its own to
-isolate them completely: a repository left without one is verified with
-the shared secret its peers also hold. In the chart, pass the document
-through `controller.extraEnv` from a Kubernetes secret.
+by repository slug. A slug is lowercased once, when the delivery is
+read, and that one value picks the secret and answers the binding, so
+no case fold can send the two decisions to different repositories; a
+`repository.full_name` that is not an ASCII `owner/name` slug is refused
+outright. A pipeline with a `repos` list refuses any delivery naming a
+repository outside it, so a repository owner reaches only the pipelines
+you bound to them. A `repos` list that is present but empty refuses
+every repository; omit the key, or the pipeline entry, to leave the
+delivery's repository unchecked. The controller logs the resolved
+counts at startup, so an installed document that parsed to nothing is
+visible in the log.
 
-Each delivery's `X-GitHub-Delivery` id is stored on the trigger it
-creates under a store-wide unique constraint, so replaying a signed
-delivery -- at the pipeline it was sent to or at another one -- answers
-`409` rather than starting a second run. A delivery arriving without
-that header answers `400`, since there would be nothing to key the
-constraint on.
+The signing secret resolves most specific first -- the pipeline's own
+secret, then the named repository's secret, then
+`GITHUB_WEBHOOK_SECRET`. Give every bound repository a secret of its own
+to isolate them completely: a repository left without one is verified
+with the shared secret its peers also hold. In the chart, pass the
+document through `controller.extraEnv` from a Kubernetes secret.
+
+A refusal does not say which of these rules it failed. An unbound
+repository answers `404`, the same as a pipeline that does not exist,
+and once any pipeline or repository carries a secret of its own, a
+delivery resolving to no secret answers `401` like a bad signature
+rather than `503`. Otherwise the status code alone would enumerate the
+binding table and the `repo_secrets` key set, one guess per request.
+`503` remains the answer when no secret is configured anywhere.
+
+Each delivery is recorded under two unique constraints: the
+`X-GitHub-Delivery` id, store-wide, and a digest of the material the
+signature covered -- the pipeline and the request body. The digest is
+what closes replay: `X-GitHub-Delivery` is a header the sender picks and
+the HMAC does not cover, so keying on it alone would let anyone who
+captured one delivery re-send it under an id of their own. Re-sending a
+body the controller already accepted answers `409` whatever header rides
+with it, and the response names the run the first delivery produced, so
+a redelivery from the GitHub side resolves to that run instead of a dead
+end. A delivery arriving without the header answers `400`.
 
 When `GITHUB_TOKEN` is set, the controller uses it only for outbound
 commit-status requests for `pull_request` webhook runs. Prefer a
@@ -168,12 +188,20 @@ warning at startup. Provide the key via:
 - `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key, or
 - `--secrets-key-file <path>` -- a file holding the raw or base64 key.
 
-Each envelope is bound to the row it belongs to -- the secret name and
-the owning repository, empty for an unscoped secret -- so a ciphertext
-copied onto another name, into another repository, or onto the
-unscoped row by anyone with database write access fails to open rather
-than answering there. Values sealed before binding (`enc:v1:`
-envelopes) still open; re-set them to get the binding.
+Each envelope is bound to the fields of the row that decide who may
+read it: the secret name, the owning repository (empty for an unscoped
+secret), whether an unscoped row is shared with every run, and whether
+the value is masked in run output. Anyone with database write access
+who copies a ciphertext onto another name, into another repository, or
+onto the unscoped row, or who edits a row to widen its own access, gets
+a value that fails to open rather than one that answers there.
+
+Values sealed before binding (`enc:v1:` envelopes) still open, and they
+are still substitutable until they are rebound. `sparkwing secret list`
+reports `BOUND false` for them (`"bound": false` on the API), and the
+controller reseals such a row into a bound envelope the first time it
+is read, so rows migrate as they are used. Re-setting a secret rebinds
+it as well.
 
 There is no key rotation and no multi-key read path: the controller
 holds one key and the stored envelope carries no key id. Swapping the
@@ -404,7 +432,8 @@ cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
   |------------|---------|--------|
   | `--max-node-bytes` (`SPARKWING_LOGS_MAX_NODE_BYTES`) | 64MiB | Stored-byte cap for one node's log. Appends past it store a `[sparkwing-logs] truncated` marker once and are then dropped with `204`. |
   | `--max-run-bytes` (`SPARKWING_LOGS_MAX_RUN_BYTES`) | 1GiB | Same cap across every node log in one run. |
-  | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. |
+  | `--max-inflight-bytes` (`SPARKWING_LOGS_MAX_INFLIGHT_BYTES`) | 32MiB | Request-body bytes all in-flight appends may hold in memory at once; further appends are refused with `503`. Keep it well under the pod's memory limit. |
+  | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. A volume the service cannot measure is treated as full. |
   | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off) | Age after a run's last write at which the sweeper deletes its logs. Off by default so an upgrade deletes nothing; `168h` is a common choice. |
   | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
   | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
@@ -414,6 +443,15 @@ cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
   the matches it found with `"truncated": true`. Search also requires
   `run_id`; a query without one is refused with `400` rather than
   walking every stored run.
+
+  The runner-bundle chart passes these through as `logs.limits.*`
+  (`maxNodeBytes`, `maxRunBytes`, `maxInflightBytes`, `minFreeBytes`,
+  `retention`, `sweepInterval`, `searchMaxBytes`, `searchTimeout`); an
+  empty value keeps the binary's default. Size them against
+  `logs.storage.size`, because a volume left to fill answers `507` to
+  every append until you turn on retention or delete runs. A malformed
+  or negative value stops the service at startup rather than falling
+  back to the default.
 
 - **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
   behind an ingress/proxy that enforces HTTPS.

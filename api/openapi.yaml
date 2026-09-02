@@ -1855,8 +1855,11 @@ paths:
               description: GitHub webhook payload (push, pull_request, ...).
       responses:
         "202": { description: Accepted; trigger queued. }
-        "401": { description: Invalid HMAC signature. }
-        "503": { description: GitHub webhook secret not configured. }
+        "400": { description: Missing X-GitHub-Delivery header or undecodable payload. }
+        "401": { description: Invalid HMAC signature, or no secret covers the named repository. }
+        "404": { description: The repository is not bound to this pipeline. }
+        "409": { description: This body was already accepted; the run it produced is in run_id. }
+        "503": { description: GitHub webhook secret not configured anywhere. }
 
 
   /api/v1/health:

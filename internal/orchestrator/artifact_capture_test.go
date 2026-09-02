@@ -3,13 +3,19 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	fsstore "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func newTestArtifactStore(t *testing.T) storage.ArtifactStore {
@@ -167,6 +173,187 @@ func TestCaptureArtifacts_BrokenSymlinkInDeclaredPathErrors(t *testing.T) {
 	}
 	if _, err := captureArtifacts(context.Background(), store, ws, []string{"dangling.txt"}); err == nil {
 		t.Fatal("broken symlink in a declared path should error")
+	}
+}
+
+func TestCaptureArtifacts_SymlinkOutOfWorkspace(t *testing.T) {
+	cases := []struct {
+		name      string
+		globs     []string
+		setup     func(t *testing.T, ws, outside string)
+		wantErr   bool
+		wantPaths []string
+	}{
+		{
+			name:  "literal file link is refused",
+			globs: []string{"report.txt"},
+			setup: func(t *testing.T, ws, outside string) {
+				symlinkOrSkip(t, filepath.Join(outside, "secret.txt"), filepath.Join(ws, "report.txt"))
+			},
+			wantErr: true,
+		},
+		{
+			name:  "directory link is skipped",
+			globs: []string{"dist/**"},
+			setup: func(t *testing.T, ws, outside string) {
+				symlinkOrSkip(t, outside, filepath.Join(ws, "dist"))
+			},
+		},
+		{
+			name:  "literal directory link is skipped",
+			globs: []string{"dist"},
+			setup: func(t *testing.T, ws, outside string) {
+				symlinkOrSkip(t, outside, filepath.Join(ws, "dist"))
+			},
+		},
+		{
+			name:  "wildcard file link is skipped",
+			globs: []string{"*"},
+			setup: func(t *testing.T, ws, outside string) {
+				writeArtifactFile(t, ws, "dist/a.txt", []byte("alpha"), 0o644)
+				symlinkOrSkip(t, filepath.Join(outside, "secret.txt"), filepath.Join(ws, "report.txt"))
+			},
+			wantPaths: []string{"dist/a.txt"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ws := t.TempDir()
+			outside := t.TempDir()
+			writeArtifactFile(t, outside, "secret.txt", []byte("credential"), 0o600)
+			store := newTestArtifactStore(t)
+			c.setup(t, ws, outside)
+
+			log := &artifactWarnLogger{}
+			ctx := sparkwingruntime.WithLogger(context.Background(), log)
+			digest, err := captureArtifacts(ctx, store, ws, c.globs)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("want refusal, got manifest %+v", readManifest(t, store, digest))
+				}
+				if !errors.Is(err, errArtifactOutsideWorkspace) {
+					t.Fatalf("want escape refusal, got %v", err)
+				}
+				if strings.Contains(err.Error(), outside) {
+					t.Fatalf("failure text names an outside path: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("captureArtifacts: %v", err)
+			}
+			m := readManifest(t, store, digest)
+			var paths []string
+			for _, e := range m.Entries {
+				paths = append(paths, e.Path)
+			}
+			if !slices.Equal(paths, c.wantPaths) {
+				t.Fatalf("paths = %v, want %v", paths, c.wantPaths)
+			}
+			if !log.sawWarning() {
+				t.Fatal("skipping an out-of-workspace match should warn")
+			}
+		})
+	}
+}
+
+func TestCaptureArtifacts_UnresolvableMatchHidesOutsidePath(t *testing.T) {
+	ws := t.TempDir()
+	outside := t.TempDir()
+	store := newTestArtifactStore(t)
+	symlinkOrSkip(t, filepath.Join(outside, "missing", "secret.txt"), filepath.Join(ws, "report.txt"))
+
+	_, err := captureArtifacts(context.Background(), store, ws, []string{"report.txt"})
+	if err == nil {
+		t.Fatal("an unresolvable declared path should error")
+	}
+	if strings.Contains(err.Error(), outside) {
+		t.Fatalf("failure text names an outside path: %v", err)
+	}
+	if !errors.Is(err, errArtifactUnresolvable) {
+		t.Fatalf("want unresolvable sentinel, got %v", err)
+	}
+}
+
+func TestCaptureArtifacts_UploadsTheBytesItHashed(t *testing.T) {
+	ws := t.TempDir()
+	writeArtifactFile(t, ws, "a.txt", []byte("first"), 0o644)
+	replaced := false
+	store := &replaceOnLookupStore{
+		ArtifactStore: newTestArtifactStore(t),
+		before: func() {
+			if replaced {
+				return
+			}
+			replaced = true
+			swap := filepath.Join(t.TempDir(), "swap.txt")
+			if err := os.WriteFile(swap, []byte("second"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(swap, filepath.Join(ws, "a.txt")); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+
+	digest, err := captureArtifacts(context.Background(), store, ws, []string{"a.txt"})
+	if err != nil {
+		t.Fatalf("captureArtifacts: %v", err)
+	}
+	m := readManifest(t, store, digest)
+	if len(m.Entries) != 1 {
+		t.Fatalf("want 1 entry, got %+v", m.Entries)
+	}
+	rc, err := store.Get(context.Background(), artifactBlobKey(m.Entries[0].Digest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(rc)
+	_ = rc.Close()
+	if string(b) != "first" {
+		t.Fatalf("blob content %q does not match the digest it is stored under", b)
+	}
+}
+
+type replaceOnLookupStore struct {
+	storage.ArtifactStore
+	before func()
+}
+
+func (s *replaceOnLookupStore) Has(ctx context.Context, key string) (bool, error) {
+	if strings.HasPrefix(key, "artifacts/blobs/") {
+		s.before()
+	}
+	return s.ArtifactStore.Has(ctx, key)
+}
+
+type artifactWarnLogger struct {
+	mu    sync.Mutex
+	warns int
+}
+
+func (l *artifactWarnLogger) Log(level, msg string) {
+	l.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
+}
+
+func (l *artifactWarnLogger) Emit(rec sparkwing.LogRecord) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if rec.Level == "warn" {
+		l.warns++
+	}
+}
+
+func (l *artifactWarnLogger) sawWarning() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.warns > 0
+}
+
+func symlinkOrSkip(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
 	}
 }
 

@@ -13,7 +13,10 @@ import (
 
 // Secret mirrors the wire shape of one secret row. Value is populated
 // only on GetSecret; ListSecrets blanks it. Masked indicates whether
-// the value should be redacted in run logs.
+// the value should be redacted in run logs. Bound reports that the
+// stored value is encrypted and tied to this row; false means the row
+// is plaintext, or an envelope written before binding that a read
+// will rebind.
 type Secret struct {
 	Name      string `json:"name"`
 	Value     string `json:"value,omitempty"`
@@ -21,6 +24,7 @@ type Secret struct {
 	Repo      string `json:"repo,omitempty"`
 	Masked    bool   `json:"masked"`
 	Shared    bool   `json:"shared,omitempty"`
+	Bound     bool   `json:"bound"`
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`
 }

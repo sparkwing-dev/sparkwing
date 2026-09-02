@@ -21,3 +21,17 @@ func TestConformance_Cipher(t *testing.T) {
 		return c
 	})
 }
+
+func TestConformance_BoundCipher(t *testing.T) {
+	key, err := secrets.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	ciphertest.TestBoundCipher(t, func() controller.BoundCipher {
+		c, err := secrets.NewCipher(key)
+		if err != nil {
+			t.Fatalf("NewCipher: %v", err)
+		}
+		return c
+	})
+}

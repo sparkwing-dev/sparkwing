@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type artifactManifest struct {
@@ -27,11 +29,26 @@ type artifactEntry struct {
 	Mode   uint32 `json:"mode"`
 }
 
+var (
+	errArtifactOutsideWorkspace = errors.New("resolves outside the workspace")
+	errArtifactUnresolvable     = errors.New("cannot resolve")
+)
+
 func artifactBlobKey(digest string) string { return "artifacts/blobs/" + digest }
 
 func artifactManifestKey(digest string) string { return "artifacts/manifests/" + digest }
 
 func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspace string, globs []string) (string, error) {
+	wsRoot, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace: %w", err)
+	}
+	root, err := os.OpenRoot(wsRoot)
+	if err != nil {
+		return "", fmt.Errorf("open workspace: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
 	var entries []artifactEntry
 	walkErr := filepath.WalkDir(workspace, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -55,19 +72,25 @@ func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspac
 		if !anyGlobMatches(globs, rel) {
 			return nil
 		}
-		info, serr := os.Stat(p)
+		name, nerr := workspaceRelPath(wsRoot, p)
+		if nerr != nil {
+			// safety: a wildcard sweep or an outside directory publishes nothing, so skip instead of failing the node
+			if errors.Is(nerr, errArtifactOutsideWorkspace) && (!globNamesLiterally(globs, rel) || resolvesToDirectory(p)) {
+				sparkwing.LoggerFromContext(ctx).Log("warn", fmt.Sprintf("artifact %q resolves outside the workspace; skipping", rel))
+				return nil
+			}
+			return fmt.Errorf("artifact %q: %w", rel, nerr)
+		}
+		info, serr := root.Stat(name)
 		if serr != nil {
 			return fmt.Errorf("artifact %q: %w", rel, serr)
 		}
 		if !info.Mode().IsRegular() {
 			return nil
 		}
-		digest, herr := hashFile(p)
-		if herr != nil {
-			return fmt.Errorf("artifact %q: %w", rel, herr)
-		}
-		if err := putArtifactBlob(ctx, store, p, digest); err != nil {
-			return fmt.Errorf("artifact %q: %w", rel, err)
+		digest, berr := storeArtifactFile(ctx, store, root, name)
+		if berr != nil {
+			return fmt.Errorf("artifact %q: %w", rel, berr)
 		}
 		entries = append(entries, artifactEntry{
 			Path:   rel,
@@ -81,9 +104,9 @@ func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspac
 	}
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-	manifestBytes, err := json.Marshal(artifactManifest{Entries: entries})
-	if err != nil {
-		return "", fmt.Errorf("marshal manifest: %w", err)
+	manifestBytes, merr := json.Marshal(artifactManifest{Entries: entries})
+	if merr != nil {
+		return "", fmt.Errorf("marshal manifest: %w", merr)
 	}
 	sum := sha256.Sum256(manifestBytes)
 	digest := hex.EncodeToString(sum[:])
@@ -93,28 +116,40 @@ func captureArtifacts(ctx context.Context, store storage.ArtifactStore, workspac
 	return digest, nil
 }
 
-func putArtifactBlob(ctx context.Context, store storage.ArtifactStore, p, digest string) error {
-	key := artifactBlobKey(digest)
-	if ok, err := store.Has(ctx, key); err == nil && ok {
-		return nil
-	}
-	f, err := os.Open(p)
+// safety: resolve links before reading a match so a workspace symlink cannot publish a file outside it
+// safety: resolve failures return a fixed error so failure text never carries a path outside the workspace
+func workspaceRelPath(wsRoot, p string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(p)
 	if err != nil {
-		return err
+		return "", errArtifactUnresolvable
 	}
-	defer func() { _ = f.Close() }()
-	return store.Put(ctx, key, f)
+	rel, err := filepath.Rel(wsRoot, resolved)
+	if err != nil {
+		return "", errArtifactUnresolvable
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errArtifactOutsideWorkspace
+	}
+	return rel, nil
 }
 
-func putBytes(ctx context.Context, store storage.ArtifactStore, key string, b []byte) error {
-	if ok, err := store.Has(ctx, key); err == nil && ok {
-		return nil
+func globNamesLiterally(globs []string, rel string) bool {
+	for _, g := range globs {
+		if filepath.ToSlash(g) == rel && !strings.ContainsAny(g, "*?[") {
+			return true
+		}
 	}
-	return store.Put(ctx, key, strings.NewReader(string(b)))
+	return false
 }
 
-func hashFile(p string) (string, error) {
-	f, err := os.Open(p)
+func resolvesToDirectory(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
+}
+
+// safety: one open serves both the hash and the upload so the stored bytes are the bytes the digest names
+func storeArtifactFile(ctx context.Context, store storage.ArtifactStore, root *os.Root, name string) (string, error) {
+	f, err := root.Open(name)
 	if err != nil {
 		return "", err
 	}
@@ -123,7 +158,25 @@ func hashFile(p string) (string, error) {
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	digest := hex.EncodeToString(h.Sum(nil))
+	key := artifactBlobKey(digest)
+	if ok, herr := store.Has(ctx, key); herr == nil && ok {
+		return digest, nil
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	if err := store.Put(ctx, key, f); err != nil {
+		return "", err
+	}
+	return digest, nil
+}
+
+func putBytes(ctx context.Context, store storage.ArtifactStore, key string, b []byte) error {
+	if ok, err := store.Has(ctx, key); err == nil && ok {
+		return nil
+	}
+	return store.Put(ctx, key, strings.NewReader(string(b)))
 }
 
 func anyGlobMatches(globs []string, rel string) bool {

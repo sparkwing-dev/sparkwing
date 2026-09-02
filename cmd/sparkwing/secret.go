@@ -274,7 +274,7 @@ func runSecretList(args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tREPO\tMASKED\tPRINCIPAL\tCREATED\tUPDATED")
+	fmt.Fprintln(tw, "NAME\tREPO\tMASKED\tBOUND\tPRINCIPAL\tCREATED\tUPDATED")
 	for _, sec := range secs {
 		repo := sec.Repo
 		if repo == "" {
@@ -284,8 +284,8 @@ func runSecretList(args []string) error {
 			}
 		}
 		fmt.Fprintf(
-			tw, "%s\t%s\t%v\t%s\t%s\t%s\n",
-			sec.Name, repo, sec.Masked, sec.Principal,
+			tw, "%s\t%s\t%v\t%v\t%s\t%s\t%s\n",
+			sec.Name, repo, sec.Masked, sec.Bound, sec.Principal,
 			time.Unix(sec.CreatedAt, 0).UTC().Format("2006-01-02 15:04"),
 			time.Unix(sec.UpdatedAt, 0).UTC().Format("2006-01-02 15:04"),
 		)

@@ -50,6 +50,20 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
+- **controller:** Secret envelopes are now bound to the fields of the row
+  that decide who may read them -- the secret name, the owning repository,
+  whether an unscoped row is shared with every run, and whether the value is
+  masked in run output -- as additional authenticated data under an `enc:v2:`
+  prefix, so anyone with database write access who copies a ciphertext onto
+  another row, or edits a row to widen its own access, gets a value that
+  fails to open instead of one that answers there. Envelopes written before
+  the binding (`enc:v1:`) still open; `sparkwing secret list` and the
+  secrets API report `bound: false` for them, and the first successful read
+  reseals such a row in place. Secret names holding `..` or an empty path
+  segment are rejected for new rows, while a row that already exists keeps
+  its name and can still be rotated. A `Cipher` supplied through
+  `WithSecretsCipher` may also implement `controller.BoundCipher`, which
+  `ciphertest.TestBoundCipher` checks, to take part in the binding.
 - **cli (Breaking):** `sparkwing runs submit` now snapshots an allow-listed
   environment instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`,
   `HOME`, `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every
@@ -66,14 +80,24 @@ code change to unlock.
   See the
   [migration guide](docs/migrations/_unreleased.md#breaking-submitted-runs-carry-an-allow-listed-environment).
 - **logs:** Bound what one runner token can spend on the logs service. Appends
-  read the request body before taking a lock that is now sharded per run and
-  node, so a slow POST no longer stalls every other node's writes. New
-  `--max-node-bytes`, `--max-run-bytes`, `--min-free-bytes`, `--retention`,
-  `--sweep-interval`, `--search-max-bytes`, and `--search-timeout` flags (each
-  with a `SPARKWING_LOGS_*` environment variable) cap stored bytes, expire old
-  runs, and bound one search; `GET /api/v1/logs/search` now requires `run_id`
-  and reports `"truncated": true` when a budget stops the scan. Retention is
-  off unless you set it, so an upgrade deletes no history. See the
+  read the request body before taking a lock that is now sharded per stored
+  file, so a slow POST no longer stalls every other node's writes, and a global
+  in-flight byte budget (`--max-inflight-bytes`, 32MiB) refuses further appends
+  with `503` rather than letting concurrent bodies outgrow the pod's memory.
+  New `--max-node-bytes`, `--max-run-bytes`, `--max-inflight-bytes`,
+  `--min-free-bytes`, `--retention`, `--sweep-interval`, `--search-max-bytes`,
+  and `--search-timeout` flags (each with a `SPARKWING_LOGS_*` environment
+  variable, and each surfaced as `logs.limits.*` in the runner-bundle chart)
+  cap stored bytes, expire old runs, and bound one search; a malformed or
+  negative value now stops the service instead of silently restoring the
+  default. The byte caps are reserved under one lock, so concurrent appends
+  cannot overshoot them and two spellings of one node id share the file's cap.
+  A storage volume the service cannot measure is treated as full.
+  `GET /api/v1/logs/search` now requires `run_id` and reports
+  `"truncated": true` when a budget or an over-long line stops the scan.
+  Retention is off unless you set it, so an upgrade deletes no history, and
+  `GET /api/v1/health` no longer names the storage path or the volume's free
+  bytes to an unauthenticated caller. See the
   [operator checklist](docs/security.md#operator-checklist) and the
   [migration guide](docs/migrations/_unreleased.md).
 - **controller:** GitHub webhook deliveries are bound to the repository that
@@ -82,12 +106,16 @@ code change to unlock.
   gives a pipeline an allow-list of repositories and gives a pipeline or a
   repository a signing secret of its own, so handing a repository owner a
   secret no longer hands them every other pipeline: a delivery naming a
-  repository outside the pipeline's list answers `403`, and the shared
+  repository outside the pipeline's list answers `404`, and the shared
   `GITHUB_WEBHOOK_SECRET` stays the fallback for whatever the bindings do not
-  name. Each delivery's `X-GitHub-Delivery` is now stored on its trigger under
-  a store-wide unique constraint (schema 24), so a replayed delivery answers
-  `409` at any pipeline instead of starting a second run, and a delivery
-  arriving without that header answers `400`.
+  name. The claimed slug is normalized once, so no case fold can point the
+  secret lookup and the binding check at different repositories, and a
+  `repos` list that is present but empty refuses every repository rather than
+  none. Each delivery is recorded under both its `X-GitHub-Delivery` id and a
+  digest of the material its signature covered (schema 25), so re-sending an
+  accepted body answers `409` -- naming the run the first delivery produced --
+  however its delivery header reads, and a delivery arriving without that
+  header answers `400`.
 - **controller:** Secret envelopes are now bound to the row they belong to
   -- the secret name and its owning repository -- as additional
   authenticated data under an `enc:v2:` prefix, so a ciphertext copied onto
@@ -161,11 +189,26 @@ code change to unlock.
 - **cache + orchestrator:** The dependency-cache and lint-cache archives now
   extract through one `os.Root`-backed implementation that refuses to follow a
   symlink out of the target directory, so a chain of links inside an archive can
-  no longer land a file outside the cache. Both extractors share one extraction
-  budget, which the lint cache previously lacked entirely, and both mask entry
-  modes to `0o777`. Consumed artifacts stage through the workspace root under a
-  per-blob size cap with the manifest mode masked the same way, so a symlink
-  left in a workspace cannot capture the write.
+  no longer land a file outside the cache. An archived symlink is rejected when
+  its target is absolute, when it climbs past the entry's own depth, or when any
+  ancestor of the entry is itself a symlink, and directory modes are clamped to
+  `0o755` instead of being restored from the archive verbatim. Each extraction
+  is bounded by its own size budget, which the lint cache previously lacked
+  entirely, and the lint cache now expands into a sibling directory that is
+  renamed into place, so a rejected entry leaves the previous cache intact.
+  Consumed artifacts stage through the workspace root under a per-blob and a
+  per-run size cap with the manifest mode masked to `0o777`, so a symlink left
+  in a workspace cannot capture the write.
+- **orchestrator:** Artifact capture now resolves each glob match before it
+  reads one, so a symlink planted in a producer's workspace can no longer
+  publish a file the runner happens to be able to read -- a credential file,
+  `/etc/passwd` -- into the artifact store. The boundary is path-based and
+  catches symlinks only: a hard link to a readable file is still captured. A
+  match that a glob names literally fails the node when it resolves outside
+  the workspace; one a wildcard swept up, or one resolving to an outside
+  directory, is skipped with a warning. A link whose target stays inside the
+  workspace is still followed, and every matched file is opened once through
+  an `os.Root` on the workspace, hashed and uploaded from that one handle.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

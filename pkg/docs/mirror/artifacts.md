@@ -71,6 +71,15 @@ rather than publishing a partial set. A glob that legitimately matches
 nothing records an empty set instead --- some outputs are optional, and
 absence is not failure.
 
+Capture stays inside the workspace by path: it resolves each match's
+symlinks and compares the target against the workspace root. A path a
+glob names literally fails the node when it resolves outside; a path a
+wildcard swept up, and any target that resolves to a directory outside
+the workspace, is skipped with a warning instead, since the pipeline
+never promised that file. The check reads paths, so it sees symlinks
+only: a hard link planted in the workspace still publishes the file it
+points at if the runner can read it.
+
 ## Immutable, content-addressed edges
 
 Each published file is stored under the digest of its own bytes, so

@@ -39,7 +39,10 @@ type Server struct {
 
 	limits    Limits
 	appendMu  [appendLockShards]sync.Mutex
+	inFlight  inFlightBytes
+	runTotals runTotals
 	freeSpace freeSpaceProbe
+	diskSpace func(path string) (free, total uint64, ok bool)
 
 	controllerURL string
 	authCache     sync.Map
@@ -75,22 +78,22 @@ func newServer(root string, logger *slog.Logger, private bool) (*Server, error) 
 		logger = slog.Default()
 	}
 	return &Server{
-		root:     root,
-		logger:   logger,
-		dirMode:  dirMode,
-		fileMode: fileMode,
-		limits:   DefaultLimits(),
+		root:      root,
+		logger:    logger,
+		dirMode:   dirMode,
+		fileMode:  fileMode,
+		limits:    DefaultLimits(),
+		diskSpace: diskSpace,
 	}, nil
 }
 
-// safety: sharding by run/node path keeps one slow file from serializing every other node's appends.
+// safety: sharding by stored file path keeps one slow file from serializing every other node's appends,
+// and puts every alias of one node id on the same mutex as the file they share.
 const appendLockShards = 64
 
-func (s *Server) appendLock(runID, nodeID string) *sync.Mutex {
+func (s *Server) appendLock(name string) *sync.Mutex {
 	h := fnv.New32a()
-	_, _ = io.WriteString(h, runID)
-	_, _ = h.Write([]byte{0})
-	_, _ = io.WriteString(h, nodeID)
+	_, _ = io.WriteString(h, name)
 	return &s.appendMu[h.Sum32()%appendLockShards]
 }
 
@@ -477,18 +480,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 	_ = os.Remove(canary)
 
-	if free, total, ok := diskSpace(s.root); ok && total > 0 {
+	if free, total, ok := s.diskSpace(s.root); ok && total > 0 {
 		pctFree := float64(free) / float64(total) * 100.0
 		const minGiB = 1 << 30
+		// safety: health is unauthenticated, so the storage path and the volume's size stay in the log.
 		switch {
 		case free < minGiB:
-			problems = append(problems, fmt.Sprintf(
-				"root: disk free %s (<1GiB) on %s", formatBytes(free), s.root,
-			))
+			s.logger.Warn("logs store", "op", "health", "root", s.root, "free", formatBytes(free))
+			problems = append(problems, "root: disk under 1GiB free")
 		case pctFree < 10.0:
-			problems = append(problems, fmt.Sprintf(
-				"root: %.1f%% free on %s (<10%%)", pctFree, s.root,
-			))
+			s.logger.Warn("logs store", "op", "health", "root", s.root, "pct_free", pctFree)
+			problems = append(problems, "root: disk under 10% free")
 		}
 	}
 
@@ -541,8 +543,20 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer func() { _ = r.Body.Close() }()
+	reserved := int64(maxAppendRequestBytes)
+	if r.ContentLength >= 0 && r.ContentLength < reserved {
+		reserved = r.ContentLength
+	}
+	if limit := s.limits.MaxInFlightBytes; limit > 0 && reserved > limit {
+		reserved = limit
+	}
+	if !s.inFlight.reserve(reserved, s.limits.MaxInFlightBytes) {
+		http.Error(w, "too many appends in flight", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.inFlight.release(reserved, s.limits.MaxInFlightBytes)
 	// safety: the body is read before any lock so a slow client cannot hold one node's appends hostage.
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxAppendRequestBytes))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, reserved))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
@@ -573,22 +587,26 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := nodePath(runID, nodeID)
-	lock := s.appendLock(runID, nodeID)
+	rt := s.runTotals.acquire(runID)
+	defer s.runTotals.release(rt)
+	lock := s.appendLock(name)
 	lock.Lock()
 	defer lock.Unlock()
 
-	plan := s.planAppend(nodeSize(root, name), runTotalBytes(root, runID), body)
+	plan := s.planAppend(root, runID, name, rt, body)
 	if len(plan.write) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	f, err := s.openAppend(root, name)
 	if err != nil {
+		rt.unreserve(int64(len(plan.write)))
 		s.storeError(w, "open node log", err)
 		return
 	}
 	defer f.Close()
 	if _, err := f.Write(plan.write); err != nil {
+		rt.unreserve(int64(len(plan.write)))
 		s.storeError(w, "write node log", err)
 		return
 	}
@@ -597,6 +615,7 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 			s.storeError(w, "write node log", err)
 			return
 		}
+		rt.add(int64(len(TruncationMarker)))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -780,6 +799,7 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "remove run dir", err)
 		return
 	}
+	s.runTotals.forget(runID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
