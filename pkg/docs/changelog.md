@@ -398,6 +398,13 @@ code change to unlock.
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
 
+### Docs
+
+- **helm:** Both chart READMEs now open with the minimal `helm template`
+  invocation. `helm template` stops on the runner bundle's `validate.yaml`
+  until `controller.tokenSecret.name` is set, and `sparkwing-full` takes it
+  under the `sparkwing-runner-bundle.` sub-chart key.
+
 ## [v0.40.0] - 2026-09-02
 ### Security
 
