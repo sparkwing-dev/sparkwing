@@ -258,12 +258,22 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := s.store.DeleteUser(name); err != nil {
+	revoked, err := s.store.DeleteUser(name, time.Now().UTC())
+	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
+	for _, prefix := range revoked {
+		s.auth.Invalidate(prefix)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+const (
+	defaultRotateGrace = 24 * time.Hour
+	// safety: a rotation must not mint an unbounded window in which the replaced token still authenticates.
+	maxRotateGrace = 7 * 24 * time.Hour
+)
 
 type rotateReq struct {
 	GraceSecs int64 `json:"grace_secs,omitempty"`
@@ -286,9 +296,16 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	grace := 24 * time.Hour
+	grace := defaultRotateGrace
 	if req.GraceSecs > 0 {
 		grace = time.Duration(req.GraceSecs) * time.Second
+	}
+	if grace > maxRotateGrace {
+		writeError(w, http.StatusBadRequest, fmt.Errorf(
+			"grace_secs must not exceed %d (%s)",
+			int64(maxRotateGrace.Seconds()), maxRotateGrace,
+		))
+		return
 	}
 	var ttl time.Duration
 	if req.TTLSecs > 0 {
@@ -312,6 +329,7 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	s.auth.Invalidate(prefix)
 	s.logger.Info(
 		"token rotated",
 		"from_prefix", oldTok.Prefix,

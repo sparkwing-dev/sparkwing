@@ -48,8 +48,26 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
 ### Security
 
+- **cache:** The package proxy rewrites the npm and PyPI URLs it serves against
+  `--public-url` (`SPARKWING_CACHE_PUBLIC_URL`, chart: `cache.publicUrl`,
+  defaulting to the in-cluster Service URL) and caches that copy. Without a
+  public URL the upstream body is cached untouched and every response is
+  rewritten from its own request's `Host`, so a forged `Host` no longer poisons
+  the packument each later build reads. `X-Forwarded-Host` and
+  `X-Forwarded-Proto` count only when `--trust-forwarded-host`
+  (`SPARKWING_CACHE_TRUST_FORWARDED_HOST`) is set.
+- **controller (Breaking):** Revoking a token, rotating one, or deleting a user now takes
+  effect on the serving replica immediately: the auth cache drops the affected
+  prefixes and rechecks each cached entry's `expires_at` and `revoked_at` on
+  every hit. Revoke can cut an open rotation grace window short, `grace_secs`
+  is capped at 7 days, and deleting a user also deletes its sessions and
+  revokes its tokens in one transaction. `Store.DeleteUser` takes a `now` and
+  returns the revoked prefixes. See
+  [auth.md](docs/auth.md#how-long-revocation-takes-to-bite) for the window that
+  remains across replicas and the logs service.
 - **web (Breaking):** Dashboard responses carry a Content Security Policy with a
   per-response script nonce, `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and HSTS
@@ -66,10 +84,13 @@ code change to unlock.
   schema 21 migration deletes existing session rows, so everyone signs in
   again after the upgrade.
 - **cache:** The warm-pool controller now accepts only registry references in
-  `warm_images`, logging and dropping every other entry, and passes the list to
-  the privileged warmer pod as container arguments consumed by a fixed script.
-  A ConfigMap writer can no longer smuggle shell into the one privileged
-  workload Sparkwing creates.
+  `warm_images` -- a DNS or bracketed IPv6 host, a lowercase path, an optional
+  tag, and a lowercase `sha256` digest -- reads at most 64 entries per config
+  read, summarizes what it dropped in one log line per read, and passes the
+  accepted list to the privileged warmer pod as container arguments consumed by
+  a fixed script. A ConfigMap writer can no longer smuggle shell into the one
+  privileged workload Sparkwing creates, nor flood the controller log with
+  rejections.
 - **controller:** Login now carries per-client, listener-wide, and per-account
   budgets, and every argon2id verification passes through a memory-sized
   semaphore, so unauthenticated callers can no longer exhaust the pod by
@@ -95,23 +116,6 @@ code change to unlock.
   a renamed owner, or a dropped `persist-credentials: false` fails until the
   table is updated on purpose, and `.github/dependabot.yml` proposes weekly
   action, Go module, and dashboard dependency updates.
-- **cache:** The package proxy rewrites the npm and PyPI URLs it serves against
-  `--public-url` (`SPARKWING_CACHE_PUBLIC_URL`, chart: `cache.publicUrl`,
-  defaulting to the in-cluster Service URL) and caches that copy. Without a
-  public URL the upstream body is cached untouched and every response is
-  rewritten from its own request's `Host`, so a forged `Host` no longer poisons
-  the packument each later build reads. `X-Forwarded-Host` and
-  `X-Forwarded-Proto` count only when `--trust-forwarded-host`
-  (`SPARKWING_CACHE_TRUST_FORWARDED_HOST`) is set.
-
-### Fixed
-
-- **admission:** Equal-priority participants keep their service order while
-  queued, so sustained arrivals from an older owner cannot move an existing
-  request backward indefinitely.
-
-### Security
-
 - **cache (Breaking):** Every cache route that touches repository content --
   git clone and registration, archives, files, tree hashes, branch membership,
   the repo listing, and artifacts -- now requires the bearer token, alongside
@@ -126,18 +130,12 @@ code change to unlock.
   dashboard's `/api/v1/gitcache/` mount rejects a request with no bearer
   credential and caps concurrent Git streams. See the
   [migration guide](docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
-
-### Security
-
 - **cli:** The admission daemon's unix socket is now private to its user.
   It binds under `$XDG_RUNTIME_DIR` when one is available, refuses a socket
   directory that is not a `0700` directory owned by the current uid, chmods
   the socket to `0600`, and drops accepted connections whose kernel-reported
   peer uid differs. Clients apply the same directory test before dialing, and
   reach a daemon still serving the pre-upgrade `/tmp` path until it exits.
-
-### Security
-
 - **controller (Breaking):** A node claim now binds to the authenticated
   principal as well as to the client-supplied `holder_id`, and the per-node
   write routes admit only the runner holding that unexpired claim. A
@@ -147,6 +145,12 @@ code change to unlock.
   an unauthenticated controller serves the redacted view. Runner tokens
   claiming their own work are unaffected. See the
   [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-principal).
+
+### Fixed
+
+- **admission:** Equal-priority participants keep their service order while
+  queued, so sustained arrivals from an older owner cannot move an existing
+  request backward indefinitely.
 
 ## [v0.39.0] - 2026-09-02
 ### Docs

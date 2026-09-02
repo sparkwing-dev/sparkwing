@@ -362,17 +362,68 @@ func (s *Store) ListUsers() ([]User, error) {
 	return out, nil
 }
 
-// DeleteUser removes the user; existing sessions remain valid.
-func (s *Store) DeleteUser(name string) error {
-	res, err := s.execNoCtx(`DELETE FROM users WHERE name = ?`, name)
+// DeleteUser removes the user, deletes every session it opened, and
+// revokes every token minted for it, in one transaction. It returns the
+// prefixes of the tokens it revoked so the caller can drop them from an
+// authentication cache.
+func (s *Store) DeleteUser(name string, now time.Time) ([]string, error) {
+	tx, err := s.beginTx(context.Background())
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("users: begin: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return errors.New("user not found")
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.Exec(`DELETE FROM users WHERE name = ?`, name)
+	if err != nil {
+		return nil, fmt.Errorf("users: delete: %w", err)
 	}
-	return nil
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, errors.New("user not found")
+	}
+	if _, err := tx.Exec(`DELETE FROM sessions WHERE principal = ?`, name); err != nil {
+		return nil, fmt.Errorf("users: delete sessions: %w", err)
+	}
+
+	ts := now.UTC().Unix()
+	prefixes, err := livePrefixesForPrincipal(tx, name, ts)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(
+		`UPDATE tokens SET revoked_at = ? WHERE principal = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
+		ts, name, ts,
+	); err != nil {
+		return nil, fmt.Errorf("users: revoke tokens: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("users: commit: %w", err)
+	}
+	return prefixes, nil
+}
+
+func livePrefixesForPrincipal(tx *storeTx, name string, ts int64) ([]string, error) {
+	rows, err := tx.Query(
+		`SELECT prefix FROM tokens WHERE principal = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
+		name, ts,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("users: select tokens: %w", err)
+	}
+	// safety: the cursor must close before the caller's UPDATE; a single pooled connection deadlocks otherwise.
+	defer func() { _ = rows.Close() }()
+
+	var out []string
+	for rows.Next() {
+		var prefix string
+		if err := rows.Scan(&prefix); err != nil {
+			return nil, err
+		}
+		out = append(out, prefix)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, rows.Close()
 }
 
 func (s *Store) lookupUser(name string) (*User, error) {
