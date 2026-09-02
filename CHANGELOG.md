@@ -249,6 +249,14 @@ code change to unlock.
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
   so a naked suppression silences nothing, and the comment gate keeps each
   annotation alone on one line so free prose cannot ride behind one.
+- **runner:** The Kubernetes runner now clamps a pipeline's declared resource
+  pin to the CPU and memory limits the runner is configured with, so
+  `sparkwing.Cores(64)` in one pipeline can no longer request more than a node
+  has and hold the namespace's capacity. A charge below the ceiling is
+  untouched. `sparkwing-runner-bundle` ships an optional `LimitRange` and
+  `ResourceQuota` (`limitRange.enabled`, `resourceQuota.enabled`, both off) as
+  the cluster-side backstop, and the SDK documentation for `Plan.Resources` no
+  longer claims a pin never caps the work.
 
 ### Added
 
