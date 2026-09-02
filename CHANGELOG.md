@@ -249,13 +249,18 @@ code change to unlock.
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
   so a naked suppression silences nothing, and the comment gate keeps each
   annotation alone on one line so free prose cannot ride behind one.
-- **release:** The release workflow now resolves a version tag's published
-  image digest before it retags, and fails when that tag already points at
-  different bytes. A `workflow_dispatch` rerun with `publish_images: true`
-  used to move `vX.Y.Z` to a freshly built digest, so an operator who pinned
-  the tag got layers nobody audited; moving it now takes the new `force_retag`
-  input. Each release also carries an `image-digests.json` asset listing every
-  published image, its tag, and its digest, so operators can pin and diff them.
+- **release:** The release workflow now resolves every version tag's published
+  image digest before it retags any of them, and fails when a tag already
+  points at different bytes. A `workflow_dispatch` rerun with
+  `publish_images: true` used to move `vX.Y.Z` to a freshly built digest, so an
+  operator who pinned the tag got layers nobody audited; moving it now takes
+  the new `force_retag` input. A registry lookup that fails for any other
+  reason stops the run rather than reading as an absent tag, and each tag is
+  re-read after the move to prove it resolves to the pushed digest. The step's
+  shell lives in `bin/publish-image-tags.sh` so a stubbed-registry table test
+  covers those paths. Each release also carries a signed `image-digests.json`
+  asset listing every published image, its tag, and its digest, so operators
+  can pin and diff them.
 
 ### Added
 
