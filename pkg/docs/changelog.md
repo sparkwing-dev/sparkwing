@@ -49,6 +49,15 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Security
+
+- **cli:** The admission daemon's unix socket is now private to its user.
+  It binds under `$XDG_RUNTIME_DIR` when one is available, refuses a socket
+  directory that is not a `0700` directory owned by the current uid, chmods
+  the socket to `0600`, and drops accepted connections whose kernel-reported
+  peer uid differs. Clients apply the same directory test before dialing, and
+  reach a daemon still serving the pre-upgrade `/tmp` path until it exits.
+
 ## [v0.39.0] - 2026-09-02
 ### Docs
 

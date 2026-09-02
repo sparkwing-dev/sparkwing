@@ -91,6 +91,38 @@ Keep the raw cache Service private: `pipeline trigger --working-tree` may seed
 uncommitted source, and the cache retains up to 128 workspace refs per
 repository.
 
+## Local daemon socket
+
+The admission daemon (`wingd`) is a per-user process on the developer's
+own machine. It serves a unix socket at
+`$XDG_RUNTIME_DIR/sparkwing-<uid>-<hash>/d.sock`, falling back to
+`/tmp/sparkwing-<uid>-<hash>/d.sock` when no private runtime directory
+is available or when the runtime path would exceed the operating
+system's `sun_path` limit. The trust boundary is the user account, not
+the machine: everyone logged into the same host as the same user shares
+one daemon and can queue, inspect, cancel, and drain its runs. The
+protocol carries no token, and adding one would not change that -- a
+token readable by the account is readable by anything running as the
+account.
+
+Other accounts on the host are outside the boundary, and three checks
+keep them out. The daemon creates its socket directory with `Mkdir` and
+refuses to serve if the path already exists as anything but a real
+directory owned by the current uid with mode `0700`, so another account
+cannot pre-create it and collect connections. The bound socket is
+chmodded to `0600`. Every accepted connection is checked against the
+kernel's peer credentials (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on
+macOS and FreeBSD) and dropped when the caller's uid differs, which
+holds even where socket file modes are not enforced on connect. Clients
+apply the same directory test before dialing, so a `sparkwing` command
+refuses to hand a handshake to a socket sitting in a directory this user
+does not own.
+
+Root is not excluded by any of this; a root account on the host can read
+the daemon's memory whatever the socket says. On a shared host, give
+each user their own `SPARKWING_HOME`, which is the unit of daemon
+isolation.
+
 ## Container hardening
 
 The Helm charts run the long-lived services as non-root with explicit
