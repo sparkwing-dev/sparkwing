@@ -197,8 +197,9 @@ purpose is reaching browsers outside the cluster. Set
 `ingress.allowInsecure=true` to publish it unencrypted or open anyway;
 it must be a bool, since a quoted string fails the render instead of
 reading as an opt-out. Opting in without TLS also sets
-`SPARKWING_WEB_INSECURE_COOKIES=1` on the web Deployment, so the login
-gate still works over plain HTTP. The `ingress.tls` check is
+`SPARKWING_WEB_INSECURE_COOKIES=1` and `--allow-insecure-cookies-remote`
+on the web Deployment, so the login gate still works over plain HTTP on
+a pod that binds a non-loopback address. The `ingress.tls` check is
 presence-only: an entry without `secretName` leaves TLS to the ingress
 controller's default certificate.
 

@@ -38,6 +38,14 @@ func (q *QuietRenderer) color(s, code string) string {
 	return code + s + ansiReset
 }
 
+// safety: pipeline output reaches the terminal here, so escape sequences are filtered before printing.
+func (q *QuietRenderer) sanitize(s string) string {
+	if q.useColor {
+		return SanitizeANSI(s)
+	}
+	return StripANSI(s)
+}
+
 func (q *QuietRenderer) Log(level, msg string) {
 	q.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
 }
@@ -139,10 +147,11 @@ func (q *QuietRenderer) writeFailureDetail(sink io.Writer, nodes []any, runID st
 		stepID, body := splitStepErrorPrefix(errMsg)
 		crumb := q.color(id, ansiBold+ansiRed)
 		if stepID != "" {
-			crumb += q.color(" › "+stepID, ansiDim)
+			crumb += q.color(" › "+q.sanitize(stepID), ansiDim)
 		}
 		lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 		for i, l := range lines {
+			l = q.sanitize(l)
 			if i == 0 {
 				fmt.Fprintln(sink, "  "+crumb+q.color(" │ ", ansiDim)+q.color(l, ansiRed))
 			} else {

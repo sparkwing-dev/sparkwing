@@ -51,6 +51,77 @@ code change to unlock.
 
 ### Security
 
+- **web:** Browser sessions now die at an absolute age. The controller refuses
+  to renew a session older than seven days and deletes it, so a polling tab can
+  no longer slide the twelve-hour TTL forever; embedders set another cap with
+  `Server.WithSessionMaxLifetime`. `SPARKWING_WEB_INSECURE_COOKIES` is now a
+  `HandlerOptions` field the dashboard reads at startup instead of an init-time
+  global, and `sparkwing-web` refuses to start when it is set on a non-loopback
+  bind unless the operator also passes `--allow-insecure-cookies-remote`. The
+  chart renders that flag alongside the variable when `ingress.allowInsecure`
+  publishes the dashboard over plain HTTP, so that opt-in still starts.
+- **cli:** `~/.config/sparkwing` is now created and kept at `0700` by every
+  writer. `sparkwing configure profiles add/set`, `configure init`, the repos
+  registry, and the dotenv secrets store all route through `fssecure`, and
+  `profiles.yaml` is staged through a randomly named temporary file instead of
+  a predictable `profiles.yaml.tmp`. `configure profiles add` and
+  `configure profiles set` take `--token-stdin`, which prompts without echo on
+  a terminal and reads a pipe otherwise; `--token` still works and its help now
+  says the value is visible in the process list and shell history.
+- **store (Breaking):** Two live tokens can no longer share a prefix. Run-store
+  schema 26 makes the `idx_tokens_prefix` index unique and minting retries when
+  a prefix is already taken, so the 12-character handle
+  `sparkwing cluster tokens revoke --prefix` accepts names one principal.
+  Revoking runs its update inside a transaction and rolls back when the prefix
+  matched more than one row, rather than revoking every match and reporting the
+  ambiguity afterwards, and `store.LookupTokenByPrefix` -- the read behind
+  rotation -- errors on an ambiguous prefix instead of returning the first row.
+  A database that already holds two tokens on one prefix refuses to migrate and
+  names the prefix; see the
+  [migration guide](docs/migrations/_unreleased.md#token-prefixes-are-unique).
+- **sparks:** A `sparks:` entry's `source` is checked as a Go module path
+  before it reaches `go list`, so a malformed path fails with a named error
+  instead of becoming an argument to the go command.
+- **cache + orchestrator:** Every git call that takes a caller-supplied ref or
+  revision now separates it from the option list -- `--` before the positional
+  arguments of `merge-base`, `cat-file`, and `git worktree add`, and
+  `--verify --end-of-options` for `git rev-parse` -- so no such value is read
+  as a flag. `/sync/negotiate` requires each `commits[]` entry to be a 40-64
+  character hex object id, and a retry's recorded revision must be one before
+  the orchestrator materializes it. Short-ref log lines clamp instead of
+  slicing at eight bytes, which crashed the negotiate handler on a shorter ref.
+- **runner:** The Kubernetes runner now clamps a pipeline's declared resource
+  pin to the CPU and memory limits the runner is configured with, so
+  `sparkwing.Cores(64)` in one pipeline can no longer request more than a node
+  has and hold the namespace's capacity. A charge below the ceiling is
+  untouched. `sparkwing-runner-bundle` ships an optional `LimitRange` and
+  `ResourceQuota` (`limitRange.enabled`, `resourceQuota.enabled`, both off) as
+  the cluster-side backstop, and the SDK documentation for `Plan.Resources` no
+  longer claims a pin never caps the work.
+- **logs:** CLI log output now filters terminal escape sequences out of
+  pipeline output. Plain format drops every escape sequence and every C0
+  control byte except tab, so one log record stays one line; the colored
+  format keeps only the SGR codes the web log viewer renders. A pipeline can
+  no longer retitle the operator's terminal, plant an OSC 8 hyperlink, reset
+  the terminal with `ESC c`, or forge a Sparkwing status line in the output of
+  `sparkwing runs logs`.
+- **deploy:** The `mode3-postgres` Terraform module now commits its
+  `.terraform.lock.hcl` and pins providers with `~>` instead of `>=`, so
+  `terraform init` installs the checksummed versions the module was tested
+  against rather than whatever the registry serves that day; the lock records
+  `linux_amd64` and `darwin_arm64`. `allowed_cidr_blocks` now requires every
+  entry to be an IPv4 CIDR no wider than `/8`, so neither `0.0.0.0/0` nor a
+  pair of halves such as `0.0.0.0/1` and `128.0.0.0/1` opens the database
+  port to the internet at plan time; the module's ingress is IPv4 only and
+  exposes no `ipv6_cidr_blocks` knob, so it has no IPv6 ingress path to
+  guard. `install/install.sh` creates `agent.yaml` at mode 600 before it
+  writes the token, closing the window a permissive umask left between the
+  heredoc and the `chmod`, refuses a token carrying anything outside
+  `[A-Za-z0-9_.-]`, and refuses a controller URL, logs URL, gitcache URL,
+  cache token or runner name carrying a double quote, backslash, newline or
+  control character. Each of those lands in a quoted YAML scalar, where an
+  unfiltered value could close the quote and inject config, or leave behind
+  a config the runner cannot parse while the installer reports success.
 - **controller:** `GET /api/v1/runs/{id}` and `GET /api/v1/triggers/{id}` now
   admit a caller holding a live claim on that run as well as one holding
   `runs.read` or `triggers.read`. Those are the first two calls a node process

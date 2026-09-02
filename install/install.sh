@@ -35,6 +35,15 @@ ask_secret() {
   echo "$answer"
 }
 
+# safety: every value below lands in a double-quoted YAML scalar, so a quote, backslash or control character could close the quote and inject config
+reject_unsafe_value() {
+  local label="$1"
+  local value="$2"
+  if [ "$value" != "$(printf '%s' "$value" | LC_ALL=C tr -d '"\\[:cntrl:]')" ]; then
+    err "$label contains a double quote, backslash, newline or control character. Remove it and re-run: the value is written into the runner config as a quoted YAML string."
+  fi
+}
+
 detect_platform() {
   case "$(uname -s)" in
     Darwin) echo "macos" ;;
@@ -105,6 +114,10 @@ fi
 if [ -z "$API_TOKEN" ]; then
   err "API token is required. Get one from your team's sparkwing admin."
 fi
+# safety: the token lands in a double-quoted YAML scalar, so an unfiltered value could close the quote and inject config
+if ! [[ "$API_TOKEN" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  err "API token contains unsupported characters. Allowed: letters, digits, underscore, dot, hyphen."
+fi
 if [ -z "$RUNNER_NAME" ]; then
   DEFAULT_NAME="$(hostname -s | tr '[:upper:]' '[:lower:]')-runner"
   RUNNER_NAME="$(ask 'Runner name (shown in dashboard)' "$DEFAULT_NAME")"
@@ -112,6 +125,12 @@ fi
 if [ -z "$MAX_CONCURRENT" ]; then
   MAX_CONCURRENT="$(ask 'Max concurrent jobs' '2')"
 fi
+
+reject_unsafe_value "Controller URL" "$CONTROLLER_URL"
+reject_unsafe_value "Logs service URL" "$LOGS_URL"
+reject_unsafe_value "Gitcache URL" "$GITCACHE_URL"
+reject_unsafe_value "Cache token" "$CACHE_TOKEN"
+reject_unsafe_value "Runner name" "$RUNNER_NAME"
 
 log ""
 log "config summary:"
@@ -138,6 +157,8 @@ mkdir -p "$SPARKWING_HOME"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing"
 CONFIG_PATH="${CONFIG_DIR}/agent.yaml"
 mkdir -p "$CONFIG_DIR"
+# safety: create the file at mode 600 first so the token is never readable, however permissive the umask
+install -m 600 /dev/null "$CONFIG_PATH"
 cat > "$CONFIG_PATH" <<YAML
 controller: "${CONTROLLER_URL}"
 logs: "${LOGS_URL}"
@@ -147,7 +168,6 @@ token: "${API_TOKEN}"
 max_concurrent: ${MAX_CONCURRENT}
 holder_prefix: "${RUNNER_NAME}"
 YAML
-chmod 600 "$CONFIG_PATH"
 log "wrote $CONFIG_PATH (mode 600)"
 
 if [ "$PLATFORM" = "macos" ]; then

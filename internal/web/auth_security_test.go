@@ -74,7 +74,7 @@ func TestSameOriginRequestBehindHTTPSProxyKeepsSecureCookies(t *testing.T) {
 	if !decided {
 		t.Error("forwarded https origin rejected; the login POST would 403 behind a TLS proxy")
 	}
-	if !cookieSecure {
+	if !cookiesSecure(opts) {
 		t.Error("test assumes the default Secure cookie policy")
 	}
 }
@@ -895,5 +895,53 @@ func gitcacheStream(dashboardURL string) func() (int, string, error) {
 		defer resp.Body.Close()
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return resp.StatusCode, resp.Header.Get("Retry-After"), nil
+	}
+}
+
+func TestLoginCookieSecureAttributeFollowsHandlerOptions(t *testing.T) {
+	t.Parallel()
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/auth/bootstrap-needed" {
+			_ = json.NewEncoder(w).Encode(map[string]bool{"needed": false})
+			return
+		}
+		http.Error(w, "unexpected", http.StatusTeapot)
+	}))
+	t.Cleanup(controller.Close)
+
+	for _, tc := range []struct {
+		name       string
+		insecure   bool
+		wantSecure bool
+	}{
+		{name: "default", wantSecure: true},
+		{name: "insecure opt-in", insecure: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := HandlerFromOptionsWithBundle(HandlerOptions{
+				ControllerURL:   controller.URL,
+				RequireLogin:    true,
+				InsecureCookies: tc.insecure,
+			}, authTestBundle)
+			req := httptest.NewRequest(http.MethodGet, "https://dashboard.example/login", nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET /login = %d, want 200", rec.Code)
+			}
+			var found bool
+			for _, c := range rec.Result().Cookies() {
+				if c.Name != csrfCookieName {
+					continue
+				}
+				found = true
+				if c.Secure != tc.wantSecure {
+					t.Errorf("csrf cookie Secure = %v, want %v", c.Secure, tc.wantSecure)
+				}
+			}
+			if !found {
+				t.Fatalf("login page set no %s cookie", csrfCookieName)
+			}
+		})
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1958,6 +1959,9 @@ func TestInsecureOptInWithoutTLSAllowsSessionCookiesOverHTTP(t *testing.T) {
 	if insecure != "1" {
 		t.Fatalf("SPARKWING_WEB_INSECURE_COOKIES = %q, want 1 so a browser can hold a session over plain HTTP", insecure)
 	}
+	if !slices.Contains(container.Args, "--allow-insecure-cookies-remote") {
+		t.Fatalf("web args %v lack --allow-insecure-cookies-remote; the pod refuses a non-loopback bind with insecure cookies", container.Args)
+	}
 
 	secured := runnerContainer(t, helmRender(t, "./sparkwing-full", "templates/web-deployment.yaml", "sparkwing",
 		"ingress.enabled=true", "web.requireLogin=true", "ingress.tls[0].secretName=sparkwing-tls"))
@@ -1965,6 +1969,9 @@ func TestInsecureOptInWithoutTLSAllowsSessionCookiesOverHTTP(t *testing.T) {
 		if env.Name == "SPARKWING_WEB_INSECURE_COOKIES" {
 			t.Fatalf("SPARKWING_WEB_INSECURE_COOKIES set behind TLS: %+v", env)
 		}
+	}
+	if slices.Contains(secured.Args, "--allow-insecure-cookies-remote") {
+		t.Fatalf("web args %v carry --allow-insecure-cookies-remote behind TLS", secured.Args)
 	}
 }
 
@@ -1974,5 +1981,135 @@ func TestPublishedDashboardAcceptsTLSWithoutASecretName(t *testing.T) {
 		"ingress.tls[0].hosts[0]=sparkwing.example.com")
 	if !strings.Contains(rendered, "kind: Ingress") {
 		t.Fatalf("no Ingress rendered:\n%s", rendered)
+	}
+}
+
+type renderedResourceGuard struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
+		Name      string `yaml:"name"`
+		Namespace string `yaml:"namespace"`
+	} `yaml:"metadata"`
+	Spec struct {
+		Hard   map[string]string `yaml:"hard"`
+		Limits []struct {
+			Type           string            `yaml:"type"`
+			Max            map[string]string `yaml:"max"`
+			Min            map[string]string `yaml:"min"`
+			Default        map[string]string `yaml:"default"`
+			DefaultRequest map[string]string `yaml:"defaultRequest"`
+		} `yaml:"limits"`
+	} `yaml:"spec"`
+}
+
+func renderResourceGuard(t *testing.T, showOnly string, sets ...string) renderedResourceGuard {
+	t.Helper()
+	rendered := helmRender(t, "./sparkwing-runner-bundle", showOnly, "sparkwing", sets...)
+	var doc renderedResourceGuard
+	decoder := yaml.NewDecoder(strings.NewReader(rendered))
+	for {
+		var candidate renderedResourceGuard
+		if err := decoder.Decode(&candidate); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("decode %s: %v\n%s", showOnly, err, rendered)
+		}
+		if candidate.Kind != "" {
+			doc = candidate
+		}
+	}
+	if doc.Kind == "" {
+		t.Fatalf("no resource guard rendered from %s:\n%s", showOnly, rendered)
+	}
+	return doc
+}
+
+func TestNamespaceResourceGuardsAreOffByDefault(t *testing.T) {
+	rendered := helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default")
+	for _, kind := range []string{"LimitRange", "ResourceQuota"} {
+		if strings.Contains(rendered, "kind: "+kind) {
+			t.Errorf("default install renders a %s; an existing release would start failing admission", kind)
+		}
+	}
+}
+
+func TestLimitRangeBoundsOneContainer(t *testing.T) {
+	doc := renderResourceGuard(t, "templates/limitrange.yaml", "limitRange.enabled=true")
+	if doc.Kind != "LimitRange" {
+		t.Fatalf("kind = %q, want LimitRange", doc.Kind)
+	}
+	if doc.Metadata.Name != "sparkwing-sparkwing-runner-bundle-limits" {
+		t.Errorf("name = %q, want the release-scoped limits name", doc.Metadata.Name)
+	}
+	if len(doc.Spec.Limits) != 1 {
+		t.Fatalf("limits = %d, want one Container entry", len(doc.Spec.Limits))
+	}
+	entry := doc.Spec.Limits[0]
+	if entry.Type != "Container" {
+		t.Errorf("type = %q, want Container", entry.Type)
+	}
+	want := map[string]string{"cpu": "16", "memory": "64Gi"}
+	if !reflect.DeepEqual(entry.Max, want) {
+		t.Errorf("max = %v, want %v", entry.Max, want)
+	}
+	if entry.Default["cpu"] != "2" || entry.DefaultRequest["cpu"] != "100m" {
+		t.Errorf("default = %v, defaultRequest = %v, want the chart's container defaults", entry.Default, entry.DefaultRequest)
+	}
+	if entry.Min != nil {
+		t.Errorf("min = %v, want no floor until one is configured", entry.Min)
+	}
+}
+
+func TestLimitRangeTakesAnOperatorCeiling(t *testing.T) {
+	doc := renderResourceGuard(t, "templates/limitrange.yaml",
+		"limitRange.enabled=true", "limitRange.max.cpu=4", "limitRange.max.memory=8Gi",
+		"limitRange.min.cpu=50m")
+	entry := doc.Spec.Limits[0]
+	want := map[string]string{"cpu": "4", "memory": "8Gi"}
+	if !reflect.DeepEqual(entry.Max, want) {
+		t.Errorf("max = %v, want %v", entry.Max, want)
+	}
+	if entry.Min["cpu"] != "50m" {
+		t.Errorf("min = %v, want the configured floor", entry.Min)
+	}
+}
+
+func TestResourceQuotaBoundsTheNamespaceTotal(t *testing.T) {
+	doc := renderResourceGuard(t, "templates/resourcequota.yaml", "resourceQuota.enabled=true")
+	if doc.Kind != "ResourceQuota" {
+		t.Fatalf("kind = %q, want ResourceQuota", doc.Kind)
+	}
+	if doc.Metadata.Name != "sparkwing-sparkwing-runner-bundle-quota" {
+		t.Errorf("name = %q, want the release-scoped quota name", doc.Metadata.Name)
+	}
+	want := map[string]string{
+		"requests.cpu":    "32",
+		"requests.memory": "64Gi",
+		"limits.cpu":      "64",
+		"limits.memory":   "128Gi",
+	}
+	if !reflect.DeepEqual(doc.Spec.Hard, want) {
+		t.Errorf("hard = %v, want %v", doc.Spec.Hard, want)
+	}
+}
+
+func TestResourceQuotaTakesOperatorTotals(t *testing.T) {
+	doc := renderResourceGuard(t, "templates/resourcequota.yaml",
+		"resourceQuota.enabled=true", `resourceQuota.hard.requests\.cpu=8`, `resourceQuota.hard.pods=20`)
+	if doc.Spec.Hard["requests.cpu"] != "8" || doc.Spec.Hard["pods"] != "20" {
+		t.Errorf("hard = %v, want the configured totals including the object count", doc.Spec.Hard)
+	}
+}
+
+func TestFullChartCarriesTheNamespaceResourceGuards(t *testing.T) {
+	rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", "default",
+		"sparkwing-runner-bundle.controller.tokenSecret.name=tok",
+		"sparkwing-runner-bundle.limitRange.enabled=true",
+		"sparkwing-runner-bundle.resourceQuota.enabled=true")
+	for _, kind := range []string{"LimitRange", "ResourceQuota"} {
+		if !strings.Contains(rendered, "kind: "+kind) {
+			t.Errorf("flagship chart rendered no %s; the vendored sub-chart may be stale", kind)
+		}
 	}
 }

@@ -748,7 +748,7 @@ CREATE TABLE IF NOT EXISTS tokens (
     revoked_at   INTEGER,
     replaced_by  TEXT                  -- prefix of rotation successor
 );
-CREATE INDEX IF NOT EXISTS idx_tokens_prefix ON tokens(prefix);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tokens_prefix ON tokens(prefix);
 
 -- Browser sessions. hash = sha256 of the raw session id; the CSRF token is
 -- an HMAC of that id under a server key, so neither is stored in the clear.
@@ -854,7 +854,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 25
+const expectedSchemaVersion = 26
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1257,6 +1257,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.addTriggerWebhookDelivery(ctx)
 	case 25:
 		return s.addTriggerWebhookReplayKey(ctx)
+	case 26:
+		return s.uniqueTokenPrefixIndex(ctx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1354,6 +1356,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		}
 		_, err := tx.ExecContext(ctx, triggerWebhookReplayKeyIndex)
 		return err
+	case 26:
+		return uniqueTokenPrefixIndexTx(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1620,6 +1624,17 @@ const triggerWebhookReplayKeyColumn = "webhook_replay_key"
 const triggerWebhookReplayKeyIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TriggerWebhookReplayKeyIndexName + `
     ON triggers(` + triggerWebhookReplayKeyColumn + `) WHERE ` + triggerWebhookReplayKeyColumn + ` != ''`
 
+// TokenPrefixIndexName is the unique index enforcing one token row per
+// prefix. Exported so a schema test can assert the constraint exists by
+// name.
+const TokenPrefixIndexName = "idx_tokens_prefix"
+
+const tokenPrefixIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TokenPrefixIndexName + ` ON tokens(prefix)`
+
+const tokenPrefixIndexDrop = `DROP INDEX IF EXISTS ` + TokenPrefixIndexName
+
+const tokenPrefixDuplicates = `SELECT prefix FROM tokens GROUP BY prefix HAVING COUNT(*) > 1 ORDER BY prefix`
+
 func (s *Store) ensureColumnsAll() error {
 	for _, spec := range columnMigrations {
 		if err := s.ensureColumns(spec.table, spec.cols); err != nil {
@@ -1820,6 +1835,52 @@ func (s *Store) addTriggerWebhookReplayKey(ctx context.Context) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Store) uniqueTokenPrefixIndex(ctx context.Context) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := uniqueTokenPrefixIndexTx(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func uniqueTokenPrefixIndexTx(ctx context.Context, q migrationQueryExecer) error {
+	dupes, err := duplicateTokenPrefixes(ctx, q)
+	if err != nil {
+		return err
+	}
+	if len(dupes) > 0 {
+		return fmt.Errorf(
+			"tokens: prefix %s names more than one token row; delete or re-mint the extra rows, then upgrade",
+			strings.Join(dupes, ", "))
+	}
+	if _, err := q.ExecContext(ctx, tokenPrefixIndexDrop); err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx, tokenPrefixIndex)
+	return err
+}
+
+func duplicateTokenPrefixes(ctx context.Context, q migrationQueryExecer) ([]string, error) {
+	rows, err := q.QueryContext(ctx, tokenPrefixDuplicates)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var prefix string
+		if err := rows.Scan(&prefix); err != nil {
+			return nil, err
+		}
+		out = append(out, prefix)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ensureColumns(table string, cols map[string]string) error {
