@@ -51,6 +51,8 @@ spec:
             - --allow-unauthenticated
           {{- end }}
           env:
+            - name: SPARKWING_CACHE_PUBLIC_URL
+              value: {{ include "sparkwing-runner-bundle.cachePublicURL" . | quote }}
             {{- if .Values.cache.repos }}
             - name: GITCACHE_REPOS
               value: {{ .Values.cache.repos | quote }}

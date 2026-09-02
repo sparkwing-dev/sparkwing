@@ -2074,10 +2074,12 @@ var cmdTokensRotate = Command{
 	Synopsis: "Mint a replacement token with a grace window",
 	Description: `Creates a new token and schedules the old token for revocation
 after --grace. During the grace window, both tokens work, which
-lets callers cycle credentials without downtime.`,
+lets callers cycle credentials without downtime. The controller
+caps --grace at 7 days, and revoking the old prefix cuts a grace
+window short.`,
 	Flags: []FlagSpec{
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret prefix of the token to rotate", Required: true, Group: "Input"},
-		{Name: "grace", Argument: "DURATION", Desc: "Window during which the old token still authenticates", Default: "24h", Group: "Input"},
+		{Name: "grace", Argument: "DURATION", Desc: "Window during which the old token still authenticates (max 168h)", Default: "24h", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "TTL of the new token (0 = preserve the old token's remaining TTL)", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
@@ -2133,9 +2135,9 @@ user in the controller's users table.`,
 var cmdUsersDelete = Command{
 	Path:     "sparkwing cluster users delete",
 	Synopsis: "Remove a dashboard user",
-	Description: `Deletes the user row. Any sessions that user holds remain
-valid until their individual expiry -- sparkwing does not
-proactively invalidate active cookies on delete.`,
+	Description: `Deletes the user row, every session that user holds, and
+revokes every token minted under that principal name, in one
+transaction. Cookies and tokens stop working immediately.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Dashboard username to remove", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},

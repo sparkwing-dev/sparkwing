@@ -221,11 +221,14 @@ func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
 	return out, rows.Err()
 }
 
-// RevokeToken sets revoked_at=now; row is kept for audit.
+// RevokeToken sets revoked_at=now; row is kept for audit. A token
+// already carrying a future revoked_at from a rotation grace window is
+// clamped down to now, so an operator can cut a leaked token short.
 func (s *Store) RevokeToken(prefix string, now time.Time) error {
+	ts := now.UTC().Unix()
 	res, err := s.execNoCtx(
-		`UPDATE tokens SET revoked_at = ? WHERE prefix = ? AND revoked_at IS NULL`,
-		now.UTC().Unix(), prefix,
+		`UPDATE tokens SET revoked_at = ? WHERE prefix = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
+		ts, prefix, ts,
 	)
 	if err != nil {
 		return fmt.Errorf("tokens: revoke: %w", err)

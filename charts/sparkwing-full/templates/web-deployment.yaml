@@ -85,18 +85,22 @@ spec:
             {{- if .Values.web.requireLogin }}
             - "--require-login"
             {{- end }}
+            {{- if .Values.web.allowUnauthenticatedRemote }}
+            - "--allow-unauthenticated-remote"
+            {{- end }}
             {{- with .Values.web.trustedProxyCIDRs }}
             - {{ printf "--trusted-proxy-cidrs=%s" (join "," .) | quote }}
             {{- end }}
           env:
             - name: SPARKWING_HOME
               value: /tmp/sparkwing
-            {{- if .Values.web.tokenSecret.name }}
+            {{- $tokenSecret := include "sparkwing-full.web.tokenSecretName" . }}
+            {{- if $tokenSecret }}
             - name: SPARKWING_AGENT_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.web.tokenSecret.name | quote }}
-                  key: {{ .Values.web.tokenSecret.key | quote }}
+                  name: {{ $tokenSecret | quote }}
+                  key: {{ include "sparkwing-full.web.tokenSecretKey" . | quote }}
             {{- end }}
             - name: OTEL_SERVICE_NAME
               value: "sparkwing-web"

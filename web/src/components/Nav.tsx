@@ -154,7 +154,7 @@ function VersionPill() {
     queueMicrotask(() => {
       const v = (window as unknown as { __SPARKWING_VERSION__?: string })
         .__SPARKWING_VERSION__;
-      if (!cancelled && v && v !== "__SPARKWING_VERSION_MARKER__") {
+      if (!cancelled && v) {
         setVersion(v);
       }
     });

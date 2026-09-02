@@ -219,7 +219,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `web.controller.url` | Override controller URL. | (auto-computed in-cluster) |
 | `web.logs.url` | Override logs URL. | (auto-computed from sub-chart) |
 | `web.cache.url` | Cache the services panel probes. Probe-only; empty and no bundled cache leaves it off the panel. | (auto-computed from sub-chart) |
-| `web.tokenSecret.name` | Secret holding the controller-bearer token. | `""` |
+| `web.tokenSecret.name` | Secret holding the controller-bearer token. | (defaults to `sparkwing-runner-bundle.controller.tokenSecret`) |
 | `web.requireLogin` | Gate the dashboard behind /login (first visit offers first-admin signup). | `false` |
 | `web.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. | `[]` |
 
@@ -303,6 +303,11 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    `sparkwing-runner-bundle.logs.allowUnauthenticated=true`. The bootstrap
    window above needs both and the token upgrade should turn both back off.
 
+   An install that sets only `sparkwing-runner-bundle.controller.tokenSecret`
+   gives the web pod that same Secret, so the dashboard's log panes carry a
+   bearer the authenticated logs service accepts. Set `web.tokenSecret.name`
+   to hand the dashboard its own narrower token instead.
+
 3. Set `web.requireLogin=true` to gate the dashboard behind `/login`.
    On a fresh cluster `/login` renders a "create first admin" form and
    the account you create there becomes the admin; afterwards, seed
@@ -375,7 +380,7 @@ create one.
 ```yaml
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.5"
+    version: "0.1.6"
     repository: "file://../sparkwing-runner-bundle"
     condition: sparkwing-runner-bundle.enabled
 ```

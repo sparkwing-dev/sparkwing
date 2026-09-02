@@ -21,6 +21,7 @@ type Authenticator struct {
 }
 func (a *Authenticator) AuthDisabled() bool
 func (a *Authenticator) Authenticate(raw string) (*Principal, error)
+func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
 type Cipher interface {
 	Seal(plain string) (string, error)

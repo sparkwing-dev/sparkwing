@@ -154,6 +154,13 @@ cache:
     tag: "" # falls back to .Chart.AppVersion
     pullPolicy: IfNotPresent
 
+  # Base URL clients use to reach this cache. The package proxy
+  # rewrites the upstream URLs inside npm packuments and PyPI simple
+  # pages against it, so it has to be the URL the runner and its build
+  # pods actually dial. Empty uses the in-cluster Service URL; set it
+  # when traffic arrives through an Ingress or a load balancer instead.
+  publicUrl: ""
+
   service:
     # ClusterIP: only the runner needs to reach the cache. Set to
     # LoadBalancer / NodePort if you have an out-of-cluster runner

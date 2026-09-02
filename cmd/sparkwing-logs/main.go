@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -31,17 +32,16 @@ func run(args []string) error {
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
 		"controller URL used to resolve sw*_ tokens via /api/v1/auth/whoami; empty disables auth (env: SPARKWING_CONTROLLER_URL)")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
-		"refuse to start when --controller is empty, guarding against "+
-			"accidentally deploying a logs service that serves, forges, and "+
+		"refuse to start unless --controller is an absolute http(s) URL, "+
+			"guarding against accidentally deploying a logs service that serves, forges, and "+
 			"deletes every run's logs for anyone who can reach it. Leave unset "+
 			"for laptop-local use.")
 	_ = fs.Parse(args)
 
-	if *requireAuth && *controllerURL == "" {
-		return errors.New("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +
-			"--controller (SPARKWING_CONTROLLER_URL) is empty; point the logs " +
-			"service at a controller so it can resolve caller tokens, or drop " +
-			"--require-auth for laptop-local use")
+	if *requireAuth {
+		if err := checkControllerURL(*controllerURL); err != nil {
+			return err
+		}
 	}
 
 	privateRoot := *root == ""
@@ -64,6 +64,26 @@ func run(args []string) error {
 		return logs.ServePrivateWithTokens(ctx, *root, *addr, *controllerURL, nil)
 	}
 	return logs.ServeWithTokens(ctx, *root, *addr, *controllerURL, nil)
+}
+
+// safety: --require-auth advertises auth on /api/v1/health, so a URL that resolves no token must not start.
+func checkControllerURL(raw string) error {
+	const remedy = "; point the logs service at a controller so it can " +
+		"resolve caller tokens, or drop --require-auth for laptop-local use"
+	if strings.TrimSpace(raw) == "" {
+		return errors.New("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +
+			"--controller (SPARKWING_CONTROLLER_URL) is empty" + remedy)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("--require-auth (SPARKWING_REQUIRE_AUTH) is set but "+
+			"--controller (SPARKWING_CONTROLLER_URL) %q is not a URL: %w"+remedy, raw, err)
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("--require-auth (SPARKWING_REQUIRE_AUTH) is set but "+
+			"--controller (SPARKWING_CONTROLLER_URL) %q is not an absolute http(s) URL"+remedy, raw)
+	}
+	return nil
 }
 
 func envTruthy(name string) bool {

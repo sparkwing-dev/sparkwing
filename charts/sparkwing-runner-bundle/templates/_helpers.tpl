@@ -172,6 +172,21 @@ URL always wins, including for parent installs with naming overrides.
 {{- end }}
 
 {{/*
+Public base URL clients use to reach the cache. The cache rewrites the
+upstream URLs inside npm packuments and PyPI simple pages against it,
+so it must be the URL the runner and its build pods actually dial --
+by default the in-cluster Service. Set it explicitly when traffic
+arrives through an Ingress or an external load balancer.
+*/}}
+{{- define "sparkwing-runner-bundle.cachePublicURL" -}}
+{{- if .Values.cache.publicUrl -}}
+{{- .Values.cache.publicUrl -}}
+{{- else -}}
+{{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Render runner --label flags. Each entry in .Values.runner.labels
 becomes a separate --label=<value> arg. Done in a helper so the
 deployment template stays readable.

@@ -169,6 +169,22 @@ now fails at startup instead of silently serving an unauthenticated dashboard.
 The controller URL must be an absolute `http` or `https` URL without embedded
 credentials, a query, or a fragment.
 
+Every dashboard response carries `Content-Security-Policy`
+(`default-src 'self'` plus a per-response nonce for the bundle's inline
+scripts), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
+`Referrer-Policy: same-origin`, and adds `Strict-Transport-Security` when
+session cookies are `Secure`. The page reads its configuration from
+`/sparkwing-runtime.js`, which carries the dashboard version and the login
+mode. The service bearer stays in the web process and rides only its
+server-side proxy, so the browser talks to one origin and `connect-src 'self'`
+holds.
+
+A dashboard that carries `--token`, runs without `--require-login`, and binds a
+non-loopback address refuses to start, because every caller that reaches the
+listener would drive the controller with that token. Pass `--require-login`,
+bind a loopback address, or accept the exposure with
+`--allow-unauthenticated-remote` (chart: `web.allowUnauthenticatedRemote`).
+
 Login throttling uses the TCP peer address and ignores forwarded headers by
 default. When a reverse proxy fronts `sparkwing-web`, pass its egress networks
 as `--trusted-proxy-cidrs=<CIDR,...>` or set the chart's
@@ -276,6 +292,16 @@ sparkwing cluster tokens lookup --prefix swu_6cF9r2Kp --profile prod
 sparkwing cluster tokens rotate --prefix swu_6cF9r2Kp --grace 48h --profile prod
 ```
 
+`--grace` is capped at 7 days; a larger value is rejected with `400`.
+Revoking the old prefix cuts an open grace window short, so a rotation
+you started before learning the old token leaked can still be stopped.
+
+Deleting a user removes the user row, deletes every session that user
+holds, and revokes every token whose principal is that name, in one
+transaction. Principals are free-form labels, so a token minted for an
+unrelated caller under the same name is revoked too; keep human account
+names and service principal names distinct.
+
 Profiles are the only path for targeting a remote cluster, which keeps
 it hard to accidentally point at the wrong one. The
 `SPARKWING_CONTROLLER_URL` environment variable is a fallback only for
@@ -293,6 +319,31 @@ Hash parameters (`pkg/store/tokens.go`):
 Measured on an arm64 laptop: ~8-15ms per `argon2.IDKey`. Token lookup on
 the hot path is prefix-indexed + cached in-process for 60s, so argon2
 only runs on cold lookups.
+
+## How long revocation takes to bite
+
+Revoking a token, rotating one, and deleting a user all drop the
+affected prefixes from the controller replica that served the request,
+so the next request on that replica re-reads the row and gets `401`.
+A cached entry also carries the row's `expires_at` and `revoked_at`,
+which are rechecked on every hit, so a token that expires or whose
+rotation grace closes mid-cache stops authenticating on time rather
+than at the end of the cache window.
+
+Two windows remain:
+
+- **Other controller replicas.** Invalidation is in-process. A replica
+  that did not serve the revoke keeps its cached entry for up to 60
+  seconds. Restart or scale the controller to zero to close it now.
+- **The logs service.** `sparkwing-logs` resolves callers through the
+  controller's `whoami` and caches the answer for its own TTL (60s by
+  default), on top of whatever the controller replica held. Its worst
+  case is the sum of the two.
+
+Sessions carry no cache: the controller reads the `sessions` row on
+every request and the dashboard resolves the session on every protected
+request, so deleting a session or a user logs that browser out on its
+next request.
 
 ## Extension points
 

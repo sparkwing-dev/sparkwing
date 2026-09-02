@@ -239,38 +239,39 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 
 	bundle := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte(
-			`<script>window.__SPARKWING_TOKEN__="__SPARKWING_TOKEN_MARKER__";window.__SPARKWING_API_URL__="__SPARKWING_API_URL_MARKER__";window.__SPARKWING_REQUIRE_LOGIN__="__SPARKWING_REQUIRE_LOGIN_MARKER__";</script>`,
+			`<script src="/sparkwing-runtime.js"></script><script>self.__next_f.push([0])</script>`,
 		)},
 	}
-	recorder := httptest.NewRecorder()
-	spaHandler(fs.FS(bundle), HandlerOptions{
-		Token:         "service-token",
-		APIURL:        "https://controller.example.test",
-		ControllerURL: controller.URL,
-		RequireLogin:  true,
-	}).ServeHTTP(
-		recorder,
-		httptest.NewRequest(http.MethodGet, "/", nil),
-	)
-	if strings.Contains(recorder.Body.String(), "service-token") ||
-		!strings.Contains(recorder.Body.String(), `window.__SPARKWING_TOKEN__="";`) ||
-		!strings.Contains(recorder.Body.String(), `window.__SPARKWING_API_URL__="";`) ||
-		!strings.Contains(recorder.Body.String(), `window.__SPARKWING_REQUIRE_LOGIN__="true";`) {
-		t.Errorf("authenticated dashboard HTML exposed its service token or lost auth config: %s", recorder.Body.String())
-	}
+	for _, tc := range []struct {
+		name         string
+		requireLogin bool
+		wantLogin    string
+	}{
+		{name: "session mode", requireLogin: true, wantLogin: `"true"`},
+		{name: "sessionless mode", wantLogin: `"false"`},
+	} {
+		opts := HandlerOptions{
+			Token:         "service-token",
+			ControllerURL: controller.URL,
+			Version:       "v9.9.9",
+			RequireLogin:  tc.requireLogin,
+		}
+		page := httptest.NewRecorder()
+		spaHandler(fs.FS(bundle), opts).ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/", nil))
+		if strings.Contains(page.Body.String(), "service-token") {
+			t.Errorf("%s: dashboard HTML exposed its service token: %s", tc.name, page.Body.String())
+		}
 
-	sessionless := httptest.NewRecorder()
-	spaHandler(fs.FS(bundle), HandlerOptions{
-		Token:  "service-token",
-		APIURL: "https://controller.example.test",
-	}).ServeHTTP(
-		sessionless,
-		httptest.NewRequest(http.MethodGet, "/", nil),
-	)
-	if !strings.Contains(sessionless.Body.String(), `window.__SPARKWING_TOKEN__="service-token";`) ||
-		!strings.Contains(sessionless.Body.String(), `window.__SPARKWING_API_URL__="https://controller.example.test";`) ||
-		!strings.Contains(sessionless.Body.String(), `window.__SPARKWING_REQUIRE_LOGIN__="false";`) {
-		t.Errorf("sessionless dashboard lost its existing runtime token behavior: %s", sessionless.Body.String())
+		config := httptest.NewRecorder()
+		runtimeConfigHandler(opts)(config, httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil))
+		body := config.Body.String()
+		if strings.Contains(body, "service-token") {
+			t.Errorf("%s: runtime config exposed its service token: %s", tc.name, body)
+		}
+		if !strings.Contains(body, `window.__SPARKWING_REQUIRE_LOGIN__=`+tc.wantLogin) ||
+			!strings.Contains(body, `window.__SPARKWING_VERSION__="v9.9.9"`) {
+			t.Errorf("%s: runtime config lost its dashboard configuration: %s", tc.name, body)
+		}
 	}
 }
 

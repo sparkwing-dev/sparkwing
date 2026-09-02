@@ -510,7 +510,7 @@ func (s *Store) DB() *sql.DB
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name, repo string) error
 func (s *Store) DeleteSession(rawSession string) error
-func (s *Store) DeleteUser(name string) error
+func (s *Store) DeleteUser(name string, now time.Time) ([]string, error)
 func (s *Store) Dialect() Dialect
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
