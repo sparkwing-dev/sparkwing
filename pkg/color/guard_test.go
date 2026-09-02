@@ -12,6 +12,7 @@ var allowed = map[string]bool{
 	"pkg/color/color.go":                       true,
 	"pkg/color/guard_test.go":                  true,
 	"internal/logpretty/pretty.go":             true,
+	"internal/logpretty/sanitize.go":           true,
 	"internal/orchestrator/jobs_cli.go":        true,
 	"internal/orchestrator/jobs_cli_remote.go": true,
 }

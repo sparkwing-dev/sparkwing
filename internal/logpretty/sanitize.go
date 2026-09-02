@@ -95,8 +95,6 @@ func needsSanitizing(s string) bool {
 	return false
 }
 
-// scanEscape returns the escape sequence starting at i and the index just past it. A sequence
-// truncated by the end of the input consumes the rest of the input.
 func scanEscape(s string, i int) (string, int) {
 	j := i + 1
 	if j >= len(s) {
