@@ -64,6 +64,13 @@ type Options struct {
 	// endpoints are absent rather than 405.
 	NoLocalStore bool
 
+	// AllowRemote lets the server bind a non-loopback Addr and answer
+	// requests whose Host is not loopback. The API carries no
+	// authentication, so this hands every reachable network the power
+	// to run pipelines and read secrets. Off by default; Run refuses a
+	// non-loopback Addr without it.
+	AllowRemote bool
+
 	// Version is rendered as a small pill in the dashboard nav. The
 	// caller passes the running CLI's version (typically the value
 	// of cmd/sparkwing.installedVersion()). Empty hides the pill.
@@ -75,14 +82,17 @@ type Options struct {
 // for standalone use; redundant when the parent ctx already cancels
 // on signal.
 func Run(ctx context.Context, opts Options) error {
-	if err := web.VerifyBundleEmbedded(); err != nil {
-		return err
-	}
 	if opts.Listener != nil {
 		opts.Addr = opts.Listener.Addr().String()
 	}
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:4343"
+	}
+	if !opts.AllowRemote && !loopbackBind(opts.Addr) {
+		return fmt.Errorf("addr %s is not loopback: set AllowRemote to serve the unauthenticated API to other hosts", opts.Addr)
+	}
+	if err := web.VerifyBundleEmbedded(); err != nil {
+		return err
 	}
 
 	paths, err := localPaths(opts.Home)
@@ -202,6 +212,7 @@ func Run(ctx context.Context, opts Options) error {
 		handler = guard.middleware(root)
 		go guard.poll(ctx, schemaPollInterval)
 	}
+	handler = originGuard(handler, opts.AllowRemote)
 
 	srv := &http.Server{
 		Addr:              opts.Addr,

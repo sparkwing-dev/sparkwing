@@ -17,6 +17,8 @@ type Options struct {
 
 	NoLocalStore bool
 
+	AllowRemote bool
+
 	Version string
 }
 func Run(ctx context.Context, opts Options) error
