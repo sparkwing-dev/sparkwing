@@ -70,11 +70,15 @@ than accepting an unknown signer.
 
 ## Cache service
 
-`sparkwing-cache` requires a bearer token on its external **write**
-endpoints (`--api-token`, falling back to `$SPARKWING_API_TOKEN`); an
-empty token disables auth. Read endpoints (clone, file access, repo
-listing) are reachable only in-cluster via the Service, not the
-ingress. In-cluster callers reach it directly without a token.
+`sparkwing-cache` requires a bearer token on its blob and sync endpoints
+(`--api-token`, falling back to `$SPARKWING_API_TOKEN`), and refuses to
+start without one unless the operator passes `--allow-unauthenticated`
+(`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which logs a startup warning.
+The guard has no network-location exemption: an in-cluster caller, a
+port-forward, and an ingress request are all rejected without the bearer,
+because a caller-controlled header cannot prove where a request came from.
+Read endpoints (clone, file access, repo listing) carry no token and are
+reachable only in-cluster via the Service, not the ingress.
 
 Off-cluster runners read Git through the controller's admin-scoped
 `/api/v1/gitcache/git/...` proxy. The controller removes its bearer before the

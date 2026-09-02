@@ -895,8 +895,7 @@ func describeManagedHook(script string) (pipes []string, chained bool) {
 	for line := range strings.SplitSeq(script, "\n") {
 		line = strings.TrimSpace(line)
 		if rest, ok := strings.CutPrefix(line, "sparkwing run "); ok {
-			name, _, _ := strings.Cut(rest, " ")
-			pipes = append(pipes, name)
+			pipes = append(pipes, firstShellWord(rest))
 		}
 		if strings.HasPrefix(line, "exec \"$hook\"") {
 			chained = true
@@ -955,7 +954,8 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool, profile
 			flag = " --profile " + shellSingleQuote(profileName)
 		}
 		for _, p := range pipes {
-			fmt.Fprintf(&b, "sparkwing run %s%s%s%s\n", p, flag, stdin, tolerate)
+			// safety: pipeline names come from repo config, so quote before they reach sh.
+			fmt.Fprintf(&b, "sparkwing run %s%s%s%s\n", shellSingleQuote(p), flag, stdin, tolerate)
 		}
 		b.WriteString(")\n")
 	}
@@ -979,4 +979,23 @@ func renderGlobalChain(hookName string) string {
 
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func firstShellWord(s string) string {
+	var b strings.Builder
+	quoted := false
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '\'':
+			quoted = !quoted
+		case s[i] == '\\' && !quoted && i+1 < len(s):
+			i++
+			b.WriteByte(s[i])
+		case s[i] == ' ' && !quoted:
+			return b.String()
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }

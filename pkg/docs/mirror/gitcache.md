@@ -301,9 +301,16 @@ and permits upload-pack reads only. Authenticated requests carry the token as:
 Authorization: Bearer <SPARKWING_API_TOKEN>
 ```
 
-In-cluster requests (from controller, runners) skip auth - they reach
-the cache via the k8s Service without the `X-Forwarded-For` header that
-the ingress sets.
+Every caller presents the token, in-cluster ones included. Reaching the
+cache through the k8s Service rather than the ingress proves nothing about
+the caller, so requests to those endpoints without a valid bearer get 401
+wherever they come from. Runners and the controller read the token from
+`SPARKWING_CACHE_TOKEN`.
+
+The cache refuses to start without a token. A laptop or test setup that
+wants the endpoints open passes `--allow-unauthenticated` (or
+`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED=1`); the pod logs a warning at
+startup so an unauthenticated deployment is visible.
 
 ## API Endpoints
 
@@ -382,7 +389,8 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 
 | Variable | Description |
 |----------|-------------|
-| `SPARKWING_API_TOKEN` | Bearer token for write endpoint auth |
+| `SPARKWING_API_TOKEN` | Bearer token for the blob and sync endpoints. Required unless auth is disabled |
+| `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED` | Start without a token, leaving the blob and sync endpoints open |
 | `GITCACHE_REPOS` | Comma-separated `name=url` pairs for auto-registration |
 | `FETCH_INTERVAL` | Background fetch interval (default: `30s`) |
 | `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch (default: `15s`; negative disables) |

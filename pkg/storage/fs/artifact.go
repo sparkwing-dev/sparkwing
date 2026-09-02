@@ -15,8 +15,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -46,62 +48,137 @@ func NewArtifactStore(root string) (*ArtifactStore, error) {
 
 var _ storage.ArtifactStore = (*ArtifactStore)(nil)
 
-func (s *ArtifactStore) path(key string) string {
-	if len(key) >= 2 {
-		return filepath.Join(s.Root, key[:2], key)
+// safety: keys arrive from HTTP path segments, so a key is validated and
+// its shard join confirmed inside the root before any filesystem call.
+func relPath(key string) (string, error) {
+	if err := storage.SafeRelPath(key); err != nil {
+		return "", err
 	}
-	return filepath.Join(s.Root, "_", key)
+	shard := "_"
+	if len(key) >= 2 {
+		shard = key[:2]
+	}
+	rel := filepath.Join(shard, filepath.FromSlash(key))
+	if !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("storage: key %q resolves outside the store root", key)
+	}
+	return rel, nil
+}
+
+func (s *ArtifactStore) openRoot(key string) (*os.Root, string, error) {
+	rel, err := relPath(key)
+	if err != nil {
+		return nil, "", err
+	}
+	root, err := os.OpenRoot(s.Root)
+	if err != nil {
+		return nil, "", err
+	}
+	return root, rel, nil
+}
+
+func notFound(err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		return storage.ErrNotFound
+	}
+	return err
 }
 
 func (s *ArtifactStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
-	f, err := os.Open(s.path(key))
+	root, rel, err := s.openRoot(key)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, storage.ErrNotFound
-		}
-		return nil, err
+		return nil, notFound(err)
+	}
+	defer func() { _ = root.Close() }()
+	f, err := root.Open(rel)
+	if err != nil {
+		return nil, notFound(err)
 	}
 	return f, nil
 }
 
 func (s *ArtifactStore) Put(_ context.Context, key string, r io.Reader) error {
-	dst := s.path(key)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := os.MkdirAll(s.Root, 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".put-*")
+	root, rel, err := s.openRoot(key)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return writeThroughRoot(root, rel, r)
+}
+
+func writeThroughRoot(root *os.Root, rel string, r io.Reader) error {
+	dir := filepath.Dir(rel)
+	if err := root.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, tmpRel, err := createTemp(root, dir)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(tmp, r); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
+		_ = root.Remove(tmpRel)
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmp.Name())
+		_ = root.Remove(tmpRel)
 		return err
 	}
-	return os.Rename(tmp.Name(), dst)
+	if err := root.Rename(tmpRel, rel); err != nil {
+		_ = root.Remove(tmpRel)
+		return err
+	}
+	return nil
+}
+
+func createTemp(root *os.Root, dir string) (*os.File, string, error) {
+	for range 1000 {
+		name := filepath.Join(dir, ".put-"+strconv.FormatUint(rand.Uint64(), 36))
+		f, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			return f, name, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, "", err
+		}
+	}
+	return nil, "", errors.New("fs: no free temp file name")
 }
 
 func (s *ArtifactStore) Has(_ context.Context, key string) (bool, error) {
-	_, err := os.Stat(s.path(key))
-	if err == nil {
-		return true, nil
+	root, rel, err := s.openRoot(key)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
 	}
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+	defer func() { _ = root.Close() }()
+	if _, err := root.Stat(rel); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
 	}
-	return false, err
+	return true, nil
 }
 
 func (s *ArtifactStore) Delete(_ context.Context, key string) error {
-	err := os.Remove(s.path(key))
-	if err == nil || errors.Is(err, os.ErrNotExist) {
-		return nil
+	root, rel, err := s.openRoot(key)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("fs delete %s: %w", key, err)
 	}
-	return fmt.Errorf("fs delete %s: %w", key, err)
+	defer func() { _ = root.Close() }()
+	if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("fs delete %s: %w", key, err)
+	}
+	return nil
 }
 
 // List walks Root and returns every blob whose logical key starts

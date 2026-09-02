@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -24,49 +22,54 @@ func (s *ArtifactStore) keyMu(key string) *sync.Mutex {
 // GetWithETag returns the object and the sha256 of its bytes as the
 // ETag. The ETag feeds back into PutIfMatch to gate the next write.
 func (s *ArtifactStore) GetWithETag(_ context.Context, key string) (io.ReadCloser, storage.ETag, error) {
-	body, err := os.ReadFile(s.path(key))
+	root, rel, err := s.openRoot(key)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, "", storage.ErrNotFound
-		}
-		return nil, "", err
+		return nil, "", notFound(err)
+	}
+	defer func() { _ = root.Close() }()
+	body, err := root.ReadFile(rel)
+	if err != nil {
+		return nil, "", notFound(err)
 	}
 	return io.NopCloser(bytes.NewReader(body)), contentETag(body), nil
 }
 
 // PutIfAbsent writes only when key has no object. A pre-existing
 // object yields ErrPreconditionFailed.
-func (s *ArtifactStore) PutIfAbsent(_ context.Context, key string, r io.Reader) (storage.ETag, error) {
+func (s *ArtifactStore) PutIfAbsent(ctx context.Context, key string, r io.Reader) (storage.ETag, error) {
 	mu := s.keyMu(key)
 	mu.Lock()
 	defer mu.Unlock()
 
-	if _, err := os.Stat(s.path(key)); err == nil {
-		return "", storage.ErrPreconditionFailed
-	} else if !errors.Is(err, os.ErrNotExist) {
+	has, err := s.Has(ctx, key)
+	if err != nil {
 		return "", err
 	}
-	return s.writeAtomic(key, r)
+	if has {
+		return "", storage.ErrPreconditionFailed
+	}
+	return s.writeAtomic(ctx, key, r)
 }
 
 // PutIfMatch writes only when the current object's ETag equals expect.
 // A differing or absent object yields ErrPreconditionFailed.
-func (s *ArtifactStore) PutIfMatch(_ context.Context, key string, r io.Reader, expect storage.ETag) (storage.ETag, error) {
+func (s *ArtifactStore) PutIfMatch(ctx context.Context, key string, r io.Reader, expect storage.ETag) (storage.ETag, error) {
 	mu := s.keyMu(key)
 	mu.Lock()
 	defer mu.Unlock()
 
-	cur, err := os.ReadFile(s.path(key))
+	rc, cur, err := s.GetWithETag(ctx, key)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, storage.ErrNotFound) {
 			return "", storage.ErrPreconditionFailed
 		}
 		return "", err
 	}
-	if contentETag(cur) != expect {
+	_ = rc.Close()
+	if cur != expect {
 		return "", storage.ErrPreconditionFailed
 	}
-	return s.writeAtomic(key, r)
+	return s.writeAtomic(ctx, key, r)
 }
 
 // ConditionalWritesSupported is always true for the local filesystem:
@@ -76,30 +79,12 @@ func (s *ArtifactStore) ConditionalWritesSupported(context.Context) (bool, error
 	return true, nil
 }
 
-func (s *ArtifactStore) writeAtomic(key string, r io.Reader) (storage.ETag, error) {
+func (s *ArtifactStore) writeAtomic(ctx context.Context, key string, r io.Reader) (storage.ETag, error) {
 	body, err := io.ReadAll(r)
 	if err != nil {
 		return "", err
 	}
-	dst := s.path(key)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".put-*")
-	if err != nil {
-		return "", err
-	}
-	if _, err := tmp.Write(body); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-		return "", err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmp.Name())
-		return "", err
-	}
-	if err := os.Rename(tmp.Name(), dst); err != nil {
-		_ = os.Remove(tmp.Name())
+	if err := s.Put(ctx, key, bytes.NewReader(body)); err != nil {
 		return "", err
 	}
 	return contentETag(body), nil
