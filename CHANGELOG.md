@@ -233,6 +233,7 @@ code change to unlock.
   redacted argument would execute as the literal `***`. Runner tokens claiming
   their own work are unaffected. See the
   [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-token).
+- **docs:** the security guide names `sparkwing cluster tokens list`, the CLI reference lists `secrets --repo`, and the gitleaks history exception covers the argon2 hashing seam, which is renamed so future scans stay clean.
 
 ### Added
 

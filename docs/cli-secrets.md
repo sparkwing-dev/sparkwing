@@ -37,6 +37,7 @@ Deletes the secret from local files when --profile is omitted, or from the named
 | Flag | Description |
 |---|---|
 | `--name NAME` | Secret name to remove (required) |
+| `--repo SLUG` | Remove the row owned by one repository slug (controller only); omit for the unscoped row |
 | `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples
@@ -62,6 +63,7 @@ so it can be piped into another command. Use 'secrets list' for metadata.
 | Flag | Description |
 |---|---|
 | `--name NAME` | Secret name (required) |
+| `--repo SLUG` | Read the row owned by one repository slug (controller only); omit for the unscoped row |
 | `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples
@@ -118,6 +120,7 @@ does not land in shell history.
 | `--value VALUE` | Secret value (prefer --file for long values) |
 | `--file PATH` | Read value from file (keeps value out of shell history) |
 | `--plain` | Store as non-masked config (e.g. REGION, LOG_LEVEL) -- value will NOT be redacted in run logs. Default is masked. |
+| `--repo SLUG` | Scope the secret to one repository slug (controller only); omit for a secret every run can read |
 | `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples
@@ -131,4 +134,7 @@ sparkwing secrets set --name TLS_CERT --file ./tls.crt --profile prod
 
 # Set non-masked config
 sparkwing secrets set --name REGION --value us-east-1 --plain --profile prod
+
+# Scope a secret to one repository
+sparkwing secrets set --name DEPLOY_KEY --file ./key --repo acme/web --profile prod
 ```

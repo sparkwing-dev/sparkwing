@@ -29,16 +29,16 @@ func TestArgon2Concurrency(t *testing.T) {
 }
 
 func TestArgon2SemaphoreBoundsConcurrentHashes(t *testing.T) {
-	restore := argonIDKey
+	restore := argonIDFunc
 	prevWait := SetArgon2AcquireTimeout(time.Minute)
 	t.Cleanup(func() {
-		argonIDKey = restore
+		argonIDFunc = restore
 		SetArgon2AcquireTimeout(prevWait)
 		SetArgon2MemoryBudget(DefaultArgon2MemoryBudget)
 	})
 
 	var inFlight, peak atomic.Int64
-	argonIDKey = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
+	argonIDFunc = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
 		n := inFlight.Add(1)
 		for {
 			seen := peak.Load()
@@ -88,17 +88,17 @@ func TestSetArgon2MemoryBudgetIgnoresNonPositive(t *testing.T) {
 }
 
 func TestArgon2SaturationShedsInsteadOfQueueing(t *testing.T) {
-	restore := argonIDKey
+	restore := argonIDFunc
 	prevWait := SetArgon2AcquireTimeout(20 * time.Millisecond)
 	t.Cleanup(func() {
-		argonIDKey = restore
+		argonIDFunc = restore
 		SetArgon2AcquireTimeout(prevWait)
 		SetArgon2MemoryBudget(DefaultArgon2MemoryBudget)
 	})
 
 	release := make(chan struct{})
 	entered := make(chan struct{}, 1)
-	argonIDKey = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
+	argonIDFunc = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
 		entered <- struct{}{}
 		<-release
 		return make([]byte, keyLen)
@@ -130,10 +130,10 @@ func TestArgon2SaturationShedsInsteadOfQueueing(t *testing.T) {
 }
 
 func TestVerifyUserShedsWhenHashingIsSaturated(t *testing.T) {
-	restore := argonIDKey
+	restore := argonIDFunc
 	prevWait := SetArgon2AcquireTimeout(20 * time.Millisecond)
 	t.Cleanup(func() {
-		argonIDKey = restore
+		argonIDFunc = restore
 		SetArgon2AcquireTimeout(prevWait)
 		SetArgon2MemoryBudget(DefaultArgon2MemoryBudget)
 	})
@@ -146,7 +146,7 @@ func TestVerifyUserShedsWhenHashingIsSaturated(t *testing.T) {
 
 	release := make(chan struct{})
 	entered := make(chan struct{}, 1)
-	argonIDKey = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
+	argonIDFunc = func(_, _ []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
 		entered <- struct{}{}
 		<-release
 		return make([]byte, keyLen)

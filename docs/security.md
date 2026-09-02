@@ -36,7 +36,7 @@ successes.
 
 Bearer verification carries the same protection, keyed on the client
 address and the 12-character token prefix, which is public
-(`sparkwing tokens list` prints it). Ten failed verifications for one
+(`sparkwing cluster tokens list` prints it). Ten failed verifications for one
 prefix from one client in a minute and further attempts answer `429`
 without hashing. Keying on the pair matters for the same reason it does
 for login: a prefix-only budget would let a stranger who reads a prefix
@@ -194,8 +194,8 @@ The protocol carries no token, and adding one would not change that -- a
 token readable by the account is readable by anything running as the
 account.
 
-Other accounts on the host are outside the boundary, and four checks
-keep them out. The base directory must be a directory carrying the
+Other accounts on the host are outside the boundary, and the checks
+below keep them out. The base directory must be a directory carrying the
 sticky bit, or else not be writable by other accounts, so no one can
 rename this user's socket directory away and substitute their own. The
 daemon then creates its socket directory with `Mkdir` and refuses to
