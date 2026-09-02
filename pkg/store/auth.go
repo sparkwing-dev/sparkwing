@@ -52,29 +52,25 @@ func sessionDigest(rawSession string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// ErrSessionBackend marks a session lookup that failed for an infrastructure
+// reason rather than an unknown or expired session. Callers answer 5xx for it
+// so a browser keeps cookies a working backend would still resolve.
+var ErrSessionBackend = errors.New("sessions: backend unavailable")
+
 func (s *Store) csrfSigningKey() ([]byte, error) {
 	s.csrfKeyMu.Lock()
 	defer s.csrfKeyMu.Unlock()
 	if len(s.csrfKey) > 0 {
 		return s.csrfKey, nil
 	}
-	minted := make([]byte, sha256.Size)
-	if _, err := rand.Read(minted); err != nil {
+	stored, found, err := s.storedCSRFKey()
+	if err != nil {
 		return nil, err
 	}
-	// safety: DO NOTHING keeps a concurrent minter's key, so every process derives the same token for a session.
-	if _, err := s.execNoCtx(
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO NOTHING`,
-		metaKeySessionCSRFKey, hex.EncodeToString(minted), time.Now().UnixNano(),
-	); err != nil {
-		return nil, fmt.Errorf("sessions: persist csrf key: %w", err)
-	}
-	var stored string
-	if err := s.queryRowNoCtx(
-		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeySessionCSRFKey,
-	).Scan(&stored); err != nil {
-		return nil, fmt.Errorf("sessions: read csrf key: %w", err)
+	if !found {
+		if stored, err = s.mintCSRFKey(); err != nil {
+			return nil, err
+		}
 	}
 	key, err := hex.DecodeString(stored)
 	if err != nil || len(key) == 0 {
@@ -82,6 +78,59 @@ func (s *Store) csrfSigningKey() ([]byte, error) {
 	}
 	s.csrfKey = key
 	return key, nil
+}
+
+// safety: reading before writing keeps a read-only store, and every process past the first, off the write path.
+func (s *Store) storedCSRFKey() (string, bool, error) {
+	var stored string
+	err := s.queryRowNoCtx(
+		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeySessionCSRFKey,
+	).Scan(&stored)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", false, nil
+	case err != nil:
+		return "", false, fmt.Errorf("sessions: read csrf key: %w", err)
+	}
+	return stored, true, nil
+}
+
+func (s *Store) mintCSRFKey() (string, error) {
+	minted := make([]byte, sha256.Size)
+	if _, err := rand.Read(minted); err != nil {
+		return "", err
+	}
+	tx, err := s.beginTx(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("sessions: begin csrf key: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// safety: DO NOTHING keeps a concurrent minter's key, so every process derives the same token for a session.
+	res, err := tx.Exec(
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT (key) DO NOTHING`,
+		metaKeySessionCSRFKey, hex.EncodeToString(minted), time.Now().UnixNano(),
+	)
+	if err != nil {
+		return "", fmt.Errorf("sessions: persist csrf key: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		// safety: a fresh key cannot sign the tokens live sessions carry, so key and sessions rotate as one.
+		if _, err := tx.Exec(`DELETE FROM sessions`); err != nil {
+			return "", fmt.Errorf("sessions: rotate on new csrf key: %w", err)
+		}
+	}
+	var stored string
+	if err := tx.QueryRow(
+		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeySessionCSRFKey,
+	).Scan(&stored); err != nil {
+		return "", fmt.Errorf("sessions: read csrf key: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("sessions: commit csrf key: %w", err)
+	}
+	return stored, nil
 }
 
 func (s *Store) deriveCSRFToken(rawSession string) (string, error) {
@@ -156,6 +205,11 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 		return nil, errors.New("empty session")
 	}
 	digest := sessionDigest(rawSession)
+	// safety: minting a key drops every session it cannot sign for, so resolve the key before reading the row.
+	csrfToken, err := s.deriveCSRFToken(rawSession)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
+	}
 	row := s.queryRowNoCtx(`
         SELECT principal, scopes,
                created_at, expires_at, last_used_at
@@ -171,7 +225,10 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 		&sess.Principal, &scopes,
 		&created, &expires, &lastUsed,
 	); err != nil {
-		return nil, errors.New("unknown session")
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("unknown session")
+		}
+		return nil, fmt.Errorf("%w: read session: %w", ErrSessionBackend, err)
 	}
 	sess.ID = rawSession
 	sess.Scopes = splitScopes(scopes)
@@ -183,10 +240,6 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 	}
 	if !now.Before(sess.ExpiresAt) {
 		return nil, errors.New("session expired")
-	}
-	csrfToken, err := s.deriveCSRFToken(rawSession)
-	if err != nil {
-		return nil, err
 	}
 	sess.CSRFToken = csrfToken
 	_, _ = s.execNoCtx(

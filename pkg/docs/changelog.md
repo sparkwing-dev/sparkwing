@@ -51,6 +51,14 @@ code change to unlock.
 
 ### Security
 
+- **cli:** The admission daemon's unix socket is now private to its user. Its
+  path stays a pure function of `SPARKWING_HOME`, so every caller resolves the
+  same socket whatever its environment. The daemon refuses a base directory
+  that other accounts can write without the sticky bit, refuses a socket
+  directory that is not a `0700` directory owned by the current uid, chmods the
+  socket to `0600`, and drops accepted connections whose kernel-reported peer
+  uid differs. Clients apply the same tests before dialing, including the peer
+  sweep behind `sparkwing doctor`. These checks are unix-only.
 - **cache:** The package proxy rewrites the npm and PyPI URLs it serves against
   `--public-url` (`SPARKWING_CACHE_PUBLIC_URL`, chart: `cache.publicUrl`,
   defaulting to the in-cluster Service URL) and caches that copy. Without a
@@ -77,12 +85,16 @@ code change to unlock.
   `web.apiUrl` are deprecated and ignored. A token-backed dashboard that binds
   a non-loopback address without `--require-login` refuses to start. See the
   [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
-- **store:** Browser sessions are stored as a sha256 digest of the session id,
-  and the CSRF token is derived as an HMAC of that id under a server key
-  instead of being written to the database, so a copy of the state database,
-  its WAL, or a backup no longer yields replayable dashboard sessions. The
-  schema 21 migration deletes existing session rows, so everyone signs in
-  again after the upgrade.
+- **store (Breaking):** Browser sessions are stored as a sha256 digest of the
+  session id, and the CSRF token is derived as an HMAC of that id under a
+  server key instead of being written to the database, so a copy of the state
+  database, its WAL, or a backup no longer yields replayable dashboard
+  sessions. Schema 21 drops the `sessions.csrf_token` column and deletes every
+  session row: everyone signs in again, and it is the first migration a
+  still-running older binary cannot read past. A session lookup that fails on
+  the store or the signing key now answers `500` instead of `401`, so the
+  dashboard reports a backend fault rather than signing the browser out. See
+  the [migration guide](docs/migrations/_unreleased.md#session-rows-are-hashed-and-the-csrf-column-is-dropped).
 - **cache:** The warm-pool controller now accepts only registry references in
   `warm_images` -- a DNS or bracketed IPv6 host, a lowercase path, an optional
   tag, and a lowercase `sha256` digest -- reads at most 64 entries per config

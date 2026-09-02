@@ -164,6 +164,7 @@ var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
 var ErrRunNotLive = errors.New("run is not live")
 var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
+var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrTokenRevoked = errors.New("token is revoked or expired")
 var ErrUnknownToken = errors.New("unknown token")
 type Event struct {

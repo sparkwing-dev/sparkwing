@@ -170,28 +170,42 @@ workspace refs per repository and expires them after
 
 The admission daemon (`wingd`) is a per-user process on the developer's
 own machine. It serves a unix socket at
-`$XDG_RUNTIME_DIR/sparkwing-<uid>-<hash>/d.sock`, falling back to
-`/tmp/sparkwing-<uid>-<hash>/d.sock` when no private runtime directory
-is available or when the runtime path would exceed the operating
-system's `sun_path` limit. The trust boundary is the user account, not
-the machine: everyone logged into the same host as the same user shares
-one daemon and can queue, inspect, cancel, and drain its runs. The
-protocol carries no token, and adding one would not change that -- a
+`/tmp/sparkwing-<uid>-<hash>/d.sock`, where the hash covers
+`SPARKWING_HOME`. The path is a pure function of the home: no
+environment variable moves it, so a cron job, a privilege-elevated
+shell, and an interactive session all resolve the same socket for the
+same home. It sits under `/tmp` rather than under the home because a
+unix socket path is capped at 104 bytes on macOS. Windows uses the
+process temp directory instead. The trust boundary is the user account,
+not the machine: everyone logged into the same host as the same user
+shares one daemon and can queue, inspect, cancel, and drain its runs.
+The protocol carries no token, and adding one would not change that -- a
 token readable by the account is readable by anything running as the
 account.
 
-Other accounts on the host are outside the boundary, and three checks
-keep them out. The daemon creates its socket directory with `Mkdir` and
-refuses to serve if the path already exists as anything but a real
-directory owned by the current uid with mode `0700`, so another account
-cannot pre-create it and collect connections. The bound socket is
-chmodded to `0600`. Every accepted connection is checked against the
-kernel's peer credentials (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED` on
-macOS and FreeBSD) and dropped when the caller's uid differs, which
-holds even where socket file modes are not enforced on connect. Clients
-apply the same directory test before dialing, so a `sparkwing` command
-refuses to hand a handshake to a socket sitting in a directory this user
-does not own.
+Other accounts on the host are outside the boundary, and four checks
+keep them out. The base directory must be a directory carrying the
+sticky bit, or else not be writable by other accounts, so no one can
+rename this user's socket directory away and substitute their own. The
+daemon then creates its socket directory with `Mkdir` and refuses to
+serve if the path already exists as anything but a real directory owned
+by the current uid with mode `0700`, so another account cannot
+pre-create it and collect connections; a foreign directory at that path
+is a refusal that names it, never a redirect somewhere else. The bound
+socket is chmodded to `0600`. Every accepted connection is checked
+against the kernel's peer credentials (`SO_PEERCRED` on Linux,
+`LOCAL_PEERCRED` on macOS and FreeBSD) and dropped when the caller's uid
+differs, which holds even where socket file modes are not enforced on
+connect. Clients apply the same base and directory tests before dialing,
+including the peer sweep behind `sparkwing doctor`, so a `sparkwing`
+command refuses to hand a handshake to a socket sitting in a directory
+this user does not own.
+
+The ownership, mode, and peer-credential checks are unix-only. Windows
+reports no uid for a unix socket peer and has no sticky bit, so the
+per-user temp directory is the only separation there, and the daemon
+neither refuses a connection on credentials nor sweeps a stale socket
+directory away.
 
 Root is not excluded by any of this; a root account on the host can read
 the daemon's memory whatever the socket says. On a shared host, give
