@@ -87,7 +87,10 @@ const ScopeLogsRead = "logs.read"
 const ScopeLogsWrite = "logs.write"
 const ScopeNodesClaim = "nodes.claim"
 const ScopeRunsRead = "runs.read"
+const ScopeRunsState = "runs.state"
 const ScopeRunsWrite = "runs.write"
+const ScopeSecretsRead = "secrets.read"
+const ScopeTriggersClaim = "triggers.claim"
 const ScopeTriggersRead = "triggers.read"
 func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logger) error
 func ServeWith(ctx context.Context, s *Server, addr string) error
@@ -110,6 +113,7 @@ func (s *Server) WithLogsURL(url string) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
+func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
 	CachePod string
 

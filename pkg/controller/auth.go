@@ -40,6 +40,19 @@ const (
 	ScopeLogsRead     = "logs.read"
 	ScopeLogsWrite    = "logs.write"
 	ScopeTriggersRead = "triggers.read"
+	// ScopeTriggersClaim gates the trigger worker lifecycle: claim,
+	// heartbeat, and done. It carries no authority over run or node
+	// state.
+	ScopeTriggersClaim = "triggers.claim"
+	// ScopeRunsState gates run and node state writes: run create and
+	// finish, node create, start, finish, and run event append. The
+	// per-node routes are additionally bound to the caller's own
+	// claim.
+	ScopeRunsState = "runs.state"
+	// ScopeSecretsRead gates GET /api/v1/secrets/{name}. A non-admin
+	// holder resolves a name against the repository of the run it
+	// currently holds a claim in.
+	ScopeSecretsRead = "secrets.read"
 	// ScopeApprovalsWrite gates POST /api/v1/runs/{run}/approvals/{node}.
 	// Any principal with this scope can resolve any approval. Reads
 	// are covered by runs.read.
@@ -54,6 +67,9 @@ var allScopes = []string{
 	ScopeLogsRead,
 	ScopeLogsWrite,
 	ScopeTriggersRead,
+	ScopeTriggersClaim,
+	ScopeRunsState,
+	ScopeSecretsRead,
 	ScopeApprovalsWrite,
 	ScopeAdmin,
 }

@@ -53,6 +53,7 @@ func runSecretSet(args []string) error {
 	value := v.String("value")
 	file := v.String("file")
 	plain := v.Bool("plain")
+	repo := v.String("repo")
 	on := v.String("profile")
 	if !fs.Changed("value") && !fs.Changed("file") {
 		return errors.New("secret set: either --value or --file is required")
@@ -74,6 +75,10 @@ func runSecretSet(args []string) error {
 	}
 
 	masked := !plain
+
+	if repo != "" && !fs.Changed("profile") {
+		return errors.New("secret set: --repo needs --profile; the local store has no repository dimension")
+	}
 
 	if !fs.Changed("profile") {
 		path, perr := localPathFor(masked)
@@ -101,10 +106,14 @@ func runSecretSet(args []string) error {
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := c.CreateSecret(ctx, name, raw, masked); err != nil {
+	if err := c.CreateSecretForRepo(ctx, name, raw, repo, masked); err != nil {
 		return fmt.Errorf("secret set: %w", err)
 	}
-	fmt.Fprintf(os.Stdout, "secret %q set (on: %s, masked=%v)\n", name, prof.Name, masked)
+	scope := "every repo"
+	if repo != "" {
+		scope = repo
+	}
+	fmt.Fprintf(os.Stdout, "secret %q set (on: %s, repo: %s, masked=%v)\n", name, prof.Name, scope, masked)
 	return nil
 }
 
@@ -125,6 +134,7 @@ func runSecretGet(args []string) error {
 		return err
 	}
 	name := v.String("name")
+	repo := v.String("repo")
 	on := v.String("profile")
 	if name == "" {
 		return errors.New("secret get: --name is required")
@@ -153,7 +163,7 @@ func runSecretGet(args []string) error {
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	sec, err := c.GetSecret(ctx, name)
+	sec, err := c.GetSecretForRepo(ctx, name, repo)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return fmt.Errorf("secret get: %q not found", name)
@@ -251,11 +261,15 @@ func runSecretList(args []string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tMASKED\tPRINCIPAL\tCREATED\tUPDATED")
+	fmt.Fprintln(tw, "NAME\tREPO\tMASKED\tPRINCIPAL\tCREATED\tUPDATED")
 	for _, sec := range secs {
+		repo := sec.Repo
+		if repo == "" {
+			repo = "(every repo)"
+		}
 		fmt.Fprintf(
-			tw, "%s\t%v\t%s\t%s\t%s\n",
-			sec.Name, sec.Masked, sec.Principal,
+			tw, "%s\t%s\t%v\t%s\t%s\t%s\n",
+			sec.Name, repo, sec.Masked, sec.Principal,
 			time.Unix(sec.CreatedAt, 0).UTC().Format("2006-01-02 15:04"),
 			time.Unix(sec.UpdatedAt, 0).UTC().Format("2006-01-02 15:04"),
 		)
@@ -273,6 +287,7 @@ func runSecretDelete(args []string) error {
 		return err
 	}
 	name := v.String("name")
+	repo := v.String("repo")
 	on := v.String("profile")
 	if name == "" {
 		return errors.New("secret delete: --name is required")
@@ -313,7 +328,7 @@ func runSecretDelete(args []string) error {
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := c.DeleteSecret(ctx, name); err != nil {
+	if err := c.DeleteSecretForRepo(ctx, name, repo); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return fmt.Errorf("secret delete: %q not found", name)
 		}

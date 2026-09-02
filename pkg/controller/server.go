@@ -302,17 +302,17 @@ func (s *Server) WithAuthenticator(a *Authenticator) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.Handle("POST /api/v1/runs", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateRun)))
+	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateRun)))
 	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleListRuns)))
 	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleGetRun)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodes)))
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
-	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinishRun)))
+	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, http.HandlerFunc(s.handleFinishRun)))
 	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUpdatePlanSnapshot)))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateNode)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeAdmin, http.HandlerFunc(s.handleStartNode)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinishNode)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateNode)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleStartNode))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleFinishNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUpdateNodeDeps)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetNode)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetNodeOutput)))
@@ -320,12 +320,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeDispatch)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeDispatches)))
 
-	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeAdmin, http.HandlerFunc(s.handleAppendEvent)))
+	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
-	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeAdmin, http.HandlerFunc(s.handleClaimTrigger)))
-	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handleHeartbeat)))
-	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinishTrigger)))
+	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleClaimTrigger)))
+	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleHeartbeat)))
+	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleFinishTrigger)))
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
@@ -430,7 +430,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret)))
 	mux.Handle("GET /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListSecrets)))
-	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGetSecret)))
+	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret)))
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret)))
 
 	authed := s.authMiddleware().Middleware(mux)
