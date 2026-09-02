@@ -51,6 +51,10 @@ code change to unlock.
 
 ### Security
 
+- **dependencies:** Upgrade gRPC-Go from v1.82.1 to v1.83.1, which fixes
+  CVE-2026-84304 in all six release binaries and the five service images. The
+  v0.39.0 image scan caught the vulnerable version and stopped publication
+  before a GitHub release was created.
 - **controller (Breaking):** Runners no longer need `admin`. New `triggers.claim`,
   `runs.state`, and `secrets.read` scopes carry the trigger lifecycle, run and
   node state writes, and single-secret reads, and `start` and `finish` admit
