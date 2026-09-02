@@ -117,6 +117,22 @@ now fails at startup instead of silently serving an unauthenticated dashboard.
 The controller URL must be an absolute `http` or `https` URL without embedded
 credentials, a query, or a fragment.
 
+Every dashboard response carries `Content-Security-Policy`
+(`default-src 'self'` plus a per-response nonce for the bundle's inline
+scripts), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
+`Referrer-Policy: same-origin`, and adds `Strict-Transport-Security` when
+session cookies are `Secure`. The page reads its configuration from
+`/sparkwing-runtime.js`, which carries the dashboard version and the login
+mode. The service bearer stays in the web process and rides only its
+server-side proxy, so the browser talks to one origin and `connect-src 'self'`
+holds.
+
+A dashboard that carries `--token`, runs without `--require-login`, and binds a
+non-loopback address refuses to start, because every caller that reaches the
+listener would drive the controller with that token. Pass `--require-login`,
+bind a loopback address, or accept the exposure with
+`--allow-unauthenticated-remote` (chart: `web.allowUnauthenticatedRemote`).
+
 Login throttling uses the TCP peer address and ignores forwarded headers by
 default. When a reverse proxy fronts `sparkwing-web`, pass its egress networks
 as `--trusted-proxy-cidrs=<CIDR,...>` or set the chart's

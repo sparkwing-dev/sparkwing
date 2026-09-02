@@ -41,9 +41,11 @@ func run(args []string) error {
 			"the dashboard reads nothing else from the cache. Empty leaves it off the panel.")
 
 	token := fs.String("token", "", "controller bearer token (also SPARKWING_AGENT_TOKEN)")
-	apiURL := fs.String("api-url", "", "public API URL injected into the dashboard (default: same origin)")
+	_ = fs.String("api-url", "", "deprecated; the dashboard proxies the API on its own origin")
 	requireLogin := fs.Bool("require-login", false,
 		"require controller-backed browser sessions; needs --controller or a profile with controller.url. Leave off for laptop-local dev.")
+	allowUnauthenticatedRemote := fs.Bool("allow-unauthenticated-remote", false,
+		"serve a token-backed dashboard without --require-login on a non-loopback address, handing the controller to every caller that reaches it")
 	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
 		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For; empty ignores forwarded headers")
 
@@ -51,6 +53,10 @@ func run(args []string) error {
 	stateSpec := fs.String("state-spec", "", "inline state backend spec, e.g. postgres://user:pw@host/db or s3://bucket/prefix")
 	logsSpecFlag := fs.String("logs-spec", "", "inline logs backend spec, e.g. s3://bucket/logs or stdout:")
 	artifactsSpec := fs.String("artifacts-spec", "", "inline artifact backend spec; only consulted when state is object-store-backed")
+
+	if err := fs.MarkDeprecated("api-url", "the dashboard proxies the API on its own origin"); err != nil {
+		return err
+	}
 
 	_ = fs.Parse(args)
 	trustedProxyCIDRs, err := parseTrustedProxyCIDRs(*trustedProxyCIDRsRaw)
@@ -94,9 +100,10 @@ func run(args []string) error {
 			AuthControllerURL: authControllerURL,
 			CacheURL:          *cacheURL,
 			Token:             *token,
-			APIURL:            *apiURL,
 			RequireLogin:      *requireLogin,
 			TrustedProxyCIDRs: trustedProxyCIDRs,
+
+			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
@@ -125,9 +132,10 @@ func run(args []string) error {
 			LogsURL:           *logsURL,
 			CacheURL:          *cacheURL,
 			Token:             *token,
-			APIURL:            *apiURL,
 			RequireLogin:      *requireLogin,
 			TrustedProxyCIDRs: trustedProxyCIDRs,
+
+			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}

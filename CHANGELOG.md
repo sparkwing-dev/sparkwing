@@ -54,6 +54,15 @@ code change to unlock.
   SHA with a version comment, the release job that prepares binaries no longer
   persists checkout credentials, and the canonical gate installs dashboard
   dependencies with `--ignore-scripts`.
+- **web (Breaking):** Dashboard responses carry a Content Security Policy with a
+  per-response script nonce, `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and HSTS
+  when session cookies are `Secure`. The page reads its configuration from
+  `/sparkwing-runtime.js` rather than an inline script, and the controller
+  bearer stays server-side in both login modes, so `--api-url` and the chart's
+  `web.apiUrl` are deprecated and ignored. A token-backed dashboard that binds
+  a non-loopback address without `--require-login` refuses to start. See the
+  [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
 
 ### Fixed
 

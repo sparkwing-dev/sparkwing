@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
 
 type RuntimeWindow = {
-  __SPARKWING_API_URL__?: string;
   __SPARKWING_REQUIRE_LOGIN__?: string;
 };
 let getNodeStreamUrl!: typeof import("./api").getNodeStreamUrl;
@@ -12,7 +11,7 @@ before(async () => {
   const runtime = globalThis as unknown as { window?: RuntimeWindow };
   const hadWindow = Object.prototype.hasOwnProperty.call(runtime, "window");
   const previousWindow = runtime.window;
-  runtime.window = { __SPARKWING_API_URL__: "" };
+  runtime.window = {};
   try {
     ({ getNodeStreamUrl, cancelRun } = await import("./api"));
   } finally {
