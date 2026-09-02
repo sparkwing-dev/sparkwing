@@ -5,6 +5,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -128,5 +130,87 @@ func TestLogs_PathTraversalRejected(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("path traversal status=%d want 400", resp.StatusCode)
+	}
+}
+
+func TestLogs_UnsafeIDsRejected(t *testing.T) {
+	dir := t.TempDir()
+	s, err := logs.New(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	c := logs.NewClient(srv.URL, nil)
+	if err := c.Append(context.Background(), "run-keep", "step-a", []byte("keep me\n")); err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(dir, "runs", "run-keep", "step-a.log")
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "delete-dot-encoded", method: http.MethodDelete, path: "/api/v1/logs/%2e"},
+		{name: "delete-dot-dot-encoded", method: http.MethodDelete, path: "/api/v1/logs/%2e%2e"},
+		{name: "delete-parent-escape", method: http.MethodDelete, path: "/api/v1/logs/..%2Fruns"},
+		{name: "read-run-dot-encoded", method: http.MethodGet, path: "/api/v1/logs/%2e"},
+		{name: "read-node-outside-run", method: http.MethodGet, path: "/api/v1/logs/%2e/step-a"},
+		{name: "append-node-outside-run", method: http.MethodPost, path: "/api/v1/logs/%2e/step-a"},
+		{name: "append-encoded-separator", method: http.MethodPost, path: "/api/v1/logs/run-keep/%2Fetc%2Fpasswd"},
+		{name: "append-node-dot", method: http.MethodPost, path: "/api/v1/logs/run-keep/%2e"},
+		{name: "stream-dot-encoded", method: http.MethodGet, path: "/api/v1/logs/%2e/step-a/stream"},
+		{name: "append-control-node", method: http.MethodPost, path: "/api/v1/logs/run-keep/step%01a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(tc.method, srv.URL+tc.path, strings.NewReader("pwn"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("%s %s status=%d, want 400", tc.method, tc.path, resp.StatusCode)
+			}
+			if _, err := os.Stat(kept); err != nil {
+				t.Fatalf("existing log gone after %s %s: %v", tc.method, tc.path, err)
+			}
+		})
+	}
+
+	for _, tc := range []struct{ name, run, node string }{
+		{name: "empty-run", run: "", node: "step-a"},
+		{name: "empty-node", run: "run-keep", node: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := c.Append(context.Background(), tc.run, tc.node, []byte("pwn")); err == nil {
+				t.Errorf("Append(%q, %q) succeeded, want rejection", tc.run, tc.node)
+			}
+		})
+	}
+}
+
+func TestLogs_RealIDsAccepted(t *testing.T) {
+	c, dir, stop := newLogsServer(t)
+	defer stop()
+
+	ctx := context.Background()
+	for _, id := range []string{"run-20260901-120000-ab12", "run-20260901-120000-1f2e3d4c"} {
+		for _, node := range []string{"build.amd64-v2", "gate_pre-commit", "a"} {
+			if err := c.Append(ctx, id, node, []byte("line\n")); err != nil {
+				t.Fatalf("Append(%q, %q): %v", id, node, err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "runs", id, node+".log")); err != nil {
+				t.Fatalf("log for (%q, %q) missing: %v", id, node, err)
+			}
+		}
 	}
 }
