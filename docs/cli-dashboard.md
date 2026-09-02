@@ -104,7 +104,7 @@ sparkwing dashboard start --profile ci-smoke --no-local-store --read-only
 
 # Serve a LAN bind, and let a browser reach it by name
 sparkwing dashboard start --addr 192.168.1.20:4343 --allow-remote \
-  --allow-origin http://dash.lan:4343
+  --allow-origin http://dashboard.example.com:4343
 ```
 
 The listener answers loopback `Host` headers only, and rejects a browser
