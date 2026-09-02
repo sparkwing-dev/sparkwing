@@ -54,11 +54,11 @@ CHANGELOG links here.
 - **After:** Capture drops any key whose name reads as a credential
   (`TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `CREDENTIAL`, and similar), masks
   registered secret values in the rest, and records the dropped names in
-  `redacted_keys`. Schema 19 adds that column. The dispatch read routes return
+  `redacted_keys`. Schema 20 adds that column. The dispatch read routes return
   `env_json` only to an `admin` principal; every other reader still gets the
   key list. Cluster-mode `sparkwing debug rerun` creates its debug pod from a
   manifest on `kubectl` stdin rather than `--env=K=V` arguments.
-- **Migration:** Upgrade the fleet before opening schema 19; schema-18 binaries
+- **Migration:** Upgrade the fleet before opening schema 20; older binaries
   refuse the upgraded SQL store. Give any tooling that reads `env_json` an
   `admin` token, or have it read the run's own environment instead. Export a
   credential a rerun needs into the debug shell yourself; the banner names the

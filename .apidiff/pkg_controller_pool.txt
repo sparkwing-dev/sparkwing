@@ -46,4 +46,5 @@ const StateDirty = "dirty"
 const StateInUse = "in-use"
 const StateWarming = "warming"
 func WarmPVC(ctx context.Context, client kubernetes.Interface, namespace, pvcName string, warmImages []string) error
+const WarmerServiceAccountName = "sparkwing-cache-warmer"
 func WarmingLoop(ctx context.Context, client kubernetes.Interface, p *Pool, ns string)
