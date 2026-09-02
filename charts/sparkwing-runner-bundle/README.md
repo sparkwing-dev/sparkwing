@@ -123,7 +123,9 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `cache.storage.storageClassName` | Override default StorageClass. | `""` |
 | `logs.enabled` | Toggle the log-store sidecar. | `true` |
 | `logs.storage.size` | Logs PVC size. | `10Gi` |
+| `runner.automountServiceAccountToken` | Mount the runner pod's API token. Needed only by the k8s trigger runner. | `false` |
 | `serviceAccount.annotations` | Add IRSA / Workload Identity annotations. | `{}` |
+| `serviceAccount.shareAcrossComponents` | Accept one shared account when `serviceAccount.create=false`. | `false` |
 | `imagePullSecrets` | Private-registry pull secrets for all 3 images. | `[]` |
 
 ## Auth
@@ -190,6 +192,15 @@ token: every pod sets `automountServiceAccountToken: false`, and the
 cache and logs pods run under their own ServiceAccounts rather than the
 runner's.
 
+The one runner configuration that does call the API is the opt-in
+Kubernetes trigger runner (`SPARKWING_TRIGGER_RUNNER=k8s`), which creates
+runner Jobs and cannot load its in-cluster config without a token. Give it
+one back, along with the Role that lets it create Jobs:
+
+```bash
+--set runner.automountServiceAccountToken=true
+```
+
 Pipelines that need to reach the cluster API (e.g. `kubectl apply`,
 sealed-secrets, helm-installs) should bring their own ServiceAccount and
 RBAC outside this chart.
@@ -199,8 +210,14 @@ If you don't want the chart-managed Role at all:
 ```bash
 --set rbac.create=false \
 --set serviceAccount.create=false \
---set serviceAccount.name=my-existing-sa
+--set serviceAccount.name=my-existing-sa \
+--set serviceAccount.shareAcrossComponents=true
 ```
+
+`serviceAccount.create=false` runs all three pods under that one account.
+The render fails without `shareAcrossComponents=true` so the sharing is a
+recorded choice; the chart never invents `-cache` and `-logs` names you
+have not created.
 
 ## Image registry
 

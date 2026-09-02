@@ -92,6 +92,12 @@ code change to unlock.
 
 ### Security
 
+- **web:** The dashboard's logs-service proxy now forwards only the four log
+  reads the dashboard makes, each gated on the session's `logs.read` scope, so
+  a signed-in browser can no longer delete a run's logs or append forged log
+  lines with the web pod's service bearer. Creating a dashboard user rejects a
+  blank or repeated scope instead of storing an account that cannot reach any
+  route.
 - **storage:** Artifact keys are limited to ASCII letters, digits, `.`, `_`, and
   `-` with no dot-leading segment, and the cache-backed artifact store escapes
   every key segment in its request path, so a double-encoded or `#`/`?` key
@@ -121,17 +127,30 @@ code change to unlock.
   `sparkwing cluster users add --scope` creates narrower accounts.
   `store.CreateUser` and `store.CreateFirstUser` now take that scope set. See the
   [migration guide](docs/migrations/_unreleased.md#dashboard-proxy-allow-list).
-- **runner:** Runner Job pods mount no ServiceAccount token, and `--runner k8s`
-  now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead of silently
-  landing pipeline code on the namespace default ServiceAccount.
-- **helm:** The runner Role no longer reads namespace Secrets, ConfigMaps,
-  pods, or events, and no chart pod mounts a ServiceAccount token. The cache
-  and logs pods get their own ServiceAccounts instead of sharing the runner's,
-  and `sparkwing-full` creates an unprivileged `sparkwing-cache-warmer`
-  ServiceAccount that the controller's warmer pods now name explicitly.
-  Controllers running the warm pool outside that chart must create that
-  ServiceAccount in the pool namespace;
+- **runner (Breaking):** Runner Job pods mount no ServiceAccount token, and
+  `--runner k8s` now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead
+  of silently landing pipeline code on the namespace default ServiceAccount.
+  `--trigger-runner k8s` checks the same flag at startup rather than failing
+  once per claimed trigger. See the
+  [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
+- **controller (Breaking):** `controller.PoolConfig` adds
+  `WarmerServiceAccount`, and `pool.WarmPVC` and `pool.WarmingLoop` now accept
+  the warmer ServiceAccount name so integrations can use a release-scoped
+  identity. See the
+  [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
+- **helm (Breaking):** The runner Role no longer reads namespace Secrets,
+  ConfigMaps, pods, or events, and no chart pod mounts a ServiceAccount token
+  unless `runner.automountServiceAccountToken` asks for one. The cache and logs
+  pods get their own ServiceAccounts instead of sharing the runner's, and
+  `serviceAccount.create=false` now requires
+  `serviceAccount.shareAcrossComponents=true` to accept one shared account.
+  `sparkwing-full` creates a release-scoped, unprivileged cache-warmer
+  ServiceAccount and names it to the controller with
+  `--warmer-service-account`. Controllers running the warm pool outside that
+  chart must create that ServiceAccount in the pool namespace;
   `pool.WarmerServiceAccountName` exposes its exact name to Go integrations.
+  See the
+  [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
 - **cache:** The cache no longer serves an authenticated endpoint to a request
   that omits `X-Forwarded-For`, so `PUT /bin/<key>`, `PUT /cache/<key>`,
   `POST /upload`, and the sync routes now require the bearer token from every
@@ -168,10 +187,19 @@ code change to unlock.
   suffix or an untrusted immediate peer use the TCP peer address. Configure
   `--trusted-proxy-cidrs` or the chart's `web.trustedProxyCIDRs` to retain
   per-client buckets behind a reverse proxy.
-- **logs:** Run and node identifiers must now be a single path segment that
-  `filepath.Clean` leaves unchanged and resolve to one directory under the
-  runs root, so a request carrying a percent-encoded `.` can no longer address
-  the runs root itself and delete every run's logs.
+- **logs:** Run identifiers must now be a single path segment, and every
+  segment of a node identifier must be one that `filepath.Clean` leaves
+  unchanged, so a request carrying a percent-encoded `.` can no longer address
+  the runs root itself and delete every run's logs. Hierarchical node
+  identifiers such as `parent/child`, which spawned children carry, are stored
+  as one flat `parent__child.log` file the way local runs already store them,
+  instead of being rejected until the writer gives up.
+- **logs:** The log service opens, lists, and removes run directories through
+  an `os.Root` confined to the runs root, so a symlink planted at `runs/<name>`
+  can no longer read or delete files outside it. Filesystem failures answer
+  with a generic message instead of the server's absolute path, and the
+  identifier length cap counts the `.log` suffix, so an over-long node id is
+  rejected with a 400 rather than failing as an unretryable 500.
 
 ## [v0.38.2] - 2026-09-01
 

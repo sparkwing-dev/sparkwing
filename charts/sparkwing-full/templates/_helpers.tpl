@@ -115,6 +115,15 @@ name so it doesn't collide with the sub-chart's SA.
 {{- end }}
 
 {{/*
+ServiceAccount name for the warm-pool warmer pods. Release-scoped so two
+releases in one namespace do not fight over the same account; the
+controller is told the name with --warmer-service-account.
+*/}}
+{{- define "sparkwing-full.warmerServiceAccountName" -}}
+{{- include "sparkwing-full.componentFullname" (dict "root" . "component" "cache-warmer") }}
+{{- end }}
+
+{{/*
 Resolved image tag for a component: per-component image.tag wins,
 otherwise fall back to .Chart.AppVersion.
 Usage: {{ include "sparkwing-full.image" (dict "img" .Values.controller.image "root" .) }}
