@@ -66,6 +66,16 @@ code change to unlock.
   file, line, fingerprint) in the step log, and the Security workflow uploads
   the report directory as a build artifact, so a failure is no longer just
   "leaks found: 1".
+- **store:** A SQLite schema migration that fails partway now rolls back
+  completely. Each schema version and its version stamp commit as one
+  transaction, so an interrupted upgrade leaves the database on the last
+  version it fully applied instead of a half-built schema the next open
+  refuses to repair. Postgres already migrated inside one transaction.
+- **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
+  it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
+  of printing a skip and exiting 0, so the comment and `#nosec` annotation
+  policies are no longer waived by a detached, shallow, or unfetched checkout.
+  Pass `-allow-no-diff` to accept a run that gates nothing.
 
 ### Security
 
@@ -420,18 +430,6 @@ code change to unlock.
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
 
-### Fixed
-
-- **store:** A SQLite schema migration that fails partway now rolls back
-  completely. Each schema version and its version stamp commit as one
-  transaction, so an interrupted upgrade leaves the database on the last
-  version it fully applied instead of a half-built schema the next open
-  refuses to repair. Postgres already migrated inside one transaction.
-- **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
-  it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
-  of printing a skip and exiting 0, so the comment and `#nosec` annotation
-  policies are no longer waived by a detached, shallow, or unfetched checkout.
-  Pass `-allow-no-diff` to accept a run that gates nothing.
 ### Docs
 
 - **helm:** Both chart READMEs now open with the minimal `helm template`
