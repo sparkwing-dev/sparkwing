@@ -71,12 +71,20 @@ code change to unlock.
   sweep behind `sparkwing doctor`. These checks are unix-only.
 - **cache:** The package proxy rewrites the npm and PyPI URLs it serves against
   `--public-url` (`SPARKWING_CACHE_PUBLIC_URL`, chart: `cache.publicUrl`,
-  defaulting to the in-cluster Service URL) and caches that copy. Without a
-  public URL the upstream body is cached untouched and every response is
-  rewritten from its own request's `Host`, so a forged `Host` no longer poisons
-  the packument each later build reads. `X-Forwarded-Host` and
+  defaulting to the in-cluster Service URL on a `ClusterIP` Service and empty on
+  any other, where clients dial more than one address) and caches that copy.
+  Without a public URL the upstream body is cached untouched and every response
+  is rewritten from its own request's `Host`, so a forged `Host` no longer
+  poisons the packument each later build reads. That rewrite streams and `HEAD`
+  answers from the cached metadata, so entry size no longer becomes memory, and
+  the responses carry `Cache-Control: private, max-age=0` plus `Vary: Host` so
+  no shared intermediary hands one client's body to another; a fixed base stays
+  `Cache-Control: public` for the entry TTL. `X-Forwarded-Host` and
   `X-Forwarded-Proto` count only when `--trust-forwarded-host`
-  (`SPARKWING_CACHE_TRUST_FORWARDED_HOST`) is set.
+  (`SPARKWING_CACHE_TRUST_FORWARDED_HOST`) is set, are read right-most first,
+  and must parse as a host with an optional port; a request with no usable
+  `Host` is refused with `400`. A public URL with a path beyond `/proxy`, a
+  query, or a fragment now fails startup naming the value.
 - **controller (Breaking):** Revoking a token, rotating one, or deleting a user now takes
   effect on the serving replica immediately: the auth cache drops the affected
   prefixes and rechecks each cached entry's `expires_at` and `revoked_at` on

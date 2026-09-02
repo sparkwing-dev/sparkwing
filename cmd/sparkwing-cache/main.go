@@ -51,10 +51,10 @@ func run(args []string) error {
 		"cleanup threshold for immutable proxy entries (content-addressed files). Falls back to $PROXY_MAX_AGE.")
 	fs.StringVar(&cfg.PublicURL, "public-url",
 		envOr("SPARKWING_CACHE_PUBLIC_URL", cfg.PublicURL),
-		"base URL clients use to reach this cache (e.g. http://sparkwing-cache.sparkwing.svc.cluster.local). Registry bodies are rewritten against it and the rewritten copy is cached. Empty rewrites each response from its own request Host and caches the upstream body untouched. Falls back to $SPARKWING_CACHE_PUBLIC_URL.")
+		"base URL clients use to reach this cache (e.g. http://sparkwing-cache.sparkwing.svc.cluster.local): a scheme and host, optionally with a /proxy path. Registry bodies are rewritten against it and the rewritten copy is cached, so it is correct only when every client dials the same address. Changing it leaves cached mutable entries on the old value until their TTL expires. Empty rewrites each response from its own request Host and caches the upstream body untouched. Falls back to $SPARKWING_CACHE_PUBLIC_URL.")
 	fs.BoolVar(&cfg.TrustForwardedHost, "trust-forwarded-host",
 		envBool("SPARKWING_CACHE_TRUST_FORWARDED_HOST", cfg.TrustForwardedHost),
-		"honor X-Forwarded-Host and X-Forwarded-Proto when rewriting registry bodies from the request. Only safe when a reverse proxy is the only route to this port. Falls back to $SPARKWING_CACHE_TRUST_FORWARDED_HOST.")
+		"honor X-Forwarded-Host and X-Forwarded-Proto when rewriting registry bodies from the request, taking the right-most element of each. Only safe when a reverse proxy is the only route to this port, and inert when --public-url is set. Falls back to $SPARKWING_CACHE_TRUST_FORWARDED_HOST.")
 	fs.StringVar(&cfg.APIToken, "api-token",
 		envOr("SPARKWING_API_TOKEN", cfg.APIToken),
 		"bearer token required on the git, blob, artifact, and sync endpoints. Required unless --allow-unauthenticated is set. Falls back to $SPARKWING_API_TOKEN.")

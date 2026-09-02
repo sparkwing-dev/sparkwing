@@ -174,14 +174,17 @@ URL always wins, including for parent installs with naming overrides.
 {{/*
 Public base URL clients use to reach the cache. The cache rewrites the
 upstream URLs inside npm packuments and PyPI simple pages against it,
-so it must be the URL the runner and its build pods actually dial --
-by default the in-cluster Service. Set it explicitly when traffic
-arrives through an Ingress or an external load balancer.
+so it is correct only when every client dials the same address. A
+ClusterIP Service is that case, so it is the default. Any other Service
+type means clients reach the cache at more than one address, so this
+stays empty and the cache rewrites each response from its own request
+Host instead. Set it explicitly when an Ingress or a load balancer is
+the one address every client uses.
 */}}
 {{- define "sparkwing-runner-bundle.cachePublicURL" -}}
 {{- if .Values.cache.publicUrl -}}
 {{- .Values.cache.publicUrl -}}
-{{- else -}}
+{{- else if eq .Values.cache.service.type "ClusterIP" -}}
 {{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace -}}
 {{- end -}}
 {{- end }}

@@ -687,6 +687,22 @@ func TestCachePublicURLOverrideWins(t *testing.T) {
 	}
 }
 
+func TestCachePublicURLIsUnsetWhenClientsDialMoreThanOneAddress(t *testing.T) {
+	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
+		env := runnerEnv(t, renderCache(t, "cache.service.type="+serviceType))
+		if got, ok := env["SPARKWING_CACHE_PUBLIC_URL"]; ok {
+			t.Errorf("%s Service set SPARKWING_CACHE_PUBLIC_URL = %q, want it unset so the proxy rewrites per request", serviceType, got)
+		}
+	}
+
+	env := runnerEnv(t, renderCache(t,
+		"cache.service.type=LoadBalancer",
+		"cache.publicUrl=http://cache.example.com"))
+	if got := env["SPARKWING_CACHE_PUBLIC_URL"]; got != "http://cache.example.com" {
+		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want the explicit override", got)
+	}
+}
+
 func TestRunnerExtraEnvOverridesADependencyProxyDefault(t *testing.T) {
 	env := runnerEnv(t, renderRunner(t,
 		"runner.extraEnv[0].name=GOPROXY",

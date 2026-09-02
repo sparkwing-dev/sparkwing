@@ -121,7 +121,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
 | `cache.allowUnauthenticated` | Serve the cache's blob and sync endpoints without a token. | `false` |
 | `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
-| `cache.publicUrl` | Base URL the proxy rewrites registry bodies against. | in-cluster Service URL |
+| `cache.publicUrl` | Base URL the proxy rewrites registry bodies against. Empty on a non-ClusterIP Service means each response is rewritten from its own request `Host`. | in-cluster Service URL on a ClusterIP Service |
 | `cache.repos` | `GITCACHE_REPOS` -- comma-separated `alias=url`. | `""` |
 | `cache.sshKeySecret.name` | Required SSH-key Secret when configured. | `""` |
 | `cache.storage.size` | Cache PVC size. | `20Gi` |
