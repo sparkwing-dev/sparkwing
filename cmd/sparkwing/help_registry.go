@@ -1698,6 +1698,7 @@ and a fresh one takes its place. It refuses only when the resident
 dashboard is a newer version than this CLI.`,
 	Flags: []FlagSpec{
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
+		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets.", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/profiles.yaml (uses its log_store + artifact_store)", Group: "Storage"},
 		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},

@@ -98,7 +98,7 @@ func readLivePID(pidPath string) (int, bool) {
 func runDashboardStart(args []string) error {
 	fs := flag.NewFlagSet(cmdDashboardStart.Path, flag.ContinueOnError)
 	var addr, home, logStore, artifactStore, profileName string
-	var readOnly, noLocalStore bool
+	var readOnly, noLocalStore, allowRemote bool
 	fs.StringVar(&addr, "addr", "127.0.0.1:4343", "bind address for the unified dashboard+api server")
 	fs.StringVar(&home, "home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	fs.StringVar(&logStore, "log-store", "",
@@ -111,11 +111,17 @@ func runDashboardStart(args []string) error {
 		"skip the local SQLite store; list runs from --artifact-store instead. Requires --log-store + --artifact-store (or --profile). Powers tailing CI runs from a fresh laptop without an ingest step.")
 	fs.StringVar(&profileName, "profile", "",
 		"read the dashboard's logs + artifacts through this storage profile's surfaces")
+	fs.BoolVar(&allowRemote, "allow-remote", false,
+		"serve a non-loopback --addr; the API has no authentication, so every host that can reach it can run pipelines and read secrets")
 	if err := parseAndCheck(cmdDashboardStart, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
+	}
+
+	if !allowRemote && !loopbackBindAddr(addr) {
+		return fmt.Errorf("--addr %s is not loopback; the dashboard API has no authentication, so pass --allow-remote to accept that risk", addr)
 	}
 
 	if err := web.VerifyBundleEmbedded(); err != nil {
@@ -186,6 +192,9 @@ func runDashboardStart(args []string) error {
 	}
 	if readOnly {
 		superviseArgs = append(superviseArgs, "--read-only")
+	}
+	if allowRemote {
+		superviseArgs = append(superviseArgs, "--allow-remote")
 	}
 	if noLocalStore {
 		if (logStore == "" || artifactStore == "") && !profileSupplies {
@@ -319,6 +328,7 @@ func runDashboardSupervise(args []string) error {
 	logStoreURL := fs.String("log-store", "", "")
 	artifactStoreURL := fs.String("artifact-store", "", "")
 	readOnly := fs.Bool("read-only", false, "")
+	allowRemote := fs.Bool("allow-remote", false, "")
 	noLocalStore := fs.Bool("no-local-store", false, "")
 	profileName := fs.String("profile", "", "")
 	version := fs.String("version", "", "")
@@ -341,6 +351,7 @@ func runDashboardSupervise(args []string) error {
 		Addr:         *addr,
 		Home:         *home,
 		ReadOnly:     *readOnly,
+		AllowRemote:  *allowRemote,
 		NoLocalStore: *noLocalStore,
 		Version:      *version,
 	}
@@ -368,6 +379,19 @@ func runDashboardSupervise(args []string) error {
 		return fmt.Errorf("local-ws: %w", err)
 	}
 	return nil
+}
+
+func loopbackBindAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func schemeOf(raw string) string {
