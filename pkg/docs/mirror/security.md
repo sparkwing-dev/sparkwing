@@ -128,29 +128,34 @@ The signing key is release machinery, not per-user configuration:
 
 ## Static analysis
 
-The `security-scan` pipeline runs four scanners and the Security GitHub
+The `security-scan` pipeline runs four local scanners. The Security GitHub
 Actions workflow runs it on every pull request, on pushes to `main`, and
-weekly:
+weekly. The release workflow calls the same workflow against the resolved tag
+commit and waits for every security job before building release artifacts.
 
 - **gosec** over the public module and the `.sparkwing` pipeline module,
   with the rules that describe how a CI tool works (file inclusion and
   subprocess arguments named by its inputs, cache directory permissions)
   excluded. The pipeline writes a repository-relative SARIF file that the
-  workflow uploads to GitHub code scanning, which reports only findings a
-  pull request introduces. gosec findings do not fail the pipeline until
-  `--strict` is set; the recorded backlog is tracked as tickets.
+  workflow uploads to GitHub code scanning. Gosec findings remain report-only
+  until the pipeline runs with `--strict`; they do not block a pull request or
+  release by themselves.
 - **govulncheck** in source mode over `./...`, in addition to the
   binary-mode scan the `pre-push` gate runs against every shipped
   executable.
-- **gitleaks** over the full git history. `.gitleaks.toml` allow-lists the
-  documentation examples and test fixtures that match its generic rules.
+- **gitleaks** over the available git history. `.gitleaks.toml` allow-lists two
+  exact documentation and test-fixture values, and `.gitleaksignore` names one
+  historical generated-bundle false positive by fingerprint. No path is
+  excluded.
 - **`npm audit`** over the dashboard's production dependencies at the
   `high` threshold.
 
-The same workflow runs CodeQL for Go and TypeScript with the
-`security-extended` query suite. Every scanner runs through `go run` at a
-pinned version, so `sparkwing run security-scan` reproduces the hosted
-result locally.
+The hosted workflow also runs CodeQL for Go and TypeScript with the
+`security-extended` query suite. CodeQL alerts remain report-only. The workflow
+pins external actions to commit SHAs, and the three Go-based local scanners use
+pinned module versions. The installed npm version and advisory database supply
+`npm audit`; CodeQL has no local pipeline step. A release stops when a scanner
+cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
 
 ## Operator checklist
 

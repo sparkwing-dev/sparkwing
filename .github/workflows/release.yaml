@@ -60,9 +60,19 @@ jobs:
     permissions:
       contents: read
 
+  security:
+    name: Verify tagged source security
+    needs: validate-tag
+    uses: ./.github/workflows/security.yaml
+    with:
+      source_ref: ${{ needs.validate-tag.outputs.source_sha }}
+    permissions:
+      contents: read
+      security-events: write
+
   build:
-    needs: [validate-tag, canonical]
-    if: ${{ always() && needs.validate-tag.result == 'success' && needs.canonical.result == 'success' }}
+    needs: [validate-tag, canonical, security]
+    if: ${{ always() && needs.validate-tag.result == 'success' && needs.canonical.result == 'success' && needs.security.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -352,8 +362,8 @@ jobs:
 
   build-images:
     name: Build & scan container images
-    needs: [validate-tag, canonical]
-    if: ${{ always() && needs.validate-tag.result == 'success' && needs.canonical.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.publish_images) }}
+    needs: [validate-tag, canonical, security]
+    if: ${{ always() && needs.validate-tag.result == 'success' && needs.canonical.result == 'success' && needs.security.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.publish_images) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

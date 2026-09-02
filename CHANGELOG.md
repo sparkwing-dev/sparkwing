@@ -83,7 +83,9 @@ code change to unlock.
 - **ci:** A `security-scan` pipeline runs gosec, source-mode govulncheck,
   gitleaks, and `npm audit`, and the Security workflow runs it on every pull
   request with gosec findings uploaded to GitHub code scanning alongside CodeQL
-  for Go and TypeScript. gosec reports without failing until `--strict` is set.
+  for Go and TypeScript. The release workflow scans the resolved tag commit and
+  waits before building artifacts. Govulncheck, gitleaks, and `npm audit` fail
+  the gate; gosec and CodeQL report without blocking on findings.
 - **web:** Login throttling now ignores forwarded client addresses unless the
   connecting proxy matches an explicit trusted CIDR. Trusted append-style proxy
   chains use the nearest untrusted address. Malformed entries in the trusted
