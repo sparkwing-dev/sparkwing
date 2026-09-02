@@ -75,7 +75,7 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	done := make(chan struct{})
 	var serveErr error
 	go func() {
-		serveErr = web.Serve(ctx, paths, addr, nil)
+		serveErr = web.Serve(ctx, paths, addr, web.HandlerOptions{})
 		close(done)
 	}()
 	var stopOnce sync.Once

@@ -11,39 +11,71 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 var authTestBundle = fstest.MapFS{
 	"index.html": &fstest.MapFile{Data: []byte("<html>dashboard</html>")},
 }
 
-func TestSameOriginRequestUsesCookiePolicyForOriginFormRequests(t *testing.T) {
+func TestSameOriginRequestUsesTLSEvidenceForOriginFormRequests(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name          string
-		secureCookies bool
-		origin        string
-		want          bool
+		name    string
+		overTLS bool
+		origin  string
+		want    bool
 	}{
-		{name: "secure accepts HTTPS", secureCookies: true, origin: "https://dashboard.example:8443", want: true},
-		{name: "secure rejects HTTP", secureCookies: true, origin: "http://dashboard.example:8443"},
-		{name: "insecure accepts HTTP", origin: "http://dashboard.example:8443", want: true},
-		{name: "insecure rejects HTTPS", origin: "https://dashboard.example:8443"},
-		{name: "rejects different host", secureCookies: true, origin: "https://attacker.example:8443"},
-		{name: "rejects different port", secureCookies: true, origin: "https://dashboard.example:9443"},
+		{name: "TLS accepts HTTPS", overTLS: true, origin: "https://dashboard.example:8443", want: true},
+		{name: "TLS rejects HTTP", overTLS: true, origin: "http://dashboard.example:8443"},
+		{name: "no evidence accepts HTTP", origin: "http://dashboard.example:8443", want: true},
+		{name: "no evidence accepts HTTPS", origin: "https://dashboard.example:8443", want: true},
+		{name: "rejects different host", overTLS: true, origin: "https://attacker.example:8443"},
+		{name: "rejects different port", overTLS: true, origin: "https://dashboard.example:9443"},
+		{name: "rejects missing origin", overTLS: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/runs", nil)
 			req.Host = "dashboard.example:8443"
-			req.Header.Set("Origin", test.origin)
+			if test.origin != "" {
+				req.Header.Set("Origin", test.origin)
+			}
 			if req.URL.IsAbs() {
 				t.Fatalf("test request URL = %q, want production origin form", req.URL)
 			}
-			if got := sameOriginRequestForCookiePolicy(req, test.secureCookies); got != test.want {
+			if got := sameOriginRequestOverTLS(req, test.overTLS); got != test.want {
 				t.Errorf("same-origin decision = %t, want %t", got, test.want)
 			}
 		})
+	}
+}
+
+func TestSameOriginRequestBehindHTTPSProxyKeepsSecureCookies(t *testing.T) {
+	t.Parallel()
+	trusted, err := ratelimit.ParseTrustedProxyCIDRs("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("parse CIDRs: %v", err)
+	}
+	opts := HandlerOptions{TrustedProxyCIDRs: trusted}
+
+	var decided bool
+	handler := securityHeadersMiddleware(opts, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		decided = sameOriginRequest(r)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/login", nil)
+	req.RemoteAddr = "10.1.2.3:9999"
+	req.Host = "dashboard.example"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("Origin", "https://dashboard.example")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if !decided {
+		t.Error("forwarded https origin rejected; the login POST would 403 behind a TLS proxy")
+	}
+	if !cookieSecure {
+		t.Error("test assumes the default Secure cookie policy")
 	}
 }
 

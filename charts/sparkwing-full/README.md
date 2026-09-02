@@ -220,6 +220,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `web.logs.url` | Override logs URL. | (auto-computed from sub-chart) |
 | `web.cache.url` | Cache the services panel probes. Probe-only; empty and no bundled cache leaves it off the panel. | (auto-computed from sub-chart) |
 | `web.tokenSecret.name` | Secret holding the controller-bearer token. | (defaults to `sparkwing-runner-bundle.controller.tokenSecret`) |
+| `web.addr` | Address the web pod binds. Empty binds `0.0.0.0:<web.port>`, which the Service needs; a loopback value is reachable only through a port-forward. | `""` |
 | `web.requireLogin` | Gate the dashboard behind /login (first visit offers first-admin signup). | `false` |
 | `web.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. | `[]` |
 

@@ -280,7 +280,7 @@ func buildHandler(
 		handler = guard.middleware(root)
 		go guard.poll(ctx, schemaPollInterval)
 	}
-	return originGuard(handler, opts.originPolicy())
+	return web.SecurityHeadersMiddleware(webOpts, originGuard(handler, opts.originPolicy()))
 }
 
 func (o Options) originPolicy() originPolicy {

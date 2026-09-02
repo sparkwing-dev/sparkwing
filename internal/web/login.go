@@ -327,10 +327,12 @@ func validFormCSRF(r *http.Request) bool {
 }
 
 func sameOriginRequest(r *http.Request) bool {
-	return sameOriginRequestForCookiePolicy(r, cookieSecure)
+	return sameOriginRequestOverTLS(r, requestOverTLSFrom(r.Context()))
 }
 
-func sameOriginRequestForCookiePolicy(r *http.Request, secureCookies bool) bool {
+// safety: without TLS evidence the process cannot know its external scheme, so
+// the host comparison carries the check rather than reject the live origin.
+func sameOriginRequestOverTLS(r *http.Request, overTLS bool) bool {
 	raw := r.Header.Get("Origin")
 	if raw == "" {
 		raw = r.Referer()
@@ -340,11 +342,7 @@ func sameOriginRequestForCookiePolicy(r *http.Request, secureCookies bool) bool 
 		u.Host == "" || u.User != nil || !strings.EqualFold(u.Host, r.Host) {
 		return false
 	}
-	expectedScheme := "https"
-	if !secureCookies {
-		expectedScheme = "http"
-	}
-	return strings.EqualFold(u.Scheme, expectedScheme)
+	return !overTLS || strings.EqualFold(u.Scheme, "https")
 }
 
 func constantTimeEqual(a, b string) bool {

@@ -89,12 +89,22 @@ code change to unlock.
 - **web (Breaking):** Dashboard responses carry a Content Security Policy with a
   per-response script nonce, `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and HSTS
-  when session cookies are `Secure`. The page reads its configuration from
+  when the request arrives over TLS. The page reads its configuration from
   `/sparkwing-runtime.js` rather than an inline script, and the controller
-  bearer stays server-side in both login modes, so `--api-url` and the chart's
-  `web.apiUrl` are deprecated and ignored. A token-backed dashboard that binds
-  a non-loopback address without `--require-login` refuses to start. See the
-  [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
+  bearer stays server-side in both login modes, so `--api-url` is deprecated
+  and ignored and the chart no longer renders it. A token-backed dashboard that
+  binds a non-loopback address without `--require-login` refuses to start. See
+  the [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
+- **web:** `Strict-Transport-Security` now needs evidence that browsers reach
+  the dashboard over TLS: a TLS listener, `X-Forwarded-Proto: https` from a
+  peer inside `--trusted-proxy-cidrs`, or the new `--hsts` flag for operators
+  who terminate TLS elsewhere. The same evidence, rather than the
+  `SPARKWING_WEB_INSECURE_COOKIES` override, decides the scheme the login CSRF
+  check expects, so a login behind an HTTPS proxy works with `Secure` cookies
+  intact. `sparkwing dashboard` carries the headers on its API routes too,
+  `--token` without a controller, logs, or profile backend is now a startup
+  error, and `sparkwing-full` gains `web.addr` (default `0.0.0.0:<port>`) so a
+  loopback bind is expressible from the chart.
 - **store (Breaking):** Browser sessions are stored as a sha256 digest of the
   session id, and the CSRF token is derived as an HMAC of that id under a
   server key instead of being written to the database, so a copy of the state

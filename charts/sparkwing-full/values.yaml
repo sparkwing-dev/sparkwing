@@ -143,6 +143,12 @@ web:
   # Bind addr. Service maps :80 -> :4343.
   port: 4343
 
+  # Address sparkwing-web binds. Empty = 0.0.0.0:<port>, which the
+  # Service needs. Set "127.0.0.1:4343" to keep a token-backed
+  # dashboard off the pod network; the Service then reaches nothing,
+  # so this is for a kubectl port-forward or a sidecar only.
+  addr: ""
+
   controller:
     # Where the web pod proxies /api/v1/* to. Empty = auto-generate
     # to point at the in-cluster controller Service. Override if
@@ -189,10 +195,6 @@ web:
 
   # Proxy source CIDRs allowed to supply X-Forwarded-For. Empty ignores it.
   trustedProxyCIDRs: []
-
-  # Deprecated: the dashboard proxies the API on its own origin, so
-  # this value is ignored.
-  apiUrl: ""
 
   resources:
     requests:

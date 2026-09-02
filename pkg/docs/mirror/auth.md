@@ -172,8 +172,13 @@ credentials, a query, or a fragment.
 Every dashboard response carries `Content-Security-Policy`
 (`default-src 'self'` plus a per-response nonce for the bundle's inline
 scripts), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
-`Referrer-Policy: same-origin`, and adds `Strict-Transport-Security` when
-session cookies are `Secure`. The page reads its configuration from
+`Referrer-Policy: same-origin`, and adds `Strict-Transport-Security` when the
+request carries evidence of TLS: the listener terminates TLS itself, a peer
+inside `--trusted-proxy-cidrs` forwarded `X-Forwarded-Proto: https`, or the
+operator passed `--hsts` because TLS terminates somewhere that forwards no
+trusted header. That same evidence decides the scheme the CSRF origin check
+expects, so a dashboard behind an HTTPS proxy keeps `Secure` cookies without
+the insecure-cookie override. The page reads its configuration from
 `/sparkwing-runtime.js`, which carries the dashboard version and the login
 mode. The service bearer stays in the web process and rides only its
 server-side proxy, so the browser talks to one origin and `connect-src 'self'`
@@ -182,8 +187,11 @@ holds.
 A dashboard that carries `--token`, runs without `--require-login`, and binds a
 non-loopback address refuses to start, because every caller that reaches the
 listener would drive the controller with that token. Pass `--require-login`,
-bind a loopback address, or accept the exposure with
+bind a loopback address (chart: `web.addr`), or accept the exposure with
 `--allow-unauthenticated-remote` (chart: `web.allowUnauthenticatedRemote`).
+`--token` with no controller, logs, or profile backend is a startup error too:
+nothing would authenticate with it, so the dashboard would serve
+unauthenticated while the flag suggested otherwise.
 
 Login throttling uses the TCP peer address and ignores forwarded headers by
 default. When a reverse proxy fronts `sparkwing-web`, pass its egress networks

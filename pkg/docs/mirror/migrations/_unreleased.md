@@ -83,10 +83,13 @@ CHANGELOG links here.
   proxy. That configuration now fails at startup with a message naming the
   three ways forward.
 - **Migration:** Turn on `--require-login` (chart: `web.requireLogin`), bind a
-  loopback address, or keep the open dashboard by passing
-  `--allow-unauthenticated-remote` (chart: `web.allowUnauthenticatedRemote`).
-  Drop `--api-url` and `web.apiUrl`: the dashboard proxies the API on its own
-  origin, which is also what the new `connect-src 'self'` policy allows.
+  loopback address (chart: `web.addr`, which defaults to `0.0.0.0:<port>` and
+  reaches the Service only from that default), or keep the open dashboard by
+  passing `--allow-unauthenticated-remote` (chart:
+  `web.allowUnauthenticatedRemote`). Drop `--api-url`: the dashboard proxies
+  the API on its own origin, which is also what the new `connect-src 'self'`
+  policy allows. The chart no longer renders the flag and `web.apiUrl` is gone
+  from `values.yaml`; leaving it set in your own values file does nothing.
 - **Why:** An unauthenticated dashboard holding a service token hands the
   controller to every caller that can reach the port.
 

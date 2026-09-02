@@ -92,6 +92,13 @@ type HandlerOptions struct {
 	RequireLogin      bool
 	TrustedProxyCIDRs []netip.Prefix
 
+	// HSTS asserts that browsers reach this dashboard over TLS even
+	// though the process serves plaintext, for operators who terminate
+	// TLS in front of it without forwarding a trusted X-Forwarded-Proto.
+	// It emits Strict-Transport-Security and makes the CSRF origin check
+	// demand an https origin.
+	HSTS bool
+
 	// AllowUnauthenticatedRemote lets a token-backed dashboard bind a
 	// non-loopback address without RequireLogin. Everyone who can reach
 	// the listener then drives the controller with the service token, so
@@ -99,7 +106,9 @@ type HandlerOptions struct {
 	AllowUnauthenticatedRemote bool
 }
 
-func Serve(ctx context.Context, paths swpaths.Paths, addr string, trustedProxyCIDRs []netip.Prefix) error {
+// Serve runs the store-backed dashboard on addr. Backend and Paths come
+// from paths; every other field of opts is used as given.
+func Serve(ctx context.Context, paths swpaths.Paths, addr string, opts HandlerOptions) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
@@ -113,12 +122,9 @@ func Serve(ctx context.Context, paths swpaths.Paths, addr string, trustedProxyCI
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	return ServeWithOptions(ctx,
-		HandlerOptions{
-			Backend: backend.NewStoreBackend(st, paths, nil), Paths: paths,
-			TrustedProxyCIDRs: trustedProxyCIDRs,
-		},
-		addr)
+	opts.Backend = backend.NewStoreBackend(st, paths, nil)
+	opts.Paths = paths
+	return ServeWithOptions(ctx, opts, addr)
 }
 
 func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) error {
@@ -227,7 +233,7 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 		router.Handle("/api/v1/gitcache/", gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false)))
 	}
 	router.Handle("/", sessionAuthMiddleware(opts, bundleFS, authedMux))
-	return securityHeadersMiddleware(router)
+	return securityHeadersMiddleware(opts, router)
 }
 
 const gitcacheStreamLimit = 8
@@ -360,11 +366,122 @@ func serveTemplatedHTML(w http.ResponseWriter, r *http.Request, bundleFS fs.FS, 
 	}
 	body := raw
 	if nonce := cspNonceFrom(r.Context()); nonce != "" {
-		body = bytes.ReplaceAll(raw, []byte("<script>"), []byte(`<script nonce="`+nonce+`">`))
+		body = nonceInlineScripts(raw, nonce)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(body)
+}
+
+// safety: every inline script needs the nonce or the CSP blanks the page, so
+// the scan follows tag syntax instead of one literal spelling of the tag.
+func nonceInlineScripts(raw []byte, nonce string) []byte {
+	attr := []byte(` nonce="` + nonce + `"`)
+	out := make([]byte, 0, len(raw)+len(attr))
+	for i := 0; i < len(raw); {
+		open := bytes.IndexByte(raw[i:], '<')
+		if open < 0 {
+			return append(out, raw[i:]...)
+		}
+		open += i
+		out = append(out, raw[i:open+1]...)
+		i = open + 1
+		if !opensScriptTag(raw, open) {
+			continue
+		}
+		end := tagEnd(raw, open)
+		if end < 0 {
+			continue
+		}
+		tag := raw[open+1 : end]
+		if !tagHasAttr(tag, "src") {
+			cut := len(tag)
+			for cut > 0 && (asciiSpace(tag[cut-1]) || tag[cut-1] == '/') {
+				cut--
+			}
+			out = append(out, tag[:cut]...)
+			out = append(out, attr...)
+			tag = tag[cut:]
+		}
+		out = append(out, tag...)
+		out = append(out, '>')
+		i = end + 1
+	}
+	return out
+}
+
+func opensScriptTag(raw []byte, open int) bool {
+	name := open + 1 + len("script")
+	if name > len(raw) || !strings.EqualFold(string(raw[open+1:name]), "script") {
+		return false
+	}
+	return name == len(raw) || asciiSpace(raw[name]) || raw[name] == '>' || raw[name] == '/'
+}
+
+func tagEnd(raw []byte, open int) int {
+	var quote byte
+	for i := open + 1; i < len(raw); i++ {
+		switch c := raw[i]; {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '>':
+			return i
+		}
+	}
+	return -1
+}
+
+func tagHasAttr(tag []byte, name string) bool {
+	i := 0
+	for i < len(tag) && !asciiSpace(tag[i]) {
+		i++
+	}
+	for i < len(tag) {
+		for i < len(tag) && (asciiSpace(tag[i]) || tag[i] == '/') {
+			i++
+		}
+		start := i
+		for i < len(tag) && !asciiSpace(tag[i]) && tag[i] != '=' && tag[i] != '/' {
+			i++
+		}
+		if i == start {
+			return false
+		}
+		if strings.EqualFold(string(tag[start:i]), name) {
+			return true
+		}
+		for i < len(tag) && asciiSpace(tag[i]) {
+			i++
+		}
+		if i == len(tag) || tag[i] != '=' {
+			continue
+		}
+		i++
+		for i < len(tag) && asciiSpace(tag[i]) {
+			i++
+		}
+		if i < len(tag) && (tag[i] == '"' || tag[i] == '\'') {
+			quote := tag[i]
+			i++
+			for i < len(tag) && tag[i] != quote {
+				i++
+			}
+			i++
+			continue
+		}
+		for i < len(tag) && !asciiSpace(tag[i]) {
+			i++
+		}
+	}
+	return false
+}
+
+func asciiSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
 }
 
 const runtimeConfigPath = "/sparkwing-runtime.js"

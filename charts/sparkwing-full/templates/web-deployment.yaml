@@ -69,7 +69,7 @@ spec:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           command: ["/usr/local/bin/sparkwing-web"]
           args:
-            - {{ printf "--addr=0.0.0.0:%d" (int .Values.web.port) | quote }}
+            - {{ printf "--addr=%s" (.Values.web.addr | default (printf "0.0.0.0:%d" (int .Values.web.port))) | quote }}
             - {{ printf "--controller=%s" (include "sparkwing-full.web.controllerURL" .) | quote }}
             {{- $logsURL := include "sparkwing-full.web.logsURL" . }}
             {{- if $logsURL }}
@@ -78,9 +78,6 @@ spec:
             {{- $cacheURL := include "sparkwing-full.web.cacheURL" . }}
             {{- if $cacheURL }}
             - {{ printf "--cache=%s" $cacheURL | quote }}
-            {{- end }}
-            {{- if .Values.web.apiUrl }}
-            - {{ printf "--api-url=%s" .Values.web.apiUrl | quote }}
             {{- end }}
             {{- if .Values.web.requireLogin }}
             - "--require-login"

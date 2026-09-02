@@ -45,6 +45,9 @@ func run(args []string) error {
 		"require controller-backed browser sessions; needs --controller or a profile with controller.url. Leave off for laptop-local dev.")
 	allowUnauthenticatedRemote := fs.Bool("allow-unauthenticated-remote", false,
 		"serve a token-backed dashboard without --require-login on a non-loopback address, handing the controller to every caller that reaches it")
+	hsts := fs.Bool("hsts", false,
+		"assert that browsers reach this dashboard over TLS: send Strict-Transport-Security and require an https origin on unsafe requests. "+
+			"Unneeded when this process serves TLS itself or a proxy in --trusted-proxy-cidrs forwards X-Forwarded-Proto")
 	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
 		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For; empty ignores forwarded headers")
 
@@ -101,6 +104,7 @@ func run(args []string) error {
 			Token:             *token,
 			RequireLogin:      *requireLogin,
 			TrustedProxyCIDRs: trustedProxyCIDRs,
+			HSTS:              *hsts,
 
 			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
 		}
@@ -133,6 +137,7 @@ func run(args []string) error {
 			Token:             *token,
 			RequireLogin:      *requireLogin,
 			TrustedProxyCIDRs: trustedProxyCIDRs,
+			HSTS:              *hsts,
 
 			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
 		}
@@ -141,8 +146,14 @@ func run(args []string) error {
 	if err := validateLoginBackend(*requireLogin, ""); err != nil {
 		return err
 	}
+	if *token != "" {
+		return fmt.Errorf("--token (or SPARKWING_AGENT_TOKEN) has no backend to authenticate to; pass --controller URL, --logs URL, or --profile NAME, or drop the token")
+	}
 
-	return web.Serve(ctx, paths, *addr, trustedProxyCIDRs)
+	return web.Serve(ctx, paths, *addr, web.HandlerOptions{
+		TrustedProxyCIDRs: trustedProxyCIDRs,
+		HSTS:              *hsts,
+	})
 }
 
 func validateLoginBackend(requireLogin bool, controllerURL string) error {
