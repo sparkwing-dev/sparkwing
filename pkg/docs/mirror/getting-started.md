@@ -35,7 +35,7 @@ curl -fsSL https://github.com/sparkwing-dev/sparkwing/releases/latest/download/s
 
 Keep to one location: `sparkwing doctor` reports competing copies on
 PATH, and a second copy shadows the first. Each release also publishes
-`SHA256SUMS` covering every asset; diff your download against it to
+`SHA256SUMS` covering every binary; diff your download against it to
 verify.
 
 Or, if Go is on PATH, build from source:

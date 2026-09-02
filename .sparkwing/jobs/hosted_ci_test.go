@@ -225,7 +225,7 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 	if tagCheckAt >= 0 {
 		tagCheckAt += tagAt
 	}
-	tagMutationAt := strings.Index(publishImages, "docker buildx imagetools create")
+	tagMutationAt := strings.Index(publishImages, "bash bin/publish-image-tags.sh")
 	if checkAt < 0 || signAt < 0 || tagAt < 0 || checkAt > signAt || tagCheckAt < tagAt || tagMutationAt < tagCheckAt {
 		t.Fatal("image signing and tagging are not guarded by tag stability checks")
 	}
@@ -265,18 +265,19 @@ func TestReleaseRefusesToMoveAPublishedImageTag(t *testing.T) {
 	publish := workflowJob(t, body, "publish-images")
 	requireWorkflowText(t, publish,
 		"FORCE_RETAG: ${{ inputs.force_retag || false }}",
-		`docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "${image}:${TAG}"`,
-		`if [ -n "$published" ] && [ "$published" != "$digest" ]; then`,
-		`if [ "$FORCE_RETAG" != "true" ]; then`,
-		"exit 1",
+		"TAG: ${{ inputs.tag || github.ref_name }}",
+		"bash bin/publish-image-tags.sh",
 		"image-digests/image-digests.json",
 		"name: release-image-digests",
 	)
-	inspectAt := strings.Index(publish, "docker buildx imagetools inspect")
-	guardAt := strings.Index(publish, `if [ "$FORCE_RETAG" != "true" ]; then`)
-	createAt := strings.Index(publish, "docker buildx imagetools create")
-	if inspectAt < 0 || guardAt < inspectAt || createAt < guardAt {
-		t.Fatal("tag mutation is not guarded by a published-digest check")
+	checkoutAt := strings.Index(publish, "uses: actions/checkout@")
+	downloadDigestsAt := strings.Index(publish, "uses: actions/download-artifact@")
+	guardAt := strings.Index(publish, "bash bin/publish-image-tags.sh")
+	if checkoutAt < 0 || downloadDigestsAt < checkoutAt || guardAt < downloadDigestsAt {
+		t.Fatal("the guarded publish script is not checked out before it runs")
+	}
+	if strings.Contains(publish, "docker buildx imagetools") {
+		t.Fatal("tag mutation is inline again, so the shell is untested")
 	}
 
 	release := workflowJob(t, body, "release")
@@ -285,10 +286,12 @@ func TestReleaseRefusesToMoveAPublishedImageTag(t *testing.T) {
 		"if: ${{ needs.publish-images.result == 'success' }}",
 		"name: release-image-digests",
 		"path: dist",
+		"go run ./cmd/sign-manifest -in dist/image-digests.json -out dist/image-digests.json.sig",
 	)
 	downloadAt := strings.Index(release, "- name: Download published image digests")
+	signAt := strings.Index(release, "go run ./cmd/sign-manifest -in dist/image-digests.json")
 	uploadAt := strings.Index(release, `gh release upload "$tag" dist/*`)
-	if downloadAt < 0 || uploadAt < downloadAt {
-		t.Fatal("image digests are not staged as a release asset before upload")
+	if downloadAt < 0 || signAt < downloadAt || uploadAt < signAt {
+		t.Fatal("the image digests asset is not signed between download and upload")
 	}
 }

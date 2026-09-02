@@ -337,6 +337,44 @@ func TestSyncNegotiateRejectsACommitThatIsNotAnObjectID(t *testing.T) {
 	}
 }
 
+func TestSyncNegotiateRejectsMoreCommitsThanTheForkCap(t *testing.T) {
+	repoURL, _, _ := gitcacheFixture(t)
+
+	commits := make([]string, maxNegotiateCommits+1)
+	for i := range commits {
+		commits[i] = fmt.Sprintf("%040x", i)
+	}
+	payload, err := json.Marshal(map[string]any{"repo": repoURL, "commits": commits})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/sync/negotiate", bytes.NewReader(payload))
+	w := httptest.NewRecorder()
+	handleSyncNegotiate(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "at most") {
+		t.Errorf("status %d body %q, want 400 naming the cap", w.Code, strings.TrimSpace(w.Body.String()))
+	}
+}
+
+func TestSyncSeedRejectsARepoURLTheMirrorMayNotFetch(t *testing.T) {
+	gitcacheFixture(t)
+
+	sha := strings.Repeat("a", 40)
+	for _, repo := range []string{
+		"http://attacker.example/x.git",
+		"file:///tmp/repo",
+		"https://127.0.0.1/repo.git",
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/sync/seed?repo="+url.QueryEscape(repo)+"&sha="+sha, nil)
+		w := httptest.NewRecorder()
+		handleSyncSeed(w, req)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid repo URL") {
+			t.Errorf("repo %q: status %d body %q, want 400 rejecting the URL",
+				repo, w.Code, strings.TrimSpace(w.Body.String()))
+		}
+	}
+}
+
 func TestRefArgsStillResolveAfterTheOptionTerminator(t *testing.T) {
 	repoURL, bareRepo, _ := gitcacheFixture(t)
 	head := strings.TrimSpace(string(mustGitOut(t, bareRepo, "rev-parse", "main")))

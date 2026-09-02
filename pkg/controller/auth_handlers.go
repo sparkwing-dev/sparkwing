@@ -17,6 +17,13 @@ const (
 	sessionExtend = 1 * time.Hour
 )
 
+// DefaultSessionMaxLifetime bounds how long a browser session lives from
+// its creation, however often the dashboard renews it. Override it with
+// Server.WithSessionMaxLifetime.
+const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
+
+var errSessionLifetimeExceeded = errors.New("session exceeded its maximum lifetime")
+
 type loginReq struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -134,9 +141,16 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
+	// safety: an absolute cap ends a session the sliding TTL would otherwise renew forever.
+	if s.sessionExpired(sess.CreatedAt, now) {
+		_ = s.store.DeleteSession(raw)
+		writeError(w, http.StatusUnauthorized, errSessionLifetimeExceeded)
+		return
+	}
 	if sess.ExpiresAt.Sub(now) < sessionExtend {
-		_ = s.store.ExtendSession(sess.ID, sessionTTL, now)
-		sess.ExpiresAt = now.Add(sessionTTL)
+		ttl := s.sessionExtensionTTL(sess.CreatedAt, now)
+		_ = s.store.ExtendSession(sess.ID, ttl, now)
+		sess.ExpiresAt = now.Add(ttl)
 	}
 	writeJSON(w, http.StatusOK, sessionResp{
 		Principal: sess.Principal,
@@ -144,6 +158,21 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		CSRFToken: sess.CSRFToken,
 		ExpiresAt: sess.ExpiresAt.Unix(),
 	})
+}
+
+func (s *Server) sessionExpired(createdAt, now time.Time) bool {
+	// safety: a future creation time makes the lifetime clamp inert, so a backwards clock jump renews forever.
+	if createdAt.After(now) {
+		return true
+	}
+	return s.sessionMaxLifetime > 0 && !now.Before(createdAt.Add(s.sessionMaxLifetime))
+}
+
+func (s *Server) sessionExtensionTTL(createdAt, now time.Time) time.Duration {
+	if s.sessionMaxLifetime <= 0 {
+		return sessionTTL
+	}
+	return min(createdAt.Add(s.sessionMaxLifetime).Sub(now), sessionTTL)
 }
 
 func extractSessionHeader(r *http.Request) string {

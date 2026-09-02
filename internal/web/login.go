@@ -13,7 +13,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -106,10 +105,10 @@ func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 				sessionBackendError(w)
 				return
 			}
-			clearSessionCookies(w)
+			clearSessionCookies(w, cookiesSecure(opts))
 		}
 		data.Bootstrap = controllerBootstrapNeeded(r.Context(), controllerURL)
-		renderLoginPage(w, data, http.StatusOK)
+		renderLoginPage(w, data, http.StatusOK, cookiesSecure(opts))
 	}
 }
 
@@ -128,11 +127,11 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 		sess, err := controllerLogin(r.Context(), controllerURL, user, pass, ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
 		if err != nil {
 			data := loginPageData{Error: "Invalid username or password.", Next: next}
-			renderLoginPage(w, data, http.StatusUnauthorized)
+			renderLoginPage(w, data, http.StatusUnauthorized, cookiesSecure(opts))
 			return
 		}
 
-		setSessionCookies(w, sess)
+		setSessionCookies(w, sess, cookiesSecure(opts))
 		http.Redirect(w, r, next, http.StatusSeeOther)
 	}
 }
@@ -155,7 +154,7 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 				data.Bootstrap = false
 				data.Error = "Bootstrap closed -- sign in with the existing admin credentials."
 			}
-			renderLoginPage(w, data, http.StatusBadRequest)
+			renderLoginPage(w, data, http.StatusBadRequest, cookiesSecure(opts))
 			return
 		}
 
@@ -165,10 +164,10 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 				Next:  next,
 				Error: "Admin created, but auto-login failed. Sign in with the credentials you just set.",
 			}
-			renderLoginPage(w, data, http.StatusOK)
+			renderLoginPage(w, data, http.StatusOK, cookiesSecure(opts))
 			return
 		}
-		setSessionCookies(w, sess)
+		setSessionCookies(w, sess, cookiesSecure(opts))
 		http.Redirect(w, r, next, http.StatusSeeOther)
 	}
 }
@@ -178,7 +177,7 @@ func logoutHandler(opts HandlerOptions) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-store")
 		sessionCookie, err := r.Cookie(sessionCookieName)
 		if err != nil || sessionCookie.Value == "" {
-			clearSessionCookies(w)
+			clearSessionCookies(w, cookiesSecure(opts))
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
@@ -186,7 +185,7 @@ func logoutHandler(opts HandlerOptions) http.HandlerFunc {
 		sess, err := controllerResolveSession(r.Context(), controllerURL, sessionCookie.Value)
 		if err != nil {
 			if errors.Is(err, errInvalidControllerSession) {
-				clearSessionCookies(w)
+				clearSessionCookies(w, cookiesSecure(opts))
 				http.Redirect(w, r, "/login", http.StatusSeeOther)
 			} else {
 				sessionBackendError(w)
@@ -201,7 +200,7 @@ func logoutHandler(opts HandlerOptions) http.HandlerFunc {
 			http.Error(w, "controller logout failed", http.StatusBadGateway)
 			return
 		}
-		clearSessionCookies(w)
+		clearSessionCookies(w, cookiesSecure(opts))
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}
 }
@@ -295,14 +294,14 @@ func safeNext(next string) string {
 	return next
 }
 
-func renderLoginPage(w http.ResponseWriter, data loginPageData, status int) {
+func renderLoginPage(w http.ResponseWriter, data loginPageData, status int, secure bool) {
 	token, err := newCSRFToken()
 	if err != nil {
 		http.Error(w, "could not create login form", http.StatusInternalServerError)
 		return
 	}
 	data.CSRFToken = token
-	setCSRFCookie(w, token)
+	setCSRFCookie(w, token, secure)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
@@ -442,46 +441,45 @@ func controllerResolveSession(ctx context.Context, controllerURL, sessionID stri
 	return &out, nil
 }
 
-func setSessionCookies(w http.ResponseWriter, sess *loginResp) {
+func setSessionCookies(w http.ResponseWriter, sess *loginResp, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    sess.SessionID,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   cookieSecure,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(12 * time.Hour / time.Second),
 	})
-	setCSRFCookie(w, sess.CSRFToken)
+	setCSRFCookie(w, sess.CSRFToken, secure)
 }
 
-func setCSRFCookie(w http.ResponseWriter, token string) {
+func setCSRFCookie(w http.ResponseWriter, token string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     csrfCookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: false, // safety: the native logout form reads the session-bound token without exposing the HttpOnly session id
-		Secure:   cookieSecure,
+		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(12 * time.Hour / time.Second),
 	})
 }
 
-func clearSessionCookies(w http.ResponseWriter) {
+func clearSessionCookies(w http.ResponseWriter, secure bool) {
 	for _, name := range []string{sessionCookieName, csrfCookieName} {
 		http.SetCookie(w, &http.Cookie{
 			Name:     name,
 			Value:    "",
 			Path:     "/",
 			MaxAge:   -1,
-			Secure:   cookieSecure,
+			Secure:   secure,
 			HttpOnly: name == sessionCookieName,
 			SameSite: http.SameSiteStrictMode,
 		})
 	}
 }
 
-var cookieSecure = func() bool {
-	v := os.Getenv("SPARKWING_WEB_INSECURE_COOKIES")
-	return !(v == "1" || strings.EqualFold(v, "true"))
-}()
+func cookiesSecure(opts HandlerOptions) bool {
+	return !opts.InsecureCookies
+}

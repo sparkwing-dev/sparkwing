@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/url"
 	"strings"
 	"time"
@@ -51,6 +52,16 @@ type Config struct {
 	CPULimit      string
 	MemoryRequest string
 	MemoryLimit   string
+
+	// CPUCeiling is the operator's hard cap in cores on what one runner pod
+	// may ask for, whatever a pipeline pinned or a profile measured. Zero
+	// means no ceiling. Parse an operator string with [ParseCPUCeiling].
+	CPUCeiling float64
+
+	// MemoryCeiling is the operator's hard cap in bytes on what one runner
+	// pod may ask for. Zero means no ceiling. Parse an operator string with
+	// [ParseMemoryCeiling].
+	MemoryCeiling int64
 
 	BackoffLimit int32
 
@@ -330,7 +341,13 @@ func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capac
 			_ = r.ctrl.SetPipelinePin(ctx, pipeline, req.NodeID, pin.Cores, pin.MemoryBytes)
 		}
 	}
-	return capacity.Resolve(pin, profile, podDefaultRefCPU, "")
+	res := capacity.Resolve(pin, profile, podDefaultRefCPU, "")
+	if w := ceilingWarning(res, r.cfg.CPUCeiling, r.cfg.MemoryCeiling); w != "" {
+		r.logger.Warn("resource ceiling clamped the pod",
+			"pipeline", pipeline, "node", req.NodeID, "detail", w)
+		_ = r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID, "resource_clamped", []byte(w))
+	}
+	return res
 }
 
 func nodePin(node *sparkwing.JobNode) *capacity.Pin {
@@ -496,35 +513,110 @@ func dependencyProxyEnv(base string) []corev1.EnvVar {
 // hard CFS limit here; sustained local-host demand would throttle spiky pods.
 func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequirements {
 	// safety: an operator ceiling outranks a pipeline pin, which is otherwise unbounded on this path
-	res = capacity.ApplyCeiling(res, quantityCores(cfg.CPULimit), quantityBytes(cfg.MemoryLimit))
+	res = capacity.ApplyCeiling(res, cfg.CPUCeiling, cfg.MemoryCeiling)
 	req := corev1.ResourceList{}
 	lim := corev1.ResourceList{}
 	measured := res.Source != store.CostSourceDefault
 
 	if measured && res.Cores > 0 {
-		req[corev1.ResourceCPU] = *resource.NewMilliQuantity(int64(res.Cores*1000), resource.DecimalSI)
-		lim[corev1.ResourceCPU] = *resource.NewMilliQuantity(int64(res.Cores*1000*podCPULimitFactor), resource.DecimalSI)
+		// safety: a sub-milli pin otherwise renders cpu: 0, which no quota counts
+		cores := cappedCores(math.Max(res.Cores, capacity.MeasuredCoreFloor), cfg.CPUCeiling)
+		req[corev1.ResourceCPU] = milliCores(cores)
+		lim[corev1.ResourceCPU] = milliCores(cappedCores(cores*podCPULimitFactor, cfg.CPUCeiling))
 	} else {
 		if cfg.CPURequest != "" {
 			req[corev1.ResourceCPU] = resource.MustParse(cfg.CPURequest)
 		}
 		if cfg.CPULimit != "" {
-			lim[corev1.ResourceCPU] = resource.MustParse(cfg.CPULimit)
+			lim[corev1.ResourceCPU] = milliCores(cappedCores(quantityCores(cfg.CPULimit), cfg.CPUCeiling))
 		}
 	}
 
 	if measured && res.MemoryBytes > 0 {
 		req[corev1.ResourceMemory] = *resource.NewQuantity(res.MemoryBytes, resource.BinarySI)
-		lim[corev1.ResourceMemory] = *resource.NewQuantity(int64(float64(res.MemoryBytes)*podMemoryLimitFactor), resource.BinarySI)
+		burst := int64(float64(res.MemoryBytes) * podMemoryLimitFactor)
+		lim[corev1.ResourceMemory] = *resource.NewQuantity(cappedBytes(burst, cfg.MemoryCeiling), resource.BinarySI)
 	} else {
 		if cfg.MemoryRequest != "" {
 			req[corev1.ResourceMemory] = resource.MustParse(cfg.MemoryRequest)
 		}
 		if cfg.MemoryLimit != "" {
-			lim[corev1.ResourceMemory] = resource.MustParse(cfg.MemoryLimit)
+			lim[corev1.ResourceMemory] = *resource.NewQuantity(
+				cappedBytes(quantityBytes(cfg.MemoryLimit), cfg.MemoryCeiling), resource.BinarySI)
 		}
 	}
 	return corev1.ResourceRequirements{Requests: req, Limits: lim}
+}
+
+func milliCores(cores float64) resource.Quantity {
+	return *resource.NewMilliQuantity(int64(cores*1000), resource.DecimalSI)
+}
+
+func cappedCores(cores, ceiling float64) float64 {
+	if ceiling > 0 && cores > ceiling {
+		return ceiling
+	}
+	return cores
+}
+
+func cappedBytes(bytes, ceiling int64) int64 {
+	if ceiling > 0 && bytes > ceiling {
+		return ceiling
+	}
+	return bytes
+}
+
+// ParseCPUCeiling reads an operator's CPU ceiling in Kubernetes quantity form
+// ("8", "500m"). An empty string means no ceiling.
+func ParseCPUCeiling(s string) (float64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	q, err := resource.ParseQuantity(s)
+	if err != nil {
+		return 0, fmt.Errorf("cpu ceiling %q: expected a Kubernetes quantity such as 8 or 500m", s)
+	}
+	cores := q.AsApproximateFloat64()
+	if cores <= 0 {
+		return 0, fmt.Errorf("cpu ceiling %q: expected a positive number of cores", s)
+	}
+	return cores, nil
+}
+
+// ParseMemoryCeiling reads an operator's memory ceiling in Kubernetes quantity
+// form ("8Gi", "512Mi"). An empty string means no ceiling.
+func ParseMemoryCeiling(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	q, err := resource.ParseQuantity(s)
+	if err != nil {
+		return 0, fmt.Errorf("memory ceiling %q: expected a Kubernetes quantity such as 8Gi", s)
+	}
+	bytes := q.Value()
+	if bytes <= 0 {
+		return 0, fmt.Errorf("memory ceiling %q: expected a positive quantity of memory", s)
+	}
+	return bytes, nil
+}
+
+func ceilingWarning(res capacity.Resolution, ceilingCores float64, ceilingBytes int64) string {
+	clamped := capacity.ApplyCeiling(res, ceilingCores, ceilingBytes)
+	switch {
+	case clamped.Cores < res.Cores:
+		return fmt.Sprintf("%s charge %.1f cores exceeds the runner ceiling %.1f, so the pod is sized at %.1f cores",
+			res.Source, res.Cores, ceilingCores, clamped.Cores)
+	case clamped.MemoryBytes < res.MemoryBytes:
+		return fmt.Sprintf("%s charge %s exceeds the runner ceiling %s, so the pod is sized at %s",
+			res.Source, gib(res.MemoryBytes), gib(ceilingBytes), gib(clamped.MemoryBytes))
+	}
+	return ""
+}
+
+func gib(bytes int64) string {
+	return fmt.Sprintf("%.1fGi", float64(bytes)/float64(1<<30))
 }
 
 func quantityCores(s string) float64 {

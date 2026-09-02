@@ -241,8 +241,8 @@ func TestResolve_ZeroCPUProfileQualifiesOnHealthySampler(t *testing.T) {
 	if got.Source != store.CostSourceMeasured {
 		t.Fatalf("Source = %q, want measured (healthy sampler, near-zero peak)", got.Source)
 	}
-	if got.Cores != measuredCoreFloor {
-		t.Errorf("Cores = %v, want the %v core floor", got.Cores, measuredCoreFloor)
+	if got.Cores != MeasuredCoreFloor {
+		t.Errorf("Cores = %v, want the %v core floor", got.Cores, MeasuredCoreFloor)
 	}
 	if got.MemoryBytes != 256<<20 {
 		t.Errorf("MemoryBytes = %d, want the measured 256MiB", got.MemoryBytes)
@@ -272,8 +272,8 @@ func TestResolve_MeasuredPeakBelowFloorLiftsToFloor(t *testing.T) {
 		SampleCount: MinSamples,
 		CPUMeasured: true,
 	}
-	if got := Resolve(nil, tiny, 8, ""); got.Cores != measuredCoreFloor {
-		t.Errorf("Cores = %v, want the %v floor", got.Cores, measuredCoreFloor)
+	if got := Resolve(nil, tiny, 8, ""); got.Cores != MeasuredCoreFloor {
+		t.Errorf("Cores = %v, want the %v floor", got.Cores, MeasuredCoreFloor)
 	}
 }
 
@@ -405,8 +405,8 @@ func TestResolve_SustainedBelowFloorLiftsToFloor(t *testing.T) {
 		SampleCount:    MinSamples,
 		CPUMeasured:    true,
 	}
-	if got := Resolve(nil, tiny, 8, ""); got.Cores != measuredCoreFloor {
-		t.Errorf("Cores = %v, want the %v floor", got.Cores, measuredCoreFloor)
+	if got := Resolve(nil, tiny, 8, ""); got.Cores != MeasuredCoreFloor {
+		t.Errorf("Cores = %v, want the %v floor", got.Cores, MeasuredCoreFloor)
 	}
 }
 

@@ -51,6 +51,32 @@ code change to unlock.
 
 ### Security
 
+- **store (Breaking):** Run-store schema 26 makes the `idx_tokens_prefix` index
+  unique and minting retries when a prefix is already taken, so two tokens can
+  no longer share a prefix and the 12-character handle that
+  `sparkwing cluster tokens revoke --prefix` accepts names one principal.
+  Revoking and rotating each run inside a transaction that commits only when
+  exactly one row matched, and rotation now re-reads the row it replaces inside
+  that transaction, so a revoke that lands while the replacement is hashing is
+  no longer undone. `store.LookupTokenByPrefix` -- the read behind rotation --
+  errors on an ambiguous prefix instead of returning the first row. A database
+  that already holds two tokens on one prefix refuses to migrate and names the
+  prefix; see the
+  [migration guide](docs/migrations/_unreleased.md#token-prefixes-are-unique).
+- **web:** Browser sessions now die at an absolute age. The controller refuses
+  to renew a session older than seven days and deletes it, so a polling tab can
+  no longer slide the twelve-hour TTL forever; embedders set another cap with
+  `Server.WithSessionMaxLifetime`. `SPARKWING_WEB_INSECURE_COOKIES` is now a
+  `HandlerOptions` field the dashboard reads at startup instead of an init-time
+  global, and `sparkwing-web` refuses to start when it is set on a non-loopback
+  bind unless the operator also passes `--allow-insecure-cookies-remote`. The
+  chart renders that flag alongside the variable when `ingress.allowInsecure`
+  publishes the dashboard over plain HTTP, so that opt-in still starts; see the
+  [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-insecure-cookie-remote-bind).
+  A session whose creation time sits in the future, from a clock stepped
+  backwards or a tampered row, is deleted and refused instead of renewed. A tab
+  whose session ends stops polling and goes to the sign-in page rather than
+  showing the banner that blames the deployment's API token.
 - **cli:** `~/.config/sparkwing` is now created and kept at `0700` by every
   writer. Profiles, the repos registry, the dotenv secrets store, and
   `version hold --set` resolve the directory through one helper and write
@@ -81,40 +107,65 @@ code change to unlock.
 - **sparks:** A `sparks:` entry's `source` is checked as a Go module path
   before it reaches `go list`, so a malformed path fails with a named error
   instead of becoming an argument to the go command.
-- **cache + orchestrator:** Every git call that takes a caller-supplied ref or
-  revision now separates it from the option list -- `--` before the positional
-  arguments of `merge-base`, `cat-file`, and `git worktree add`, and
-  `--verify --end-of-options` for `git rev-parse` -- so no such value is read
-  as a flag. `/sync/negotiate` requires each `commits[]` entry to be a 40-64
-  character hex object id, and a retry's recorded revision must be one before
-  the orchestrator materializes it. Short-ref log lines clamp instead of
-  slicing at eight bytes, which crashed the negotiate handler on a shorter ref.
+- **cache + controller + orchestrator:** Every git call that takes a
+  caller-supplied ref or revision now separates it from the option list --
+  `--` before the positional arguments of `merge-base`, `cat-file`, and
+  `git worktree add`, and `--end-of-options` for `git rev-parse`, `git show`,
+  `git fetch`, and `git diff` -- so no such value is read as a flag. This
+  requires git 2.24 or newer on cache and runner hosts. A `git.sha` is
+  rejected at `POST /api/v1/triggers` and `POST /api/v1/runs`, and again
+  before a runner fetches it, unless it is a 40-64 character hex object id;
+  `/sync/negotiate` requires the same of each `commits[]` entry and now caps
+  the list at 256 commits; `/sync/seed` holds its `repo` to the same clone-URL
+  rules as every other cache route, so a seed can no longer point a mirror's
+  `origin` at an arbitrary host. A retry's recorded revision must be an object
+  id before the orchestrator materializes it. Short-ref log lines clamp
+  instead of slicing at eight bytes, which crashed the negotiate handler on a
+  shorter ref.
 - **runner:** The Kubernetes runner now clamps a pipeline's declared resource
-  pin to the CPU and memory limits the runner is configured with, so
-  `sparkwing.Cores(64)` in one pipeline can no longer request more than a node
-  has and hold the namespace's capacity. A charge below the ceiling is
-  untouched. `sparkwing-runner-bundle` ships an optional `LimitRange` and
-  `ResourceQuota` (`limitRange.enabled`, `resourceQuota.enabled`, both off) as
-  the cluster-side backstop, and the SDK documentation for `Plan.Resources` no
+  pin to an operator ceiling, so `sparkwing.Cores(64)` in one pipeline can no
+  longer request more than a node has and hold the namespace's capacity. The
+  ceiling is `--k8s-cpu-ceiling` / `--k8s-memory-ceiling`
+  (`SPARKWING_K8S_CPU_CEILING`, `SPARKWING_K8S_MEMORY_CEILING`, chart values
+  `runner.jobCeiling.cpu` and `runner.jobCeiling.memory`); it is unset by
+  default, meaning no ceiling, and a value that is not a positive Kubernetes
+  quantity fails at runner startup. A clamped pod is sized at the ceiling
+  request and burst limit alike, and the runner logs the pin, the ceiling, and
+  the result and records it on the run as a `resource_clamped` event. A pin
+  below the 0.1-core measurement floor no longer renders `cpu: 0`, which
+  escaped both the ceiling and any namespace quota.
+  `sparkwing-runner-bundle` ships an optional `LimitRange` and `ResourceQuota`
+  (`limitRange.enabled`, `resourceQuota.enabled`, both off, the quota now
+  requiring the LimitRange) as the cluster-side backstop, with a real
+  `limitRange.min` floor, and the SDK documentation for `Plan.Resources` no
   longer claims a pin never caps the work.
 - **logs:** CLI log output now filters terminal escape sequences out of
-  pipeline output. Plain format drops every escape sequence and every C0
-  control byte except tab, so one log record stays one line; the colored
-  format keeps only the SGR codes the web log viewer renders. A pipeline can
-  no longer retitle the operator's terminal, plant an OSC 8 hyperlink, reset
-  the terminal with `ESC c`, or forge a Sparkwing status line in the output of
-  `sparkwing runs logs`.
+  pipeline output. Both formats drop every escape sequence, every C0 control
+  byte except tab and newline, and the C1 controls U+0080 to U+009F in their
+  raw and UTF-8 forms; the colored format keeps only the SGR codes the web log
+  viewer renders, and drops a compound sequence whole instead of reducing it to
+  the codes it recognizes. A pipeline can no longer retitle the operator's
+  terminal, plant an OSC 8 hyperlink, reset the terminal with `ESC c`, or forge
+  a Sparkwing status line in the output of `sparkwing runs logs`, and a newline
+  inside a record now opens an indented continuation line so a multi-line
+  command echo stays readable.
 - **deploy:** The `mode3-postgres` Terraform module now commits its
   `.terraform.lock.hcl` and pins providers with `~>` instead of `>=`, so
   `terraform init` installs the checksummed versions the module was tested
   against rather than whatever the registry serves that day; the lock records
-  `linux_amd64` and `darwin_arm64`. `allowed_cidr_blocks` now rejects
-  `0.0.0.0/0` and `::/0` at plan time instead of quietly opening the database
-  port to the internet. `install/install.sh` creates `agent.yaml` at mode 600
-  before it writes the token, closing the window a permissive umask left
-  between the heredoc and the `chmod`, and refuses a token carrying anything
-  outside `[A-Za-z0-9_.-]`, which could otherwise close the YAML quote and
-  inject config.
+  `linux_amd64` and `darwin_arm64`. `allowed_cidr_blocks` now requires every
+  entry to be an IPv4 CIDR no wider than `/8`, so neither `0.0.0.0/0` nor a
+  pair of halves such as `0.0.0.0/1` and `128.0.0.0/1` opens the database
+  port to the internet at plan time; the module's ingress is IPv4 only and
+  exposes no `ipv6_cidr_blocks` knob, so it has no IPv6 ingress path to
+  guard. `install/install.sh` creates `agent.yaml` at mode 600 before it
+  writes the token, closing the window a permissive umask left between the
+  heredoc and the `chmod`, refuses a token carrying anything outside
+  `[A-Za-z0-9_.-]`, and refuses a controller URL, logs URL, gitcache URL,
+  cache token or runner name carrying a double quote, backslash, newline or
+  control character. Each of those lands in a quoted YAML scalar, where an
+  unfiltered value could close the quote and inject config, or leave behind
+  a config the runner cannot parse while the installer reports success.
 - **controller:** `GET /api/v1/runs/{id}` and `GET /api/v1/triggers/{id}` now
   admit a caller holding a live claim on that run as well as one holding
   `runs.read` or `triggers.read`. Those are the first two calls a node process
@@ -313,13 +364,18 @@ code change to unlock.
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
   so a naked suppression silences nothing, and the comment gate keeps each
   annotation alone on one line so free prose cannot ride behind one.
-- **release:** The release workflow now resolves a version tag's published
-  image digest before it retags, and fails when that tag already points at
-  different bytes. A `workflow_dispatch` rerun with `publish_images: true`
-  used to move `vX.Y.Z` to a freshly built digest, so an operator who pinned
-  the tag got layers nobody audited; moving it now takes the new `force_retag`
-  input. Each release also carries an `image-digests.json` asset listing every
-  published image, its tag, and its digest, so operators can pin and diff them.
+- **release:** The release workflow now resolves every version tag's published
+  image digest before it retags any of them, and fails when a tag already
+  points at different bytes. A `workflow_dispatch` rerun with
+  `publish_images: true` used to move `vX.Y.Z` to a freshly built digest, so an
+  operator who pinned the tag got layers nobody audited; moving it now takes
+  the new `force_retag` input. A registry lookup that fails for any other
+  reason stops the run rather than reading as an absent tag, and each tag is
+  re-read after the move to prove it resolves to the pushed digest. The step's
+  shell lives in `bin/publish-image-tags.sh` so a stubbed-registry table test
+  covers those paths. Each release also carries a signed `image-digests.json`
+  asset listing every published image, its tag, and its digest, so operators
+  can pin and diff them.
 
 ### Added
 

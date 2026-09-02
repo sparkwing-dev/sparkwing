@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/sha256"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -325,6 +327,97 @@ func TestAmbiguousPrefixRefusesLookupRevokeAndRotate(t *testing.T) {
 			}
 			if len(live) != 2 {
 				t.Fatalf("%d live rows after the refusal, want 2", len(live))
+			}
+		})
+	}
+}
+
+func fakeArgonKey(secret, salt []byte, keyLen uint32) []byte {
+	sum := sha256.Sum256(append(append([]byte{}, secret...), salt...))
+	out := make([]byte, keyLen)
+	copy(out, sum[:])
+	return out
+}
+
+func TestRotateToken_ARevokeDuringTheMintIsNotUndone(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().UTC()
+
+	restore := argonIDFunc
+	t.Cleanup(func() { argonIDFunc = restore })
+
+	armed := false
+	var once sync.Once
+	var revokeErr error
+	revokeDone := make(chan struct{})
+	prefix := ""
+	argonIDFunc = func(secret, salt []byte, _, _ uint32, _ uint8, keyLen uint32) []byte {
+		if armed {
+			once.Do(func() {
+				go func() {
+					revokeErr = s.RevokeToken(prefix, now)
+					close(revokeDone)
+				}()
+				select {
+				case <-revokeDone:
+				case <-time.After(200 * time.Millisecond):
+				}
+			})
+		}
+		return fakeArgonKey(secret, salt, keyLen)
+	}
+
+	raw, tok, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	prefix = tok.Prefix
+	armed = true
+
+	_, _, _, err = s.RotateToken(prefix, 24*time.Hour, 0, now)
+	if err != nil && !strings.Contains(err.Error(), "already revoked") {
+		t.Fatalf("RotateToken: %v", err)
+	}
+
+	select {
+	case <-revokeDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the concurrent revoke never finished")
+	}
+	if revokeErr != nil {
+		t.Fatalf("RevokeToken: %v", revokeErr)
+	}
+
+	if _, err := s.LookupToken(raw, now.Add(time.Minute)); err == nil {
+		t.Fatal("the revoked token still authenticates after the rotation")
+	}
+	revoked, err := s.LookupTokenByPrefix(prefix)
+	if err != nil {
+		t.Fatalf("LookupTokenByPrefix: %v", err)
+	}
+	if revoked.RevokedAt == nil || revoked.RevokedAt.After(now) {
+		t.Fatalf("revoked_at = %v, want no later than the revoke at %v", revoked.RevokedAt, now)
+	}
+}
+
+func TestMintRetryOnlyMatchesAPrefixCollision(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"sqlite prefix", errors.New("constraint failed: UNIQUE constraint failed: tokens.prefix (2067)"), true},
+		{"postgres prefix", errors.New(
+			`ERROR: duplicate key value violates unique constraint "idx_tokens_prefix" (SQLSTATE 23505)`), true},
+		{"sqlite hash", errors.New("constraint failed: UNIQUE constraint failed: tokens.hash (2067)"), false},
+		{"sqlite principal", errors.New("constraint failed: UNIQUE constraint failed: tokens.principal (2067)"), false},
+		{"not a violation", errors.New("database is locked"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTokenPrefixCollision(tc.err); got != tc.want {
+				t.Fatalf("isTokenPrefixCollision(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
 	}

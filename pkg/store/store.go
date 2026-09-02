@@ -1629,7 +1629,10 @@ const triggerWebhookReplayKeyIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + Trig
 // name.
 const TokenPrefixIndexName = "idx_tokens_prefix"
 
-const tokenPrefixIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TokenPrefixIndexName + ` ON tokens(prefix)`
+const tokenPrefixColumn = "prefix"
+
+const tokenPrefixIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TokenPrefixIndexName +
+	` ON tokens(` + tokenPrefixColumn + `)`
 
 const tokenPrefixIndexDrop = `DROP INDEX IF EXISTS ` + TokenPrefixIndexName
 
@@ -1856,7 +1859,8 @@ func uniqueTokenPrefixIndexTx(ctx context.Context, q migrationQueryExecer) error
 	}
 	if len(dupes) > 0 {
 		return fmt.Errorf(
-			"tokens: prefix %s names more than one token row; delete or re-mint the extra rows, then upgrade",
+			"tokens: prefix %s names more than one token row; keep the live row, "+
+				"delete the revoked duplicates, then upgrade",
 			strings.Join(dupes, ", "))
 	}
 	if _, err := q.ExecContext(ctx, tokenPrefixIndexDrop); err != nil {

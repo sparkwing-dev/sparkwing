@@ -151,6 +151,24 @@ CHANGELOG links here.
 - **Why:** An unauthenticated dashboard holding a service token hands the
   controller to every caller that can reach the port.
 
+## The dashboard refuses an insecure-cookie remote bind
+
+- **Before:** `SPARKWING_WEB_INSECURE_COOKIES=1` dropped `Secure` from the
+  session and CSRF cookies on any bind address, so a dashboard published over
+  plain HTTP handed both cookies to every network between the browser and the
+  pod.
+- **After:** `sparkwing-web` reads the variable once at startup and exits
+  before listening when the bind address is not loopback. A deployment that
+  carries the variable on a `0.0.0.0` bind crashloops after the upgrade, with
+  the refusal in the pod log.
+- **Migration:** Serve the dashboard over HTTPS and drop the variable, bind a
+  loopback address (chart: `web.addr`) for a port-forward or sidecar, or keep
+  the plain-HTTP publication by adding `--allow-insecure-cookies-remote`. The
+  chart renders both the flag and the variable whenever
+  `ingress.allowInsecure` is on, so a chart-managed deployment needs no change.
+- **Why:** A cookie without `Secure` travels in clear text, and the bind
+  address is the only evidence the process has that nobody else is listening.
+
 ## Cache reads require the bearer token
 
 - **Before:** `sparkwing-cache` demanded a bearer only on its blob and sync
@@ -578,13 +596,25 @@ CHANGELOG links here.
   only then reported the ambiguity, and the read behind rotation returned
   whichever row the store listed first.
 - **After:** Run-store schema 26 makes the `idx_tokens_prefix` index unique and
-  minting retries on a collision. Revoking runs in a transaction that commits
-  only when exactly one row matched, so an ambiguous prefix leaves every token
-  live. `store.LookupTokenByPrefix` returns an error rather than the first of
+  minting retries on a collision. Revoking and rotating each run in a
+  transaction that commits only when exactly one row matched, so an ambiguous
+  prefix leaves every token live and a revoke that lands while a rotation is
+  minting the replacement is no longer undone.
+  `store.LookupTokenByPrefix` returns an error rather than the first of
   several rows, which is what `store.RotateToken` reports as well.
 - **Migration:** Upgrade the controller before the runners; older binaries
   refuse the upgraded SQL store. A database that already holds two tokens on
-  one prefix fails to open and names the prefix -- delete or re-mint the extra
-  rows, then upgrade.
+  one prefix fails to open and names the prefix. Revoked rows are kept for
+  audit, so the pair can be historical; list it with
+
+  ```sql
+  SELECT prefix, hash, principal, revoked_at FROM tokens
+   WHERE prefix IN (SELECT prefix FROM tokens
+                     GROUP BY prefix HAVING COUNT(*) > 1);
+  ```
+
+  then delete the revoked duplicates, keep the one live row, and upgrade. The
+  controller cannot open the database until the prefix is unique, so run the
+  query against the file with `sqlite3` or against the server with `psql`.
 - **Why:** Revoke and rotate are the operator's emergency tools, and neither
   should touch a token other than the one named.

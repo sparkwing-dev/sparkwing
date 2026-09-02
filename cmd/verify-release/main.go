@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -45,6 +46,8 @@ func run(args []string) error {
 	return process(*dist, privateKey, publicKey, *verify)
 }
 
+const imageDigestsAsset = "image-digests.json"
+
 func process(dist string, privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey, verify bool) error {
 	if err := validateReleaseAssets(dist); err != nil {
 		return err
@@ -60,6 +63,14 @@ func process(dist string, privateKey ed25519.PrivateKey, publicKey ed25519.Publi
 	}
 	sort.Strings(assets)
 	paths := append([]string{manifestPath}, assets...)
+	digests := filepath.Join(dist, imageDigestsAsset)
+	// safety: a release that skipped image publication carries no listing, so sign it when present rather than require it.
+	switch _, err := os.Stat(digests); {
+	case err == nil:
+		paths = append(paths, digests)
+	case !errors.Is(err, fs.ErrNotExist):
+		return err
+	}
 	for _, path := range paths {
 		body, err := os.ReadFile(path)
 		if err != nil {

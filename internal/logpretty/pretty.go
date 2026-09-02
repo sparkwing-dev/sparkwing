@@ -115,8 +115,12 @@ func (p *PrettyRenderer) sanitize(s string) string {
 	return StripANSI(s)
 }
 
+func (p *PrettyRenderer) sanitizeInline(s string) string { return foldLines(p.sanitize(s)) }
+
 func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 	rec.Msg = p.sanitize(rec.Msg)
+	rec.JobID = p.sanitizeInline(rec.JobID)
+	rec.Step = p.sanitizeInline(rec.Step)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	sink := p.w
@@ -129,7 +133,7 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		nh := p.hueFor(p.pendingNodeStart.JobID)
 		head := p.color("▶ "+p.pendingNodeStart.JobID, ansiBold+nh)
 		stepGlyph := p.color("●", ansiBlue)
-		stepName := p.color(rec.Msg, ansiBlue)
+		stepName := p.color(foldLines(rec.Msg), ansiBlue)
 		fmt.Fprintln(sink, head+"  "+stepGlyph+" "+stepName)
 		p.pendingNodeStart = nil
 		return
@@ -139,8 +143,7 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		rec.JobID == p.pendingStepEnd.JobID &&
 		(rec.Step == "" || rec.Step == p.pendingStepEnd.Msg) &&
 		rec.Event == "" {
-		fmt.Fprint(sink, p.breadcrumb(rec, nodeHue))
-		fmt.Fprintln(sink, p.levelize(rec.Level, rec.Msg))
+		p.writeMessage(sink, p.breadcrumb(rec, nodeHue), rec.Level, rec.Msg)
 		return
 	}
 
@@ -156,7 +159,7 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		glyph, code := outcomeIcon(outcome)
 		nh := p.hueFor(rec.JobID)
 		line := p.color(glyph, code) + " " + p.color(rec.JobID, nh) +
-			p.color(" › ", ansiDim) + p.color(p.pendingStepEnd.Msg, ansiDim)
+			p.color(" › ", ansiDim) + p.color(foldLines(p.pendingStepEnd.Msg), ansiDim)
 		if durMS > 0 {
 			line += " " + p.color(fmt.Sprintf("(%s)", fmtDuration(durMS)), code)
 		}
@@ -200,9 +203,9 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 	case "step_skipped":
 		p.writeStepSkipped(sink, rec)
 	case "retry":
-		fmt.Fprintln(sink, p.color(fmt.Sprintf("  ↻ %s", rec.Msg), ansiYellow))
+		fmt.Fprintln(sink, p.color(fmt.Sprintf("  ↻ %s", foldLines(rec.Msg)), ansiYellow))
 	case "approval_requested":
-		fmt.Fprintln(sink, "  "+p.color("⏸ approval requested", ansiBold+ansiYellow)+p.color(" › "+rec.Msg, ansiDim))
+		fmt.Fprintln(sink, "  "+p.color("⏸ approval requested", ansiBold+ansiYellow)+p.color(" › "+foldLines(rec.Msg), ansiDim))
 	case "approval_resolved":
 		resolution, _ := rec.Attrs["resolution"].(string)
 		via, _ := rec.Attrs["via"].(string)
@@ -213,14 +216,13 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		case "timed_out":
 			icon, code = "⏱", ansiRed
 		}
-		head := p.color(icon+" "+rec.Msg, ansiBold+code)
+		head := p.color(icon+" "+foldLines(rec.Msg), ansiBold+code)
 		if via != "" {
-			head += p.color(" ["+via+"]", ansiDim)
+			head += p.color(" ["+p.sanitizeInline(via)+"]", ansiDim)
 		}
 		fmt.Fprintln(sink, "  "+head)
 	case "exec_line":
-		fmt.Fprint(sink, p.breadcrumb(rec, nodeHue))
-		fmt.Fprintln(sink, rec.Msg)
+		p.writeMessage(sink, p.breadcrumb(rec, nodeHue), "", rec.Msg)
 	case "run_start":
 		recCopy := rec
 		p.pendingRunStart = &recCopy
@@ -236,8 +238,20 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		p.writeRunBlock(sink, p.pendingRunSummary, &rec)
 		p.pendingRunSummary = nil
 	default:
-		fmt.Fprint(sink, p.breadcrumb(rec, nodeHue))
-		fmt.Fprintln(sink, p.levelize(rec.Level, rec.Msg))
+		p.writeMessage(sink, p.breadcrumb(rec, nodeHue), rec.Level, rec.Msg)
+	}
+}
+
+// safety: a continuation line is indented so pipeline output cannot forge a Sparkwing status line
+// at column zero, while the line breaks of a multi-line command echo stay readable.
+func (p *PrettyRenderer) writeMessage(w io.Writer, crumb, level, msg string) {
+	first, rest, more := strings.Cut(msg, "\n")
+	fmt.Fprintln(w, crumb+p.levelize(level, first))
+	if !more {
+		return
+	}
+	for _, line := range strings.Split(rest, "\n") {
+		fmt.Fprintln(w, msgIndent+p.levelBody(level, line))
 	}
 }
 
@@ -281,6 +295,15 @@ func (p *PrettyRenderer) breadcrumb(rec sparkwing.LogRecord, nodeHue string) str
 	}
 	b.WriteString(p.color(" │ ", ansiDim))
 	return b.String()
+}
+
+const msgIndent = "    "
+
+func (p *PrettyRenderer) levelBody(level, msg string) string {
+	if level == "debug" {
+		return p.color(msg, ansiDim)
+	}
+	return msg
 }
 
 func (p *PrettyRenderer) levelize(level, msg string) string {
@@ -621,7 +644,7 @@ func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.L
 				p.writeRunBlockNodeRow(w, m)
 				if msg, ok := m["error"].(string); ok && msg != "" {
 					id, _ := m["id"].(string)
-					errs = append(errs, nodeErr{nodeID: id, errMsg: msg})
+					errs = append(errs, nodeErr{nodeID: p.sanitizeInline(id), errMsg: msg})
 				}
 			}
 		}
@@ -635,7 +658,7 @@ func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.L
 			lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 			crumb := p.color(e.nodeID, p.hueFor(e.nodeID))
 			if stepID != "" {
-				crumb += p.color(" › ", ansiDim) + p.color(p.sanitize(stepID), ansiDim)
+				crumb += p.color(" › ", ansiDim) + p.color(p.sanitizeInline(stepID), ansiDim)
 			}
 			crumb += p.color(" │ ", ansiDim)
 			for i, line := range lines {
@@ -774,6 +797,7 @@ func errorTail(body string) string {
 
 func (p *PrettyRenderer) writeRunBlockNodeRow(w io.Writer, m map[string]any) {
 	id, _ := m["id"].(string)
+	id = p.sanitizeInline(id)
 	oc, _ := m["outcome"].(string)
 	nodeIcon, nodeCode := outcomeIcon(oc)
 	const nameWidth = 24
@@ -946,7 +970,7 @@ func splitStepErrorPrefix(s string) (stepID, body string) {
 func (p *PrettyRenderer) writeStepStart(w io.Writer, rec sparkwing.LogRecord) {
 	glyph := "●"
 	code := ansiBlue
-	fmt.Fprintln(w, p.color(fmt.Sprintf("  %s %s", glyph, rec.Msg), code))
+	fmt.Fprintln(w, p.color(fmt.Sprintf("  %s %s", glyph, foldLines(rec.Msg)), code))
 }
 
 func (p *PrettyRenderer) writeStepEnd(w io.Writer, rec sparkwing.LogRecord) {
@@ -960,7 +984,7 @@ func (p *PrettyRenderer) writeStepEnd(w io.Writer, rec sparkwing.LogRecord) {
 	if dms > 0 {
 		tail = " " + p.color("("+fmtDuration(dms)+")", ansiDim)
 	}
-	fmt.Fprintln(w, p.color(fmt.Sprintf("  %s %s", glyph, rec.Msg), code)+tail)
+	fmt.Fprintln(w, p.color(fmt.Sprintf("  %s %s", glyph, foldLines(rec.Msg)), code)+tail)
 	if errMsg, ok := rec.Attrs["error"].(string); ok && errMsg != "" {
 		for _, errLine := range strings.Split(strings.TrimRight(errMsg, "\n"), "\n") {
 			fmt.Fprintln(w, "      "+p.color(p.sanitize(errLine), ansiRed))
@@ -973,9 +997,9 @@ func (p *PrettyRenderer) writeStepSkipped(w io.Writer, rec sparkwing.LogRecord) 
 	reason, _ := rec.Attrs["reason"].(string)
 	tail := ""
 	if reason != "" {
-		tail = " " + p.color("["+reason+"]", ansiDim)
+		tail = " " + p.color("["+p.sanitizeInline(reason)+"]", ansiDim)
 	}
-	fmt.Fprintln(w, p.color(fmt.Sprintf("  %s %s", glyph, rec.Msg), code)+tail)
+	fmt.Fprintln(w, p.color(fmt.Sprintf("  %s %s", glyph, foldLines(rec.Msg)), code)+tail)
 }
 
 func (p *PrettyRenderer) writeSetupBlock(w io.Writer, runStart, plan *sparkwing.LogRecord) {

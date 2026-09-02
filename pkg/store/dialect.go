@@ -71,6 +71,12 @@ func (s *Store) forUpdate() string {
 	return ""
 }
 
+type storeExecer struct{ s *Store }
+
+func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return e.s.exec(ctx, q, args...)
+}
+
 func rewritePh(dialect Dialect, q string) string {
 	if dialect != DialectPostgres {
 		return q
@@ -132,6 +138,13 @@ func (s *Store) beginTx(ctx context.Context) (*storeTx, error) {
 		return nil, err
 	}
 	return &storeTx{tx: tx, dialect: s.dialect}, nil
+}
+
+func (t *storeTx) forUpdate() string {
+	if t.dialect == DialectPostgres {
+		return " FOR UPDATE"
+	}
+	return ""
 }
 
 func (t *storeTx) Commit() error   { return t.tx.Commit() }

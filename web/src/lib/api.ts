@@ -5,12 +5,17 @@ function getApiUrl(): string {
 
 const API_URL = getApiUrl();
 
+function sessionMode(): boolean {
+  if (typeof window === "undefined") return false;
+  const runtime = window as unknown as Record<string, unknown>;
+  return runtime.__SPARKWING_REQUIRE_LOGIN__ === "true";
+}
+
 function getSessionCSRFHeaders(method: string | undefined): HeadersInit {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return {};
   }
-  const runtime = window as unknown as Record<string, unknown>;
-  if (runtime.__SPARKWING_REQUIRE_LOGIN__ !== "true") return {};
+  if (!sessionMode()) return {};
   switch ((method || "GET").toUpperCase()) {
     case "GET":
     case "HEAD":
@@ -31,7 +36,11 @@ function getSessionCSRFHeaders(method: string | undefined): HeadersInit {
   }
 }
 
-export type ConnectionStatus = "ok" | "unreachable" | "unauthorized";
+export type ConnectionStatus =
+  | "ok"
+  | "unreachable"
+  | "unauthorized"
+  | "session-expired";
 type StatusListener = (status: ConnectionStatus) => void;
 
 let _connectionStatus: ConnectionStatus = "ok";
@@ -56,8 +65,25 @@ function setConnectionStatus(s: ConnectionStatus) {
 }
 
 let _backoffUntil = 0;
+let _sessionEnded = false;
+
+export function loginUrlFor(pathname: string, search: string): string {
+  return `/login?next=${encodeURIComponent(`${pathname}${search}`)}`;
+}
+
+function endSession() {
+  if (_sessionEnded) return;
+  _sessionEnded = true;
+  setConnectionStatus("session-expired");
+  if (typeof window === "undefined" || !window.location) return;
+  const { pathname, search } = window.location;
+  window.location.assign(loginUrlFor(pathname || "/", search || ""));
+}
 
 function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
+  if (_sessionEnded) {
+    return Promise.reject(new Error("session ended -- sign in again"));
+  }
   if (Date.now() < _backoffUntil) {
     return Promise.reject(new Error("rate-limited -- backing off"));
   }
@@ -77,7 +103,9 @@ function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
         setConnectionStatus("ok");
         return res;
       }
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401 && sessionMode()) {
+        endSession();
+      } else if (res.status === 401 || res.status === 403) {
         setConnectionStatus("unauthorized");
       } else {
         setConnectionStatus("ok");

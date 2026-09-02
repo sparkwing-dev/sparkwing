@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	gitcacheSeedSHA  = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
+	gitObjectSHA     = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 	gitcacheRepoName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 
@@ -42,7 +42,7 @@ func (s *Server) handleGitcacheSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sha := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sha")))
-	if !gitcacheSeedSHA.MatchString(sha) {
+	if !gitObjectSHA.MatchString(sha) {
 		http.Error(w, "sha query param must be a 40-64 character hex object id", http.StatusBadRequest)
 		return
 	}

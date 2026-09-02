@@ -340,6 +340,27 @@ func TestChangedFiles(t *testing.T) {
 	}
 }
 
+func TestChangedFilesRefusesARevisionThatLeadsWithADash(t *testing.T) {
+	dir := withRepo(t)
+	writeFile(t, dir, "a.txt", "alpha")
+	commitIn(t, dir, "init")
+
+	writeFile(t, dir, "a.txt", "alpha2")
+
+	victimDir := t.TempDir()
+	victim := filepath.Join(victimDir, "victim.diff")
+	if _, err := ChangedFiles(context.Background(), dir, "--output="+victim); err == nil {
+		t.Fatal("ChangedFiles accepted an option-shaped revision")
+	}
+	written, err := filepath.Glob(filepath.Join(victimDir, "victim.diff*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(written) > 0 {
+		t.Fatalf("git wrote %v from the revision argument", written)
+	}
+}
+
 func TestTagsAtHead(t *testing.T) {
 	dir := withRepo(t)
 	writeFile(t, dir, "a.txt", "x")

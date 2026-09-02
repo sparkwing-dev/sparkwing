@@ -270,7 +270,8 @@ func ChangedFiles(ctx context.Context, repoDir, since string) ([]string, error) 
 	if since == "" {
 		args = append(args, "HEAD")
 	} else {
-		args = append(args, since+"...HEAD")
+		// safety: a revision that leads with a dash is read by git as an option, not a range.
+		args = append(args, "--end-of-options", since+"...HEAD")
 	}
 	out, err := runGit(ctx, repoDir, args...)
 	if err != nil {
