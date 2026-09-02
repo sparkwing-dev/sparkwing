@@ -165,12 +165,31 @@ func TestSecrets_ReadsEnvelopesWrittenBeforeBinding(t *testing.T) {
 	}
 	var got struct {
 		Value string `json:"value"`
+		Bound bool   `json:"bound"`
 	}
 	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if got.Value != "older secret" {
 		t.Fatalf("Value = %q, want %q", got.Value, "older secret")
+	}
+	if !got.Bound {
+		t.Fatal("read of an unbound row reported bound=false; the read should have rebound it")
+	}
+
+	row, err := st.GetSecret("LEGACY")
+	if err != nil {
+		t.Fatalf("GetSecret: %v", err)
+	}
+	if !strings.HasPrefix(row.Value, "enc:v2:") {
+		t.Fatalf("stored value after read = %q, want it resealed under an enc:v2: prefix", row.Value)
+	}
+	status, body = getSecretStatus(t, srv.URL+"/api/v1/secrets/LEGACY")
+	if status != http.StatusOK {
+		t.Fatalf("GET after rebinding status = %d, body = %s", status, body)
+	}
+	if !strings.Contains(body, "older secret") {
+		t.Fatalf("rebound row no longer reads back: %s", body)
 	}
 }
 
@@ -191,6 +210,150 @@ func TestSecrets_PlaintextRowFailsClosedOnceEncrypted(t *testing.T) {
 	}
 	if strings.Contains(body, "plain value") {
 		t.Fatalf("failed read leaked the stored value: %s", body)
+	}
+	if !strings.Contains(body, "stored value did not open") {
+		t.Fatalf("failed read body = %s, want the fixed message", body)
+	}
+	if strings.Contains(body, "not sealed") {
+		t.Fatalf("failed read body names the row's storage state: %s", body)
+	}
+}
+
+func TestSecrets_EnvelopeIsBoundToAccessFields(t *testing.T) {
+	key, _ := secrets.GenerateKey()
+	c, _ := secrets.NewCipher(key)
+	srv, st := newSecretsTestServer(t, c)
+
+	resp := postSecretJSON(t, srv.URL+"/api/v1/secrets",
+		map[string]any{"name": "TOKEN", "value": "supersecret"})
+	resp.Body.Close()
+
+	row, err := st.GetSecret("TOKEN")
+	if err != nil {
+		t.Fatalf("GetSecret: %v", err)
+	}
+	if row.Shared || !row.Masked {
+		t.Fatalf("row was written shared=%v masked=%v, want shared=false masked=true", row.Shared, row.Masked)
+	}
+
+	for _, c2 := range []struct {
+		label          string
+		shared, masked bool
+	}{
+		{"shared flipped on", true, true},
+		{"masked flipped off", false, false},
+	} {
+		t.Run(c2.label, func(t *testing.T) {
+			edited := *row
+			edited.Shared = c2.shared
+			edited.Masked = c2.masked
+			if err := st.CreateOrReplaceSecret(edited, time.Now().UTC()); err != nil {
+				t.Fatalf("CreateOrReplaceSecret: %v", err)
+			}
+			status, body := getSecretStatus(t, srv.URL+"/api/v1/secrets/TOKEN")
+			if status != http.StatusInternalServerError {
+				t.Fatalf("GET widened row status = %d, want 500, body = %s", status, body)
+			}
+			if strings.Contains(body, "supersecret") {
+				t.Fatalf("widened row leaked plaintext: %s", body)
+			}
+		})
+	}
+
+	if err := st.CreateOrReplaceSecret(*row, time.Now().UTC()); err != nil {
+		t.Fatalf("restore row: %v", err)
+	}
+	status, body := getSecretStatus(t, srv.URL+"/api/v1/secrets/TOKEN")
+	if status != http.StatusOK {
+		t.Fatalf("GET untouched row status = %d, body = %s", status, body)
+	}
+}
+
+func TestSecrets_ListNamesUnboundRows(t *testing.T) {
+	key, _ := secrets.GenerateKey()
+	c, _ := secrets.NewCipher(key)
+	srv, st := newSecretsTestServer(t, c)
+
+	resp := postSecretJSON(t, srv.URL+"/api/v1/secrets",
+		map[string]any{"name": "BOUND", "value": "fresh"})
+	resp.Body.Close()
+
+	legacy, err := c.Seal("older secret")
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	if err := st.CreateOrReplaceSecret(store.Secret{
+		Name: "UNBOUND", Value: legacy, Principal: "admin", Masked: true,
+	}, time.Now().UTC()); err != nil {
+		t.Fatalf("CreateOrReplaceSecret: %v", err)
+	}
+
+	status, body := getSecretStatus(t, srv.URL+"/api/v1/secrets")
+	if status != http.StatusOK {
+		t.Fatalf("GET list status = %d, body = %s", status, body)
+	}
+	var list struct {
+		Secrets []struct {
+			Name  string `json:"name"`
+			Bound bool   `json:"bound"`
+		} `json:"secrets"`
+	}
+	if err := json.Unmarshal([]byte(body), &list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := map[string]bool{"BOUND": true, "UNBOUND": false}
+	for _, sec := range list.Secrets {
+		w, ok := want[sec.Name]
+		if !ok {
+			t.Fatalf("unexpected row %q in the list", sec.Name)
+		}
+		if sec.Bound != w {
+			t.Errorf("row %q bound = %v, want %v", sec.Name, sec.Bound, w)
+		}
+		delete(want, sec.Name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("list omitted rows: %v", want)
+	}
+}
+
+func TestSecrets_ExistingRowKeepsANameTheRuleNowRejects(t *testing.T) {
+	key, _ := secrets.GenerateKey()
+	c, _ := secrets.NewCipher(key)
+	srv, st := newSecretsTestServer(t, c)
+
+	sealed, err := c.Seal("legacy value")
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	if err := st.CreateOrReplaceSecret(store.Secret{
+		Name: "cert..pem", Value: sealed, Principal: "admin", Masked: true,
+	}, time.Now().UTC()); err != nil {
+		t.Fatalf("CreateOrReplaceSecret: %v", err)
+	}
+
+	resp := postSecretJSON(t, srv.URL+"/api/v1/secrets",
+		map[string]any{"name": "cert..pem", "value": "rotated"})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("re-set of an existing row status = %d, want 204, body = %s", resp.StatusCode, body)
+	}
+
+	status, got := getSecretStatus(t, srv.URL+"/api/v1/secrets/cert..pem")
+	if status != http.StatusOK {
+		t.Fatalf("GET rotated row status = %d, body = %s", status, got)
+	}
+	if !strings.Contains(got, "rotated") {
+		t.Fatalf("rotated row = %s, want the new value", got)
+	}
+
+	resp = postSecretJSON(t, srv.URL+"/api/v1/secrets",
+		map[string]any{"name": "new..name", "value": "nope"})
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("new row with an invalid name status = %d, want 400, body = %s", resp.StatusCode, body)
 	}
 }
 

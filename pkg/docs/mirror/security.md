@@ -101,12 +101,20 @@ warning at startup. Provide the key via:
 - `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key, or
 - `--secrets-key-file <path>` -- a file holding the raw or base64 key.
 
-Each envelope is bound to the row it belongs to -- the secret name and
-the owning repository, empty for an unscoped secret -- so a ciphertext
-copied onto another name, into another repository, or onto the
-unscoped row by anyone with database write access fails to open rather
-than answering there. Values sealed before binding (`enc:v1:`
-envelopes) still open; re-set them to get the binding.
+Each envelope is bound to the fields of the row that decide who may
+read it: the secret name, the owning repository (empty for an unscoped
+secret), whether an unscoped row is shared with every run, and whether
+the value is masked in run output. Anyone with database write access
+who copies a ciphertext onto another name, into another repository, or
+onto the unscoped row, or who edits a row to widen its own access, gets
+a value that fails to open rather than one that answers there.
+
+Values sealed before binding (`enc:v1:` envelopes) still open, and they
+are still substitutable until they are rebound. `sparkwing secret list`
+reports `BOUND false` for them (`"bound": false` on the API), and the
+controller reseals such a row into a bound envelope the first time it
+is read, so rows migrate as they are used. Re-setting a secret rebinds
+it as well.
 
 There is no key rotation and no multi-key read path: the controller
 holds one key and the stored envelope carries no key id. Swapping the

@@ -55,6 +55,16 @@ func (s *Store) GetSecret(name string) (*Secret, error) {
 	return s.readSecret(name, "")
 }
 
+// GetSecretRow returns the row stored under exactly this name and
+// repo, and ErrNotFound when there is none. Unlike GetSecretForRepo it
+// never falls back to the unscoped row.
+func (s *Store) GetSecretRow(name, repo string) (*Secret, error) {
+	if name == "" {
+		return nil, errors.New("secrets: name required")
+	}
+	return s.readSecret(name, repo)
+}
+
 // GetSecretForRepo returns the row named for repo, falling back to the
 // unscoped row when the repository has none of its own. ErrNotFound
 // when neither exists. This is the administrative read: it reaches an

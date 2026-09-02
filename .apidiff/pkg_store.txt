@@ -554,6 +554,7 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 func (s *Store) GetSecret(name string) (*Secret, error)
 func (s *Store) GetSecretForRepo(name, repo string) (*Secret, error)
 func (s *Store) GetSecretForRun(name, repo string) (*Secret, error)
+func (s *Store) GetSecretRow(name, repo string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error

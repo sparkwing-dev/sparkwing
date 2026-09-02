@@ -28,9 +28,9 @@ func (a *Authenticator) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Authenti
 type BoundCipher interface {
 	Cipher
 
-	SealBound(name, repo, plain string) (string, error)
+	SealBound(name, repo string, shared, masked bool, plain string) (string, error)
 
-	OpenBound(name, repo, envelope string) (string, error)
+	OpenBound(name, repo string, shared, masked bool, envelope string) (string, error)
 }
 type Cipher interface {
 	Seal(plain string) (string, error)

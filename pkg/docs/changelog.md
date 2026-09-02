@@ -50,15 +50,20 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
-- **controller:** Secret envelopes are now bound to the row they belong to
-  -- the secret name and its owning repository -- as additional
-  authenticated data under an `enc:v2:` prefix, so a ciphertext copied onto
-  another name, into another repository, or onto the unscoped row by anyone
-  with database write access fails to open instead of answering there.
-  Envelopes written before the binding (`enc:v1:`) still open; re-set a
-  secret to rewrite it. Secret names holding `..` or an empty path segment
-  are rejected. A `Cipher` supplied through `WithSecretsCipher` may also
-  implement the new `controller.BoundCipher` to take part in the binding.
+- **controller:** Secret envelopes are now bound to the fields of the row
+  that decide who may read them -- the secret name, the owning repository,
+  whether an unscoped row is shared with every run, and whether the value is
+  masked in run output -- as additional authenticated data under an `enc:v2:`
+  prefix, so anyone with database write access who copies a ciphertext onto
+  another row, or edits a row to widen its own access, gets a value that
+  fails to open instead of one that answers there. Envelopes written before
+  the binding (`enc:v1:`) still open; `sparkwing secret list` and the
+  secrets API report `bound: false` for them, and the first successful read
+  reseals such a row in place. Secret names holding `..` or an empty path
+  segment are rejected for new rows, while a row that already exists keeps
+  its name and can still be rotated. A `Cipher` supplied through
+  `WithSecretsCipher` may also implement `controller.BoundCipher`, which
+  `ciphertest.TestBoundCipher` checks, to take part in the binding.
 - **helm:** Both charts now default to the Pod Security "restricted" profile:
   every pod carries `seccompProfile: RuntimeDefault` and every container runs
   with a read-only root filesystem over a `/tmp` scratch `emptyDir`. The
