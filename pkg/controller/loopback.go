@@ -1021,6 +1021,10 @@ func (l *Loopback) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing key", http.StatusBadRequest)
 		return
 	}
+	if !safeArtifactKey(key) {
+		http.Error(w, "invalid key", http.StatusBadRequest)
+		return
+	}
 	rc, err := l.artifactStore.Get(r.Context(), key)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
