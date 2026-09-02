@@ -67,6 +67,16 @@ func TestResolveExactVersion(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsASourceThatIsNotAModulePath(t *testing.T) {
+	r := &Resolver{Proxies: []string{"http://proxy.invalid.example"}}
+	for _, src := range []string{"", "-flags", "--version", "../escape", "example.com/x@v1", "example.com/x y"} {
+		m := &Manifest{Libraries: []Library{{Name: "x", Source: src, Version: "v1.2.3"}}}
+		if _, err := r.Resolve(context.Background(), m); err == nil {
+			t.Errorf("source %q: expected a rejected module path", src)
+		}
+	}
+}
+
 func TestResolveSemverRange(t *testing.T) {
 	mod := "github.com/sparkwing-dev/sparks-core"
 	srv := newMockProxy(t, map[string][]string{

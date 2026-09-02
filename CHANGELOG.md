@@ -249,6 +249,17 @@ code change to unlock.
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
   so a naked suppression silences nothing, and the comment gate keeps each
   annotation alone on one line so free prose cannot ride behind one.
+- **cache + orchestrator:** Every git call that takes a caller-supplied ref or
+  revision now separates it from the option list -- `--` before the positional
+  arguments of `merge-base`, `cat-file`, and `git worktree add`, and
+  `--verify --end-of-options` for `git rev-parse` -- so no such value is read
+  as a flag. `/sync/negotiate` requires each `commits[]` entry to be a 40-64
+  character hex object id, and a retry's recorded revision must be one before
+  the orchestrator materializes it. Short-ref log lines clamp instead of
+  slicing at eight bytes, which crashed the negotiate handler on a shorter ref.
+- **sparks:** A `sparks:` entry's `source` is checked as a Go module path
+  before it reaches `go list`, so a malformed path fails with a named error
+  instead of becoming an argument to the go command.
 
 ### Added
 
