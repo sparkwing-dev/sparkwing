@@ -40,6 +40,7 @@ func proxyTestDashboard(t *testing.T, scopes []string) (http.Handler, func() []s
 	t.Cleanup(upstream.Close)
 	handler := HandlerFromOptionsWithBundle(HandlerOptions{
 		ControllerURL: upstream.URL,
+		LogsURL:       upstream.URL,
 		Token:         "service-token",
 		RequireLogin:  true,
 	}, authTestBundle)
@@ -72,6 +73,9 @@ func TestProxyAllowList_SessionCannotReachUnproxiedControllerRoutes(t *testing.T
 		{http.MethodGet, "/api/v1/users"},
 		{http.MethodPost, "/api/v1/runs"},
 		{http.MethodGet, "/api/v1/queue/state"},
+		{http.MethodDelete, "/api/v1/logs/r1"},
+		{http.MethodPost, "/api/v1/logs/r1/n1"},
+		{http.MethodGet, "/api/v1/logs/r1/n1/tail"},
 	} {
 		t.Run(test.method+" "+test.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -103,6 +107,11 @@ func TestProxyAllowList_SessionScopesGateProxiedRoutes(t *testing.T) {
 		{"reader cannot approve", []string{controller.ScopeRunsRead}, http.MethodPost, "/api/v1/runs/r1/approvals/gate", http.StatusForbidden},
 		{"approver approves", []string{controller.ScopeApprovalsWrite}, http.MethodPost, "/api/v1/runs/r1/approvals/gate", http.StatusNoContent},
 		{"scopeless session reads nothing", nil, http.MethodGet, "/api/v1/runs", http.StatusForbidden},
+		{"reader searches logs", []string{controller.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/search", http.StatusNoContent},
+		{"reader reads run logs", []string{controller.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/r1", http.StatusNoContent},
+		{"reader streams node logs", []string{controller.ScopeLogsRead}, http.MethodGet, "/api/v1/logs/r1/n1/stream", http.StatusNoContent},
+		{"run reader cannot read logs", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/logs/search", http.StatusForbidden},
+		{"scopeless session reads no logs", nil, http.MethodGet, "/api/v1/logs/r1/n1", http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -136,9 +145,29 @@ func TestProxyRoutes_ScopesMatchControllerRegistrations(t *testing.T) {
 	}
 }
 
+func TestLogsProxyRoutes_ScopesMatchLogsRegistrations(t *testing.T) {
+	t.Parallel()
+	registered := logsRouteScopes(t)
+	for _, route := range logsProxyRoutes {
+		if !strings.HasPrefix(route.pattern, http.MethodGet+" ") {
+			t.Errorf("logs proxy allows %q; the dashboard forwards reads only", route.pattern)
+			continue
+		}
+		scope, ok := registered[route.pattern]
+		if !ok {
+			t.Errorf("logs proxy allows %q, which the logs service does not register", route.pattern)
+			continue
+		}
+		if scope != route.scope {
+			t.Errorf("logs proxy guards %q with %s; the logs service registers it at %s",
+				route.pattern, route.scope, scope)
+		}
+	}
+}
+
 func controllerRouteScopes(t *testing.T) map[string]string {
 	t.Helper()
-	values := map[string]string{
+	return routeScopes(t, "../../pkg/controller/server.go", map[string]string{
 		"ScopeRunsRead":       controller.ScopeRunsRead,
 		"ScopeRunsWrite":      controller.ScopeRunsWrite,
 		"ScopeNodesClaim":     controller.ScopeNodesClaim,
@@ -147,8 +176,20 @@ func controllerRouteScopes(t *testing.T) map[string]string {
 		"ScopeTriggersRead":   controller.ScopeTriggersRead,
 		"ScopeApprovalsWrite": controller.ScopeApprovalsWrite,
 		"ScopeAdmin":          controller.ScopeAdmin,
-	}
-	const source = "../../pkg/controller/server.go"
+	})
+}
+
+func logsRouteScopes(t *testing.T) map[string]string {
+	t.Helper()
+	return routeScopes(t, "../../pkg/logs/server.go", map[string]string{
+		"scopeLogsRead":  controller.ScopeLogsRead,
+		"scopeLogsWrite": controller.ScopeLogsWrite,
+		"scopeAdmin":     controller.ScopeAdmin,
+	})
+}
+
+func routeScopes(t *testing.T, source string, values map[string]string) map[string]string {
+	t.Helper()
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, source, nil, 0)
 	if err != nil {
@@ -179,7 +220,7 @@ func controllerRouteScopes(t *testing.T) map[string]string {
 		if !ok {
 			return true
 		}
-		if fn, ok := wrapped.Fun.(*ast.Ident); !ok || fn.Name != "requireScope" || len(wrapped.Args) == 0 {
+		if wrapperName(wrapped.Fun) != "requireScope" || len(wrapped.Args) == 0 {
 			return true
 		}
 		ident, ok := wrapped.Args[0].(*ast.Ident)
@@ -198,4 +239,14 @@ func controllerRouteScopes(t *testing.T) map[string]string {
 		t.Fatalf("parsed no routes from %s; the guard would pass vacuously", source)
 	}
 	return out
+}
+
+func wrapperName(fun ast.Expr) string {
+	switch f := fun.(type) {
+	case *ast.Ident:
+		return f.Name
+	case *ast.SelectorExpr:
+		return f.Sel.Name
+	}
+	return ""
 }

@@ -3,7 +3,10 @@ package controller
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -145,6 +148,19 @@ func requestedUserScopes(req createUserReq) ([]string, error) {
 		// safety: an omitted scope set grants admin, matching what an operator
 		// who names no scopes has always received from this route.
 		return []string{ScopeAdmin}, nil
+	}
+	// safety: a blank or repeated entry is dropped on the way to storage, so the
+	// account would sign in holding a narrower scope set than the operator named.
+	seen := make(map[string]struct{}, len(req.Scopes))
+	for _, s := range req.Scopes {
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" {
+			return nil, fmt.Errorf("empty scope (valid: %s)", strings.Join(allScopes, ", "))
+		}
+		if _, dup := seen[trimmed]; dup {
+			return nil, fmt.Errorf("duplicate scope %s", strconv.Quote(trimmed))
+		}
+		seen[trimmed] = struct{}{}
 	}
 	if err := validateScopes(req.Scopes); err != nil {
 		return nil, err

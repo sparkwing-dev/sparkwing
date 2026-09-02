@@ -177,7 +177,8 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles/explain", capacityExplainHandler(opts.Backend))
 
 	if opts.LogsURL != "" {
-		authedMux.Handle("/api/v1/logs/", controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts)))
+		authedMux.Handle("/api/v1/logs/",
+			logsProxyAllowList(controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts))))
 	}
 	if opts.ControllerURL != "" {
 		authedMux.Handle("/api/v1/",

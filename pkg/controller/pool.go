@@ -26,6 +26,9 @@ type PoolConfig struct {
 	Namespace string
 	// ReconcileEvery is the reconcile-loop cadence. Zero uses 15s.
 	ReconcileEvery time.Duration
+	// WarmerServiceAccount names the ServiceAccount warmer pods run as.
+	// Empty uses [pool.WarmerServiceAccountName].
+	WarmerServiceAccount string
 }
 
 // AttachPool wires the pool into the server. Returns the server for
@@ -38,6 +41,9 @@ func (s *Server) AttachPool(cfg PoolConfig) *Server {
 	}
 	if cfg.ReconcileEvery <= 0 {
 		cfg.ReconcileEvery = 15 * time.Second
+	}
+	if cfg.WarmerServiceAccount == "" {
+		cfg.WarmerServiceAccount = pool.WarmerServiceAccountName
 	}
 	s.pool = &poolBinding{cfg: cfg}
 	return s
@@ -62,7 +68,7 @@ func (p *poolBinding) run(ctx context.Context, logger *slog.Logger) {
 	)
 
 	go p.reconcileLoop(ctx, logger)
-	go pool.WarmingLoop(ctx, p.cfg.Client, p.pool, p.cfg.Namespace)
+	go pool.WarmingLoop(ctx, p.cfg.Client, p.pool, p.cfg.Namespace, p.cfg.WarmerServiceAccount)
 	<-ctx.Done()
 }
 
