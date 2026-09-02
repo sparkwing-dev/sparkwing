@@ -144,12 +144,19 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	return nil
 }
 
-func HandlerFromOptions(opts HandlerOptions) http.Handler {
+// BundleFS returns the embedded dashboard bundle rooted at its
+// index.html, for callers that build their own handler chain around
+// HandlerFromOptionsWithBundle.
+func BundleFS() fs.FS {
 	subFS, err := fs.Sub(nextBundle, "next-out")
 	if err != nil {
 		panic(fmt.Sprintf("web: embed fs.Sub failed: %v", err)) //nolint:forbidigo // unreachable post-VerifyBundleEmbedded; build-time invariant
 	}
-	return HandlerFromOptionsWithBundle(opts, subFS)
+	return subFS
+}
+
+func HandlerFromOptions(opts HandlerOptions) http.Handler {
+	return HandlerFromOptionsWithBundle(opts, BundleFS())
 }
 
 func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Handler {

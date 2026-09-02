@@ -21,6 +21,47 @@ CHANGELOG links here.
 - **Why:** A local Git action should not require an intermittently available
   controller unless the repository owner opts into that dependency.
 
+## Pipeline name charset
+
+- **Before:** `sparkwing.yaml` accepted any string as a pipeline `name`,
+  including `e2e/k8s`, `my pipeline`, and names holding a quote or a shell
+  metacharacter.
+- **After:** A name must match `^[A-Za-z0-9][A-Za-z0-9._-]*$`: it starts with an
+  ASCII letter or digit and then holds only letters, digits, `.`, `_`, and `-`.
+  A config with any other name fails to load, so `sparkwing run`, `pipeline
+  list`, `pipeline hooks install`, tab completion, the dashboard, and the
+  orchestrator all refuse it with `pipeline "<name>": name must match
+  ^[A-Za-z0-9][A-Za-z0-9._-]*$`.
+- **Migration:** Rename each offending pipeline. The YAML `name` and the string
+  passed to the SDK's `Register` call must stay equal, so both change together.
+
+  ```yaml
+  # before
+  pipelines:
+    - name: e2e/k8s
+      entrypoint: Gate
+
+  # after
+  pipelines:
+    - name: e2e-k8s
+      entrypoint: Gate
+  ```
+
+  ```go
+  // before
+  sw.Register[sw.NoInputs]("e2e/k8s", func() sw.Pipeline[sw.NoInputs] { return &Gate{} })
+
+  // after
+  sw.Register[sw.NoInputs]("e2e-k8s", func() sw.Pipeline[sw.NoInputs] { return &Gate{} })
+  ```
+
+  Then update every caller of the old name: `sparkwing run <name>` in CI jobs,
+  scripts, and schedules. Re-run `sparkwing pipeline hooks install` so the
+  generated git hooks invoke the renamed pipeline.
+- **Why:** The name reaches generated git hook scripts, argv, log lines, and
+  file paths. A cloned repository could otherwise hand shell execution to
+  anyone who ran the documented hooks install command.
+
 ## Dashboard proxy allow-list
 
 - **Before:** `sparkwing-web` forwarded any `/api/v1/` path to the controller

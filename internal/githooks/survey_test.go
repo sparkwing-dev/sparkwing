@@ -1,6 +1,7 @@
 package githooks_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,7 +155,7 @@ func TestSurveyFleet_SortsRowsByRepoPath(t *testing.T) {
 		}
 		roots = append(roots, repo)
 	}
-	rows := githooks.SurveyFleet(stubGit("", ""), roots, func(string) []string { return nil })
+	rows := githooks.SurveyFleet(stubGit("", ""), roots, func(string) ([]string, error) { return nil, nil })
 	if len(rows) != 3 {
 		t.Fatalf("rows = %d, want 3", len(rows))
 	}
@@ -168,11 +169,11 @@ func TestSurveyFleet_SortsRowsByRepoPath(t *testing.T) {
 func TestSurveyFleet_AsksForEachRepositorysOwnDeclaredHooks(t *testing.T) {
 	armed, armedHooks := checkout(t, "pre-commit")
 	bare, _ := checkout(t)
-	rows := githooks.SurveyFleet(stubGit("", ""), []string{armed, bare}, func(root string) []string {
+	rows := githooks.SurveyFleet(stubGit("", ""), []string{armed, bare}, func(root string) ([]string, error) {
 		if root == bare {
-			return []string{"pre-push"}
+			return []string{"pre-push"}, nil
 		}
-		return []string{"pre-commit"}
+		return []string{"pre-commit"}, nil
 	})
 	byRepo := map[string]githooks.RepoGates{}
 	for _, r := range rows {
@@ -205,9 +206,28 @@ func TestSurveyFleet_AsksGitForTheMachineWideConfigOnce(t *testing.T) {
 		}
 		return stubGit("", "")(dir, args...)
 	}
-	githooks.SurveyFleet(counting, roots, func(string) []string { return []string{"pre-commit"} })
+	githooks.SurveyFleet(counting, roots, func(string) ([]string, error) { return []string{"pre-commit"}, nil })
 	if globalLookups != 1 {
 		t.Errorf("global config lookups = %d, want 1 across %d repos", globalLookups, len(roots))
+	}
+}
+
+func TestSurveyFleet_MarksARepoWhoseDeclarationCannotBeReadBroken(t *testing.T) {
+	armed, _ := checkout(t, "pre-commit")
+	rows := githooks.SurveyFleet(stubGit("", ""), []string{armed}, func(string) ([]string, error) {
+		return nil, errors.New("config does not load: bad name")
+	})
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want one row", rows)
+	}
+	if rows[0].State != githooks.GateBroken {
+		t.Errorf("State = %s, want %s", rows[0].State, githooks.GateBroken)
+	}
+	if rows[0].Gated() {
+		t.Error("a repo whose declaration cannot be read counted as gated")
+	}
+	if !strings.Contains(rows[0].Summary(), "config does not load: bad name") {
+		t.Errorf("Summary = %q, want the config error", rows[0].Summary())
 	}
 }
 

@@ -92,6 +92,14 @@ code change to unlock.
 
 ### Security
 
+- **dashboard:** The local listener refuses cross-site subresource loads,
+  not just cross-site writes, so an `img` or `fetch` from another page
+  cannot reach a side-effecting GET. `--allow-remote` now widens the `Host`
+  check alone: a foreign browser `Origin` is still refused unless it is
+  loopback, the `--addr` host, or listed in the new
+  `--allow-origin`. Login, logout, user, bootstrap, token, and secret
+  writes decode through the shared JSON path, so they require an
+  `application/json` body and a bounded one.
 - **web:** The dashboard's logs-service proxy now forwards only the four log
   reads the dashboard makes, each gated on the session's `logs.read` scope, so
   a signed-in browser can no longer delete a run's logs or append forged log
@@ -158,10 +166,14 @@ code change to unlock.
   `--api-token` unless `--allow-unauthenticated`
   (`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`) is set, and cached-binary and
   lint-cache reads now send `SPARKWING_CACHE_TOKEN`.
-- **cli:** Generated git hooks now single-quote each pipeline name, and
-  `sparkwing.yaml` rejects a pipeline name outside
+- **cli + config (Breaking):** Generated git hooks now single-quote each pipeline
+  name, and `sparkwing.yaml` rejects a pipeline name outside
   `^[A-Za-z0-9][A-Za-z0-9._-]*$`, so a repository's config cannot hand shell
-  execution to anyone who runs `sparkwing pipeline hooks install`.
+  execution to anyone who runs `sparkwing pipeline hooks install`. A config
+  holding a name outside that pattern no longer loads at all, so every command
+  that reads it fails until the pipeline is renamed in the YAML and in the
+  matching `Register(...)` string. See the
+  [migration guide](docs/migrations/_unreleased.md#pipeline-name-charset).
 - **storage:** Artifact keys are now validated before the filesystem store
   joins them to a path, and the store opens every blob through `os.Root`, so
   `GET /api/v1/artifacts/{key}` can no longer read, overwrite, or delete files

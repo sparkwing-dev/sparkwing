@@ -157,6 +157,11 @@ func TestValidate_NameCharset(t *testing.T) {
 		{"$(id)", false},
 		{"a/b", false},
 		{"tab\tname", false},
+		{"lint\n", false},
+		{"lint\nrm -rf /", false},
+		{"lint\x00; id", false},
+		{"l\u0456nt", false},
+		{"\xff\xfelint", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

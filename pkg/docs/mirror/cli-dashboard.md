@@ -79,6 +79,7 @@ dashboard is a newer version than this CLI.
 |---|---|
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
 | `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets. |
+| `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when `--allow-remote` serves the dashboard under a name that is not the `--addr` host. |
 | `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--profile PROFILE` | Profile from ~/.config/sparkwing/profiles.yaml (uses its log_store + artifact_store) |
 | `--log-store URL` | Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |
@@ -100,7 +101,16 @@ sparkwing dashboard start --home /tmp/sparkwing-x
 
 # Tail CI runs from S3 (no SQLite)
 sparkwing dashboard start --profile ci-smoke --no-local-store --read-only
+
+# Serve a LAN bind, and let a browser reach it by name
+sparkwing dashboard start --addr 192.168.1.20:4343 --allow-remote \
+  --allow-origin http://dash.lan:4343
 ```
+
+The listener answers loopback `Host` headers only, and rejects a browser
+`Origin` that is neither loopback, the `--addr` host, nor listed in
+`--allow-origin`. `--allow-remote` widens the `Host` check alone: a page
+that resolves its own name to this machine still cannot read a response.
 
 ## `sparkwing dashboard status`
 

@@ -85,6 +85,19 @@ func TestDescribeManagedHook_ReadsUnquotedLegacyHook(t *testing.T) {
 	}
 }
 
+func TestDescribeManagedHook_ReadsLegacyNamesHoldingAQuoteOrBackslash(t *testing.T) {
+	cases := []struct{ line, want string }{
+		{"sparkwing run it's --profile 'bucket'", "it's"},
+		{`sparkwing run a\b --profile 'bucket'`, `a\b`},
+	}
+	for _, tc := range cases {
+		got, _ := describeManagedHook("#!/bin/sh\n" + tc.line + "\n")
+		if len(got) != 1 || got[0] != tc.want {
+			t.Errorf("describeManagedHook(%q) = %q, want [%s]", tc.line, got, tc.want)
+		}
+	}
+}
+
 func TestRenderHookScript_ForwarderCarriesNoProfile(t *testing.T) {
 	script := renderHookScript("prepare-commit-msg", nil, true, "bucket")
 	if strings.Contains(script, "--profile") || strings.Contains(script, "--sw-local-only") {
