@@ -408,11 +408,11 @@ code change to unlock.
   for the input set and where proofs are stored.
 
 - **release:** The release pipeline now runs a contract preflight before the
-  root Go suite. It proves the embedded documentation mirror and the
-  documentation, help, and environment-variable contracts in seconds, and it
-  fails if its `-run` pattern stops matching anything, so a renamed check
-  cannot leave the preflight passing on nothing. The full gates keep their
-  existing coverage.
+  root Go suite. It proves the embedded documentation mirror and a named set of
+  documentation, help, registry, and environment-variable contract checks in
+  under a second, and every named check must report a pass, so renaming or
+  removing one fails the release rather than quietly shrinking the preflight.
+  The full gates keep their existing coverage.
 
 ### Fixed
 

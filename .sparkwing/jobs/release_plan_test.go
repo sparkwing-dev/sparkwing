@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -156,14 +157,50 @@ func TestReleasePlanRunsContractPreflightBeforeTheRootGoSuite(t *testing.T) {
 	}
 }
 
-func TestReleaseContractPreflightFailsWhenItsTestsAreRenamedAway(t *testing.T) {
-	check := releaseContractChecks[0]
-	if err := requireContractTestsRan(check, "ok  github.com/sparkwing-dev/sparkwing/pkg/docs  0.2s"); err != nil {
-		t.Fatalf("passing output rejected: %v", err)
+func TestReleaseContractPreflightRequiresEveryNamedCheckToPass(t *testing.T) {
+	check := contractCheck{
+		Label:   "contracts",
+		Command: "go test -v ./cmd/sparkwing -run " + contractTestPattern([]string{"TestAlpha", "TestBeta"}),
+		Tests:   []string{"TestAlpha", "TestBeta"},
 	}
-	err := requireContractTestsRan(check, "testing: warning: no tests to run\nok  pkg/docs  0.1s [no tests to run]")
-	if err == nil || !strings.Contains(err.Error(), "matched no tests") {
-		t.Fatalf("empty run = %v, want a refusal naming the vanished tests", err)
+
+	full := "--- PASS: TestAlpha (0.01s)\n--- PASS: TestBeta (0.00s)\nok  cmd/sparkwing 0.3s\n"
+	if err := requireContractTestsPassed(check, full); err != nil {
+		t.Fatalf("a run that passed every named check was rejected: %v", err)
+	}
+
+	err := requireContractTestsPassed(check, "--- PASS: TestAlpha (0.01s)\nok  cmd/sparkwing 0.3s\n")
+	if err == nil || !strings.Contains(err.Error(), "TestBeta") || strings.Contains(err.Error(), "TestAlpha\n") {
+		t.Fatalf("a vanished check = %v, want a refusal naming only TestBeta", err)
+	}
+
+	if err := requireContractTestsPassed(check, "ok  cmd/sparkwing 0.3s [no tests to run]\n"); err == nil {
+		t.Fatal("a run that matched nothing passed the preflight")
+	}
+
+	if err := requireContractTestsPassed(check, "--- PASS: TestAlphaExtended (0.01s)\n--- PASS: TestBeta (0.0s)\n"); err == nil {
+		t.Fatal("a check whose name is only a prefix of another satisfied the preflight")
+	}
+}
+
+func TestReleaseContractPreflightNamesTheContractsItClaims(t *testing.T) {
+	checks := releaseContractChecks()
+	if len(checks) != 2 {
+		t.Fatalf("preflight has %d checks, want the docs mirror and the contract set", len(checks))
+	}
+	named := checks[1]
+	for _, want := range releaseContractTests {
+		if !strings.Contains(named.Command, want) {
+			t.Errorf("the -run pattern does not name %s", want)
+		}
+		if !slices.Contains(named.Tests, want) {
+			t.Errorf("the required-pass list does not name %s", want)
+		}
+	}
+	for _, want := range []string{"EnvironmentVariable", "Registry", "Help", "Docs"} {
+		if !strings.Contains(strings.Join(releaseContractTests, " "), want) {
+			t.Errorf("the contract set covers no %s check, but the label claims one", want)
+		}
 	}
 }
 
