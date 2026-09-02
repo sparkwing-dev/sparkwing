@@ -53,11 +53,12 @@ func (s *Server) routes() {
 	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleGetRun)))
 	mux.Handle("GET /api/v1/auth/whoami", http.HandlerFunc(s.handleWhoami))
 	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeUnknown, http.HandlerFunc(s.handleGitcacheGit)))
+	mux.Handle("GET /api/v1/triggers/{id}", s.scopeOrRunClaim(ScopeTriggersRead, http.HandlerFunc(s.handleGetTrigger)))
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	log.Printf("not a route")
 }
 `)
-	scopes := map[string]string{"ScopeRunsState": "runs.state", "ScopeRunsRead": "runs.read"}
+	scopes := map[string]string{"ScopeRunsState": "runs.state", "ScopeRunsRead": "runs.read", "ScopeTriggersRead": "triggers.read"}
 	got, err := Parse(src, scopes)
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +69,7 @@ func (s *Server) routes() {
 		{Method: "GET", Path: "/api/v1/health", Scope: Public},
 		{Method: "POST", Path: "/api/v1/runs", Scope: "runs.state"},
 		{Method: "GET", Path: "/api/v1/runs/{id}", Scope: "runs.read"},
+		{Method: "GET", Path: "/api/v1/triggers/{id}", Scope: "triggers.read"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("routes = %v, want %v", got, want)

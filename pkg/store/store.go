@@ -3213,6 +3213,28 @@ func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claima
 	return held > 0, nil
 }
 
+// PrincipalHoldsPipelineClaim reports whether claimant holds an
+// unexpired claim on any node of any run of the named pipeline. It is
+// the ownership proof for a write that names a pipeline instead of a
+// run. An unbound claimant holds nothing.
+func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error) {
+	if !claimant.bound() {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM nodes JOIN runs ON runs.id = nodes.run_id
+		  WHERE runs.pipeline = ? AND nodes.claim_principal = ?
+		    AND nodes.claim_token_prefix = ?
+		    AND nodes.claimed_by IS NOT NULL
+		    AND nodes.lease_expires_at IS NOT NULL AND nodes.lease_expires_at > ?`,
+		pipeline, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
+}
+
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
 // claims; ready_at is left intact. Returns reaped pairs.
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) {

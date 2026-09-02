@@ -92,14 +92,39 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 		t.Fatalf("HeartbeatTrigger: %v", err)
 	}
 
+	absentIsFine := func(err error) error {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+
 	for _, step := range []struct {
 		name string
 		call func() error
 	}{
+		{"read the run for execution, the node process's first call", func() error {
+			_, err := c.GetRunForExecution(ctx, trig.ID)
+			return absentIsFine(err)
+		}},
+		{"read the trigger, the node process's second call", func() error {
+			_, err := c.GetTrigger(ctx, trig.ID)
+			return absentIsFine(err)
+		}},
 		{"create the run", func() error {
 			return c.CreateRun(ctx, store.Run{
 				ID: trig.ID, Pipeline: "deploy", Status: "running", StartedAt: time.Now().UTC(),
 			})
+		}},
+		{"re-read the run it just created", func() error {
+			run, err := c.GetRunForExecution(ctx, trig.ID)
+			if err != nil {
+				return err
+			}
+			if run == nil || run.Pipeline != "deploy" {
+				return errors.New("GetRunForExecution returned no run for the claimed trigger")
+			}
+			return nil
 		}},
 		{"persist the plan snapshot", func() error {
 			return c.UpdatePlanSnapshot(ctx, trig.ID, []byte(`{"nodes":[]}`))
@@ -386,7 +411,83 @@ func TestRunnerScopes_StateWritesStillNeedTheNodeClaim(t *testing.T) {
 	}
 }
 
+// The two reads a node process starts with are admitted by the claim,
+// not by the scope, so a runner token holding no claim on the run still
+// gets nothing.
+func TestRunnerScopes_RunAndTriggerReadsStillNeedTheClaim(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	ctx := context.Background()
+
+	seedRepoTrigger(t, f.store, "run-1", "acme/web")
+	if _, err := client.NewWithToken(f.url, nil, raw).ClaimTrigger(ctx); err != nil {
+		t.Fatalf("ClaimTrigger: %v", err)
+	}
+	stranger, _, err := f.store.CreateToken("pool-b", store.TokenKindRunner,
+		runnerScopes, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateToken stranger: %v", err)
+	}
+
+	for _, tc := range []struct{ name, path string }{
+		{"read the run", "/api/v1/runs/run-1"},
+		{"read the trigger", "/api/v1/triggers/run-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := f.do(t, stranger, http.MethodGet, tc.path, ""); got != http.StatusForbidden {
+				t.Errorf("stranger GET %s = %d, want 403", tc.path, got)
+			}
+		})
+	}
+}
+
+// A pin outlives the run that writes it, so the route is bound to a
+// live claim on a run of that pipeline rather than to the scope alone.
+func TestRunnerScopes_ProfilePinNeedsAClaimOnThatPipeline(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+
+	seedRunNode(t, f.store, "run-1", "build")
+	if err := f.store.MarkNodeReady(ctx, "run-1", "build"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ClaimNode(ctx, "holder-1", nil, time.Minute, nil); err != nil {
+		t.Fatalf("ClaimNode: %v", err)
+	}
+	if err := f.store.RecordProfileObservation(ctx, "demo", "build", store.ProfileObservation{
+		Duration: time.Minute, PeakCores: 3, PeakMemoryBytes: 4 << 30, CPUMeasured: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.SetPipelinePin(ctx, "demo", "build", 3, 4<<30); err != nil {
+		t.Fatalf("SetPipelinePin on the pipeline this runner is executing: %v", err)
+	}
+	prof, err := f.store.GetPipelineProfile(ctx, "demo", "build")
+	if err != nil || prof == nil {
+		t.Fatalf("GetPipelineProfile: %v (profile %v)", err, prof)
+	}
+	if prof.PinnedCores != 3 {
+		t.Errorf("pinned cores = %v, want 3", prof.PinnedCores)
+	}
+
+	if err := c.SetPipelinePin(ctx, "release", "build", 1, 1<<30); err == nil {
+		t.Error("SetPipelinePin on a pipeline this runner holds no claim in succeeded, want 403")
+	}
+
+	stranger, _, err := f.store.CreateToken("pool-b", store.TokenKindRunner,
+		runnerScopes, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateToken stranger: %v", err)
+	}
+	if err := client.NewWithToken(f.url, nil, stranger).
+		SetPipelinePin(ctx, "demo", "build", 1, 1<<30); err == nil {
+		t.Error("a runner token holding no claim pinned another runner's pipeline, want 403")
+	}
+}
+
 func (f scopedFixture) do(t *testing.T, token, method, path, body string) int {
+
 	t.Helper()
 	var reader io.Reader
 	if body != "" {

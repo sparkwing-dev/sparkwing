@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"maps"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -57,12 +58,10 @@ func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 				return true
 			}
 		}
-		if wrapped, ok := call.Args[1].(*ast.CallExpr); ok {
-			if fn, ok := wrapped.Fun.(*ast.Ident); ok && fn.Name == "requireScope" {
-				return true
-			}
+		if _, ok := routeScope(call.Args[1]); ok {
+			return true
 		}
-		t.Errorf("server.go:%d: mux route registered without requireScope",
+		t.Errorf("server.go:%d: mux route registered without a scope gate",
 			fset.Position(call.Pos()).Line)
 		return true
 	})
@@ -85,6 +84,32 @@ func TestRouteGuard_LoopbackRoutesAreASubsetOfTheController(t *testing.T) {
 				pattern, scope, want)
 		}
 	}
+}
+
+// safety: a scopeOr... wrapper takes requireScope's first argument and
+// admits a documented alternative to it, so it counts as a gate here.
+func routeScope(handler ast.Expr) (string, bool) {
+	call, ok := handler.(*ast.CallExpr)
+	if !ok || len(call.Args) == 0 {
+		return "", false
+	}
+	var name string
+	switch fn := call.Fun.(type) {
+	case *ast.Ident:
+		name = fn.Name
+	case *ast.SelectorExpr:
+		name = fn.Sel.Name
+	default:
+		return "", false
+	}
+	if name != "requireScope" && !strings.HasPrefix(name, "scopeOr") {
+		return "", false
+	}
+	scope, ok := call.Args[0].(*ast.Ident)
+	if !ok {
+		return "", false
+	}
+	return scope.Name, true
 }
 
 func muxRoutes(t *testing.T, file string) map[string]string {
@@ -115,19 +140,11 @@ func muxRoutes(t *testing.T, file string) map[string]string {
 		if err != nil {
 			return true
 		}
-		wrapped, ok := call.Args[1].(*ast.CallExpr)
+		scope, ok := routeScope(call.Args[1])
 		if !ok {
 			return true
 		}
-		fn, ok := wrapped.Fun.(*ast.Ident)
-		if !ok || fn.Name != "requireScope" || len(wrapped.Args) == 0 {
-			return true
-		}
-		scope, ok := wrapped.Args[0].(*ast.Ident)
-		if !ok {
-			return true
-		}
-		out[pattern] = scope.Name
+		out[pattern] = scope
 		return true
 	})
 	return out

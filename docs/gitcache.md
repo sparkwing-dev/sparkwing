@@ -330,14 +330,19 @@ startup so an unauthenticated deployment is visible.
 ### Network policy
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
-cache pod, admitting only the release's runner and controller pods on the
-cache port. Set `networkPolicy.enabled=false` to drop it, point
-`networkPolicy.controllerPodSelector` at your own controller's pod labels when
-it runs under a different release, and add peers through
-`networkPolicy.extraIngress` for an out-of-cluster runner pool. The chart
-refuses to render a non-`ClusterIP` `cache.service.type` unless
-`controller.tokenSecret.name` is set and `cache.allowUnauthenticated` is false,
-so a published cache always demands a bearer.
+cache pod, admitting four peers on the cache port: the release's runner,
+controller, and dashboard pods, plus the Job pods the Kubernetes runner
+backend creates. Set `networkPolicy.enabled=false` to drop it. Point
+`networkPolicy.controllerPodSelector` and `networkPolicy.webPodSelector` at
+your own pod labels when the controller or the dashboard runs under a
+different release; both default to this release's own pods. Override
+`networkPolicy.runnerJobPodSelector`, which defaults to
+`app.kubernetes.io/name: sparkwing-runner`, when the Job template carries
+other labels. Add peers through `networkPolicy.extraIngress` for an
+out-of-cluster runner pool. The chart refuses to render a non-`ClusterIP`
+`cache.service.type` unless `controller.tokenSecret.name` is set and
+`cache.allowUnauthenticated` is false, so a published cache always demands a
+bearer.
 
 ## API Endpoints
 

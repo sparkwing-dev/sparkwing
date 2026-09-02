@@ -48,6 +48,7 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
 ### Security
 
 - **ci:** The `security-scan` pipeline now fails on any high-severity,
@@ -194,18 +195,12 @@ code change to unlock.
   token on. The Git cache register route keeps its half-hour deadline, the
   controller refuses to start when `--metrics-addr` cannot bind, and
   `controller.metricsPort` wires that flag into the `sparkwing-full` chart.
-
-### Security
-
 - **controller:** First-admin bootstrap is now atomic on Postgres. The
   check-then-insert locks a single `sparkwing_meta` latch row inside its
   transaction, so two concurrent bootstrap requests can no longer both read an
   empty `users` table and each create an admin under a different name. The
   transaction also ran raw `?` placeholders that Postgres rejects, so bootstrap
   now goes through the dialect-aware transaction helper.
-
-### Security
-
 - **cache + orchestrator:** The dependency-cache and lint-cache archives now
   extract through one `os.Root`-backed implementation that refuses to follow a
   symlink out of the target directory, so a chain of links inside an archive can
@@ -229,9 +224,6 @@ code change to unlock.
   directory, is skipped with a warning. A link whose target stays inside the
   workspace is still followed, and every matched file is opened once through
   an `os.Root` on the workspace, hashed and uploaded from that one handle.
-
-### Security
-
 - **docs:** The security documents now state what the code enforces. A Trust
   model section in `docs/security.md` names one controller as one trust domain,
   records that pipeline authors run code on runners with the runner's token in
@@ -244,6 +236,20 @@ code change to unlock.
   `x-sparkwing-scope` instead of prose that could disagree with the router:
   `bash bin/gen-api-docs.sh` writes it from `pkg/controller/server.go` and
   `bash bin/check-api-spec.sh` fails the `pre-push` gate when the two drift.
+  That check now also rejects a response object carrying a field OpenAPI 3.0
+  does not allow, which an unquoted comma in a flow-style description produces,
+  and it recognizes a scope named anywhere in an operation's prose rather than
+  only the phrase "<scope> scope". The Git-cache document's NetworkPolicy
+  paragraph names all four admitted peers and the selectors that override them.
+- **controller:** `GET /api/v1/runs/{id}` and `GET /api/v1/triggers/{id}` now
+  admit a caller holding a live claim on that run as well as one holding
+  `runs.read` or `triggers.read`. Those are the first two calls a node process
+  makes, so the documented runner token -- `nodes.claim`, `triggers.claim`,
+  `runs.state`, `secrets.read`, `logs.write` -- starts a node without carrying
+  either read scope. `PUT /api/v1/pipelines/{name}/profile/pin` now takes a
+  live claim on a run of the named pipeline in addition to `runs.state`, so a
+  runner token can no longer pin the CPU and memory limits of every other
+  repository's pipelines. `admin` bypasses both checks.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

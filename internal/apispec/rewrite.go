@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 
@@ -89,7 +91,7 @@ func comment(text string) string {
 
 func stampDocumented(paths *yaml.Node, registered map[string]apiroutes.Route, scopes []string) (map[string]bool, error) {
 	documented := map[string]bool{}
-	var phantom, prose []string
+	var phantom, prose, malformed []string
 	for i := 0; i+1 < len(paths.Content); i += 2 {
 		path := paths.Content[i].Value
 		item := paths.Content[i+1]
@@ -97,22 +99,32 @@ func stampDocumented(paths *yaml.Node, registered map[string]apiroutes.Route, sc
 			continue
 		}
 		for j := 0; j+1 < len(item.Content); j += 2 {
+			key := item.Content[j].Value
+			if key != "summary" && key != "description" {
+				continue
+			}
+			if scope := namedScope(item.Content[j+1].Value, scopes); scope != "" {
+				prose = append(prose, path+": "+key+" names "+scope)
+			}
+		}
+		for j := 0; j+1 < len(item.Content); j += 2 {
 			method := strings.ToLower(item.Content[j].Value)
 			if !isMethod(method) {
 				continue
 			}
-			key := strings.ToUpper(method) + " " + path
-			route, ok := registered[key]
+			opKey := strings.ToUpper(method) + " " + path
+			route, ok := registered[opKey]
 			if !ok {
-				phantom = append(phantom, key)
+				phantom = append(phantom, opKey)
 				continue
 			}
-			documented[key] = true
+			documented[opKey] = true
 			op := item.Content[j+1]
 			setScalar(op, scopeKey, route.Scope, true)
 			if claim := scopeProse(op, scopes); claim != "" {
-				prose = append(prose, key+": "+claim)
+				prose = append(prose, opKey+": "+claim)
 			}
+			malformed = append(malformed, badResponses(opKey, op)...)
 		}
 	}
 	if len(phantom) > 0 {
@@ -125,7 +137,44 @@ func stampDocumented(paths *yaml.Node, registered map[string]apiroutes.Route, sc
 		return nil, fmt.Errorf("%d operation(s) state a scope in prose, which drifts from the route table; drop the phrase and let %s carry it:\n  %s",
 			len(prose), scopeKey, strings.Join(prose, "\n  "))
 	}
+	if len(malformed) > 0 {
+		sort.Strings(malformed)
+		return nil, fmt.Errorf("%d response object(s) carry a field OpenAPI 3.0 does not allow, usually an unquoted comma splitting a description:\n  %s",
+			len(malformed), strings.Join(malformed, "\n  "))
+	}
 	return documented, nil
+}
+
+// safety: any other member on a Response Object, x- extensions aside,
+// means the document does not say what its author wrote.
+var responseFields = map[string]bool{
+	"description": true,
+	"headers":     true,
+	"content":     true,
+	"links":       true,
+	"$ref":        true,
+}
+
+func badResponses(opKey string, op *yaml.Node) []string {
+	responses := mapValue(op, "responses")
+	if responses == nil || responses.Kind != yaml.MappingNode {
+		return nil
+	}
+	var bad []string
+	for i := 0; i+1 < len(responses.Content); i += 2 {
+		status, response := responses.Content[i].Value, responses.Content[i+1]
+		if response.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(response.Content); j += 2 {
+			field := response.Content[j].Value
+			if responseFields[field] || strings.HasPrefix(field, "x-") {
+				continue
+			}
+			bad = append(bad, opKey+" "+status+": unexpected field "+strconv.Quote(field))
+		}
+	}
+	return bad
 }
 
 func seedMissing(paths *yaml.Node, routes []apiroutes.Route, documented map[string]bool) {
@@ -178,22 +227,72 @@ func pathParameters(path string) *yaml.Node {
 	return seq
 }
 
-func scopeProse(op *yaml.Node, scopes []string) string {
-	for _, field := range []string{"summary", "description"} {
-		v := mapValue(op, field)
-		if v == nil {
+func scopeProse(node *yaml.Node, scopes []string) string {
+	if node.Kind == yaml.SequenceNode {
+		for _, child := range node.Content {
+			if claim := scopeProse(child, scopes); claim != "" {
+				return claim
+			}
+		}
+		return ""
+	}
+	if node.Kind != yaml.MappingNode {
+		return ""
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := node.Content[i].Value, node.Content[i+1]
+		if key == "schema" || key == "schemas" {
 			continue
 		}
-		text := strings.NewReplacer("`", "", "*", "", "_", "").Replace(strings.ToLower(v.Value))
-		for _, scope := range scopes {
-			for _, spelling := range []string{scope, strings.ReplaceAll(scope, ".", "-")} {
-				if strings.Contains(text, spelling+" scope") {
-					return field + " says " + spelling + " scope"
-				}
+		if (key == "summary" || key == "description") && value.Kind == yaml.ScalarNode {
+			if scope := namedScope(value.Value, scopes); scope != "" {
+				return key + " names " + scope
+			}
+			continue
+		}
+		if claim := scopeProse(value, scopes); claim != "" {
+			return claim
+		}
+	}
+	return ""
+}
+
+// safety: these sentences name a scope to say which fields it fills, not
+// which scope the route demands, so namedScope reads past them.
+var proseNarrowing = []string{
+	"honored for an `admin` token and for a `nodes.claim` token holding an unexpired claim",
+	"Admits `runs.read`, but fills `env_json` only for an `admin` principal",
+}
+
+var proseMarkup = strings.NewReplacer("`", "", "*", "", "_", "")
+
+func namedScope(text string, scopes []string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	for _, allowed := range proseNarrowing {
+		text = strings.ReplaceAll(text, allowed, "")
+	}
+	text = proseMarkup.Replace(strings.ToLower(text))
+	for _, scope := range scopes {
+		for _, spelling := range []string{scope, strings.ReplaceAll(scope, ".", "-")} {
+			if scopeTokenRE(spelling).MatchString(text) {
+				return spelling
 			}
 		}
 	}
 	return ""
+}
+
+var scopeTokenREs sync.Map
+
+// safety: a bare scope token anywhere in the prose is a second authorization
+// statement, so the boundary stops only at letters and digits.
+func scopeTokenRE(spelling string) *regexp.Regexp {
+	if re, ok := scopeTokenREs.Load(spelling); ok {
+		return re.(*regexp.Regexp)
+	}
+	re := regexp.MustCompile(`(^|[^a-z0-9])` + regexp.QuoteMeta(spelling) + `([^a-z0-9]|$)`)
+	scopeTokenREs.Store(spelling, re)
+	return re
 }
 
 func specPath(routePath string) string {

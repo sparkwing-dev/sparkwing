@@ -4,7 +4,10 @@
 //
 // Parse recognises the registration form those files use,
 // `mux.Handle("METHOD /path", requireScope(ScopeX, ...))`, and resolves the
-// scope constant through the map [Scopes] collects from the auth sources:
+// scope constant through the map [Scopes] collects from the auth sources.
+// A wrapper named `scopeOr...` that takes the route scope as its first
+// argument reads the same way, so a route whose scope check has a documented
+// alternative still reports the scope it demands:
 //
 //	scopes, err := apiroutes.Scopes("pkg/controller/auth.go")
 //	routes, err := apiroutes.Parse("pkg/controller/server.go", scopes)
@@ -29,7 +32,7 @@ const Authenticated = "authenticated"
 var (
 	handleRE = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
 
-	scopeRefRE = regexp.MustCompile(`requireScope\((\w+),`)
+	scopeRefRE = regexp.MustCompile(`(?:requireScope|scopeOr\w+)\((\w+),`)
 
 	scopeConstRE = regexp.MustCompile(`\b([A-Za-z]\w*)\s*=\s*"([a-z][a-z.]*)"`)
 )
@@ -49,8 +52,7 @@ func Scopes(files ...string) (map[string]string, error) {
 	scopes := map[string]string{}
 	for _, file := range files {
 		// #nosec G703 -- a build-time tool reading paths the operator names
-		// #nosec G703 -- a build-time tool reading paths the operator names
-	data, err := os.ReadFile(file)
+		data, err := os.ReadFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("read scopes: %w", err)
 		}
@@ -67,6 +69,7 @@ func Scopes(files ...string) (map[string]string, error) {
 // A route registered on the `mux` receiver sits behind the authentication
 // middleware; anything else is reachable without a credential.
 func Parse(file string, scopes map[string]string) ([]Route, error) {
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("read routes: %w", err)

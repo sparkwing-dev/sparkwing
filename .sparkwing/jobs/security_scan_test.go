@@ -154,3 +154,13 @@ func TestFirstInt(t *testing.T) {
 		}
 	}
 }
+
+func TestReadGosecReportTreatsAMissingFileAsNoFindings(t *testing.T) {
+	issues, err := readGosecReport(filepath.Join(t.TempDir(), "gosec.json"))
+	if err != nil {
+		t.Fatalf("missing report: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("issues = %d, want none", len(issues))
+	}
+}

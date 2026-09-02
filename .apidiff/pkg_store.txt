@@ -214,6 +214,7 @@ var Maintenance = storeMaintenanceFns{
 }
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
+const MaxRunListLimit = 1000
 type MetricSample struct {
 	TS            time.Time
 	CPUMillicores int64
@@ -590,6 +591,7 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, now time.Time) (bool, error)
+func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)

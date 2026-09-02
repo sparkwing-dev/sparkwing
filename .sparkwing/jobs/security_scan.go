@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -121,7 +122,15 @@ func runGosec(ctx context.Context, dir, out string) ([]gosecIssue, error) {
 	if _, err := sparkwing.Exec(ctx, "go", gosecArgs(out)...).Dir(dir).Env("GOWORK", "off").Run(); err != nil {
 		return nil, err
 	}
+	return readGosecReport(out)
+}
+
+func readGosecReport(out string) ([]gosecIssue, error) {
 	data, err := os.ReadFile(out)
+	// safety: gosec -quiet writes no report at all when nothing was found, so a missing file is a clean scan.
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read gosec report: %w", err)
 	}

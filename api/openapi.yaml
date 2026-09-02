@@ -724,7 +724,7 @@ paths:
     post:
       x-sparkwing-scope: runs.state
       tags: [nodes]
-      summary: Admin override of a node's status (debug / repair).
+      summary: Override a node's status (debug / repair).
       requestBody:
         required: true
         content:
@@ -768,7 +768,7 @@ paths:
               schema: {$ref: "#/components/schemas/NodeBounce"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: The node is not running, or the run is no longer live.: ''}
+        "409": {description: "The node is not running, or the run is no longer live."}
         "500": {$ref: "#/components/responses/InternalError"}
     get:
       x-sparkwing-scope: nodes.claim
@@ -1875,7 +1875,7 @@ paths:
     post:
       x-sparkwing-scope: admin
       tags: [users]
-      summary: Create a user, or bootstrap the first admin.
+      summary: Create a user, or bootstrap the first administrator.
       description: |
         Answers without a credential while the users table is empty, and
         goes back to demanding the route's scope once any user exists.
@@ -2229,7 +2229,7 @@ paths:
       parameters:
         - {$ref: "#/components/parameters/GitcacheRepo"}
       responses:
-        "200": {description: The cache's answer, forwarded verbatim.: ''}
+        "200": {description: "The cache's answer, forwarded verbatim."}
         "400": {description: Missing or rejected repo URL.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "502": {description: The cache is unreachable or answered badly.}
@@ -2260,8 +2260,8 @@ paths:
           application/octet-stream:
             schema: {type: string, format: binary}
       responses:
-        "200": {description: The cache's answer, forwarded verbatim.: ''}
-        "400": {description: Missing or rejected repo URL, sha: '', or workspace flag.: ''}
+        "200": {description: "The cache's answer, forwarded verbatim."}
+        "400": {description: "Missing or rejected repo URL, sha, or workspace flag."}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "502": {description: The cache is unreachable or answered badly.}
         "503": {description: No cache is configured on this controller.}
@@ -2278,7 +2278,7 @@ paths:
           schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}
         - {$ref: "#/components/parameters/GitcacheRepo"}
       responses:
-        "200": {description: The cache's answer, forwarded verbatim.: ''}
+        "200": {description: "The cache's answer, forwarded verbatim."}
         "400": {description: Rejected name or repo URL.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "502": {description: The cache is unreachable or answered badly.}
@@ -2355,7 +2355,7 @@ paths:
       responses:
         "202": {description: Accepted; trigger queued.}
         "400": {description: Missing X-GitHub-Delivery header or undecodable payload.}
-        "401": {description: Invalid HMAC signature, or no secret covers the named repository.: ''}
+        "401": {description: "Invalid HMAC signature, or no secret covers the named repository."}
         "404": {description: The repository is not bound to this pipeline.}
         "409": {description: This body was already accepted; the run it produced is in run_id.}
         "503": {description: GitHub webhook secret not configured anywhere.}
