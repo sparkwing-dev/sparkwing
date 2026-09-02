@@ -95,6 +95,14 @@ code change to unlock.
   a renamed owner, or a dropped `persist-credentials: false` fails until the
   table is updated on purpose, and `.github/dependabot.yml` proposes weekly
   action, Go module, and dashboard dependency updates.
+- **cache:** The package proxy rewrites the npm and PyPI URLs it serves against
+  `--public-url` (`SPARKWING_CACHE_PUBLIC_URL`, chart: `cache.publicUrl`,
+  defaulting to the in-cluster Service URL) and caches that copy. Without a
+  public URL the upstream body is cached untouched and every response is
+  rewritten from its own request's `Host`, so a forged `Host` no longer poisons
+  the packument each later build reads. `X-Forwarded-Host` and
+  `X-Forwarded-Proto` count only when `--trust-forwarded-host`
+  (`SPARKWING_CACHE_TRUST_FORWARDED_HOST`) is set.
 
 ### Fixed
 
