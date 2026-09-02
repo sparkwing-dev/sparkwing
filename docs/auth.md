@@ -24,11 +24,11 @@ mapping is in the generated [api-reference.md](api-reference.md):
 |-------------------|---------------------------------------------------------------------------------------------------|
 | `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/trends`, `/agents`, per-node metrics GETs  |
 | `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`                                   |
-| `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, and read-only Git proxy routes scoped to a live claimed run |
+| `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`                               |
-| `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`                   |
+| `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run |
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, and PUT `/pipelines/{name}/profile/pin`. Every one is bound to a run the caller owns |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
@@ -78,6 +78,11 @@ claiming token's prefix on the trigger row. A trigger's id is the id of the run
 it creates, so that claim is what a dispatcher owns a run by before any node of
 it is claimed.
 
+`GET /api/v1/runs/{id}` accepts `runs.read` or a live `nodes.claim` or
+`triggers.claim` owner of that run. `GET /api/v1/triggers/{id}` likewise
+accepts `triggers.read` or either live claim. Claim-scoped access expires with
+the lease and never widens list routes.
+
 Every `runs.state` write names a run, and the caller must own that run: hold an
 unexpired claim on one of its nodes, or hold the unexpired claim on its
 trigger. That covers run create, run finish, plan snapshot, node create, event
@@ -106,6 +111,8 @@ single write that a live claim authorized moments earlier.
 The execution view (`GET /api/v1/runs/{id}?include=secret_values`) follows the
 same rule: it returns plaintext argument values to an `admin` principal, or to
 a `nodes.claim` principal holding an unexpired claim on one of the run's nodes.
+A trigger claimant may read the run record but receives redacted secret values
+until it holds a node claim.
 A controller serving unauthenticated returns **plaintext**, because the whole
 API is open in that mode and handing a runner `***` as a real argument value
 would corrupt the run rather than protect it. Once authentication is on, a

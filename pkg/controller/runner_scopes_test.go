@@ -409,6 +409,108 @@ func TestRunnerScopes_StateWritesStillNeedTheNodeClaim(t *testing.T) {
 	}
 }
 
+func TestRunnerScopes_ClaimScopedReadsExpireAndKeepSecretsNodeOnly(t *testing.T) {
+	t.Run("trigger claim", func(t *testing.T) {
+		f, raw := newScopedFixture(t, []string{controller.ScopeTriggersClaim})
+		ctx := context.Background()
+		c := client.NewWithToken(f.url, nil, raw)
+
+		seedRepoTrigger(t, f.store, "run-trigger", "acme/web")
+		if err := f.store.CreateRun(ctx, store.Run{
+			ID:       "run-trigger",
+			Pipeline: "deploy",
+			Status:   "pending",
+			Args:     map[string]string{"token": "trigger-secret"},
+			Invocation: map[string]any{
+				store.InvocationSecretArgsKey: []string{"token"},
+			},
+			StartedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+		trig, err := c.ClaimTrigger(ctx)
+		if err != nil || trig == nil {
+			t.Fatalf("ClaimTrigger: %v (trigger %v)", err, trig)
+		}
+		run, err := c.GetRunForExecution(ctx, trig.ID)
+		if err != nil {
+			t.Fatalf("GetRunForExecution with live trigger claim: %v", err)
+		}
+		if got := run.Args["token"]; got != "***" {
+			t.Fatalf("trigger claimant secret arg = %q, want redacted value", got)
+		}
+
+		if _, err := f.store.DB().ExecContext(ctx,
+			`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`,
+			time.Now().Add(-time.Minute).UnixNano(), trig.ID); err != nil {
+			t.Fatalf("expire trigger claim: %v", err)
+		}
+		for _, path := range []string{
+			"/api/v1/runs/run-trigger?include=secret_values",
+			"/api/v1/triggers/run-trigger",
+		} {
+			if got := f.do(t, raw, http.MethodGet, path, ""); got != http.StatusForbidden {
+				t.Errorf("expired trigger claimant GET %s = %d, want 403", path, got)
+			}
+		}
+	})
+
+	t.Run("node claim", func(t *testing.T) {
+		f, raw := newScopedFixture(t, []string{controller.ScopeNodesClaim})
+		ctx := context.Background()
+		c := client.NewWithToken(f.url, nil, raw)
+
+		seedRepoTrigger(t, f.store, "run-node", "acme/web")
+		if err := f.store.CreateRun(ctx, store.Run{
+			ID:       "run-node",
+			Pipeline: "deploy",
+			Status:   "running",
+			Args:     map[string]string{"token": "node-secret"},
+			Invocation: map[string]any{
+				store.InvocationSecretArgsKey: []string{"token"},
+			},
+			StartedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("CreateRun: %v", err)
+		}
+		if err := f.store.CreateNode(ctx, store.Node{
+			RunID: "run-node", NodeID: "build", Status: "pending",
+		}); err != nil {
+			t.Fatalf("CreateNode: %v", err)
+		}
+		if err := f.store.MarkNodeReady(ctx, "run-node", "build"); err != nil {
+			t.Fatalf("MarkNodeReady: %v", err)
+		}
+		if _, err := c.ClaimNode(ctx, "holder-node", nil, time.Minute, nil); err != nil {
+			t.Fatalf("ClaimNode: %v", err)
+		}
+		run, err := c.GetRunForExecution(ctx, "run-node")
+		if err != nil {
+			t.Fatalf("GetRunForExecution with live node claim: %v", err)
+		}
+		if got := run.Args["token"]; got != "node-secret" {
+			t.Fatalf("node claimant secret arg = %q, want plaintext", got)
+		}
+		if _, err := c.GetTrigger(ctx, "run-node"); err != nil {
+			t.Fatalf("GetTrigger with live node claim: %v", err)
+		}
+
+		if _, err := f.store.DB().ExecContext(ctx,
+			`UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ?`,
+			time.Now().Add(-time.Minute).UnixNano(), "run-node", "build"); err != nil {
+			t.Fatalf("expire node claim: %v", err)
+		}
+		for _, path := range []string{
+			"/api/v1/runs/run-node?include=secret_values",
+			"/api/v1/triggers/run-node",
+		} {
+			if got := f.do(t, raw, http.MethodGet, path, ""); got != http.StatusForbidden {
+				t.Errorf("expired node claimant GET %s = %d, want 403", path, got)
+			}
+		}
+	})
+}
+
 func (f scopedFixture) do(t *testing.T, token, method, path, body string) int {
 	t.Helper()
 	var reader io.Reader

@@ -12,7 +12,7 @@ import (
 var (
 	handleRE = regexp.MustCompile(`\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
 
-	scopeRefRE = regexp.MustCompile(`requireScope\((\w+),`)
+	scopeRefRE = regexp.MustCompile(`\b((?:Scope|scope)[A-Za-z]\w*)\b`)
 
 	scopeConstRE = regexp.MustCompile(`\b([A-Za-z]\w*)\s*=\s*"([a-z][a-z.]*)"`)
 )
@@ -39,7 +39,8 @@ func main() {
 	b.WriteString("<!-- GENERATED from the route registrations in pkg/controller/server.go and pkg/logs/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->\n")
 	b.WriteString("# HTTP API reference\n\n")
 	b.WriteString("Every route the controller and logs service register, with the " +
-		"scope each requires, generated from the routing code. All paths are under " +
+		"scope each accepts, generated from the routing code. Alternatives are joined " +
+		"by `or`; claim scopes still require ownership of the named run. All paths are under " +
 		"the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and " +
 		"the token model are in [auth.md](auth.md); `admin` is the superset that " +
 		"satisfies any scope check. `public` routes run with no bearer check (the " +
@@ -78,12 +79,20 @@ func writeRoutes(b *strings.Builder, title string, scopes map[string]string, fil
 		}
 		method, path, rest := m[1], m[2], m[3]
 		scope := "public"
-		if sm := scopeRefRE.FindStringSubmatch(rest); sm != nil {
-			if v, ok := scopes[sm[1]]; ok {
-				scope = v
-			} else {
-				scope = sm[1]
+		if matches := scopeRefRE.FindAllStringSubmatch(rest, -1); len(matches) > 0 {
+			seen := map[string]bool{}
+			var accepted []string
+			for _, match := range matches {
+				value := scopes[match[1]]
+				if value == "" {
+					value = match[1]
+				}
+				if !seen[value] {
+					accepted = append(accepted, value)
+					seen[value] = true
+				}
 			}
+			scope = strings.Join(accepted, "` or `")
 		}
 		routes = append(routes, route{method, path, scope})
 	}
