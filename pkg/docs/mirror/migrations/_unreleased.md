@@ -5,6 +5,23 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## The dashboard refuses an unauthenticated remote bind
+
+- **Before:** `sparkwing-web --token ... --addr=0.0.0.0:4343` without
+  `--require-login` served an open dashboard and injected the controller bearer
+  into every HTML page, so any browser that reached the listener held the
+  token.
+- **After:** The bearer stays in the web process and rides only its server-side
+  proxy. That configuration now fails at startup with a message naming the
+  three ways forward.
+- **Migration:** Turn on `--require-login` (chart: `web.requireLogin`), bind a
+  loopback address, or keep the open dashboard by passing
+  `--allow-unauthenticated-remote` (chart: `web.allowUnauthenticatedRemote`).
+  Drop `--api-url` and `web.apiUrl`: the dashboard proxies the API on its own
+  origin, which is also what the new `connect-src 'self'` policy allows.
+- **Why:** An unauthenticated dashboard holding a service token hands the
+  controller to every caller that can reach the port.
+
 ## Cache reads require the bearer token
 
 - **Before:** `sparkwing-cache` demanded a bearer only on its blob and sync

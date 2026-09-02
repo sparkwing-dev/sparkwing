@@ -7,9 +7,6 @@ import { getControllerUrl } from "@/lib/api";
 
 function getToken(): string {
   if (typeof window === "undefined") return "";
-  const win = window as unknown as Record<string, unknown>;
-  if (typeof win.__SPARKWING_TOKEN__ === "string")
-    return win.__SPARKWING_TOKEN__ as string;
   return process.env.NEXT_PUBLIC_API_TOKEN || "";
 }
 

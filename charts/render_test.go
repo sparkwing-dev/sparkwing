@@ -670,6 +670,23 @@ func TestRunnerPackageManagersUseTheBundledDependencyProxy(t *testing.T) {
 	}
 }
 
+func TestCachePublicURLMatchesTheProxyURLRunnersDial(t *testing.T) {
+	const want = "http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
+	if got := runnerEnv(t, renderCache(t))["SPARKWING_CACHE_PUBLIC_URL"]; got != want {
+		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want %q", got, want)
+	}
+	if got := runnerEnv(t, renderRunner(t))["npm_config_registry"]; got != want+"/proxy/npm" {
+		t.Errorf("npm_config_registry = %q, want the same base the cache rewrites against", got)
+	}
+}
+
+func TestCachePublicURLOverrideWins(t *testing.T) {
+	env := runnerEnv(t, renderCache(t, "cache.publicUrl=https://cache.example.com"))
+	if got := env["SPARKWING_CACHE_PUBLIC_URL"]; got != "https://cache.example.com" {
+		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want the explicit override", got)
+	}
+}
+
 func TestRunnerExtraEnvOverridesADependencyProxyDefault(t *testing.T) {
 	env := runnerEnv(t, renderRunner(t,
 		"runner.extraEnv[0].name=GOPROXY",

@@ -229,6 +229,15 @@ registries:
 | golang | proxy.golang.org | No |
 | alpine | dl-cdn.alpinelinux.org | No |
 
+**URL rewriting:** npm packuments and PyPI simple pages carry absolute
+upstream URLs, so the proxy rewrites them onto itself. It rewrites against
+`SPARKWING_CACHE_PUBLIC_URL` when that is set, and caches the rewritten body.
+Unset, the cached copy stays exactly as upstream sent it and each response is
+rewritten from its own request's `Host` header, so a caller who sends a forged
+`Host` only ever changes its own response. Set the public URL whenever every
+client reaches the proxy at one address -- the runner-bundle chart does it for
+you through `cache.publicUrl`, defaulting to the in-cluster Service URL.
+
 **Cache policy:**
 
 - Immutable content (.tgz, .whl, .gem, .zip, .jar, .apk): cached until the
@@ -247,3 +256,9 @@ registries:
 - `PROXY_CACHE_DIR` -- cache directory (default: `/data/proxy`)
 - `PROXY_CACHE_TTL` -- metadata TTL (default: `10m`)
 - `PROXY_MAX_AGE` -- cleanup threshold for immutable entries (default: `168h`)
+- `SPARKWING_CACHE_PUBLIC_URL` (`--public-url`) -- base URL clients use to reach
+  the proxy, e.g. `http://sparkwing-cache.sparkwing.svc.cluster.local`. Empty
+  rewrites per request from the `Host` header (default)
+- `SPARKWING_CACHE_TRUST_FORWARDED_HOST` (`--trust-forwarded-host`) -- honor
+  `X-Forwarded-Host` and `X-Forwarded-Proto` when rewriting per request. Only
+  set it when a reverse proxy is the only route to the port (default: off)

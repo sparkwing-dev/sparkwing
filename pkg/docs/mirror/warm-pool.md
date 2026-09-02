@@ -96,11 +96,20 @@ ConfigMap named `sparkwing-cache-config`. The warming parameters
 warming loop, so changes take effect without a restart. The remaining
 parameters (`pool_size`, `pvc_size`, `heartbeat_timeout`, and
 `startup_grace`) are read once at controller startup and require a
-restart to change. Each `warm_images` entry must be a registry
-reference (optional host and port, a lowercase path, an optional tag,
-an optional `@sha256:` digest); the controller logs and drops anything
-else rather than passing it to the privileged warmer pod. The YAML
-below is the value stored under `data.config.yaml`:
+restart to change.
+
+Each `warm_images` entry must be a registry reference: an optional host
+and port, where the host is a DNS name or a bracketed IPv6 address such
+as `[::1]:5000`, then a lowercase path, an optional tag, and an optional
+`@sha256:` digest. The controller drops every other entry rather than
+passing it to the privileged warmer pod, and reports what it dropped in
+one summary line per read. It reads the first 64 entries and ignores the
+rest.
+
+The grammar is narrower than `docker pull` in two ways: it accepts
+`sha256` digests only, and it requires lowercase hexadecimal in a digest.
+
+The YAML below is the value stored under `data.config.yaml`:
 
 ```yaml
 # Images to pre-pull into each pool PVC

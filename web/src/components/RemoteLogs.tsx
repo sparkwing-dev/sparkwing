@@ -18,14 +18,7 @@ export default function RemoteLogs({ jobId, logsUrl }: Props) {
     (async () => {
       try {
         const url = `${logsUrl}?offset=0&limit=${2 * 1024 * 1024}`;
-        const token =
-          (typeof window !== "undefined" &&
-            ((window as unknown as Record<string, unknown>)
-              .__SPARKWING_TOKEN__ as string)) ||
-          "";
-        const res = await fetch(url, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
+        const res = await fetch(url);
         if (!res.ok) {
           throw new Error(`logs service returned ${res.status}`);
         }

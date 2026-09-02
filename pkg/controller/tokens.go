@@ -126,6 +126,7 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
+	s.auth.Invalidate(prefix)
 	p, _ := PrincipalFromContext(r.Context())
 	who := authwire.AnonymousPrincipal
 	if p != nil {
