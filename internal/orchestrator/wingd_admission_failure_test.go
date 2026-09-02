@@ -99,7 +99,7 @@ func TestRun_AdmissionFailureEmitsDelegateFinish(t *testing.T) {
 }
 
 func TestAdmissionFailure_NeverAdmissibleCarriesTheDaemonsArithmetic(t *testing.T) {
-	err := admissionFailure(&wingdclient.AdmissionError{
+	err := admissionFailure(nil, &wingdclient.AdmissionError{
 		Key:    "never_admissible",
 		Policy: wingwire.PolicyFail,
 		Reason: "needs 12GiB of memory, this machine has 8GiB",
@@ -109,7 +109,7 @@ func TestAdmissionFailure_NeverAdmissibleCarriesTheDaemonsArithmetic(t *testing.
 		t.Errorf("refusal = %q, want %q", err.Error(), want)
 	}
 
-	bare := admissionFailure(&wingdclient.AdmissionError{Key: "never_admissible", Policy: wingwire.PolicyFail})
+	bare := admissionFailure(nil, &wingdclient.AdmissionError{Key: "never_admissible", Policy: wingwire.PolicyFail})
 	if !strings.Contains(bare.Error(), "concurrency group") {
 		t.Errorf("reasonless refusal = %q, want the concurrency-group fallback", bare.Error())
 	}

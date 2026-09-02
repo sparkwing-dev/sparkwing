@@ -43,6 +43,13 @@ type verifyEnv struct {
 	SparksCore map[string]string `json:"sparks_core"`
 
 	GoEnv map[string]string `json:"go_env"`
+
+	Proof proofEnv `json:"proof"`
+}
+
+// TemplateVerifyArgs are the flags `sparkwing run template-verify` accepts.
+type TemplateVerifyArgs struct {
+	Exhaustive bool `flag:"exhaustive" desc:"Verify every template even when a recorded proof covers its inputs. The release pipeline always sets this."`
 }
 
 var (
@@ -58,22 +65,23 @@ func (TemplateVerify) ShortHelp() string {
 }
 
 func (TemplateVerify) Help() string {
-	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline explain`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with SPARKWING_DRY_RUN=1 exported so cloud mutations echo instead of executing. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. The pipeline is green only when every template passes, which is why the release pipeline gates on it."
+	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline explain`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with SPARKWING_DRY_RUN=1 exported so cloud mutations echo instead of executing. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. The pipeline is green only when every template passes, which is why the release pipeline gates on it. A template whose proof inputs are unchanged since a recorded pass is reused instead of re-verified: the digest covers the template's registry files, its verification manifest fields, the exact working state of the sparkwing and sparks-core checkouts (which is what pins the SDK, the CLI, and this verifier), the Go toolchain, and the identity of every host tool the template needs. Reuse is refused whenever any of those cannot be established, including when no local sparks-core checkout pins the module versions a scaffold resolves. Pass --exhaustive to verify every template regardless; the release pipeline always does."
 }
 
 func (TemplateVerify) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Verify the whole template registry", Command: "sparkwing run template-verify"},
 		{Comment: "Render the fan-out DAG without running", Command: "sparkwing pipeline explain --name template-verify"},
+		{Comment: "Re-verify every template, ignoring recorded proofs", Command: "sparkwing run template-verify --exhaustive"},
 	}
 }
 
-func (TemplateVerify) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+func (TemplateVerify) Plan(_ context.Context, plan *sparkwing.Plan, in TemplateVerifyArgs, _ sparkwing.RunContext) error {
 	if verifyTemplatesErr != nil {
 		return fmt.Errorf("template-verify: load registry: %w", verifyTemplatesErr)
 	}
 
-	build := sparkwing.Job(plan, "build-cli", &buildVerifyCLIJob{})
+	build := sparkwing.Job(plan, "build-cli", &buildVerifyCLIJob{Exhaustive: in.Exhaustive})
 	envRef := sparkwing.RefTo[verifyEnv](build)
 
 	deps := make([]sparkwing.Dep, 0, len(verifyTemplates))
@@ -90,6 +98,8 @@ func (TemplateVerify) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.
 type buildVerifyCLIJob struct {
 	sparkwing.Base
 	sparkwing.Produces[verifyEnv]
+
+	Exhaustive bool
 }
 
 func (j *buildVerifyCLIJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -128,12 +138,19 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	} else {
 		sparkwing.Annotate(ctx, "built CLI; no local sparks-core checkout (using published modules)")
 	}
+	proof := resolveProofEnv(ctx, root, core, j.Exhaustive)
+	if proof.Reusable {
+		sparkwing.Annotate(ctx, "proof inputs digested; templates whose inputs are unchanged reuse a recorded proof")
+	} else {
+		sparkwing.Info(ctx, "verifying every template: %s", proof.Reason)
+	}
 	return verifyEnv{
 		CLI:        bin,
 		Root:       root,
 		StateHome:  filepath.Join(dir, "state"),
 		SparksCore: core,
 		GoEnv:      readGoEnv(ctx),
+		Proof:      proof,
 	}, nil
 }
 
@@ -220,77 +237,140 @@ func (j *templateVerifyGate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) func(context.Context) error {
 	return func(ctx context.Context) error {
 		env := envRef.Get(ctx)
-		bin := env.CLI
-		scratch, err := os.MkdirTemp("", "sparkwing-tv-"+m.Name+"-*")
+		digest, dir, reuse := reusableProof(ctx, env.Proof, m)
+		if reuse {
+			sparkwing.Annotate(ctx, fmt.Sprintf("%s: reused a recorded proof; every input digest matched", m.Name))
+			return nil
+		}
+		outcome, err := verifyTemplate(ctx, m, env)
 		if err != nil {
-			return fmt.Errorf("%s: temp dir: %w", m.Name, err)
+			return err
 		}
-		defer func() { _ = os.RemoveAll(scratch) }()
+		recordVerification(ctx, dir, digest, m.Name, outcome)
+		return nil
+	}
+}
 
-		newArgs := []string{"examples", "scaffold", "-C", scratch, "--name", m.Name}
-		for _, p := range sortedParamFlags(m.VerifyParams) {
-			newArgs = append(newArgs, "--param", p)
-		}
-		if _, err := sparkwing.Exec(ctx, bin, newArgs...).Run(); err != nil {
-			return fmt.Errorf("%s: scaffold: %w", m.Name, err)
-		}
+// safety: a skipped run step is a partial verification, so it is never
+// recorded. Reusing one would let the next run treat a template that has
+// never executed as proven once its toolchain appeared.
+func recordVerification(ctx context.Context, dir, digest, name string, outcome templateOutcome) {
+	if digest == "" {
+		return
+	}
+	if outcome.Skipped {
+		sparkwing.Info(ctx, "%s: proof not recorded because %s was unavailable and the run step did not execute; the next run verifies it again",
+			name, outcome.SkipReason)
+		return
+	}
+	if err := recordProof(dir, digest, proofRecord{Template: name, Tier: outcome.Tier, RanRunStep: outcome.RanRunStep}); err != nil {
+		sparkwing.Info(ctx, "%s: proof not recorded, so the next run verifies again: %v", name, err)
+	}
+}
 
-		dotSparkwing := filepath.Join(scratch, ".sparkwing")
-		if err := normalizeVerifyModulePath(dotSparkwing, m.Name); err != nil {
-			return fmt.Errorf("%s: normalize module path: %w", m.Name, err)
-		}
-		if err := pinLocalSparksCore(ctx, dotSparkwing, env.SparksCore); err != nil {
-			return fmt.Errorf("%s: pin sparks-core: %w", m.Name, err)
-		}
-		if err := pinLocalSparkwingSDK(ctx, dotSparkwing, env.Root); err != nil {
-			return fmt.Errorf("%s: pin sparkwing SDK: %w", m.Name, err)
-		}
-		if _, err := sparkwing.Exec(ctx, "go", "build", "./...").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
-			return fmt.Errorf("%s: go build: %w", m.Name, err)
-		}
-		if _, err := sparkwing.Exec(ctx, bin, "pipeline", "lint", "-C", scratch, "--all").Run(); err != nil {
-			return fmt.Errorf("%s: lint: %w", m.Name, err)
-		}
-		if _, err := sparkwing.Exec(ctx, bin, "pipeline", "explain", "--name", m.Name).Dir(scratch).Run(); err != nil {
-			return fmt.Errorf("%s: explain: %w", m.Name, err)
-		}
+// safety: Skipped marks a tier whose run step could not execute. That is a
+// partial proof, and recording it would let the next run reuse it once the
+// missing toolchain appeared.
+type templateOutcome struct {
+	Tier       string
+	RanRunStep bool
+	Skipped    bool
+	SkipReason string
+}
 
-		switch m.Tier() {
-		case templates.VerifyCompileOnly:
-			sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained (compile-only)", m.Name))
-			return nil
-		case templates.VerifyRunnable, templates.VerifyDryRunnable:
-			if ready, missing := runToolchainReady(ctx, m); !ready {
-				sparkwing.Info(ctx, "%s: run SKIPPED -- %s not available on host; keeping gate green (compiled + linted + explained only)", m.Name, missing)
-				sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained; run skipped (%s unavailable)", m.Name, missing))
-				return nil
-			}
-			cleanup, runEnv, err := provisionFixture(ctx, scratch, m, env)
-			if err != nil {
-				return fmt.Errorf("%s: fixture: %w", m.Name, err)
-			}
-			defer cleanup()
-			runCmd := sparkwing.Exec(ctx, bin, "run", m.Name).
-				Dir(scratch)
-			for name, value := range templateRunAdmissionEnv(env.StateHome) {
-				runCmd = runCmd.Env(name, value)
-			}
-			mode := "ran green"
-			if m.Tier() == templates.VerifyDryRunnable {
-				runCmd = runCmd.Env("SPARKWING_DRY_RUN", "1")
-				mode = "ran green (dry-run)"
-			}
-			for _, k := range sortedKeys(runEnv) {
-				runCmd = runCmd.Env(k, runEnv[k])
-			}
-			if _, err := runCmd.Run(); err != nil {
-				return fmt.Errorf("%s: run: %w", m.Name, err)
-			}
-			sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained + %s", m.Name, mode))
-			return nil
-		default:
-			return fmt.Errorf("%s: unknown verify tier %q", m.Name, m.Tier())
+// safety: every failure to establish an input returns no reuse and no digest,
+// so a template whose inputs cannot be pinned down is verified again and its
+// pass is not recorded against a digest that does not describe it.
+func reusableProof(ctx context.Context, env proofEnv, m templates.Manifest) (digest, dir string, reuse bool) {
+	if !env.Reusable {
+		return "", "", false
+	}
+	dir, err := proofDir()
+	if err != nil {
+		return "", "", false
+	}
+	digest, err = templateProofDigest(ctx, env, m)
+	if err != nil {
+		sparkwing.Info(ctx, "%s: verifying again, no digest: %v", m.Name, err)
+		return "", "", false
+	}
+	return digest, dir, proofRecorded(dir, digest)
+}
+
+func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (templateOutcome, error) {
+	out := templateOutcome{Tier: m.Tier()}
+	bin := env.CLI
+	scratch, err := os.MkdirTemp("", "sparkwing-tv-"+m.Name+"-*")
+	if err != nil {
+		return out, fmt.Errorf("%s: temp dir: %w", m.Name, err)
+	}
+	defer func() { _ = os.RemoveAll(scratch) }()
+
+	newArgs := []string{"examples", "scaffold", "-C", scratch, "--name", m.Name}
+	for _, p := range sortedParamFlags(m.VerifyParams) {
+		newArgs = append(newArgs, "--param", p)
+	}
+	if _, err := sparkwing.Exec(ctx, bin, newArgs...).Run(); err != nil {
+		return out, fmt.Errorf("%s: scaffold: %w", m.Name, err)
+	}
+
+	dotSparkwing := filepath.Join(scratch, ".sparkwing")
+	if err := normalizeVerifyModulePath(dotSparkwing, m.Name); err != nil {
+		return out, fmt.Errorf("%s: normalize module path: %w", m.Name, err)
+	}
+	if err := pinLocalSparksCore(ctx, dotSparkwing, env.SparksCore); err != nil {
+		return out, fmt.Errorf("%s: pin sparks-core: %w", m.Name, err)
+	}
+	if err := pinLocalSparkwingSDK(ctx, dotSparkwing, env.Root); err != nil {
+		return out, fmt.Errorf("%s: pin sparkwing SDK: %w", m.Name, err)
+	}
+	if _, err := sparkwing.Exec(ctx, "go", "build", "./...").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
+		return out, fmt.Errorf("%s: go build: %w", m.Name, err)
+	}
+	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "lint", "-C", scratch, "--all").Run(); err != nil {
+		return out, fmt.Errorf("%s: lint: %w", m.Name, err)
+	}
+	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "explain", "--name", m.Name).Dir(scratch).Run(); err != nil {
+		return out, fmt.Errorf("%s: explain: %w", m.Name, err)
+	}
+
+	switch m.Tier() {
+	case templates.VerifyCompileOnly:
+		sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained (compile-only)", m.Name))
+		return out, nil
+	case templates.VerifyRunnable, templates.VerifyDryRunnable:
+		if ready, missing := runToolchainReady(ctx, m); !ready {
+			sparkwing.Info(ctx, "%s: run SKIPPED -- %s not available on host; keeping gate green (compiled + linted + explained only)", m.Name, missing)
+			sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained; run skipped (%s unavailable)", m.Name, missing))
+			out.Skipped, out.SkipReason = true, missing
+			return out, nil
 		}
+		cleanup, runEnv, err := provisionFixture(ctx, scratch, m, env)
+		if err != nil {
+			return out, fmt.Errorf("%s: fixture: %w", m.Name, err)
+		}
+		defer cleanup()
+		runCmd := sparkwing.Exec(ctx, bin, "run", m.Name).
+			Dir(scratch)
+		for name, value := range templateRunAdmissionEnv(env.StateHome) {
+			runCmd = runCmd.Env(name, value)
+		}
+		mode := "ran green"
+		if m.Tier() == templates.VerifyDryRunnable {
+			runCmd = runCmd.Env("SPARKWING_DRY_RUN", "1")
+			mode = "ran green (dry-run)"
+		}
+		for _, k := range sortedKeys(runEnv) {
+			runCmd = runCmd.Env(k, runEnv[k])
+		}
+		if _, err := runCmd.Run(); err != nil {
+			return out, fmt.Errorf("%s: run: %w", m.Name, err)
+		}
+		sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained + %s", m.Name, mode))
+		out.RanRunStep = true
+		return out, nil
+	default:
+		return out, fmt.Errorf("%s: unknown verify tier %q", m.Name, m.Tier())
 	}
 }
 
@@ -753,5 +833,5 @@ func writeFixtureFiles(root string, files map[string]string) error {
 }
 
 func init() {
-	sparkwing.Register("template-verify", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &TemplateVerify{} })
+	sparkwing.Register[TemplateVerifyArgs]("template-verify", func() sparkwing.Pipeline[TemplateVerifyArgs] { return &TemplateVerify{} })
 }

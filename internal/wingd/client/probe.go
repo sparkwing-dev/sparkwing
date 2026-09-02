@@ -18,6 +18,10 @@ type DaemonInfo struct {
 
 	BinaryVersion string
 
+	// StoreSchemaVersion is the runs-store schema the daemon's binary
+	// understands, or 0 from a daemon that predates the field.
+	StoreSchemaVersion int
+
 	Draining bool
 }
 
@@ -43,10 +47,11 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 		native = ack.ProtocolMajor
 	}
 	return DaemonInfo{
-		Socket:        sock,
-		ProtocolMajor: native,
-		BinaryVersion: ack.BinaryVersion,
-		Draining:      ack.Draining,
+		Socket:             sock,
+		ProtocolMajor:      native,
+		BinaryVersion:      ack.BinaryVersion,
+		StoreSchemaVersion: ack.StoreSchemaVersion,
+		Draining:           ack.Draining,
 	}, nil
 }
 

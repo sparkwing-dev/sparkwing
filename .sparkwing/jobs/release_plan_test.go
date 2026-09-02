@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +21,7 @@ func TestReleaseTemplateVerificationAllowsSerializedAdmission(t *testing.T) {
 var releaseGateNodes = []string{
 	"validate-version",
 	"check-clean-tree",
+	"gate-contracts",
 	"gate-pre-commit",
 	"gate-pre-push",
 	"gate-template-verify",
@@ -137,6 +140,73 @@ func TestReleasePlanSerializesTemplateVerificationAfterLocalGates(t *testing.T) 
 	hints := mustNode(t, plan, "gate-template-verify").ResourceHints()
 	if hints == nil || hints.Cores != 0.5 {
 		t.Fatalf("gate-template-verify resources = %+v, want 0.5 coordinator cores", hints)
+	}
+}
+
+func TestReleasePlanRunsContractPreflightBeforeTheRootGoSuite(t *testing.T) {
+	plan := releasePlan(t)
+
+	if !ancestors(t, plan, "gate-pre-commit")["gate-contracts"] {
+		t.Error("gate-pre-commit must depend on gate-contracts: a contract failure has to return before the longest local suite runs")
+	}
+	if ancestors(t, plan, "gate-contracts")["gate-pre-commit"] {
+		t.Error("gate-contracts must not depend on gate-pre-commit, directly or transitively: that puts it back behind the suite it exists to precede")
+	}
+	if ancestors(t, plan, "gate-contracts")["gate-pre-push"] || ancestors(t, plan, "gate-contracts")["gate-template-verify"] {
+		t.Error("gate-contracts must not depend on the expensive gates")
+	}
+}
+
+func TestReleaseContractPreflightRequiresEveryNamedCheckToPass(t *testing.T) {
+	check := contractCheck{
+		Label:   "contracts",
+		Command: "go test -v ./cmd/sparkwing -run " + contractTestPattern([]string{"TestAlpha", "TestBeta"}),
+		Tests:   []string{"TestAlpha", "TestBeta"},
+	}
+
+	full := "--- PASS: TestAlpha (0.01s)\n--- PASS: TestBeta (0.00s)\nok  cmd/sparkwing 0.3s\n"
+	if err := requireContractTestsPassed(check, full); err != nil {
+		t.Fatalf("a run that passed every named check was rejected: %v", err)
+	}
+
+	err := requireContractTestsPassed(check, "--- PASS: TestAlpha (0.01s)\nok  cmd/sparkwing 0.3s\n")
+	if err == nil || !strings.Contains(err.Error(), "TestBeta") || strings.Contains(err.Error(), "TestAlpha\n") {
+		t.Fatalf("a vanished check = %v, want a refusal naming only TestBeta", err)
+	}
+
+	if err := requireContractTestsPassed(check, "ok  cmd/sparkwing 0.3s [no tests to run]\n"); err == nil {
+		t.Fatal("a run that matched nothing passed the preflight")
+	}
+
+	if err := requireContractTestsPassed(check, "--- PASS: TestAlphaExtended (0.01s)\n--- PASS: TestBeta (0.0s)\n"); err == nil {
+		t.Fatal("a check whose name is only a prefix of another satisfied the preflight")
+	}
+}
+
+func TestReleaseContractPreflightNamesTheContractsItClaims(t *testing.T) {
+	checks := releaseContractChecks()
+	if len(checks) != 2 {
+		t.Fatalf("preflight has %d checks, want the docs mirror and the contract set", len(checks))
+	}
+	named := checks[1]
+	for _, want := range releaseContractTests {
+		if !strings.Contains(named.Command, want) {
+			t.Errorf("the -run pattern does not name %s", want)
+		}
+		if !slices.Contains(named.Tests, want) {
+			t.Errorf("the required-pass list does not name %s", want)
+		}
+	}
+	for _, want := range []string{"EnvironmentVariable", "Registry", "Help", "Docs"} {
+		if !strings.Contains(strings.Join(releaseContractTests, " "), want) {
+			t.Errorf("the contract set covers no %s check, but the label claims one", want)
+		}
+	}
+}
+
+func TestReleaseAlwaysRequestsAnExhaustiveTemplateProof(t *testing.T) {
+	if !releaseTemplateVerifyArgs.Exhaustive {
+		t.Error("the release gate must request an exhaustive template proof; a recorded proof shortens local iteration, never the tag boundary")
 	}
 }
 

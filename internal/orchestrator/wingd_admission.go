@@ -359,7 +359,7 @@ func (la *LocalAdmission) attachChildRun(
 	plan *sparkwing.Plan,
 	onEvicted func(error),
 ) (*runLease, admitOutcome, error) {
-	cl, err := wingdclient.EnsureDaemon(ctx, la.clientOptions())
+	cl, err := la.ensureDaemon(ctx)
 	if err != nil {
 		return nil, admitProceed, fmt.Errorf("local admission: %w", err)
 	}
@@ -435,7 +435,7 @@ func (la *LocalAdmission) acquireBlocking(
 			fmt.Errorf("plan concurrency group %q: queued %s without a slot under OnLimit:Queue; run `sparkwing queue` to see who holds it", key, timeout))
 		defer cancel()
 	}
-	cl, err := wingdclient.EnsureDaemon(acquireCtx, la.clientOptions())
+	cl, err := la.ensureDaemon(acquireCtx)
 	if err != nil {
 		// safety: an answered takeover exhaustion is a version conflict, not an
 		// unreachable daemon; preserve the actionable diagnosis.
@@ -443,7 +443,8 @@ func (la *LocalAdmission) acquireBlocking(
 			return nil, admitProceed, fmt.Errorf("local admission refused a version conflict: %w", err)
 		}
 
-		if errors.Is(err, wingdclient.ErrDaemonTooOld) ||
+		if errors.Is(err, ErrDaemonStoreSchemaTooOld) ||
+			errors.Is(err, wingdclient.ErrDaemonTooOld) ||
 			errors.Is(err, wingdclient.ErrProtocolTooOld) ||
 			errors.Is(err, wingdclient.ErrNoDaemonHost) ||
 			errors.Is(err, wingdclient.ErrDaemonHostUnusable) ||
@@ -487,7 +488,7 @@ func (la *LocalAdmission) acquireBlocking(
 				return nil, admitSkipped, nil
 			case wingwire.PolicyFail:
 				appendPlanEvent(ctx, backends, runID, "plan_failed_concurrent", nil)
-				return nil, admitProceed, admissionFailure(admErr)
+				return nil, admitProceed, admissionFailure(req.Semaphores, admErr)
 			}
 			return nil, admitProceed, fmt.Errorf("local admission: %w", admErr)
 		}
@@ -628,18 +629,46 @@ func queuePositionParts(q wingwire.Queued) (ahead int, noun, reason string) {
 	return ahead, noun, reason
 }
 
-func admissionFailure(admErr *wingdclient.AdmissionError) error {
+// safety: only a key this request claimed can mean exhausted capacity. Every
+// other key is the daemon's own, and calling one a full slot sends the operator
+// to `sparkwing queue` after a holder that does not exist.
+func admissionFailure(claims []wingwire.SemaphoreClaim, admErr *wingdclient.AdmissionError) error {
+	if requestClaimsKey(claims, admErr.Key) {
+		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail; run `sparkwing queue` to see who holds it", admErr.Key)
+	}
+	return daemonRefusal(admErr)
+}
+
+// safety: the node path claims exactly one key, and the daemon evicts under
+// PolicyFail for reasons of its own too, so only that key can mean a full slot.
+func nodeAdmissionFailure(claim wingwire.SemaphoreClaim, admErr *wingdclient.AdmissionError) error {
+	if requestClaimsKey([]wingwire.SemaphoreClaim{claim}, admErr.Key) {
+		return fmt.Errorf("concurrency key %q slot full under OnLimit:Fail", claim.Name)
+	}
+	return daemonRefusal(admErr)
+}
+
+func daemonRefusal(admErr *wingdclient.AdmissionError) error {
 	switch admErr.Key {
 	case "never_admissible":
 		if admErr.Reason != "" {
 			return fmt.Errorf("local admission: this request can never be admitted on this box: %s", admErr.Reason)
 		}
 		return errors.New("local admission: a concurrency group's cost exceeds its own capacity; lower the cost or raise the group's limit")
-	case "duplicate", "invalid", "parent", "reattach":
-		return fmt.Errorf("local admission: %w", admErr)
+	case "terminal-check":
+		return fmt.Errorf("local admission: %w; the daemon refused before any capacity decision, so run `sparkwing daemon status` to compare the daemon's runs-store schema with the store's", admErr)
 	default:
-		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail; run `sparkwing queue` to see who holds it", admErr.Key)
+		return fmt.Errorf("local admission: %w", admErr)
 	}
+}
+
+func requestClaimsKey(claims []wingwire.SemaphoreClaim, key string) bool {
+	for _, claim := range claims {
+		if claim.Name == key {
+			return true
+		}
+	}
+	return false
 }
 
 func evictionHandler(runID string, onEvicted func(error)) func(wingwire.Evicted) {
@@ -912,7 +941,7 @@ func (la *LocalAdmission) acquireNodeAdmission(
 	req wingwire.AdmissionRequest,
 	onQueued func(wingwire.Queued),
 ) (*wingdclient.Lease, error) {
-	cl, err := wingdclient.EnsureDaemon(ctx, la.clientOptions())
+	cl, err := la.ensureDaemon(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("local admission: %w", err)
 	}

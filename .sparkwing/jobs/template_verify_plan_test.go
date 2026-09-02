@@ -2,6 +2,8 @@ package jobs
 
 import (
 	"context"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -10,7 +12,7 @@ import (
 
 func TestTemplateVerifyPlanUsesMeasuredResourcesAndBoundsFanout(t *testing.T) {
 	plan := sparkwing.NewPlan()
-	if err := (TemplateVerify{}).Plan(context.Background(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{}); err != nil {
+	if err := (TemplateVerify{}).Plan(context.Background(), plan, TemplateVerifyArgs{}, sparkwing.RunContext{}); err != nil {
 		t.Fatal(err)
 	}
 	if hints := plan.ResourceHints(); hints != nil {
@@ -37,6 +39,26 @@ func TestTemplateVerifyPlanUsesMeasuredResourcesAndBoundsFanout(t *testing.T) {
 	}
 	if count != len(verifyTemplates) {
 		t.Fatalf("bounded templates = %d, want %d", count, len(verifyTemplates))
+	}
+}
+
+func TestTemplateVerifyPlanShapeIsIndependentOfProofReuse(t *testing.T) {
+	nodeIDs := func(in TemplateVerifyArgs) []string {
+		plan := sparkwing.NewPlan()
+		if err := (TemplateVerify{}).Plan(context.Background(), plan, in, sparkwing.RunContext{}); err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, node := range plan.Nodes() {
+			ids = append(ids, node.ID())
+		}
+		sort.Strings(ids)
+		return ids
+	}
+	reuse := nodeIDs(TemplateVerifyArgs{})
+	exhaustive := nodeIDs(TemplateVerifyArgs{Exhaustive: true})
+	if !slices.Equal(reuse, exhaustive) {
+		t.Fatalf("reuse changed the plan shape:\n reuse:      %v\n exhaustive: %v", reuse, exhaustive)
 	}
 }
 

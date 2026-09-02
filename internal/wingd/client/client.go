@@ -526,6 +526,11 @@ func (cl *Client) Draining() bool { return cl.ack.Draining }
 
 func (cl *Client) DaemonVersion() string { return cl.ack.BinaryVersion }
 
+// DaemonStoreSchema returns the runs-store schema version the connected
+// daemon's binary understands, or 0 when the daemon predates the field and
+// the skew cannot be detected before it reads the store.
+func (cl *Client) DaemonStoreSchema() int { return cl.ack.StoreSchemaVersion }
+
 func (cl *Client) write(msg wingwire.Message) error {
 	line, err := wingwire.Encode(msg)
 	if err != nil {

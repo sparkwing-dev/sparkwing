@@ -179,6 +179,8 @@ type HelloAck struct {
 	BinaryVersion       string
 	BuildIdentity       string
 	Draining            bool
+
+	StoreSchemaVersion int
 }
 type Holder struct {
 	RunID string

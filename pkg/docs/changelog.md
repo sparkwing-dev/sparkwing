@@ -58,6 +58,24 @@ code change to unlock.
   commits. Each step log names the mode it ran in, and a step refuses to run
   when the checkout cannot resolve `origin/main`. `SPARKWING_REGEX_SWEEP_ALL=1`
   still sweeps the whole tree.
+- **release + template-verify:** `sparkwing run template-verify` now reuses a
+  recorded proof for any template whose proof inputs are unchanged, and takes
+  `--exhaustive` to verify everything regardless. The digest covers the
+  template's registry files, its verification manifest fields, the exact
+  state of the sparkwing and sparks-core checkouts (including the gitignored
+  `go.work` and embedded web bundle), the Go toolchain, and the identity of
+  every host tool the template needs, down to whether the Docker daemon
+  answers. Reuse is refused whenever any input cannot be established, a
+  template whose run step was skipped for a missing toolchain records no proof,
+  and the release pipeline always runs the exhaustive proof. See DELIVERY.md
+  for the input set and where proofs are stored.
+
+- **release:** The release pipeline now runs a contract preflight before the
+  root Go suite. It proves the embedded documentation mirror and a named set of
+  documentation, help, registry, and environment-variable contract checks in
+  under a second, and every named check must report a pass, so renaming or
+  removing one fails the release rather than quietly shrinking the preflight.
+  The full gates keep their existing coverage.
 
 ### Fixed
 
@@ -85,6 +103,20 @@ code change to unlock.
   of printing a skip and exiting 0, so the comment and `#nosec` annotation
   policies are no longer waived by a detached, shallow, or unfetched checkout.
   Pass `-allow-no-diff` to accept a run that gates nothing.
+- **orchestrator + cli:** A daemon that cannot read the runs store no longer
+  reads as exhausted capacity. The daemon now sends the store failure verbatim
+  with its eviction, and the client reports a full slot only for a concurrency
+  group the run actually claimed, so a stale daemon against a migrated store
+  names both schema versions instead of sending the operator to
+  `sparkwing queue` after a holder that does not exist. The handshake also
+  advertises the daemon's runs-store schema, so a newer client refuses before
+  requesting admission and names the remedies that work: install a matching
+  sparkwing, or point `SPARKWING_WINGD_BIN` at one, since a daemon restart
+  respawns the same build. Node-level concurrency failures get the same
+  treatment as plan-level ones. `sparkwing daemon status` reports
+  `daemon_schema_version` against `store_schema_version`, marks a diverged pair
+  unhealthy, says when a restart will not help, and reports a store that exists
+  but cannot be read as `store_schema_error` instead of as an absent store.
 
 ### Security
 

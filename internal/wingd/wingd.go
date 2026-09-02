@@ -94,6 +94,12 @@ type Config struct {
 
 	IsRunTerminal func(runID string) (bool, error)
 
+	// StoreSchemaVersion is the runs-store schema version this daemon's
+	// binary understands. It is advertised in the handshake so a newer
+	// client refuses before admission instead of discovering the skew as an
+	// opaque terminal-check failure.
+	StoreSchemaVersion int
+
 	Logf func(format string, args ...any)
 }
 
