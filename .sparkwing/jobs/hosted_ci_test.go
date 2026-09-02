@@ -257,3 +257,38 @@ func TestREADMEPublishesStableCIBadge(t *testing.T) {
 		"actions/workflows/ci.yaml)",
 	)
 }
+
+func TestReleaseRefusesToMoveAPublishedImageTag(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/release.yaml")
+	requireWorkflowText(t, body, "      force_retag:\n", "        type: boolean\n")
+
+	publish := workflowJob(t, body, "publish-images")
+	requireWorkflowText(t, publish,
+		"FORCE_RETAG: ${{ inputs.force_retag || false }}",
+		`docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "${image}:${TAG}"`,
+		`if [ -n "$published" ] && [ "$published" != "$digest" ]; then`,
+		`if [ "$FORCE_RETAG" != "true" ]; then`,
+		"exit 1",
+		"image-digests/image-digests.json",
+		"name: release-image-digests",
+	)
+	inspectAt := strings.Index(publish, "docker buildx imagetools inspect")
+	guardAt := strings.Index(publish, `if [ "$FORCE_RETAG" != "true" ]; then`)
+	createAt := strings.Index(publish, "docker buildx imagetools create")
+	if inspectAt < 0 || guardAt < inspectAt || createAt < guardAt {
+		t.Fatal("tag mutation is not guarded by a published-digest check")
+	}
+
+	release := workflowJob(t, body, "release")
+	requireWorkflowText(t, release,
+		"- name: Download published image digests",
+		"if: ${{ needs.publish-images.result == 'success' }}",
+		"name: release-image-digests",
+		"path: dist",
+	)
+	downloadAt := strings.Index(release, "- name: Download published image digests")
+	uploadAt := strings.Index(release, `gh release upload "$tag" dist/*`)
+	if downloadAt < 0 || uploadAt < downloadAt {
+		t.Fatal("image digests are not staged as a release asset before upload")
+	}
+}

@@ -472,8 +472,9 @@ func bytesOf(q resource.Quantity) int64 {
 }
 
 func TestPodResources_PinDrivesRequestAndPolicyLimit(t *testing.T) {
+	roomy := Config{CPURequest: "100m", CPULimit: "16", MemoryRequest: "128Mi", MemoryLimit: "64Gi"}
 	res := capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin}
-	rr := podResources(res, defaultsCfg)
+	rr := podResources(res, roomy)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 4000 {
 		t.Errorf("cpu request = %dm, want 4000m", got)
 	}
@@ -485,6 +486,72 @@ func TestPodResources_PinDrivesRequestAndPolicyLimit(t *testing.T) {
 	}
 	if got := bytesOf(rr.Limits[corev1.ResourceMemory]); got != int64(float64(8<<30)*podMemoryLimitFactor) {
 		t.Errorf("mem limit = %d, want %d (1.25x request)", got, int64(float64(8<<30)*podMemoryLimitFactor))
+	}
+}
+
+func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
+	cases := []struct {
+		name       string
+		res        capacity.Resolution
+		cfg        Config
+		wantCPUReq int64
+		wantCPULim int64
+		wantMemReq int64
+		wantMemLim int64
+	}{
+		{
+			name:       "pin over the cpu ceiling is capped",
+			res:        capacity.Resolution{Cores: 64, MemoryBytes: 1 << 30, Source: store.CostSourcePin},
+			cfg:        defaultsCfg,
+			wantCPUReq: 2000,
+			wantCPULim: int64(2000 * podCPULimitFactor),
+			wantMemReq: 1 << 30,
+			wantMemLim: int64(float64(1<<30) * podMemoryLimitFactor),
+		},
+		{
+			name:       "pin over the memory ceiling is capped",
+			res:        capacity.Resolution{Cores: 1, MemoryBytes: 128 << 30, Source: store.CostSourcePin},
+			cfg:        defaultsCfg,
+			wantCPUReq: 1000,
+			wantCPULim: int64(1000 * podCPULimitFactor),
+			wantMemReq: 2 << 30,
+			wantMemLim: int64(float64(2<<30) * podMemoryLimitFactor),
+		},
+		{
+			name:       "measured charge over the ceiling is capped too",
+			res:        capacity.Resolution{Cores: 8, MemoryBytes: 16 << 30, Source: store.CostSourceMeasured},
+			cfg:        defaultsCfg,
+			wantCPUReq: 2000,
+			wantCPULim: int64(2000 * podCPULimitFactor),
+			wantMemReq: 2 << 30,
+			wantMemLim: int64(float64(2<<30) * podMemoryLimitFactor),
+		},
+		{
+			name:       "no configured ceiling leaves the pin alone",
+			res:        capacity.Resolution{Cores: 64, MemoryBytes: 128 << 30, Source: store.CostSourcePin},
+			cfg:        Config{CPURequest: "100m", MemoryRequest: "128Mi"},
+			wantCPUReq: 64000,
+			wantCPULim: int64(64000 * podCPULimitFactor),
+			wantMemReq: 128 << 30,
+			wantMemLim: int64(float64(128<<30) * podMemoryLimitFactor),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := podResources(tc.res, tc.cfg)
+			if got := milli(rr.Requests[corev1.ResourceCPU]); got != tc.wantCPUReq {
+				t.Errorf("cpu request = %dm, want %dm", got, tc.wantCPUReq)
+			}
+			if got := milli(rr.Limits[corev1.ResourceCPU]); got != tc.wantCPULim {
+				t.Errorf("cpu limit = %dm, want %dm", got, tc.wantCPULim)
+			}
+			if got := bytesOf(rr.Requests[corev1.ResourceMemory]); got != tc.wantMemReq {
+				t.Errorf("mem request = %d, want %d", got, tc.wantMemReq)
+			}
+			if got := bytesOf(rr.Limits[corev1.ResourceMemory]); got != tc.wantMemLim {
+				t.Errorf("mem limit = %d, want %d", got, tc.wantMemLim)
+			}
+		})
 	}
 }
 
