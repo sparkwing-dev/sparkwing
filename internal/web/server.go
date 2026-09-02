@@ -180,7 +180,8 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 		authedMux.Handle("/api/v1/logs/", controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts)))
 	}
 	if opts.ControllerURL != "" {
-		authedMux.Handle("/api/v1/", controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts)))
+		authedMux.Handle("/api/v1/",
+			proxyAllowList(controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts))))
 	} else {
 		authedMux.HandleFunc("GET /api/v1/runs", ListRunsHandler(opts.Backend))
 		authedMux.HandleFunc("GET /api/v1/runs/{id}", GetRunHandler(opts.Backend))

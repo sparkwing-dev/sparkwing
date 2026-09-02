@@ -87,6 +87,25 @@ code change to unlock.
   download and discard a mismatch before the binary lands, so a poisoned or
   tampered entry is recompiled instead of executed. A download without a digest
   counts as a miss, so binaries stored by an older cache are recompiled once.
+- **web (Breaking):** The dashboard proxy now forwards only the controller
+  routes the dashboard itself calls and checks the signed-in session's scopes
+  against each one, so a logged-in browser can no longer mint tokens, read
+  secrets, or create users with the web pod's service bearer. Sessions carry
+  the scopes of their user rather than a fixed `admin`, run-store schema 19
+  adds a `users.scopes` column defaulting existing accounts to `admin`, and
+  `sparkwing cluster users add --scope` creates narrower accounts.
+  `store.CreateUser` and `store.CreateFirstUser` now take that scope set. See the
+  [migration guide](docs/migrations/_unreleased.md#dashboard-proxy-allow-list).
+- **runner:** Runner Job pods mount no ServiceAccount token, and `--runner k8s`
+  now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead of silently
+  landing pipeline code on the namespace default ServiceAccount.
+- **helm:** The runner Role no longer reads namespace Secrets, ConfigMaps,
+  pods, or events, and no chart pod mounts a ServiceAccount token. The cache
+  and logs pods get their own ServiceAccounts instead of sharing the runner's,
+  and `sparkwing-full` creates an unprivileged `sparkwing-cache-warmer`
+  ServiceAccount that the controller's warmer pods now name explicitly.
+  Controllers running the warm pool outside that chart must create that
+  ServiceAccount in the pool namespace.
 - **cache:** The cache no longer serves an authenticated endpoint to a request
   that omits `X-Forwarded-For`, so `PUT /bin/<key>`, `PUT /cache/<key>`,
   `POST /upload`, and the sync routes now require the bearer token from every

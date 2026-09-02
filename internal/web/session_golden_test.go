@@ -82,7 +82,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 			state.logoutSessions = append(state.logoutSessions, body["session_id"])
 			delete(state.activeSessions, body["session_id"])
 			w.WriteHeader(http.StatusNoContent)
-		case "/api/v1/probe":
+		case "/api/v1/agents":
 			state.proxyAuth = r.Header.Get("Authorization")
 			state.proxyCalls++
 			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
@@ -110,7 +110,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	unauthenticatedAPI := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	unauthenticatedAPI := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/agents", nil)
 	unauthenticatedAPI.Header.Set("Accept", "application/json")
 	resp = doDashboardRequest(t, client, unauthenticatedAPI)
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -160,7 +160,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	assertClearedSessionCookies(t, resp.Cookies())
 	resp.Body.Close()
 
-	copiedSession := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	copiedSession := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/agents", nil)
 	copiedSession.Header.Set("Accept", "application/json")
 	copiedSession.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-1"})
 	resp = doDashboardRequest(t, client, copiedSession)
@@ -169,7 +169,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	stolenBearer := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	stolenBearer := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/agents", nil)
 	stolenBearer.Header.Set("Accept", "application/json")
 	stolenBearer.Header.Set("Authorization", "Bearer service-token")
 	resp = doDashboardRequest(t, client, stolenBearer)
@@ -197,7 +197,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	resp.Body.Close()
 	assertSessionCookies(t, loginCookies, "session-2", "csrf-session-2")
 
-	proxy := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	proxy := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/agents", nil)
 	proxy.Header.Set("Accept", "application/json")
 	addAuthCookies(t, proxy, loginCookies)
 	resp = doDashboardRequest(t, client, proxy)
@@ -209,7 +209,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	state.Lock()
 	delete(state.activeSessions, "session-2")
 	state.Unlock()
-	revoked := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	revoked := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/agents", nil)
 	revoked.Header.Set("Accept", "application/json")
 	addAuthCookies(t, revoked, loginCookies)
 	resp = doDashboardRequest(t, client, revoked)

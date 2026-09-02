@@ -25,10 +25,12 @@ type Session struct {
 	LastUsedAt *time.Time
 }
 
-// User is one row in the users table.
+// User is one row in the users table. Scopes is the authorization set a
+// browser session inherits when this user signs in.
 type User struct {
 	Name        string
 	PWHash      string
+	Scopes      []string
 	CreatedAt   time.Time
 	LastLoginAt *time.Time
 }
@@ -147,8 +149,10 @@ func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Tim
 	return err
 }
 
-// CreateUser inserts a user with an argon2id-hashed password.
-func (s *Store) CreateUser(name, password string, now time.Time) (*User, error) {
+// CreateUser inserts a user with an argon2id-hashed password. scopes is
+// the authorization set every session this user opens carries; the caller
+// owns the scope vocabulary and validates it.
+func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error) {
 	if name == "" {
 		return nil, errors.New("users: name required")
 	}
@@ -160,8 +164,8 @@ func (s *Store) CreateUser(name, password string, now time.Time) (*User, error) 
 		return nil, err
 	}
 	_, err = s.execNoCtx(
-		`INSERT INTO users (name, pw_hash, created_at) VALUES (?, ?, ?)`,
-		name, pwHash, now.UTC().Unix(),
+		`INSERT INTO users (name, pw_hash, created_at, scopes) VALUES (?, ?, ?, ?)`,
+		name, pwHash, now.UTC().Unix(), joinScopes(scopes),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("users: insert: %w", err)
@@ -169,6 +173,7 @@ func (s *Store) CreateUser(name, password string, now time.Time) (*User, error) 
 	return &User{
 		Name:      name,
 		PWHash:    pwHash,
+		Scopes:    dedupeScopes(scopes),
 		CreatedAt: now.UTC(),
 	}, nil
 }
@@ -177,8 +182,9 @@ func (s *Store) CreateUser(name, password string, now time.Time) (*User, error) 
 // bootstrap is no longer permitted.
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 
-// CreateFirstUser race-safely inserts the first admin in one txn.
-func (s *Store) CreateFirstUser(name, password string, now time.Time) (*User, error) {
+// CreateFirstUser race-safely inserts the first admin in one txn. scopes
+// is the authorization set that account's sessions carry.
+func (s *Store) CreateFirstUser(name, password string, scopes []string, now time.Time) (*User, error) {
 	if name == "" {
 		return nil, errors.New("users: name required")
 	}
@@ -203,8 +209,8 @@ func (s *Store) CreateFirstUser(name, password string, now time.Time) (*User, er
 		return nil, ErrBootstrapClosed
 	}
 	if _, err := tx.Exec(
-		`INSERT INTO users (name, pw_hash, created_at) VALUES (?, ?, ?)`,
-		name, pwHash, now.UTC().Unix(),
+		`INSERT INTO users (name, pw_hash, created_at, scopes) VALUES (?, ?, ?, ?)`,
+		name, pwHash, now.UTC().Unix(), joinScopes(scopes),
 	); err != nil {
 		return nil, fmt.Errorf("users: insert: %w", err)
 	}
@@ -214,6 +220,7 @@ func (s *Store) CreateFirstUser(name, password string, now time.Time) (*User, er
 	return &User{
 		Name:      name,
 		PWHash:    pwHash,
+		Scopes:    dedupeScopes(scopes),
 		CreatedAt: now.UTC(),
 	}, nil
 }
@@ -253,7 +260,7 @@ func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error) 
 // ListUsers returns every user (for audit).
 func (s *Store) ListUsers() ([]User, error) {
 	rows, err := s.queryNoCtx(`
-        SELECT name, pw_hash, created_at, last_login_at
+        SELECT name, pw_hash, created_at, last_login_at, scopes
           FROM users
          ORDER BY created_at DESC
     `)
@@ -267,9 +274,11 @@ func (s *Store) ListUsers() ([]User, error) {
 		var u User
 		var lastLogin sql.NullInt64
 		var created int64
-		if err := rows.Scan(&u.Name, &u.PWHash, &created, &lastLogin); err != nil {
+		var scopes string
+		if err := rows.Scan(&u.Name, &u.PWHash, &created, &lastLogin, &scopes); err != nil {
 			return nil, err
 		}
+		u.Scopes = splitScopes(scopes)
 		u.CreatedAt = time.Unix(created, 0).UTC()
 		if lastLogin.Valid {
 			ts := time.Unix(lastLogin.Int64, 0).UTC()
@@ -295,16 +304,18 @@ func (s *Store) DeleteUser(name string) error {
 
 func (s *Store) lookupUser(name string) (*User, error) {
 	row := s.queryRowNoCtx(`
-        SELECT name, pw_hash, created_at, last_login_at
+        SELECT name, pw_hash, created_at, last_login_at, scopes
           FROM users
          WHERE name = ?
     `, name)
 	var u User
 	var lastLogin sql.NullInt64
 	var created int64
-	if err := row.Scan(&u.Name, &u.PWHash, &created, &lastLogin); err != nil {
+	var scopes string
+	if err := row.Scan(&u.Name, &u.PWHash, &created, &lastLogin, &scopes); err != nil {
 		return nil, err
 	}
+	u.Scopes = splitScopes(scopes)
 	u.CreatedAt = time.Unix(created, 0).UTC()
 	if lastLogin.Valid {
 		ts := time.Unix(lastLogin.Int64, 0).UTC()
