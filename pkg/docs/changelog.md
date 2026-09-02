@@ -76,6 +76,15 @@ code change to unlock.
   SHA with a version comment, the release job that prepares binaries no longer
   persists checkout credentials, and the canonical gate installs dashboard
   dependencies with `--ignore-scripts`.
+- **controller (Breaking):** Revoking a token, rotating one, or deleting a user now takes
+  effect on the serving replica immediately: the auth cache drops the affected
+  prefixes and rechecks each cached entry's `expires_at` and `revoked_at` on
+  every hit. Revoke can cut an open rotation grace window short, `grace_secs`
+  is capped at 7 days, and deleting a user also deletes its sessions and
+  revokes its tokens in one transaction. `Store.DeleteUser` takes a `now` and
+  returns the revoked prefixes. See
+  [auth.md](docs/auth.md#how-long-revocation-takes-to-bite) for the window that
+  remains across replicas and the logs service.
 
 ### Fixed
 
