@@ -183,16 +183,16 @@ container.
 
 ## RBAC
 
-The chart creates a namespace-scoped Role + RoleBinding. The runner
-SA can:
+The chart creates a namespace-scoped Role + RoleBinding with no rules.
+The runner, cache, and logs servers talk to the controller over HTTP and
+never call the Kubernetes API, so none of them mounts a ServiceAccount
+token: every pod sets `automountServiceAccountToken: false`, and the
+cache and logs pods run under their own ServiceAccounts rather than the
+runner's.
 
-- Read pods + pod logs + events (for self-debugging output)
-- Read configmaps + secrets (so pipelines can mount config)
-
-It cannot create / update / delete cluster resources. Pipelines
-that need to mutate cluster state (e.g. `kubectl apply`,
-sealed-secrets, helm-installs) should bring their own RBAC outside
-this chart.
+Pipelines that need to reach the cluster API (e.g. `kubectl apply`,
+sealed-secrets, helm-installs) should bring their own ServiceAccount and
+RBAC outside this chart.
 
 If you don't want the chart-managed Role at all:
 

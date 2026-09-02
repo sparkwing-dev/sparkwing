@@ -1,7 +1,11 @@
 package bincache
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/cgi"
@@ -550,7 +554,7 @@ func TestTryBinary_DoesNotInstallRedirectedContent(t *testing.T) {
 	}))
 	defer source.Close()
 	dest := filepath.Join(t.TempDir(), "pipeline")
-	err := TryBinary(source.URL, "deadbeef-cafebabe", dest)
+	err := TryBinary(source.URL, "", "deadbeef-cafebabe", dest)
 	if err == nil || !strings.Contains(err.Error(), "307") {
 		t.Fatalf("error = %v, want redirect rejection", err)
 	}
@@ -559,5 +563,110 @@ func TestTryBinary_DoesNotInstallRedirectedContent(t *testing.T) {
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
 		t.Fatalf("redirected binary was installed: %v", err)
+	}
+}
+
+func TestTryBinary_VerifiesAdvertisedDigest(t *testing.T) {
+	body := []byte("compiled pipeline bytes")
+	sum := sha256.Sum256(body)
+	honest := base64.StdEncoding.EncodeToString(sum[:])
+	other := sha256.Sum256([]byte("attacker bytes"))
+
+	cases := []struct {
+		name    string
+		digest  string
+		served  []byte
+		wantErr bool
+	}{
+		{name: "matching digest", digest: "sha-256=" + honest, served: body},
+		{name: "tampered body", digest: "sha-256=" + honest, served: []byte("attacker bytes"), wantErr: true},
+		{name: "tampered digest", digest: "sha-256=" + base64.StdEncoding.EncodeToString(other[:]), served: body, wantErr: true},
+		{name: "absent digest", digest: "", served: body, wantErr: true},
+		{name: "unsupported algorithm", digest: "md5=" + honest, served: body, wantErr: true},
+		{name: "undecodable digest", digest: "sha-256=not-base64!", served: body, wantErr: true},
+		{name: "short digest", digest: "sha-256=" + base64.StdEncoding.EncodeToString(sum[:16]), served: body, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.digest != "" {
+					w.Header().Set("Digest", tc.digest)
+				}
+				_, _ = w.Write(tc.served)
+			}))
+			defer srv.Close()
+
+			dest := filepath.Join(t.TempDir(), "pipeline")
+			err := TryBinary(srv.URL, "cache-token", "deadbeef-cafebabe", dest)
+			if tc.wantErr {
+				if !errors.Is(err, ErrDigest) {
+					t.Fatalf("err = %v, want ErrDigest", err)
+				}
+				if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+					t.Fatalf("unverified binary was installed: %v", statErr)
+				}
+				if _, statErr := os.Stat(dest + ".tmp"); !os.IsNotExist(statErr) {
+					t.Errorf("temp download left behind: %v", statErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("TryBinary: %v", err)
+			}
+			got, readErr := os.ReadFile(dest)
+			if readErr != nil {
+				t.Fatalf("read dest: %v", readErr)
+			}
+			if !bytes.Equal(got, body) {
+				t.Errorf("payload = %q, want %q", got, body)
+			}
+		})
+	}
+}
+
+func TestUploadBinary_RejectsDifferentStoredDigest(t *testing.T) {
+	other := sha256.Sum256([]byte("something else"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Digest", "sha-256="+base64.StdEncoding.EncodeToString(other[:]))
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	src := filepath.Join(t.TempDir(), "pipeline")
+	if err := os.WriteFile(src, []byte("compiled pipeline bytes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := UploadBinary(srv.URL, "cache-token", "deadbeef-cafebabe", src)
+	if !errors.Is(err, ErrDigest) {
+		t.Fatalf("err = %v, want ErrDigest", err)
+	}
+}
+
+func TestTryBinary_SendsTokenAsBearer(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		token string
+		want  string
+	}{
+		{name: "token", token: "cache-token", want: "Bearer cache-token"},
+		{name: "no token", token: "", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var authz string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authz = r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer srv.Close()
+
+			dest := filepath.Join(t.TempDir(), "pipeline")
+			if err := TryBinary(srv.URL, tc.token, "deadbeef-cafebabe", dest); !errors.Is(err, ErrMiss) {
+				t.Fatalf("error = %v, want ErrMiss", err)
+			}
+			if authz != tc.want {
+				t.Fatalf("Authorization = %q, want %q", authz, tc.want)
+			}
+		})
 	}
 }

@@ -2094,14 +2094,17 @@ var cmdUsersAdd = Command{
 is a TTY (the password is not shown on-screen or recorded in
 shell history). Passing --password skips the prompt -- useful
 for CI seed flows but leaks via shell history if used
-interactively.`,
+interactively. --scope sets what the account's dashboard
+sessions may reach; omitting it grants admin.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Dashboard username", Required: true, Group: "Input"},
 		{Name: "password", Argument: "PASSWORD", Desc: "Password (omit to prompt interactively)", Group: "Input"},
+		{Name: "scope", Argument: "LIST", Desc: "Comma-separated scopes (omit to grant admin)", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
 		{"Interactive add", "sparkwing cluster users add --name alice --profile prod"},
+		{"Read-only dashboard account", "sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod"},
 		{"Non-interactive add for CI", `sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod`},
 	},
 }
@@ -2109,8 +2112,8 @@ interactively.`,
 var cmdUsersList = Command{
 	Path:     "sparkwing cluster users list",
 	Synopsis: "Print every user",
-	Description: `Prints name, created_at, and last_login_at for every user in
-the controller's users table.`,
+	Description: `Prints name, scopes, created_at, and last_login_at for every
+user in the controller's users table.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},

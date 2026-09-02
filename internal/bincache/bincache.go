@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -44,10 +45,35 @@ func CacheToken() string {
 	return os.Getenv("SPARKWING_CACHE_TOKEN")
 }
 
-func TryBinary(gcURL, hash, dest string) error {
+// ErrDigest reports a cached binary whose bytes do not match the digest the cache advertised,
+// or a response that carried no digest at all.
+var ErrDigest = errors.New("remote binary cache: digest verification failed")
+
+func parseDigestHeader(value string) ([]byte, error) {
+	for _, member := range strings.Split(value, ",") {
+		name, encoded, ok := strings.Cut(strings.TrimSpace(member), "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(name), "sha-256") {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+		if err != nil {
+			return nil, fmt.Errorf("%w: undecodable sha-256 digest", ErrDigest)
+		}
+		if len(raw) != sha256.Size {
+			return nil, fmt.Errorf("%w: sha-256 digest is %d bytes", ErrDigest, len(raw))
+		}
+		return raw, nil
+	}
+	return nil, fmt.Errorf("%w: response carried no sha-256 digest", ErrDigest)
+}
+
+func TryBinary(gcURL, token, hash, dest string) error {
 	req, err := http.NewRequest(http.MethodGet, gcURL+"/bin/"+hash, nil)
 	if err != nil {
 		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	cli := &http.Client{
 		Timeout: 30 * time.Second,
@@ -66,6 +92,10 @@ func TryBinary(gcURL, hash, dest string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bin cache GET: %s", resp.Status)
 	}
+	want, err := parseDigestHeader(resp.Header.Get("Digest"))
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
@@ -74,7 +104,8 @@ func TryBinary(gcURL, hash, dest string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	sum := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(f, sum), resp.Body); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return err
@@ -82,6 +113,11 @@ func TryBinary(gcURL, hash, dest string) error {
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp)
 		return err
+	}
+	// safety: the key folds source inputs, not content, so only this digest ties the bytes to the cache entry.
+	if !bytes.Equal(sum.Sum(nil), want) {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("%w: %s", ErrDigest, hash)
 	}
 	return os.Rename(tmp, dest)
 }
@@ -112,6 +148,16 @@ func UploadBinary(gcURL, token, hash, src string) error {
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("bin cache PUT %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	if header := resp.Header.Get("Digest"); header != "" {
+		stored, err := parseDigestHeader(header)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		if !bytes.Equal(stored, sum[:]) {
+			return fmt.Errorf("%w: cache stored different bytes for %s", ErrDigest, hash)
+		}
 	}
 	return nil
 }

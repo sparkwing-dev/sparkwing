@@ -18,7 +18,8 @@ spec:
       labels:
         {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "cache") | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "sparkwing-runner-bundle.serviceAccountName" . }}
+      serviceAccountName: {{ include "sparkwing-runner-bundle.cacheServiceAccountName" . }}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

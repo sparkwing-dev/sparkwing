@@ -492,14 +492,14 @@ func (s *Store) CountPendingTriggers(ctx context.Context) (int, error)
 func (s *Store) CountUsers() (int, error)
 func (s *Store) CreateApproval(ctx context.Context, a Approval) error
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error
-func (s *Store) CreateFirstUser(name, password string, now time.Time) (*User, error)
+func (s *Store) CreateFirstUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CreateNode(ctx context.Context, n Node) error
 func (s *Store) CreateOrReplaceSecret(name, value, principal string, masked bool, now time.Time) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (raw string, tok *Token, err error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
-func (s *Store) CreateUser(name, password string, now time.Time) (*User, error)
+func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
@@ -669,6 +669,7 @@ const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 type User struct {
 	Name        string
 	PWHash      string
+	Scopes      []string
 	CreatedAt   time.Time
 	LastLoginAt *time.Time
 }

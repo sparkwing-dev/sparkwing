@@ -83,12 +83,54 @@ code change to unlock.
 - **orchestrator (Breaking):** Node dispatch snapshots drop credential-shaped
   environment variables, mask registered secret values in the ones they keep,
   and name every dropped key in a new `redacted_keys` field so a replay can say
-  what it will not reproduce. Run-store schema 19 adds that column.
+  what it will not reproduce. Run-store schema 20 adds that column.
   `GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and its list form return
   `env_json` only to an `admin` principal. Cluster-mode `sparkwing debug rerun`
   sends the pod manifest to `kubectl` on stdin, keeping env values off the
   command line and out of the echoed banner. See the
   [migration guide](docs/migrations/_unreleased.md#dispatch-snapshot-credentials).
+- **cache:** Cached pipeline binaries now carry a verified sha-256 digest
+  The cache stores the digest and the writing principal's token fingerprint
+  beside each uploaded binary, serves them as `Digest` and `ETag`, and writes
+  the digest as a companion object in an artifact store. Clients hash what they
+  download and discard a mismatch before the binary lands, so a poisoned or
+  tampered entry is recompiled instead of executed. A download without a digest
+  counts as a miss, so binaries stored by an older cache are recompiled once.
+- **web (Breaking):** The dashboard proxy now forwards only the controller
+  routes the dashboard itself calls and checks the signed-in session's scopes
+  against each one, so a logged-in browser can no longer mint tokens, read
+  secrets, or create users with the web pod's service bearer. Sessions carry
+  the scopes of their user rather than a fixed `admin`, run-store schema 19
+  adds a `users.scopes` column defaulting existing accounts to `admin`, and
+  `sparkwing cluster users add --scope` creates narrower accounts.
+  `store.CreateUser` and `store.CreateFirstUser` now take that scope set. See the
+  [migration guide](docs/migrations/_unreleased.md#dashboard-proxy-allow-list).
+- **runner:** Runner Job pods mount no ServiceAccount token, and `--runner k8s`
+  now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead of silently
+  landing pipeline code on the namespace default ServiceAccount.
+- **helm:** The runner Role no longer reads namespace Secrets, ConfigMaps,
+  pods, or events, and no chart pod mounts a ServiceAccount token. The cache
+  and logs pods get their own ServiceAccounts instead of sharing the runner's,
+  and `sparkwing-full` creates an unprivileged `sparkwing-cache-warmer`
+  ServiceAccount that the controller's warmer pods now name explicitly.
+  Controllers running the warm pool outside that chart must create that
+  ServiceAccount in the pool namespace.
+- **cache:** The cache no longer serves an authenticated endpoint to a request
+  that omits `X-Forwarded-For`, so `PUT /bin/<key>`, `PUT /cache/<key>`,
+  `POST /upload`, and the sync routes now require the bearer token from every
+  caller, in-cluster ones included. The service refuses to start without
+  `--api-token` unless `--allow-unauthenticated`
+  (`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`) is set, and cached-binary and
+  lint-cache reads now send `SPARKWING_CACHE_TOKEN`.
+- **cli:** Generated git hooks now single-quote each pipeline name, and
+  `sparkwing.yaml` rejects a pipeline name outside
+  `^[A-Za-z0-9][A-Za-z0-9._-]*$`, so a repository's config cannot hand shell
+  execution to anyone who runs `sparkwing pipeline hooks install`.
+- **storage:** Artifact keys are now validated before the filesystem store
+  joins them to a path, and the store opens every blob through `os.Root`, so
+  `GET /api/v1/artifacts/{key}` can no longer read, overwrite, or delete files
+  outside the artifact root. The controller and loopback handlers reject a
+  traversal key with 400 before any backend sees it.
 - **ci:** A `security-scan` pipeline runs gosec, source-mode govulncheck,
   gitleaks, and `npm audit`, and the Security workflow runs it on every pull
   request with gosec findings uploaded to GitHub code scanning alongside CodeQL
@@ -99,6 +141,10 @@ code change to unlock.
   suffix or an untrusted immediate peer use the TCP peer address. Configure
   `--trusted-proxy-cidrs` or the chart's `web.trustedProxyCIDRs` to retain
   per-client buckets behind a reverse proxy.
+- **logs:** Run and node identifiers must now be a single path segment that
+  `filepath.Clean` leaves unchanged and resolve to one directory under the
+  runs root, so a request carrying a percent-encoded `.` can no longer address
+  the runs root itself and delete every run's logs.
 
 ## [v0.38.2] - 2026-09-01
 
