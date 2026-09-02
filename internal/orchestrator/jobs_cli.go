@@ -1098,9 +1098,9 @@ func formatPlain(rec sparkwing.LogRecord) string {
 	prefix := ts + " " + lvl
 	if rec.JobID != "" {
 		if rec.Step != "" {
-			prefix += " " + rec.JobID + "/" + rec.Step
+			prefix += " " + logpretty.StripInline(rec.JobID) + "/" + logpretty.StripInline(rec.Step)
 		} else {
-			prefix += " " + rec.JobID
+			prefix += " " + logpretty.StripInline(rec.JobID)
 		}
 	}
 	if rec.Event != "" {
@@ -1111,7 +1111,9 @@ func formatPlain(rec sparkwing.LogRecord) string {
 		b, _ := json.Marshal(rec.Attrs)
 		msg = string(b)
 	}
-	return prefix + " " + msg
+	// safety: indenting the continuation lines keeps a newline in pipeline output from starting a
+	// forged log line at column zero.
+	return prefix + " " + strings.ReplaceAll(msg, "\n", "\n    ")
 }
 
 func followLogs(ctx context.Context, st *store.Store, paths Paths, runID string, target []*store.Node, opts LogsOpts, out io.Writer) error {

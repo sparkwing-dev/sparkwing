@@ -46,6 +46,8 @@ func (q *QuietRenderer) sanitize(s string) string {
 	return StripANSI(s)
 }
 
+func (q *QuietRenderer) sanitizeInline(s string) string { return foldLines(q.sanitize(s)) }
+
 func (q *QuietRenderer) Log(level, msg string) {
 	q.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
 }
@@ -145,9 +147,9 @@ func (q *QuietRenderer) writeFailureDetail(sink io.Writer, nodes []any, runID st
 		id, _ := m["id"].(string)
 		errMsg, _ := m["error"].(string)
 		stepID, body := splitStepErrorPrefix(errMsg)
-		crumb := q.color(id, ansiBold+ansiRed)
+		crumb := q.color(q.sanitizeInline(id), ansiBold+ansiRed)
 		if stepID != "" {
-			crumb += q.color(" › "+q.sanitize(stepID), ansiDim)
+			crumb += q.color(" › "+q.sanitizeInline(stepID), ansiDim)
 		}
 		lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 		for i, l := range lines {

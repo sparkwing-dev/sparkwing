@@ -37,6 +37,33 @@ function escapeHTML(s: string): string {
   );
 }
 
+function normalizeCode(param: string): string {
+  const trimmed = param.replace(/^0+/, "");
+  return trimmed === "" ? "0" : trimmed;
+}
+
+// Splits SGR parameters into codes, folding a 38 or 48 extended colour selector and its arguments
+// into the single code they belong to. Returns null when that selector is malformed.
+function sgrCodes(params: string): string[] | null {
+  const raw = params.split(";");
+  const out: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const code = normalizeCode(raw[i]);
+    if (code !== "38" && code !== "48") {
+      out.push(code);
+      continue;
+    }
+    const kind = i + 1 < raw.length ? normalizeCode(raw[i + 1]) : "";
+    const want = kind === "5" ? 1 : kind === "2" ? 3 : -1;
+    if (want < 0 || i + 1 + want >= raw.length) return null;
+    out.push(
+      [code, ...raw.slice(i + 1, i + 2 + want).map(normalizeCode)].join(";"),
+    );
+    i += 1 + want;
+  }
+  return out;
+}
+
 export function ansiToHtml(input: string): string {
   if (!input) return "";
   let out = "";
@@ -51,26 +78,25 @@ export function ansiToHtml(input: string): string {
   let match: RegExpExecArray | null;
   while ((match = SGR_RE.exec(input)) !== null) {
     flushText(input.slice(lastIndex, match.index));
-    const codes = (match[1] || "0")
-      .split(";")
-      .map((c) => c.trim())
-      .filter((c) => c !== "");
+    lastIndex = SGR_RE.lastIndex;
+    const codes = sgrCodes(match[1] ?? "");
+    // One unrecognized parameter drops the whole sequence, so a compound SGR never degrades into
+    // attributes its producer never asked for.
+    if (codes === null || codes.some((c) => c !== "0" && !CODE_TO_CLASS[c])) {
+      continue;
+    }
 
     for (const code of codes) {
-      if (code === "0" || code === "") {
+      if (code === "0") {
         while (openSpans > 0) {
           out += "</span>";
           openSpans--;
         }
         continue;
       }
-      const cls = CODE_TO_CLASS[code];
-      if (cls) {
-        out += `<span class="${cls}">`;
-        openSpans++;
-      }
+      out += `<span class="${CODE_TO_CLASS[code]}">`;
+      openSpans++;
     }
-    lastIndex = SGR_RE.lastIndex;
   }
   flushText(input.slice(lastIndex));
   while (openSpans > 0) {

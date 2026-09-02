@@ -52,12 +52,15 @@ code change to unlock.
 ### Security
 
 - **logs:** CLI log output now filters terminal escape sequences out of
-  pipeline output. Plain format drops every escape sequence and every C0
-  control byte except tab, so one log record stays one line; the colored
-  format keeps only the SGR codes the web log viewer renders. A pipeline can
-  no longer retitle the operator's terminal, plant an OSC 8 hyperlink, reset
-  the terminal with `ESC c`, or forge a Sparkwing status line in the output of
-  `sparkwing runs logs`.
+  pipeline output. Both formats drop every escape sequence, every C0 control
+  byte except tab and newline, and the C1 controls U+0080 to U+009F in their
+  raw and UTF-8 forms; the colored format keeps only the SGR codes the web log
+  viewer renders, and drops a compound sequence whole instead of reducing it to
+  the codes it recognizes. A pipeline can no longer retitle the operator's
+  terminal, plant an OSC 8 hyperlink, reset the terminal with `ESC c`, or forge
+  a Sparkwing status line in the output of `sparkwing runs logs`, and a newline
+  inside a record now opens an indented continuation line so a multi-line
+  command echo stays readable.
 - **deploy:** The `mode3-postgres` Terraform module now commits its
   `.terraform.lock.hcl` and pins providers with `~>` instead of `>=`, so
   `terraform init` installs the checksummed versions the module was tested
