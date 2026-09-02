@@ -51,6 +51,17 @@ code change to unlock.
 
 ### Security
 
+- **store (Breaking):** Two live tokens can no longer share a prefix. Run-store
+  schema 26 makes the `idx_tokens_prefix` index unique and minting retries when
+  a prefix is already taken, so the 12-character handle
+  `sparkwing cluster tokens revoke --prefix` accepts names one principal.
+  Revoking runs its update inside a transaction and rolls back when the prefix
+  matched more than one row, rather than revoking every match and reporting the
+  ambiguity afterwards, and `store.LookupTokenByPrefix` -- the read behind
+  rotation -- errors on an ambiguous prefix instead of returning the first row.
+  A database that already holds two tokens on one prefix refuses to migrate and
+  names the prefix; see the
+  [migration guide](docs/migrations/_unreleased.md#token-prefixes-are-unique).
 - **controller:** `GET /api/v1/runs/{id}` and `GET /api/v1/triggers/{id}` now
   admit a caller holding a live claim on that run as well as one holding
   `runs.read` or `triggers.read`. Those are the first two calls a node process
