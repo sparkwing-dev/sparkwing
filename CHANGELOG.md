@@ -48,6 +48,7 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
 ### Security
 
 - **ci:** The `security-scan` pipeline now fails on any high-severity,
@@ -186,18 +187,12 @@ code change to unlock.
   token on. The Git cache register route keeps its half-hour deadline, the
   controller refuses to start when `--metrics-addr` cannot bind, and
   `controller.metricsPort` wires that flag into the `sparkwing-full` chart.
-
-### Security
-
 - **controller:** First-admin bootstrap is now atomic on Postgres. The
   check-then-insert locks a single `sparkwing_meta` latch row inside its
   transaction, so two concurrent bootstrap requests can no longer both read an
   empty `users` table and each create an admin under a different name. The
   transaction also ran raw `?` placeholders that Postgres rejects, so bootstrap
   now goes through the dialect-aware transaction helper.
-
-### Security
-
 - **cache + orchestrator:** The dependency-cache and lint-cache archives now
   extract through one `os.Root`-backed implementation that refuses to follow a
   symlink out of the target directory, so a chain of links inside an archive can
@@ -221,9 +216,6 @@ code change to unlock.
   directory, is skipped with a warning. A link whose target stays inside the
   workspace is still followed, and every matched file is opened once through
   an `os.Root` on the workspace, hashed and uploaded from that one handle.
-
-### Security
-
 - **docs:** The security documents now state what the code enforces. A Trust
   model section in `docs/security.md` names one controller as one trust domain,
   records that pipeline authors run code on runners with the runner's token in
