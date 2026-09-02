@@ -48,6 +48,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **ci:** Every GitHub Actions workflow now pins its actions to a full commit
+  SHA with a version comment, the release job that prepares binaries no longer
+  persists checkout credentials, and the canonical gate installs dashboard
+  dependencies with `--ignore-scripts`.
 
 ## [v0.39.0] - 2026-09-02
 ### Docs
