@@ -495,6 +495,8 @@ func dependencyProxyEnv(base string) []corev1.EnvVar {
 // safety: cluster profiles use peak CPU because the resolved core value is a
 // hard CFS limit here; sustained local-host demand would throttle spiky pods.
 func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequirements {
+	// safety: an operator ceiling outranks a pipeline pin, which is otherwise unbounded on this path
+	res = capacity.ApplyCeiling(res, quantityCores(cfg.CPULimit), quantityBytes(cfg.MemoryLimit))
 	req := corev1.ResourceList{}
 	lim := corev1.ResourceList{}
 	measured := res.Source != store.CostSourceDefault
@@ -523,6 +525,22 @@ func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequiremen
 		}
 	}
 	return corev1.ResourceRequirements{Requests: req, Limits: lim}
+}
+
+func quantityCores(s string) float64 {
+	q, err := resource.ParseQuantity(s)
+	if err != nil {
+		return 0
+	}
+	return q.AsApproximateFloat64()
+}
+
+func quantityBytes(s string) int64 {
+	q, err := resource.ParseQuantity(s)
+	if err != nil {
+		return 0
+	}
+	return q.Value()
 }
 
 func isJobDone(j *batchv1.Job) bool {

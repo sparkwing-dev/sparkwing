@@ -37,6 +37,7 @@ type Cipher interface {
 
 	Open(envelope string) (string, error)
 }
+const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
@@ -141,6 +142,7 @@ func (s *Server) WithMetricsAddr(addr string) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
+func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
 	CachePod string

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 
 	flag "github.com/spf13/pflag"
 
@@ -45,6 +46,8 @@ func run(args []string) error {
 		"require controller-backed browser sessions; needs --controller or a profile with controller.url. Leave off for laptop-local dev.")
 	allowUnauthenticatedRemote := fs.Bool("allow-unauthenticated-remote", false,
 		"serve a token-backed dashboard without --require-login on a non-loopback address, handing the controller to every caller that reaches it")
+	allowInsecureCookiesRemote := fs.Bool("allow-insecure-cookies-remote", false,
+		"accept SPARKWING_WEB_INSECURE_COOKIES on a non-loopback address, for a dashboard published over plain HTTP through a proxy or ingress")
 	hsts := fs.Bool("hsts", false,
 		"assert that browsers reach this dashboard over TLS: send Strict-Transport-Security and require an https origin on unsafe requests. "+
 			"Unneeded when this process serves TLS itself or a proxy in --trusted-proxy-cidrs forwards X-Forwarded-Proto")
@@ -61,6 +64,7 @@ func run(args []string) error {
 	}
 
 	_ = fs.Parse(args)
+	insecureCookies := insecureCookiesRequested(os.Getenv("SPARKWING_WEB_INSECURE_COOKIES"))
 	trustedProxyCIDRs, err := ratelimit.ParseTrustedProxyCIDRs(*trustedProxyCIDRsRaw)
 	if err != nil {
 		return fmt.Errorf("--trusted-proxy-cidrs: %w", err)
@@ -107,6 +111,8 @@ func run(args []string) error {
 			HSTS:              *hsts,
 
 			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
+			InsecureCookies:            insecureCookies,
+			AllowInsecureCookiesRemote: *allowInsecureCookiesRemote,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
@@ -140,6 +146,8 @@ func run(args []string) error {
 			HSTS:              *hsts,
 
 			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
+			InsecureCookies:            insecureCookies,
+			AllowInsecureCookiesRemote: *allowInsecureCookiesRemote,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
@@ -153,7 +161,14 @@ func run(args []string) error {
 	return web.Serve(ctx, paths, *addr, web.HandlerOptions{
 		TrustedProxyCIDRs: trustedProxyCIDRs,
 		HSTS:              *hsts,
+
+		InsecureCookies:            insecureCookies,
+		AllowInsecureCookiesRemote: *allowInsecureCookiesRemote,
 	})
+}
+
+func insecureCookiesRequested(v string) bool {
+	return v == "1" || strings.EqualFold(v, "true")
 }
 
 func validateLoginBackend(requireLogin bool, controllerURL string) error {

@@ -142,21 +142,31 @@ func ApplyHostCeiling(res Resolution, pipeline string, machineCores, grantableCo
 		return res, warning
 	}
 	measuring := res.Source == store.CostSourceFloor || res.Source == store.CostSourceMeasuring
-	if grantableCores > 0 && res.Cores > grantableCores {
-		if measuring {
-			warning = fmt.Sprintf("measuring charge %.1f cores exceeds this machine's grantable %.1f, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline %s",
-				res.Cores, grantableCores, pipeline)
-		}
-		res.Cores = grantableCores
+	clamped := ApplyCeiling(res, grantableCores, grantableMemoryBytes)
+	switch {
+	case measuring && clamped.Cores < res.Cores:
+		warning = fmt.Sprintf("measuring charge %.1f cores exceeds this machine's grantable %.1f, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline %s",
+			res.Cores, grantableCores, pipeline)
+	case measuring && clamped.MemoryBytes < res.MemoryBytes:
+		warning = fmt.Sprintf("measuring charge %s exceeds this machine's grantable %s, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline %s",
+			gib(res.MemoryBytes), gib(grantableMemoryBytes), pipeline)
 	}
-	if grantableMemoryBytes > 0 && res.MemoryBytes > grantableMemoryBytes {
-		if measuring && warning == "" {
-			warning = fmt.Sprintf("measuring charge %s exceeds this machine's grantable %s, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline %s",
-				gib(res.MemoryBytes), gib(grantableMemoryBytes), pipeline)
-		}
-		res.MemoryBytes = grantableMemoryBytes
+	return clamped, warning
+}
+
+// ApplyCeiling caps a resolution at a hard ceiling, whatever its source. A
+// zero ceiling in either dimension leaves that dimension alone. Unlike
+// [ApplyHostCeiling], a pin is capped too: on a backend that turns the
+// resolution into an enforced allocation, an operator ceiling outranks a
+// pipeline's own declaration.
+func ApplyCeiling(res Resolution, ceilingCores float64, ceilingMemoryBytes int64) Resolution {
+	if ceilingCores > 0 && res.Cores > ceilingCores {
+		res.Cores = ceilingCores
 	}
-	return res, warning
+	if ceilingMemoryBytes > 0 && res.MemoryBytes > ceilingMemoryBytes {
+		res.MemoryBytes = ceilingMemoryBytes
+	}
+	return res
 }
 
 func measurementQualifies(profile *store.PipelineProfile) bool {

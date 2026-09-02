@@ -3,11 +3,13 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
 
 	flag "github.com/spf13/pflag"
+	"golang.org/x/term"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
@@ -58,7 +60,8 @@ func runProfilesAdd(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesAdd.Path, flag.ContinueOnError)
 	name := fs.String("name", "", "profile name (unique per profiles.yaml)")
 	controller := fs.String("controller", "", "controller base URL (required for remote dispatch)")
-	token := fs.String("token", "", "bearer token (optional -- omit for unauthed controllers)")
+	token := fs.String("token", "", "bearer token, visible to other processes in the process list and shell history (optional -- omit for unauthed controllers)")
+	tokenStdin := fs.Bool("token-stdin", false, "read the bearer token from stdin, prompting without echo when stdin is a terminal")
 	if err := parseAndCheck(cmdProfilesAdd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -72,6 +75,13 @@ func runProfilesAdd(args []string) error {
 	}
 	if _, existed := cfg.Profiles[*name]; existed {
 		return fmt.Errorf("profiles add: %q already exists (use `profiles remove` first, or `profiles duplicate` into a new name)", *name)
+	}
+	if *tokenStdin {
+		read, err := readTokenStdin(os.Stdin, os.Stderr, fmt.Sprintf("bearer token for %q", *name))
+		if err != nil {
+			return err
+		}
+		*token = read
 	}
 	p := &profile.Profile{Name: *name}
 	if *controller != "" || *token != "" {
@@ -206,7 +216,8 @@ func runProfilesSet(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesSet.Path, flag.ContinueOnError)
 	nameFlag := fs.String("name", "", "profile name to mutate")
 	controller := fs.String("controller", "", "new controller URL")
-	token := fs.String("token", "", "new bearer token")
+	token := fs.String("token", "", "new bearer token, visible to other processes in the process list and shell history")
+	tokenStdin := fs.Bool("token-stdin", false, "read the new bearer token from stdin, prompting without echo when stdin is a terminal")
 	if err := parseAndCheck(cmdProfilesSet, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -222,14 +233,22 @@ func runProfilesSet(args []string) error {
 	if !ok {
 		return fmt.Errorf("profiles set: %q not found", name)
 	}
-	if fs.Changed("controller") || fs.Changed("token") {
+	if *tokenStdin {
+		read, err := readTokenStdin(os.Stdin, os.Stderr, fmt.Sprintf("new bearer token for %q", name))
+		if err != nil {
+			return err
+		}
+		*token = read
+	}
+	tokenGiven := fs.Changed("token") || *tokenStdin
+	if fs.Changed("controller") || tokenGiven {
 		if p.Controller == nil {
 			p.Controller = &profile.ControllerSpec{}
 		}
 		if fs.Changed("controller") {
 			p.Controller.URL = *controller
 		}
-		if fs.Changed("token") {
+		if tokenGiven {
 			p.Controller.Token = *token
 		}
 	}
@@ -274,6 +293,23 @@ func runProfilesDuplicate(args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "duplicated %q -> %q (inspect it with `sparkwing configure profiles show --name %s`, then edit profiles.yaml or remove and re-add it)\n", src, dst, dst)
 	return nil
+}
+
+func readTokenStdin(in *os.File, prompt io.Writer, label string) (string, error) {
+	if term.IsTerminal(int(in.Fd())) {
+		fmt.Fprintf(prompt, "%s: ", label)
+		raw, err := term.ReadPassword(int(in.Fd()))
+		fmt.Fprintln(prompt)
+		if err != nil {
+			return "", fmt.Errorf("read token: %w", err)
+		}
+		return strings.TrimSpace(string(raw)), nil
+	}
+	raw, err := io.ReadAll(in)
+	if err != nil {
+		return "", fmt.Errorf("read token: %w", err)
+	}
+	return strings.TrimSpace(string(raw)), nil
 }
 
 func redactToken(t string) string {
