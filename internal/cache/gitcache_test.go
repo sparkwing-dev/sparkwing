@@ -1538,6 +1538,7 @@ func TestSetupSSHFailsWhenTheKeyCannotBeStaged(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 
 	err := setupSSH()
 	if err == nil {

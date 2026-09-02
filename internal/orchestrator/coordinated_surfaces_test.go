@@ -45,6 +45,7 @@ func TestCoordinatedChildSurfaces_LocalOnlyNeverOpensProfileBackends(t *testing.
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
 	secretsDir := filepath.Join(home, ".config", "sparkwing")
 	if err := os.MkdirAll(secretsDir, 0o700); err != nil {
 		t.Fatal(err)
