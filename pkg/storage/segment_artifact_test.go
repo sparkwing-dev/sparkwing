@@ -3,7 +3,7 @@ package storage
 import "testing"
 
 func TestSafeArtifactKey(t *testing.T) {
-	for _, key := range []string{"a", "ab", "abcd1234", "runs/r1/state.ndjson", "bin/some-key", "artifacts/blobs/0f1e"} {
+	for _, key := range []string{"a", "ab", "abcd1234", "runs/r1/state.ndjson", "bin/some-entry", "artifacts/blobs/0f1e"} {
 		if err := SafeArtifactKey(key); err != nil {
 			t.Errorf("SafeArtifactKey(%q) = %v, want nil", key, err)
 		}

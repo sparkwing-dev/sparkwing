@@ -116,7 +116,11 @@ func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 		"abcd1234-ef567890",
 	)
 	ignore := strings.TrimSpace(readHostedCIFile(t, ".gitleaksignore"))
-	if ignore != "49be43e4b2e9c0dc24ee7d50eaf4a0dd0291e147:internal/web/next-out/_next/static/chunks/17mq5rf2.ibbt.js:generic-api-key:55" {
-		t.Fatalf("gitleaks history exception is not one exact fingerprint: %q", ignore)
+	want := strings.Join([]string{
+		"49be43e4b2e9c0dc24ee7d50eaf4a0dd0291e147:internal/web/next-out/_next/static/chunks/17mq5rf2.ibbt.js:generic-api-key:55",
+		"c4f254125ffc14690be63b70e25c21c90e95932c:pkg/storage/segment_artifact_test.go:generic-api-key:6",
+	}, "\n")
+	if ignore != want {
+		t.Fatalf("gitleaks history exceptions are not the exact fingerprint set: %q", ignore)
 	}
 }
