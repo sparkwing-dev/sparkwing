@@ -86,8 +86,6 @@ func TestRouteGuard_LoopbackRoutesAreASubsetOfTheController(t *testing.T) {
 	}
 }
 
-// safety: a scopeOr... wrapper takes requireScope's first argument and
-// admits a documented alternative to it, so it counts as a gate here.
 func routeScope(handler ast.Expr) (string, bool) {
 	call, ok := handler.(*ast.CallExpr)
 	if !ok || len(call.Args) == 0 {
@@ -102,7 +100,7 @@ func routeScope(handler ast.Expr) (string, bool) {
 	default:
 		return "", false
 	}
-	if name != "requireScope" && !strings.HasPrefix(name, "scopeOr") {
+	if name != "requireScope" {
 		return "", false
 	}
 	scope, ok := call.Args[0].(*ast.Ident)

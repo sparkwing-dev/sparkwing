@@ -5,12 +5,6 @@
 // Parse recognises the registration form those files use,
 // `mux.Handle("METHOD /path", requireScope(ScopeX, ...))`, and resolves the
 // scope constant through the map [Scopes] collects from the auth sources.
-// A wrapper named `scopeOr...` that takes the route scope as its first
-// argument reads the same way, so a route whose scope check has a documented
-// alternative still reports the scope it demands:
-//
-//	scopes, err := apiroutes.Scopes("pkg/controller/auth.go")
-//	routes, err := apiroutes.Parse("pkg/controller/server.go", scopes)
 package apiroutes
 
 import (
