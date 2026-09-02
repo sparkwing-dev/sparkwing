@@ -60,6 +60,8 @@ const ApprovalOnTimeoutFail = "fail"
 const ApprovalResolutionApproved = "approved"
 const ApprovalResolutionDenied = "denied"
 const ApprovalResolutionTimedOut = "timed_out"
+func Argon2Concurrency(budget int64) int
+const Argon2HashBytes = int64(argonMemory) << 10
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
@@ -134,6 +136,7 @@ type DebugPause struct {
 	ReleasedBy  string
 	ReleaseKind string
 }
+const DefaultArgon2MemoryBudget = int64(256) << 20
 const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
 const DefaultConcurrencyCacheCap = 10_000
@@ -446,6 +449,7 @@ type Session struct {
 	LastUsedAt *time.Time
 }
 const SessionIDLen = 32
+func SetArgon2MemoryBudget(budget int64) int
 func SetBinaryVersion(v string)
 type SkewError struct {
 	DBVersion        int
@@ -505,7 +509,7 @@ func (s *Store) DB() *sql.DB
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name string) error
 func (s *Store) DeleteSession(rawSession string) error
-func (s *Store) DeleteUser(name string) error
+func (s *Store) DeleteUser(name string, now time.Time) ([]string, error)
 func (s *Store) Dialect() Dialect
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error

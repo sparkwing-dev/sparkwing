@@ -34,6 +34,10 @@ type Config struct {
 
 	ProxyMaxAge time.Duration
 
+	PublicURL string
+
+	TrustForwardedHost bool
+
 	APIToken string
 
 	AllowUnauthenticated bool
@@ -111,6 +115,10 @@ func New(cfg Config) (*Server, error) {
 	if cfg.ProxyMaxAge <= 0 {
 		cfg.ProxyMaxAge = 7 * 24 * time.Hour
 	}
+	publicBase, err := normalizeProxyPublicBase(cfg.PublicURL)
+	if err != nil {
+		return nil, err
+	}
 	if cfg.SSHKeyDir == "" {
 		cfg.SSHKeyDir = "/etc/ssh-key"
 	}
@@ -132,6 +140,8 @@ func New(cfg Config) (*Server, error) {
 	proxyDir = cfg.ProxyDir
 	proxyCacheTTL = cfg.ProxyCacheTTL
 	proxyMaxAge = cfg.ProxyMaxAge
+	proxyPublicBase = publicBase
+	proxyTrustForwardedHost = cfg.TrustForwardedHost
 	apiToken = cfg.APIToken
 	sshKeyDir = cfg.SSHKeyDir
 	autoRegisterReposSpec = cfg.AutoRegisterRepos
@@ -145,6 +155,13 @@ func New(cfg Config) (*Server, error) {
 			return nil, fmt.Errorf("cache: mkdir %s: %w", d, err)
 		}
 	}
+	if proxyPublicBase != "" {
+		log.Printf("sparkwing-cache rewrites proxied registry bodies against %s", proxyPublicBase)
+	} else {
+		log.Printf("sparkwing-cache rewrites proxied registry bodies per request from the Host header; " +
+			"set --public-url (or $SPARKWING_CACHE_PUBLIC_URL) to rewrite against one fixed base")
+	}
+
 	loadRepoNames()
 	initProxy()
 	initGitcacheMetrics()

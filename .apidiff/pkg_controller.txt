@@ -21,6 +21,7 @@ type Authenticator struct {
 }
 func (a *Authenticator) AuthDisabled() bool
 func (a *Authenticator) Authenticate(raw string) (*Principal, error)
+func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
 type Cipher interface {
 	Seal(plain string) (string, error)
@@ -110,6 +111,7 @@ func (s *Server) WithLogsURL(url string) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
+func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
 	CachePod string
 

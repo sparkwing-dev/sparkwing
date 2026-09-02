@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -105,6 +106,18 @@ type Authenticator struct {
 type authCacheEntry struct {
 	principal *Principal
 	expires   time.Time
+	tokenExp  *time.Time
+	revokedAt *time.Time
+}
+
+func (e *authCacheEntry) tokenLive(now time.Time) bool {
+	if e.revokedAt != nil && !now.Before(*e.revokedAt) {
+		return false
+	}
+	if e.tokenExp != nil && !now.Before(*e.tokenExp) {
+		return false
+	}
+	return true
 }
 
 type authFailureEntry struct {
@@ -144,12 +157,18 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
 	if a.cacheTTL > 0 {
 		if v, ok := a.cache.Load(raw); ok {
 			e := v.(*authCacheEntry)
-			if now.Before(e.expires) {
+			switch {
+			case !now.Before(e.expires):
+				a.cache.Delete(raw)
+			// safety: a cached entry outlives the row's own clock, so expiry and revocation are rechecked on every hit.
+			case !e.tokenLive(now):
+				a.cache.Delete(raw)
+				return nil, errors.New("token is revoked or expired")
+			default:
 				cp := *e.principal
 				cp.Authed = now
 				return &cp, nil
 			}
-			a.cache.Delete(raw)
 		}
 	}
 
@@ -186,9 +205,28 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
 		a.cache.Store(raw, &authCacheEntry{
 			principal: principal,
 			expires:   now.Add(a.cacheTTL),
+			tokenExp:  tok.ExpiresAt,
+			revokedAt: tok.RevokedAt,
 		})
 	}
 	return principal, nil
+}
+
+// Invalidate drops every cached authentication for a token prefix, so
+// the next request carrying that token re-reads the row instead of
+// answering from a stale cache entry. Revocation and rotation call it.
+// Safe on a nil Authenticator.
+func (a *Authenticator) Invalidate(prefix string) {
+	if a == nil || prefix == "" {
+		return
+	}
+	a.cache.Range(func(k, v any) bool {
+		e, ok := v.(*authCacheEntry)
+		if ok && e.principal != nil && e.principal.TokenPrefix == prefix {
+			a.cache.Delete(k)
+		}
+		return true
+	})
 }
 
 func (a *Authenticator) recentFailure(raw string, now time.Time) (string, bool) {
@@ -357,7 +395,7 @@ func PrincipalFromContext(ctx context.Context) (*Principal, bool) {
 func AuditFields(ctx context.Context) []slog.Attr {
 	p, ok := PrincipalFromContext(ctx)
 	if !ok {
-		return []slog.Attr{slog.String("principal", "unauthed")}
+		return []slog.Attr{slog.String("principal", authwire.AnonymousPrincipal)}
 	}
 	return []slog.Attr{
 		slog.String("principal", p.Name),

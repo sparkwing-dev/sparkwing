@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -136,14 +137,20 @@ func withTestProxy(t *testing.T, registries map[string]Registry, fn func()) {
 	t.Helper()
 	oldRegistries := defaultRegistries
 	oldProxyDir := proxyDir
+	oldPublicBase := proxyPublicBase
+	oldTrustForwarded := proxyTrustForwardedHost
 	defaultRegistries = registries
 	proxyDir = t.TempDir()
+	proxyPublicBase = ""
+	proxyTrustForwardedHost = false
 	for name := range registries {
 		os.MkdirAll(filepath.Join(proxyDir, name), 0o755)
 	}
 	defer func() {
 		defaultRegistries = oldRegistries
 		proxyDir = oldProxyDir
+		proxyPublicBase = oldPublicBase
+		proxyTrustForwardedHost = oldTrustForwarded
 	}()
 	fn()
 }
@@ -355,10 +362,7 @@ func TestProxyRewriteBody_Npm(t *testing.T) {
 	body := []byte(`{"name":"lodash","dist":{"tarball":"https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz"}}`)
 	reg := Registry{Name: "npm", Upstream: "https://registry.npmjs.org", RewriteBody: true}
 
-	req := httptest.NewRequest(http.MethodGet, "/proxy/npm/lodash", nil)
-	req.Host = "gitcache.local:8091"
-
-	result := proxyRewriteBody(body, reg, req)
+	result := proxyRewriteBody(body, reg, "http://gitcache.local:8091/proxy")
 	s := string(result)
 
 	if strings.Contains(s, "registry.npmjs.org") {
@@ -373,10 +377,7 @@ func TestProxyRewriteBody_Pypi(t *testing.T) {
 	body := []byte(`<a href="https://files.pythonhosted.org/packages/ab/cd/requests-2.31.0.tar.gz">requests-2.31.0.tar.gz</a>`)
 	reg := Registry{Name: "pypi", Upstream: "https://pypi.org", RewriteBody: true}
 
-	req := httptest.NewRequest(http.MethodGet, "/proxy/pypi/simple/requests/", nil)
-	req.Host = "gitcache.local:8091"
-
-	result := proxyRewriteBody(body, reg, req)
+	result := proxyRewriteBody(body, reg, "http://gitcache.local:8091/proxy")
 	s := string(result)
 
 	if strings.Contains(s, "files.pythonhosted.org") {
@@ -391,10 +392,7 @@ func TestProxyRewriteBody_NoRewrite(t *testing.T) {
 	body := []byte(`{"some":"data"}`)
 	reg := Registry{Name: "rubygems", Upstream: "https://rubygems.org", RewriteBody: false}
 
-	req := httptest.NewRequest(http.MethodGet, "/proxy/rubygems/api/v1/gems/rails.json", nil)
-	req.Host = "gitcache.local:8091"
-
-	result := proxyRewriteBody(body, reg, req)
+	result := proxyRewriteBody(body, reg, "http://gitcache.local:8091/proxy")
 	if string(result) != string(body) {
 		t.Errorf("non-rewrite registry should return body unchanged")
 	}
@@ -427,5 +425,180 @@ func TestHandleProxyStats(t *testing.T) {
 	files := total["files"].(float64)
 	if files != 1 {
 		t.Errorf("expected 1 cached file, got %.0f", files)
+	}
+}
+
+func npmProxyRequest(host, path string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/proxy/npm/"+path, nil)
+	req.Host = host
+	return req
+}
+
+func TestHandleProxy_ForgedHostDoesNotPoisonLaterRequests(t *testing.T) {
+	var upstream *httptest.Server
+	upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"name":"pkg","dist":{"tarball":"%s/pkg/-/pkg-1.0.0.tgz"}}`, upstream.URL)
+	}))
+	defer upstream.Close()
+
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: upstream.URL, RewriteBody: true},
+	}, func() {
+		w1 := httptest.NewRecorder()
+		handleProxy(w1, npmProxyRequest("evil.example.com", "pkg"))
+		if w1.Header().Get("X-Proxy-Cache") != "MISS" {
+			t.Fatalf("first request should be MISS, got %s", w1.Header().Get("X-Proxy-Cache"))
+		}
+		if !strings.Contains(w1.Body.String(), "http://evil.example.com/proxy/npm/") {
+			t.Fatalf("attacker response should carry its own Host, got: %s", w1.Body.String())
+		}
+
+		w2 := httptest.NewRecorder()
+		handleProxy(w2, npmProxyRequest("cache.internal", "pkg"))
+		if w2.Header().Get("X-Proxy-Cache") != "HIT" {
+			t.Fatalf("second request should be HIT, got %s", w2.Header().Get("X-Proxy-Cache"))
+		}
+		body := w2.Body.String()
+		if strings.Contains(body, "evil.example.com") {
+			t.Errorf("cached body was poisoned by the forged Host: %s", body)
+		}
+		if !strings.Contains(body, "http://cache.internal/proxy/npm/pkg/-/pkg-1.0.0.tgz") {
+			t.Errorf("expected a rewrite against the second request Host, got: %s", body)
+		}
+
+		cached, err := os.ReadFile(filepath.Join(proxyDir, "npm", proxyCacheKey("npm", "pkg")+".body"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(cached), upstream.URL) {
+			t.Errorf("cached body should stay unrewritten, got: %s", cached)
+		}
+	})
+}
+
+func TestHandleProxy_PublicBaseRewritesAndCaches(t *testing.T) {
+	var upstream *httptest.Server
+	upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"name":"pkg","dist":{"tarball":"%s/pkg/-/pkg-1.0.0.tgz"}}`, upstream.URL)
+	}))
+	defer upstream.Close()
+
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: upstream.URL, RewriteBody: true},
+	}, func() {
+		proxyPublicBase = "http://cache.internal:8090/proxy"
+
+		w1 := httptest.NewRecorder()
+		handleProxy(w1, npmProxyRequest("evil.example.com", "pkg"))
+		if !strings.Contains(w1.Body.String(), "http://cache.internal:8090/proxy/npm/pkg/-/pkg-1.0.0.tgz") {
+			t.Errorf("expected the configured base, got: %s", w1.Body.String())
+		}
+
+		cached, err := os.ReadFile(filepath.Join(proxyDir, "npm", proxyCacheKey("npm", "pkg")+".body"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(cached), "http://cache.internal:8090/proxy/npm/") {
+			t.Errorf("configured base should be cached rewritten, got: %s", cached)
+		}
+
+		w2 := httptest.NewRecorder()
+		handleProxy(w2, npmProxyRequest("cache.internal:8090", "pkg"))
+		if strings.Contains(w2.Body.String(), "evil.example.com") {
+			t.Errorf("configured base must ignore the request Host, got: %s", w2.Body.String())
+		}
+	})
+}
+
+func TestProxyBaseForRequest(t *testing.T) {
+	tests := []struct {
+		name          string
+		publicBase    string
+		trustForward  bool
+		host          string
+		forwardedHost string
+		forwardedProt string
+		want          string
+	}{
+		{name: "request host", host: "cache.internal:8090", want: "http://cache.internal:8090/proxy"},
+		{
+			name:          "forwarded host ignored by default",
+			host:          "cache.internal",
+			forwardedHost: "evil.example.com",
+			want:          "http://cache.internal/proxy",
+		},
+		{
+			name:          "forwarded host honored when trusted",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: "cache.example.com, hop.example.com",
+			forwardedProt: "https",
+			want:          "https://cache.example.com/proxy",
+		},
+		{
+			name:          "configured base wins",
+			publicBase:    "http://configured.internal/proxy",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: "evil.example.com",
+			want:          "http://configured.internal/proxy",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldBase, oldTrust := proxyPublicBase, proxyTrustForwardedHost
+			proxyPublicBase, proxyTrustForwardedHost = tt.publicBase, tt.trustForward
+			defer func() { proxyPublicBase, proxyTrustForwardedHost = oldBase, oldTrust }()
+
+			req := httptest.NewRequest(http.MethodGet, "/proxy/npm/pkg", nil)
+			req.Host = tt.host
+			if tt.forwardedHost != "" {
+				req.Header.Set("X-Forwarded-Host", tt.forwardedHost)
+			}
+			if tt.forwardedProt != "" {
+				req.Header.Set("X-Forwarded-Proto", tt.forwardedProt)
+			}
+			if got := proxyBaseForRequest(req); got != tt.want {
+				t.Errorf("proxyBaseForRequest() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeProxyPublicBase(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{in: "", want: ""},
+		{in: "  ", want: ""},
+		{in: "http://cache.internal:8090", want: "http://cache.internal:8090/proxy"},
+		{in: "https://cache.example.com/", want: "https://cache.example.com/proxy"},
+		{in: "https://cache.example.com/proxy", want: "https://cache.example.com/proxy"},
+		{in: "cache.internal:8090", wantErr: true},
+		{in: "ftp://cache.internal", wantErr: true},
+		{in: "://", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, err := normalizeProxyPublicBase(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error for %q, got %q", tt.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("normalizeProxyPublicBase(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }

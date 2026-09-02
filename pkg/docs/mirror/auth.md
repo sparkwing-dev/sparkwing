@@ -185,7 +185,9 @@ controller therefore takes effect on the next protected data request rather
 than after a local cache expires. A controller `401` authoritatively clears the
 browser session; a controller outage, `5xx`, or malformed response returns
 `502` and preserves the cookies so a transient failure cannot log out every
-user. Browser redirects preserve the original path and query as one encoded
+user. The controller answers `5xx` when the state store or the session signing
+key is unreadable, so only an unknown or expired session reaches the browser as
+`401`. Browser redirects preserve the original path and query as one encoded
 `next` value and accept only same-origin absolute paths.
 
 Login cookies are `Secure` by default, so a login-required dashboard must be
@@ -256,6 +258,16 @@ sparkwing cluster tokens lookup --prefix swu_6cF9r2Kp --profile prod
 sparkwing cluster tokens rotate --prefix swu_6cF9r2Kp --grace 48h --profile prod
 ```
 
+`--grace` is capped at 7 days; a larger value is rejected with `400`.
+Revoking the old prefix cuts an open grace window short, so a rotation
+you started before learning the old token leaked can still be stopped.
+
+Deleting a user removes the user row, deletes every session that user
+holds, and revokes every token whose principal is that name, in one
+transaction. Principals are free-form labels, so a token minted for an
+unrelated caller under the same name is revoked too; keep human account
+names and service principal names distinct.
+
 Profiles are the only path for targeting a remote cluster, which keeps
 it hard to accidentally point at the wrong one. The
 `SPARKWING_CONTROLLER_URL` environment variable is a fallback only for
@@ -274,10 +286,38 @@ Measured on an arm64 laptop: ~8-15ms per `argon2.IDKey`. Token lookup on
 the hot path is prefix-indexed + cached in-process for 60s, so argon2
 only runs on cold lookups.
 
+## How long revocation takes to bite
+
+Revoking a token, rotating one, and deleting a user all drop the
+affected prefixes from the controller replica that served the request,
+so the next request on that replica re-reads the row and gets `401`.
+A cached entry also carries the row's `expires_at` and `revoked_at`,
+which are rechecked on every hit, so a token that expires or whose
+rotation grace closes mid-cache stops authenticating on time rather
+than at the end of the cache window.
+
+Two windows remain:
+
+- **Other controller replicas.** Invalidation is in-process. A replica
+  that did not serve the revoke keeps its cached entry for up to 60
+  seconds. Restart or scale the controller to zero to close it now.
+- **The logs service.** `sparkwing-logs` resolves callers through the
+  controller's `whoami` and caches the answer for its own TTL (60s by
+  default), on top of whatever the controller replica held. Its worst
+  case is the sum of the two.
+
+Sessions carry no cache: the controller reads the `sessions` row on
+every request and the dashboard resolves the session on every protected
+request, so deleting a session or a user logs that browser out on its
+next request.
+
 ## Extension points
 
 - **OIDC / SSO**: not implemented. The `users` + `sessions` tables are
-  shape-compatible; an OIDC callback can populate sessions directly.
+  shape-compatible; an OIDC callback can populate sessions directly by writing
+  `sha256(session id)` into `sessions.hash` and keeping the raw id only in the
+  browser cookie. There is no `csrf_token` column: Sparkwing derives that token
+  per request as an HMAC of the session id under a key in `sparkwing_meta`.
 - **Audit trail**: the principal name is stamped onto the OTel trace
   span. There is no dedicated audit database.
 - **Per-user multi-tenancy**: principals are a free-form label. Adding a
