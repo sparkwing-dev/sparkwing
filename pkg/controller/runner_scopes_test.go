@@ -16,8 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// runnerScopes is the set an operator grants a runner: enough to take
-// work and report on it, and nothing that mints credentials.
 var runnerScopes = []string{
 	controller.ScopeNodesClaim,
 	controller.ScopeTriggersClaim,
