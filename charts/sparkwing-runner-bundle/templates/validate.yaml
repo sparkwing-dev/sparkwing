@@ -33,3 +33,6 @@
 {{- if and (not .Values.serviceAccount.create) (not .Values.serviceAccount.shareAcrossComponents) -}}
 {{- fail "sparkwing-runner-bundle: serviceAccount.create=false puts the runner, cache, and logs pods on one ServiceAccount; set serviceAccount.shareAcrossComponents=true to accept that, or leave create=true for one account per component" -}}
 {{- end -}}
+{{- if and .Values.resourceQuota.enabled (not .Values.limitRange.enabled) -}}
+{{- fail "sparkwing-runner-bundle: resourceQuota.enabled=true requires limitRange.enabled=true, whose default and defaultRequest give a pod that declares no resources something for the quota to count. Without it the API server rejects every such pod in the namespace" -}}
+{{- end -}}

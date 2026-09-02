@@ -2056,8 +2056,9 @@ func TestLimitRangeBoundsOneContainer(t *testing.T) {
 	if entry.Default["cpu"] != "2" || entry.DefaultRequest["cpu"] != "100m" {
 		t.Errorf("default = %v, defaultRequest = %v, want the chart's container defaults", entry.Default, entry.DefaultRequest)
 	}
-	if entry.Min != nil {
-		t.Errorf("min = %v, want no floor until one is configured", entry.Min)
+	wantMin := map[string]string{"cpu": "10m", "memory": "16Mi"}
+	if !reflect.DeepEqual(entry.Min, wantMin) {
+		t.Errorf("min = %v, want the shipped floor %v", entry.Min, wantMin)
 	}
 }
 
@@ -2076,7 +2077,8 @@ func TestLimitRangeTakesAnOperatorCeiling(t *testing.T) {
 }
 
 func TestResourceQuotaBoundsTheNamespaceTotal(t *testing.T) {
-	doc := renderResourceGuard(t, "templates/resourcequota.yaml", "resourceQuota.enabled=true")
+	doc := renderResourceGuard(t, "templates/resourcequota.yaml",
+		"resourceQuota.enabled=true", "limitRange.enabled=true")
 	if doc.Kind != "ResourceQuota" {
 		t.Fatalf("kind = %q, want ResourceQuota", doc.Kind)
 	}
@@ -2096,7 +2098,8 @@ func TestResourceQuotaBoundsTheNamespaceTotal(t *testing.T) {
 
 func TestResourceQuotaTakesOperatorTotals(t *testing.T) {
 	doc := renderResourceGuard(t, "templates/resourcequota.yaml",
-		"resourceQuota.enabled=true", `resourceQuota.hard.requests\.cpu=8`, `resourceQuota.hard.pods=20`)
+		"resourceQuota.enabled=true", "limitRange.enabled=true",
+		`resourceQuota.hard.requests\.cpu=8`, `resourceQuota.hard.pods=20`)
 	if doc.Spec.Hard["requests.cpu"] != "8" || doc.Spec.Hard["pods"] != "20" {
 		t.Errorf("hard = %v, want the configured totals including the object count", doc.Spec.Hard)
 	}
@@ -2111,5 +2114,37 @@ func TestFullChartCarriesTheNamespaceResourceGuards(t *testing.T) {
 		if !strings.Contains(rendered, "kind: "+kind) {
 			t.Errorf("flagship chart rendered no %s; the vendored sub-chart may be stale", kind)
 		}
+	}
+}
+
+func TestResourceQuotaWithoutALimitRangeFailsAtRender(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "resourceQuota.enabled=true")
+	if !strings.Contains(out, "requires limitRange.enabled=true") {
+		t.Fatalf("render error = %s, want the missing-LimitRange refusal", out)
+	}
+}
+
+func TestRunnerCarriesNoJobCeilingByDefault(t *testing.T) {
+	env := runnerEnv(t, renderRunner(t))
+	for _, name := range []string{"SPARKWING_K8S_CPU_CEILING", "SPARKWING_K8S_MEMORY_CEILING"} {
+		if _, ok := env[name]; ok {
+			t.Errorf("default install sets %s; the ceiling is opt-in", name)
+		}
+	}
+}
+
+func TestRunnerCarriesTheConfiguredJobCeiling(t *testing.T) {
+	env := runnerEnv(t, renderRunner(t, "runner.jobCeiling.cpu=8", "runner.jobCeiling.memory=16Gi"))
+	if env["SPARKWING_K8S_CPU_CEILING"] != "8" || env["SPARKWING_K8S_MEMORY_CEILING"] != "16Gi" {
+		t.Errorf("runner env = %v, want the configured job ceiling", env)
+	}
+}
+
+func TestFullChartCarriesTheJobCeiling(t *testing.T) {
+	rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", "default",
+		"sparkwing-runner-bundle.controller.tokenSecret.name=tok",
+		"sparkwing-runner-bundle.runner.jobCeiling.cpu=8")
+	if !strings.Contains(rendered, "SPARKWING_K8S_CPU_CEILING") {
+		t.Error("flagship chart carries no job ceiling env; the vendored sub-chart may be stale")
 	}
 }
