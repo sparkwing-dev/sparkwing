@@ -80,6 +80,10 @@ code change to unlock.
 
 ### Security
 
+- **cli:** Generated git hooks now single-quote each pipeline name, and
+  `sparkwing.yaml` rejects a pipeline name outside
+  `^[A-Za-z0-9][A-Za-z0-9._-]*$`, so a repository's config cannot hand shell
+  execution to anyone who runs `sparkwing pipeline hooks install`.
 - **ci:** A `security-scan` pipeline runs gosec, source-mode govulncheck,
   gitleaks, and `npm audit`, and the Security workflow runs it on every pull
   request with gosec findings uploaded to GitHub code scanning alongside CodeQL
