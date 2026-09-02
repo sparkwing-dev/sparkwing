@@ -348,10 +348,15 @@ connection info from a profile. Register one first:
 
 ```sh
 # Register a prod profile (controller URL + admin bearer).
+# --token-stdin prompts without echo on a terminal and reads a pipe otherwise.
 sparkwing configure profiles add --name prod \
     --controller https://sparkwing.example.com \
-    --token "$ADMIN_TOKEN"
+    --token-stdin
 ```
+
+`--token` accepts the bearer on the command line instead, but every process
+on the machine can read it from the process list and the shell records it in
+history. Use it only where a prompt or a pipe is impossible.
 
 Then the tokens commands are terse:
 

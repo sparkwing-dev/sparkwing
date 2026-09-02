@@ -249,6 +249,14 @@ code change to unlock.
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
   so a naked suppression silences nothing, and the comment gate keeps each
   annotation alone on one line so free prose cannot ride behind one.
+- **cli:** `~/.config/sparkwing` is now created and kept at `0700` by every
+  writer. `sparkwing configure profiles add/set`, `configure init`, the repos
+  registry, and the dotenv secrets store all route through `fssecure`, and
+  `profiles.yaml` is staged through a randomly named temporary file instead of
+  a predictable `profiles.yaml.tmp`. `configure profiles add` and
+  `configure profiles set` take `--token-stdin`, which prompts without echo on
+  a terminal and reads a pipe otherwise; `--token` still works and its help now
+  says the value is visible in the process list and shell history.
 
 ### Added
 
