@@ -815,7 +815,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 17
+const expectedSchemaVersion = 18
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1199,6 +1199,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 	case 17:
 		_, err := s.exec(ctx, runIdentityIndexes)
 		return err
+	case 18:
+		return scrubSecretInputHashes(ctx, s.db)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1260,9 +1262,73 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 17:
 		_, err := tx.ExecContext(ctx, runIdentityIndexes)
 		return err
+	case 18:
+		return scrubSecretInputHashes(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
+}
+
+type migrationQueryExecer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func scrubSecretInputHashes(ctx context.Context, q migrationQueryExecer) error {
+	rows, err := q.QueryContext(ctx, `SELECT id, args_json, invocation_json FROM runs WHERE invocation_json IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	type update struct {
+		id   string
+		json []byte
+	}
+	var updates []update
+	for rows.Next() {
+		var id string
+		var argsRaw []byte
+		var raw []byte
+		if err := rows.Scan(&id, &argsRaw, &raw); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		var args map[string]string
+		argsText := strings.TrimSpace(string(argsRaw))
+		if argsText != "" && argsText != "null" {
+			if err := json.Unmarshal(argsRaw, &args); err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("decode run %s args_json: %w", id, err)
+			}
+		}
+		var inv map[string]any
+		if err := json.Unmarshal(raw, &inv); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("decode run %s invocation_json: %w", id, err)
+		}
+		if !errors.Is(ValidateRunInvocation(Run{Args: args, Invocation: inv}), ErrSecretInputHash) {
+			continue
+		}
+		delete(inv, "inputs_hash")
+		cleaned, err := json.Marshal(inv)
+		if err != nil {
+			_ = rows.Close()
+			return err
+		}
+		updates = append(updates, update{id: id, json: cleaned})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range updates {
+		if _, err := q.ExecContext(ctx, `UPDATE runs SET invocation_json = ? WHERE id = ?`, item.json, item.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func addColumnsTx(ctx context.Context, tx *storeTx, table string, cols map[string]string) error {
@@ -1621,6 +1687,9 @@ type Run struct {
 // the orchestrator performs at start-of-run; non-pending existing rows
 // are left untouched so this stays a no-op on retry / replay paths.
 func (s *Store) CreateRun(ctx context.Context, r Run) error {
+	if err := ValidateRunInvocation(r); err != nil {
+		return err
+	}
 	argsJSON, _ := json.Marshal(r.Args)
 	var invocationJSON []byte
 	if len(r.Invocation) > 0 {

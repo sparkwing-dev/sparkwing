@@ -208,6 +208,7 @@ func TestBuildReceipt_RedactsSecretArgsInInvocation(t *testing.T) {
 	run.Invocation = map[string]any{
 		"args":                        map[string]string{"token": "s3cr3t-token-value", "env": "prod"},
 		"reproducer":                  "sparkwing run deploy --env=prod --token=s3cr3t-token-value",
+		"inputs_hash":                 "sha256:offline-oracle",
 		store.InvocationSecretArgsKey: []string{"token"},
 	}
 
@@ -222,12 +223,30 @@ func TestBuildReceipt_RedactsSecretArgsInInvocation(t *testing.T) {
 	if repro, _ := rec.Invocation["reproducer"].(string); strings.Contains(repro, "s3cr3t-token-value") {
 		t.Errorf("receipt reproducer leaked the secret: %q", repro)
 	}
+	if _, ok := rec.Invocation["inputs_hash"]; ok {
+		t.Errorf("receipt invocation exposes an input-hash oracle: %v", rec.Invocation)
+	}
+	if rec.Identity.InputsHash != "" {
+		t.Errorf("receipt identity inputs_hash = %q, want empty for secret arguments", rec.Identity.InputsHash)
+	}
 
 	if run.Args["token"] != "s3cr3t-token-value" {
 		t.Errorf("BuildReceipt mutated the run: %q", run.Args["token"])
 	}
 	if inv, _ := run.Invocation["args"].(map[string]string); inv["token"] != "s3cr3t-token-value" {
 		t.Errorf("BuildReceipt mutated the run's invocation: %q", inv["token"])
+	}
+}
+
+func TestBuildReceipt_UnsuppliedSecretKeepsInputsHash(t *testing.T) {
+	run := fixedRun()
+	run.Invocation = map[string]any{
+		"args":                        map[string]string{"env": "prod", "tag": "v1.2.3"},
+		store.InvocationSecretArgsKey: []string{"token"},
+	}
+	rec := receipt.BuildReceipt(run, nil, 0, "")
+	if rec.Identity.InputsHash == "" {
+		t.Fatal("optional secret was not supplied, but receipt inputs_hash is empty")
 	}
 }
 

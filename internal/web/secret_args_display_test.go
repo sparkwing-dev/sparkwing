@@ -22,6 +22,7 @@ func webSecretRun(id string) *store.Run {
 		Invocation: map[string]any{
 			"args":                        map[string]string{"token": webSecretValue, "env": webVisibleValue},
 			"reproducer":                  "sparkwing run deploy --env=" + webVisibleValue + " --token=" + webSecretValue,
+			"inputs_hash":                 "sha256:legacy-oracle",
 			store.InvocationSecretArgsKey: []string{"token"},
 		},
 	}
@@ -37,6 +38,9 @@ func assertWebRedacted(t *testing.T, surface, body string) {
 	}
 	if !strings.Contains(body, webVisibleValue) {
 		t.Errorf("%s redacted the non-secret arg too:\n%s", surface, body)
+	}
+	if strings.Contains(body, "legacy-oracle") {
+		t.Errorf("%s exposed a legacy secret input-hash oracle:\n%s", surface, body)
 	}
 }
 

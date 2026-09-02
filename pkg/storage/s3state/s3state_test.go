@@ -128,6 +128,22 @@ func TestS3StateBackend_CreateRun_RoundTrips(t *testing.T) {
 	}
 }
 
+func TestS3StateBackend_CreateRun_RejectsSecretInputHash(t *testing.T) {
+	b := s3state.New(newMemArt())
+	t.Cleanup(func() { _ = b.Close() })
+	err := b.CreateRun(context.Background(), store.Run{
+		ID: "old-writer", Pipeline: "deploy", Status: "running", StartedAt: time.Now().UTC(),
+		Args: map[string]string{"token": "guessable"},
+		Invocation: map[string]any{
+			"inputs_hash":                 "sha256:oracle",
+			store.InvocationSecretArgsKey: []string{"token"},
+		},
+	})
+	if !errors.Is(err, store.ErrSecretInputHash) {
+		t.Fatalf("CreateRun error = %v, want ErrSecretInputHash", err)
+	}
+}
+
 func TestS3StateBackend_FinishNode_PersistsEnvelope(t *testing.T) {
 	art := newMemArt()
 	b := s3state.New(art, s3state.WithFlushInterval(5*time.Millisecond))

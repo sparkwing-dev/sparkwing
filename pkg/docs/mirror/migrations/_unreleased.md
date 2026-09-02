@@ -5,6 +5,25 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## Secret input hash migration
+
+- **Before:** Run-store schema 17 persisted a deterministic `inputs_hash` even
+  when the caller supplied an argument declared `secret:"true"`. A reader could
+  verify guesses of a low-entropy value without seeing the redacted argument.
+- **After:** Schema 18 removes legacy hashes from SQL rows that supplied a
+  classified secret argument. New runs omit the invocation hash, receipts leave
+  `identity.inputs_hash` empty, and read-time redaction suppresses hashes from
+  legacy state objects. Built-in SQL and S3 state backends reject an unsafe
+  `CreateRun`; the controller maps that rejection to HTTP 400 before the run can
+  emit its start record.
+- **Migration:** Stop the controller and every runner or local process that can
+  write run state or logs. Upgrade the whole fleet before opening schema 18 or
+  writing another S3 state object, then resume it together. Schema-17 binaries
+  refuse the upgraded SQL store; object storage has no equivalent schema gate.
+  A custom `storage.StateStore` should call `store.ValidateRunInvocation` from
+  `CreateRun` and return `store.ErrSecretInputHash` unchanged.
+- **Why:** A deterministic digest is not a safe commitment to a secret value.
+
 ## Kubernetes acceptance testing
 
 - **Before:** `sparkwing run kind-e2e` built images locally, created a Kind
