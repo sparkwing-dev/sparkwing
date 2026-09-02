@@ -10,8 +10,9 @@ Manage secrets (local dotenv or controller-stored)
 
 Without --profile, reads/writes the laptop dotenv at
 ~/.config/sparkwing/secrets.env (masked) or
-~/.config/sparkwing/config.env (--plain). Used by jobs invoked
-through 'sparkwing run <pipeline>' locally.
+~/.config/sparkwing/config.env (--plain), under
+$XDG_CONFIG_HOME/sparkwing when that variable is set. Used by jobs
+invoked through 'sparkwing run <pipeline>' locally.
 
 With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run

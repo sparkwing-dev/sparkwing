@@ -20,7 +20,11 @@ type Change struct {
 
 func EnsureDir(path string) error {
 	target := DirMode
-	if info, err := os.Stat(path); err == nil {
+	if info, err := os.Lstat(path); err == nil {
+		// safety: chmod follows links, so a symlinked root would move the tighten off-path.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refuse to prepare private directory through symlink %q", path)
+		}
 		target = info.Mode().Perm() & DirMode
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -28,7 +32,10 @@ func EnsureDir(path string) error {
 	if err := os.MkdirAll(path, DirMode); err != nil {
 		return err
 	}
-	return tighten(path, target)
+	if err := tighten(path, target); err != nil {
+		return fmt.Errorf("set mode %04o on %s: %w", target.Perm(), path, err)
+	}
+	return nil
 }
 
 func OpenFile(path string, flag int) (*os.File, error) {

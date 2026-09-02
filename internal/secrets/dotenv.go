@@ -14,19 +14,11 @@ import (
 )
 
 func DefaultDotenvPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("user home: %w", err)
-	}
-	return filepath.Join(home, ".config", "sparkwing", "secrets.env"), nil
+	return fssecure.ConfigFile("secrets.env")
 }
 
 func DefaultConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("user home: %w", err)
-	}
-	return filepath.Join(home, ".config", "sparkwing", "config.env"), nil
+	return fssecure.ConfigFile("config.env")
 }
 
 type DotenvSource struct {
@@ -143,8 +135,8 @@ func WriteDotenvEntry(path, name, value string) error {
 		}
 		path = p
 	}
-	if err := fssecure.EnsureDir(filepath.Dir(path)); err != nil {
-		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
+	if err := fssecure.EnsureConfigDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("prepare %s: %w", filepath.Dir(path), err)
 	}
 	existing, err := parseDotenvFile(path)
 	if err != nil {

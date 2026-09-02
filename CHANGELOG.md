@@ -52,13 +52,21 @@ code change to unlock.
 ### Security
 
 - **cli:** `~/.config/sparkwing` is now created and kept at `0700` by every
-  writer. `sparkwing configure profiles add/set`, `configure init`, the repos
-  registry, and the dotenv secrets store all route through `fssecure`, and
-  `profiles.yaml` is staged through a randomly named temporary file instead of
-  a predictable `profiles.yaml.tmp`. `configure profiles add` and
-  `configure profiles set` take `--token-stdin`, which prompts without echo on
-  a terminal and reads a pipe otherwise; `--token` still works and its help now
-  says the value is visible in the process list and shell history.
+  writer. Profiles, the repos registry, the dotenv secrets store, and
+  `version hold --set` resolve the directory through one helper and write
+  through `fssecure`, and `profiles.yaml` is staged through a randomly named
+  temporary file instead of a predictable `profiles.yaml.tmp`.
+  `sparkwing configure init` re-applies `0700` to a directory that already
+  exists, prints each config file's mode, and names any file group or other
+  users can read; `--dry-run` still reports without touching anything.
+  `secrets.env` and `config.env` now follow `XDG_CONFIG_HOME` like every other
+  config file. A `SPARKWING_PROFILES` or `SPARKWING_REPOS` path outside the
+  config directory keeps the permissions its owner gave it, and sparkwing says
+  so on stderr rather than narrowing a shared directory.
+  `configure profiles add` and `configure profiles set` take `--token-stdin`,
+  which prompts without echo on a terminal, restores echo if the prompt is
+  interrupted, and reads a pipe otherwise; `--token` still works and its help
+  now says the value is visible in the process list and shell history.
 - **store (Breaking):** Two live tokens can no longer share a prefix. Run-store
   schema 26 makes the `idx_tokens_prefix` index unique and minting retries when
   a prefix is already taken, so the 12-character handle

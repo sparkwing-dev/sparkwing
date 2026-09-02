@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 
 	flag "github.com/spf13/pflag"
@@ -298,7 +300,7 @@ func runProfilesDuplicate(args []string) error {
 func readTokenStdin(in *os.File, prompt io.Writer, label string) (string, error) {
 	if term.IsTerminal(int(in.Fd())) {
 		fmt.Fprintf(prompt, "%s: ", label)
-		raw, err := term.ReadPassword(int(in.Fd()))
+		raw, err := readPasswordRestoringEcho(int(in.Fd()))
 		fmt.Fprintln(prompt)
 		if err != nil {
 			return "", fmt.Errorf("read token: %w", err)
@@ -310,6 +312,42 @@ func readTokenStdin(in *os.File, prompt io.Writer, label string) (string, error)
 		return "", fmt.Errorf("read token: %w", err)
 	}
 	return strings.TrimSpace(string(raw)), nil
+}
+
+func readPasswordRestoringEcho(fd int) ([]byte, error) {
+	state, err := term.GetState(fd)
+	if err != nil {
+		return term.ReadPassword(fd)
+	}
+	stop := restoreEchoOnSignal(func() { _ = term.Restore(fd, state) })
+	defer stop()
+	return term.ReadPassword(fd)
+}
+
+var exitOnSignal = os.Exit
+
+func restoreEchoOnSignal(restore func()) func() {
+	// safety: a terminal left in no-echo mode after an interrupt hides everything the user types next.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case s := <-sig:
+			restore()
+			signal.Stop(sig)
+			code := 1
+			if n, ok := s.(syscall.Signal); ok {
+				code = 128 + int(n)
+			}
+			exitOnSignal(code)
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(sig)
+		close(done)
+	}
 }
 
 func redactToken(t string) string {

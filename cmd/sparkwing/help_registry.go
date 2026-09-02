@@ -248,11 +248,13 @@ after install, then run 'sparkwing pipeline new --name <name>'
 inside each project to scaffold .sparkwing/ + your first pipeline
 in one step (no separate init needed).
 
-Re-running on an already-set-up laptop is a no-op status report.
---dry-run skips the mkdir so the command pure-probes.`,
+Re-running on an already-set-up laptop re-applies 0700 to
+~/.config/sparkwing/ and reports each config file's mode, naming any
+that group or other users can read. --dry-run skips both the mkdir
+and the permission fix so the command pure-probes.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "dry-run", Desc: "Probe + report without creating ~/.config/sparkwing/", Group: "Behavior"},
+		{Name: "dry-run", Desc: "Probe + report without creating or tightening ~/.config/sparkwing/", Group: "Behavior"},
 	},
 	GroupOrder: []string{"Output", "Behavior", "Other"},
 	Examples: []Example{
@@ -3028,8 +3030,9 @@ var cmdSecret = Command{
 	Synopsis: "Manage secrets (local dotenv or controller-stored)",
 	Description: `Without --profile, reads/writes the laptop dotenv at
 ~/.config/sparkwing/secrets.env (masked) or
-~/.config/sparkwing/config.env (--plain). Used by jobs invoked
-through 'sparkwing run <pipeline>' locally.
+~/.config/sparkwing/config.env (--plain), under
+$XDG_CONFIG_HOME/sparkwing when that variable is set. Used by jobs
+invoked through 'sparkwing run <pipeline>' locally.
 
 With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run

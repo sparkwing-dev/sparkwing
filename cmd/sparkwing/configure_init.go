@@ -18,6 +18,8 @@ import (
 type ConfigureInit struct {
 	ConfigDir   string                 `json:"config_dir"`
 	Created     bool                   `json:"created"`
+	Mode        string                 `json:"mode,omitempty"`
+	Exposed     bool                   `json:"exposed,omitempty"`
 	ConfigFiles []ConfigureInitFile    `json:"config_files"`
 	Toolchain   ConfigureInitToolchain `json:"toolchain"`
 	NextSteps   []InfoNextStep         `json:"next_steps"`
@@ -27,6 +29,8 @@ type ConfigureInitFile struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`
 	Present bool   `json:"present"`
+	Mode    string `json:"mode,omitempty"`
+	Exposed bool   `json:"exposed,omitempty"`
 
 	Summary string `json:"summary,omitempty"`
 }
@@ -41,7 +45,7 @@ type ConfigureInitToolchain struct {
 func runConfigureInit(args []string) error {
 	fs := flag.NewFlagSet(cmdConfigureInit.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty | json | plain (default: table)")
-	dryRun := fs.Bool("dry-run", false, "probe + report without creating ~/.config/sparkwing/")
+	dryRun := fs.Bool("dry-run", false, "probe + report without creating or tightening ~/.config/sparkwing/")
 	if err := parseAndCheck(cmdConfigureInit, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -88,14 +92,14 @@ func gatherConfigureInit(dryRun bool) (ConfigureInit, error) {
 	configDir := filepath.Dir(profilesPath)
 	out.ConfigDir = configDir
 
-	if !dirExists(configDir) {
-		if !dryRun {
-			if err := fssecure.EnsureDir(configDir); err != nil {
-				return out, fmt.Errorf("configure init: create %s: %w", configDir, err)
-			}
-			out.Created = true
+	existed := dirExists(configDir)
+	if !dryRun {
+		if err := fssecure.EnsureConfigDir(configDir); err != nil {
+			return out, fmt.Errorf("configure init: prepare %s: %w", configDir, err)
 		}
+		out.Created = !existed
 	}
+	out.Mode, out.Exposed = pathExposure(configDir)
 
 	out.ConfigFiles = surveyConfigFiles(configDir, profilesPath)
 	out.Toolchain = probeToolchain()
@@ -115,8 +119,20 @@ func surveyConfigFiles(configDir, profilesPath string) []ConfigureInitFile {
 	for i := range files {
 		_, err := os.Stat(files[i].Path)
 		files[i].Present = err == nil
+		if files[i].Present {
+			files[i].Mode, files[i].Exposed = pathExposure(files[i].Path)
+		}
 	}
 	return files
+}
+
+func pathExposure(path string) (string, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", false
+	}
+	perm := info.Mode().Perm()
+	return fmt.Sprintf("%04o", perm), perm&0o077 != 0
 }
 
 func profileSummary(path string) string {
@@ -152,6 +168,25 @@ func repoSummary(path string) string {
 	return fmt.Sprintf("%d repos registered", n)
 }
 
+func printConfigureInitExposure(info ConfigureInit) {
+	var exposed []string
+	if info.Exposed {
+		exposed = append(exposed, fmt.Sprintf("  ! %s is readable by group or other users; run: chmod 700 %s", info.ConfigDir, info.ConfigDir))
+	}
+	for _, f := range info.ConfigFiles {
+		if f.Exposed {
+			exposed = append(exposed, fmt.Sprintf("  ! %s is readable by group or other users; run: chmod 600 %s", f.Name, f.Path))
+		}
+	}
+	if len(exposed) == 0 {
+		return
+	}
+	fmt.Println()
+	for _, line := range exposed {
+		fmt.Println(line)
+	}
+}
+
 func probeToolchain() ConfigureInitToolchain {
 	tc := ConfigureInitToolchain{
 		CLIVersion: installedVersion(),
@@ -177,11 +212,14 @@ func configureInitNextSteps() []InfoNextStep {
 }
 
 func printConfigureInitTable(info ConfigureInit) {
-	if info.Created {
-		fmt.Printf("Laptop config root: %s/  (created)\n", info.ConfigDir)
-	} else {
-		fmt.Printf("Laptop config root: %s/\n", info.ConfigDir)
+	fmt.Printf("Laptop config root: %s/", info.ConfigDir)
+	if info.Mode != "" {
+		fmt.Printf("  mode %s", info.Mode)
 	}
+	if info.Created {
+		fmt.Printf("  (created)")
+	}
+	fmt.Println()
 	fmt.Println()
 
 	fmt.Println("CONFIG FILES")
@@ -193,11 +231,14 @@ func printConfigureInitTable(info ConfigureInit) {
 	}
 	for _, f := range info.ConfigFiles {
 		state := "absent "
+		mode := "    "
 		if f.Present {
 			state = "present"
+			mode = f.Mode
 		}
-		fmt.Printf("  %-*s  [%s]  %s\n", nameWidth, f.Name, state, f.Summary)
+		fmt.Printf("  %-*s  [%s]  %s  %s\n", nameWidth, f.Name, state, mode, f.Summary)
 	}
+	printConfigureInitExposure(info)
 	fmt.Println()
 
 	fmt.Println("TOOLCHAIN")

@@ -28,17 +28,10 @@ func DefaultPath() (string, error) {
 	if v := os.Getenv("SPARKWING_REPOS"); v != "" {
 		return v, nil
 	}
-	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
-		return filepath.Join(v, "sparkwing", "repos.yaml"), nil
-	}
-	if paths.UnderTest() {
+	if os.Getenv("XDG_CONFIG_HOME") == "" && paths.UnderTest() {
 		return filepath.Join(paths.TestSandbox(), "config", "sparkwing", "repos.yaml"), nil
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve repos.yaml path: %w", err)
-	}
-	return filepath.Join(home, ".config", "sparkwing", "repos.yaml"), nil
+	return fssecure.ConfigFile("repos.yaml")
 }
 
 func Load(path string) (*Config, error) {
@@ -58,8 +51,8 @@ func Load(path string) (*Config, error) {
 
 func Save(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
-	if err := fssecure.EnsureDir(dir); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
+	if err := fssecure.EnsureConfigDir(dir); err != nil {
+		return fmt.Errorf("prepare %s: %w", dir, err)
 	}
 	buf, err := yaml.Marshal(cfg)
 	if err != nil {

@@ -8,12 +8,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -91,14 +91,7 @@ func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
 }
 
 func DefaultAgentConfigPath() (string, error) {
-	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
-		return filepath.Join(v, "sparkwing", "agent.yaml"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "sparkwing", "agent.yaml"), nil
+	return fssecure.ConfigFile("agent.yaml")
 }
 
 func RunAgentCLI(args []string) error {

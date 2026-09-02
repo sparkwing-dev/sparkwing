@@ -100,14 +100,7 @@ func DefaultPath() (string, error) {
 	if v := os.Getenv("SPARKWING_PROFILES"); v != "" {
 		return v, nil
 	}
-	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
-		return filepath.Join(v, "sparkwing", "profiles.yaml"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve profiles.yaml path: %w", err)
-	}
-	return filepath.Join(home, ".config", "sparkwing", "profiles.yaml"), nil
+	return fssecure.ConfigFile("profiles.yaml")
 }
 
 func Load(path string) (*Config, error) {
@@ -158,8 +151,8 @@ func (p *Profile) validateSurfaceFields() error {
 
 func Save(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
-	if err := fssecure.EnsureDir(dir); err != nil {
-		return fmt.Errorf("mkdir %s: %w", dir, err)
+	if err := fssecure.EnsureConfigDir(dir); err != nil {
+		return fmt.Errorf("prepare %s: %w", dir, err)
 	}
 	out := &Config{Profiles: map[string]*Profile{}}
 	for name, p := range cfg.Profiles {

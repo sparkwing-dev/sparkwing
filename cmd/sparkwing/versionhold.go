@@ -10,6 +10,7 @@ import (
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -40,14 +41,7 @@ func resolveVersionHold() versionHold {
 }
 
 func versionHoldPath() (string, error) {
-	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
-		return filepath.Join(v, "sparkwing", "version-hold"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve version-hold path: %w", err)
-	}
-	return filepath.Join(home, ".config", "sparkwing", "version-hold"), nil
+	return fssecure.ConfigFile("version-hold")
 }
 
 func normalizeHold(raw string) (string, error) {
@@ -120,10 +114,10 @@ func runVersionHold(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := fssecure.EnsureConfigDir(filepath.Dir(path)); err != nil {
 			return fmt.Errorf("create config dir: %w", err)
 		}
-		if err := os.WriteFile(path, []byte(value+"\n"), 0o644); err != nil {
+		if err := fssecure.WriteFile(path, []byte(value+"\n")); err != nil {
 			return fmt.Errorf("write hold: %w", err)
 		}
 		fmt.Printf("version hold set to %s (%s)\n", value, path)

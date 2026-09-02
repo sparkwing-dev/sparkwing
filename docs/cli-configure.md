@@ -59,15 +59,17 @@ after install, then run 'sparkwing pipeline new --name <name>'
 inside each project to scaffold .sparkwing/ + your first pipeline
 in one step (no separate init needed).
 
-Re-running on an already-set-up laptop is a no-op status report.
---dry-run skips the mkdir so the command pure-probes.
+Re-running on an already-set-up laptop re-applies 0700 to
+~/.config/sparkwing/ and reports each config file's mode, naming any
+that group or other users can read. --dry-run skips both the mkdir
+and the permission fix so the command pure-probes.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
-| `--dry-run` | Probe + report without creating ~/.config/sparkwing/ |
+| `--dry-run` | Probe + report without creating or tightening ~/.config/sparkwing/ |
 
 ### Examples
 

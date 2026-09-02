@@ -9,19 +9,22 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 func WatchedFiles(home string) []string {
+	dir := fssecure.ConfigDirIn(home)
 	return []string{
-		filepath.Join(home, ".config", "sparkwing", "repos.yaml"),
-		filepath.Join(home, ".config", "sparkwing", "profiles.yaml"),
+		filepath.Join(dir, "repos.yaml"),
+		filepath.Join(dir, "profiles.yaml"),
 	}
 }
 
 func SandboxLeaks(sandboxHome string) ([]string, error) {
 	var leaks []string
 	for _, root := range []string{
-		filepath.Join(sandboxHome, ".config", "sparkwing"),
+		fssecure.ConfigDirIn(sandboxHome),
 		filepath.Join(sandboxHome, ".sparkwing"),
 	} {
 		err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {

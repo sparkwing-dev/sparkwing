@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -33,14 +33,7 @@ type ResolvedBudget struct {
 func (r ResolvedBudget) IsSet() bool { return r.Source != "" && r.Source != BudgetSourceUnset }
 
 func BudgetConfigPath() (string, error) {
-	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
-		return filepath.Join(v, "sparkwing", "budget"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve budget config path: %w", err)
-	}
-	return filepath.Join(home, ".config", "sparkwing", "budget"), nil
+	return fssecure.ConfigFile("budget")
 }
 
 func ResolveBudget(flagValue string) (ResolvedBudget, error) {
