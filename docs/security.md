@@ -74,6 +74,26 @@ accept that any pod in that range can then supply `X-Forwarded-For`. List
 the narrowest range that contains the web pod. Leaving it empty stays safe
 and turns coarse: every browser then shares the proxy's budget.
 
+## Trigger and list-query limits
+
+`POST /api/v1/triggers` validates `git.repo_url` with the same rules the
+Git cache routes use, so a submission cannot point a runner's clone at a
+local path, a loopback or private address, or a URL carrying embedded
+credentials. It also keeps only the trigger environment keys a run
+actually reads (`GITHUB_REPOSITORY`, the GitHub pull-request context, and
+the `SPARKWING_START_AT` / `STOP_AT` / `ONLY` / `DRY_RUN` / `NO_CACHE`
+switches). Everything else is dropped, including the retry-provenance
+keys the controller writes for itself, so a submission cannot forge the
+repository directory a later local retry trusts.
+
+`GET /api/v1/runs?limit=` is capped at 1000 rows, in the query parser and
+again in the store, so a read-only token cannot ask one request to
+materialize every run row with its plan and args blobs.
+
+`GET /api/v1/services` announces internal cache and logs URLs and needs a
+bearer; any valid token satisfies it, and every client that consumes it
+already holds one.
+
 ## Webhooks
 
 GitHub webhook deliveries are verified by the controller: it checks the
@@ -153,12 +173,20 @@ warning at startup. Provide the key via:
 - `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key, or
 - `--secrets-key-file <path>` -- a file holding the raw or base64 key.
 
-Each envelope is bound to the row it belongs to -- the secret name and
-the owning repository, empty for an unscoped secret -- so a ciphertext
-copied onto another name, into another repository, or onto the
-unscoped row by anyone with database write access fails to open rather
-than answering there. Values sealed before binding (`enc:v1:`
-envelopes) still open; re-set them to get the binding.
+Each envelope is bound to the fields of the row that decide who may
+read it: the secret name, the owning repository (empty for an unscoped
+secret), whether an unscoped row is shared with every run, and whether
+the value is masked in run output. Anyone with database write access
+who copies a ciphertext onto another name, into another repository, or
+onto the unscoped row, or who edits a row to widen its own access, gets
+a value that fails to open rather than one that answers there.
+
+Values sealed before binding (`enc:v1:` envelopes) still open, and they
+are still substitutable until they are rebound. `sparkwing secret list`
+reports `BOUND false` for them (`"bound": false` on the API), and the
+controller reseals such a row into a bound envelope the first time it
+is read, so rows migrate as they are used. Re-setting a secret rebinds
+it as well.
 
 There is no key rotation and no multi-key read path: the controller
 holds one key and the stored envelope carries no key id. Swapping the
@@ -381,6 +409,25 @@ cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
   passing whenever it cannot read the logs service's auth state: no
   announced logs URL, a health body with no `auth` field (an image
   older than the report), or a degraded service.
+- **Size the logs service's quotas for your volume.** `sparkwing-logs`
+  caps what one authenticated runner can spend. Each flag below reads an
+  environment variable of the same meaning, and `0` turns that bound off.
+
+  | Flag (env) | Default | Effect |
+  |------------|---------|--------|
+  | `--max-node-bytes` (`SPARKWING_LOGS_MAX_NODE_BYTES`) | 64MiB | Stored-byte cap for one node's log. Appends past it store a `[sparkwing-logs] truncated` marker once and are then dropped with `204`. |
+  | `--max-run-bytes` (`SPARKWING_LOGS_MAX_RUN_BYTES`) | 1GiB | Same cap across every node log in one run. |
+  | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. |
+  | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off) | Age after a run's last write at which the sweeper deletes its logs. Off by default so an upgrade deletes nothing; `168h` is a common choice. |
+  | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
+  | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
+  | `--search-timeout` (`SPARKWING_LOGS_SEARCH_TIMEOUT`) | 10s | How long one search may scan. |
+
+  A search that hits either budget, or whose caller disconnects, returns
+  the matches it found with `"truncated": true`. Search also requires
+  `run_id`; a query without one is refused with `400` rather than
+  walking every stored run.
+
 - **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
   behind an ingress/proxy that enforces HTTPS.
 - **Pin image digests** rather than floating tags.

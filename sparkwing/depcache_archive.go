@@ -82,25 +82,7 @@ func extractDepCacheArchive(r io.Reader, dir string) error {
 }
 
 func extractDepCacheArchiveStaged(r io.Reader, dir string) error {
-	parent := filepath.Dir(dir)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.MkdirTemp(parent, ".depcache-restore-*")
-	if err != nil {
-		return err
-	}
-	if err := extractDepCacheArchive(r, tmp); err != nil {
-		_ = os.RemoveAll(tmp)
-		return err
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		_ = os.RemoveAll(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, dir); err != nil {
-		_ = os.RemoveAll(tmp)
-		return err
-	}
-	return nil
+	return extractIntoDirStaged(dir, ".depcache-restore-*", func(stage string) error {
+		return extractDepCacheArchive(r, stage)
+	})
 }

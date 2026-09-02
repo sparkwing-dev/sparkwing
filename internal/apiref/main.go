@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	handleRE = regexp.MustCompile(`\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
+	handleRE = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
 
 	scopeRefRE = regexp.MustCompile(`requireScope\((\w+),`)
 
@@ -43,7 +43,8 @@ func main() {
 		"the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and " +
 		"the token model are in [auth.md](auth.md); `admin` is the superset that " +
 		"satisfies any scope check. `public` routes run with no bearer check (the " +
-		"GitHub webhook is HMAC-verified instead).\n\n")
+		"GitHub webhook is HMAC-verified instead); `authenticated` routes take any " +
+		"valid bearer and check no further scope.\n\n")
 
 	writeRoutes(&b, "Controller", scopes, controller)
 	writeRoutes(&b, "Logs service", scopes, logs)
@@ -76,8 +77,11 @@ func writeRoutes(b *strings.Builder, title string, scopes map[string]string, fil
 		if m == nil {
 			continue
 		}
-		method, path, rest := m[1], m[2], m[3]
+		receiver, method, path, rest := m[1], m[2], m[3], m[4]
 		scope := "public"
+		if receiver == "mux" {
+			scope = "authenticated"
+		}
 		if sm := scopeRefRE.FindStringSubmatch(rest); sm != nil {
 			if v, ok := scopes[sm[1]]; ok {
 				scope = v

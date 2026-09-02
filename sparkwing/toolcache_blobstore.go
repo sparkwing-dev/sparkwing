@@ -146,7 +146,7 @@ func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error) {
 
 	counted := &countReader{r: resp.Body}
 	cacheDir := ToolCacheDir("golangci-lint")
-	if err := extractLintCacheArchive(counted, cacheDir, WorkDir()); err != nil {
+	if err := extractLintCacheArchiveStaged(counted, cacheDir, WorkDir()); err != nil {
 		return false, counted.n, err
 	}
 	return true, counted.n, nil
@@ -211,6 +211,12 @@ func writeLintCacheArchive(w io.Writer, cacheDir, workdir string) error {
 		return err
 	}
 	return gz.Close()
+}
+
+func extractLintCacheArchiveStaged(r io.Reader, destDir, runningWorkdir string) error {
+	return extractIntoDirStaged(destDir, ".lintcache-restore-*", func(stage string) error {
+		return extractLintCacheArchive(r, stage, runningWorkdir)
+	})
 }
 
 func extractLintCacheArchive(r io.Reader, destDir, runningWorkdir string) error {

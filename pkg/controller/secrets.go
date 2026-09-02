@@ -26,6 +26,7 @@ type secretJSON struct {
 	Repo      string `json:"repo,omitempty"`
 	Masked    bool   `json:"masked"`
 	Shared    bool   `json:"shared,omitempty"`
+	Bound     bool   `json:"bound"`
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`
 }
@@ -36,7 +37,7 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := secrets.ValidateName(req.Name); err != nil {
+	if err := s.validateSecretName(req.Name, req.Repo); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -44,18 +45,19 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
 		principal = p.Name
 	}
+	masked := true
+	if req.Masked != nil {
+		masked = *req.Masked
+	}
 	stored := req.Value
 	if s.secretsCipher != nil {
-		sealed, sErr := sealSecret(s.secretsCipher, req.Name, req.Repo, req.Value)
+		binding := secretBinding{Name: req.Name, Repo: req.Repo, Shared: req.Shared, Masked: masked}
+		sealed, sErr := sealSecret(s.secretsCipher, binding, req.Value)
 		if sErr != nil {
 			writeError(w, http.StatusInternalServerError, sErr)
 			return
 		}
 		stored = sealed
-	}
-	masked := true
-	if req.Masked != nil {
-		masked = *req.Masked
 	}
 	if err := s.store.CreateOrReplaceSecret(store.Secret{
 		Name:      req.Name,
@@ -73,19 +75,33 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// safety: the name rule guards new rows only, so a row written under an older rule can still be rotated.
+func (s *Server) validateSecretName(name, repo string) error {
+	if row, err := s.store.GetSecretRow(name, repo); err == nil && row != nil {
+		return nil
+	}
+	return secrets.ValidateName(name)
+}
+
 func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	sec, ok := s.readSecretForCaller(w, r, r.PathValue("name"))
 	if !ok {
 		return
 	}
 	plain := sec.Value
+	bound := secrets.IsBound(sec.Value)
 	if s.secretsCipher != nil {
-		opened, oerr := openSecret(s.secretsCipher, sec.Name, sec.Repo, plain)
+		opened, oerr := openSecret(s.secretsCipher, bindingForRow(sec), plain)
 		if oerr != nil {
-			writeError(w, http.StatusInternalServerError, oerr)
+			s.logger.Error("secret read: open envelope", "name", sec.Name, "repo", sec.Repo, "err", oerr)
+			// safety: the cipher's own text names the row's storage state, which a reader that cannot open it may not learn.
+			writeError(w, http.StatusInternalServerError, errors.New("secrets cipher: stored value did not open"))
 			return
 		}
 		plain = opened
+		if !bound {
+			bound = s.rebindSecret(sec, plain)
+		}
 	} else if secrets.IsEncrypted(plain) {
 		writeError(w, http.StatusInternalServerError, errors.New("secrets cipher: encrypted value but no key configured"))
 		return
@@ -97,9 +113,30 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 		Repo:      sec.Repo,
 		Masked:    sec.Masked,
 		Shared:    sec.Shared,
+		Bound:     bound,
 		CreatedAt: sec.CreatedAt.Unix(),
 		UpdatedAt: sec.UpdatedAt.Unix(),
 	})
+}
+
+// safety: an envelope written before binding is substitutable, so a successful read reseals it in place.
+func (s *Server) rebindSecret(sec *store.Secret, plain string) bool {
+	if _, ok := s.secretsCipher.(BoundCipher); !ok {
+		return false
+	}
+	sealed, err := sealSecret(s.secretsCipher, bindingForRow(sec), plain)
+	if err != nil {
+		s.logger.Error("secret rebind: seal", "name", sec.Name, "repo", sec.Repo, "err", err)
+		return false
+	}
+	row := *sec
+	row.Value = sealed
+	if err := s.store.CreateOrReplaceSecret(row, sec.UpdatedAt); err != nil {
+		s.logger.Error("secret rebind: store", "name", sec.Name, "repo", sec.Repo, "err", err)
+		return false
+	}
+	s.logger.Info("secret envelope rebound", "name", sec.Name, "repo", sec.Repo)
+	return true
 }
 
 // safety: a non-admin reader never names its own repository; the live claim it holds names it.
@@ -188,6 +225,7 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
 			Repo:      sec.Repo,
 			Masked:    sec.Masked,
 			Shared:    sec.Shared,
+			Bound:     secrets.IsBound(sec.Value),
 			CreatedAt: sec.CreatedAt.Unix(),
 			UpdatedAt: sec.UpdatedAt.Unix(),
 		})

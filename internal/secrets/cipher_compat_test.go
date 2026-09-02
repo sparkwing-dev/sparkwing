@@ -6,3 +6,5 @@ import (
 )
 
 var _ controller.Cipher = (*secrets.Cipher)(nil)
+
+var _ controller.BoundCipher = (*secrets.Cipher)(nil)

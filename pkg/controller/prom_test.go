@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -220,5 +221,71 @@ func TestMetrics_EndpointUnauthWithAuthEnabled(t *testing.T) {
 	resp2.Body.Close()
 	if resp2.StatusCode != http.StatusUnauthorized {
 		t.Errorf("/api/v1/runs without auth: expected 401, got %d", resp2.StatusCode)
+	}
+}
+
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := l.Addr().String()
+	if err := l.Close(); err != nil {
+		t.Fatalf("close probe listener: %v", err)
+	}
+	return addr
+}
+
+func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	metricsAddr := freeAddr(t)
+	apiAddr := freeAddr(t)
+	srv := controller.New(st, nil).WithMetricsAddr(metricsAddr)
+
+	api := httptest.NewServer(srv.Handler())
+	t.Cleanup(api.Close)
+	resp := mustGet(t, api.URL+"/metrics")
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("/metrics on the API listener status = %d, want 404", resp.StatusCode)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- controller.ServeWith(ctx, srv, apiAddr) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-served; err != nil {
+			t.Errorf("ServeWith: %v", err)
+		}
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		metrics, gerr := http.Get("http://" + metricsAddr + "/metrics")
+		if gerr == nil {
+			body, rerr := io.ReadAll(metrics.Body)
+			_ = metrics.Body.Close()
+			if rerr != nil {
+				t.Fatalf("read metrics: %v", rerr)
+			}
+			if metrics.StatusCode != http.StatusOK {
+				t.Fatalf("metrics listener status = %d, want 200", metrics.StatusCode)
+			}
+			if !strings.Contains(string(body), "go_goroutines") {
+				t.Fatalf("metrics body missing go_goroutines: %s", body)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("metrics listener never answered: %v", gerr)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

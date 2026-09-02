@@ -263,12 +263,17 @@ func TestBuildJob_MountsScratchOverEveryWritablePath(t *testing.T) {
 	if len(mounts) != 1 || mounts[0].Name != scratchVolumeName || mounts[0].MountPath != "/tmp" {
 		t.Fatalf("container volume mounts = %#v, want scratch at /tmp", mounts)
 	}
+	set := map[string]string{}
 	for _, env := range pod.Containers[0].Env {
-		switch env.Name {
-		case "HOME", "GOCACHE", "GOMODCACHE", "SPARKWING_HOME":
-			if !strings.HasPrefix(env.Value, "/tmp") {
-				t.Fatalf("%s = %q, which the read-only root leaves unwritable", env.Name, env.Value)
-			}
+		set[env.Name] = env.Value
+	}
+	for _, name := range []string{"HOME", "GOCACHE", "GOMODCACHE", "SPARKWING_HOME"} {
+		value, ok := set[name]
+		if !ok {
+			t.Fatalf("Job env has no %s, so the read-only root leaves its default unwritable: %#v", name, set)
+		}
+		if !strings.HasPrefix(value, "/tmp") {
+			t.Fatalf("%s = %q, which the read-only root leaves unwritable", name, value)
 		}
 	}
 }

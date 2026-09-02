@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -522,12 +523,33 @@ type triggerResp struct {
 	Status string `json:"status"`
 }
 
+// safety: every other trigger_env key a run reads is controller-written, so an inbound copy forges it.
+var submittedTriggerEnvKeys = map[string]bool{
+	"GITHUB_REPOSITORY":          true,
+	sparkwing.EnvGitHubEventName: true,
+	sparkwing.EnvPRNumber:        true,
+	sparkwing.EnvPRAction:        true,
+	sparkwing.EnvPRBaseRef:       true,
+	sparkwing.EnvPRBaseSHA:       true,
+	sparkwing.EnvPRHeadRef:       true,
+	sparkwing.EnvPRHeadSHA:       true,
+	"SPARKWING_START_AT":         true,
+	"SPARKWING_STOP_AT":          true,
+	"SPARKWING_ONLY":             true,
+	"SPARKWING_DRY_RUN":          true,
+	"SPARKWING_NO_CACHE":         true,
+}
+
 func sanitizeTriggerEnv(env map[string]string) map[string]string {
 	if len(env) == 0 {
 		return nil
 	}
 	cleaned := make(map[string]string, len(env))
 	for key, value := range env {
+		// safety: an inbound key outside this set is either a credential or a forged provenance marker.
+		if !submittedTriggerEnvKeys[key] {
+			continue
+		}
 		// safety: trigger_env is served whole to every triggers.read principal, so no credential-named key may persist.
 		if envredact.CredentialName(key) {
 			continue
@@ -555,6 +577,16 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("trigger.source is required"))
 		return
 	}
+	if body.Git.RepoURL != "" {
+		// safety: the repo URL becomes a clone target on every runner, so hold it to the gitcache rules.
+		validated, verr := sourceurl.ValidateCloneURL(body.Git.RepoURL)
+		if verr != nil {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("git.repo_url: %w", verr))
+			return
+		}
+		body.Git.RepoURL = validated
+	}
+
 	runID := newRunID()
 	repoInherited := body.ParentRunID != "" && body.Git.Repo == ""
 

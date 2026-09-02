@@ -194,7 +194,13 @@ helm install sparkwing ./charts/sparkwing-full \
 An Ingress with an empty `ingress.tls` or with `web.requireLogin=false`
 fails to render, because publishing the dashboard is the one knob whose
 purpose is reaching browsers outside the cluster. Set
-`ingress.allowInsecure=true` to publish it unencrypted or open anyway.
+`ingress.allowInsecure=true` to publish it unencrypted or open anyway;
+it must be a bool, since a quoted string fails the render instead of
+reading as an opt-out. Opting in without TLS also sets
+`SPARKWING_WEB_INSECURE_COOKIES=1` on the web Deployment, so the login
+gate still works over plain HTTP. The `ingress.tls` check is
+presence-only: an entry without `secretName` leaves TLS to the ingress
+controller's default certificate.
 
 ## Values cheat sheet
 
@@ -249,8 +255,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `ingress.enabled` | Create the Ingress resource. | `false` |
 | `ingress.className` | IngressClass. Empty = cluster default. | `""` |
 | `ingress.hosts[].host` | Hostname for the dashboard. | `sparkwing.example.com` |
-| `ingress.tls` | TLS section. Empty fails the render unless `ingress.allowInsecure`. | `[]` |
-| `ingress.allowInsecure` | Publish the dashboard without TLS or without a login gate. | `false` |
+| `ingress.tls` | TLS section. Empty fails the render unless `ingress.allowInsecure`; presence-only, `secretName` optional. | `[]` |
+| `ingress.allowInsecure` | Publish the dashboard without TLS or without a login gate. Bool only. | `false` |
 
 ### Runner-bundle sub-chart
 

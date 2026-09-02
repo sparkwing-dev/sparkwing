@@ -621,6 +621,7 @@ export interface LogSearchResponse {
   query: string;
   results: LogSearchResult[];
   total: number;
+  truncated?: boolean;
 }
 
 export function getLogsUrl(): string {

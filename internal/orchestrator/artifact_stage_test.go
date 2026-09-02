@@ -303,6 +303,32 @@ func TestStageConsumedArtifacts_RejectsOversizedBlob(t *testing.T) {
 	}
 }
 
+func TestStageConsumedArtifacts_RejectsOversizedManifestTotal(t *testing.T) {
+	origBlob, origTotal := maxStagedArtifactBytes, maxStagedTotalBytes
+	maxStagedArtifactBytes = 1 << 10
+	maxStagedTotalBytes = 2 << 10
+	defer func() {
+		maxStagedArtifactBytes, maxStagedTotalBytes = origBlob, origTotal
+	}()
+
+	art := newTestArtifactStore(t)
+	reader := publishProducer(t, art, "build", map[string][]byte{
+		"a.bin": make([]byte, 900),
+		"b.bin": make([]byte, 900),
+		"c.bin": make([]byte, 900),
+	})
+	consumerWS := t.TempDir()
+
+	staged, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
+		[]sparkwing.ConsumeEdge{{Producer: "build"}})
+	if err == nil {
+		t.Fatal("manifest staged past the total cap")
+	}
+	if staged >= 3 {
+		t.Fatalf("staged %d entries, want the run cut short before the third", staged)
+	}
+}
+
 func TestResolveArtifactStoreFromEnv_OpensURL(t *testing.T) {
 	t.Setenv(ArtifactStoreEnvVar, "fs://"+t.TempDir())
 	s, err := resolveArtifactStoreFromEnv(context.Background())
