@@ -26,6 +26,21 @@ external self-host), use the standalone
 [`sparkwing-runner-bundle`](../sparkwing-runner-bundle/) chart
 instead -- this chart pulls it in as a dependency.
 
+## Render the chart
+
+`helm template` stops on the sub-chart's `validate.yaml` unless the runner
+token Secret is named, and the value lives under the sub-chart's key. The
+minimal read-only render is:
+
+```bash
+helm template sparkwing ./charts/sparkwing-full \
+  --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token
+```
+
+`charts/render_test.go` injects that same value, so what it exercises is what
+this renders. The sub-chart is vendored in the repository, so this works in a
+fresh clone with no `helm dependency update` first.
+
 ## Topology
 
 ```

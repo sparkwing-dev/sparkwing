@@ -29,6 +29,20 @@ exists somewhere else and you just need a runner pool.
 > images from one compatible Sparkwing revision and explicitly set each
 > enabled component's `image.repository` and `image.tag`.
 
+## Render the chart
+
+`helm template` stops on this chart's own `validate.yaml` unless the token
+Secret is named, because `cache.enabled` defaults to true. The minimal
+read-only render is:
+
+```bash
+helm template runners ./charts/sparkwing-runner-bundle \
+  --set controller.tokenSecret.name=sparkwing-token
+```
+
+`charts/render_test.go` injects that same value, so what it exercises is what
+this renders.
+
 ## Topology
 
 ```
