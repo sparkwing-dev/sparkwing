@@ -170,7 +170,9 @@ func New(cfg Config) (*Server, error) {
 	s.tel = otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
 	initGitcacheMetrics()
 	initProxyMetrics()
-	setupSSH()
+	if err := setupSSH(); err != nil {
+		return nil, err
+	}
 	autoRegisterRepos()
 
 	s.mux = http.NewServeMux()
