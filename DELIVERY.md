@@ -17,7 +17,11 @@ this file is a menu and checklist, not a command that every change must run.
 - **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
-  the change touches those boundaries. Verify dashboard changes against real
+  the change touches those boundaries. `sparkwing run security-scan` runs gosec,
+  source-mode govulncheck, gitleaks, and `npm audit`; the Security workflow runs
+  it on every pull request and uploads gosec findings to code scanning, so run it
+  locally when a change touches an HTTP handler, auth, file paths built from
+  input, subprocess arguments, or a dependency. Verify dashboard changes against real
   local state with `bash bin/dev-start.sh` (dashboard backend on :4343, `next
   dev` on :3100) and stop it with `bash bin/dev-stop.sh`; the browser gate uses
   deterministic API fixtures on OS-assigned local ports and does not replace
