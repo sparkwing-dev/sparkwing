@@ -445,11 +445,24 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 The server variables above configure the cache pod. On the client side,
 `SPARKWING_GITCACHE` forces a specific gitcache base URL for git clones:
 set it to a reachable cache server and sparkwing routes clones through
-that server instead of probing for a local one. Empty (the default)
-leaves sparkwing to auto-detect, falling back to a direct clone when no
-gitcache answers. Those clones carry `SPARKWING_CACHE_TOKEN` as their
-bearer, so a cache that guards its git routes still serves them; a cache
-that answers `401` sends the clone to the upstream remote instead.
+that server instead of probing for a local one. `SPARKWING_GITCACHE_URL`,
+the variable the runner chart stamps on every runner pod, is the fallback
+when `SPARKWING_GITCACHE` is empty, so a chart-deployed runner already
+names its cache. With neither set, sparkwing auto-detects a cache on
+`localhost:18090` and falls back to a direct clone when none answers.
+
+A clone through a named cache carries `SPARKWING_CACHE_TOKEN` as its
+bearer, so a cache that guards its git routes still serves it. The bearer
+travels in the environment as a cache-scoped header, never on the command
+line, and never goes to the auto-detected cache: only an operator naming
+the cache in one of those two variables authorizes sending a credential to
+it. Redirects are off for the cache URL so the bearer cannot follow a
+request to another host, which means a cache behind a redirecting ingress
+must be named by the URL it finally serves on. A cache that answers `401`
+or a redirect sends the clone to the upstream remote instead, with one
+line on stderr naming the cache. A later `git fetch` through
+`sparkwing/git` reuses the same bearer when the checkout's `origin` is
+under the named cache.
 
 ### Data directories
 
