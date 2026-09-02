@@ -55,13 +55,19 @@ code change to unlock.
   `.terraform.lock.hcl` and pins providers with `~>` instead of `>=`, so
   `terraform init` installs the checksummed versions the module was tested
   against rather than whatever the registry serves that day; the lock records
-  `linux_amd64` and `darwin_arm64`. `allowed_cidr_blocks` now rejects
-  `0.0.0.0/0` and `::/0` at plan time instead of quietly opening the database
-  port to the internet. `install/install.sh` creates `agent.yaml` at mode 600
-  before it writes the token, closing the window a permissive umask left
-  between the heredoc and the `chmod`, and refuses a token carrying anything
-  outside `[A-Za-z0-9_.-]`, which could otherwise close the YAML quote and
-  inject config.
+  `linux_amd64` and `darwin_arm64`. `allowed_cidr_blocks` now requires every
+  entry to be an IPv4 CIDR no wider than `/8`, so neither `0.0.0.0/0` nor a
+  pair of halves such as `0.0.0.0/1` and `128.0.0.0/1` opens the database
+  port to the internet at plan time; the module's ingress is IPv4 only and
+  exposes no `ipv6_cidr_blocks` knob, so it has no IPv6 ingress path to
+  guard. `install/install.sh` creates `agent.yaml` at mode 600 before it
+  writes the token, closing the window a permissive umask left between the
+  heredoc and the `chmod`, refuses a token carrying anything outside
+  `[A-Za-z0-9_.-]`, and refuses a controller URL, logs URL, gitcache URL,
+  cache token or runner name carrying a double quote, backslash, newline or
+  control character. Each of those lands in a quoted YAML scalar, where an
+  unfiltered value could close the quote and inject config, or leave behind
+  a config the runner cannot parse while the installer reports success.
 - **controller:** `GET /api/v1/runs/{id}` and `GET /api/v1/triggers/{id}` now
   admit a caller holding a live claim on that run as well as one holding
   `runs.read` or `triggers.read`. Those are the first two calls a node process

@@ -137,12 +137,23 @@ run "world_open_ipv4_cidr_is_rejected" {
   expect_failures = [var.allowed_cidr_blocks]
 }
 
-run "world_open_ipv6_cidr_is_rejected" {
+run "split_halves_covering_all_of_ipv4_are_rejected" {
   command = plan
 
   variables {
     engine              = "rds"
-    allowed_cidr_blocks = ["::/0"]
+    allowed_cidr_blocks = ["0.0.0.0/1", "128.0.0.0/1"]
+  }
+
+  expect_failures = [var.allowed_cidr_blocks]
+}
+
+run "single_half_of_ipv4_is_rejected" {
+  command = plan
+
+  variables {
+    engine              = "rds"
+    allowed_cidr_blocks = ["0.0.0.0/1"]
   }
 
   expect_failures = [var.allowed_cidr_blocks]
