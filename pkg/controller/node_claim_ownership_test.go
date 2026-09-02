@@ -272,7 +272,7 @@ func TestNodeClaimOwnership_CrossRunReadsAndHeartbeatNeedAClaim(t *testing.T) {
 	}
 }
 
-func TestNodeClaimOwnership_ProfilePinIsAdminOnly(t *testing.T) {
+func TestNodeClaimOwnership_ProfilePinIsADispatcherWrite(t *testing.T) {
 	f := newOwnershipFixture(t)
 	req, err := http.NewRequest(http.MethodPut, f.url+"/api/v1/pipelines/demo/profile/pin",
 		strings.NewReader(`{"node_id":"only","cores":8,"memory_bytes":1}`))

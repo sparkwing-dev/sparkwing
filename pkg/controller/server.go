@@ -392,8 +392,9 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
 	mux.Handle("GET /api/v1/pipelines/{name}/profile", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetPipelineProfile)))
-	// safety: a pin becomes a hard Kubernetes limit for every later run of that pipeline.
-	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetPipelinePin)))
+	// safety: a pin becomes a hard Kubernetes limit for every later run of that pipeline,
+	// so it is a dispatcher write, not something a node-claiming replica may reach.
+	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeRunsState, http.HandlerFunc(s.handleSetPipelinePin)))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAddNodeMetric))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeMetrics)))

@@ -158,24 +158,24 @@ func TestRepoForPrincipalClaim_NamesTheRepoOfTheHeldRun(t *testing.T) {
 		}
 	}
 
-	if repo, err := st.RepoForPrincipalClaim(ctx, "runner-a", now); err != nil || repo != "" {
+	if repo, err := st.RepoForPrincipalClaim(ctx, store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_runner-a"}, now); err != nil || repo != "" {
 		t.Fatalf("RepoForPrincipalClaim with no claim = (%q, %v), want empty", repo, err)
 	}
 
-	n, err := st.ClaimNextReadyNode(ctx, "runner-a", "holder-a", time.Minute, nil)
+	n, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_runner-a"}, "holder-a", time.Minute, nil)
 	if err != nil {
 		t.Fatalf("ClaimNextReadyNode: %v", err)
 	}
 	want := map[string]string{"run-web": "acme/web", "run-api": "acme/api"}[n.RunID]
 
-	repo, err := st.RepoForPrincipalClaim(ctx, "runner-a", now)
+	repo, err := st.RepoForPrincipalClaim(ctx, store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_runner-a"}, now)
 	if err != nil {
 		t.Fatalf("RepoForPrincipalClaim: %v", err)
 	}
 	if repo != want {
 		t.Errorf("RepoForPrincipalClaim = %q, want %q (the repo of the run it holds)", repo, want)
 	}
-	if other, err := st.RepoForPrincipalClaim(ctx, "runner-b", now); err != nil || other != "" {
+	if other, err := st.RepoForPrincipalClaim(ctx, store.ClaimIdentity{Principal: "runner-b", TokenPrefix: "swr_runner-b"}, now); err != nil || other != "" {
 		t.Errorf("a principal holding nothing resolved repo %q (err %v)", other, err)
 	}
 }

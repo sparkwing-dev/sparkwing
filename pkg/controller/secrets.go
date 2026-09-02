@@ -141,7 +141,7 @@ func (s *Server) secretRepoForReader(r *http.Request) (string, bool) {
 	if !ok || p.HasScope(ScopeAdmin) {
 		return r.URL.Query().Get("repo"), true
 	}
-	repo, err := s.store.RepoForPrincipalClaim(r.Context(), p.Name, time.Now())
+	repo, err := s.store.RepoForPrincipalClaim(r.Context(), claimIdentity(r), time.Now())
 	if err != nil {
 		s.logger.Error("secret read: resolve claim repository", "principal", p.Name, "err", err)
 		return "", false

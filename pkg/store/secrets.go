@@ -129,19 +129,20 @@ func (s *Store) DeleteSecret(name, repo string) error {
 }
 
 // RepoForPrincipalClaim returns the repository slug of a run in which
-// principal holds an unexpired node claim, or "" when it holds none.
-// The longest-lived claim wins when a principal holds several.
-func (s *Store) RepoForPrincipalClaim(ctx context.Context, principal string, now time.Time) (string, error) {
-	if principal == "" {
+// claimant holds an unexpired node claim, or "" when it holds none.
+// The longest-lived claim wins when a claimant holds several.
+func (s *Store) RepoForPrincipalClaim(ctx context.Context, claimant ClaimIdentity, now time.Time) (string, error) {
+	if !claimant.bound() {
 		return "", nil
 	}
 	var repo string
 	err := s.queryRow(ctx, `
         SELECT runs.repo
           FROM nodes JOIN runs ON runs.id = nodes.run_id
-         WHERE nodes.claim_principal = ? AND `+nodeClaimLiveSQL+`
+         WHERE nodes.claim_principal = ? AND nodes.claim_token_prefix = ?
+           AND `+nodeClaimLiveSQL+`
          ORDER BY nodes.lease_expires_at DESC
-         LIMIT 1`, principal, now.UnixNano()).Scan(&repo)
+         LIMIT 1`, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&repo)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

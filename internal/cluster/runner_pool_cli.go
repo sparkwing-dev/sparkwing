@@ -191,7 +191,7 @@ func runRunnerCLI(args []string) error {
 	maxConcurrent := fs.Int("max-concurrent", 1,
 		"max nodes this runner will execute in parallel")
 	lease := fs.Duration("lease", store.DefaultLeaseDuration,
-		"initial claim lease the controller grants on each claim")
+		"initial claim lease to request on each claim; the controller clamps it to 10m")
 	holderPrefix := fs.String("holder-prefix", "",
 		"holder id prefix (defaults to HOSTNAME or 'runner')")
 	var labels multiFlag
