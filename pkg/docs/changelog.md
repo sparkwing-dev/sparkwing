@@ -55,14 +55,18 @@ code change to unlock.
   the privileged warmer pod as container arguments consumed by a fixed script.
   A ConfigMap writer can no longer smuggle shell into the one privileged
   workload Sparkwing creates.
-- **controller:** Login now carries per-client, listener-wide, and per-account
-  budgets, and every argon2id verification passes through a memory-sized
-  semaphore, so unauthenticated callers can no longer exhaust the pod by
-  hashing. Size the semaphore with `--argon2-memory-budget-mb` (chart:
-  `controller.argon2MemoryBudgetMB`) and name proxy networks with
-  `--trusted-proxy-cidrs` (chart: `controller.trustedProxyCIDRs`) so throttling
-  keys on the real client. A rejected bearer token is remembered for a few
-  seconds, so a replayed wrong guess costs one hash.
+- **controller:** Login now carries per-client, listener-wide, and
+  per-account-per-client budgets, bearer verification carries a per-token-prefix
+  failure budget, and every argon2id verification passes through a memory-sized
+  semaphore that sheds with `503` and a `Retry-After` instead of queueing, so
+  unauthenticated callers can no longer exhaust the pod by hashing and no
+  stranger can lock a named user out. Size the semaphore with
+  `--argon2-memory-budget-mb` (chart: `controller.argon2MemoryBudgetMB`) and
+  name proxy networks with `--trusted-proxy-cidrs` (chart:
+  `controller.trustedProxyCIDRs`, which must include the dashboard pod's source)
+  so throttling keys on the real browser. A rejected bearer token is remembered
+  for a few seconds, so a replayed wrong guess costs one hash; store failures
+  are never cached and never echoed to an unauthenticated caller.
 - **logs:** `sparkwing-logs` gains `--require-auth` /
   `SPARKWING_REQUIRE_AUTH`, refusing to start without a controller to resolve
   caller tokens against, reports `"auth"` on `GET /api/v1/health` so

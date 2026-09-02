@@ -40,14 +40,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	client := s.loginLimit.client(r)
 	// safety: a drained failure budget answers before VerifyUser, so guessing one account costs no argon2 work.
-	if !s.loginLimit.accountAllowed(req.Username, now) {
+	if !s.loginLimit.accountAllowed(req.Username, client, now) {
 		writeRetryAfter(w, loginFailureWindow, "too many failed login attempts for this account")
 		return
 	}
 	u, err := s.store.VerifyUser(req.Username, req.Password, now)
 	if err != nil {
-		s.loginLimit.accountFailed(req.Username, now)
+		if !errors.Is(err, store.ErrInvalidCredentials) {
+			s.writeLoginUnavailable(w, err)
+			return
+		}
+		s.loginLimit.accountFailed(req.Username, client, now)
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
@@ -68,6 +73,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Scopes:    u.Scopes,
 		ExpiresAt: sess.ExpiresAt.Unix(),
 	})
+}
+
+// safety: the caller is unauthenticated, so a login the controller could not decide answers a generic 503.
+func (s *Server) writeLoginUnavailable(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrHashingBusy) {
+		writeRetryAfterStatus(w, http.StatusServiceUnavailable, authBusyRetryAfter,
+			"authentication is busy, retry shortly")
+		return
+	}
+	s.logger.Error("login.unavailable", "error", err.Error())
+	writeRetryAfterStatus(w, http.StatusServiceUnavailable, authUnavailableRetryAfter,
+		"authentication is temporarily unavailable")
 }
 
 type logoutReq struct {

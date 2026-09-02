@@ -16,6 +16,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 const (
@@ -123,7 +125,7 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 		pass := r.PostForm.Get("password")
 		next := safeNext(r.PostForm.Get("next"))
 
-		sess, err := controllerLogin(r.Context(), controllerURL, user, pass)
+		sess, err := controllerLogin(r.Context(), controllerURL, user, pass, ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
 		if err != nil {
 			data := loginPageData{Error: "Invalid username or password.", Next: next}
 			renderLoginPage(w, data, http.StatusUnauthorized)
@@ -157,7 +159,7 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 			return
 		}
 
-		sess, err := controllerLogin(r.Context(), controllerURL, user, pass)
+		sess, err := controllerLogin(r.Context(), controllerURL, user, pass, ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
 		if err != nil {
 			data := loginPageData{
 				Next:  next,
@@ -237,12 +239,16 @@ type sessionResp struct {
 	ExpiresAt int64    `json:"expires_at"`
 }
 
-func controllerLogin(ctx context.Context, controllerURL, user, pass string) (*loginResp, error) {
+func controllerLogin(ctx context.Context, controllerURL, user, pass, clientIP string) (*loginResp, error) {
 	body, _ := json.Marshal(map[string]string{"username": user, "password": pass})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(controllerURL, "/")+"/api/v1/auth/login",
 		bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	// safety: without this every browser shares the web pod's controller budget, so one of them throttles all of them.
+	if clientIP != "" {
+		req.Header.Set("X-Forwarded-For", clientIP)
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

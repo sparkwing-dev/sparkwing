@@ -145,9 +145,12 @@ broader mapped prefixes fail startup. List proxy networks, not client networks.
 
 The controller throttles `POST /api/v1/auth/login` the same way and takes the
 same `--trusted-proxy-cidrs` flag, because it is reachable without going
-through the dashboard. See
-[security.md](security.md#login-and-hashing-budgets) for its budgets and the
-argon2 memory bound.
+through the dashboard. `sparkwing-web` forwards each browser's resolved
+address to the controller as `X-Forwarded-For`, so the controller's list must
+include the web pod's source; otherwise the controller ignores the header and
+keys every dashboard login on the web pod's own address. See
+[security.md](security.md#login-and-hashing-budgets) for its budgets, the
+per-prefix bearer budget, and the argon2 memory bound.
 
 The login, first-admin, and logout forms carry a CSRF token in both a
 `SameSite=Strict` cookie and a hidden field. Sparkwing rejects a missing,
@@ -256,7 +259,9 @@ Hash parameters (`pkg/store/tokens.go`):
 
 Measured on an arm64 laptop: ~8-15ms per `argon2.IDKey`. Token lookup on
 the hot path is prefix-indexed + cached in-process for 60s, so argon2
-only runs on cold lookups.
+only runs on cold lookups. Concurrent hashing is capped by a memory
+budget, and a hash that waits more than 250ms for a slot is shed with
+`503` and a `Retry-After` instead of queueing.
 
 ## Extension points
 

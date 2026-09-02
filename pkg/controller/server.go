@@ -198,9 +198,7 @@ func (s *Server) authMiddleware() *Authenticator {
 	if s.auth != nil {
 		return s.auth
 	}
-	return &Authenticator{
-		now: func() time.Time { return time.Now().UTC() },
-	}
+	return NewAuthenticator(nil, 0).WithLogger(s.logger)
 }
 
 // safety: the addressed node's live claim, not the token's scope, decides who may write it; admin bypasses.
@@ -234,6 +232,9 @@ func (s *Server) claimedBy(next http.Handler) http.Handler {
 // limiter on the TCP peer and ignores forwarded headers.
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server {
 	s.loginLimit = newLoginLimiter(prefixes)
+	if s.auth != nil {
+		s.auth.WithTrustedProxyCIDRs(prefixes)
+	}
 	return s
 }
 
@@ -258,7 +259,9 @@ func (s *Server) EnableAuthFromStore() *Server {
 		s.logger.Warn("controller serving unauthenticated: tokens table is empty, every endpoint is open; mint an admin token and restart to enable auth")
 		return s
 	}
-	s.auth = NewAuthenticator(s.store, 60*time.Second)
+	s.auth = NewAuthenticator(s.store, 60*time.Second).
+		WithTrustedProxyCIDRs(s.loginLimit.trusted).
+		WithLogger(s.logger)
 	return s
 }
 
