@@ -358,7 +358,7 @@ create one.
 ```yaml
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.3"
+    version: "0.1.4"
     repository: "file://../sparkwing-runner-bundle"
     condition: sparkwing-runner-bundle.enabled
 ```

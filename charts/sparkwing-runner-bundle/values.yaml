@@ -88,6 +88,13 @@ runner:
   # to trigger-claiming and leave the others node-only.
   alsoClaimTriggers: true
 
+  # Mount the runner pod's ServiceAccount token. The runner reaches the
+  # controller over HTTP and needs no API access, so this stays false.
+  # Set it true only for the opt-in Kubernetes trigger runner
+  # (SPARKWING_TRIGGER_RUNNER=k8s), which calls the API to create runner
+  # Jobs and cannot load its in-cluster config without a token.
+  automountServiceAccountToken: false
+
   # Optional metrics scrape port. The Prometheus client registry on
   # the runner serves /metrics here. Disable by setting to 0.
   metricsPort: 9090
@@ -264,6 +271,11 @@ serviceAccount:
   # .Release.Name. The cache and logs SAs always follow their
   # component names.
   name: ""
+  # create=false gives the chart one pre-created account for all three
+  # pods, which is the sharing the separate accounts exist to end. The
+  # render fails until you set this true, so the choice is recorded in
+  # your values rather than made by omission.
+  shareAcrossComponents: false
   # Annotations on the SA. Common case: IRSA (EKS) role binding for
   # ECR / S3 access on the runner side.
   #   eks.amazonaws.com/role-arn: arn:aws:iam::123:role/sparkwing-runner
@@ -272,7 +284,7 @@ serviceAccount:
 # RBAC. The chart is namespace-scoped: a Role + RoleBinding only.
 # The runner, cache, and logs servers reach the controller over HTTP
 # and never call the Kubernetes API, so the Role carries no rules and
-# no pod in this chart mounts a ServiceAccount token. Pipelines that
+# no pod mounts a ServiceAccount token by default. Pipelines that
 # must reach the API should bring their own Role outside this chart.
 rbac:
   create: true

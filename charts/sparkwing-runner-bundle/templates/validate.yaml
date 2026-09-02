@@ -12,3 +12,6 @@
 {{- if and .Values.runner.alsoClaimTriggers (not .Values.cache.enabled) (not $externalGitcache) -}}
 {{- fail "sparkwing-runner-bundle: runner.alsoClaimTriggers=true requires cache.enabled=true or runner.extraEnv SPARKWING_GITCACHE_URL with an external gitcache URL" -}}
 {{- end -}}
+{{- if and (not .Values.serviceAccount.create) (not .Values.serviceAccount.shareAcrossComponents) -}}
+{{- fail "sparkwing-runner-bundle: serviceAccount.create=false puts the runner, cache, and logs pods on one ServiceAccount; set serviceAccount.shareAcrossComponents=true to accept that, or leave create=true for one account per component" -}}
+{{- end -}}

@@ -50,15 +50,19 @@ Pool management runs inside sparkwing-controller in the sparkwing namespace.
   2. `clean` PVCs older than `refresh_interval` (default 1 hour)
 - Launches an ephemeral warmer pod that:
   - Mounts the target PVC at `/var/lib/docker`
-  - Runs a privileged DinD container under the `sparkwing-cache-warmer`
-    ServiceAccount with no API token mounted
+  - Runs a privileged DinD container under the warmer ServiceAccount with
+    no API token mounted
   - Pulls all images listed in the ConfigMap
   - Timeout: 30 minutes per warm cycle
 
-The warmer pod names `sparkwing-cache-warmer` explicitly, so that
-ServiceAccount must exist in the pool namespace or Kubernetes rejects the
-pod. `sparkwing-full` creates it whenever `controller.pool.enabled` is
-true; create it yourself when you run the controller outside that chart:
+The warmer pod names its ServiceAccount explicitly, so that account must
+exist in the pool namespace or Kubernetes rejects the pod. The name comes
+from `--warmer-service-account` (env `SPARKWING_WARMER_SA`), which defaults
+to `sparkwing-cache-warmer`. `sparkwing-full` creates a release-scoped
+`<release>-sparkwing-full-cache-warmer` whenever `controller.pool.enabled`
+is true and passes the flag, so two releases in one namespace do not fight
+over one account. Create the account yourself when you run the controller
+outside that chart:
 
 ```bash
 kubectl create serviceaccount sparkwing-cache-warmer -n <pool-namespace>

@@ -156,3 +156,18 @@ func TestRunRunnerCLI_ClaimNodesFalseRequiresTriggerLoop(t *testing.T) {
 		t.Fatalf("runRunnerCLI() error = %v, want claim-nodes/trigger-loop validation", err)
 	}
 }
+
+func TestRunRunnerCLI_K8sTriggerRunnerRequiresAServiceAccount(t *testing.T) {
+	t.Setenv("SPARKWING_RUNNER_SA", "")
+	err := runRunnerCLI([]string{
+		"--controller=http://controller",
+		"--metrics-addr=",
+		"--also-claim-triggers",
+		"--gitcache=http://cache",
+		"--trigger-runner=k8s",
+		"--trigger-runner-image=img",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--runner-sa (or SPARKWING_RUNNER_SA) is required with --runner k8s") {
+		t.Fatalf("runRunnerCLI() error = %v, want the same rejection BuildK8sRunnerFactory returns", err)
+	}
+}
