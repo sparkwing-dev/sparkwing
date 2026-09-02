@@ -393,6 +393,15 @@ code change to unlock.
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
 
+### Changed
+
+- **release:** The release pipeline now runs a contract preflight before the
+  root Go suite. It proves the embedded documentation mirror and the
+  documentation, help, and environment-variable contracts in seconds, and it
+  fails if its `-run` pattern stops matching anything, so a renamed check
+  cannot leave the preflight passing on nothing. The full gates keep their
+  existing coverage.
+
 ### Fixed
 
 - **orchestrator + cli:** A daemon that cannot read the runs store no longer

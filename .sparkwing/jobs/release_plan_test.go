@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ func TestReleaseTemplateVerificationAllowsSerializedAdmission(t *testing.T) {
 var releaseGateNodes = []string{
 	"validate-version",
 	"check-clean-tree",
+	"gate-contracts",
 	"gate-pre-commit",
 	"gate-pre-push",
 	"gate-template-verify",
@@ -137,6 +139,31 @@ func TestReleasePlanSerializesTemplateVerificationAfterLocalGates(t *testing.T) 
 	hints := mustNode(t, plan, "gate-template-verify").ResourceHints()
 	if hints == nil || hints.Cores != 0.5 {
 		t.Fatalf("gate-template-verify resources = %+v, want 0.5 coordinator cores", hints)
+	}
+}
+
+func TestReleasePlanRunsContractPreflightBeforeTheRootGoSuite(t *testing.T) {
+	plan := releasePlan(t)
+
+	if !ancestors(t, plan, "gate-pre-commit")["gate-contracts"] {
+		t.Error("gate-pre-commit must depend on gate-contracts: a contract failure has to return before the longest local suite runs")
+	}
+	if ancestors(t, plan, "gate-contracts")["gate-pre-commit"] {
+		t.Error("gate-contracts must not depend on gate-pre-commit, directly or transitively: that puts it back behind the suite it exists to precede")
+	}
+	if ancestors(t, plan, "gate-contracts")["gate-pre-push"] || ancestors(t, plan, "gate-contracts")["gate-template-verify"] {
+		t.Error("gate-contracts must not depend on the expensive gates")
+	}
+}
+
+func TestReleaseContractPreflightFailsWhenItsTestsAreRenamedAway(t *testing.T) {
+	check := releaseContractChecks[0]
+	if err := requireContractTestsRan(check, "ok  github.com/sparkwing-dev/sparkwing/pkg/docs  0.2s"); err != nil {
+		t.Fatalf("passing output rejected: %v", err)
+	}
+	err := requireContractTestsRan(check, "testing: warning: no tests to run\nok  pkg/docs  0.1s [no tests to run]")
+	if err == nil || !strings.Contains(err.Error(), "matched no tests") {
+		t.Fatalf("empty run = %v, want a refusal naming the vanished tests", err)
 	}
 }
 
