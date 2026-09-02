@@ -3223,11 +3223,10 @@ func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string
 	}
 	var held int
 	err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM nodes JOIN runs ON runs.id = nodes.run_id
-		  WHERE runs.pipeline = ? AND nodes.claim_principal = ?
-		    AND nodes.claim_token_prefix = ?
-		    AND nodes.claimed_by IS NOT NULL
-		    AND nodes.lease_expires_at IS NOT NULL AND nodes.lease_expires_at > ?`,
+		`SELECT COUNT(*) FROM nodes
+		  WHERE run_id IN (SELECT id FROM runs WHERE pipeline = ?)
+		    AND claim_principal = ? AND claim_token_prefix = ?
+		    AND `+nodeClaimLiveSQL,
 		pipeline, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
 	if err != nil {
 		return false, err
