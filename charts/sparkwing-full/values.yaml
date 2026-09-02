@@ -166,6 +166,9 @@ web:
   # turn on after bootstrapping the admin user.
   requireLogin: false
 
+  # Proxy source CIDRs allowed to supply X-Forwarded-For. Empty ignores it.
+  trustedProxyCIDRs: []
+
   # Optional: explicit API URL injected into the dashboard's
   # client-side bundle. Leave empty to use same-origin (the
   # browser hits the same host that served the SPA). Set when

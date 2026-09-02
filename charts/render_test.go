@@ -2,6 +2,7 @@ package charts
 
 import (
 	"io"
+	"os"
 	"os/exec"
 	"reflect"
 	"regexp"
@@ -10,6 +11,22 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestFullChartVersion(t *testing.T) {
+	data, err := os.ReadFile("sparkwing-full/Chart.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chart struct {
+		Version string `yaml:"version"`
+	}
+	if err := yaml.Unmarshal(data, &chart); err != nil {
+		t.Fatal(err)
+	}
+	if chart.Version != "0.1.5" {
+		t.Fatalf("full chart version = %q, want 0.1.5", chart.Version)
+	}
+}
 
 func helmRender(t *testing.T, chart, showOnly, release string, sets ...string) string {
 	t.Helper()
@@ -128,6 +145,25 @@ func TestWebIsPointedAtTheBundledCache(t *testing.T) {
 	if got, _ := hasFlag(args, "--logs="); got !=
 		"--logs=http://sparkwing-sparkwing-runner-bundle-logs.default.svc.cluster.local" {
 		t.Errorf("logs flag = %q, want the bundled logs Service", got)
+	}
+}
+
+func TestWebTrustedProxyCIDRsRenderAsOneFlag(t *testing.T) {
+	defaultArgs := webArgs(t, helmTemplate(t, "sparkwing"))
+	if got, ok := hasFlag(defaultArgs, "--trusted-proxy-cidrs="); ok {
+		t.Fatalf("default trusted proxy flag = %q", got)
+	}
+
+	configuredArgs := webArgs(t, helmTemplate(t, "sparkwing",
+		"web.trustedProxyCIDRs[0]=10.0.0.0/8",
+		"web.trustedProxyCIDRs[1]=192.168.0.0/16",
+	))
+	got, ok := hasFlag(configuredArgs, "--trusted-proxy-cidrs=")
+	if !ok {
+		t.Fatalf("no trusted proxy flag in %v", configuredArgs)
+	}
+	if want := "--trusted-proxy-cidrs=10.0.0.0/8,192.168.0.0/16"; got != want {
+		t.Fatalf("trusted proxy flag = %q, want %q", got, want)
 	}
 }
 

@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 	"time"
 )
@@ -50,7 +51,7 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 	l := newRateLimiter(2, time.Minute)
-	h := rateLimitMiddleware(l, inner)
+	h := rateLimitMiddleware(l, nil, inner)
 
 	send := func(method string) int {
 		req := httptest.NewRequest(method, "/login", nil)
@@ -75,27 +76,114 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 	}
 }
 
-func TestClientIP_XForwardedFor(t *testing.T) {
+func TestRateLimitMiddleware_DirectPeerCannotRotateWithForwardedHeader(t *testing.T) {
+	hits := 0
+	h := rateLimitMiddleware(newRateLimiter(2, time.Minute), nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusOK)
+	}))
+	for attempt, forwarded := range []string{"198.51.100.1", "198.51.100.2", "198.51.100.3"} {
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		req.RemoteAddr = "203.0.113.9:5000"
+		req.Header.Set("X-Forwarded-For", forwarded)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		want := http.StatusOK
+		if attempt == 2 {
+			want = http.StatusTooManyRequests
+		}
+		if rec.Code != want {
+			t.Fatalf("attempt %d status = %d, want %d", attempt+1, rec.Code, want)
+		}
+	}
+	if hits != 2 {
+		t.Fatalf("handler hits = %d, want 2", hits)
+	}
+}
+
+func TestRateLimitMiddleware_TrustedProxyIgnoresSpoofedLeftChain(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	h := rateLimitMiddleware(newRateLimiter(2, time.Minute), trusted, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	for attempt, spoofed := range []string{"unknown", "also-bad", "still-not-an-ip"} {
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		req.RemoteAddr = "10.0.0.5:5000"
+		req.Header.Set("X-Forwarded-For", spoofed+", 203.0.113.9")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		want := http.StatusOK
+		if attempt == 2 {
+			want = http.StatusTooManyRequests
+		}
+		if rec.Code != want {
+			t.Fatalf("attempt %d status = %d, want %d", attempt+1, rec.Code, want)
+		}
+	}
+}
+
+func TestRateLimitMiddleware_MalformedLeftPrefixDoesNotCollapseClients(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	h := rateLimitMiddleware(newRateLimiter(1, time.Minute), trusted, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	send := func(client string) int {
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		req.RemoteAddr = "10.0.0.5:5000"
+		req.Header.Set("X-Forwarded-For", "unknown, "+client)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for attempt, tc := range []struct {
+		client string
+		want   int
+	}{
+		{client: "203.0.113.9", want: http.StatusOK},
+		{client: "203.0.113.10", want: http.StatusOK},
+		{client: "203.0.113.9", want: http.StatusTooManyRequests},
+	} {
+		if got := send(tc.client); got != tc.want {
+			t.Fatalf("attempt %d status = %d, want %d", attempt+1, got, tc.want)
+		}
+	}
+}
+
+func TestClientIP_TrustedProxyChain(t *testing.T) {
+	trustedEdge := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	trustedIPv6Edge := []netip.Prefix{netip.MustParsePrefix("2001:db8:1::/48")}
+	trustedChain := []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("192.168.0.0/16"),
+	}
 	cases := []struct {
 		name       string
-		xff        string
+		xff        []string
 		remoteAddr string
+		trusted    []netip.Prefix
 		want       string
 	}{
-		{"xff single", "203.0.113.5", "10.0.0.1:5000", "203.0.113.5"},
-		{"xff chain", "203.0.113.5, 10.0.0.99", "10.0.0.1:5000", "203.0.113.5"},
-		{"xff with spaces", "  203.0.113.5  ", "10.0.0.1:5000", "203.0.113.5"},
-		{"no xff", "", "10.0.0.1:5000", "10.0.0.1"},
-		{"no port in remoteaddr", "", "127.0.0.1", "127.0.0.1"},
+		{name: "default ignores forwarded header", xff: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
+		{name: "trusted edge accepts client", xff: []string{"198.51.100.7"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "198.51.100.7"},
+		{name: "trusted IPv6 edge accepts client", xff: []string{"2001:db8:ffff::7"}, remoteAddr: "[2001:db8:1::5]:5000", trusted: trustedIPv6Edge, want: "2001:db8:ffff::7"},
+		{name: "append chain stops at nearest untrusted hop", xff: []string{"198.51.100.99, 203.0.113.9"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "203.0.113.9"},
+		{name: "malformed left prefix after client is ignored", xff: []string{"unknown, 203.0.113.9"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "203.0.113.9"},
+		{name: "multiple trusted hops", xff: []string{"198.51.100.7, 192.168.1.5"}, remoteAddr: "10.0.0.1:5000", trusted: trustedChain, want: "198.51.100.7"},
+		{name: "multiple header fields", xff: []string{"198.51.100.7", "192.168.1.5"}, remoteAddr: "10.0.0.1:5000", trusted: trustedChain, want: "198.51.100.7"},
+		{name: "malformed chain falls back to peer", xff: []string{"198.51.100.7, unknown"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "10.0.0.1"},
+		{name: "untrusted peer ignores valid chain", xff: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", trusted: trustedEdge, want: "203.0.113.9"},
+		{name: "missing forwarded header uses peer", remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "10.0.0.1"},
+		{name: "peer without port", remoteAddr: "127.0.0.1", want: "127.0.0.1"},
+		{name: "malformed peer stays opaque", remoteAddr: "local-peer", trusted: trustedEdge, want: "local-peer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/login", nil)
 			req.RemoteAddr = tc.remoteAddr
-			if tc.xff != "" {
-				req.Header.Set("X-Forwarded-For", tc.xff)
+			for _, value := range tc.xff {
+				req.Header.Add("X-Forwarded-For", value)
 			}
-			if got := clientIP(req); got != tc.want {
+			if got := clientIP(req, tc.trusted); got != tc.want {
 				t.Fatalf("clientIP=%q want %q", got, tc.want)
 			}
 		})

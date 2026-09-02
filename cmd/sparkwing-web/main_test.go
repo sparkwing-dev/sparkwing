@@ -46,6 +46,31 @@ func TestResolveAuthControllerURL(t *testing.T) {
 	}
 }
 
+func TestParseTrustedProxyCIDRs(t *testing.T) {
+	prefixes, err := parseTrustedProxyCIDRs(" 10.0.0.5/8, 192.168.0.0/16, 2001:db8:1::1/48, ::ffff:10.0.0.5/104 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prefixes) != 4 || prefixes[0].String() != "10.0.0.0/8" || prefixes[1].String() != "192.168.0.0/16" || prefixes[2].String() != "2001:db8:1::/48" || prefixes[3].String() != "10.0.0.0/8" {
+		t.Fatalf("prefixes = %v", prefixes)
+	}
+	if empty, err := parseTrustedProxyCIDRs(""); err != nil || empty != nil {
+		t.Fatalf("empty prefixes = %v, error = %v", empty, err)
+	}
+	for _, raw := range []string{"10.0.0.1", "10.0.0.0/8,", "not-a-cidr", "::ffff:10.0.0.0/95"} {
+		if _, err := parseTrustedProxyCIDRs(raw); err == nil {
+			t.Fatalf("parseTrustedProxyCIDRs(%q) succeeded", raw)
+		}
+	}
+}
+
+func TestRunRejectsMalformedTrustedProxyCIDRs(t *testing.T) {
+	err := run([]string{"--trusted-proxy-cidrs", "10.0.0.1"})
+	if err == nil || !strings.Contains(err.Error(), "--trusted-proxy-cidrs") {
+		t.Fatalf("error = %v, want trusted proxy CIDR error", err)
+	}
+}
+
 func TestOpenFromConfigReturnsProfileSessionController(t *testing.T) {
 	root := t.TempDir()
 	profilesPath := filepath.Join(root, "profiles.yaml")
