@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -71,12 +72,15 @@ func TestDeleteUser_RevokesSessionsAndTokens(t *testing.T) {
 		t.Fatalf("CreateToken bob: %v", err)
 	}
 
-	revoked, err := s.DeleteUser("mallory", now)
+	sessions, revoked, err := s.DeleteUser("mallory", "", now)
 	if err != nil {
 		t.Fatalf("DeleteUser: %v", err)
 	}
 	if len(revoked) != 1 || revoked[0] != tok.Prefix {
 		t.Fatalf("revoked prefixes = %v, want [%s]", revoked, tok.Prefix)
+	}
+	if sessions != 1 {
+		t.Fatalf("deleted sessions = %d, want 1", sessions)
 	}
 	if _, err := s.LookupSession(rawSession, now.Add(time.Second)); err == nil {
 		t.Fatalf("session of a deleted user still resolves")
@@ -100,10 +104,41 @@ func TestDeleteUser_UnknownLeavesTokensAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
-	if _, err := s.DeleteUser("nobody", now); err == nil {
-		t.Fatalf("expected an error deleting an unknown user")
+	if _, _, err := s.DeleteUser("nobody", "", now); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("DeleteUser on an unknown name = %v, want ErrUserNotFound", err)
 	}
 	if _, err := s.LookupToken(rawToken, now.Add(time.Second)); err != nil {
 		t.Fatalf("token revoked by a failed delete: %v", err)
+	}
+}
+
+func TestDeleteUser_KeepsTheNamedPrefix(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().UTC()
+
+	if _, err := s.CreateUser("alice", "correct-horse", []string{"admin"}, now); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	rawCaller, caller, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken caller: %v", err)
+	}
+	rawOther, other, err := s.CreateToken("alice", TokenKindUser, []string{"runs.read"}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken other: %v", err)
+	}
+
+	_, revoked, err := s.DeleteUser("alice", caller.Prefix, now)
+	if err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	if len(revoked) != 1 || revoked[0] != other.Prefix {
+		t.Fatalf("revoked prefixes = %v, want [%s]", revoked, other.Prefix)
+	}
+	if _, err := s.LookupToken(rawCaller, now.Add(time.Second)); err != nil {
+		t.Fatalf("the kept prefix stopped authenticating: %v", err)
+	}
+	if _, err := s.LookupToken(rawOther, now.Add(time.Second)); err == nil {
+		t.Fatalf("another token under the deleted principal still authenticates")
 	}
 }

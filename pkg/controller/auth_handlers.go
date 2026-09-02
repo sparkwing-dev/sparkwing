@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -263,14 +264,33 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	revoked, err := s.store.DeleteUser(name, time.Now().UTC())
+	who := authwire.AnonymousPrincipal
+	keep := ""
+	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
+		who = p.Name
+		// safety: revoking the requesting token would lock the operator out mid-incident.
+		keep = p.TokenPrefix
+	}
+	sessions, revoked, err := s.store.DeleteUser(name, keep, time.Now().UTC())
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		if errors.Is(err, store.ErrUserNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		s.logger.Error("user delete failed", "name", name, "by", who, "err", err)
+		writeError(w, http.StatusInternalServerError, errors.New("could not delete user"))
 		return
 	}
 	for _, prefix := range revoked {
 		s.auth.Invalidate(prefix)
 	}
+	s.logger.Info(
+		"user deleted",
+		"name", name,
+		"sessions", sessions,
+		"revoked_prefixes", revoked,
+		"by", who,
+	)
 	w.WriteHeader(http.StatusNoContent)
 }
 

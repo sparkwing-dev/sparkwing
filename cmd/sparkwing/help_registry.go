@@ -2136,8 +2136,10 @@ var cmdUsersDelete = Command{
 	Path:     "sparkwing cluster users delete",
 	Synopsis: "Remove a dashboard user",
 	Description: `Deletes the user row, every session that user holds, and
-revokes every token minted under that principal name, in one
-transaction. Cookies and tokens stop working immediately.`,
+revokes every token minted under that principal name except the token
+this request authenticates with, in one transaction. The sessions and
+tokens are revoked and the auth cache on the serving replica is
+cleared; auth.md describes the windows that remain elsewhere.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Dashboard username to remove", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},

@@ -62,12 +62,16 @@ code change to unlock.
 - **controller (Breaking):** Revoking a token, rotating one, or deleting a user now takes
   effect on the serving replica immediately: the auth cache drops the affected
   prefixes and rechecks each cached entry's `expires_at` and `revoked_at` on
-  every hit. Revoke can cut an open rotation grace window short, `grace_secs`
-  is capped at 7 days, and deleting a user also deletes its sessions and
-  revokes its tokens in one transaction. `Store.DeleteUser` takes a `now` and
-  returns the revoked prefixes. See
-  [auth.md](docs/auth.md#how-long-revocation-takes-to-bite) for the window that
-  remains across replicas and the logs service.
+  every hit, and an authentication that was already reading the row when the
+  revoke landed no longer re-caches it. Revoke can cut an open rotation grace
+  window short, `grace_secs` is capped at 7 days, and deleting a user also
+  deletes its sessions and revokes its tokens in one transaction, except the
+  token the delete request itself authenticates with. `Store.DeleteUser` takes
+  a `now` and a token prefix to keep, returns the deleted session count and the
+  revoked prefixes, and reports a missing user as `store.ErrUserNotFound`; the
+  route answers `404` only for that and `500` for a storage failure. See
+  [auth.md](docs/auth.md#how-long-revocation-takes-to-bite) for the windows that
+  remain across replicas, the per-run loopback controller, and the logs service.
 - **web (Breaking):** Dashboard responses carry a Content Security Policy with a
   per-response script nonce, `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and HSTS
