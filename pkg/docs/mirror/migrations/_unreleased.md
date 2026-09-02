@@ -5,7 +5,6 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
-<<<<<<< HEAD
 ## The dashboard refuses an unauthenticated remote bind
 
 - **Before:** `sparkwing-web --token ... --addr=0.0.0.0:4343` without
@@ -22,7 +21,7 @@ CHANGELOG links here.
   origin, which is also what the new `connect-src 'self'` policy allows.
 - **Why:** An unauthenticated dashboard holding a service token hands the
   controller to every caller that can reach the port.
-=======
+
 ## Cache reads require the bearer token
 
 - **Before:** `sparkwing-cache` demanded a bearer only on its blob and sync
@@ -58,7 +57,6 @@ CHANGELOG links here.
   labels. `networkPolicy.enabled=false` removes the policy. A published cache
   Service needs `controller.tokenSecret.name` set and
   `cache.allowUnauthenticated` left false.
->>>>>>> origin/main
 
 ## Managed Git hooks run locally by default
 
