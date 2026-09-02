@@ -196,15 +196,21 @@ code change to unlock.
   the socket to `0600`, and drops accepted connections whose kernel-reported
   peer uid differs. Clients apply the same directory test before dialing, and
   reach a daemon still serving the pre-upgrade `/tmp` path until it exits.
-- **controller (Breaking):** A node claim now binds to the authenticated
-  principal as well as to the client-supplied `holder_id`, and the per-node
-  write routes admit only the runner holding that unexpired claim. A
-  `nodes.claim` token can no longer write another runner's node, stamp
-  `ready_at` (now `admin`, so a runner cannot skip a node's dependencies), or
-  read a run's plaintext secret arguments without a claim on one of its nodes;
-  an unauthenticated controller serves the redacted view. Runner tokens
-  claiming their own work are unaffected. See the
-  [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-principal).
+- **controller (Breaking):** A node claim now binds to the claiming token -- its
+  prefix segment and principal name -- as well as to the client-supplied
+  `holder_id`, and the per-node write routes admit only the token holding that
+  unexpired claim, so two tokens sharing a principal name cannot act on each
+  other's claims. `lease_secs` is clamped to 10 minutes on the claim and on
+  every heartbeat, so a claimant cannot pick how long its own authorization
+  lasts. A `nodes.claim` token can no longer write another runner's node, read
+  or heartbeat a run it holds no claim on, stamp or revoke `ready_at` (both now
+  `admin`, so a runner cannot skip a node's dependencies), pin a pipeline's
+  resources (now `runs.state`), or read a run's plaintext secret arguments without a
+  claim on one of its nodes. A controller running with authentication disabled
+  still serves plaintext arguments, because the whole API is open there and a
+  redacted argument would execute as the literal `***`. Runner tokens claiming
+  their own work are unaffected. See the
+  [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-token).
 
 ### Added
 

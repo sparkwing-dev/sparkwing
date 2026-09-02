@@ -24,15 +24,15 @@ mapping is in the generated [api-reference.md](api-reference.md):
 |-------------------|---------------------------------------------------------------------------------------------------|
 | `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/trends`, `/agents`, per-node metrics GETs  |
 | `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`                                   |
-| `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, `revoke-ready`, and the per-node write routes (`activity`, `annotations`, `summary`, `steps/*`, `dispatch`, `metrics`, and similar); GET `nodes/{id}`, `nodes/{id}/output` |
+| `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, and the per-node write routes (`activity`, `annotations`, `summary`, `steps/*`, `dispatch`, `metrics`, and similar); GET `nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce` |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`                               |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`                   |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/nodes`, `/runs/{id}/events`, and per-node `start` + `finish` (those two also require the caller's own claim) |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start` + `finish` (those two also require the caller's own claim), and PUT `/pipelines/{name}/profile/pin` |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
-| `admin`           | tokens / users / secrets CRUD, node deps / status / mark-ready, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, node deps / status / mark-ready / revoke-ready, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
@@ -51,23 +51,51 @@ still gets `redacted_keys`, the names the snapshot dropped as credentials.
 ## Claim ownership
 
 Scope decides which routes a token may call; the claim decides which node it
-may write. `POST /api/v1/nodes/claim` binds the claim to the authenticated
-principal alongside the client-supplied `holder_id`. Afterwards the per-node
-write routes admit only that principal while the lease is unexpired: another
-runner token gets `403` with `"error": "claim_required"`, and
-`POST /runs/{id}/nodes/{nodeID}/heartbeat` answers `409` unless both the
-principal and the holder id match. `admin` bypasses the check, which is what
-lets a dispatcher mark a node ready, start it, and finish it.
+may write. `POST /api/v1/nodes/claim` binds the claim to the **claiming
+token**: the controller records that token's prefix segment alongside the
+principal name and the client-supplied `holder_id`. The prefix is what the
+gate matches on, because it is unique per token while a principal name is a
+free-form label two tokens may share; the name stays for display. Afterwards
+the per-node write routes admit only that token while the lease is unexpired:
+another runner token gets `403` with `"error": "claim_required"`, and
+`POST /runs/{id}/nodes/{nodeID}/heartbeat` answers `409` unless the token, the
+principal, and the holder id all match. `admin` bypasses the check, which is
+what lets a dispatcher mark a node ready, start it, and finish it.
+
+The lease is an authorization window, so the claimant does not choose how long
+it lasts. `lease_secs` above the server cap of 10 minutes is clamped, on the
+claim and on every heartbeat; a runner renews well inside that.
 
 `POST /runs/{id}/nodes/{nodeID}/start` and `finish` follow the same rule: a
 `runs.state` principal may drive only a node whose unexpired claim it holds.
 Run create, run finish, node create, and event append are not claim-bound,
 because the caller creates those objects before any claim exists.
 
+`mark-ready` and `revoke-ready` both require `admin`. Readiness is a dispatcher
+decision on both sides, and `revoke-ready` writes only an *unclaimed* node, so
+holding a claim can never stand in for the scope.
+
+A `nodes.claim` token also reaches only the runs it is working on. The node
+read routes (`GET nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`) and
+`POST /runs/{id}/heartbeat` answer `403 claim_required` unless the caller holds
+an unexpired claim on some node of that run. `admin` bypasses; so does
+`runs.read` on the reads, which already grants the wider view through
+`GET /runs/{id}/nodes`.
+
+The ownership check runs in its own statement ahead of the handler's write, so
+a claim that expires in the microseconds between the two still admits one
+stale write. The store's write methods each open their own transaction and
+take no ownership predicate, so folding the check into the write would mean
+threading a claimant through every one of them; the exposure is bounded to a
+single write that a live claim authorized moments earlier.
+
 The execution view (`GET /api/v1/runs/{id}?include=secret_values`) follows the
 same rule: it returns plaintext argument values to an `admin` principal, or to
 a `nodes.claim` principal holding an unexpired claim on one of the run's nodes.
-A controller serving unauthenticated returns the redacted view.
+A controller serving unauthenticated returns **plaintext**, because the whole
+API is open in that mode and handing a runner `***` as a real argument value
+would corrupt the run rather than protect it. Once authentication is on, a
+request that carries no principal is refused.
 
 ## Secret ownership
 

@@ -33,7 +33,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
-| `PUT` | `/api/v1/pipelines/{name}/profile/pin` | `nodes.claim` |
+| `PUT` | `/api/v1/pipelines/{name}/profile/pin` | `runs.state` |
 | `GET` | `/api/v1/pool` | `runs.read` |
 | `POST` | `/api/v1/pool/checkout` | `admin` |
 | `POST` | `/api/v1/pool/heartbeat` | `admin` |
@@ -76,7 +76,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.write` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `admin` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `admin` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations` | `nodes.claim` |

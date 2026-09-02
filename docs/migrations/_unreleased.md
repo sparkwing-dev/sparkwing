@@ -220,31 +220,43 @@ CHANGELOG links here.
   file paths. A cloned repository could otherwise hand shell execution to
   anyone who ran the documented hooks install command.
 
-## Node claims bind to the claiming principal
+## Node claims bind to the claiming token
 
 - **Before:** Any `nodes.claim` token could write any node of any run, stamp
   `ready_at` on a node whose dependencies had not finished, and read any run's
   plaintext secret arguments through `?include=secret_values`. Scope gated the
   route; nothing gated the object.
-- **After:** `POST /api/v1/nodes/claim` records the authenticated principal
-  alongside `holder_id`. The per-node write routes (`activity`, `touch`,
+- **After:** `POST /api/v1/nodes/claim` records the claiming token's prefix
+  segment alongside the principal name and `holder_id`, and every gated route
+  matches on the prefix, so two tokens sharing a principal name cannot act on
+  each other's claims. The per-node write routes (`activity`, `touch`,
   `annotations`, `summary`, `artifact-manifest`, `metrics`, `dispatch`,
-  `steps/*`, `bounce/consume`, `revoke-ready`) answer `403` with
-  `"error": "claim_required"` unless the caller holds that node's unexpired
-  claim, and `heartbeat` answers `409` unless both the principal and the holder
-  id match. `mark-ready` requires `admin`. The execution view returns plaintext
-  arguments to an `admin` principal, or to a `nodes.claim` principal holding an
-  unexpired claim on one of the run's nodes; a controller serving
-  unauthenticated returns the redacted view.
+  `steps/*`, `bounce/consume`) answer `403` with `"error": "claim_required"`
+  unless the caller holds that node's unexpired claim, and `heartbeat` answers
+  `409` unless the token, the principal, and the holder id all match.
+  `mark-ready` and `revoke-ready` require `admin`. `lease_secs` is clamped to
+  10 minutes on the claim and on every heartbeat. The node read routes
+  (`nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`) and
+  `POST /runs/{id}/heartbeat` answer `403` unless the caller holds a claim on
+  some node of that run, carries `runs.read`, or is `admin`.
+  `PUT /api/v1/pipelines/{name}/profile/pin` requires `runs.state`. The execution
+  view returns plaintext arguments to an `admin` principal, or to a
+  `nodes.claim` principal holding an unexpired claim on one of the run's nodes;
+  a controller serving unauthenticated returns plaintext, because the whole API
+  is open in that mode and a redacted argument would execute as the literal
+  `***`.
 - **Migration:** Give the token that dispatches nodes to a warm pool `admin`,
-  which it already needs to create, start, and finish nodes. Pool runners that
-  claim their own work keep `nodes.claim`. Mint a token on a controller that
-  serves unauthenticated if its runners fetch secret arguments over HTTP.
-  Claims taken before the upgrade carry no principal, so a runner in flight
+  which it already needs to create, start, finish, and mark nodes ready; it now
+  also needs `admin` to call `revoke-ready`. A dispatcher that sizes pods needs
+  `runs.state` to write a pipeline resource pin. Pool runners that claim their own work keep `nodes.claim`, and need
+  `runs.read` as well if their pipelines resolve cross-pipeline references.
+  Claims taken before the upgrade carry no token prefix, so a runner in flight
   during the upgrade loses its lease and the node is requeued.
-- **Why:** Every laptop agent and pool replica holds a runner token. A token
-  scoped to claim work should not read another repository's deploy credentials
-  or force a node to run before its dependencies finish.
+- **Why:** Every laptop agent and pool replica holds a runner token, and the
+  documented Helm deployment gives every replica the same one. A token scoped
+  to claim work should not read another repository's deploy credentials, force
+  a node to run before its dependencies finish, or pick how long its own
+  authorization lasts.
 
 ## Dashboard proxy allow-list
 
