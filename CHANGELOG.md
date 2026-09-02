@@ -48,6 +48,15 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **sdk:** `git.Clone` now authenticates to the git cache named by
+  `SPARKWING_GITCACHE`. The bearer in `SPARKWING_CACHE_TOKEN` travels in the
+  environment as a cache-scoped `http.<cache>/.extraHeader`, never on the
+  command line, and redirects are off for that URL so the header cannot follow
+  the request to another host. A cache that answers 401 no longer breaks the
+  clone: it falls back to the upstream remote, the same as an unreachable
+  cache.
 
 ## [v0.40.0] - 2026-09-02
 ### Security
