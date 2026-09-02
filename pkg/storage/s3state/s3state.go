@@ -494,6 +494,9 @@ func encodeEnvelope(kind string, data any) (envelope, error) {
 }
 
 func (b *Backend) CreateRun(ctx context.Context, r store.Run) error {
+	if err := store.ValidateRunInvocation(r); err != nil {
+		return err
+	}
 	env, err := encodeEnvelope(KindRun, r)
 	if err != nil {
 		return err

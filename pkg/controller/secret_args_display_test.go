@@ -3,6 +3,7 @@ package controller_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -102,12 +103,57 @@ func TestSecretArgs_ControllerGetRunRedactsByDefault(t *testing.T) {
 func TestSecretArgs_ControllerReceiptRedacts(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRun(t, st, "run-1")
+	if _, err := st.DB().Exec(`UPDATE runs SET invocation_json = json_set(invocation_json, '$.inputs_hash', 'sha256:offline-oracle') WHERE id = 'run-1'`); err != nil {
+		t.Fatal(err)
+	}
 	body := getBody(t, srv.URL+"/api/v1/runs/run-1/receipt")
 	if strings.Contains(body, ctlSecretValue) {
 		t.Errorf("receipt served the secret arg value:\n%s", body)
 	}
 	if !strings.Contains(body, store.RedactedArgValue) {
 		t.Errorf("receipt carries no redaction marker:\n%s", body)
+	}
+	if strings.Contains(body, "offline-oracle") {
+		t.Errorf("receipt served a stored input-hash oracle:\n%s", body)
+	}
+	var rec struct {
+		Identity struct {
+			InputsHash string `json:"inputs_hash"`
+		} `json:"identity"`
+	}
+	if err := json.Unmarshal([]byte(body), &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Identity.InputsHash != "" {
+		t.Errorf("receipt identity inputs_hash = %q, want empty for secret arguments", rec.Identity.InputsHash)
+	}
+}
+
+func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
+	st, srv := secretArgController(t)
+	body, err := json.Marshal(store.Run{
+		ID: "old-writer", Pipeline: "deploy", Status: "running", StartedAt: time.Now(),
+		Args: map[string]string{"token": ctlSecretValue},
+		Invocation: map[string]any{
+			"args":                        map[string]string{"token": ctlSecretValue},
+			"inputs_hash":                 "sha256:offline-oracle",
+			store.InvocationSecretArgsKey: []string{"token"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(srv.URL+"/api/v1/runs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		got, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /api/v1/runs status = %d, want 400: %s", resp.StatusCode, got)
+	}
+	if _, err := st.GetRun(context.Background(), "old-writer"); err != store.ErrNotFound {
+		t.Fatalf("GetRun error = %v, want ErrNotFound", err)
 	}
 }
 

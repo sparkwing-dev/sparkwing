@@ -2394,6 +2394,9 @@ hashes (pipeline_version_hash, inputs_hash, plan_hash, per-node
 outputs_hash), per-step observability (durations, outcomes), and
 runner-time and compute-cost accounting.
 
+inputs_hash is empty when the run carries a caller-supplied
+secret:"true" argument, so the receipt cannot verify guesses of that value.
+
 Local mode reads from the SQLite store and reports zero cost because no
 local billing rate is configured. --profile NAME reads from the remote
 controller's receipt endpoint and uses the controller's configured rate.`,

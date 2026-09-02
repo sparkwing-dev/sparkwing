@@ -44,8 +44,8 @@ func TestRedactedForDisplay_RedactsArgsInvocationAndReproducer(t *testing.T) {
 		t.Errorf("reproducer = %q, want %q", repro, want)
 	}
 
-	if got.Invocation["inputs_hash"] != "abc123" {
-		t.Errorf("inputs_hash lost: %v", got.Invocation["inputs_hash"])
+	if _, ok := got.Invocation["inputs_hash"]; ok {
+		t.Errorf("inputs_hash exposes a secret-argument oracle: %v", got.Invocation["inputs_hash"])
 	}
 	if _, ok := got.Invocation["flags"]; !ok {
 		t.Error("flags block lost; the attempts dropdown reads it")
@@ -173,6 +173,18 @@ func TestSecretArgNames_ReadsClassification(t *testing.T) {
 	}
 	if got := (store.Run{}).SecretArgNames(); got != nil {
 		t.Errorf("empty run SecretArgNames = %v, want nil", got)
+	}
+}
+
+func TestValidateRunInvocation_FailsClosedOnMalformedClassification(t *testing.T) {
+	run := store.Run{
+		Invocation: map[string]any{
+			"inputs_hash":                 "sha256:oracle",
+			store.InvocationSecretArgsKey: []string{""},
+		},
+	}
+	if err := store.ValidateRunInvocation(run); err != store.ErrSecretInputHash {
+		t.Fatalf("ValidateRunInvocation error = %v, want ErrSecretInputHash", err)
 	}
 }
 

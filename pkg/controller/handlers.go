@@ -95,6 +95,10 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.CreateRun(r.Context(), body); err != nil {
+		if errors.Is(err, store.ErrSecretInputHash) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

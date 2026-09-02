@@ -154,6 +154,7 @@ var ErrLockHeld = errors.New("held by another holder")
 var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
 var ErrRunNotLive = errors.New("run is not live")
+var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
 type Event struct {
 	RunID   string
 	Seq     int64
@@ -670,6 +671,7 @@ type User struct {
 	CreatedAt   time.Time
 	LastLoginAt *time.Time
 }
+func ValidateRunInvocation(r Run) error
 const WaiterCached WaiterStatus = "cached"
 const WaiterCancelled WaiterStatus = "cancelled"
 const WaiterLeaderFinished WaiterStatus = "leader_finished"

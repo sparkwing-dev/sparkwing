@@ -978,7 +978,9 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 			args[k] = v
 		}
 		inv["args"] = args
-		inv["inputs_hash"] = hashCanonicalJSON(opts.Args)
+		if !containsNamedArg(opts.Args, secretArgs) {
+			inv["inputs_hash"] = hashCanonicalJSON(opts.Args)
+		}
 	}
 
 	if len(secretArgs) > 0 {
@@ -1011,6 +1013,15 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	}
 	inv["reproducer"] = buildReproducer(opts, runID)
 	return inv
+}
+
+func containsNamedArg(args map[string]string, names []string) bool {
+	for _, name := range names {
+		if _, ok := args[name]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {

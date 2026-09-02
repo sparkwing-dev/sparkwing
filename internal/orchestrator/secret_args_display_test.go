@@ -3,12 +3,14 @@ package orchestrator_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -137,6 +139,9 @@ func TestSecretArgs_RedactedInRunStartEnvelope(t *testing.T) {
 	if !strings.Contains(body, visibleArgValue) {
 		t.Errorf("run_start envelope lost the non-secret arg:\n%s", body)
 	}
+	if strings.Contains(body, "inputs_hash") {
+		t.Errorf("run_start envelope exposes an input-hash oracle:\n%s", body)
+	}
 }
 
 func TestSecretArgs_StoredRowKeepsPlaintextForReExecution(t *testing.T) {
@@ -162,9 +167,41 @@ func TestSecretArgs_StoredRowKeepsPlaintextForReExecution(t *testing.T) {
 	if got := run.SecretArgNames(); len(got) != 1 || got[0] != "token" {
 		t.Errorf("stored classification = %v, want [token]", got)
 	}
+	if _, ok := run.Invocation["inputs_hash"]; ok {
+		t.Errorf("stored invocation exposes an input-hash oracle: %v", run.Invocation)
+	}
 
 	if run.RedactedForDisplay().Args["token"] != store.RedactedArgValue {
 		t.Error("stored row does not redact through RedactedForDisplay")
+	}
+}
+
+func TestSecretArgs_StateDumpOmitsInputHash(t *testing.T) {
+	registerSecretArgsPipeline()
+	artifacts, err := fs.NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		Pipeline:      secretArgPipeline,
+		Args:          map[string]string{"token": secretArgValue, "env": visibleArgValue},
+		ArtifactStore: artifacts,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := artifacts.Get(context.Background(), "runs/"+res.RunID+"/state.ndjson")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	body, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "inputs_hash") {
+		t.Errorf("state.ndjson exposes an input-hash oracle:\n%s", body)
 	}
 }
 
@@ -208,5 +245,29 @@ func TestSecretArgs_PipelineWithoutSecretsIsUnchanged(t *testing.T) {
 	}
 	if _, ok := run.Invocation[store.InvocationSecretArgsKey]; ok {
 		t.Errorf("secret-free pipeline wrote a classification key: %v", run.Invocation)
+	}
+}
+
+func TestSecretArgs_UnsuppliedSecretKeepsInputHash(t *testing.T) {
+	registerSecretArgsPipeline()
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		Pipeline: secretArgPipeline,
+		Args:     map[string]string{"env": visibleArgValue},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	run, err := st.GetRun(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := run.Invocation["inputs_hash"]; !ok {
+		t.Errorf("optional secret was not supplied, but inputs_hash was omitted: %v", run.Invocation)
 	}
 }

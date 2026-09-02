@@ -957,11 +957,12 @@ Limits worth knowing:
   not the value. Pass the same value to a non-secret argument as well
   and it is masked in logs -- where masking is value-anchored -- but
   shown under that other argument's name.
-- `inputs_hash` is computed over the plaintext arguments and is shown
-  unredacted. For a low-entropy secret it is a brute-force oracle to
-  anyone who can read the run, so a receipt for a run with secret
-  arguments is not safe to hand to a party you would not give the
-  secret to.
+- `inputs_hash` is omitted when the caller supplied any `secret:"true"`
+  argument. This keeps run metadata, logs, receipts, and state dumps from
+  becoming an offline oracle for low-entropy values. The SQL migration also
+  removes hashes from classified rows written by older versions. Built-in
+  state backends reject an unsafe write; custom `storage.StateStore`
+  implementations should call `store.ValidateRunInvocation` in `CreateRun`.
 - Audit events are masked when they are written, not when they are
   read. Events recorded before this behavior existed, and any future
   event type that carries arguments without going through the masker,

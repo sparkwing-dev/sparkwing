@@ -56,6 +56,13 @@ code change to unlock.
 
 ### Fixed
 
+- **security (Breaking):** Run-store schema 18 removes `inputs_hash` from runs
+  with caller-supplied secret arguments, eliminating an offline guessing
+  oracle from SQL stores, run APIs, logs, receipts, and new state dumps. Older
+  binaries refuse the upgraded SQL store. Built-in state backends now return
+  `store.ErrSecretInputHash` for an unsafe `CreateRun`, and `POST /api/v1/runs`
+  returns 400, so an older remote writer cannot reintroduce the hash. See the
+  [migration guide](docs/migrations/_unreleased.md#secret-input-hash-migration).
 - **helm:** A configured web controller-token Secret is now required, so a
   missing Secret or key keeps the web pod unready instead of starting a proxy
   without its controller credential.
