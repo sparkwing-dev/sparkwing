@@ -19,7 +19,8 @@ spec:
       labels:
         {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "logs") | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "sparkwing-runner-bundle.serviceAccountName" . }}
+      serviceAccountName: {{ include "sparkwing-runner-bundle.logsServiceAccountName" . }}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

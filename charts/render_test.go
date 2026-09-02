@@ -23,8 +23,8 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.5" {
-		t.Fatalf("full chart version = %q, want 0.1.5", chart.Version)
+	if chart.Version != "0.1.6" {
+		t.Fatalf("full chart version = %q, want 0.1.6", chart.Version)
 	}
 }
 
@@ -255,12 +255,20 @@ type renderedDeployment struct {
 	Spec struct {
 		Template struct {
 			Spec struct {
-				SecurityContext renderedSecurityContext `yaml:"securityContext"`
-				InitContainers  []renderedContainer     `yaml:"initContainers"`
-				Containers      []renderedContainer     `yaml:"containers"`
+				SecurityContext              renderedSecurityContext `yaml:"securityContext"`
+				ServiceAccountName           string                  `yaml:"serviceAccountName"`
+				AutomountServiceAccountToken *bool                   `yaml:"automountServiceAccountToken"`
+				InitContainers               []renderedContainer     `yaml:"initContainers"`
+				Containers                   []renderedContainer     `yaml:"containers"`
 			} `yaml:"spec"`
 		} `yaml:"template"`
 	} `yaml:"spec"`
+}
+
+type renderedPolicyRule struct {
+	APIGroups []string `yaml:"apiGroups"`
+	Resources []string `yaml:"resources"`
+	Verbs     []string `yaml:"verbs"`
 }
 
 type renderedResource struct {
@@ -269,11 +277,14 @@ type renderedResource struct {
 		Name   string            `yaml:"name"`
 		Labels map[string]string `yaml:"labels"`
 	} `yaml:"metadata"`
-	Spec struct {
+	Rules []renderedPolicyRule `yaml:"rules"`
+	Spec  struct {
 		Template struct {
 			Spec struct {
-				InitContainers []renderedContainer `yaml:"initContainers"`
-				Containers     []renderedContainer `yaml:"containers"`
+				ServiceAccountName           string              `yaml:"serviceAccountName"`
+				AutomountServiceAccountToken *bool               `yaml:"automountServiceAccountToken"`
+				InitContainers               []renderedContainer `yaml:"initContainers"`
+				Containers                   []renderedContainer `yaml:"containers"`
 			} `yaml:"spec"`
 		} `yaml:"template"`
 	} `yaml:"spec"`
@@ -963,5 +974,92 @@ func TestControllerAnnouncesNoLogsServiceWhenNoneIsDeployed(t *testing.T) {
 	args := webArgs(t, rendered)
 	if got, ok := hasFlag(args, "--logs-url="); ok {
 		t.Errorf("got %q, want no flag when no logs service is deployed", got)
+	}
+}
+
+func TestRunnerBundleRoleGrantsNoNamespaceReads(t *testing.T) {
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
+		"controller.url=http://controller"))
+	var roles int
+	for _, resource := range resources {
+		if resource.Kind != "Role" && resource.Kind != "ClusterRole" {
+			continue
+		}
+		roles++
+		for _, rule := range resource.Rules {
+			t.Errorf("%s %s grants %v on %v; the runner reads none of it through the API",
+				resource.Kind, resource.Metadata.Name, rule.Verbs, rule.Resources)
+		}
+	}
+	if roles != 1 {
+		t.Fatalf("rendered %d runner Roles, want exactly one", roles)
+	}
+}
+
+func TestRunnerBundleMountsNoServiceAccountTokens(t *testing.T) {
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
+		"controller.url=http://controller"))
+	accounts := map[string]string{}
+	for _, component := range []string{"runner", "cache", "logs"} {
+		deployment := componentResource(t, resources, "Deployment", component)
+		pod := deployment.Spec.Template.Spec
+		if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+			t.Errorf("%s pod automounts a ServiceAccount token", component)
+		}
+		if pod.ServiceAccountName == "" {
+			t.Errorf("%s pod names no ServiceAccount", component)
+		}
+		if owner, dup := accounts[pod.ServiceAccountName]; dup {
+			t.Errorf("%s shares ServiceAccount %q with %s", component, pod.ServiceAccountName, owner)
+		}
+		accounts[pod.ServiceAccountName] = component
+	}
+	created := map[string]bool{}
+	for _, resource := range resources {
+		if resource.Kind == "ServiceAccount" {
+			created[resource.Metadata.Name] = true
+		}
+	}
+	for name, component := range accounts {
+		if !created[name] {
+			t.Errorf("%s names ServiceAccount %q that the chart never creates", component, name)
+		}
+	}
+}
+
+func TestFullChartMountsNoWebServiceAccountToken(t *testing.T) {
+	pod := deploymentDocument(t, helmTemplate(t, "sparkwing")).Spec.Template.Spec
+	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+		t.Fatal("web pod automounts a ServiceAccount token")
+	}
+}
+
+func TestFullChartCreatesTheWarmerServiceAccount(t *testing.T) {
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-full", "sparkwing", "default"))
+	for _, resource := range resources {
+		if resource.Kind == "ServiceAccount" && resource.Metadata.Name == "sparkwing-cache-warmer" {
+			return
+		}
+	}
+	t.Fatal("no sparkwing-cache-warmer ServiceAccount for the controller's warmer pods")
+}
+
+func TestFullChartVendorsTheTightenedRunnerRBAC(t *testing.T) {
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-full", "sparkwing", "default"))
+	runner := componentResource(t, resources, "Deployment", "runner")
+	if pod := runner.Spec.Template.Spec; pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+		t.Error("vendored runner pod automounts a ServiceAccount token")
+	}
+	for _, resource := range resources {
+		if resource.Kind != "Role" {
+			continue
+		}
+		for _, rule := range resource.Rules {
+			for _, res := range rule.Resources {
+				if res == "secrets" {
+					t.Errorf("Role %s still grants %v on secrets", resource.Metadata.Name, rule.Verbs)
+				}
+			}
+		}
 	}
 }
