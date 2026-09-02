@@ -58,6 +58,14 @@ code change to unlock.
   which mode it ran in, and the step refuses to run when the checkout cannot
   resolve `origin/main`.
 
+### Fixed
+
+- **ci:** The `security-scan` gitleaks job says what it found. It writes
+  `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
+  file, line, fingerprint) in the step log, and the Security workflow uploads
+  the report directory as a build artifact, so a failure is no longer just
+  "leaks found: 1".
+
 ### Security
 
 - **store (Breaking):** Run-store schema 26 makes the `idx_tokens_prefix` index
