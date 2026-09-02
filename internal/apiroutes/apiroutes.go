@@ -49,7 +49,6 @@ func Scopes(files ...string) (map[string]string, error) {
 	scopes := map[string]string{}
 	for _, file := range files {
 		// #nosec G703 -- a build-time tool reading paths the operator names
-		// #nosec G703 -- a build-time tool reading paths the operator names
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("read scopes: %w", err)
@@ -67,6 +66,7 @@ func Scopes(files ...string) (map[string]string, error) {
 // A route registered on the `mux` receiver sits behind the authentication
 // middleware; anything else is reachable without a credential.
 func Parse(file string, scopes map[string]string) ([]Route, error) {
+	// #nosec G703 -- a build-time tool reading paths the operator names
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("read routes: %w", err)
