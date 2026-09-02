@@ -50,6 +50,21 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
+- **web (Breaking):** Dashboard responses carry a Content Security Policy with a
+  per-response script nonce, `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and HSTS
+  when session cookies are `Secure`. The page reads its configuration from
+  `/sparkwing-runtime.js` rather than an inline script, and the controller
+  bearer stays server-side in both login modes, so `--api-url` and the chart's
+  `web.apiUrl` are deprecated and ignored. A token-backed dashboard that binds
+  a non-loopback address without `--require-login` refuses to start. See the
+  [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
+- **store:** Browser sessions are stored as a sha256 digest of the session id,
+  and the CSRF token is derived as an HMAC of that id under a server key
+  instead of being written to the database, so a copy of the state database,
+  its WAL, or a backup no longer yields replayable dashboard sessions. The
+  schema 21 migration deletes existing session rows, so everyone signs in
+  again after the upgrade.
 - **cache:** The warm-pool controller now accepts only registry references in
   `warm_images`, logging and dropping every other entry, and passes the list to
   the privileged warmer pod as container arguments consumed by a fixed script.
@@ -112,6 +127,18 @@ code change to unlock.
   the socket to `0600`, and drops accepted connections whose kernel-reported
   peer uid differs. Clients apply the same directory test before dialing, and
   reach a daemon still serving the pre-upgrade `/tmp` path until it exits.
+
+### Security
+
+- **controller (Breaking):** A node claim now binds to the authenticated
+  principal as well as to the client-supplied `holder_id`, and the per-node
+  write routes admit only the runner holding that unexpired claim. A
+  `nodes.claim` token can no longer write another runner's node, stamp
+  `ready_at` (now `admin`, so a runner cannot skip a node's dependencies), or
+  read a run's plaintext secret arguments without a claim on one of its nodes;
+  an unauthenticated controller serves the redacted view. Runner tokens
+  claiming their own work are unaffected. See the
+  [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-principal).
 
 ## [v0.39.0] - 2026-09-02
 ### Docs

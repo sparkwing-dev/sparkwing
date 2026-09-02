@@ -32,16 +32,10 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html:
-              'window.__SPARKWING_TOKEN__="__SPARKWING_TOKEN_MARKER__";' +
-              'window.__SPARKWING_API_URL__="__SPARKWING_API_URL_MARKER__";' +
-              'window.__SPARKWING_VERSION__="__SPARKWING_VERSION_MARKER__";' +
-              'window.__SPARKWING_REQUIRE_LOGIN__="__SPARKWING_REQUIRE_LOGIN_MARKER__";',
-          }}
-          suppressHydrationWarning
-        />
+        {/* Blocking so the dashboard configuration is set before the app
+            bundle runs. */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script src="/sparkwing-runtime.js" />
       </head>
       <body className="h-full flex flex-col">
         <DynamicFavicon />

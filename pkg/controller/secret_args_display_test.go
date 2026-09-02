@@ -269,6 +269,11 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateToken runner: %v", err)
 	}
+	idleRunnerTok, _, err := st.CreateToken("idle-pod", store.TokenKindRunner,
+		[]string{"nodes.claim", "runs.read"}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken idle runner: %v", err)
+	}
 	readerTok, _, err := st.CreateToken("dashboard", store.TokenKindUser,
 		[]string{"runs.read"}, 0, now)
 	if err != nil {
@@ -278,6 +283,17 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 		[]string{"admin"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken admin: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "only", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-1", "only"); err != nil {
+		t.Fatalf("MarkNodeReady: %v", err)
+	}
+	if _, err := st.ClaimNextReadyNode(ctx, "pod", "holder-1", time.Minute, nil); err != nil {
+		t.Fatalf("ClaimNextReadyNode: %v", err)
 	}
 
 	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
@@ -308,8 +324,10 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 	const secretValues = "?include=" + store.IncludeSecretValues
 
 	if body := get(t, runnerTok, secretValues); !strings.Contains(body, ctlSecretValue) {
-		t.Errorf("nodes.claim token did not receive the execution view:\n%s", body)
+		t.Errorf("the claiming runner did not receive the execution view:\n%s", body)
 	}
+	assertRedactedResponse(t, "nodes.claim token holding no claim on the run",
+		get(t, idleRunnerTok, secretValues))
 	if body := get(t, adminTok, secretValues); !strings.Contains(body, ctlSecretValue) {
 		t.Errorf("admin token did not receive the execution view:\n%s", body)
 	}
