@@ -51,12 +51,15 @@ code change to unlock.
 ### Security
 
 - **sdk:** `git.Clone` now authenticates to the git cache named by
-  `SPARKWING_GITCACHE`. The bearer in `SPARKWING_CACHE_TOKEN` travels in the
-  environment as a cache-scoped `http.<cache>/.extraHeader`, never on the
-  command line, and redirects are off for that URL so the header cannot follow
-  the request to another host. A cache that answers 401 no longer breaks the
-  clone: it falls back to the upstream remote, the same as an unreachable
-  cache.
+  `SPARKWING_GITCACHE` or `SPARKWING_GITCACHE_URL`. The bearer in
+  `SPARKWING_CACHE_TOKEN` travels in the environment as a cache-scoped
+  `http.<cache>/.extraHeader`, never on the command line, never to the
+  auto-detected localhost cache, and redirects are off for that URL so the
+  header cannot follow the request to another host. A cache that answers 401
+  or a redirect no longer breaks the clone: it falls back to the upstream
+  remote with one line on stderr, the same as an unreachable cache.
+  `git.Fetch` reuses the bearer when the checkout's `origin` is under that
+  cache, so a clone served by a guarded cache stays fetchable.
 - **cli:** `sparkwing runs submit` now snapshots an allow-listed environment
   instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
   `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every credential-shaped
