@@ -82,6 +82,16 @@ code change to unlock.
 
 ### Security
 
+- **orchestrator + controller:** Dispatch snapshots now filter on the value as
+  well as the name. A captured URL or DSN keeps its host and loses its
+  userinfo, a bearer header, PEM block, or JSON body with a token or password
+  field is dropped and named in `redacted_keys`, and `SPARKWING_PG_URL`,
+  `DATABASE_URL`, `PGPASSWORD`, and `PGURL` join the dropped names; a short
+  allow-list keeps well-known configuration such as `GIT_AUTHOR_NAME` and
+  `GOPRIVATE`. `POST /api/v1/triggers` applies the same name rule to
+  `trigger.env`, so a credential-named key no longer reaches the `trigger_env`
+  a `triggers.read` principal can read. Cluster-mode `sparkwing debug rerun`
+  deletes its debug pod on interrupt as well as on normal exit.
 - **storage:** Artifact keys are limited to ASCII letters, digits, `.`, `_`, and
   `-` with no dot-leading segment, and the cache-backed artifact store escapes
   every key segment in its request path, so a double-encoded or `#`/`?` key

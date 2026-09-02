@@ -462,6 +462,10 @@ paths:
     get:
       tags: [nodes]
       summary: Fetch the latest dispatch (or a specific `?seq=N`) for a node.
+      description: >-
+        Admits `runs.read`, but fills `env_json` only for an `admin`
+        principal; every other reader gets the row without it. `redacted_keys`
+        is served to all readers.
       parameters:
         - in: query
           name: seq
@@ -481,18 +485,18 @@ paths:
     get:
       tags: [nodes]
       summary: List every dispatch attempt for a node.
+      description: >-
+        Admits `runs.read`, but fills `env_json` only for an `admin`
+        principal; every other reader gets each row without it.
+        `redacted_keys` is served to all readers.
       responses:
         "200":
           description: Dispatch list.
           content:
             application/json:
               schema:
-                type: object
-                required: [dispatches]
-                properties:
-                  dispatches:
-                    type: array
-                    items: { $ref: "#/components/schemas/NodeDispatch" }
+                type: array
+                items: { $ref: "#/components/schemas/NodeDispatch" }
 
   /api/v1/runs/{id}/nodes/{nodeID}/activity:
     parameters:
@@ -2071,21 +2075,41 @@ components:
 
     NodeDispatch:
       type: object
-      description: One attempt to dispatch a node to a runner.
+      description: >-
+        One dispatch-frame snapshot for a node attempt. Mirrors
+        `pkg/store.NodeDispatch`. The byte-typed members carry
+        base64-encoded JSON.
       properties:
         run_id: { type: string }
         node_id: { type: string }
         seq: { type: integer }
-        kind: { type: string }
-        runner: { type: string }
-        target: { type: string }
-        started_at: { type: string, format: date-time }
-        finished_at: { type: string, format: date-time, nullable: true }
-        outcome: { type: string }
-        error: { type: string }
-        attrs:
-          type: object
-          additionalProperties: true
+        dispatched_at: { type: string, format: date-time }
+        code_version: { type: string }
+        binary_hash: { type: string }
+        runner_labels:
+          type: string
+          format: byte
+          description: JSON `[]string` of the labels the dispatch required.
+        env_json:
+          type: string
+          format: byte
+          description: >-
+            JSON `map[string]string` of the captured environment. Present
+            only for an `admin` principal; a `runs.read` principal gets the
+            row with this member absent.
+        redacted_keys:
+          type: string
+          format: byte
+          description: >-
+            JSON `[]string` naming the variables the snapshot dropped as
+            credential-shaped. Served to every reader of the row.
+        workdir: { type: string }
+        input_envelope_json:
+          type: string
+          format: byte
+          description: JSON dispatch envelope; over-cap rows store a truncation stub.
+        input_size_bytes: { type: integer, format: int64 }
+        secret_redactions: { type: integer }
 
     MetricSample:
       type: object

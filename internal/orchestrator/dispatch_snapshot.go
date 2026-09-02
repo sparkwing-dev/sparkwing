@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -152,11 +153,16 @@ func redactDispatchEnv(ctx context.Context, env map[string]string) dispatchEnv {
 	got := dispatchEnv{values: env}
 	masker := secrets.MaskerFromContext(ctx)
 	for k, v := range env {
-		// safety: drop credential-named keys whatever their source; the snapshot must not carry the runner's own bearer.
-		if credentialEnvName(k) {
+		// safety: drop credential-shaped names and values; the snapshot must not carry a bearer or a DSN password.
+		if envredact.CredentialName(k) || envredact.CredentialValue(v) {
 			delete(env, k)
 			got.redactedKeys = append(got.redactedKeys, k)
 			continue
+		}
+		if r := envredact.RedactValue(v); r != v {
+			env[k] = r
+			v = r
+			got.masked++
 		}
 		if masker == nil {
 			continue
@@ -168,35 +174,6 @@ func redactDispatchEnv(ctx context.Context, env map[string]string) dispatchEnv {
 	}
 	sort.Strings(got.redactedKeys)
 	return got
-}
-
-var envCredentialSubstrings = []string{
-	"TOKEN",
-	"SECRET",
-	"PASSWORD",
-	"KEY",
-	"CREDENTIAL",
-}
-
-var envCredentialExact = map[string]bool{
-	"SPARKWING_AGENT_TOKEN": true,
-	"SPARKWING_CACHE_TOKEN": true,
-	"SPARKWING_LEASE_TOKEN": true,
-	"SPARKWING_SECRETS_KEY": true,
-	"GITHUB_TOKEN":          true,
-}
-
-func credentialEnvName(name string) bool {
-	if envCredentialExact[name] {
-		return true
-	}
-	upper := strings.ToUpper(name)
-	for _, frag := range envCredentialSubstrings {
-		if strings.Contains(upper, frag) {
-			return true
-		}
-	}
-	return false
 }
 
 var envDenyExact = map[string]bool{
