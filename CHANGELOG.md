@@ -66,10 +66,13 @@ code change to unlock.
   schema 21 migration deletes existing session rows, so everyone signs in
   again after the upgrade.
 - **cache:** The warm-pool controller now accepts only registry references in
-  `warm_images`, logging and dropping every other entry, and passes the list to
-  the privileged warmer pod as container arguments consumed by a fixed script.
-  A ConfigMap writer can no longer smuggle shell into the one privileged
-  workload Sparkwing creates.
+  `warm_images` -- a DNS or bracketed IPv6 host, a lowercase path, an optional
+  tag, and a lowercase `sha256` digest -- reads at most 64 entries per config
+  read, summarizes what it dropped in one log line per read, and passes the
+  accepted list to the privileged warmer pod as container arguments consumed by
+  a fixed script. A ConfigMap writer can no longer smuggle shell into the one
+  privileged workload Sparkwing creates, nor flood the controller log with
+  rejections.
 - **controller:** Login now carries per-client, listener-wide, and per-account
   budgets, and every argon2id verification passes through a memory-sized
   semaphore, so unauthenticated callers can no longer exhaust the pod by
