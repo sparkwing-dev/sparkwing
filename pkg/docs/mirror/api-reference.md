@@ -65,7 +65,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `runs.write` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce/consume` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/debug-pause` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `admin` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatches` | `runs.read` |
@@ -78,7 +78,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.write` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `admin` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `admin` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/finish` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/skip` | `nodes.claim` |
@@ -87,7 +87,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/summary` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/touch` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/plan` | `admin` |
+| `POST` | `/api/v1/runs/{id}/plan` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/retry` | `runs.write` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
