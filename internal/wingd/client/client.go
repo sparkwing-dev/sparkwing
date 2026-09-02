@@ -302,6 +302,13 @@ func daemonUnreachable(home, sock string, spawns int, cause, dialErr error) erro
 	return fmt.Errorf("%w: %w", ErrDaemonUnreachable, cause)
 }
 
+func describeHome(home string) string {
+	if resolved, err := wingd.HomeDir(home); err == nil && resolved != "" {
+		return resolved
+	}
+	return home
+}
+
 func daemonDeathCause(tail string) string {
 	lines := strings.Split(strings.TrimRight(tail, "\n"), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -359,10 +366,10 @@ func (cl *Client) connect(ctx context.Context) error {
 				case wingd.SocketPreparationElectionHeld:
 					if predecessorDeadline.IsZero() {
 						predecessorDeadline = time.Now().Add(opts.predecessorWaitTimeout())
-						opts.logf("waiting for predecessor daemon election lock for %s", opts.Home)
+						opts.logf("waiting for predecessor daemon election lock for %s", describeHome(opts.Home))
 					}
 					if !time.Now().Before(predecessorDeadline) {
-						cause := fmt.Errorf("predecessor daemon still holds the election lock for %s after %s", opts.Home, opts.predecessorWaitTimeout())
+						cause := fmt.Errorf("predecessor daemon still holds the election lock for %s after %s", describeHome(opts.Home), opts.predecessorWaitTimeout())
 						return daemonUnreachable(opts.Home, cl.sock, spawns, cause, nil)
 					}
 					if err := electionWait.wait(ctx, derr); err != nil {

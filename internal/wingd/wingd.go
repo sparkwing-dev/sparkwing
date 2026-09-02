@@ -40,6 +40,8 @@ const (
 	DefaultStallCPUFraction = 0.02
 
 	DefaultStallProbeTimeout = 10 * time.Second
+
+	staleSocketDirAge = 24 * time.Hour
 )
 
 type Config struct {
@@ -240,6 +242,9 @@ func socketPathIn(base, home string) string {
 }
 
 func ensureSocketDir(dir string) error {
+	if err := checkSocketBase(filepath.Dir(dir)); err != nil {
+		return err
+	}
 	switch err := os.Mkdir(dir, 0o700); {
 	case err == nil:
 		// safety: Mkdir's mode passes through the process umask, so restate it.
@@ -253,7 +258,26 @@ func ensureSocketDir(dir string) error {
 	return checkSocketDir(dir)
 }
 
+func checkSocketBase(base string) error {
+	// safety: the base is a system path such as /tmp, which is a symlink on
+	// macOS, so resolve it; the sticky bit on the target is what matters.
+	info, err := os.Stat(base)
+	if err != nil {
+		return fmt.Errorf("wingd: inspect socket base directory %s: %w", base, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("wingd: socket base directory %s is unsafe (not a directory): %w", base, fs.ErrPermission)
+	}
+	if fault := socketBaseFault(info); fault != "" {
+		return fmt.Errorf("wingd: socket base directory %s is unsafe (%s): %w", base, fault, fs.ErrPermission)
+	}
+	return nil
+}
+
 func checkSocketDir(dir string) error {
+	if err := checkSocketBase(filepath.Dir(dir)); err != nil {
+		return err
+	}
 	info, err := os.Lstat(dir)
 	if err != nil {
 		return fmt.Errorf("wingd: inspect socket directory %s: %w", dir, err)
@@ -291,27 +315,31 @@ func PeerSockets(home string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	dirs, err := filepath.Glob(filepath.Join(socketBaseDir(), socketDirPrefix()+"*"))
+	if err != nil {
+		return nil, fmt.Errorf("wingd: scan daemon sockets: %w", err)
+	}
 	var peers []string
-	for _, base := range socketBaseDirs() {
-		matches, err := filepath.Glob(filepath.Join(base, socketDirPrefix()+"*", "d.sock"))
-		if err != nil {
-			return nil, fmt.Errorf("wingd: scan daemon sockets: %w", err)
+	for _, dir := range dirs {
+		sock := filepath.Join(dir, "d.sock")
+		alive, dead := socketStatus(sock)
+		if dead {
+			reapSocketDir(sock)
+			continue
 		}
-		for _, sock := range matches {
-			alive, dead := socketStatus(sock)
-			if dead {
-				reapSocketDir(sock)
-				continue
-			}
-			if alive && sock != own {
-				peers = append(peers, sock)
-			}
+		if alive && sock != own {
+			peers = append(peers, sock)
 		}
 	}
 	return peers, nil
 }
 
 func socketStatus(sock string) (alive, dead bool) {
+	// safety: a directory this user does not own can hold an impostor listener,
+	// so leave it alone rather than opening a connection to it.
+	if err := ValidateSocketDir(sock); err != nil {
+		return false, false
+	}
 	info, err := os.Lstat(sock)
 	if err != nil {
 		return false, errors.Is(err, fs.ErrNotExist)
@@ -337,7 +365,10 @@ func reapSocketDir(sock string) {
 		return
 	}
 	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || socketDirFault(info) != "" {
+	if err != nil || !info.IsDir() || !socketDirReapable(info) {
+		return
+	}
+	if _, serr := os.Lstat(sock); errors.Is(serr, fs.ErrNotExist) && time.Since(info.ModTime()) < staleSocketDirAge {
 		return
 	}
 	_ = os.Remove(sock)
@@ -345,39 +376,14 @@ func reapSocketDir(sock string) {
 }
 
 func socketBaseDir() string {
-	// safety: a per-user runtime directory cannot be pre-created by another
-	// account; the shared temp directory is the length-limited fallback.
-	if base := runtimeSocketBaseDir(); base != "" && ValidateSocketPath(socketPathIn(base, "")) == nil {
-		return base
-	}
-	return tempSocketBaseDir()
-}
-
-func runtimeSocketBaseDir() string {
-	dir := os.Getenv("XDG_RUNTIME_DIR")
-	if dir == "" || !filepath.IsAbs(dir) {
-		return ""
-	}
-	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || socketDirFault(info) != "" {
-		return ""
-	}
-	return dir
-}
-
-func tempSocketBaseDir() string {
+	// safety: the socket path must be a pure function of the home so every
+	// caller agrees on it whatever the environment. A short shared base keeps
+	// the path inside the sun_path limit; checkSocketBase and checkSocketDir
+	// carry the privacy that a per-user base would otherwise provide.
 	if runtime.GOOS == "windows" {
 		return os.TempDir()
 	}
 	return "/tmp"
-}
-
-func socketBaseDirs() []string {
-	base := socketBaseDir()
-	if legacy := tempSocketBaseDir(); legacy != base {
-		return []string{base, legacy}
-	}
-	return []string{base}
 }
 
 func maxSunPath() int {
@@ -399,23 +405,17 @@ func SocketPath(home string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return servedSocketPath(l), nil
+	return l.sock, nil
 }
 
-func servedSocketPath(l layout) string {
-	// safety: an upgrade can move the base directory while a daemon of the
-	// previous build still serves the old path; prefer a bound socket over a
-	// derived one so clients keep reaching the daemon that holds the election.
-	legacy := socketPathIn(tempSocketBaseDir(), l.home)
-	if legacy == l.sock || boundSocket(l.sock) || !boundSocket(legacy) {
-		return l.sock
+// HomeDir reports the daemon home that a caller's home argument resolves to,
+// so a message can name it when the caller relied on the environment.
+func HomeDir(home string) (string, error) {
+	l, err := resolveLayout(home)
+	if err != nil {
+		return "", err
 	}
-	return legacy
-}
-
-func boundSocket(sock string) bool {
-	info, err := os.Lstat(sock)
-	return err == nil && info.Mode()&os.ModeSocket != 0
+	return l.home, nil
 }
 
 func LockPath(home string) (string, error) {

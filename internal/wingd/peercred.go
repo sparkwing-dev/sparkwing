@@ -6,8 +6,10 @@ import (
 	"os"
 )
 
+var readPeerUID = peerUID
+
 func checkPeerCredentials(nc net.Conn) error {
-	uid, known, err := peerUID(nc)
+	uid, known, err := readPeerUID(nc)
 	if err != nil {
 		return fmt.Errorf("wingd: read peer credentials: %w", err)
 	}

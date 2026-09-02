@@ -121,12 +121,14 @@ code change to unlock.
 
 ### Security
 
-- **cli:** The admission daemon's unix socket is now private to its user.
-  It binds under `$XDG_RUNTIME_DIR` when one is available, refuses a socket
-  directory that is not a `0700` directory owned by the current uid, chmods
-  the socket to `0600`, and drops accepted connections whose kernel-reported
-  peer uid differs. Clients apply the same directory test before dialing, and
-  reach a daemon still serving the pre-upgrade `/tmp` path until it exits.
+- **cli:** The admission daemon's unix socket is now private to its user. Its
+  path stays a pure function of `SPARKWING_HOME`, so every caller resolves the
+  same socket whatever its environment. The daemon refuses a base directory
+  that other accounts can write without the sticky bit, refuses a socket
+  directory that is not a `0700` directory owned by the current uid, chmods the
+  socket to `0600`, and drops accepted connections whose kernel-reported peer
+  uid differs. Clients apply the same tests before dialing, including the peer
+  sweep behind `sparkwing doctor`. These checks are unix-only.
 
 ### Security
 
