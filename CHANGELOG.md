@@ -55,10 +55,18 @@ code change to unlock.
   `--strict` flag is gone. The recorded backlog is triaged in place: every
   remaining finding carries a `#nosec GNNN -- <reason>` annotation, which the
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
-  so a naked suppression silences nothing.
+  so a naked suppression silences nothing, and the comment gate keeps each
+  annotation alone on one line so free prose cannot ride behind one.
 - **cache:** The artifact download endpoint now ends `tar`'s option list with
   `--` before the matched file names, so an artifact whose name begins with a
-  dash is archived rather than parsed as a `tar` option. Artifact and proxy
+  dash is archived rather than parsed as a `tar` option, and an artifact path
+  with a segment that begins with `@` is refused, because `bsdtar` reads such a
+  member name as an archive to inline and `--` does not stop it. The uploads
+  endpoint validates the upload ID as a single path segment, so a
+  percent-encoded `../` no longer reports whether a file outside the uploads
+  directory exists. A git ref that begins with `-` is rejected before `git`
+  reads it as an option, and the commit `git rev-parse` prints must be an
+  object ID before it becomes part of an archive file name. Artifact and proxy
   log lines quote the caller-supplied path, so a newline in it can no longer
   forge a log record.
 

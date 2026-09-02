@@ -160,11 +160,12 @@ func Run(t testing.TB, cfg Config) {
 	}
 
 	// #nosec G404 -- a seeded generator so a chaos run replays deterministically
+	rng := rand.New(rand.NewSource(cfg.Seed))
 	h := &Harness{
 		cfg:     cfg,
 		t:       t,
 		home:    home,
-		rng:     rand.New(rand.NewSource(cfg.Seed)),
+		rng:     rng,
 		jr:      jr,
 		actors:  map[string]*actor{},
 		daemons: map[int]*daemonProcess{},

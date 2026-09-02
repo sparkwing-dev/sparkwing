@@ -50,7 +50,7 @@ func checkServicePorts(contentDir, repoRoot string) bool {
 		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
 			return nil
 		}
-		// #nosec G122 -- the walk stays inside the repository this check runs in
+		// #nosec G122 -- a TOCTOU swap here needs write access to the checkout this build-time check already trusts
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return rerr

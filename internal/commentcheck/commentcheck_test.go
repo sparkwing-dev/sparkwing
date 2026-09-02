@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -364,6 +365,43 @@ func TestNosecRE_RequiresRuleAndReason(t *testing.T) {
 	for _, s := range deny {
 		if nosecRE.MatchString(s) {
 			t.Errorf("expected %q NOT to match the nosec allowlist", s)
+		}
+	}
+}
+
+func TestCheckFile_RejectsProseRidingOnANosec(t *testing.T) {
+	src := `package widget
+
+import "os"
+
+func smuggled() {
+	// #nosec G999 -- placeholder
+	// This paragraph is arbitrary prose that the comment gate still rejects.
+	// A second line of free narrative, riding behind a fabricated rule id.
+	_, _ = os.Stat(os.Getenv("WIDGET_PATH"))
+}
+
+func tagged() {
+	// safety: a tagged group is no licence for an annotation to carry narrative.
+	// #nosec G703 -- the path comes from this user's own environment
+	_, _ = os.Stat(os.Getenv("WIDGET_PATH"))
+}
+`
+	path := filepath.Join(t.TempDir(), "widget.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+	if len(got) != 2 || got[0].line != 6 || got[1].line != 13 {
+		t.Fatalf("violations = %+v, want the multi-line nosec groups at lines 6 and 13", got)
+	}
+	for _, v := range got {
+		if !strings.Contains(v.text, "stands alone on one line") {
+			t.Errorf("violation %q does not name the one-line rule", v.text)
 		}
 	}
 }

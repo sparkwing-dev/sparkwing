@@ -170,16 +170,24 @@ func copyFile(src, dst string) error {
 }
 
 func makeTreeWritable(root string) error {
-	return filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	return filepath.WalkDir(root, func(p string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		rel, rerr := filepath.Rel(root, p)
+		if rerr != nil {
+			return rerr
 		}
 		info, ierr := d.Info()
 		if ierr != nil {
 			return ierr
 		}
-		// #nosec G122 -- the walk stays inside the vendor tree this process just created
-		return os.Chmod(p, info.Mode()|0o200)
+		return dir.Chmod(rel, info.Mode()|0o200)
 	})
 }
 

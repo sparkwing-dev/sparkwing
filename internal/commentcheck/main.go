@@ -156,7 +156,16 @@ func checkFile(path string) ([]violation, error) {
 			}
 			continue
 		}
-		if tagRE.MatchString(first) || nosecRE.MatchString(first) {
+		if strings.Contains(cg.Text(), "#nosec") {
+			reason := nosecGroupViolation(cg)
+			if reason == "" {
+				continue
+			}
+			pos := fset.Position(cg.Pos())
+			out = append(out, violation{pos.Filename, pos.Line, firstLine(first) + " (" + reason + ")"})
+			continue
+		}
+		if tagRE.MatchString(first) {
 			reason := tagGroupViolation(cg)
 			if reason == "" {
 				continue
@@ -169,6 +178,20 @@ func checkFile(path string) ([]violation, error) {
 		out = append(out, violation{pos.Filename, pos.Line, firstLine(first)})
 	}
 	return out, nil
+}
+
+func nosecGroupViolation(cg *ast.CommentGroup) string {
+	if len(cg.List) != 1 || strings.Contains(cg.List[0].Text, "\n") {
+		return "a nosec annotation stands alone on one line"
+	}
+	text := cg.List[0].Text
+	if !nosecRE.MatchString(text) {
+		return "a nosec annotation reads #nosec GNNN -- reason"
+	}
+	if utf8.RuneCountInString(text) > 120 {
+		return "tagged comment lines are limited to 120 characters"
+	}
+	return ""
 }
 
 func tagGroupViolation(cg *ast.CommentGroup) string {
@@ -406,5 +429,6 @@ func report(violations []violation) {
 	fmt.Println("  // safety: an invariant that isn't visible locally")
 	fmt.Println("  // bug:    a known defect that remains unresolved")
 	fmt.Println("  // perf:   a non-obvious optimization")
+	fmt.Println("  // #nosec GNNN -- why the scanner finding is not a defect (one line, alone in its group)")
 	fmt.Println("Fix: delete the comment, document the exported API, or tag the invariant.")
 }

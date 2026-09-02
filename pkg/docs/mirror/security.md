@@ -432,7 +432,8 @@ commit and waits for every security job before building release artifacts.
   `-nosec-require-justification`, so every suppression reads
   `#nosec GNNN -- <reason>`, naming the rules it silences and why, and no
   `-nosec-tag` alternative is configured, so `grep -rn '#nosec' --include='*.go' .`
-  lists every one for review.
+  lists every one for review. The comment gate keeps each annotation alone on
+  one line, so no free prose rides behind a suppression.
 - **govulncheck** in source mode over `./...`, in addition to the
   binary-mode scan the `pre-push` gate runs against every shipped
   executable.

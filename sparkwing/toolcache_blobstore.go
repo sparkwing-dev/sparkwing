@@ -196,7 +196,7 @@ func writeLintCacheArchive(w io.Writer, cacheDir, workdir string) error {
 		if d.IsDir() {
 			return nil
 		}
-		// #nosec G122 -- the walk stays inside the tool cache this process owns
+		// #nosec G122 -- a TOCTOU swap here needs write access to this user's own tool cache, so the race is accepted
 		f, err := os.Open(path)
 		if err != nil {
 			return err

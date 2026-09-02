@@ -331,7 +331,7 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 		if err != nil || info.IsDir() || filepath.Ext(path) != ".go" {
 			return err
 		}
-		// #nosec G122 -- the walk stays inside the repository this job runs in
+		// #nosec G122 -- a TOCTOU swap here needs write access to the checkout this build-time job already trusts
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
@@ -340,7 +340,7 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 		if bytes.Equal(data, updated) {
 			return nil
 		}
-		// #nosec G122,G703 -- the walk stays inside the repository this job runs in
+		// #nosec G122,G703 -- a TOCTOU swap needs write access to the checkout this build-time job already trusts
 		return os.WriteFile(path, updated, info.Mode())
 	})
 }

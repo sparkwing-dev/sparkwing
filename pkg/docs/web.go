@@ -428,9 +428,9 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 
 // ClearCache removes everything under CacheDir. Refuses to delete
 // anything outside the configured cache directory: it walks via
-// filepath.Walk rather than RemoveAll(parent), and double-checks
-// each entry is rooted at CacheDir before unlinking. Returns the
-// number of files removed.
+// filepath.Walk rather than RemoveAll(parent), and unlinks through an
+// os.Root anchored at CacheDir, so a path the walk reported cannot
+// resolve outside it. Returns the number of files removed.
 func (c *WebClient) ClearCache() (int, error) {
 	if c.CacheDir == "" {
 		return 0, errors.New("docs: cache dir not configured")
@@ -445,30 +445,25 @@ func (c *WebClient) ClearCache() (int, error) {
 	if !info.IsDir() {
 		return 0, fmt.Errorf("docs: cache path %s is not a directory", c.CacheDir)
 	}
-	absCache, err := filepath.Abs(c.CacheDir)
+	root, err := os.OpenRoot(c.CacheDir)
 	if err != nil {
 		return 0, err
 	}
+	defer func() { _ = root.Close() }()
+
 	removed := 0
 	err = filepath.Walk(c.CacheDir, func(p string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if p == c.CacheDir {
+		if p == c.CacheDir || info.IsDir() {
 			return nil
 		}
-		abs, aerr := filepath.Abs(p)
-		if aerr != nil {
-			return aerr
+		rel, rerr := filepath.Rel(c.CacheDir, p)
+		if rerr != nil {
+			return rerr
 		}
-		if !strings.HasPrefix(abs, absCache+string(filepath.Separator)) {
-			return fmt.Errorf("docs: refusing to remove path outside cache: %s", abs)
-		}
-		if info.IsDir() {
-			return nil
-		}
-		// #nosec G122 -- the walk stays inside the documentation cache this process owns
-		if rerr := os.Remove(p); rerr != nil {
+		if rerr := root.Remove(rel); rerr != nil {
 			return rerr
 		}
 		removed++
@@ -481,8 +476,11 @@ func (c *WebClient) ClearCache() (int, error) {
 		if !info.IsDir() || p == c.CacheDir {
 			return nil
 		}
-		// #nosec G122 -- the walk stays inside the documentation cache this process owns
-		_ = os.Remove(p)
+		rel, rerr := filepath.Rel(c.CacheDir, p)
+		if rerr != nil {
+			return nil
+		}
+		_ = root.Remove(rel)
 		return nil
 	})
 	return removed, nil
