@@ -80,6 +80,11 @@ code change to unlock.
 
 ### Security
 
+- **storage:** Artifact keys are now validated before the filesystem store
+  joins them to a path, and the store opens every blob through `os.Root`, so
+  `GET /api/v1/artifacts/{key}` can no longer read, overwrite, or delete files
+  outside the artifact root. The controller and loopback handlers reject a
+  traversal key with 400 before any backend sees it.
 - **ci:** A `security-scan` pipeline runs gosec, source-mode govulncheck,
   gitleaks, and `npm audit`, and the Security workflow runs it on every pull
   request with gosec findings uploaded to GitHub code scanning alongside CodeQL
