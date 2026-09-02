@@ -154,6 +154,77 @@ func TestPrintRerunBanner(t *testing.T) {
 	}
 }
 
+func TestRerunPodManifest_EnvOffArgv(t *testing.T) {
+	raw, err := rerunPodManifest("sparkwing-rerun-abc", "ghcr.io/me/runner:v1", "run-X", map[string]string{
+		"SPARKWING_RUN_ID": "run-X",
+		"SPARKWING_RERUN":  "1",
+	})
+	if err != nil {
+		t.Fatalf("rerunPodManifest: %v", err)
+	}
+	var pod struct {
+		Metadata struct {
+			Name   string            `json:"name"`
+			Labels map[string]string `json:"labels"`
+		} `json:"metadata"`
+		Spec struct {
+			RestartPolicy         string `json:"restartPolicy"`
+			ActiveDeadlineSeconds int    `json:"activeDeadlineSeconds"`
+			Containers            []struct {
+				Image     string `json:"image"`
+				Stdin     bool   `json:"stdin"`
+				StdinOnce bool   `json:"stdinOnce"`
+				TTY       bool   `json:"tty"`
+				Env       []struct {
+					Name  string `json:"name"`
+					Value string `json:"value"`
+				} `json:"env"`
+			} `json:"containers"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(raw, &pod); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	if pod.Metadata.Name != "sparkwing-rerun-abc" {
+		t.Fatalf("pod name: %q", pod.Metadata.Name)
+	}
+	if pod.Metadata.Labels["sparkwing.dev/rerun-of-run"] != "run-X" {
+		t.Fatalf("labels: %v", pod.Metadata.Labels)
+	}
+	if pod.Spec.RestartPolicy != "Never" || pod.Spec.ActiveDeadlineSeconds != rerunPodDeadlineSecs {
+		t.Fatalf("pod spec should not outlive the session: %+v", pod.Spec)
+	}
+	if len(pod.Spec.Containers) != 1 {
+		t.Fatalf("containers: %d", len(pod.Spec.Containers))
+	}
+	c := pod.Spec.Containers[0]
+	if !c.Stdin || !c.StdinOnce || !c.TTY {
+		t.Fatalf("attach needs an interactive container: %+v", c)
+	}
+	if len(c.Env) != 2 || c.Env[0].Name != "SPARKWING_RERUN" || c.Env[1].Name != "SPARKWING_RUN_ID" {
+		t.Fatalf("env should be sorted and complete: %+v", c.Env)
+	}
+	if c.Env[1].Value != "run-X" {
+		t.Fatalf("env value lost: %+v", c.Env)
+	}
+}
+
+func TestPrintRerunBanner_NamesDroppedKeys(t *testing.T) {
+	snap := &store.NodeDispatch{
+		RunID: "run-X", NodeID: "deploy",
+		RedactedKeys: []byte(`["GITHUB_TOKEN","SPARKWING_AGENT_TOKEN"]`),
+	}
+	var buf bytes.Buffer
+	printRerunBanner(&buf, snap, nil, "")
+
+	out := buf.String()
+	for _, want := range []string{"GITHUB_TOKEN", "SPARKWING_AGENT_TOKEN", "export"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("banner missing %q\n%s", want, out)
+		}
+	}
+}
+
 func TestPodName(t *testing.T) {
 	a := podName("run-1", "build")
 	b := podName("run-1", "build")

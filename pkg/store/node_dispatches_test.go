@@ -49,6 +49,7 @@ func TestDispatch_RoundTrip(t *testing.T) {
 		InputEnvelope:    []byte(`{"version":1,"type_name":"*pkg.Job"}`),
 		InputSizeBytes:   42,
 		SecretRedactions: 2,
+		RedactedKeys:     []byte(`["GITHUB_TOKEN"]`),
 	}
 	if err := s.WriteNodeDispatch(ctx, in); err != nil {
 		t.Fatalf("WriteNodeDispatch: %v", err)
@@ -75,6 +76,9 @@ func TestDispatch_RoundTrip(t *testing.T) {
 	}
 	if out.SecretRedactions != 2 {
 		t.Fatalf("redactions: got %d want 2", out.SecretRedactions)
+	}
+	if string(out.RedactedKeys) != string(in.RedactedKeys) {
+		t.Fatalf("redacted_keys: got %s", string(out.RedactedKeys))
 	}
 }
 

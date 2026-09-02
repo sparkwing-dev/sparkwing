@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -239,15 +240,14 @@ func TestDispatchSnapshot_BestEffortFailureNonFatal(t *testing.T) {
 
 func TestCollectDispatchEnv(t *testing.T) {
 	t.Setenv("SPARKWING_FOO", "from-env")
-	t.Setenv("GITHUB_TOKEN", "redact-me-in-mask-not-here")
 	t.Setenv("UNRELATED_SECRET", "should-not-leak")
 
 	node := buildNode(t, "deploy", &stubJob{}).Env("CUSTOM", "node-value")
-	got := collectDispatchEnv(node, "run-7", &store.Run{
+	got := collectDispatchEnv(context.Background(), node, "run-7", &store.Run{
 		GitBranch: "main", GitSHA: "abc",
 		TriggerSource: "webhook",
 		GithubOwner:   "me", GithubRepo: "proj",
-	})
+	}).values
 
 	if got["SPARKWING_FOO"] != "from-env" {
 		t.Fatalf("os.Environ pass-through dropped: %v", got)
@@ -279,7 +279,7 @@ func TestCollectDispatchEnv_ExcludesTheDaemonHostPath(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, "/opt/this-machine-only/bin/sparkwing")
 	t.Setenv("SPARKWING_FOO", "kept")
 
-	got := collectDispatchEnv(buildNode(t, "deploy", &stubJob{}), "run-7", nil)
+	got := collectDispatchEnv(context.Background(), buildNode(t, "deploy", &stubJob{}), "run-7", nil).values
 
 	if v, ok := got[wingdclient.HostBinEnv]; ok {
 		t.Fatalf("%s=%q was captured into the dispatch snapshot; a replay elsewhere would exec it", wingdclient.HostBinEnv, v)
@@ -291,7 +291,7 @@ func TestCollectDispatchEnv_ExcludesTheDaemonHostPath(t *testing.T) {
 
 func TestCollectDispatchEnv_NilRun(t *testing.T) {
 	node := buildNode(t, "deploy", &stubJob{})
-	got := collectDispatchEnv(node, "run-7", nil)
+	got := collectDispatchEnv(context.Background(), node, "run-7", nil).values
 
 	if got["SPARKWING_RUN_ID"] != "run-7" {
 		t.Fatalf("run id should still synthesize without run row: %v", got)
@@ -301,5 +301,109 @@ func TestCollectDispatchEnv_NilRun(t *testing.T) {
 	}
 	if _, ok := got["SPARKWING_BRANCH"]; ok {
 		t.Fatalf("branch should be absent without run row: %v", got)
+	}
+}
+
+func TestCollectDispatchEnv_DropsCredentialKeys(t *testing.T) {
+	t.Setenv("SPARKWING_FOO", "from-env")
+	t.Setenv("GITHUB_TOKEN", "gh-bearer")
+	t.Setenv("SPARKWING_AGENT_TOKEN", "runner-bearer")
+	t.Setenv("SPARKWING_SECRETS_KEY", "aead-key")
+	t.Setenv("SPARKWING_DEPLOY_PASSWORD", "hunter2")
+
+	node := buildNode(t, "deploy", &stubJob{}).
+		Env("NODE_API_TOKEN", "node-bearer").
+		Env("CUSTOM", "node-value")
+
+	got := collectDispatchEnv(context.Background(), node, "run-7", nil)
+
+	for k, v := range got.values {
+		if strings.HasSuffix(k, "_TOKEN") || strings.Contains(k, "SECRET") ||
+			strings.Contains(k, "PASSWORD") || strings.Contains(k, "KEY") ||
+			strings.Contains(k, "CREDENTIAL") {
+			t.Fatalf("credential-shaped key survived capture: %s=%q", k, v)
+		}
+	}
+	for _, want := range []string{
+		"GITHUB_TOKEN", "NODE_API_TOKEN", "SPARKWING_AGENT_TOKEN",
+		"SPARKWING_DEPLOY_PASSWORD", "SPARKWING_SECRETS_KEY",
+	} {
+		if !slices.Contains(got.redactedKeys, want) {
+			t.Fatalf("%s should be named in redacted keys: %v", want, got.redactedKeys)
+		}
+	}
+	if !slices.IsSorted(got.redactedKeys) {
+		t.Fatalf("redacted keys should be sorted: %v", got.redactedKeys)
+	}
+	if got.values["SPARKWING_FOO"] != "from-env" || got.values["CUSTOM"] != "node-value" {
+		t.Fatalf("the deny list swept up ordinary keys: %v", got.values)
+	}
+}
+
+func TestCollectDispatchEnv_MasksValues(t *testing.T) {
+	t.Setenv("SPARKWING_ENDPOINT", "https://user:supersecret@example.test")
+
+	m := secrets.NewMasker()
+	m.Register("supersecret")
+	ctx := secrets.WithMasker(context.Background(), m)
+
+	node := buildNode(t, "deploy", &stubJob{}).Env("NODE_URL", "https://supersecret@example.test")
+	got := collectDispatchEnv(ctx, node, "run-7", nil)
+
+	for k, v := range got.values {
+		if strings.Contains(v, "supersecret") {
+			t.Fatalf("registered secret survived in %s=%q", k, v)
+		}
+	}
+	if got.masked != 2 {
+		t.Fatalf("masked count: got %d, want 2 (%v)", got.masked, got.values)
+	}
+}
+
+func TestDispatchSnapshot_RecordsRedactedKeys(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "gh-bearer")
+	be := &captureBackend{}
+	r := NewNodeExecutor(Backends{State: be})
+	node := buildNode(t, "deploy", &stubJob{})
+
+	if err := r.writeDispatchSnapshot(context.Background(), "run-1", node); err != nil {
+		t.Fatalf("writeDispatchSnapshot: %v", err)
+	}
+	d := be.captured[0]
+	if strings.Contains(string(d.EnvJSON), "gh-bearer") {
+		t.Fatalf("env_json leaks a credential: %s", string(d.EnvJSON))
+	}
+	var keys []string
+	if err := json.Unmarshal(d.RedactedKeys, &keys); err != nil {
+		t.Fatalf("redacted_keys: %v (%s)", err, string(d.RedactedKeys))
+	}
+	if !slices.Contains(keys, "GITHUB_TOKEN") {
+		t.Fatalf("redacted_keys should name GITHUB_TOKEN: %v", keys)
+	}
+}
+
+func TestCredentialEnvName(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"GITHUB_TOKEN", true},
+		{"SPARKWING_AGENT_TOKEN", true},
+		{"SPARKWING_CACHE_TOKEN", true},
+		{"SPARKWING_LEASE_TOKEN", true},
+		{"SPARKWING_SECRETS_KEY", true},
+		{"AWS_SECRET_ACCESS_KEY", true},
+		{"DB_PASSWORD", true},
+		{"GOOGLE_APPLICATION_CREDENTIALS", true},
+		{"npm_token", true},
+		{"SPARKWING_RUN_ID", false},
+		{"GITHUB_REPOSITORY", false},
+		{"PATH", false},
+		{"HOME", false},
+	}
+	for _, c := range cases {
+		if got := credentialEnvName(c.name); got != c.want {
+			t.Errorf("credentialEnvName(%q) = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -62,10 +63,16 @@ func (r *NodeExecutor) writeDispatchSnapshot(ctx context.Context, runID string, 
 		run = got
 	}
 
-	envBytes, err := json.Marshal(collectDispatchEnv(node, runID, run))
+	env := collectDispatchEnv(ctx, node, runID, run)
+	envBytes, err := json.Marshal(env.values)
 	if err != nil {
 		return fmt.Errorf("marshal env: %w", err)
 	}
+	var redactedBytes []byte
+	if len(env.redactedKeys) > 0 {
+		redactedBytes, _ = json.Marshal(env.redactedKeys)
+	}
+	redactions += env.masked
 
 	var labelsBytes []byte
 	if labels := node.RequiresLabels(); len(labels) > 0 {
@@ -94,10 +101,17 @@ func (r *NodeExecutor) writeDispatchSnapshot(ctx context.Context, runID string, 
 		Workdir:          workdir,
 		InputEnvelope:    envelope,
 		SecretRedactions: redactions,
+		RedactedKeys:     redactedBytes,
 	})
 }
 
-func collectDispatchEnv(node *sparkwing.JobNode, runID string, run *store.Run) map[string]string {
+type dispatchEnv struct {
+	values       map[string]string
+	redactedKeys []string
+	masked       int
+}
+
+func collectDispatchEnv(ctx context.Context, node *sparkwing.JobNode, runID string, run *store.Run) dispatchEnv {
 	out := map[string]string{}
 	for _, kv := range os.Environ() {
 		i := strings.IndexByte(kv, '=')
@@ -131,7 +145,58 @@ func collectDispatchEnv(node *sparkwing.JobNode, runID string, run *store.Run) m
 	for k, v := range node.EnvMap() {
 		out[k] = v
 	}
-	return out
+	return redactDispatchEnv(ctx, out)
+}
+
+func redactDispatchEnv(ctx context.Context, env map[string]string) dispatchEnv {
+	got := dispatchEnv{values: env}
+	masker := secrets.MaskerFromContext(ctx)
+	for k, v := range env {
+		// safety: drop credential-named keys whatever their source; the snapshot must not carry the runner's own bearer.
+		if credentialEnvName(k) {
+			delete(env, k)
+			got.redactedKeys = append(got.redactedKeys, k)
+			continue
+		}
+		if masker == nil {
+			continue
+		}
+		if m := masker.Mask(v); m != v {
+			env[k] = m
+			got.masked++
+		}
+	}
+	sort.Strings(got.redactedKeys)
+	return got
+}
+
+var envCredentialSubstrings = []string{
+	"TOKEN",
+	"SECRET",
+	"PASSWORD",
+	"KEY",
+	"CREDENTIAL",
+}
+
+var envCredentialExact = map[string]bool{
+	"SPARKWING_AGENT_TOKEN": true,
+	"SPARKWING_CACHE_TOKEN": true,
+	"SPARKWING_LEASE_TOKEN": true,
+	"SPARKWING_SECRETS_KEY": true,
+	"GITHUB_TOKEN":          true,
+}
+
+func credentialEnvName(name string) bool {
+	if envCredentialExact[name] {
+		return true
+	}
+	upper := strings.ToUpper(name)
+	for _, frag := range envCredentialSubstrings {
+		if strings.Contains(upper, frag) {
+			return true
+		}
+	}
+	return false
 }
 
 var envDenyExact = map[string]bool{

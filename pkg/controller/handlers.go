@@ -186,6 +186,35 @@ func secretValuesAllowed(r *http.Request) bool {
 	return p.HasScope(ScopeAdmin) || p.HasScope(ScopeNodesClaim)
 }
 
+func dispatchEnvAllowed(r *http.Request) bool {
+	p, ok := PrincipalFromContext(r.Context())
+	if !ok {
+		return true
+	}
+	return p.HasScope(ScopeAdmin)
+}
+
+func dispatchForResponse(r *http.Request, d *store.NodeDispatch) *store.NodeDispatch {
+	if d == nil || dispatchEnvAllowed(r) {
+		return d
+	}
+	// safety: the captured environment is admin-only; every reader still sees which keys it lost.
+	stripped := *d
+	stripped.EnvJSON = nil
+	return &stripped
+}
+
+func dispatchesForResponse(r *http.Request, in []*store.NodeDispatch) []*store.NodeDispatch {
+	if dispatchEnvAllowed(r) {
+		return in
+	}
+	out := make([]*store.NodeDispatch, 0, len(in))
+	for _, d := range in {
+		out = append(out, dispatchForResponse(r, d))
+	}
+	return out
+}
+
 func runForResponse(r *http.Request, run *store.Run) *store.Run {
 	if includeHas(r.URL.Query().Get("include"), store.IncludeSecretValues) &&
 		secretValuesAllowed(r) {
@@ -828,7 +857,7 @@ func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, d)
+	writeJSON(w, http.StatusOK, dispatchForResponse(r, d))
 }
 
 func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request) {
@@ -842,7 +871,7 @@ func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request
 	if out == nil {
 		out = []*store.NodeDispatch{}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, dispatchesForResponse(r, out))
 }
 
 type claimNodeReq struct {

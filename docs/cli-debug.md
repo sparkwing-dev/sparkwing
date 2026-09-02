@@ -157,9 +157,14 @@ Reads the dispatch snapshot for the given run/node and reproduces
 the env + workdir the orchestrator saw at dispatch time. Local mode
 exec's $SHELL with the snapshot env applied and writes upstream Ref
 outputs to ~/.sparkwing/rerun/<run>/<node>/refs so they're cat-able
-from the shell. Cluster mode shells out to 'kubectl run' against a
-runner image (--image or $SPARKWING_RERUN_IMAGE) with the snapshot
-env materialized as --env=K=V flags.
+from the shell. Cluster mode pipes a debug-pod manifest to 'kubectl
+create' against a runner image (--image or $SPARKWING_RERUN_IMAGE),
+carrying the snapshot env on stdin, then attaches to the pod and
+deletes it on exit.
+
+Snapshots never capture credential-shaped variables, and the
+controller serves the captured env only to an admin token. The
+banner names the keys the snapshot dropped; export those yourself.
 
 Replays do NOT freeze the rest of the cluster: secrets re-resolve
 through the standard sparkwing.Secret API on demand, and the runner

@@ -34,6 +34,11 @@ mapping is in the generated [api-reference.md](api-reference.md):
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
 
+A route can narrow a field below its route scope. The node dispatch reads
+(`GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and `/dispatches`) admit
+`runs.read`, but fill `env_json` only for an `admin` principal. Every reader
+still gets `redacted_keys`, the names the snapshot dropped as credentials.
+
 Token creation validates scopes against that same set: a scope the
 controller does not honor is rejected with a `400` naming the offending
 scope and the valid set, so a typo fails at mint time instead of

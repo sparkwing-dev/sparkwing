@@ -24,6 +24,26 @@ CHANGELOG links here.
   `CreateRun` and return `store.ErrSecretInputHash` unchanged.
 - **Why:** A deterministic digest is not a safe commitment to a secret value.
 
+## Dispatch snapshot credentials
+
+- **Before:** A node dispatch snapshot captured every `SPARKWING_` and `GITHUB_`
+  environment variable, including the runner's controller bearer, stored the
+  values unmasked, and served them to any `runs.read` token.
+- **After:** Capture drops any key whose name reads as a credential
+  (`TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `CREDENTIAL`, and similar), masks
+  registered secret values in the rest, and records the dropped names in
+  `redacted_keys`. Schema 19 adds that column. The dispatch read routes return
+  `env_json` only to an `admin` principal; every other reader still gets the
+  key list. Cluster-mode `sparkwing debug rerun` creates its debug pod from a
+  manifest on `kubectl` stdin rather than `--env=K=V` arguments.
+- **Migration:** Upgrade the fleet before opening schema 19; schema-18 binaries
+  refuse the upgraded SQL store. Give any tooling that reads `env_json` an
+  `admin` token, or have it read the run's own environment instead. Export a
+  credential a rerun needs into the debug shell yourself; the banner names the
+  keys the snapshot dropped.
+- **Why:** A read-only token could otherwise lift the runner's admin bearer out
+  of a snapshot.
+
 ## Kubernetes acceptance testing
 
 - **Before:** `sparkwing run kind-e2e` built images locally, created a Kind

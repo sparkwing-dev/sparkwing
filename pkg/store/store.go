@@ -800,6 +800,7 @@ CREATE TABLE IF NOT EXISTS node_dispatches (
     input_envelope_json BLOB,
     input_size_bytes    INTEGER NOT NULL DEFAULT 0,
     secret_redactions   INTEGER NOT NULL DEFAULT 0,
+    redacted_keys       BLOB,
     PRIMARY KEY (run_id, node_id, seq),
     FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
@@ -815,7 +816,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 18
+const expectedSchemaVersion = 19
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1201,6 +1202,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return err
 	case 18:
 		return scrubSecretInputHashes(ctx, s.db)
+	case 19:
+		return s.ensureColumns("node_dispatches", nodeDispatchRedactionCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1264,6 +1267,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return err
 	case 18:
 		return scrubSecretInputHashes(ctx, tx)
+	case 19:
+		return addColumnsTx(ctx, tx, "node_dispatches", nodeDispatchRedactionCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1456,6 +1461,10 @@ var nodesUsageCols = map[string]string{
 	"cpu_nanos":          "INTEGER NOT NULL DEFAULT 0",
 	"max_rss_bytes":      "INTEGER NOT NULL DEFAULT 0",
 	"process_wall_nanos": "INTEGER NOT NULL DEFAULT 0",
+}
+
+var nodeDispatchRedactionCols = map[string]string{
+	"redacted_keys": "BLOB",
 }
 
 var nodeMetricsCPUTimeCols = map[string]string{

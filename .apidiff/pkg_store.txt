@@ -263,6 +263,7 @@ type NodeDispatch struct {
 	InputEnvelope    []byte
 	InputSizeBytes   int64
 	SecretRedactions int
+	RedactedKeys     []byte
 }
 const NodeStatusApprovalPending = "approval_pending"
 type NodeStep struct {
