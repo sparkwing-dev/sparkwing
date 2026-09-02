@@ -30,6 +30,10 @@ func TestValidateName(t *testing.T) {
 		{"end-dash-", true},
 		{"end-dot.", true},
 		{"end-slash/", true},
+		{"aws/../prod/token", true},
+		{"a..b", true},
+		{"aws//prod", true},
+		{"aws/prod//token", true},
 	}
 	for _, c := range cases {
 		err := ValidateName(c.name)

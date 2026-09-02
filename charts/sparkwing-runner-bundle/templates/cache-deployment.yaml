@@ -28,6 +28,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       {{- with .Values.cache.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -77,6 +79,8 @@ spec:
             {{- end }}
             - name: data
               mountPath: /data
+            - name: scratch
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.cache.resources | nindent 12 }}
           livenessProbe:
@@ -105,4 +109,6 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: scratch
+          emptyDir: {}
 {{- end }}

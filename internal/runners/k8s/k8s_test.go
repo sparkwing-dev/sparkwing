@@ -247,6 +247,30 @@ func TestBuildJob_UsesRestrictedPodSecurityContext(t *testing.T) {
 	if container.SecurityContext.Capabilities == nil || len(container.SecurityContext.Capabilities.Drop) != 1 || container.SecurityContext.Capabilities.Drop[0] != "ALL" {
 		t.Fatalf("container dropped capabilities = %#v, want [ALL]", container.SecurityContext.Capabilities)
 	}
+	if container.SecurityContext.ReadOnlyRootFilesystem == nil || !*container.SecurityContext.ReadOnlyRootFilesystem {
+		t.Fatalf("container readOnlyRootFilesystem = %#v, want true", container.SecurityContext.ReadOnlyRootFilesystem)
+	}
+}
+
+func TestBuildJob_MountsScratchOverEveryWritablePath(t *testing.T) {
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	pod := job.Spec.Template.Spec
+	if len(pod.Volumes) != 1 || pod.Volumes[0].Name != scratchVolumeName || pod.Volumes[0].EmptyDir == nil {
+		t.Fatalf("pod volumes = %#v, want one scratch emptyDir", pod.Volumes)
+	}
+	mounts := pod.Containers[0].VolumeMounts
+	if len(mounts) != 1 || mounts[0].Name != scratchVolumeName || mounts[0].MountPath != "/tmp" {
+		t.Fatalf("container volume mounts = %#v, want scratch at /tmp", mounts)
+	}
+	for _, env := range pod.Containers[0].Env {
+		switch env.Name {
+		case "HOME", "GOCACHE", "GOMODCACHE", "SPARKWING_HOME":
+			if !strings.HasPrefix(env.Value, "/tmp") {
+				t.Fatalf("%s = %q, which the read-only root leaves unwritable", env.Name, env.Value)
+			}
+		}
+	}
 }
 
 func TestRunNode_MissingJobReturnsFailed(t *testing.T) {
