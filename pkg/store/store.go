@@ -735,7 +735,8 @@ CREATE TABLE IF NOT EXISTS users (
     name          TEXT PRIMARY KEY,
     pw_hash       TEXT NOT NULL,
     created_at    INTEGER NOT NULL,
-    last_login_at INTEGER
+    last_login_at INTEGER,
+    scopes        TEXT NOT NULL DEFAULT 'admin'
 );
 
 -- Pipeline secrets; encryption at rest is up to the volume.
@@ -815,7 +816,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 18
+const expectedSchemaVersion = 19
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1201,6 +1202,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return err
 	case 18:
 		return scrubSecretInputHashes(ctx, s.db)
+	case 19:
+		return s.ensureColumns("users", usersScopesCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1264,6 +1267,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return err
 	case 18:
 		return scrubSecretInputHashes(ctx, tx)
+	case 19:
+		return addColumnsTx(ctx, tx, "users", usersScopesCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1460,6 +1465,10 @@ var nodesUsageCols = map[string]string{
 
 var nodeMetricsCPUTimeCols = map[string]string{
 	"cpu_time_nanos": "INTEGER NOT NULL DEFAULT 0",
+}
+
+var usersScopesCols = map[string]string{
+	"scopes": "TEXT NOT NULL DEFAULT 'admin'",
 }
 
 var triggerRepoInheritedCols = map[string]string{

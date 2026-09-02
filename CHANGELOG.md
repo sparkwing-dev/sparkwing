@@ -80,6 +80,15 @@ code change to unlock.
 
 ### Security
 
+- **web (Breaking):** The dashboard proxy now forwards only the controller
+  routes the dashboard itself calls and checks the signed-in session's scopes
+  against each one, so a logged-in browser can no longer mint tokens, read
+  secrets, or create users with the web pod's service bearer. Sessions carry
+  the scopes of their user rather than a fixed `admin`, run-store schema 19
+  adds a `users.scopes` column defaulting existing accounts to `admin`, and
+  `sparkwing cluster users add --scope` creates narrower accounts.
+  `store.CreateUser` and `store.CreateFirstUser` now take that scope set. See the
+  [migration guide](docs/migrations/_unreleased.md#dashboard-proxy-allow-list).
 - **ci:** A `security-scan` pipeline runs gosec, source-mode govulncheck,
   gitleaks, and `npm audit`, and the Security workflow runs it on every pull
   request with gosec findings uploaded to GitHub code scanning alongside CodeQL

@@ -37,6 +37,7 @@ func runUsersAdd(args []string) error {
 	on := addProfileFlag(fs)
 	name := fs.String("name", "", "dashboard username")
 	passwordFlag := fs.String("password", "", "password (empty prompts on stdin)")
+	scopes := fs.String("scope", "", "comma-separated scopes (empty grants admin)")
 	if err := parseAndCheck(cmdUsersAdd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -71,9 +72,12 @@ func runUsersAdd(args []string) error {
 	if len(password) < 8 {
 		return errors.New("password must be at least 8 characters")
 	}
-	body := map[string]string{
+	body := map[string]any{
 		"name":     *name,
 		"password": password,
+	}
+	if requested := splitCSV(*scopes); len(requested) > 0 {
+		body["scopes"] = requested
 	}
 	if _, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/users", body); err != nil {
 		return err
@@ -103,7 +107,12 @@ func runUsersList(args []string) error {
 		return err
 	}
 	var out struct {
-		Users []map[string]any `json:"users"`
+		Users []struct {
+			Name        string   `json:"name"`
+			Scopes      []string `json:"scopes"`
+			CreatedAt   int64    `json:"created_at"`
+			LastLoginAt *int64   `json:"last_login_at"`
+		} `json:"users"`
 	}
 	if err := json.Unmarshal(resp, &out); err != nil {
 		return err
@@ -112,9 +121,14 @@ func runUsersList(args []string) error {
 		fmt.Println("(no users)")
 		return nil
 	}
-	fmt.Printf("%-20s %-20s %s\n", "NAME", "CREATED", "LAST_LOGIN")
+	fmt.Printf("%-20s %-16s %-20s %s\n", "NAME", "SCOPES", "CREATED", "LAST_LOGIN")
 	for _, u := range out.Users {
-		fmt.Printf("%-20s %-20v %v\n", u["name"], u["created_at"], u["last_login_at"])
+		lastLogin := "never"
+		if u.LastLoginAt != nil {
+			lastLogin = fmt.Sprintf("%d", *u.LastLoginAt)
+		}
+		fmt.Printf("%-20s %-16s %-20d %s\n",
+			u.Name, formatScopes(u.Scopes), u.CreatedAt, lastLogin)
 	}
 	return nil
 }
