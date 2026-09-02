@@ -17,6 +17,28 @@ endpoints, and first-visit admin bootstrap -- is in
 [auth.md](auth.md). Sparkwing does not have a "root token"; the `admin`
 scope is the superset.
 
+## Login and hashing budgets
+
+`POST /api/v1/auth/login` is the controller's only unauthenticated route
+that hashes a password, so it carries its own budgets. One client gets 30
+attempts a minute and the listener as a whole gets 120; both answer `429`
+with `Retry-After` once drained. An account answers `429` after 5 failed
+attempts and recovers one attempt every three minutes. That budget charges
+failures only, so a busy account is never locked out by its successes.
+
+Every argon2id verification, login and bearer-token lookup alike, passes
+through a semaphore sized by `--argon2-memory-budget-mb` (chart:
+`controller.argon2MemoryBudgetMB`, default 256). One hash holds 64 MiB
+while it runs, so the default admits four at a time and queues the rest.
+Raise it only alongside the pod's memory limit. The controller also
+remembers a rejected raw token for five seconds, so a client replaying one
+wrong guess pays for a single hash.
+
+Login throttling keys on the TCP peer and ignores forwarded headers until
+you name the proxy networks in `--trusted-proxy-cidrs` (chart:
+`controller.trustedProxyCIDRs`). Leaving it empty behind a proxy stays
+safe and turns coarse: every browser then shares the proxy's budget.
+
 ## Webhooks
 
 GitHub webhook deliveries are verified by the controller: it checks the
@@ -70,26 +92,44 @@ than accepting an unknown signer.
 
 ## Cache service
 
-`sparkwing-cache` requires a bearer token on its blob and sync endpoints
-(`--api-token`, falling back to `$SPARKWING_API_TOKEN`), and refuses to
-start without one unless the operator passes `--allow-unauthenticated`
-(`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which logs a startup warning.
-The guard has no network-location exemption: an in-cluster caller, a
-port-forward, and an ingress request are all rejected without the bearer,
-because a caller-controlled header cannot prove where a request came from.
-Artifact upload, listing, and download carry the same bearer. The remaining
-read endpoints (clone, file access, repo listing) carry no token and are
-reachable only in-cluster via the Service, not the ingress.
+`sparkwing-cache` requires a bearer token (`--api-token`, falling back to
+`$SPARKWING_API_TOKEN`) on every route that touches repository content: git
+clone and registration, archives, single files, tree hashes, branch
+membership, the repo listing, artifacts, and the blob and sync endpoints. It
+refuses to start without one unless the operator passes
+`--allow-unauthenticated` (`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which
+logs a startup warning. The guard has no network-location exemption: an
+in-cluster caller, a port-forward, and an ingress request are all rejected
+without the bearer, because a caller-controlled header cannot prove where a
+request came from. `/health`, `/metrics`, `/stats`, and the pull-through
+package proxy under `/proxy/` stay open, because package managers fetch
+through the proxy without a credential and it serves upstream registry bytes
+rather than repository content.
+
+Registering a repository name validates it against
+`^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a
+different repository requires the token even on an unauthenticated cache.
+Every response carries `X-Content-Type-Options: nosniff`, and artifact
+downloads are served as `application/octet-stream` attachments.
 
 Off-cluster runners read Git through the controller's admin-scoped
-`/api/v1/gitcache/git/...` proxy. The controller removes its bearer before the
-internal request and permits only registration and upload-pack reads. A
-login-enabled dashboard exposes that path to machine bearers without accepting
-browser session credentials. Direct-cache binary and seed writes use only
-`SPARKWING_CACHE_TOKEN`; direct-cache mode never receives the controller bearer.
-Keep the raw cache Service private: `pipeline trigger --working-tree` may seed
-uncommitted source, and the cache retains up to 128 workspace refs per
-repository.
+`/api/v1/gitcache/git/...` proxy. The controller drops the caller's bearer and
+presents its own `SPARKWING_CACHE_TOKEN` to the cache, and permits only
+registration and upload-pack reads. A login-enabled dashboard exposes that path
+to machine bearers without accepting browser session credentials: the mount
+rejects a request carrying no bearer credential before it extends the
+half-hour stream deadline or proxies anything, and caps concurrent Git streams
+so one caller cannot hold every long-lived connection. Direct-cache binary and
+seed writes use only `SPARKWING_CACHE_TOKEN`; direct-cache mode never receives
+the controller bearer.
+
+The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
+cache pod (`networkPolicy.enabled`, on by default) that admits only the
+release's runner and controller pods, and refuses to render a non-`ClusterIP`
+cache Service unless a token Secret is configured. `pipeline trigger
+--working-tree` may seed uncommitted source; the cache retains up to 128
+workspace refs per repository and expires them after
+`WORKSPACE_SEED_MAX_AGE` (24 hours by default).
 
 ## Container hardening
 

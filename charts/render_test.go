@@ -1,6 +1,7 @@
 package charts
 
 import (
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -167,6 +168,37 @@ func TestWebTrustedProxyCIDRsRenderAsOneFlag(t *testing.T) {
 	}
 	if want := "--trusted-proxy-cidrs=10.0.0.0/8,192.168.0.0/16"; got != want {
 		t.Fatalf("trusted proxy flag = %q, want %q", got, want)
+	}
+}
+
+func TestControllerLoginThrottleFlagsRender(t *testing.T) {
+	controllerArgs := func(sets ...string) []string {
+		return webArgs(t, helmRender(t, "./sparkwing-full",
+			"templates/controller-deployment.yaml", "sparkwing", sets...))
+	}
+
+	defaultArgs := controllerArgs()
+	if got, ok := hasFlag(defaultArgs, "--trusted-proxy-cidrs="); ok {
+		t.Fatalf("default trusted proxy flag = %q", got)
+	}
+	if got, ok := hasFlag(defaultArgs, "--argon2-memory-budget-mb="); !ok || got != "--argon2-memory-budget-mb=256" {
+		t.Fatalf("argon2 budget flag = %q, want the 256 MiB default", got)
+	}
+
+	configured := controllerArgs(
+		"controller.trustedProxyCIDRs[0]=10.0.0.0/8",
+		"controller.trustedProxyCIDRs[1]=192.168.0.0/16",
+		"controller.argon2MemoryBudgetMB=128",
+	)
+	got, ok := hasFlag(configured, "--trusted-proxy-cidrs=")
+	if !ok {
+		t.Fatalf("no trusted proxy flag in %v", configured)
+	}
+	if want := "--trusted-proxy-cidrs=10.0.0.0/8,192.168.0.0/16"; got != want {
+		t.Fatalf("trusted proxy flag = %q, want %q", got, want)
+	}
+	if got, _ := hasFlag(configured, "--argon2-memory-budget-mb="); got != "--argon2-memory-budget-mb=128" {
+		t.Fatalf("argon2 budget flag = %q, want the override", got)
 	}
 }
 
@@ -1214,4 +1246,139 @@ func TestCacheAllowUnauthenticatedRendersTheOptIn(t *testing.T) {
 	if args := runnerContainer(t, renderCache(t)).Args; containsArg(args, "--allow-unauthenticated") {
 		t.Errorf("cache args = %v, want no unauthenticated opt-in by default", args)
 	}
+}
+
+type renderedNetworkPolicy struct {
+	Kind string `yaml:"kind"`
+	Spec struct {
+		PodSelector struct {
+			MatchLabels map[string]string `yaml:"matchLabels"`
+		} `yaml:"podSelector"`
+		PolicyTypes []string `yaml:"policyTypes"`
+		Ingress     []struct {
+			From []struct {
+				PodSelector struct {
+					MatchLabels map[string]string `yaml:"matchLabels"`
+				} `yaml:"podSelector"`
+			} `yaml:"from"`
+			Ports []struct {
+				Protocol string `yaml:"protocol"`
+				Port     int    `yaml:"port"`
+			} `yaml:"ports"`
+		} `yaml:"ingress"`
+	} `yaml:"spec"`
+}
+
+func renderCacheNetworkPolicy(t *testing.T, sets ...string) renderedNetworkPolicy {
+	t.Helper()
+	rendered := helmRender(t, "./sparkwing-runner-bundle",
+		"templates/cache-networkpolicy.yaml", "sparkwing", sets...)
+	var doc renderedNetworkPolicy
+	decoder := yaml.NewDecoder(strings.NewReader(rendered))
+	for {
+		var candidate renderedNetworkPolicy
+		if err := decoder.Decode(&candidate); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("decode NetworkPolicy: %v\n%s", err, rendered)
+		}
+		if candidate.Kind == "NetworkPolicy" {
+			doc = candidate
+		}
+	}
+	if doc.Kind != "NetworkPolicy" {
+		t.Fatalf("no NetworkPolicy rendered:\n%s", rendered)
+	}
+	return doc
+}
+
+func TestCacheNetworkPolicyAdmitsOnlyTheRunnerAndController(t *testing.T) {
+	policy := renderCacheNetworkPolicy(t)
+
+	if !reflect.DeepEqual(policy.Spec.PolicyTypes, []string{"Ingress"}) {
+		t.Errorf("policyTypes = %v, want [Ingress]", policy.Spec.PolicyTypes)
+	}
+	if got := policy.Spec.PodSelector.MatchLabels["app.kubernetes.io/component"]; got != "cache" {
+		t.Errorf("policy selects component %q, want cache", got)
+	}
+	if len(policy.Spec.Ingress) != 1 {
+		t.Fatalf("ingress rules = %d, want 1 default-deny-with-two-peers rule", len(policy.Spec.Ingress))
+	}
+	rule := policy.Spec.Ingress[0]
+	if len(rule.From) != 2 {
+		t.Fatalf("ingress peers = %d, want the runner and the controller", len(rule.From))
+	}
+	for i, want := range []map[string]string{
+		{
+			"app.kubernetes.io/name":      "sparkwing-runner-bundle",
+			"app.kubernetes.io/instance":  "sparkwing",
+			"app.kubernetes.io/component": "runner",
+		},
+		{
+			"app.kubernetes.io/instance":  "sparkwing",
+			"app.kubernetes.io/component": "controller",
+		},
+	} {
+		if got := rule.From[i].PodSelector.MatchLabels; !reflect.DeepEqual(got, want) {
+			t.Errorf("ingress peer %d = %v, want %v", i, got, want)
+		}
+	}
+	if len(rule.Ports) != 1 || rule.Ports[0].Port != 8090 || rule.Ports[0].Protocol != "TCP" {
+		t.Errorf("ingress ports = %+v, want TCP 8090", rule.Ports)
+	}
+}
+
+func TestCacheNetworkPolicyTakesAnExplicitControllerSelector(t *testing.T) {
+	policy := renderCacheNetworkPolicy(t, `networkPolicy.controllerPodSelector.app\.kubernetes\.io/name=my-controller`)
+	want := map[string]string{"app.kubernetes.io/name": "my-controller"}
+	if got := policy.Spec.Ingress[0].From[1].PodSelector.MatchLabels; !reflect.DeepEqual(got, want) {
+		t.Errorf("controller peer = %v, want %v", got, want)
+	}
+}
+
+func TestCacheNetworkPolicyIsOptOut(t *testing.T) {
+	rendered := helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default", "networkPolicy.enabled=false")
+	if strings.Contains(rendered, "kind: NetworkPolicy") {
+		t.Error("networkPolicy.enabled=false still rendered a NetworkPolicy")
+	}
+	if !strings.Contains(helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default"), "kind: NetworkPolicy") {
+		t.Error("the default install rendered no cache NetworkPolicy")
+	}
+}
+
+func TestPublishedCacheWithoutATokenFailsAtRender(t *testing.T) {
+	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
+		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
+			"cache.service.type="+serviceType, "cache.allowUnauthenticated=true")
+		for _, want := range []string{"cache.service.type=" + serviceType, "ClusterIP", "controller.tokenSecret.name"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s render error does not name %q:\n%s", serviceType, want, out)
+			}
+		}
+	}
+	rendered := helmRender(t, "./sparkwing-runner-bundle", "templates/cache-service.yaml", "sparkwing",
+		"cache.service.type=LoadBalancer")
+	if !strings.Contains(rendered, "type: LoadBalancer") {
+		t.Errorf("a tokened cache refused a LoadBalancer Service:\n%s", rendered)
+	}
+}
+
+func TestControllerCarriesTheCacheToken(t *testing.T) {
+	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token",
+		"sparkwing-runner-bundle.controller.tokenSecret.key=bearer")
+	for _, env := range controller.Env {
+		if env.Name != "SPARKWING_CACHE_TOKEN" {
+			continue
+		}
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("SPARKWING_CACHE_TOKEN is not a secretKeyRef: %+v", env)
+		}
+		ref := *env.ValueFrom.SecretKeyRef
+		if ref.Name != "sparkwing-token" || ref.Key != "bearer" {
+			t.Errorf("controller cache token = %+v, want the release token Secret", ref)
+		}
+		return
+	}
+	t.Fatalf("controller has no SPARKWING_CACHE_TOKEN env: %+v", controller.Env)
 }

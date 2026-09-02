@@ -11,8 +11,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/argon2"
 )
 
 // Token kinds (stored in the `kind` column).
@@ -368,7 +366,7 @@ func hashToken(raw string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(raw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	key := argonKey(raw, salt)
 	return fmt.Sprintf("argon2id$%s$%s", hex.EncodeToString(salt), hex.EncodeToString(key)), nil
 }
 
@@ -385,7 +383,7 @@ func verifyToken(raw, stored string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	cand := argon2.IDKey([]byte(raw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	cand := argonKey(raw, salt)
 	return subtle.ConstantTimeCompare(cand, key) == 1, nil
 }
 

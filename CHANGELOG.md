@@ -55,6 +55,14 @@ code change to unlock.
   the privileged warmer pod as container arguments consumed by a fixed script.
   A ConfigMap writer can no longer smuggle shell into the one privileged
   workload Sparkwing creates.
+- **controller:** Login now carries per-client, listener-wide, and per-account
+  budgets, and every argon2id verification passes through a memory-sized
+  semaphore, so unauthenticated callers can no longer exhaust the pod by
+  hashing. Size the semaphore with `--argon2-memory-budget-mb` (chart:
+  `controller.argon2MemoryBudgetMB`) and name proxy networks with
+  `--trusted-proxy-cidrs` (chart: `controller.trustedProxyCIDRs`) so throttling
+  keys on the real client. A rejected bearer token is remembered for a few
+  seconds, so a replayed wrong guess costs one hash.
 - **logs:** `sparkwing-logs` gains `--require-auth` /
   `SPARKWING_REQUIRE_AUTH`, refusing to start without a controller to resolve
   caller tokens against, reports `"auth"` on `GET /api/v1/health` so
@@ -74,6 +82,23 @@ code change to unlock.
 - **admission:** Equal-priority participants keep their service order while
   queued, so sustained arrivals from an older owner cannot move an existing
   request backward indefinitely.
+
+### Security
+
+- **cache (Breaking):** Every cache route that touches repository content --
+  git clone and registration, archives, files, tree hashes, branch membership,
+  the repo listing, and artifacts -- now requires the bearer token, alongside
+  the blob and sync routes that already did. Registration validates the
+  repository name and refuses to repoint an existing one without the token,
+  responses carry `X-Content-Type-Options: nosniff`, artifacts download as
+  attachments, and workspace snapshot refs expire after
+  `WORKSPACE_SEED_MAX_AGE` instead of wedging at the retention cap. The
+  runner-bundle chart ships a default-deny ingress NetworkPolicy for the cache
+  (`networkPolicy.enabled`), issues the controller a cache token, and refuses
+  to render a non-`ClusterIP` cache Service with no token configured. The
+  dashboard's `/api/v1/gitcache/` mount rejects a request with no bearer
+  credential and caps concurrent Git streams. See the
+  [migration guide](docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
 
 ## [v0.39.0] - 2026-09-02
 ### Docs
