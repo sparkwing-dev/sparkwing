@@ -108,6 +108,11 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	sess, err := s.store.LookupSession(raw, now)
 	if err != nil {
+		// safety: a backend fault answered 401 would read as expiry and clear the dashboard's session cookies.
+		if errors.Is(err, store.ErrSessionBackend) {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}

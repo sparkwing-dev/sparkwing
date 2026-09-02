@@ -50,6 +50,29 @@ CHANGELOG links here.
   deploy key with one `os.Getenv`. Keeping the bearer out of the pipeline
   body's reach entirely, by brokering these calls through a supervisor process,
   is the remaining design step.
+
+## Session rows are hashed and the CSRF column is dropped
+
+- **Before:** `sessions` held the raw browser session id and its CSRF token in
+  plain columns. Every migration up to schema 20 was additive, so a replica on
+  an older binary kept working against a newer database.
+- **After:** Schema 21 deletes every row in `sessions`, drops the
+  `sessions.csrf_token` column, and keys rows by `sha256(session id)`. The CSRF
+  token is derived per request as an HMAC of the session id under a key in
+  `sparkwing_meta`. This is the first destructive schema step: an older binary
+  still running against the migrated database selects `csrf_token`, fails, and
+  answers `401` to every dashboard request.
+- **Migration:** Stop every controller sharing the state database, upgrade them
+  all, then start them. Do not roll the upgrade one replica at a time, and do
+  not roll a replica back past schema 21 once it has run. Everyone signed in to
+  the dashboard signs in again; there is no way to carry sessions across the
+  migration, because the pre-21 rows are exactly the replayable ids the change
+  removes. On PostgreSQL the column drop takes an ACCESS EXCLUSIVE lock on
+  `sessions` inside the migration transaction, so run it when the table is idle.
+- **Why:** A copy of the state database, its WAL, or a backup handed the reader
+  a working dashboard session. Storing only the digest, and deriving the CSRF
+  token, means a database reader holds nothing it can replay.
+
 ## The dashboard refuses an unauthenticated remote bind
 
 - **Before:** `sparkwing-web --token ... --addr=0.0.0.0:4343` without

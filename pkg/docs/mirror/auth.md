@@ -221,7 +221,9 @@ controller therefore takes effect on the next protected data request rather
 than after a local cache expires. A controller `401` authoritatively clears the
 browser session; a controller outage, `5xx`, or malformed response returns
 `502` and preserves the cookies so a transient failure cannot log out every
-user. Browser redirects preserve the original path and query as one encoded
+user. The controller answers `5xx` when the state store or the session signing
+key is unreadable, so only an unknown or expired session reaches the browser as
+`401`. Browser redirects preserve the original path and query as one encoded
 `next` value and accept only same-origin absolute paths.
 
 Login cookies are `Secure` by default, so a login-required dashboard must be
@@ -348,7 +350,10 @@ next request.
 ## Extension points
 
 - **OIDC / SSO**: not implemented. The `users` + `sessions` tables are
-  shape-compatible; an OIDC callback can populate sessions directly.
+  shape-compatible; an OIDC callback can populate sessions directly by writing
+  `sha256(session id)` into `sessions.hash` and keeping the raw id only in the
+  browser cookie. There is no `csrf_token` column: Sparkwing derives that token
+  per request as an HMAC of the session id under a key in `sparkwing_meta`.
 - **Audit trail**: the principal name is stamped onto the OTel trace
   span. There is no dedicated audit database.
 - **Per-user multi-tenancy**: principals are a free-form label. Adding a
