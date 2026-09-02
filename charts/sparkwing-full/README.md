@@ -94,6 +94,8 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # `logs.write`. The web pod's needs `runs.read` + `logs.read`, plus
 # `runs.write` where operators cancel, retry, or release runs from the
 # dashboard and `approvals.write` where they resolve approval gates.
+# Deleting a run from the dashboard needs `admin` on the web token AND
+# on the signed-in account; leave it off to keep deletion on the CLI.
 # Mint the two separately so neither carries the other's reach.
 ```
 

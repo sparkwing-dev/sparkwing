@@ -82,6 +82,12 @@ code change to unlock.
 
 ### Security
 
+- **web:** The dashboard's logs-service proxy now forwards only the four log
+  reads the dashboard makes, each gated on the session's `logs.read` scope, so
+  a signed-in browser can no longer delete a run's logs or append forged log
+  lines with the web pod's service bearer. Creating a dashboard user rejects a
+  blank or repeated scope instead of storing an account that cannot reach any
+  route.
 - **storage:** Artifact keys are limited to ASCII letters, digits, `.`, `_`, and
   `-` with no dot-leading segment, and the cache-backed artifact store escapes
   every key segment in its request path, so a double-encoded or `#`/`?` key

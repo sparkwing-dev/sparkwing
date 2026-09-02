@@ -11,16 +11,19 @@ CHANGELOG links here.
   with its service bearer attached, and every browser session was minted with
   the `admin` scope. One dashboard login reached every admin route.
 - **After:** The proxy forwards only the routes the dashboard calls and
-  answers `404` for the rest. A session carries the scopes of the user who
-  signed in, and the proxy checks them against the scope the controller
-  registers for the target route. Run-store schema 19 adds `users.scopes`,
-  defaulting every existing account to `admin`.
+  answers `404` for the rest, and it forwards reads only to the logs service.
+  A session carries the scopes of the user who signed in, and the proxy checks
+  them against the scope the controller registers for the target route.
+  Run-store schema 19 adds `users.scopes`, defaulting every existing account to
+  `admin`.
 - **Migration:** Upgrade the controller before the web pod so the schema-19
   column exists when the first login resolves scopes. Re-mint the web pod's
   controller token with `runs.read` and `logs.read`, adding `runs.write` where
-  operators cancel, retry, or release runs from the dashboard and
-  `approvals.write` where they resolve approval gates. Create narrower
-  dashboard accounts with `sparkwing cluster users add --scope`; existing
+  operators cancel, retry, or release runs from the dashboard,
+  `approvals.write` where they resolve approval gates, and `admin` where they
+  delete runs from the dashboard, which the controller registers at `admin`.
+  Create narrower dashboard accounts with
+  `sparkwing cluster users add --scope`; existing
   accounts keep `admin` until an operator replaces them. Callers of
   `store.CreateUser` and `store.CreateFirstUser` pass the account's scopes as
   a new `[]string` argument before `now`.

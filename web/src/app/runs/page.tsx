@@ -865,10 +865,17 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                       const results = await Promise.allSettled(
                         ids.map((id) => deleteRun(id)),
                       );
-                      const failed = results.filter(
-                        (r) => r.status === "rejected",
-                      ).length;
+                      const rejected = results.filter(
+                        (r): r is PromiseRejectedResult =>
+                          r.status === "rejected",
+                      );
+                      const failed = rejected.length;
                       const ok = results.length - failed;
+                      const firstReason = rejected[0]?.reason;
+                      const reason =
+                        firstReason instanceof Error
+                          ? `: ${firstReason.message}`
+                          : "";
                       if (failed === 0) {
                         toast(
                           ok === 1 ? "Run deleted" : `${ok} runs deleted`,
@@ -877,12 +884,15 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                       } else if (ok === 0) {
                         toast(
                           failed === 1
-                            ? "Delete failed"
-                            : `Delete failed for ${failed} runs`,
+                            ? `Delete failed${reason}`
+                            : `Delete failed for ${failed} runs${reason}`,
                           "error",
                         );
                       } else {
-                        toast(`Deleted ${ok}, ${failed} failed`, "error");
+                        toast(
+                          `Deleted ${ok}, ${failed} failed${reason}`,
+                          "error",
+                        );
                       }
                       setCheckedRuns(new Set());
                       if (run && ids.includes(run.id)) {
