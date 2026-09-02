@@ -62,8 +62,8 @@ func MemoryGB(n float64) ResourceHint {
 // it: when a pin drifts far from what the pipeline actually costs, the run
 // ends with a one-line warning to update or remove it. Locally a pin is not
 // a limit: it caps nothing and kills nothing. On the Kubernetes backend it
-// becomes the pod's requests and limits, capped by the operator's
-// configured ceiling, so there it does bound the work.
+// becomes the pod's requests and limits, so there it does bound the work, and
+// an operator who configured a runner ceiling caps the pin at that ceiling.
 //
 //	func (p *Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in Inputs, rc sparkwing.RunContext) error {
 //	    plan.Resources(sparkwing.Cores(4), sparkwing.MemoryGB(8))
@@ -91,7 +91,7 @@ func (p *Plan) ResourceHints() *ResourceHints {
 // Resources pins this node's peak CPU and memory. Same semantics as
 // [Plan.Resources], scoped to one node: an explicit, authoritative charge
 // admission uses instead of measuring, policed for drift, enforced as a pod
-// limit only on the Kubernetes backend.
+// limit (under the operator's runner ceiling) only on the Kubernetes backend.
 // Pin sparingly -- prefer letting sparkwing measure.
 //
 //	sw.Job(plan, "integration", &Integration{}).

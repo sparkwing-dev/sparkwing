@@ -42,6 +42,10 @@ func runWorkerCLI(args []string) error {
 			"empty derives it from SPARKWING_GITCACHE_URL, \"off\" disables (env: SPARKWING_DEPENDENCY_PROXY_URL)")
 	imagePullPolicy := fs.String("image-pull-policy", os.Getenv("SPARKWING_IMAGE_PULL_POLICY"),
 		"imagePullPolicy for runner pods: Always | IfNotPresent | Never (default IfNotPresent; env: SPARKWING_IMAGE_PULL_POLICY)")
+	k8sCPUCeiling := fs.String("k8s-cpu-ceiling", os.Getenv("SPARKWING_K8S_CPU_CEILING"),
+		"hard CPU ceiling for runner pods as a Kubernetes quantity (8, 500m); a pipeline pin or measured charge above it is clamped (empty = no ceiling; env: SPARKWING_K8S_CPU_CEILING)")
+	k8sMemoryCeiling := fs.String("k8s-memory-ceiling", os.Getenv("SPARKWING_K8S_MEMORY_CEILING"),
+		"hard memory ceiling for runner pods as a Kubernetes quantity (8Gi); a pipeline pin or measured charge above it is clamped (empty = no ceiling; env: SPARKWING_K8S_MEMORY_CEILING)")
 	warmWait := fs.Duration("warm-claim-wait", 5*time.Second,
 		"how long the warm pool Runner waits for a pod to claim before falling back to K8sRunner")
 	warmPoll := fs.Duration("warm-poll", 500*time.Millisecond,
@@ -118,6 +122,8 @@ func runWorkerCLI(args []string) error {
 			DependencyProxyURL:         *dependencyProxy,
 			DependencyProxyFallbackURL: proxyFallback,
 			ImagePullPolicy:            *imagePullPolicy,
+			CPUCeiling:                 *k8sCPUCeiling,
+			MemoryCeiling:              *k8sMemoryCeiling,
 		})
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)
@@ -139,6 +145,8 @@ func runWorkerCLI(args []string) error {
 				DependencyProxyURL:         *dependencyProxy,
 				DependencyProxyFallbackURL: proxyFallback,
 				ImagePullPolicy:            *imagePullPolicy,
+				CPUCeiling:                 *k8sCPUCeiling,
+				MemoryCeiling:              *k8sMemoryCeiling,
 			})
 			if err != nil {
 				return fmt.Errorf("warm runner (fallback k8s): %w", err)

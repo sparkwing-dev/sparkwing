@@ -1897,16 +1897,21 @@ var cmdProfilesAdd = Command{
 	Path:     "sparkwing configure profiles add",
 	Synopsis: "Register a new connection profile",
 	Description: `Creates a new entry in profiles.yaml. --name and --controller
-are required; --token is optional. Configure storage and service
-backends by editing profiles.yaml.`,
+are required; the token is optional. --token-stdin reads the
+token from stdin and prompts without echo when stdin is a
+terminal; prefer it over --token, which is visible to other
+processes in the process list and recorded in shell history.
+Configure storage and service backends by editing profiles.yaml.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Profile name (unique per profiles.yaml)", Required: true, Group: "Input"},
 		{Name: "controller", Argument: "URL", Desc: "Controller base URL", Required: true, Group: "Connection"},
-		{Name: "token", Argument: "TOKEN", Desc: "Bearer token (omit for local/unauthed stacks)", Group: "Connection"},
+		{Name: "token", Argument: "TOKEN", Desc: "Bearer token, visible to other processes and shell history (omit for local/unauthed stacks)", ConflictsWith: []string{"token-stdin"}, Group: "Connection"},
+		{Name: "token-stdin", Desc: "Read the bearer token from stdin, prompting without echo on a terminal", ConflictsWith: []string{"token"}, Group: "Connection"},
 	},
 	GroupOrder: []string{"Input", "Connection", "Other"},
 	Examples: []Example{
-		{"Add a prod profile", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN"},
+		{"Add a prod profile, prompting for the token", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token-stdin"},
+		{"Add a prod profile from a piped token", "printf %s \"$TOKEN\" | sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token-stdin"},
 		{"Add a local profile without auth", "sparkwing configure profiles add --name local --controller http://127.0.0.1:4344"},
 	},
 }
@@ -1972,16 +1977,22 @@ var cmdProfilesSet = Command{
 	Path:     "sparkwing configure profiles set",
 	Synopsis: "Update fields on an existing profile",
 	Description: `Only flags you pass are overwritten. --token="" explicitly
-clears the token (empty value, not an omitted flag). Use
---show-token on 'profiles show' afterward to confirm.`,
+clears the token (empty value, not an omitted flag), and
+--token-stdin with empty input clears it too. --token-stdin
+reads the token from stdin and prompts without echo when stdin
+is a terminal; prefer it over --token, which is visible to
+other processes in the process list and recorded in shell
+history. Use --show-token on 'profiles show' afterward to
+confirm.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Profile name to mutate", Required: true, Group: "Input"},
 		{Name: "controller", Argument: "URL", Desc: "New controller URL", Group: "Connection"},
-		{Name: "token", Argument: "TOKEN", Desc: "New bearer token (empty string clears)", Group: "Connection"},
+		{Name: "token", Argument: "TOKEN", Desc: "New bearer token, visible to other processes and shell history (empty string clears)", ConflictsWith: []string{"token-stdin"}, Group: "Connection"},
+		{Name: "token-stdin", Desc: "Read the new bearer token from stdin, prompting without echo on a terminal", ConflictsWith: []string{"token"}, Group: "Connection"},
 	},
 	GroupOrder: []string{"Input", "Connection", "Other"},
 	Examples: []Example{
-		{"Rotate a profile's token", "sparkwing configure profiles set --name prod --token $NEW_TOKEN"},
+		{"Rotate a profile's token", "sparkwing configure profiles set --name prod --token-stdin"},
 		{"Change a profile's controller", "sparkwing configure profiles set --name prod --controller https://api.sparkwing.example"},
 	},
 }

@@ -126,6 +126,14 @@ spec:
               value: /tmp/sparkwing/gocache
             - name: GOMODCACHE
               value: /tmp/sparkwing/gomodcache
+            {{- with .Values.runner.jobCeiling.cpu }}
+            - name: SPARKWING_K8S_CPU_CEILING
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.runner.jobCeiling.memory }}
+            - name: SPARKWING_K8S_MEMORY_CEILING
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.cache.enabled }}
             - name: SPARKWING_GITCACHE_URL
               value: {{ printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}

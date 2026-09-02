@@ -36,6 +36,8 @@ type Server struct {
 
 	queueTimeout time.Duration
 
+	sessionMaxLifetime time.Duration
+
 	concurrencyCacheCap int
 
 	secretsCipher Cipher
@@ -75,9 +77,19 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		logger:              logger,
 		loginLimit:          newLoginLimiter(nil),
 		queueTimeout:        15 * time.Minute,
+		sessionMaxLifetime:  DefaultSessionMaxLifetime,
 		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
 		runnerHeadroom:      newRunnerHeadroomRegistry(),
 	}
+}
+
+// WithSessionMaxLifetime caps how long a browser session lives from the
+// moment it was created. A session past the cap is refused and deleted
+// instead of renewed, so a polling tab cannot keep one alive forever.
+// Zero or less removes the cap and restores an unbounded sliding TTL.
+func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server {
+	s.sessionMaxLifetime = d
+	return s
 }
 
 // WithQueueTimeout overrides the default queue-timeout window used by

@@ -74,7 +74,7 @@ func TestSameOriginRequestBehindHTTPSProxyKeepsSecureCookies(t *testing.T) {
 	if !decided {
 		t.Error("forwarded https origin rejected; the login POST would 403 behind a TLS proxy")
 	}
-	if !cookieSecure {
+	if !cookiesSecure(opts) {
 		t.Error("test assumes the default Secure cookie policy")
 	}
 }
@@ -896,4 +896,80 @@ func gitcacheStream(dashboardURL string) func() (int, string, error) {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return resp.StatusCode, resp.Header.Get("Retry-After"), nil
 	}
+}
+
+func TestLoginCookieSecureAttributeFollowsHandlerOptions(t *testing.T) {
+	t.Parallel()
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/auth/bootstrap-needed" {
+			_ = json.NewEncoder(w).Encode(map[string]bool{"needed": false})
+			return
+		}
+		if r.URL.Path == "/api/v1/auth/login" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "session-id",
+				"csrf_token": "csrf-token",
+				"principal":  "admin",
+				"scopes":     []string{"admin"},
+			})
+			return
+		}
+		http.Error(w, "unexpected", http.StatusTeapot)
+	}))
+	t.Cleanup(controller.Close)
+
+	for _, tc := range []struct {
+		name       string
+		insecure   bool
+		wantSecure bool
+	}{
+		{name: "default", wantSecure: true},
+		{name: "insecure opt-in", insecure: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := HandlerFromOptionsWithBundle(HandlerOptions{
+				ControllerURL:   controller.URL,
+				RequireLogin:    true,
+				InsecureCookies: tc.insecure,
+			}, authTestBundle)
+			req := httptest.NewRequest(http.MethodGet, "https://dashboard.example/login", nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET /login = %d, want 200", rec.Code)
+			}
+			assertCookieSecure(t, rec.Result().Cookies(), csrfCookieName, tc.wantSecure)
+
+			form := url.Values{
+				"username":   {"admin"},
+				"password":   {"correct-horse"},
+				"csrf_token": {"login-token"},
+			}
+			submit := httptest.NewRequest(http.MethodPost, "https://dashboard.example/login", strings.NewReader(form.Encode()))
+			submit.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			submit.Header.Set("Origin", "https://dashboard.example")
+			submit.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "login-token"})
+			submitted := httptest.NewRecorder()
+			handler.ServeHTTP(submitted, submit)
+			if submitted.Code != http.StatusSeeOther {
+				t.Fatalf("POST /login = %d, want 303: %s", submitted.Code, submitted.Body)
+			}
+			assertCookieSecure(t, submitted.Result().Cookies(), sessionCookieName, tc.wantSecure)
+			assertCookieSecure(t, submitted.Result().Cookies(), csrfCookieName, tc.wantSecure)
+		})
+	}
+}
+
+func assertCookieSecure(t *testing.T, cookies []*http.Cookie, name string, want bool) {
+	t.Helper()
+	for _, c := range cookies {
+		if c.Name != name {
+			continue
+		}
+		if c.Secure != want {
+			t.Errorf("%s cookie Secure = %v, want %v", name, c.Secure, want)
+		}
+		return
+	}
+	t.Fatalf("response set no %s cookie", name)
 }

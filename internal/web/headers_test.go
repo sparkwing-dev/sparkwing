@@ -323,3 +323,68 @@ func TestValidateRemoteExposure(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCookieExposure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		opts    HandlerOptions
+		addr    string
+		wantErr bool
+	}{
+		{name: "secure cookies anywhere", addr: "0.0.0.0:4343"},
+		{
+			name: "insecure on loopback",
+			opts: HandlerOptions{InsecureCookies: true},
+			addr: "127.0.0.1:4343",
+		},
+		{
+			name: "insecure on localhost",
+			opts: HandlerOptions{InsecureCookies: true},
+			addr: "localhost:4343",
+		},
+		{
+			name: "insecure on IPv6 loopback",
+			opts: HandlerOptions{InsecureCookies: true},
+			addr: "[::1]:4343",
+		},
+		{
+			name: "insecure remote with opt-in",
+			opts: HandlerOptions{InsecureCookies: true, AllowInsecureCookiesRemote: true},
+			addr: "0.0.0.0:4343",
+		},
+		{
+			name:    "insecure on wildcard bind",
+			opts:    HandlerOptions{InsecureCookies: true},
+			addr:    "0.0.0.0:4343",
+			wantErr: true,
+		},
+		{
+			name:    "insecure on routable bind",
+			opts:    HandlerOptions{InsecureCookies: true},
+			addr:    "10.0.0.5:4343",
+			wantErr: true,
+		},
+		{
+			name:    "insecure on port only",
+			opts:    HandlerOptions{InsecureCookies: true},
+			addr:    ":4343",
+			wantErr: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateCookieExposure(tc.opts, tc.addr)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validateCookieExposure(%q) error = %v, want error %v", tc.addr, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestServeRejectsInsecureCookiesOnNonLoopbackBind(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := ServeWithOptions(ctx, HandlerOptions{InsecureCookies: true}, "0.0.0.0:0")
+	if err == nil || !strings.Contains(err.Error(), "insecure cookies") {
+		t.Fatalf("ServeWithOptions error = %v, want an insecure-cookie refusal", err)
+	}
+}

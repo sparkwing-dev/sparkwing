@@ -32,7 +32,9 @@ not build a VPC. Supply:
   zones (both RDS and Aurora require two AZs).
 - One of `allowed_security_group_ids` or `allowed_cidr_blocks`: who may
   reach the database. Point this at your runner hosts. With neither set,
-  nothing can connect.
+  nothing can connect. `allowed_cidr_blocks` takes IPv4 CIDRs no wider
+  than `/8`; a wider block, `0.0.0.0/0` included, fails validation at plan
+  time rather than opening the database port to the internet.
 
 The database is never publicly accessible: runners reach it from inside
 the VPC (a peered network, a VPN, or hosts in the same VPC).
@@ -67,6 +69,14 @@ terraform apply
 
 See `terraform.tfvars.example` for a copy-paste starting point, and
 `variables.tf` for every knob with its default.
+
+The module commits its `.terraform.lock.hcl`, so `terraform init` installs
+the provider versions the module was tested against and verifies their
+checksums instead of taking whatever the registry serves that day. The lock
+records `linux_amd64` and `darwin_arm64`. On another platform `terraform
+init` appends that platform's hash and leaves the lock modified; record it
+with `terraform providers lock -platform=<os>_<arch>` and commit the result
+rather than reverting it.
 
 ## Pointing a runner at Mode 3
 
@@ -152,8 +162,10 @@ with no AWS account or API call:
   instance.
 - `storage_encrypted = true` on the RDS instance and the Aurora cluster.
 - Security-group ingress is restricted to the PostgreSQL port (5432) over
-  tcp, opens no CIDR when sourced from a security group, and never admits
-  `0.0.0.0/0` on the CIDR path.
+  tcp, opens no CIDR when sourced from a security group, and rejects any
+  CIDR wider than `/8`, so neither `0.0.0.0/0` nor a pair of halves such as
+  `0.0.0.0/1` and `128.0.0.0/1` reaches the security group. Ingress is IPv4
+  only; the module exposes no `ipv6_cidr_blocks` knob.
 - The generated connection string requires TLS (`sslmode=require`).
 
 A regression that keeps the resource count but flips one of these (widens

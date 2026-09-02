@@ -310,8 +310,14 @@ key is unreadable, so only an unknown or expired session reaches the browser as
 Login cookies are `Secure` by default, so a login-required dashboard must be
 served over HTTPS. A plain `http://localhost` port-forward can reach health
 endpoints but cannot retain those cookies. For a loopback-only development
-process, `SPARKWING_WEB_INSECURE_COOKIES=1` permits HTTP cookies; never set that
-override on a shared pod, ingress, or non-loopback listener.
+process, `SPARKWING_WEB_INSECURE_COOKIES=1` permits HTTP cookies. The dashboard
+reads that variable once at startup and refuses a non-loopback bind with it
+set. That check reads the bind address only: a proxy or sidecar in front of a
+loopback bind still carries the cookie unencrypted to everything it publishes.
+An operator who publishes the dashboard over plain HTTP through a proxy or
+ingress adds `--allow-insecure-cookies-remote` to accept cookies that travel
+without TLS; the chart renders that flag with the variable whenever
+`ingress.allowInsecure` opts a TLS-less ingress in.
 
 ## First-visit signup
 
@@ -348,10 +354,15 @@ connection info from a profile. Register one first:
 
 ```sh
 # Register a prod profile (controller URL + admin bearer).
+# --token-stdin prompts without echo on a terminal and reads a pipe otherwise.
 sparkwing configure profiles add --name prod \
     --controller https://sparkwing.example.com \
-    --token "$ADMIN_TOKEN"
+    --token-stdin
 ```
+
+`--token` accepts the bearer on the command line instead, but every process
+on the machine can read it from the process list and the shell records it in
+history. Use it only where a prompt or a pipe is impossible.
 
 Then the tokens commands are terse:
 
@@ -438,6 +449,12 @@ Sessions carry no cache: the controller reads the `sessions` row on
 every request and the dashboard resolves the session on every protected
 request, so deleting a session or a user logs that browser out on its
 next request.
+
+A session expires 12 hours after its last use and the controller renews it when
+under an hour remains, but never past seven days from the moment it was
+created. Reaching that age deletes the row and answers `401`, so the browser
+signs in again. An embedder changes the cap with
+`controller.Server.WithSessionMaxLifetime`.
 
 ## Extension points
 
