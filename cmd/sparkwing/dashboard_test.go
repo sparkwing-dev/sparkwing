@@ -178,3 +178,21 @@ func TestRunDashboardStart_RefusesNonLoopbackAddr(t *testing.T) {
 		t.Fatalf("error = %v, want it to name the opt-in flag", err)
 	}
 }
+
+func TestDashboardStartHelpExposesOriginPolicy(t *testing.T) {
+	var found bool
+	for _, spec := range cmdDashboardStart.Flags {
+		if spec.Name == "allow-origin" {
+			found = spec.Argument == "ORIGINS" && strings.Contains(spec.Desc, "--allow-remote")
+		}
+	}
+	if !found {
+		t.Fatalf("dashboard start help flags = %#v, want --allow-origin ORIGINS", cmdDashboardStart.Flags)
+	}
+	for _, example := range cmdDashboardStart.Examples {
+		if strings.Contains(example.Command, "--allow-origin http://dashboard.example.com:4343") {
+			return
+		}
+	}
+	t.Fatalf("dashboard start examples = %#v, want a public-host --allow-origin example", cmdDashboardStart.Examples)
+}
