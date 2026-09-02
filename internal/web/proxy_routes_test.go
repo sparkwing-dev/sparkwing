@@ -136,8 +136,6 @@ func TestProxyRoutes_ScopesMatchControllerRegistrations(t *testing.T) {
 	}
 }
 
-// controllerRouteScopes reads the controller's own registrations so the
-// dashboard's allow-list cannot drift from the scope each route enforces.
 func controllerRouteScopes(t *testing.T) map[string]string {
 	t.Helper()
 	values := map[string]string{

@@ -12,11 +12,7 @@ type proxyRoute struct {
 	scope   string
 }
 
-// proxyRoutes is the complete set of controller routes the dashboard
-// forwards. Each entry names the scope the controller registers that route
-// under, so a browser session reaches only what its user's scopes allow and
-// the web pod's service bearer cannot be borrowed for anything the dashboard
-// itself never calls.
+// safety: only routes the dashboard itself calls are forwarded, so the web pod's bearer cannot be borrowed for anything else.
 var proxyRoutes = []proxyRoute{
 	{"GET /api/v1/runs", controller.ScopeRunsRead},
 	{"GET /api/v1/runs/{id}", controller.ScopeRunsRead},
@@ -53,10 +49,7 @@ func routeNotProxied(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// requireSessionScope passes the request on only when the browser session
-// carries the scope the controller requires for that route. Without a
-// session the dashboard adds no credential of its own beyond what the
-// caller already sent, so the controller stays the authority.
+// safety: without a session the dashboard adds no credential of its own, so the controller stays the authority.
 func requireSessionScope(scope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := WebPrincipalFromContext(r.Context())

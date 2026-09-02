@@ -43,8 +43,6 @@ func postUserJSON(t *testing.T, url string, body any) (int, []byte) {
 	return resp.StatusCode, out
 }
 
-// bootstrapAdmin consumes the one-shot first-admin path so later creations
-// take the ordinary admin-scoped route.
 func bootstrapAdmin(t *testing.T, ts *httptest.Server) {
 	t.Helper()
 	status, body := postUserJSON(t, ts.URL+"/api/v1/users", map[string]any{
