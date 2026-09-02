@@ -368,7 +368,7 @@ so a published cache always demands a bearer.
 | POST | `/upload?repo=X&base=Y` | Incremental upload on base commit |
 | GET | `/uploads/<id>` | Download uploaded tarball (auth required) |
 | POST | `/sync/negotiate` | Find common ancestor (auth required) |
-| POST | `/sync/seed?repo=X&sha=Y[&workspace=1]` | Seed repo from a SHA-scoped git bundle; workspace mode caps retained refs at 128 and expires refs past `WORKSPACE_SEED_MAX_AGE` (auth required) |
+| POST | `/sync/seed?repo=X&sha=Y[&workspace=1]` | Seed repo from a SHA-scoped git bundle; workspace mode caps retained refs at 128 and archives refs past `WORKSPACE_SEED_MAX_AGE` (auth required) |
 
 ### Artifacts
 
@@ -438,7 +438,7 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `FETCH_INTERVAL` | Background fetch interval (default: `30s`) |
 | `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch (default: `15s`; negative disables) |
 | `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones of one repo (default: `1h`; negative disables) |
-| `WORKSPACE_SEED_MAX_AGE` | How long a working-tree snapshot ref is retained before the next seed expires it (default: `24h`; negative disables expiry) |
+| `WORKSPACE_SEED_MAX_AGE` | How long a working-tree snapshot ref is retained before the next seed archives it under `refs/sparkwing-workspace-archive/`, where it survives another seven times this window so a retry still finds its snapshot (default: `24h`; negative disables expiry) |
 | `DATA_DIR` | Override data root (default: `/data`) |
 | `PORT` | Listen port (default: `8090`) |
 

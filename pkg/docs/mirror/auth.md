@@ -197,9 +197,12 @@ broader mapped prefixes fail startup. List proxy networks, not client networks.
 
 The controller throttles `POST /api/v1/auth/login` the same way and takes the
 same `--trusted-proxy-cidrs` flag, because it is reachable without going
-through the dashboard. See
-[security.md](security.md#login-and-hashing-budgets) for its budgets and the
-argon2 memory bound.
+through the dashboard. `sparkwing-web` forwards each browser's resolved
+address to the controller as `X-Forwarded-For`, so the controller's list must
+include the web pod's source; otherwise the controller ignores the header and
+keys every dashboard login on the web pod's own address. See
+[security.md](security.md#login-and-hashing-budgets) for its budgets, the
+per-prefix bearer budget, and the argon2 memory bound.
 
 The login, first-admin, and logout forms carry a CSRF token in both a
 `SameSite=Strict` cookie and a hidden field. Sparkwing rejects a missing,
@@ -300,9 +303,12 @@ you started before learning the old token leaked can still be stopped.
 
 Deleting a user removes the user row, deletes every session that user
 holds, and revokes every token whose principal is that name, in one
-transaction. Principals are free-form labels, so a token minted for an
-unrelated caller under the same name is revoked too; keep human account
-names and service principal names distinct.
+transaction. The token the delete request authenticates with is left
+alone, so an operator whose admin token shares a name with the account
+being deleted keeps working. Principals are free-form labels, so any
+other token minted under the same name is revoked too, including one
+minted for an unrelated caller; keep human account names and service
+principal names distinct.
 
 Profiles are the only path for targeting a remote cluster, which keeps
 it hard to accidentally point at the wrong one. The
@@ -320,7 +326,9 @@ Hash parameters (`pkg/store/tokens.go`):
 
 Measured on an arm64 laptop: ~8-15ms per `argon2.IDKey`. Token lookup on
 the hot path is prefix-indexed + cached in-process for 60s, so argon2
-only runs on cold lookups.
+only runs on cold lookups. Concurrent hashing is capped by a memory
+budget, and a hash that waits more than 250ms for a slot is shed with
+`503` and a `Retry-After` instead of queueing.
 
 ## How long revocation takes to bite
 
@@ -330,13 +338,19 @@ so the next request on that replica re-reads the row and gets `401`.
 A cached entry also carries the row's `expires_at` and `revoked_at`,
 which are rechecked on every hit, so a token that expires or whose
 rotation grace closes mid-cache stops authenticating on time rather
-than at the end of the cache window.
+than at the end of the cache window. An authentication that was already
+reading the row when the revoke landed does not install its entry, so it
+cannot put the revoked row back into the cache.
 
-Two windows remain:
+Three windows remain:
 
 - **Other controller replicas.** Invalidation is in-process. A replica
   that did not serve the revoke keeps its cached entry for up to 60
   seconds. Restart or scale the controller to zero to close it now.
+- **The loopback controller each run starts.** A local run serves the
+  admin API from the orchestrator process over the same tokens table,
+  behind its own 60-second cache that a controller restart does not
+  reach. It is bound to loopback and exits with the run.
 - **The logs service.** `sparkwing-logs` resolves callers through the
   controller's `whoami` and caches the answer for its own TTL (60s by
   default), on top of whatever the controller replica held. Its worst

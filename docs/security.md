@@ -21,23 +21,58 @@ scope is the superset.
 
 `POST /api/v1/auth/login` is the controller's only unauthenticated route
 that hashes a password, so it carries its own budgets. One client gets 30
-attempts a minute and the listener as a whole gets 120; both answer `429`
-with `Retry-After` once drained. An account answers `429` after 5 failed
-attempts and recovers one attempt every three minutes. That budget charges
-failures only, so a busy account is never locked out by its successes.
+attempts a minute; the listener as a whole gets 600 per concurrent argon2
+slot, which bounds hashing work without throttling a fleet's real logins.
+Both answer `429` with `Retry-After` once drained.
+
+A failed login also charges a budget keyed on the account **and** the
+client address: 5 failures, refilling one every three minutes. Keying it
+on both is deliberate. An account-only budget would let any stranger lock
+a named user out of the dashboard with 20 requests an hour, so a wrong
+guesser only ever slows itself down; the per-client and listener buckets
+remain the outer bound on how much guessing one source can do. The budget
+charges failures only, so a busy account is never locked out by its
+successes.
+
+Bearer verification carries the same protection, keyed on the client
+address and the 12-character token prefix, which is public
+(`sparkwing tokens list` prints it). Ten failed verifications for one
+prefix from one client in a minute and further attempts answer `429`
+without hashing. Keying on the pair matters for the same reason it does
+for login: a prefix-only budget would let a stranger who reads a prefix
+deny that runner its own token on any cold cache. Only a genuine hash
+mismatch spends the budget, so a prefix that matches no stored row costs
+an indexed `SELECT` and nothing more, and a valid token served from the
+principal cache spends nothing at all. The controller also remembers a
+rejected raw token for five seconds, so a client replaying one wrong
+guess pays for a single hash; that cache evicts its coldest entries when
+full rather than closing to new ones.
 
 Every argon2id verification, login and bearer-token lookup alike, passes
 through a semaphore sized by `--argon2-memory-budget-mb` (chart:
 `controller.argon2MemoryBudgetMB`, default 256). One hash holds 64 MiB
-while it runs, so the default admits four at a time and queues the rest.
-Raise it only alongside the pod's memory limit. The controller also
-remembers a rejected raw token for five seconds, so a client replaying one
-wrong guess pays for a single hash.
+while it runs, so the default admits four at a time. A hash waits at most
+250ms for a slot; past that the request is shed with `503` and a
+`Retry-After` rather than queued, so a flood cannot grow an unbounded
+backlog behind legitimate callers. Raise the budget only alongside the
+pod's memory limit. A runner whose token is in the 60-second principal
+cache never reaches the store or the semaphore at all, so heartbeats are
+unaffected by a login flood.
+
+An unauthenticated caller never sees a store error verbatim. Anything
+that is not an authentication rejection answers `503` with a generic
+message and the detail goes to the controller log.
 
 Login throttling keys on the TCP peer and ignores forwarded headers until
 you name the proxy networks in `--trusted-proxy-cidrs` (chart:
-`controller.trustedProxyCIDRs`). Leaving it empty behind a proxy stays
-safe and turns coarse: every browser then shares the proxy's budget.
+`controller.trustedProxyCIDRs`). The dashboard forwards each browser's
+address to the controller, so that list must include the web pod's source
+or every dashboard login shares one client budget. Set the web pod's
+address where you pin it; where the pod IP is unknown, set the cluster pod
+CIDR (`10.244.0.0/16` on kubeadm and kind, `10.42.0.0/16` on k3s) and
+accept that any pod in that range can then supply `X-Forwarded-For`. List
+the narrowest range that contains the web pod. Leaving it empty stays safe
+and turns coarse: every browser then shares the proxy's budget.
 
 ## Webhooks
 
@@ -124,12 +159,23 @@ seed writes use only `SPARKWING_CACHE_TOKEN`; direct-cache mode never receives
 the controller bearer.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
-cache pod (`networkPolicy.enabled`, on by default) that admits only the
-release's runner and controller pods, and refuses to render a non-`ClusterIP`
-cache Service unless a token Secret is configured. `pipeline trigger
---working-tree` may seed uncommitted source; the cache retains up to 128
-workspace refs per repository and expires them after
-`WORKSPACE_SEED_MAX_AGE` (24 hours by default).
+cache pod (`networkPolicy.enabled`, on by default). It admits the release's
+runner, controller, and dashboard pods plus the Job pods the Kubernetes runner
+backend creates (`app.kubernetes.io/name: sparkwing-runner`), and refuses to
+render a non-`ClusterIP` cache Service unless a token Secret is configured. A
+controller or runner pool outside the cluster reaches the cache through
+`networkPolicy.extraIngress`, which is appended to the rule verbatim and takes
+an `ipBlock` for the caller's source range.
+
+`pipeline trigger --working-tree` may seed uncommitted source; the cache
+retains up to 128 workspace refs per repository and expires them after
+`WORKSPACE_SEED_MAX_AGE` (24 hours by default). Expiry moves the ref into
+`refs/sparkwing-workspace-archive/` rather than dropping it, so a retry of an
+older working-tree run still finds its snapshot; archived refs are dropped
+after seven times `WORKSPACE_SEED_MAX_AGE`, or once 128 of them accumulate.
+
+The cache's unauthenticated `/metrics` carries no per-repository label, so
+scraping it does not enumerate or confirm the mirror set.
 
 ## Local daemon socket
 

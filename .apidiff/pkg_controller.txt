@@ -23,6 +23,8 @@ func (a *Authenticator) AuthDisabled() bool
 func (a *Authenticator) Authenticate(raw string) (*Principal, error)
 func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
+func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator
+func (a *Authenticator) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Authenticator
 type Cipher interface {
 	Seal(plain string) (string, error)
 

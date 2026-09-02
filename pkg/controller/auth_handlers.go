@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -40,14 +41,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	client := s.loginLimit.client(r)
 	// safety: a drained failure budget answers before VerifyUser, so guessing one account costs no argon2 work.
-	if !s.loginLimit.accountAllowed(req.Username, now) {
+	if !s.loginLimit.accountAllowed(req.Username, client, now) {
 		writeRetryAfter(w, loginFailureWindow, "too many failed login attempts for this account")
 		return
 	}
 	u, err := s.store.VerifyUser(req.Username, req.Password, now)
 	if err != nil {
-		s.loginLimit.accountFailed(req.Username, now)
+		if !errors.Is(err, store.ErrInvalidCredentials) {
+			s.writeLoginUnavailable(w, err)
+			return
+		}
+		s.loginLimit.accountFailed(req.Username, client, now)
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
@@ -68,6 +74,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Scopes:    u.Scopes,
 		ExpiresAt: sess.ExpiresAt.Unix(),
 	})
+}
+
+// safety: the caller is unauthenticated, so a login the controller could not decide answers a generic 503.
+func (s *Server) writeLoginUnavailable(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrHashingBusy) {
+		writeRetryAfterStatus(w, http.StatusServiceUnavailable, authBusyRetryAfter,
+			"authentication is busy, retry shortly")
+		return
+	}
+	s.logger.Error("login.unavailable", "error", err.Error())
+	writeRetryAfterStatus(w, http.StatusServiceUnavailable, authUnavailableRetryAfter,
+		"authentication is temporarily unavailable")
 }
 
 type logoutReq struct {
@@ -263,14 +281,33 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	revoked, err := s.store.DeleteUser(name, time.Now().UTC())
+	who := authwire.AnonymousPrincipal
+	keep := ""
+	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
+		who = p.Name
+		// safety: revoking the requesting token would lock the operator out mid-incident.
+		keep = p.TokenPrefix
+	}
+	sessions, revoked, err := s.store.DeleteUser(name, keep, time.Now().UTC())
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		if errors.Is(err, store.ErrUserNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		s.logger.Error("user delete failed", "name", name, "by", who, "err", err)
+		writeError(w, http.StatusInternalServerError, errors.New("could not delete user"))
 		return
 	}
 	for _, prefix := range revoked {
 		s.auth.Invalidate(prefix)
 	}
+	s.logger.Info(
+		"user deleted",
+		"name", name,
+		"sessions", sessions,
+		"revoked_prefixes", revoked,
+		"by", who,
+	)
 	w.WriteHeader(http.StatusNoContent)
 }
 

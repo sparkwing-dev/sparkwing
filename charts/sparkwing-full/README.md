@@ -207,7 +207,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for commit-status run links; invalid values omit the link. | `""` |
 | `controller.secretsKey.name` | Secret holding 32-byte encryption key. | `""` |
 | `controller.pool.enabled` | Enable warm-PVC pool (needs RBAC). | `true` |
-| `controller.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. | `[]` |
+| `controller.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. Include the web pod's source, or dashboard logins all share one budget; when the pod IP is unknown, use the cluster pod CIDR. | `[]` |
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
 
 ### Web
