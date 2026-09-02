@@ -165,7 +165,7 @@ func resolveRemoteBinary(sparkwingDir, gcURL, token string, logger *slog.Logger)
 	compiled := false
 	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
 		if gcURL != "" {
-			if fetchErr := bincache.TryBinary(gcURL, key, tempPath); fetchErr == nil {
+			if fetchErr := bincache.TryBinary(gcURL, token, key, tempPath); fetchErr == nil {
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
 				logger.Warn("runNodeRemote: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)

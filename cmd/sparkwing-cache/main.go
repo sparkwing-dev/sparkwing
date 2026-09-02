@@ -51,7 +51,10 @@ func run(args []string) error {
 		"cleanup threshold for immutable proxy entries (content-addressed files). Falls back to $PROXY_MAX_AGE.")
 	fs.StringVar(&cfg.APIToken, "api-token",
 		envOr("SPARKWING_API_TOKEN", cfg.APIToken),
-		"bearer token required on external write endpoints. Empty disables auth. Falls back to $SPARKWING_API_TOKEN.")
+		"bearer token required on the blob and sync endpoints. Required unless --allow-unauthenticated is set. Falls back to $SPARKWING_API_TOKEN.")
+	fs.BoolVar(&cfg.AllowUnauthenticated, "allow-unauthenticated",
+		envBool("SPARKWING_CACHE_ALLOW_UNAUTHENTICATED", cfg.AllowUnauthenticated),
+		"start without a bearer token, leaving the blob and sync endpoints open to anyone who can reach the port. Falls back to $SPARKWING_CACHE_ALLOW_UNAUTHENTICATED.")
 	fs.StringVar(&cfg.AutoRegisterRepos, "auto-register-repos",
 		envOr("GITCACHE_REPOS", cfg.AutoRegisterRepos),
 		"comma-separated name=url pairs cloned into the gitcache on startup. Falls back to $GITCACHE_REPOS.")
@@ -76,6 +79,15 @@ func run(args []string) error {
 func envOr(name, fallback string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envBool(name string, fallback bool) bool {
+	if v := os.Getenv(name); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
 	}
 	return fallback
 }

@@ -113,6 +113,9 @@ func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error) {
 // If the archive records a different WorkDir than the running one,
 // RestoreLintCache returns ErrLintCacheWorkdirMismatch rather than
 // silently expanding paths from another tree.
+//
+// The blob store authenticates reads as well as writes, so the request
+// carries $SPARKWING_CACHE_TOKEN as its bearer when that variable is set.
 func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error) {
 	if gcURL == "" {
 		return false, 0, nil
@@ -122,6 +125,9 @@ func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false, 0, err
+	}
+	if token := os.Getenv("SPARKWING_CACHE_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	cli := &http.Client{Timeout: 10 * time.Minute}

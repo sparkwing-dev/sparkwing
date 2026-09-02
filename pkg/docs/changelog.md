@@ -80,6 +80,13 @@ code change to unlock.
 
 ### Security
 
+- **cache:** The cache no longer serves an authenticated endpoint to a request
+  that omits `X-Forwarded-For`, so `PUT /bin/<key>`, `PUT /cache/<key>`,
+  `POST /upload`, and the sync routes now require the bearer token from every
+  caller, in-cluster ones included. The service refuses to start without
+  `--api-token` unless `--allow-unauthenticated`
+  (`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`) is set, and cached-binary and
+  lint-cache reads now send `SPARKWING_CACHE_TOKEN`.
 - **ci:** A `security-scan` pipeline runs gosec, source-mode govulncheck,
   gitleaks, and `npm audit`, and the Security workflow runs it on every pull
   request with gosec findings uploaded to GitHub code scanning alongside CodeQL
