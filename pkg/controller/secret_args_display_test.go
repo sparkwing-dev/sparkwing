@@ -264,7 +264,7 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 	seedSecretArgRun(t, st, "run-1")
 
 	now := time.Now().UTC()
-	runnerTok, _, err := st.CreateToken("pod", store.TokenKindRunner,
+	runnerTok, runnerRow, err := st.CreateToken("pod", store.TokenKindRunner,
 		[]string{"nodes.claim", "runs.read"}, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken runner: %v", err)
@@ -292,7 +292,7 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 	if err := st.MarkNodeReady(ctx, "run-1", "only"); err != nil {
 		t.Fatalf("MarkNodeReady: %v", err)
 	}
-	if _, err := st.ClaimNextReadyNode(ctx, "pod", "holder-1", time.Minute, nil); err != nil {
+	if _, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "pod", TokenPrefix: runnerRow.Prefix}, "holder-1", time.Minute, nil); err != nil {
 		t.Fatalf("ClaimNextReadyNode: %v", err)
 	}
 
@@ -353,4 +353,46 @@ func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
 		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"+q))
 	assertRedactedResponse(t, "GET /api/v1/runs/{id}/receipt"+q,
 		getBody(t, srv.URL+"/api/v1/runs/run-1/receipt"+q))
+}
+
+func TestSecretArgs_ExecutionViewFollowsTheAuthMode(t *testing.T) {
+	t.Run("auth disabled serves plaintext", func(t *testing.T) {
+		st, srv := secretArgController(t)
+		seedSecretArgRun(t, st, "run-1")
+		body := getBody(t, srv.URL+"/api/v1/runs/run-1?include="+store.IncludeSecretValues)
+		if !strings.Contains(body, ctlSecretValue) {
+			t.Errorf("an unauthenticated controller redacted the execution view:\n%s", body)
+		}
+	})
+
+	t.Run("auth enabled refuses an anonymous caller", func(t *testing.T) {
+		st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
+		if _, _, err := st.CreateToken("ops", store.TokenKindUser,
+			[]string{"admin"}, 0, time.Now().UTC()); err != nil {
+			t.Fatalf("CreateToken: %v", err)
+		}
+		seedSecretArgRun(t, st, "run-1")
+		srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+		t.Cleanup(srv.Close)
+
+		resp, err := http.Get(srv.URL + "/api/v1/runs/run-1?include=" + store.IncludeSecretValues)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("anonymous execution view = %d, want 401", resp.StatusCode)
+		}
+		if strings.Contains(string(body), ctlSecretValue) {
+			t.Errorf("anonymous execution view carried the secret arg value:\n%s", body)
+		}
+	})
 }

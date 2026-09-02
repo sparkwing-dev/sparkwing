@@ -182,7 +182,7 @@ func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			n, err := st.ClaimNextReadyNode(ctx, "runner-principal", fmt.Sprintf("h-%d", id), time.Minute, nil)
+			n, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, fmt.Sprintf("h-%d", id), time.Minute, nil)
 			mu.Lock()
 			defer mu.Unlock()
 			switch {

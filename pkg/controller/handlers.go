@@ -184,7 +184,9 @@ type secretValueGate func(*http.Request) bool
 func (s *Server) secretValuesAllowed(r *http.Request) bool {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {
-		return false
+		// safety: with auth off the whole API is open, and redacting here would
+		// feed runners "***" as a real argument value instead of failing.
+		return s.authMiddleware().AuthDisabled()
 	}
 	if p.HasScope(ScopeAdmin) {
 		return true
@@ -193,7 +195,7 @@ func (s *Server) secretValuesAllowed(r *http.Request) bool {
 		return false
 	}
 	// safety: a runner reads a run's credentials only while it holds a claim on one of its nodes.
-	held, err := s.store.PrincipalHoldsRunClaim(r.Context(), r.PathValue("id"), p.Name, time.Now())
+	held, err := s.store.PrincipalHoldsRunClaim(r.Context(), r.PathValue("id"), claimIdentity(r), time.Now())
 	return err == nil && held
 }
 
@@ -964,7 +966,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	n, err := s.store.ClaimNextReadyNode(r.Context(), principalName(r), body.HolderID, lease, body.Labels)
+	n, err := s.store.ClaimNextReadyNode(r.Context(), claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			w.WriteHeader(http.StatusNoContent)
@@ -1027,7 +1029,7 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	if err := s.store.HeartbeatNodeClaim(r.Context(), runID, nodeID, principalName(r), body.HolderID, lease); err != nil {
+	if err := s.store.HeartbeatNodeClaim(r.Context(), runID, nodeID, claimIdentity(r), body.HolderID, lease); err != nil {
 		if errors.Is(err, store.ErrLockHeld) {
 			writeError(w, http.StatusConflict, err)
 			return

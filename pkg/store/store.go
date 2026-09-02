@@ -519,7 +519,11 @@ CREATE TABLE IF NOT EXISTS nodes (
     claimed_by       TEXT,
     -- claim_principal: the authenticated principal the claim is bound
     -- to; '' when the controller served the claim unauthenticated.
+    -- Display only: two tokens may carry the same principal name.
     claim_principal  TEXT NOT NULL DEFAULT '',
+    -- claim_token_prefix: the claiming token's prefix segment. Unique
+    -- per token, so this is what the ownership predicates match on.
+    claim_token_prefix TEXT NOT NULL DEFAULT '',
     lease_expires_at INTEGER,
     -- needs_labels: JSON []string from RunsOn; AND semantics.
     needs_labels     BLOB,
@@ -1379,18 +1383,19 @@ var columnMigrations = []columnSpec{
 		"summary":          "TEXT NOT NULL DEFAULT ''",
 	}},
 	{"nodes", map[string]string{
-		"ready_at":          "INTEGER",
-		"claimed_by":        "TEXT",
-		"claim_principal":   "TEXT NOT NULL DEFAULT ''",
-		"lease_expires_at":  "INTEGER",
-		"needs_labels":      "BLOB",
-		"status_detail":     "TEXT NOT NULL DEFAULT ''",
-		"last_heartbeat":    "INTEGER",
-		"failure_reason":    "TEXT NOT NULL DEFAULT ''",
-		"exit_code":         "INTEGER",
-		"annotations_json":  "BLOB",
-		"summary":           "TEXT NOT NULL DEFAULT ''",
-		"artifact_manifest": "TEXT NOT NULL DEFAULT ''",
+		"ready_at":           "INTEGER",
+		"claimed_by":         "TEXT",
+		"claim_principal":    "TEXT NOT NULL DEFAULT ''",
+		"claim_token_prefix": "TEXT NOT NULL DEFAULT ''",
+		"lease_expires_at":   "INTEGER",
+		"needs_labels":       "BLOB",
+		"status_detail":      "TEXT NOT NULL DEFAULT ''",
+		"last_heartbeat":     "INTEGER",
+		"failure_reason":     "TEXT NOT NULL DEFAULT ''",
+		"exit_code":          "INTEGER",
+		"annotations_json":   "BLOB",
+		"summary":            "TEXT NOT NULL DEFAULT ''",
+		"artifact_manifest":  "TEXT NOT NULL DEFAULT ''",
 	}},
 	{"runs", map[string]string{
 		"parent_run_id":     "TEXT",
@@ -2790,14 +2795,13 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 // Label-mismatched candidates have their ready_at bumped 1us so they
 // don't starve the FIFO queue.
 //
-// principal is the authenticated identity the claim answers to;
+// claimant is the authenticated token the claim answers to;
 // [Store.PrincipalHoldsNodeClaim] and [Store.HeartbeatNodeClaim] admit
-// only that identity afterwards. Pass "" when the caller is
-// unauthenticated, which leaves the claim unbound.
-func (s *Store) ClaimNextReadyNode(ctx context.Context, principal, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
-	if lease <= 0 {
-		lease = DefaultLeaseDuration
-	}
+// only that token afterwards. Pass the zero value when the caller is
+// unauthenticated, which leaves the claim unbound. lease is clamped to
+// [MaxLeaseDuration].
+func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
+	lease = clampNodeLease(lease)
 	labelSet := make(map[string]struct{}, len(runnerLabels))
 	for _, l := range runnerLabels {
 		if l != "" {
@@ -2851,9 +2855,10 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 		expires := now.Add(lease)
 		if _, err := tx.ExecContext(
 			ctx,
-			`UPDATE nodes SET claimed_by = ?, claim_principal = ?, lease_expires_at = ?
+			`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
+			        lease_expires_at = ?
 			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
-			holderID, principal, expires.UnixNano(), n.RunID, n.NodeID,
+			holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(), n.RunID, n.NodeID,
 		); err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -2915,19 +2920,18 @@ func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) er
 }
 
 // HeartbeatNodeClaim extends the claim lease; ErrLockHeld when the
-// caller no longer owns the claim. Both the principal the claim was
-// bound to and the holder id it was taken under must match.
-func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, principal, holderID string, lease time.Duration) error {
-	if lease <= 0 {
-		lease = DefaultLeaseDuration
-	}
-	expires := time.Now().Add(lease).UnixNano()
+// caller no longer owns the claim. The token the claim was bound to and
+// the holder id it was taken under must both match. lease is clamped to
+// [MaxLeaseDuration], so a heartbeat cannot outrun the claim cap.
+func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error {
+	expires := time.Now().Add(clampNodeLease(lease)).UnixNano()
 	res, err := s.exec(
 		ctx,
 		`UPDATE nodes SET lease_expires_at = ?
 		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
-		    AND COALESCE(claim_principal, '') = ?`,
-		expires, runID, nodeID, holderID, principal,
+		    AND COALESCE(claim_principal, '') = ?
+		    AND COALESCE(claim_token_prefix, '') = ?`,
+		expires, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
 	)
 	if err != nil {
 		return err
@@ -2945,37 +2949,39 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, principal
 const nodeClaimLiveSQL = `claimed_by IS NOT NULL
 		    AND lease_expires_at IS NOT NULL AND lease_expires_at > ?`
 
-// PrincipalHoldsNodeClaim reports whether principal holds the node's
-// unexpired claim. An empty principal holds nothing, so an
+// PrincipalHoldsNodeClaim reports whether claimant holds the node's
+// unexpired claim. An unbound claimant holds nothing, so an
 // unauthenticated caller never passes this check.
-func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID, principal string, now time.Time) (bool, error) {
-	if principal == "" {
+func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, now time.Time) (bool, error) {
+	if !claimant.bound() {
 		return false, nil
 	}
 	var held int
 	err := s.queryRow(ctx,
 		`SELECT COUNT(*) FROM nodes
 		  WHERE run_id = ? AND node_id = ? AND claim_principal = ?
+		    AND claim_token_prefix = ?
 		    AND `+nodeClaimLiveSQL,
-		runID, nodeID, principal, now.UnixNano()).Scan(&held)
+		runID, nodeID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
 	if err != nil {
 		return false, err
 	}
 	return held > 0, nil
 }
 
-// PrincipalHoldsRunClaim reports whether principal holds an unexpired
-// claim on any node of the run. An empty principal holds nothing.
-func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID, principal string, now time.Time) (bool, error) {
-	if principal == "" {
+// PrincipalHoldsRunClaim reports whether claimant holds an unexpired
+// claim on any node of the run. An unbound claimant holds nothing.
+func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error) {
+	if !claimant.bound() {
 		return false, nil
 	}
 	var held int
 	err := s.queryRow(ctx,
 		`SELECT COUNT(*) FROM nodes
 		  WHERE run_id = ? AND claim_principal = ?
+		    AND claim_token_prefix = ?
 		    AND `+nodeClaimLiveSQL,
-		runID, principal, now.UnixNano()).Scan(&held)
+		runID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
 	if err != nil {
 		return false, err
 	}
@@ -3017,7 +3023,8 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 		return nil, nil
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', lease_expires_at = NULL
+		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
+		        lease_expires_at = NULL
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {
@@ -3067,7 +3074,8 @@ UPDATE nodes
    SET `+nodeFailSet+`,
        error = 'runner heartbeat expired',
        failure_reason = ?, finished_at = ?,
-       claimed_by = NULL, claim_principal = '', lease_expires_at = NULL
+       claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
+       lease_expires_at = NULL
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			FailureAgentLost, now, p[0], p[1]); err != nil {
 			return nil, err
@@ -3444,6 +3452,30 @@ type Trigger struct {
 // DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
 // CPU-bound pauses; short enough to re-queue dead runners.
 const DefaultLeaseDuration = 3 * time.Minute
+
+// MaxLeaseDuration caps the lease a claimant may ask for. The claim is
+// an authorization window, so the claimant must not pick how long its
+// own access lasts; longer requests are clamped, not rejected, because
+// a heartbeat renews well inside the cap.
+const MaxLeaseDuration = 10 * time.Minute
+
+// safety: an unbounded lease would make a claim an unreapable, permanent grant.
+func clampNodeLease(lease time.Duration) time.Duration {
+	if lease <= 0 {
+		return DefaultLeaseDuration
+	}
+	return min(lease, MaxLeaseDuration)
+}
+
+// ClaimIdentity is the token a node claim answers to. TokenPrefix is
+// unique per token and is what the ownership predicates match on;
+// Principal is the display label, which two tokens may share.
+type ClaimIdentity struct {
+	Principal   string
+	TokenPrefix string
+}
+
+func (c ClaimIdentity) bound() bool { return c.TokenPrefix != "" }
 
 // CreateTrigger inserts a new trigger with status='pending'.
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {

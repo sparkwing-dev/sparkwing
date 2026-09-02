@@ -347,12 +347,13 @@ func requireScope(scope string, next http.Handler) http.Handler {
 	})
 }
 
-func principalName(r *http.Request) string {
+func claimIdentity(r *http.Request) store.ClaimIdentity {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {
-		return ""
+		return store.ClaimIdentity{}
 	}
-	return p.Name
+	// safety: the token prefix, not the shared principal label, is what binds a claim.
+	return store.ClaimIdentity{Principal: p.Name, TokenPrefix: p.TokenPrefix}
 }
 
 func (p *Principal) label() string {
