@@ -24,12 +24,12 @@ mapping is in the generated [api-reference.md](api-reference.md):
 |-------------------|---------------------------------------------------------------------------------------------------|
 | `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/trends`, `/agents`, per-node metrics GETs  |
 | `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`                                   |
-| `nodes.claim`     | POST `/nodes/claim`, `mark-ready`, `revoke-ready`, `heartbeat`; GET `nodes/{id}`, `nodes/{id}/output`, POST `/nodes/{nid}/metrics` |
+| `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, `revoke-ready`, and the per-node write routes (`activity`, `annotations`, `summary`, `steps/*`, `dispatch`, `metrics`, and similar); GET `nodes/{id}`, `nodes/{id}/output` |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`                               |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
-| `admin`           | tokens / users / secrets CRUD, run + node state mutation (create, start, finish, deps, events, delete), trigger lifecycle (claim, heartbeat, done), gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, run + node state mutation (create, start, finish, deps, events, delete, mark-ready), trigger lifecycle (claim, heartbeat, done), gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
@@ -38,6 +38,22 @@ A route can narrow a field below its route scope. The node dispatch reads
 (`GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and `/dispatches`) admit
 `runs.read`, but fill `env_json` only for an `admin` principal. Every reader
 still gets `redacted_keys`, the names the snapshot dropped as credentials.
+
+## Claim ownership
+
+Scope decides which routes a token may call; the claim decides which node it
+may write. `POST /api/v1/nodes/claim` binds the claim to the authenticated
+principal alongside the client-supplied `holder_id`. Afterwards the per-node
+write routes admit only that principal while the lease is unexpired: another
+runner token gets `403` with `"error": "claim_required"`, and
+`POST /runs/{id}/nodes/{nodeID}/heartbeat` answers `409` unless both the
+principal and the holder id match. `admin` bypasses the check, which is what
+lets a dispatcher mark a node ready, start it, and finish it.
+
+The execution view (`GET /api/v1/runs/{id}?include=secret_values`) follows the
+same rule: it returns plaintext argument values to an `admin` principal, or to
+a `nodes.claim` principal holding an unexpired claim on one of the run's nodes.
+A controller serving unauthenticated returns the redacted view.
 
 Token creation validates scopes against that same set: a scope the
 controller does not honor is rejected with a `400` naming the offending

@@ -514,6 +514,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     -- All NULL on laptop / K8sRunner paths.
     ready_at         INTEGER,
     claimed_by       TEXT,
+    -- claim_principal: the authenticated principal the claim is bound
+    -- to; '' when the controller served the claim unauthenticated.
+    claim_principal  TEXT NOT NULL DEFAULT '',
     lease_expires_at INTEGER,
     -- needs_labels: JSON []string from RunsOn; AND semantics.
     needs_labels     BLOB,
@@ -1367,6 +1370,7 @@ var columnMigrations = []columnSpec{
 	{"nodes", map[string]string{
 		"ready_at":          "INTEGER",
 		"claimed_by":        "TEXT",
+		"claim_principal":   "TEXT NOT NULL DEFAULT ''",
 		"lease_expires_at":  "INTEGER",
 		"needs_labels":      "BLOB",
 		"status_detail":     "TEXT NOT NULL DEFAULT ''",
@@ -2761,11 +2765,17 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 }
 
 // ClaimNextReadyNode flips the oldest claimable node to holderID with
-// a fresh lease. Claimable = ready_at set, unclaimed, !done, and
-// every needs_labels entry appears in runnerLabels. ErrNotFound when
-// no candidate matches. Label-mismatched candidates have their
-// ready_at bumped 1us so they don't starve the FIFO queue.
-func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
+// a fresh lease, bound to principal. Claimable = ready_at set,
+// unclaimed, !done, and every needs_labels entry appears in
+// runnerLabels. ErrNotFound when no candidate matches.
+// Label-mismatched candidates have their ready_at bumped 1us so they
+// don't starve the FIFO queue.
+//
+// principal is the authenticated identity the claim answers to;
+// [Store.PrincipalHoldsNodeClaim] and [Store.HeartbeatNodeClaim] admit
+// only that identity afterwards. Pass "" when the caller is
+// unauthenticated, which leaves the claim unbound.
+func (s *Store) ClaimNextReadyNode(ctx context.Context, principal, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
@@ -2822,9 +2832,9 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 		expires := now.Add(lease)
 		if _, err := tx.ExecContext(
 			ctx,
-			`UPDATE nodes SET claimed_by = ?, lease_expires_at = ?
+			`UPDATE nodes SET claimed_by = ?, claim_principal = ?, lease_expires_at = ?
 			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
-			holderID, expires.UnixNano(), n.RunID, n.NodeID,
+			holderID, principal, expires.UnixNano(), n.RunID, n.NodeID,
 		); err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -2886,8 +2896,9 @@ func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) er
 }
 
 // HeartbeatNodeClaim extends the claim lease; ErrLockHeld when the
-// caller no longer owns the claim.
-func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) error {
+// caller no longer owns the claim. Both the principal the claim was
+// bound to and the holder id it was taken under must match.
+func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, principal, holderID string, lease time.Duration) error {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
@@ -2895,8 +2906,9 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID 
 	res, err := s.exec(
 		ctx,
 		`UPDATE nodes SET lease_expires_at = ?
-		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?`,
-		expires, runID, nodeID, holderID,
+		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
+		    AND COALESCE(claim_principal, '') = ?`,
+		expires, runID, nodeID, holderID, principal,
 	)
 	if err != nil {
 		return err
@@ -2909,6 +2921,46 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID 
 		return ErrLockHeld
 	}
 	return nil
+}
+
+const nodeClaimLiveSQL = `claimed_by IS NOT NULL
+		    AND lease_expires_at IS NOT NULL AND lease_expires_at > ?`
+
+// PrincipalHoldsNodeClaim reports whether principal holds the node's
+// unexpired claim. An empty principal holds nothing, so an
+// unauthenticated caller never passes this check.
+func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID, principal string, now time.Time) (bool, error) {
+	if principal == "" {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM nodes
+		  WHERE run_id = ? AND node_id = ? AND claim_principal = ?
+		    AND `+nodeClaimLiveSQL,
+		runID, nodeID, principal, now.UnixNano()).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
+}
+
+// PrincipalHoldsRunClaim reports whether principal holds an unexpired
+// claim on any node of the run. An empty principal holds nothing.
+func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID, principal string, now time.Time) (bool, error) {
+	if principal == "" {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM nodes
+		  WHERE run_id = ? AND claim_principal = ?
+		    AND `+nodeClaimLiveSQL,
+		runID, principal, now.UnixNano()).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
 }
 
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
@@ -2946,7 +2998,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 		return nil, nil
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET claimed_by = NULL, lease_expires_at = NULL
+		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', lease_expires_at = NULL
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {
@@ -2996,7 +3048,7 @@ UPDATE nodes
    SET `+nodeFailSet+`,
        error = 'runner heartbeat expired',
        failure_reason = ?, finished_at = ?,
-       claimed_by = NULL, lease_expires_at = NULL
+       claimed_by = NULL, claim_principal = '', lease_expires_at = NULL
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			FailureAgentLost, now, p[0], p[1]); err != nil {
 			return nil, err

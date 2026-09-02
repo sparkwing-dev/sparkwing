@@ -40,6 +40,12 @@ func newBounceTestServer(t *testing.T) (*Server, string, *store.Store) {
 	if err := st.StartNode(ctx, "run-1", "build"); err != nil {
 		t.Fatalf("StartNode: %v", err)
 	}
+	if err := st.MarkNodeReady(ctx, "run-1", "build"); err != nil {
+		t.Fatalf("MarkNodeReady: %v", err)
+	}
+	if _, err := st.ClaimNextReadyNode(ctx, "alice", "holder-1", time.Minute, nil); err != nil {
+		t.Fatalf("ClaimNextReadyNode: %v", err)
+	}
 	return New(st, nil).WithAuthenticator(NewAuthenticator(st, 0)), raw, st
 }
 

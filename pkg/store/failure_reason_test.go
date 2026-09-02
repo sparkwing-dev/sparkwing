@@ -121,7 +121,7 @@ func TestFailExpiredNodeClaims_TerminatesWithAgentLost(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimNextReadyNode(ctx, "pod-dead", 1*time.Millisecond, nil); err != nil {
+	if _, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-dead", 1*time.Millisecond, nil); err != nil {
 		t.Fatal(err)
 	}
 	expireNodeClaim(t, s, "run-1", "node-a")
@@ -199,7 +199,7 @@ func TestFailStaleQueuedNodes_SkipsClaimedAndFresh(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "claimed"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, nil); err != nil {
+	if _, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 30*time.Second, nil); err != nil {
 		t.Fatal(err)
 	}
 

@@ -49,6 +49,18 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Security
+
+- **controller (Breaking):** A node claim now binds to the authenticated
+  principal as well as to the client-supplied `holder_id`, and the per-node
+  write routes admit only the runner holding that unexpired claim. A
+  `nodes.claim` token can no longer write another runner's node, stamp
+  `ready_at` (now `admin`, so a runner cannot skip a node's dependencies), or
+  read a run's plaintext secret arguments without a claim on one of its nodes;
+  an unauthenticated controller serves the redacted view. Runner tokens
+  claiming their own work are unaffected. See the
+  [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-principal).
+
 ## [v0.39.0] - 2026-09-02
 ### Docs
 
