@@ -51,7 +51,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 			}
 		}
 		if gcURL := bincache.CacheURL(); gcURL != "" {
-			if fetchErr := bincache.TryBinary(gcURL, key, tempPath); fetchErr == nil {
+			if fetchErr := bincache.TryBinary(gcURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
 				source = "gitcache"
 				return nil
 			}

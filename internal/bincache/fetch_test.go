@@ -2,6 +2,7 @@ package bincache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/cgi"
@@ -550,7 +551,7 @@ func TestTryBinary_DoesNotInstallRedirectedContent(t *testing.T) {
 	}))
 	defer source.Close()
 	dest := filepath.Join(t.TempDir(), "pipeline")
-	err := TryBinary(source.URL, "deadbeef-cafebabe", dest)
+	err := TryBinary(source.URL, "", "deadbeef-cafebabe", dest)
 	if err == nil || !strings.Contains(err.Error(), "307") {
 		t.Fatalf("error = %v, want redirect rejection", err)
 	}
@@ -559,5 +560,33 @@ func TestTryBinary_DoesNotInstallRedirectedContent(t *testing.T) {
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
 		t.Fatalf("redirected binary was installed: %v", err)
+	}
+}
+
+func TestTryBinary_SendsTokenAsBearer(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		token string
+		want  string
+	}{
+		{name: "token", token: "cache-token", want: "Bearer cache-token"},
+		{name: "no token", token: "", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var authz string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authz = r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer srv.Close()
+
+			dest := filepath.Join(t.TempDir(), "pipeline")
+			if err := TryBinary(srv.URL, tc.token, "deadbeef-cafebabe", dest); !errors.Is(err, ErrMiss) {
+				t.Fatalf("error = %v, want ErrMiss", err)
+			}
+			if authz != tc.want {
+				t.Fatalf("Authorization = %q, want %q", authz, tc.want)
+			}
+		})
 	}
 }
