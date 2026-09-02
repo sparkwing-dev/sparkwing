@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"maps"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"

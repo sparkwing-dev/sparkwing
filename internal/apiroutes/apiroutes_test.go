@@ -58,7 +58,7 @@ func (s *Server) routes() {
 	log.Printf("not a route")
 }
 `)
-	scopes := map[string]string{"ScopeRunsState": "runs.state", "ScopeRunsRead": "runs.read", "ScopeTriggersRead": "triggers.read"}
+	scopes := map[string]string{"ScopeRunsState": "runs.state", "ScopeRunsRead": "runs.read", "ScopeTriggersRead": "triggers.read", "ScopeNodesClaim": "nodes.claim", "ScopeTriggersClaim": "triggers.claim"}
 	got, err := Parse(src, scopes)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func (s *Server) routes() {
 		{Method: "GET", Path: "/api/v1/health", Scope: Public},
 		{Method: "POST", Path: "/api/v1/runs", Scope: "runs.state"},
 		{Method: "GET", Path: "/api/v1/runs/{id}", Scope: "runs.read"},
-		{Method: "GET", Path: "/api/v1/triggers/{id}", Scope: "triggers.read"},
+		{Method: "GET", Path: "/api/v1/triggers/{id}", Scope: "triggers.read` or `nodes.claim` or `triggers.claim"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("routes = %v, want %v", got, want)
