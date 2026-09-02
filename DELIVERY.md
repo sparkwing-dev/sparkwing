@@ -30,31 +30,52 @@ this file is a menu and checklist, not a command that every change must run.
   API fixtures on OS-assigned local ports and does not replace that product
   exercise or exercise Kubernetes.
 - **Template verification proofs:** `template-verify` scaffolds, builds, lints,
-  and explains all 39 registry templates, and runs the runnable ones. A local
+  and explains all 37 registry templates, and runs the runnable ones. A local
   run reuses a recorded proof for any template whose proof inputs are
   byte-identical to a previous pass. The digest covers, in one hash per
   template: the template's registry files (every file under its directory in
   the embedded `templates.FS`); the manifest's verification fields (tier,
-  fixture, `verify_params`, `verify_tools`); the exact working state of the
-  sparkwing checkout, which is what supplies the SDK every scaffold replaces,
-  the CLI each step invokes, and this verifier's own source; the same for the
-  local sparks-core checkout; `go env GOVERSION GOOS GOARCH`; and the resolved
-  path and `--version` output of every host tool the template's fixture and
-  `verify_tools` need, so a proof recorded while Docker was absent is not
-  reused once it is present. A proof-format constant sits in the same hash, so
-  widening or narrowing that list invalidates every recorded proof.
+  fixture, `verify_params`, `verify_tools`); the state of the sparkwing
+  checkout, which is what supplies the SDK every scaffold replaces, the CLI
+  each step invokes, and this verifier's own source; the same for the local
+  sparks-core checkout; `go env GOVERSION GOOS GOARCH`; and the resolved path
+  and `--version` output of every host tool the template's fixture and
+  `verify_tools` need, plus, for Docker, whether the daemon actually answers
+  `docker info`, because the binary being on PATH is not what the run step
+  needs. A proof-format constant sits in the same hash, so widening or
+  narrowing that list invalidates every recorded proof.
+
+  A checkout's state means `git rev-parse HEAD`, `git diff --binary HEAD`, and
+  the contents of every non-ignored untracked file, plus two gitignored inputs
+  that change what gets verified and would otherwise be invisible: `go.work`
+  (which steers the plain `go build` that produces the verify CLI, and the
+  sparks-core discovery that pins a scaffold's modules) and
+  `internal/web/next-out` (embedded into that CLI). Any other gitignored file
+  that reaches a build is outside the digest; add it to that list when one
+  appears.
 
   Reuse is fail-closed. Any input that cannot be established refuses reuse and
   verifies the template again: a checkout that is not a git repository, an
-  unreadable untracked file, a template that will not digest, and in
-  particular the absence of a local sparks-core checkout, because without one a
-  scaffold's `go mod tidy` resolves published module versions that no digest
-  covers. Reuse never changes the plan: every template keeps its node, and the
-  decision is made inside it, so a digest miss cannot be lost in plan shaping.
-  Third-party module resolution is outside the digest either way, which is the
-  standing reason the boundary stays exhaustive: the release pipeline passes
-  `--exhaustive`, and so should any manual run being used as a release proof.
-  Recorded proofs live under the user cache directory, one file per digest.
+  unreadable untracked file or build input, a template that will not digest,
+  and in particular the absence of a local sparks-core checkout, because
+  without one a scaffold's `go mod tidy` resolves published module versions
+  that no digest covers. A partial verification is never recorded: when a
+  runnable template's toolchain is missing the run step is skipped, the gate
+  stays green, and no proof is written, so the template is verified again once
+  the toolchain appears. Reuse never changes the plan: every template keeps its
+  node, and the decision is made inside it, so a digest miss cannot be lost in
+  plan shaping. Third-party module resolution is outside the digest either way,
+  which is the standing reason the boundary stays exhaustive: the release
+  pipeline passes `--exhaustive`, and so should any manual run being used as a
+  release proof.
+
+  Recorded proofs live in `template-verify-proofs/` under the sparkwing
+  directory of the OS user cache directory (`~/Library/Caches/sparkwing` on
+  macOS, `${XDG_CACHE_HOME:-~/.cache}/sparkwing` on Linux), one JSON file per
+  digest naming the template, its tier, and whether the run step executed. A
+  file that does not parse or carries another proof format is ignored, writes
+  are atomic, and recording prunes anything older than 14 days. Delete the
+  directory to force full verification without `--exhaustive`.
 
 - **Kubernetes product path:** `sparkwing run k8s-e2e` proves authenticated
   webhook intake, runner execution, logs, cancellation, retry, restarts, and

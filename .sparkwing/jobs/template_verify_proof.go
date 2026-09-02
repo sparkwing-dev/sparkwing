@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -13,7 +14,9 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -168,13 +171,24 @@ func fixtureTools(fixture string) []string {
 func toolIdentity(ctx context.Context, tool string) string {
 	bin, err := exec.LookPath(tool)
 	if err != nil {
-		return "absent"
+		return toolReachability(ctx, tool, "absent")
 	}
 	res, err := sparkwing.Exec(ctx, bin, "--version").Capture()
 	if err != nil {
-		return "present:" + bin
+		return toolReachability(ctx, tool, "present:"+bin)
 	}
-	return bin + ":" + strings.TrimSpace(res.Stdout)
+	return toolReachability(ctx, tool, bin+":"+strings.TrimSpace(res.Stdout))
+}
+
+// safety: the docker binary being on PATH says nothing about the daemon the
+// run step actually needs, so the same probe the run step gates on goes into
+// the digest. Without it a proof taken while the daemon was down would be
+// reused once it came up.
+func toolReachability(ctx context.Context, tool, identity string) string {
+	if tool != "docker" {
+		return identity
+	}
+	return identity + ":daemon=" + strconv.FormatBool(dockerAvailable(ctx))
 }
 
 func checkoutDigest(ctx context.Context, dir string) (string, error) {
@@ -203,7 +217,64 @@ func checkoutDigest(ctx context.Context, dir string) (string, error) {
 		}
 		hashField(h, "untracked:"+rel, body)
 	}
+	for _, rel := range ignoredBuildInputs {
+		if err := hashPathOrAbsent(h, rel, filepath.Join(dir, rel)); err != nil {
+			return "", err
+		}
+	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// safety: git ignores both of these and both change what gets verified. go.work
+// steers the plain `go build` that produces the verify CLI and the sparks-core
+// discovery that pins a scaffold's modules; internal/web/next-out is embedded
+// into that CLI.
+var ignoredBuildInputs = []string{"go.work", filepath.Join("internal", "web", "next-out")}
+
+func hashPathOrAbsent(h io.Writer, name, target string) error {
+	info, err := os.Stat(target)
+	if errors.Is(err, os.ErrNotExist) {
+		hashField(h, name, []byte("absent"))
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", name, err)
+	}
+	if !info.IsDir() {
+		body, err := os.ReadFile(target)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", name, err)
+		}
+		hashField(h, name, body)
+		return nil
+	}
+	var rels []string
+	if err := filepath.WalkDir(target, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(target, p)
+		if relErr != nil {
+			return relErr
+		}
+		rels = append(rels, rel)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("walk %s: %w", name, err)
+	}
+	sort.Strings(rels)
+	hashField(h, name, fmt.Appendf(nil, "dir:%d", len(rels)))
+	for _, rel := range rels {
+		body, err := os.ReadFile(filepath.Join(target, rel))
+		if err != nil {
+			return fmt.Errorf("read %s/%s: %w", name, rel, err)
+		}
+		hashField(h, name+":"+filepath.ToSlash(rel), body)
+	}
+	return nil
 }
 
 func toolchainDigest(ctx context.Context) (string, error) {
@@ -261,14 +332,73 @@ func proofDir() (string, error) {
 	return filepath.Join(base, "sparkwing", "template-verify-proofs"), nil
 }
 
-func proofRecorded(dir, digest string) bool {
-	_, err := os.Stat(filepath.Join(dir, digest))
-	return err == nil
+const proofRetention = 14 * 24 * time.Hour
+
+type proofRecord struct {
+	Format     int       `json:"format"`
+	Template   string    `json:"template"`
+	Tier       string    `json:"tier"`
+	RanRunStep bool      `json:"ran_run_step"`
+	RecordedAt time.Time `json:"recorded_at"`
 }
 
-func recordProof(dir, digest, name string) error {
+func proofRecorded(dir, digest string) bool {
+	if digest == "" || dir == "" {
+		return false
+	}
+	body, err := os.ReadFile(filepath.Join(dir, digest))
+	if err != nil {
+		return false
+	}
+	var rec proofRecord
+	if err := json.Unmarshal(body, &rec); err != nil {
+		return false
+	}
+	return rec.Format == proofFormat
+}
+
+func recordProof(dir, digest string, rec proofRecord) error {
+	if digest == "" {
+		return errors.New("refusing to record a proof without a digest")
+	}
+	rec.Format = proofFormat
+	rec.RecordedAt = time.Now().UTC()
+	body, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, digest), []byte(name+"\n"), 0o600)
+	pruneProofs(dir, time.Now())
+	tmp, err := os.CreateTemp(dir, digest+".*.tmp")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), filepath.Join(dir, digest))
+}
+
+func pruneProofs(dir string, now time.Time) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil || now.Sub(info.ModTime()) <= proofRetention {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, e.Name()))
+	}
 }

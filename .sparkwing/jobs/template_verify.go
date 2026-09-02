@@ -242,17 +242,40 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 			sparkwing.Annotate(ctx, fmt.Sprintf("%s: reused a recorded proof; every input digest matched", m.Name))
 			return nil
 		}
-		if err := verifyTemplate(ctx, m, env); err != nil {
+		outcome, err := verifyTemplate(ctx, m, env)
+		if err != nil {
 			return err
 		}
-		if digest == "" {
-			return nil
-		}
-		if err := recordProof(dir, digest, m.Name); err != nil {
-			sparkwing.Info(ctx, "%s: proof not recorded, so the next run verifies again: %v", m.Name, err)
-		}
+		recordVerification(ctx, dir, digest, m.Name, outcome)
 		return nil
 	}
+}
+
+// safety: a skipped run step is a partial verification, so it is never
+// recorded. Reusing one would let the next run treat a template that has
+// never executed as proven once its toolchain appeared.
+func recordVerification(ctx context.Context, dir, digest, name string, outcome templateOutcome) {
+	if digest == "" {
+		return
+	}
+	if outcome.Skipped {
+		sparkwing.Info(ctx, "%s: proof not recorded because %s was unavailable and the run step did not execute; the next run verifies it again",
+			name, outcome.SkipReason)
+		return
+	}
+	if err := recordProof(dir, digest, proofRecord{Template: name, Tier: outcome.Tier, RanRunStep: outcome.RanRunStep}); err != nil {
+		sparkwing.Info(ctx, "%s: proof not recorded, so the next run verifies again: %v", name, err)
+	}
+}
+
+// safety: Skipped marks a tier whose run step could not execute. That is a
+// partial proof, and recording it would let the next run reuse it once the
+// missing toolchain appeared.
+type templateOutcome struct {
+	Tier       string
+	RanRunStep bool
+	Skipped    bool
+	SkipReason string
 }
 
 // safety: every failure to establish an input returns no reuse and no digest,
@@ -274,11 +297,12 @@ func reusableProof(ctx context.Context, env proofEnv, m templates.Manifest) (dig
 	return digest, dir, proofRecorded(dir, digest)
 }
 
-func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) error {
+func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) (templateOutcome, error) {
+	out := templateOutcome{Tier: m.Tier()}
 	bin := env.CLI
 	scratch, err := os.MkdirTemp("", "sparkwing-tv-"+m.Name+"-*")
 	if err != nil {
-		return fmt.Errorf("%s: temp dir: %w", m.Name, err)
+		return out, fmt.Errorf("%s: temp dir: %w", m.Name, err)
 	}
 	defer func() { _ = os.RemoveAll(scratch) }()
 
@@ -287,42 +311,43 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) er
 		newArgs = append(newArgs, "--param", p)
 	}
 	if _, err := sparkwing.Exec(ctx, bin, newArgs...).Run(); err != nil {
-		return fmt.Errorf("%s: scaffold: %w", m.Name, err)
+		return out, fmt.Errorf("%s: scaffold: %w", m.Name, err)
 	}
 
 	dotSparkwing := filepath.Join(scratch, ".sparkwing")
 	if err := normalizeVerifyModulePath(dotSparkwing, m.Name); err != nil {
-		return fmt.Errorf("%s: normalize module path: %w", m.Name, err)
+		return out, fmt.Errorf("%s: normalize module path: %w", m.Name, err)
 	}
 	if err := pinLocalSparksCore(ctx, dotSparkwing, env.SparksCore); err != nil {
-		return fmt.Errorf("%s: pin sparks-core: %w", m.Name, err)
+		return out, fmt.Errorf("%s: pin sparks-core: %w", m.Name, err)
 	}
 	if err := pinLocalSparkwingSDK(ctx, dotSparkwing, env.Root); err != nil {
-		return fmt.Errorf("%s: pin sparkwing SDK: %w", m.Name, err)
+		return out, fmt.Errorf("%s: pin sparkwing SDK: %w", m.Name, err)
 	}
 	if _, err := sparkwing.Exec(ctx, "go", "build", "./...").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
-		return fmt.Errorf("%s: go build: %w", m.Name, err)
+		return out, fmt.Errorf("%s: go build: %w", m.Name, err)
 	}
 	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "lint", "-C", scratch, "--all").Run(); err != nil {
-		return fmt.Errorf("%s: lint: %w", m.Name, err)
+		return out, fmt.Errorf("%s: lint: %w", m.Name, err)
 	}
 	if _, err := sparkwing.Exec(ctx, bin, "pipeline", "explain", "--name", m.Name).Dir(scratch).Run(); err != nil {
-		return fmt.Errorf("%s: explain: %w", m.Name, err)
+		return out, fmt.Errorf("%s: explain: %w", m.Name, err)
 	}
 
 	switch m.Tier() {
 	case templates.VerifyCompileOnly:
 		sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained (compile-only)", m.Name))
-		return nil
+		return out, nil
 	case templates.VerifyRunnable, templates.VerifyDryRunnable:
 		if ready, missing := runToolchainReady(ctx, m); !ready {
 			sparkwing.Info(ctx, "%s: run SKIPPED -- %s not available on host; keeping gate green (compiled + linted + explained only)", m.Name, missing)
 			sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained; run skipped (%s unavailable)", m.Name, missing))
-			return nil
+			out.Skipped, out.SkipReason = true, missing
+			return out, nil
 		}
 		cleanup, runEnv, err := provisionFixture(ctx, scratch, m, env)
 		if err != nil {
-			return fmt.Errorf("%s: fixture: %w", m.Name, err)
+			return out, fmt.Errorf("%s: fixture: %w", m.Name, err)
 		}
 		defer cleanup()
 		runCmd := sparkwing.Exec(ctx, bin, "run", m.Name).
@@ -339,12 +364,13 @@ func verifyTemplate(ctx context.Context, m templates.Manifest, env verifyEnv) er
 			runCmd = runCmd.Env(k, runEnv[k])
 		}
 		if _, err := runCmd.Run(); err != nil {
-			return fmt.Errorf("%s: run: %w", m.Name, err)
+			return out, fmt.Errorf("%s: run: %w", m.Name, err)
 		}
 		sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained + %s", m.Name, mode))
-		return nil
+		out.RanRunStep = true
+		return out, nil
 	default:
-		return fmt.Errorf("%s: unknown verify tier %q", m.Name, m.Tier())
+		return out, fmt.Errorf("%s: unknown verify tier %q", m.Name, m.Tier())
 	}
 }
 

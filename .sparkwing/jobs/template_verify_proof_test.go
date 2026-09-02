@@ -2,11 +2,13 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
@@ -135,18 +137,25 @@ func seedGitCheckout(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "main.go"), "package main\n")
-	for _, args := range [][]string{
-		{"init", "--quiet"},
-		{"-c", "user.email=t@example.invalid", "-c", "user.name=t", "add", "-A"},
-		{"-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "--quiet", "-m", "seed"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
+	gitInTest(t, dir, "init", "--quiet")
+	commit(t, dir, "seed")
 	return dir
+}
+
+func commit(t *testing.T, dir, message string) {
+	t.Helper()
+	ident := []string{"-c", "user.email=t@example.invalid", "-c", "user.name=t"}
+	gitInTest(t, dir, append(ident, "add", "-A")...)
+	gitInTest(t, dir, append(ident, "commit", "--quiet", "-m", message)...)
+}
+
+func gitInTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
 }
 
 func write(t *testing.T, path, body string) {
@@ -211,7 +220,7 @@ func TestProofStoreOnlyMatchesARecordedDigest(t *testing.T) {
 	if proofRecorded(dir, "abc123") {
 		t.Fatal("an empty store matched a digest")
 	}
-	if err := recordProof(dir, "abc123", "lint-test-go"); err != nil {
+	if err := recordProof(dir, "abc123", proofRecord{Template: "lint-test-go", Tier: templates.VerifyRunnable, RanRunStep: true}); err != nil {
 		t.Fatalf("record proof: %v", err)
 	}
 	if !proofRecorded(dir, "abc123") {
@@ -219,5 +228,162 @@ func TestProofStoreOnlyMatchesARecordedDigest(t *testing.T) {
 	}
 	if proofRecorded(dir, "abc124") {
 		t.Fatal("a near-miss digest matched")
+	}
+
+	body, err := os.ReadFile(filepath.Join(dir, "abc123"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec proofRecord
+	if err := json.Unmarshal(body, &rec); err != nil {
+		t.Fatalf("proof body is not JSON: %v", err)
+	}
+	if rec.Format != proofFormat || rec.Template != "lint-test-go" || rec.Tier != templates.VerifyRunnable || !rec.RanRunStep || rec.RecordedAt.IsZero() {
+		t.Fatalf("proof body = %+v", rec)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("proof directory holds %d entries, want only the finished proof", len(entries))
+	}
+}
+
+func TestProofStoreRejectsUnusableRecords(t *testing.T) {
+	dir := t.TempDir()
+	if proofRecorded(dir, "") {
+		t.Fatal("an empty digest matched a proof")
+	}
+	if proofRecorded("", "abc123") {
+		t.Fatal("an empty directory matched a proof")
+	}
+	if err := recordProof(dir, "", proofRecord{Template: "lint-test-go"}); err == nil {
+		t.Fatal("recording without a digest succeeded")
+	}
+
+	write(t, filepath.Join(dir, "notjson"), "lint-test-go\n")
+	if proofRecorded(dir, "notjson") {
+		t.Fatal("a proof body that does not parse matched")
+	}
+	stale, err := json.Marshal(proofRecord{Format: proofFormat + 1, Template: "lint-test-go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "oldformat"), string(stale))
+	if proofRecorded(dir, "oldformat") {
+		t.Fatal("a proof from another input set matched")
+	}
+}
+
+func TestRecordProofPrunesExpiredProofs(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "expired")
+	write(t, old, "{}")
+	stale := time.Now().Add(-proofRetention - time.Hour)
+	if err := os.Chtimes(old, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	fresh := filepath.Join(dir, "recent")
+	write(t, fresh, "{}")
+
+	if err := recordProof(dir, "abc123", proofRecord{Template: "lint-test-go"}); err != nil {
+		t.Fatalf("record proof: %v", err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("an expired proof survived recording: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("a fresh proof was pruned: %v", err)
+	}
+}
+
+func TestToolReachabilityDistinguishesTheDockerDaemon(t *testing.T) {
+	ctx := context.Background()
+	other := toolReachability(ctx, "node", "/usr/bin/node:v22")
+	if other != "/usr/bin/node:v22" {
+		t.Fatalf("non-docker identity = %q, want it untouched", other)
+	}
+	got := toolReachability(ctx, "docker", "/usr/bin/docker:27")
+	if !strings.HasPrefix(got, "/usr/bin/docker:27:daemon=") {
+		t.Fatalf("docker identity = %q, want the daemon probe appended", got)
+	}
+	if !strings.HasSuffix(got, "true") && !strings.HasSuffix(got, "false") {
+		t.Fatalf("docker identity = %q, want a boolean reachability", got)
+	}
+}
+
+func TestCheckoutDigestCoversGitignoredBuildInputs(t *testing.T) {
+	ctx := context.Background()
+	dir := seedGitCheckout(t)
+	write(t, filepath.Join(dir, ".gitignore"), "go.work\ninternal/web/next-out/\n")
+	commit(t, dir, "ignore build inputs")
+
+	base, err := checkoutDigest(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	write(t, filepath.Join(dir, "go.work"), "go 1.26\n\nuse .\n")
+	withWork, err := checkoutDigest(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withWork == base {
+		t.Fatal("an ignored go.work left the checkout digest unchanged")
+	}
+
+	bundle := filepath.Join(dir, "internal", "web", "next-out")
+	if err := os.MkdirAll(bundle, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(bundle, "index.html"), "<title>a</title>")
+	withBundle, err := checkoutDigest(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withBundle == withWork {
+		t.Fatal("an ignored embedded web bundle left the checkout digest unchanged")
+	}
+
+	write(t, filepath.Join(bundle, "index.html"), "<title>b</title>")
+	changed, err := checkoutDigest(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == withBundle {
+		t.Fatal("editing the embedded web bundle left the checkout digest unchanged")
+	}
+}
+
+func TestSkippedRunStepIsNeverRecordedAsAProof(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	recordVerification(ctx, dir, "skipped-digest", "db-migrate-updown",
+		templateOutcome{Tier: templates.VerifyRunnable, Skipped: true, SkipReason: "docker daemon"})
+	if proofRecorded(dir, "skipped-digest") {
+		t.Fatal("a template whose run step was skipped recorded a proof")
+	}
+
+	recordVerification(ctx, dir, "ran-digest", "db-migrate-updown",
+		templateOutcome{Tier: templates.VerifyRunnable, RanRunStep: true})
+	if !proofRecorded(dir, "ran-digest") {
+		t.Fatal("a template that ran did not record a proof")
+	}
+
+	recordVerification(ctx, dir, "compile-digest", "lint-test-go",
+		templateOutcome{Tier: templates.VerifyCompileOnly})
+	if !proofRecorded(dir, "compile-digest") {
+		t.Fatal("a compile-only template, which has no run step to skip, did not record a proof")
+	}
+
+	recordVerification(ctx, dir, "", "lint-test-go", templateOutcome{Tier: templates.VerifyCompileOnly})
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("proof directory holds %d entries, want the two recordable proofs", len(entries))
 	}
 }

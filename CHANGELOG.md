@@ -399,10 +399,13 @@ code change to unlock.
   recorded proof for any template whose proof inputs are unchanged, and takes
   `--exhaustive` to verify everything regardless. The digest covers the
   template's registry files, its verification manifest fields, the exact
-  working state of the sparkwing and sparks-core checkouts, the Go toolchain,
-  and the identity of every host tool the template needs. Reuse is refused
-  whenever any input cannot be established, and the release pipeline always
-  runs the exhaustive proof. See DELIVERY.md for the input set.
+  state of the sparkwing and sparks-core checkouts (including the gitignored
+  `go.work` and embedded web bundle), the Go toolchain, and the identity of
+  every host tool the template needs, down to whether the Docker daemon
+  answers. Reuse is refused whenever any input cannot be established, a
+  template whose run step was skipped for a missing toolchain records no proof,
+  and the release pipeline always runs the exhaustive proof. See DELIVERY.md
+  for the input set and where proofs are stored.
 
 - **release:** The release pipeline now runs a contract preflight before the
   root Go suite. It proves the embedded documentation mirror and the
