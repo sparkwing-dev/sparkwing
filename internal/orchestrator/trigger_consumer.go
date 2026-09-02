@@ -367,20 +367,14 @@ func runClaimedTrigger(
 	defer stopHeartbeat()
 	go heartbeatClaimedTrigger(dispatchCtx, st, trig.ID, trig.ClaimSeq, lease, logger)
 
-	env, envErr := submissionEnvironment(home, trig)
+	env, envErr := consumeSubmissionEnvironment(home, trig, logger)
 	if envErr != nil {
 		finishClaimedTriggerFailure(book, st, trig, logger, envErr)
-		if err := DiscardSubmissionEnvironment(home, trig.ID); err != nil {
-			logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", err)
-		}
 		return
 	}
 	env = submissionExecutionEnvironment(env, home)
 	err := dispatchLocalTrigger(dispatchCtx, st, trig, "", "", cache, logger, env)
 	if err == nil {
-		if err := DiscardSubmissionEnvironment(home, trig.ID); err != nil {
-			logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", err)
-		}
 		return
 	}
 	if ctx.Err() != nil {
@@ -417,9 +411,6 @@ func runClaimedTrigger(
 	}
 	if _, ferr := st.FinishTriggerAtGeneration(book, trig.ID, trig.ClaimSeq); ferr != nil {
 		logger.Warn("finish superseded trigger", "trigger_id", trig.ID, "err", ferr)
-	}
-	if err := DiscardSubmissionEnvironment(home, trig.ID); err != nil {
-		logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", err)
 	}
 }
 
