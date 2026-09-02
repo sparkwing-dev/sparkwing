@@ -69,12 +69,16 @@ code change to unlock.
   `web.apiUrl` are deprecated and ignored. A token-backed dashboard that binds
   a non-loopback address without `--require-login` refuses to start. See the
   [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
-- **store:** Browser sessions are stored as a sha256 digest of the session id,
-  and the CSRF token is derived as an HMAC of that id under a server key
-  instead of being written to the database, so a copy of the state database,
-  its WAL, or a backup no longer yields replayable dashboard sessions. The
-  schema 21 migration deletes existing session rows, so everyone signs in
-  again after the upgrade.
+- **store (Breaking):** Browser sessions are stored as a sha256 digest of the
+  session id, and the CSRF token is derived as an HMAC of that id under a
+  server key instead of being written to the database, so a copy of the state
+  database, its WAL, or a backup no longer yields replayable dashboard
+  sessions. Schema 21 drops the `sessions.csrf_token` column and deletes every
+  session row: everyone signs in again, and it is the first migration a
+  still-running older binary cannot read past. A session lookup that fails on
+  the store or the signing key now answers `500` instead of `401`, so the
+  dashboard reports a backend fault rather than signing the browser out. See
+  the [migration guide](docs/migrations/_unreleased.md#session-rows-are-hashed-and-the-csrf-column-is-dropped).
 - **cache:** The warm-pool controller now accepts only registry references in
   `warm_images`, logging and dropping every other entry, and passes the list to
   the privileged warmer pod as container arguments consumed by a fixed script.
