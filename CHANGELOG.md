@@ -50,6 +50,58 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
+- **controller:** Secret envelopes are now bound to the fields of the row
+  that decide who may read them -- the secret name, the owning repository,
+  whether an unscoped row is shared with every run, and whether the value is
+  masked in run output -- as additional authenticated data under an `enc:v2:`
+  prefix, so anyone with database write access who copies a ciphertext onto
+  another row, or edits a row to widen its own access, gets a value that
+  fails to open instead of one that answers there. Envelopes written before
+  the binding (`enc:v1:`) still open; `sparkwing secret list` and the
+  secrets API report `bound: false` for them, and the first successful read
+  reseals such a row in place. Secret names holding `..` or an empty path
+  segment are rejected for new rows, while a row that already exists keeps
+  its name and can still be rotated. A `Cipher` supplied through
+  `WithSecretsCipher` may also implement `controller.BoundCipher`, which
+  `ciphertest.TestBoundCipher` checks, to take part in the binding.
+- **cli (Breaking):** `sparkwing runs submit` now snapshots an allow-listed
+  environment instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`,
+  `HOME`, `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every
+  credential-shaped name and value. A submitted pipeline that read
+  `AWS_PROFILE`, `AWS_REGION`, `KUBECONFIG`, `DOCKER_HOST`, or `SSH_AUTH_SOCK`
+  from the submitting shell no longer sees them, and the AWS and Docker
+  clients answer from a default rather than failing, so name what a pipeline
+  needs:
+  `SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK'`.
+  A bare `*` is refused instead of quietly allowing nothing, and the credential
+  filter logs at warn the names it drops from an explicit entry. The consumer
+  deletes the snapshot when it starts the run; a run that returns to the queue
+  without its snapshot fails rather than inheriting the consumer's own shell.
+  See the
+  [migration guide](docs/migrations/_unreleased.md#breaking-submitted-runs-carry-an-allow-listed-environment).
+- **logs:** Bound what one runner token can spend on the logs service. Appends
+  read the request body before taking a lock that is now sharded per run and
+  node, so a slow POST no longer stalls every other node's writes. New
+  `--max-node-bytes`, `--max-run-bytes`, `--min-free-bytes`, `--retention`,
+  `--sweep-interval`, `--search-max-bytes`, and `--search-timeout` flags (each
+  with a `SPARKWING_LOGS_*` environment variable) cap stored bytes, expire old
+  runs, and bound one search; `GET /api/v1/logs/search` now requires `run_id`
+  and reports `"truncated": true` when a budget stops the scan. Retention is
+  off unless you set it, so an upgrade deletes no history. See the
+  [operator checklist](docs/security.md#operator-checklist) and the
+  [migration guide](docs/migrations/_unreleased.md).
+- **controller:** GitHub webhook deliveries are bound to the repository that
+  sends them and can no longer be replayed. `GITHUB_WEBHOOK_BINDINGS` (JSON:
+  `{"pipelines":{"<pipeline>":{"repos":["owner/name"],"secret":"..."}},"repo_secrets":{"owner/name":"..."}}`)
+  gives a pipeline an allow-list of repositories and gives a pipeline or a
+  repository a signing secret of its own, so handing a repository owner a
+  secret no longer hands them every other pipeline: a delivery naming a
+  repository outside the pipeline's list answers `403`, and the shared
+  `GITHUB_WEBHOOK_SECRET` stays the fallback for whatever the bindings do not
+  name. Each delivery's `X-GitHub-Delivery` is now stored on its trigger under
+  a store-wide unique constraint (schema 24), so a replayed delivery answers
+  `409` at any pipeline instead of starting a second run, and a delivery
+  arriving without that header answers `400`.
 - **controller:** Secret envelopes are now bound to the row they belong to
   -- the secret name and its owning repository -- as additional
   authenticated data under an `enc:v2:` prefix, so a ciphertext copied onto
@@ -65,19 +117,38 @@ code change to unlock.
   Kubernetes runner Job does the same. `ingress.enabled=true` now fails to
   render with an empty `ingress.tls` or with `web.requireLogin=false`; set
   `ingress.allowInsecure=true` to publish the dashboard unencrypted or open
-  anyway.
+  anyway. That opt-out must be a bool, since a quoted string would read as
+  true and drop the guard, and opting in without TLS sets
+  `SPARKWING_WEB_INSECURE_COOKIES=1` on the web Deployment so the login gate
+  still works over plain HTTP.
 - **sdk:** `git.Clone` now authenticates to the git cache named by
-  `SPARKWING_GITCACHE`. The bearer in `SPARKWING_CACHE_TOKEN` travels in the
-  environment as a cache-scoped `http.<cache>/.extraHeader`, never on the
-  command line, and redirects are off for that URL so the header cannot follow
-  the request to another host. A cache that answers 401 no longer breaks the
-  clone: it falls back to the upstream remote, the same as an unreachable
-  cache.
+  `SPARKWING_GITCACHE` or `SPARKWING_GITCACHE_URL`. The bearer in
+  `SPARKWING_CACHE_TOKEN` travels in the environment as a cache-scoped
+  `http.<cache>/.extraHeader`, never on the command line, never to the
+  auto-detected localhost cache, and redirects are off for that URL so the
+  header cannot follow the request to another host. A cache that answers 401
+  or a redirect no longer breaks the clone: it falls back to the upstream
+  remote with one line on stderr, the same as an unreachable cache.
+  `git.Fetch` reuses the bearer when the checkout's `origin` is under that
+  cache, so a clone served by a guarded cache stays fetchable.
 - **cli:** `sparkwing runs submit` now snapshots an allow-listed environment
   instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
   `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every credential-shaped
   name and value, widened by `SPARKWING_SUBMIT_ENV_ALLOW`. The consumer
   deletes the snapshot when it starts the run rather than when the run ends.
+- **controller (Breaking):** Four controller limits, and a way to take `/metrics`
+  off the ingress. `?limit=` on the run list is capped at 1000 rows in the
+  query parser and again in the store. `GET /api/v1/services` now takes any valid bearer
+  instead of announcing the internal cache and logs URLs to anyone who can
+  reach the port. `POST /api/v1/triggers` validates `git.repo_url` with the
+  clone-URL rules the Git cache routes already use, and keeps only the trigger
+  environment keys a run reads, so a submission cannot forge the
+  retry-provenance keys the controller writes for itself. The half-hour Git
+  stream deadline is now applied by the authenticated Git cache handlers rather
+  than by a wrapper that ran before authentication. `sparkwing-controller
+  --metrics-addr` (`$SPARKWING_METRICS_ADDR`) binds Prometheus `/metrics` to
+  its own listener, off the API listener and any ingress in front of it. See
+  [the migration note](docs/migrations/_unreleased.md).
 
 ### Security
 

@@ -5,6 +5,47 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## (Breaking) Submitted runs carry an allow-listed environment
+
+- **Before:** `sparkwing runs submit` snapshotted the whole submitting shell to
+  disk and handed it to the run, so the queued snapshot held whatever the
+  terminal held: `AWS_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`, a `kubectl` bearer.
+  A run that a consumer shutdown returned to the queue dispatched again from the
+  consumer's own environment.
+- **After:** Capture keeps only `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
+  `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, then drops every credential-shaped
+  name and value from that set. `SPARKWING_SUBMIT_ENV_ALLOW` widens it by name,
+  or by prefix with a trailing `*`; a bare `*` is refused at submission time,
+  and the credential filter logs at warn the names it removes from an entry an
+  operator wrote by hand. The consumer deletes the snapshot when it starts the
+  run, and a run that returns to the queue without its snapshot fails with
+  "submission environment snapshot is gone" rather than running under the
+  consumer's shell.
+- **Migration:** A submitted pipeline that read `AWS_PROFILE`, `AWS_REGION`,
+  `KUBECONFIG`, `DOCKER_HOST`, or `SSH_AUTH_SOCK` from the submitting shell
+  stops seeing them. Most of those fail loudly; `AWS_PROFILE` and `DOCKER_HOST`
+  do not, because the AWS SDK and the Docker client fall back to a default
+  profile and socket, which can point a deploy at the wrong account. Name what
+  each pipeline needs:
+
+  ```bash
+  SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK' \
+    sparkwing runs submit deploy
+  ```
+
+  The credential filter still applies to what the list names, so a value that
+  reads as a secret is dropped even when named; the warn line says which. Take
+  credentials from the secret store instead. Go callers of
+  `orchestrator.CaptureSubmissionEnvironment` pass a `*slog.Logger` as a
+  trailing argument.
+
+  Resubmit any run that was queued when a consumer was interrupted: its
+  snapshot is gone and the requeued dispatch now fails instead of running with
+  the consumer's environment.
+- **Why:** A queued run is a file on disk that outlives the shell that made it.
+  It should not be a copy of every credential that shell happened to export,
+  and losing the snapshot should narrow what a run can reach, not widen it.
+
 ## (Breaking) Runner scopes split out of admin
 
 - **Before:** The routes a runner calls to do its job all required `admin`:
@@ -395,6 +436,36 @@ CHANGELOG links here.
   expected to read the key that decrypts every stored secret or the HMAC that
   authenticates every webhook.
 
+## Logs service quotas and bounded search
+
+- **Before:** `sparkwing-logs` stored whatever runners posted. Nothing capped a
+  node's log, a run's total, or the volume, and a full disk surfaced as a
+  degraded health probe after the writes had already failed.
+  `GET /api/v1/logs/search` accepted a query with no `run_id`, walked every
+  stored run end to end, and kept scanning after the caller hung up.
+- **After:** A node log stops at `--max-node-bytes` (64MiB) and a run's logs at
+  `--max-run-bytes` (1GiB). The append that crosses either cap stores the bytes
+  that fit, appends `[sparkwing-logs] truncated: byte cap reached` once, and
+  still answers `204`; later appends answer `204` and store nothing, so a
+  chatty node degrades its own log rather than failing its run. An append with
+  less than `--min-free-bytes` (512MiB) free answers `507`, which the log sink
+  retries and then reports as `logs_dropped`. Search requires `run_id` and
+  answers `400` without one, reads at most `--search-max-bytes` (256MiB) for at
+  most `--search-timeout` (10s), stops when the caller disconnects, and sets
+  `"truncated": true` on a response any of those stopped.
+- **Migration:** None for a stock install. Raise `--max-node-bytes` or
+  `--max-run-bytes` if a pipeline legitimately emits more than the defaults and
+  you would rather spend the disk than read a truncated log; the marker in the
+  stored log tells you which runs hit a cap. Retention is off by default, so
+  nothing deletes existing history until you opt in with `--retention`
+  (`SPARKWING_LOGS_RETENTION`, for example `168h`), which sweeps every run whose
+  last write is older than that window on the `--sweep-interval` tick. A caller
+  that searched the whole store now passes `run_id`, and one that needs
+  complete results checks `truncated` and narrows the query.
+- **Why:** Every runner holds a token that may append, and one chatty pipeline
+  could fill the volume for every other run or pin the service on a whole-store
+  scan.
+
 ## Restricted pod security and the published-dashboard guard
 
 - **Before:** Neither chart set a seccomp profile, every container could
@@ -404,10 +475,42 @@ CHANGELOG links here.
   container runs with a read-only root filesystem over a `/tmp` scratch
   `emptyDir`, and the Kubernetes runner Job does the same. `sparkwing-full`
   refuses to render when `ingress.enabled=true` with an empty `ingress.tls`
-  or with `web.requireLogin=false`.
+  or with `web.requireLogin=false`. `ingress.allowInsecure` must be a bool:
+  a quoted string fails the render instead of reading as an opt-out. Opting
+  in with an empty `ingress.tls` sets `SPARKWING_WEB_INSECURE_COOKIES=1` on
+  the web Deployment, so the login gate still works over plain HTTP. The
+  `ingress.tls` check is presence-only, so an entry without `secretName`
+  leaves TLS to the ingress controller's default certificate.
 - **Migration:** An install that publishes the dashboard sets `ingress.tls`
   and `web.requireLogin=true` before upgrading, or sets
-  `ingress.allowInsecure=true` to keep publishing it unencrypted or open. A
+  `ingress.allowInsecure=true` (a bool, not `"true"`) to keep publishing it
+  unencrypted or open. A
   custom image whose process writes outside `/tmp` needs its own
   `emptyDir` mount for that path, or `securityContext.readOnlyRootFilesystem`
   overridden for that container.
+
+## Service discovery and trigger submission take a closer look
+
+- **Before:** `GET /api/v1/services` answered anyone who could reach the
+  controller, `POST /api/v1/triggers` stored `git.repo_url` and every
+  trigger environment key it was handed, and `?limit=` on the run list was
+  unbounded.
+- **After:** Service discovery takes any valid bearer, which every client
+  that consumes it already holds. A trigger's `git.repo_url` goes through
+  the clone-URL rules the Git cache routes use, so a local path, a
+  loopback or private address, or a URL carrying credentials is rejected
+  with 400. Trigger environment keeps only `GITHUB_REPOSITORY`, the GitHub
+  pull-request context, and the `SPARKWING_START_AT`, `SPARKWING_STOP_AT`,
+  `SPARKWING_ONLY`, `SPARKWING_DRY_RUN`, and `SPARKWING_NO_CACHE`
+  switches. `?limit=` is capped at 1000 rows.
+- **Migration:** A hand-rolled client that polls `/api/v1/services`
+  anonymously sends `Authorization: Bearer <token>`. One that submits
+  triggers carrying its own environment keys moves that data into pipeline
+  args. A dashboard or export that asked for more than 1000 runs in one
+  request pages instead.
+- **Why:** The announcement names internal cache and logs URLs, the
+  repository URL becomes a clone target on every runner, the trigger
+  environment is served whole to every `triggers.read` principal and is
+  where a local retry reads the repository directory it trusts, and a
+  single unbounded list request loads every run row with its plan and args
+  blobs.

@@ -4,6 +4,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,9 +16,6 @@ const (
 	envelopePrefix      = "enc:v1:"
 	envelopePrefixBound = "enc:v2:"
 )
-
-// safety: NUL joins the fields because a valid secret name holds none, so one pair cannot spell another.
-const boundSeparator = "\x00"
 
 const KeySize = chacha20poly1305.KeySize
 
@@ -40,11 +38,13 @@ func (c *Cipher) Seal(plain string) (string, error) {
 	return c.seal(plain, envelopePrefix, nil)
 }
 
-// SealBound seals plain with the secret's name and owning repository
-// as additional authenticated data, so the envelope opens only under
-// that pair. Repo is empty for an unscoped secret.
-func (c *Cipher) SealBound(name, repo, plain string) (string, error) {
-	return c.seal(plain, envelopePrefixBound, boundAAD(name, repo))
+// SealBound seals plain with the row fields that decide access to the
+// secret as additional authenticated data: its name, its owning
+// repository (empty for an unscoped secret), whether an unscoped row
+// answers every run, and whether the value is redacted in run output.
+// The envelope opens only under that same combination.
+func (c *Cipher) SealBound(name, repo string, shared, masked bool, plain string) (string, error) {
+	return c.seal(plain, envelopePrefixBound, boundAAD(name, repo, shared, masked))
 }
 
 func (c *Cipher) seal(plain, prefix string, aad []byte) (string, error) {
@@ -67,17 +67,36 @@ func (c *Cipher) Open(envelope string) (string, error) {
 	return c.open(envelope, envelopePrefix, nil)
 }
 
-// OpenBound decrypts an envelope sealed for name and repo. Envelopes
-// written before binding carry no additional data and open unchanged.
-func (c *Cipher) OpenBound(name, repo, envelope string) (string, error) {
+// OpenBound decrypts an envelope sealed for this combination of name,
+// repo, shared and masked. Envelopes written before binding carry no
+// additional data and open unchanged.
+func (c *Cipher) OpenBound(name, repo string, shared, masked bool, envelope string) (string, error) {
 	if strings.HasPrefix(envelope, envelopePrefixBound) {
-		return c.open(envelope, envelopePrefixBound, boundAAD(name, repo))
+		return c.open(envelope, envelopePrefixBound, boundAAD(name, repo, shared, masked))
 	}
 	return c.open(envelope, envelopePrefix, nil)
 }
 
-func boundAAD(name, repo string) []byte {
-	return []byte(name + boundSeparator + repo)
+// safety: length prefixes keep one field from spelling another, so the binding needs no name rule to hold.
+func boundAAD(name, repo string, shared, masked bool) []byte {
+	aad := make([]byte, 0, 18+len(name)+len(repo))
+	aad = appendBoundField(aad, name)
+	aad = appendBoundField(aad, repo)
+	return append(aad, boundFlag(shared), boundFlag(masked))
+}
+
+func appendBoundField(dst []byte, field string) []byte {
+	var n [8]byte
+	binary.BigEndian.PutUint64(n[:], uint64(len(field)))
+	dst = append(dst, n[:]...)
+	return append(dst, field...)
+}
+
+func boundFlag(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (c *Cipher) open(envelope, prefix string, aad []byte) (string, error) {
@@ -105,7 +124,15 @@ func (c *Cipher) open(envelope, prefix string, aad []byte) (string, error) {
 }
 
 func IsEncrypted(v string) bool {
-	return strings.HasPrefix(v, envelopePrefix) || strings.HasPrefix(v, envelopePrefixBound)
+	return strings.HasPrefix(v, envelopePrefix) || IsBound(v)
+}
+
+// IsBound reports whether v is an envelope sealed to the row it
+// belongs to. An encrypted value that is not bound predates binding
+// and can still be moved onto another row, so operators can find such
+// rows and readers can rebind them.
+func IsBound(v string) bool {
+	return strings.HasPrefix(v, envelopePrefixBound)
 }
 
 func DecodeKey(s string) ([]byte, error) {

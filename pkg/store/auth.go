@@ -296,12 +296,22 @@ func (s *Store) CreateUser(name, password string, scopes []string, now time.Time
 	if err != nil {
 		return nil, err
 	}
-	_, err = s.execNoCtx(
+	tx, err := s.bootstrapTx(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("users: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := takeBootstrapLatch(tx, now); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(
 		`INSERT INTO users (name, pw_hash, created_at, scopes) VALUES (?, ?, ?, ?)`,
 		name, pwHash, now.UTC().Unix(), joinScopes(scopes),
-	)
-	if err != nil {
+	); err != nil {
 		return nil, fmt.Errorf("users: insert: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("users: commit: %w", err)
 	}
 	return &User{
 		Name:      name,
@@ -309,6 +319,30 @@ func (s *Store) CreateUser(name, password string, scopes []string, now time.Time
 		Scopes:    dedupeScopes(scopes),
 		CreatedAt: now.UTC(),
 	}, nil
+}
+
+// safety: the latch argument relies on per-statement snapshots, so the transaction pins READ COMMITTED on Postgres.
+func (s *Store) bootstrapTx(ctx context.Context) (*storeTx, error) {
+	if s.dialect != DialectPostgres {
+		return s.beginTx(ctx)
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+	return &storeTx{tx: tx, dialect: s.dialect}, nil
+}
+
+// safety: locking one latch row serializes every user insert, so racing txns cannot both count zero users.
+func takeBootstrapLatch(tx *storeTx, now time.Time) error {
+	if _, err := tx.Exec(
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		metaKeyBootstrapLatch, now.UTC().Format(time.RFC3339), now.UTC().UnixNano(),
+	); err != nil {
+		return fmt.Errorf("users: bootstrap latch: %w", err)
+	}
+	return nil
 }
 
 // ErrBootstrapClosed signals the users table is non-empty so first-admin
@@ -328,19 +362,13 @@ func (s *Store) CreateFirstUser(name, password string, scopes []string, now time
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.beginTx(context.Background())
+	tx, err := s.bootstrapTx(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("users: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	// safety: locking one latch row serializes bootstrap, so racing READ COMMITTED txns cannot both count zero users.
-	if _, err := tx.Exec(
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO UPDATE SET updated_at = excluded.updated_at`,
-		metaKeyBootstrapLatch, now.UTC().Format(time.RFC3339), now.UTC().UnixNano(),
-	); err != nil {
-		return nil, fmt.Errorf("users: bootstrap latch: %w", err)
+	if err := takeBootstrapLatch(tx, now); err != nil {
+		return nil, err
 	}
 
 	var count int

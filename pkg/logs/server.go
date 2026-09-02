@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -27,13 +28,18 @@ import (
 // safety: NAME_MAX is 255 bytes, so the cap covers the mapped node id plus its ".log" suffix.
 const maxFileNameBytes = 255
 
+const maxAppendRequestBytes = 4 << 20
+
 // Server handles HTTP requests against a filesystem-backed log store.
 type Server struct {
 	root     string
 	logger   *slog.Logger
 	dirMode  os.FileMode
 	fileMode os.FileMode
-	mu       sync.Mutex
+
+	limits    Limits
+	appendMu  [appendLockShards]sync.Mutex
+	freeSpace freeSpaceProbe
 
 	controllerURL string
 	authCache     sync.Map
@@ -68,7 +74,24 @@ func newServer(root string, logger *slog.Logger, private bool) (*Server, error) 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{root: root, logger: logger, dirMode: dirMode, fileMode: fileMode}, nil
+	return &Server{
+		root:     root,
+		logger:   logger,
+		dirMode:  dirMode,
+		fileMode: fileMode,
+		limits:   DefaultLimits(),
+	}, nil
+}
+
+// safety: sharding by run/node path keeps one slow file from serializing every other node's appends.
+const appendLockShards = 64
+
+func (s *Server) appendLock(runID, nodeID string) *sync.Mutex {
+	h := fnv.New32a()
+	_, _ = io.WriteString(h, runID)
+	_, _ = h.Write([]byte{0})
+	_, _ = io.WriteString(h, nodeID)
+	return &s.appendMu[h.Sum32()%appendLockShards]
 }
 
 func ensureServerDir(path string, mode os.FileMode) error {
@@ -350,29 +373,60 @@ func Serve(ctx context.Context, root, addr string, logger *slog.Logger) error {
 // wired against the given controller URL. Empty controllerURL = auth
 // fully disabled (laptop-local).
 func ServeWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error {
-	return serveWithTokens(ctx, root, addr, controllerURL, logger, false)
+	return ServeWith(ctx, ServeOptions{Root: root, Addr: addr, ControllerURL: controllerURL, Logger: logger})
 }
 
 // ServePrivateWithTokens serves an owner-only local log root. Operator-chosen
 // shared and PVC roots should use [ServeWithTokens].
 func ServePrivateWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error {
-	return serveWithTokens(ctx, root, addr, controllerURL, logger, true)
+	return ServeWith(ctx, ServeOptions{
+		Root:          root,
+		Addr:          addr,
+		ControllerURL: controllerURL,
+		Logger:        logger,
+		Private:       true,
+	})
 }
 
-func serveWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger, private bool) error {
+// ServeOptions configures one logs-service listener.
+type ServeOptions struct {
+	// Root is the storage root; the service creates it if absent.
+	Root string
+	// Addr is the bind address.
+	Addr string
+	// ControllerURL resolves caller tokens via whoami. Empty disables auth.
+	ControllerURL string
+	// Private makes directories and log files owner-only.
+	Private bool
+	// Logger receives service logs; nil uses slog.Default.
+	Logger *slog.Logger
+	// Limits bounds stored bytes, retention, and search work. The zero
+	// value takes [DefaultLimits].
+	Limits *Limits
+}
+
+// ServeWith starts the HTTP listener described by opts and blocks
+// until ctx is done. It also runs the retention sweeper for the
+// lifetime of ctx.
+func ServeWith(ctx context.Context, opts ServeOptions) error {
 	var s *Server
 	var err error
-	if private {
-		s, err = NewPrivate(root, logger)
+	if opts.Private {
+		s, err = NewPrivate(opts.Root, opts.Logger)
 	} else {
-		s, err = New(root, logger)
+		s, err = New(opts.Root, opts.Logger)
 	}
 	if err != nil {
 		return err
 	}
-	if controllerURL != "" {
-		s.WithControllerAuth(controllerURL, 60*time.Second)
+	if opts.Limits != nil {
+		s.WithLimits(*opts.Limits)
 	}
+	if opts.ControllerURL != "" {
+		s.WithControllerAuth(opts.ControllerURL, 60*time.Second)
+	}
+	s.StartSweeper(ctx)
+	root, addr, controllerURL := opts.Root, opts.Addr, opts.ControllerURL
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
@@ -414,10 +468,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 	canary := filepath.Join(s.root, ".health-check")
 	if err := s.writeFile(canary, []byte("ok")); err != nil {
+		// safety: the error names an absolute server path, so only the log gets it.
+		s.logger.Error("logs store", "op", "health canary", "err", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, `{"status":"degraded","auth":%q,"problems":["root: %s"]}`,
-			authState, strings.ReplaceAll(err.Error(), `"`, `\"`))
+		fmt.Fprintf(w, `{"status":"degraded","auth":%q,"problems":["root: storage root is not writable"]}`, authState)
 		return
 	}
 	_ = os.Remove(canary)
@@ -485,8 +540,26 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body := http.MaxBytesReader(w, r.Body, 4<<20)
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
+	// safety: the body is read before any lock so a slow client cannot hold one node's appends hostage.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxAppendRequestBytes))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "read request body", http.StatusBadRequest)
+		return
+	}
+	if len(body) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if !s.hasFreeSpace() {
+		http.Error(w, "log store is out of space", http.StatusInsufficientStorage)
+		return
+	}
 
 	root, err := s.openRunsRoot()
 	if err != nil {
@@ -499,19 +572,31 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// safety: mu serializes concurrent POSTs to the same file so writes don't interleave.
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	name := nodePath(runID, nodeID)
+	lock := s.appendLock(runID, nodeID)
+	lock.Lock()
+	defer lock.Unlock()
 
-	f, err := s.openAppend(root, nodePath(runID, nodeID))
+	plan := s.planAppend(nodeSize(root, name), runTotalBytes(root, runID), body)
+	if len(plan.write) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	f, err := s.openAppend(root, name)
 	if err != nil {
 		s.storeError(w, "open node log", err)
 		return
 	}
 	defer f.Close()
-	if _, err := io.Copy(f, body); err != nil {
+	if _, err := f.Write(plan.write); err != nil {
 		s.storeError(w, "write node log", err)
 		return
+	}
+	if plan.marker {
+		if _, err := f.WriteString(TruncationMarker); err != nil {
+			s.storeError(w, "write node log", err)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

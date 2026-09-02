@@ -1,13 +1,16 @@
 package logs
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func seedLog(t *testing.T, root, runID, nodeID, content string) {
@@ -34,7 +37,7 @@ func TestSearch_FindsMatches(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/logs/search?q=error")
+	resp, err := http.Get(srv.URL + "/api/v1/logs/search?q=error&run_id=run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +100,7 @@ func TestSearch_EmptyLogsVolume(t *testing.T) {
 	s, _ := New(root, nil)
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
-	resp, err := http.Get(srv.URL + "/api/v1/logs/search?q=anything")
+	resp, err := http.Get(srv.URL + "/api/v1/logs/search?q=anything&run_id=run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +125,7 @@ func TestSearch_NodeFilterAcceptsHierarchicalID(t *testing.T) {
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/api/v1/logs/search?q=pattern&node_id=scan%2Fpkg-a")
+	resp, err := http.Get(srv.URL + "/api/v1/logs/search?q=pattern&run_id=run-1&node_id=scan%2Fpkg-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,5 +140,98 @@ func TestSearch_NodeFilterAcceptsHierarchicalID(t *testing.T) {
 	}
 	if body.Results[0].NodeID != "scan__pkg-a" {
 		t.Errorf("node_id=%q want %q", body.Results[0].NodeID, "scan__pkg-a")
+	}
+}
+
+func TestSearch_MissingRunIDReturns400(t *testing.T) {
+	root := t.TempDir()
+	seedLog(t, root, "run-1", "node-a", "pattern here\n")
+	s, _ := New(root, nil)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/logs/search?q=pattern")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400", resp.StatusCode)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(data), "run_id is required") {
+		t.Errorf("body=%s want run_id requirement", data)
+	}
+}
+
+func TestSearch_BudgetsBoundTheScan(t *testing.T) {
+	root := t.TempDir()
+	var big strings.Builder
+	for i := 0; i < 5000; i++ {
+		big.WriteString("pattern line filler filler filler\n")
+	}
+	seedLog(t, root, "run-1", "node-a", big.String())
+
+	cases := []struct {
+		name   string
+		limits Limits
+	}{
+		{"byte budget", Limits{SearchMaxBytes: 1024}},
+		{"time budget", Limits{SearchTimeout: time.Nanosecond}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := New(root, nil)
+			s.WithLimits(tc.limits)
+			srv := httptest.NewServer(s.Handler())
+			defer srv.Close()
+
+			resp, err := http.Get(srv.URL + "/api/v1/logs/search?q=pattern&run_id=run-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			var body SearchResponse
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if !body.Truncated {
+				t.Fatalf("truncated=false, total=%d; want the budget to stop the scan", body.Total)
+			}
+			if body.Total >= 5000 {
+				t.Errorf("total=%d; want fewer than the 5000 seeded matches", body.Total)
+			}
+		})
+	}
+}
+
+func TestSearch_StopsOnCanceledRequest(t *testing.T) {
+	root := t.TempDir()
+	var big strings.Builder
+	for i := 0; i < 20000; i++ {
+		big.WriteString("pattern line filler filler filler\n")
+	}
+	seedLog(t, root, "run-1", "node-a", big.String())
+
+	s, _ := New(root, nil)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		srv.URL+"/api/v1/logs/search?q=pattern&run_id=run-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	var body SearchResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Truncated {
+		t.Fatalf("truncated=false, total=%d; want the canceled request to stop the scan", body.Total)
 	}
 }

@@ -179,6 +179,7 @@ type Secret struct {
 	Repo      string
 	Masked    bool
 	Shared    bool
+	Bound     bool
 	CreatedAt int64
 	UpdatedAt int64
 }

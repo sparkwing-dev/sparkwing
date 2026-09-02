@@ -124,3 +124,60 @@ func truncate(s string) string {
 	}
 	return s
 }
+
+// TestBoundCipher runs the conformance suite for
+// [controller.BoundCipher] against the implementation returned by
+// factory, which must return a fresh cipher per call.
+//
+// The suite checks the one property the interface exists for: an
+// envelope sealed under one binding does not open under another. It
+// never inspects envelope format.
+func TestBoundCipher(t *testing.T, factory func() controller.BoundCipher) {
+	t.Helper()
+
+	const plain = "bound plaintext"
+	type binding struct {
+		label  string
+		name   string
+		repo   string
+		shared bool
+		masked bool
+	}
+	sealed := binding{"sealed under", "TOKEN", "acme/api", false, true}
+
+	t.Run("SealBoundOpenBoundRoundTrip", func(t *testing.T) {
+		c := factory()
+		envelope, err := c.SealBound(sealed.name, sealed.repo, sealed.shared, sealed.masked, plain)
+		if err != nil {
+			t.Fatalf("SealBound: %v", err)
+		}
+		got, err := c.OpenBound(sealed.name, sealed.repo, sealed.shared, sealed.masked, envelope)
+		if err != nil {
+			t.Fatalf("OpenBound(SealBound(%q)): %v", plain, err)
+		}
+		if got != plain {
+			t.Fatalf("OpenBound(SealBound(%q)) = %q, want round trip", plain, truncate(got))
+		}
+	})
+
+	t.Run("OpenBoundRejectsAnotherBinding", func(t *testing.T) {
+		c := factory()
+		envelope, err := c.SealBound(sealed.name, sealed.repo, sealed.shared, sealed.masked, plain)
+		if err != nil {
+			t.Fatalf("SealBound: %v", err)
+		}
+		for _, other := range []binding{
+			{"another name", "OTHER", sealed.repo, sealed.shared, sealed.masked},
+			{"another repository", sealed.name, "acme/web", sealed.shared, sealed.masked},
+			{"the unscoped row", sealed.name, "", sealed.shared, sealed.masked},
+			{"a flipped shared flag", sealed.name, sealed.repo, !sealed.shared, sealed.masked},
+			{"a flipped masked flag", sealed.name, sealed.repo, sealed.shared, !sealed.masked},
+		} {
+			got, err := c.OpenBound(other.name, other.repo, other.shared, other.masked, envelope)
+			if err == nil {
+				t.Errorf("OpenBound under %s returned %q with nil error; a bound envelope must not open under another binding",
+					other.label, truncate(got))
+			}
+		}
+	})
+}
