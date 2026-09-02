@@ -115,3 +115,27 @@ func TestSessionRoute_ClampsRenewalToTheAbsoluteCap(t *testing.T) {
 		t.Errorf("stored expiry = %s, want no later than the cap %s", got, limit)
 	}
 }
+
+func TestSessionRoute_RefusesASessionCreatedInTheFuture(t *testing.T) {
+	ts, st := sessionLifetimeServer(t, 0)
+	bootstrapAdmin(t, ts)
+	login := loginForSessionHash(t, ts)
+
+	now := time.Now().UTC()
+	ageSession(t, st, now.Add(365*24*time.Hour), now.Add(6*time.Hour))
+
+	status, body := resolveSession(t, ts, login.SessionID)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("resolve future-dated session = %d, want 401: %s", status, body)
+	}
+	if !strings.Contains(string(body), "maximum lifetime") {
+		t.Errorf("error body = %s, want the lifetime refusal", body)
+	}
+	var remaining int
+	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Errorf("sessions after the refusal = %d, want 0", remaining)
+	}
+}

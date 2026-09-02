@@ -343,6 +343,11 @@ func TestValidateCookieExposure(t *testing.T) {
 			addr: "localhost:4343",
 		},
 		{
+			name: "insecure on IPv6 loopback",
+			opts: HandlerOptions{InsecureCookies: true},
+			addr: "[::1]:4343",
+		},
+		{
 			name: "insecure remote with opt-in",
 			opts: HandlerOptions{InsecureCookies: true, AllowInsecureCookiesRemote: true},
 			addr: "0.0.0.0:4343",

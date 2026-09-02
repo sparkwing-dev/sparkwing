@@ -161,6 +161,10 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sessionExpired(createdAt, now time.Time) bool {
+	// safety: a future creation time makes the lifetime clamp inert, so a backwards clock jump renews forever.
+	if createdAt.After(now) {
+		return true
+	}
 	return s.sessionMaxLifetime > 0 && !now.Before(createdAt.Add(s.sessionMaxLifetime))
 }
 

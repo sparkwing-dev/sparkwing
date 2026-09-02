@@ -59,7 +59,12 @@ code change to unlock.
   global, and `sparkwing-web` refuses to start when it is set on a non-loopback
   bind unless the operator also passes `--allow-insecure-cookies-remote`. The
   chart renders that flag alongside the variable when `ingress.allowInsecure`
-  publishes the dashboard over plain HTTP, so that opt-in still starts.
+  publishes the dashboard over plain HTTP, so that opt-in still starts; see the
+  [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-insecure-cookie-remote-bind).
+  A session whose creation time sits in the future, from a clock stepped
+  backwards or a tampered row, is deleted and refused instead of renewed. A tab
+  whose session ends stops polling and goes to the sign-in page rather than
+  showing the banner that blames the deployment's API token.
 - **cli:** `~/.config/sparkwing` is now created and kept at `0700` by every
   writer. `sparkwing configure profiles add/set`, `configure init`, the repos
   registry, and the dotenv secrets store all route through `fssecure`, and

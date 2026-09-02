@@ -905,6 +905,15 @@ func TestLoginCookieSecureAttributeFollowsHandlerOptions(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]bool{"needed": false})
 			return
 		}
+		if r.URL.Path == "/api/v1/auth/login" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session_id": "session-id",
+				"csrf_token": "csrf-token",
+				"principal":  "admin",
+				"scopes":     []string{"admin"},
+			})
+			return
+		}
 		http.Error(w, "unexpected", http.StatusTeapot)
 	}))
 	t.Cleanup(controller.Close)
@@ -929,19 +938,38 @@ func TestLoginCookieSecureAttributeFollowsHandlerOptions(t *testing.T) {
 			if rec.Code != http.StatusOK {
 				t.Fatalf("GET /login = %d, want 200", rec.Code)
 			}
-			var found bool
-			for _, c := range rec.Result().Cookies() {
-				if c.Name != csrfCookieName {
-					continue
-				}
-				found = true
-				if c.Secure != tc.wantSecure {
-					t.Errorf("csrf cookie Secure = %v, want %v", c.Secure, tc.wantSecure)
-				}
+			assertCookieSecure(t, rec.Result().Cookies(), csrfCookieName, tc.wantSecure)
+
+			form := url.Values{
+				"username":   {"admin"},
+				"password":   {"correct-horse"},
+				"csrf_token": {"login-token"},
 			}
-			if !found {
-				t.Fatalf("login page set no %s cookie", csrfCookieName)
+			submit := httptest.NewRequest(http.MethodPost, "https://dashboard.example/login", strings.NewReader(form.Encode()))
+			submit.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			submit.Header.Set("Origin", "https://dashboard.example")
+			submit.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "login-token"})
+			submitted := httptest.NewRecorder()
+			handler.ServeHTTP(submitted, submit)
+			if submitted.Code != http.StatusSeeOther {
+				t.Fatalf("POST /login = %d, want 303: %s", submitted.Code, submitted.Body)
 			}
+			assertCookieSecure(t, submitted.Result().Cookies(), sessionCookieName, tc.wantSecure)
+			assertCookieSecure(t, submitted.Result().Cookies(), csrfCookieName, tc.wantSecure)
 		})
 	}
+}
+
+func assertCookieSecure(t *testing.T, cookies []*http.Cookie, name string, want bool) {
+	t.Helper()
+	for _, c := range cookies {
+		if c.Name != name {
+			continue
+		}
+		if c.Secure != want {
+			t.Errorf("%s cookie Secure = %v, want %v", name, c.Secure, want)
+		}
+		return
+	}
+	t.Fatalf("response set no %s cookie", name)
 }

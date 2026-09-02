@@ -151,6 +151,24 @@ CHANGELOG links here.
 - **Why:** An unauthenticated dashboard holding a service token hands the
   controller to every caller that can reach the port.
 
+## The dashboard refuses an insecure-cookie remote bind
+
+- **Before:** `SPARKWING_WEB_INSECURE_COOKIES=1` dropped `Secure` from the
+  session and CSRF cookies on any bind address, so a dashboard published over
+  plain HTTP handed both cookies to every network between the browser and the
+  pod.
+- **After:** `sparkwing-web` reads the variable once at startup and exits
+  before listening when the bind address is not loopback. A deployment that
+  carries the variable on a `0.0.0.0` bind crashloops after the upgrade, with
+  the refusal in the pod log.
+- **Migration:** Serve the dashboard over HTTPS and drop the variable, bind a
+  loopback address (chart: `web.addr`) for a port-forward or sidecar, or keep
+  the plain-HTTP publication by adding `--allow-insecure-cookies-remote`. The
+  chart renders both the flag and the variable whenever
+  `ingress.allowInsecure` is on, so a chart-managed deployment needs no change.
+- **Why:** A cookie without `Secure` travels in clear text, and the bind
+  address is the only evidence the process has that nobody else is listening.
+
 ## Cache reads require the bearer token
 
 - **Before:** `sparkwing-cache` demanded a bearer only on its blob and sync
