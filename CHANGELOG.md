@@ -175,12 +175,15 @@ code change to unlock.
   per-run size cap with the manifest mode masked to `0o777`, so a symlink left
   in a workspace cannot capture the write.
 - **orchestrator:** Artifact capture now resolves each glob match before it
-  reads one and refuses a match that lands outside the workspace, so a symlink
-  planted in a producer's workspace can no longer publish a file the runner
-  happens to be able to read -- a credential file, `/etc/passwd` -- into the
-  artifact store. A link whose target stays inside the workspace is still
-  followed, and every matched file is opened through an `os.Root` on the
-  workspace rather than by the path the walk found.
+  reads one, so a symlink planted in a producer's workspace can no longer
+  publish a file the runner happens to be able to read -- a credential file,
+  `/etc/passwd` -- into the artifact store. The boundary is path-based and
+  catches symlinks only: a hard link to a readable file is still captured. A
+  match that a glob names literally fails the node when it resolves outside
+  the workspace; one a wildcard swept up, or one resolving to an outside
+  directory, is skipped with a warning. A link whose target stays inside the
+  workspace is still followed, and every matched file is opened once through
+  an `os.Root` on the workspace, hashed and uploaded from that one handle.
 
 ## [v0.40.0] - 2026-09-02
 ### Security
