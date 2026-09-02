@@ -143,7 +143,8 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 
 func submissionExecutionEnvironment(captured []string, home string) []string {
 	if captured == nil {
-		return nil
+		// safety: an uncaptured dispatch still passes the blocklist, so the consumer shell cannot shape the run.
+		captured = os.Environ()
 	}
 	blocked := map[string]struct{}{
 		"SPARKWING_RUN_HANDLE_FILE": {},
