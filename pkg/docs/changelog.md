@@ -224,6 +224,20 @@ code change to unlock.
   `x-sparkwing-scope` instead of prose that could disagree with the router:
   `bash bin/gen-api-docs.sh` writes it from `pkg/controller/server.go` and
   `bash bin/check-api-spec.sh` fails the `pre-push` gate when the two drift.
+  That check now also rejects a response object carrying a field OpenAPI 3.0
+  does not allow, which an unquoted comma in a flow-style description produces,
+  and it recognizes a scope named anywhere in an operation's prose rather than
+  only the phrase "<scope> scope". The Git-cache document's NetworkPolicy
+  paragraph names all four admitted peers and the selectors that override them.
+- **controller:** `GET /api/v1/runs/{id}` and `GET /api/v1/triggers/{id}` now
+  admit a caller holding a live claim on that run as well as one holding
+  `runs.read` or `triggers.read`. Those are the first two calls a node process
+  makes, so the documented runner token -- `nodes.claim`, `triggers.claim`,
+  `runs.state`, `secrets.read`, `logs.write` -- starts a node without carrying
+  either read scope. `PUT /api/v1/pipelines/{name}/profile/pin` now takes a
+  live claim on a run of the named pipeline in addition to `runs.state`, so a
+  runner token can no longer pin the CPU and memory limits of every other
+  repository's pipelines. `admin` bypasses both checks.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

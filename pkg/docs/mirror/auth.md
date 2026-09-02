@@ -22,14 +22,14 @@ mapping is in the generated [api-reference.md](api-reference.md):
 
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
-| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, per-node metrics GETs, and similar deployment-wide reads |
+| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a caller holding a live claim on that run |
 | `runs.write`      | POST `/api/v1/triggers`, `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, `/gitcache/refresh` |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, and the per-node write routes (`activity`, `annotations`, `summary`, `steps/*`, `dispatch`, `metrics`, and similar); GET `nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`, `/pipelines/{name}/profile` |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
-| `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`                               |
+| `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a caller holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`                   |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, and PUT `/pipelines/{name}/profile/pin`. Every one is bound to a run the caller owns |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `admin`           | tokens / users / secrets CRUD, node deps / status / mark-ready / revoke-ready, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
@@ -44,6 +44,12 @@ token, reads no user, and lists no secret. A pool replica that executes
 already-created nodes still needs `runs.state`, because `start`, `finish`, and
 event append are its own writes; it can drop `triggers.claim` when a separate
 dispatcher claims triggers.
+
+The set carries neither `runs.read` nor `triggers.read`, and a node process
+opens with exactly those two reads: `GET /api/v1/runs/{id}` and
+`GET /api/v1/triggers/{id}`. Both admit a caller holding a live claim on that
+run in place of the scope, so the claim the runner already took is what opens
+them. Add `runs.read` only to give a token the deployment-wide view.
 
 Marking a node ready stays `admin`, so a warm-pool dispatcher that hands nodes
 to a pool keeps an `admin` token. That is the one process in the runner path
@@ -83,6 +89,17 @@ trigger. That covers run create, run finish, plan snapshot, node create, event
 append, and the per-node `start`, `finish`, `deps`, and `status` writes. A
 runner with the scope and no claim gets `403 claim_required`, so one pool token
 cannot finish, re-plan, or forge events on another run.
+
+`PUT /pipelines/{name}/profile/pin` is the one `runs.state` write that names a
+pipeline instead of a run, and a pin becomes a hard Kubernetes limit for every
+later run of it. The caller must hold a live claim on some run of that
+pipeline, so a token executing one pipeline cannot pin another's. `admin`
+bypasses, which is what lets a dispatcher pin a pipeline it is not running.
+
+The two reads a node process opens with, `GET /api/v1/runs/{id}` and
+`GET /api/v1/triggers/{id}`, run the ownership check the other way: a caller
+without `runs.read` or `triggers.read` is admitted when it holds a live claim
+on that run, and refused with `403 missing_scope` otherwise.
 
 `mark-ready` and `revoke-ready` both require `admin`. Readiness is a dispatcher
 decision on both sides, and `revoke-ready` writes only an *unclaimed* node, so
