@@ -48,6 +48,13 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **cli:** `sparkwing runs submit` now snapshots an allow-listed environment
+  instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
+  `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every credential-shaped
+  name and value, widened by `SPARKWING_SUBMIT_ENV_ALLOW`. The consumer
+  deletes the snapshot when it starts the run rather than when the run ends.
 
 ## [v0.40.0] - 2026-09-02
 ### Security
