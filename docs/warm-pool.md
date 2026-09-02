@@ -106,8 +106,8 @@ passing it to the privileged warmer pod, and reports what it dropped in
 one summary line per read. It reads the first 64 entries and ignores the
 rest.
 
-The grammar is narrower than `docker pull` in two ways: it accepts
-`sha256` digests only, and it requires lowercase hexadecimal in a digest.
+The grammar is narrower than `docker pull`: it accepts `sha256`
+digests only, and it requires lowercase hexadecimal in a digest.
 
 The YAML below is the value stored under `data.config.yaml`:
 

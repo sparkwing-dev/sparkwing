@@ -27,7 +27,7 @@ const DefaultArgon2AcquireTimeout = 250 * time.Millisecond
 // result: answer it with 503 and a Retry-After, never with 401.
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 
-var argonIDKey = argon2.IDKey
+var argonIDFunc = argon2.IDKey
 
 var (
 	argonSemMu   sync.RWMutex
@@ -95,5 +95,5 @@ func argonKey(secret string, salt []byte) ([]byte, error) {
 		return nil, ErrHashingBusy
 	}
 	defer func() { <-sem }()
-	return argonIDKey([]byte(secret), salt, argonTime, argonMemory, argonThreads, argonKeyLen), nil
+	return argonIDFunc([]byte(secret), salt, argonTime, argonMemory, argonThreads, argonKeyLen), nil
 }
