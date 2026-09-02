@@ -51,6 +51,16 @@ code change to unlock.
 
 ### Security
 
+- **controller (Breaking):** Runners no longer need `admin`. New `triggers.claim`,
+  `runs.state`, and `secrets.read` scopes carry the trigger lifecycle, run and
+  node state writes, and single-secret reads, and `start` and `finish` admit
+  only the principal holding that node's claim. Secrets gained an owning
+  repository (schema 22, `sparkwing secrets set --repo <slug>`): a
+  `secrets.read` caller resolves a name against the repository of the run it
+  holds, so a runner token can no longer read another repository's credentials
+  or mint an admin bearer. A secret stored without `--repo` stays readable by
+  every run. `admin` remains a superset, so existing tokens keep working; see
+  the [migration guide](docs/migrations/_unreleased.md#breaking-runner-scopes-split-out-of-admin).
 - **cli:** The admission daemon's unix socket is now private to its user. Its
   path stays a pure function of `SPARKWING_HOME`, so every caller resolves the
   same socket whatever its environment. The daemon refuses a base directory

@@ -90,8 +90,9 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # so create this Secret AFTER the first `helm install` -- see Auth below.
 #   kubectl -n sparkwing create secret generic sparkwing-token \
 #       --from-literal=token=swr_...
-# Tokens carry scopes: a runner token needs `nodes.claim` +
-# `logs.write`. The web pod's needs `runs.read` + `logs.read`, plus
+# Tokens carry scopes: a runner token needs `nodes.claim`,
+# `triggers.claim`, `runs.state`, `secrets.read`, and `logs.write`.
+# The web pod's needs `runs.read` + `logs.read`, plus
 # `runs.write` where operators cancel, retry, or release runs from the
 # dashboard and `approvals.write` where they resolve approval gates.
 # Deleting a run from the dashboard needs `admin` on the web token AND

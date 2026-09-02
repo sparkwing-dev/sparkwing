@@ -137,7 +137,10 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 ## Auth
 
 The runner reads its bearer token from `controller.tokenSecret` and uses it
-for controller claims and writes to the logs service. Configuring that Secret
+for controller claims and writes to the logs service. Mint it with
+`nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`, and
+`logs.write`: enough to claim triggers and nodes, drive the runs it claimed,
+read the secrets its repository owns, and ship logs. It needs no `admin`. Configuring that Secret
 also enables logs-service auth: the logs service forwards each caller's
 incoming Authorization header to the resolved controller's
 `/api/v1/auth/whoami` endpoint and enforces the returned scopes. It does not
