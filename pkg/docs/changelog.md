@@ -249,6 +249,13 @@ code change to unlock.
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
   so a naked suppression silences nothing, and the comment gate keeps each
   annotation alone on one line so free prose cannot ride behind one.
+- **logs:** CLI log output now filters terminal escape sequences out of
+  pipeline output. Plain format drops every escape sequence and every C0
+  control byte except tab, so one log record stays one line; the colored
+  format keeps only the SGR codes the web log viewer renders. A pipeline can
+  no longer retitle the operator's terminal, plant an OSC 8 hyperlink, reset
+  the terminal with `ESC c`, or forge a Sparkwing status line in the output of
+  `sparkwing runs logs`.
 
 ### Added
 
