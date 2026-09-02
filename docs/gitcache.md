@@ -347,9 +347,12 @@ startup so an unauthenticated deployment is visible.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/artifacts/<jobID>?path=X` | Upload artifact |
-| GET | `/artifacts/<jobID>` | List artifacts |
-| GET | `/artifacts/<jobID>?glob=X` | Download matching artifacts |
+| POST | `/artifacts/<jobID>?path=X` | Upload artifact (auth required) |
+| GET | `/artifacts/<jobID>` | List artifacts (auth required) |
+| GET | `/artifacts/<jobID>?glob=X` | Download matching artifacts (auth required) |
+
+`<jobID>` must be one path segment of 1-128 alphanumeric, dash, underscore, or
+dot characters. Anything else is rejected with 400 before a path is built.
 
 ### Binary & Dependency Cache
 
@@ -358,6 +361,13 @@ binary's content, so the cache records the sha-256 of each uploaded body and the
 writing principal's token fingerprint beside the blob and serves that digest on
 every download. Clients hash what they download and discard a mismatch before
 the binary lands, and treat a response without a digest as a miss.
+
+The digest covers the window between the upload and the download: bytes altered
+in transit, or altered on the cache's disk without also rewriting the recorded
+digest, are discarded and the client recompiles. It says nothing about who
+uploaded the binary, because the cache derives the digest from the body it was
+handed. The bearer token on `PUT /bin/<name>` is what keeps an attacker from
+uploading a poisoned binary along with a digest that attests it.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

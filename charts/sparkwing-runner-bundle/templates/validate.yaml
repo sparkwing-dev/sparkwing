@@ -1,6 +1,9 @@
 {{- if and .Values.controller.tokenSecret.name (not .Values.controller.tokenSecret.key) -}}
 {{- fail "sparkwing-runner-bundle: controller.tokenSecret.key is required when controller.tokenSecret.name is set" -}}
 {{- end -}}
+{{- if and .Values.cache.enabled (not .Values.controller.tokenSecret.name) (not .Values.cache.allowUnauthenticated) -}}
+{{- fail "sparkwing-runner-bundle: cache.enabled=true requires controller.tokenSecret.name, the Secret the cache reads SPARKWING_API_TOKEN from and the runner reads SPARKWING_CACHE_TOKEN from. Set cache.allowUnauthenticated=true to serve the cache to anyone who can reach it instead" -}}
+{{- end -}}
 {{- $externalGitcache := false -}}
 {{- range .Values.runner.extraEnv -}}
 {{- if eq (default "" .name) "SPARKWING_GITCACHE_URL" -}}

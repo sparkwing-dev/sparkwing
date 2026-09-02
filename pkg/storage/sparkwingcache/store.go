@@ -26,8 +26,8 @@ type Store struct {
 	http    *http.Client
 }
 
-// New constructs a Store. token is sent as a Bearer header on writes
-// (cache enforces auth on PUT; GET is unauthenticated). nil
+// New constructs a Store. token is sent as a Bearer header on every
+// request; the cache requires it on both reads and writes. nil
 // httpClient uses a default with a 60s timeout.
 func New(baseURL, token string, httpClient *http.Client) *Store {
 	if httpClient == nil {
@@ -47,6 +47,7 @@ func (s *Store) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.authorize(req)
 	resp, err := s.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -73,9 +74,7 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	if s.token != "" {
-		req.Header.Set("Authorization", "Bearer "+s.token)
-	}
+	s.authorize(req)
 	resp, err := s.http.Do(req)
 	if err != nil {
 		return err
@@ -94,6 +93,7 @@ func (s *Store) Has(ctx context.Context, key string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	s.authorize(req)
 	resp, err := s.http.Do(req)
 	if err != nil {
 		if errors.Is(err, http.ErrNotSupported) {
@@ -125,9 +125,7 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	if s.token != "" {
-		req.Header.Set("Authorization", "Bearer "+s.token)
-	}
+	s.authorize(req)
 	resp, err := s.http.Do(req)
 	if err != nil {
 		return err
@@ -140,6 +138,12 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("sparkwingcache DELETE %s: %s: %s",
 			key, resp.Status, strings.TrimSpace(string(body)))
+	}
+}
+
+func (s *Store) authorize(req *http.Request) {
+	if s.token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.token)
 	}
 }
 

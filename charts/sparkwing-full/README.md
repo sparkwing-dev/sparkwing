@@ -121,10 +121,12 @@ sparkwing-runner-bundle:
 helm dep up ./charts/sparkwing-full
 
 # Install the complete stack with an explicitly compatible image set. This
-# source-test configuration has no auth, webhook verification, or encryption-at-rest.
+# source-test configuration has no auth, webhook verification, or encryption-at-rest,
+# so the cache must opt out of its token requirement explicitly.
 helm install sparkwing ./charts/sparkwing-full \
     --namespace sparkwing --create-namespace \
-    -f compatible-images.yaml
+    -f compatible-images.yaml \
+    --set sparkwing-runner-bundle.cache.allowUnauthenticated=true
 ```
 
 ### Verify the source stack in Kubernetes
@@ -241,7 +243,8 @@ for the full schema; a few commonly overridden keys:
 | --- | --- | --- |
 | `sparkwing-runner-bundle.enabled` | Toggle the whole runner side. | `true` |
 | `sparkwing-runner-bundle.controller.url` | Where the runner claims from. | (in-cluster controller Service) |
-| `sparkwing-runner-bundle.controller.tokenSecret.name` | Bearer-token Secret. | `""` |
+| `sparkwing-runner-bundle.controller.tokenSecret.name` | Bearer-token Secret, shared by the runner and the cache. | `""` |
+| `sparkwing-runner-bundle.cache.allowUnauthenticated` | Serve the cache without a token (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
 | `sparkwing-runner-bundle.volumePermissions.enabled` | Run a CHOWN-only init before the runner. | `true` |
@@ -283,6 +286,11 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    A configured Secret name requires a non-empty key; the chart rejects
    incomplete pairs. Web, runner, and cache Secret references are required, so
    Kubernetes holds those pods until the configured Secret is present.
+   `sparkwing-runner-bundle.controller.tokenSecret` is also what the cache
+   reads as `SPARKWING_API_TOKEN` and the runner as `SPARKWING_CACHE_TOKEN`;
+   a cache-enabled install without it fails at render time unless
+   `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, which the
+   bootstrap window above needs and the token upgrade should turn back off.
 
 3. Set `web.requireLogin=true` to gate the dashboard behind `/login`.
    On a fresh cluster `/login` renders a "create first admin" form and
@@ -356,7 +364,7 @@ create one.
 ```yaml
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.3"
+    version: "0.1.4"
     repository: "file://../sparkwing-runner-bundle"
     condition: sparkwing-runner-bundle.enabled
 ```
