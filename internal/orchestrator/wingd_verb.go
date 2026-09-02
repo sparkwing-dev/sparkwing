@@ -51,6 +51,7 @@ func runWingdCLI(args []string) error {
 		FinalizeRun:           NewOrphanRunFinalizer(*home),
 		FinalizeCancelledRuns: NewCancelledRunsFinalizer(*home),
 		IsRunTerminal:         NewTerminalRunChecker(*home),
+		StoreSchemaVersion:    store.ExpectedSchemaVersion(),
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
 				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))

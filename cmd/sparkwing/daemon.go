@@ -10,20 +10,25 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type daemonReport struct {
-	Running          bool   `json:"running"`
-	Healthy          bool   `json:"healthy"`
-	Draining         bool   `json:"draining"`
-	Restarted        bool   `json:"restarted"`
-	BinaryVersion    string `json:"binary_version,omitempty"`
-	RunningRevision  string `json:"running_revision,omitempty"`
-	PreviousVersion  string `json:"previous_version,omitempty"`
-	PreviousRevision string `json:"previous_revision,omitempty"`
-	Socket           string `json:"socket"`
+	Running             bool   `json:"running"`
+	Healthy             bool   `json:"healthy"`
+	Draining            bool   `json:"draining"`
+	Restarted           bool   `json:"restarted"`
+	BinaryVersion       string `json:"binary_version,omitempty"`
+	RunningRevision     string `json:"running_revision,omitempty"`
+	PreviousVersion     string `json:"previous_version,omitempty"`
+	PreviousRevision    string `json:"previous_revision,omitempty"`
+	Socket              string `json:"socket"`
+	DaemonSchemaVersion int    `json:"daemon_schema_version,omitempty"`
+	StoreSchemaVersion  int    `json:"store_schema_version,omitempty"`
+	SchemaDiverged      bool   `json:"schema_diverged,omitempty"`
 }
 
 func runDaemon(args []string) error {
@@ -96,7 +101,7 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	if err != nil {
 		return daemonReport{}, err
 	}
-	report := daemonReport{Socket: socket}
+	report := daemonReport{Socket: socket, StoreSchemaVersion: storeSchemaVersion(ctx, home)}
 	info, err := wingdclient.Probe(ctx, socket)
 	if errors.Is(err, wingdclient.ErrNoDaemon) {
 		return report, nil
@@ -109,7 +114,34 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	report.Draining = info.Draining
 	report.BinaryVersion = info.BinaryVersion
 	report.RunningRevision = versionRevision(info.BinaryVersion)
+	report.DaemonSchemaVersion = info.StoreSchemaVersion
+	report.SchemaDiverged = report.DaemonSchemaVersion > 0 &&
+		report.StoreSchemaVersion > report.DaemonSchemaVersion
+	if report.SchemaDiverged {
+		report.Healthy = false
+	}
 	return report, nil
+}
+
+func storeSchemaVersion(ctx context.Context, home string) int {
+	root, err := wingd.HomeDir(home)
+	if err != nil || root == "" {
+		return 0
+	}
+	db := paths.PathsAt(root).StateDB()
+	if _, err := os.Stat(db); err != nil {
+		return 0
+	}
+	st, err := store.OpenReadOnly(db)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = st.Close() }()
+	version, err := st.CurrentSchemaVersion(ctx)
+	if err != nil {
+		return 0
+	}
+	return version
 }
 
 func runDaemonRestart(args []string) error {
@@ -198,6 +230,11 @@ func emitDaemonReport(report daemonReport, output string) error {
 			action = "restarted"
 		}
 		fmt.Fprintf(os.Stdout, "wingd %s %s\n", action, report.BinaryVersion)
+		if report.SchemaDiverged {
+			fmt.Fprintf(os.Stdout,
+				"runs-store schema mismatch: the daemon understands %d, the store is at %d; it will refuse every run until `sparkwing daemon restart`\n",
+				report.DaemonSchemaVersion, report.StoreSchemaVersion)
+		}
 		return nil
 	default:
 		return fmt.Errorf("daemon: unsupported output format %q", output)

@@ -57,6 +57,12 @@ type HelloAck struct {
 	BinaryVersion       string `json:"binary_version"`
 	BuildIdentity       string `json:"build_identity,omitempty"`
 	Draining            bool   `json:"draining,omitempty"`
+	// StoreSchemaVersion is the runs-store schema version the daemon binary
+	// understands. A client whose own schema is newer knows the daemon cannot
+	// read the store they share and refuses before requesting admission. Zero
+	// from daemons that predate the field, where the skew stays undetectable
+	// until the daemon reads the store.
+	StoreSchemaVersion int `json:"store_schema_version,omitempty"`
 }
 
 // HostResources is an amount of machine capacity: CPU cores and

@@ -393,6 +393,19 @@ code change to unlock.
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
 
+### Fixed
+
+- **orchestrator + cli:** A daemon that cannot read the runs store no longer
+  reads as exhausted capacity. The daemon now sends the store failure verbatim
+  with its eviction, and the client reports a full slot only for a concurrency
+  group the run actually claimed, so a stale daemon against a migrated store
+  names both schema versions instead of sending the operator to
+  `sparkwing queue` after a holder that does not exist. The handshake also
+  advertises the daemon's runs-store schema, so a newer client refuses before
+  requesting admission, and `sparkwing daemon status` reports
+  `daemon_schema_version` against `store_schema_version` and marks a diverged
+  pair unhealthy.
+
 ## [v0.40.0] - 2026-09-02
 ### Security
 

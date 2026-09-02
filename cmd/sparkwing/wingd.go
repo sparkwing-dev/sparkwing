@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/supervise"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runWingd(args []string) error {
@@ -64,6 +65,7 @@ func runWingdRun(args []string) error {
 		FinalizeRun:           orchestrator.NewOrphanRunFinalizer(*home),
 		FinalizeCancelledRuns: orchestrator.NewCancelledRunsFinalizer(*home),
 		IsRunTerminal:         orchestrator.NewTerminalRunChecker(*home),
+		StoreSchemaVersion:    store.ExpectedSchemaVersion(),
 		Logf:                  func(format string, args ...any) { logger.Printf(format, args...) },
 	})
 	if err != nil {

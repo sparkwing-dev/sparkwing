@@ -77,7 +77,7 @@ sparkwing daemon restart -o json
 
 Report whether wingd is running and which build it serves
 
-Read-only daemon status. An absent daemon is a healthy stopped state and exits zero. An unreachable socket fails instead of pretending the admission queue is empty. The JSON running_revision identifies the exact source build when available.
+Read-only daemon status. An absent daemon is a healthy stopped state and exits zero. An unreachable socket fails instead of pretending the admission queue is empty. The JSON running_revision identifies the exact source build when available. It also reports daemon_schema_version (the runs-store schema the daemon binary understands) against store_schema_version (the schema this home's store holds); a daemon behind the store refuses every run, and the report marks it unhealthy.
 
 ### Flags
 

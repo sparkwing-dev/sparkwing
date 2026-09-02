@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestInspectDaemonReportsExactSourceRevision(t *testing.T) {
@@ -234,5 +236,51 @@ func TestDaemonRecoverStateRequiresConsentAndPreservesUnreadableBytes(t *testing
 	}
 	if got, err := os.ReadFile(matches[0]); err != nil || string(got) != string(want) {
 		t.Fatalf("preserved recovery bytes = %q, %v", got, err)
+	}
+}
+
+func TestInspectDaemonNamesADaemonBehindTheStoreSchema(t *testing.T) {
+	home, err := os.MkdirTemp("/tmp", "sparkwing-daemon-schema-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	st, err := store.Open(paths.PathsAt(home).StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	d, err := wingd.New(wingd.Config{Home: home, Version: "v0.38.2", StoreSchemaVersion: store.ExpectedSchemaVersion() - 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx) }()
+	select {
+	case <-d.Ready():
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not become ready")
+	}
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	report, err := inspectDaemon(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.StoreSchemaVersion != store.ExpectedSchemaVersion() {
+		t.Fatalf("store schema = %d, want %d", report.StoreSchemaVersion, store.ExpectedSchemaVersion())
+	}
+	if report.DaemonSchemaVersion != store.ExpectedSchemaVersion()-1 {
+		t.Fatalf("daemon schema = %d, want %d", report.DaemonSchemaVersion, store.ExpectedSchemaVersion()-1)
+	}
+	if !report.SchemaDiverged || report.Healthy {
+		t.Fatalf("a daemon behind the store schema reported healthy: %+v", report)
 	}
 }

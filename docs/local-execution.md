@@ -59,8 +59,12 @@ concurrent runs in a browser without needing any remote service.
 
 Local pipelines share a small admission daemon named wingd. It starts on
 demand and normally needs no operator attention. `sparkwing daemon status`
-reports whether it is running; JSON output includes the serving binary and its
-source revision. `sparkwing daemon restart` replaces only an answering daemon
+reports whether it is running; JSON output includes the serving binary, its
+source revision, the runs-store schema that binary understands, and the schema
+this home's store holds. A daemon behind the store cannot read it and refuses
+every run, so status reports it unhealthy and names both schemas; a run that
+hits the same skew fails with that comparison rather than a capacity error.
+`sparkwing daemon restart` replaces only an answering daemon
 when its build differs from the installed Sparkwing build. Add `--force` to
 replace an answering daemon that already serves the installed build. Existing
 holders reconnect and reattach to their durable leases, while a deliberately

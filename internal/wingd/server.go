@@ -467,6 +467,7 @@ func (d *Daemon) serveConn(c *conn) {
 		BinaryVersion:       d.cfg.Version,
 		BuildIdentity:       wingwire.BuildIdentity,
 		Draining:            draining,
+		StoreSchemaVersion:  d.cfg.StoreSchemaVersion,
 	}
 	if err := c.send(ack); err != nil {
 		return
@@ -638,6 +639,14 @@ func finalizesRun(protocolMajor int, req *wingwire.AdmissionRequest) bool {
 	return !req.SubLease
 }
 
+func (d *Daemon) terminalCheckReason(err error) string {
+	version := d.cfg.Version
+	if version == "" {
+		version = "(unknown)"
+	}
+	return fmt.Sprintf("daemon %s could not read the runs store: %v", version, err)
+}
+
 func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if !validCostSource(req.CostSource) {
 		d.rejectInvalid(c, req, rejectCauseCostSource, fmt.Sprintf(
@@ -672,7 +681,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		cancelled, err = d.cfg.IsRunTerminal(req.RunID)
 		if err != nil {
 			d.cfg.logf("admission: terminal check for %s: %v", req.RunID, err)
-			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "terminal-check", Policy: wingwire.PolicyFail})
+			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "terminal-check", Policy: wingwire.PolicyFail, Reason: d.terminalCheckReason(err)})
 			return
 		}
 	}
@@ -1189,7 +1198,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		terminal, checkErr := d.cfg.IsRunTerminal(member)
 		if checkErr != nil {
 			d.cfg.logf("reattach: terminal check for %s: %v", member, checkErr)
-			_ = c.send(&wingwire.Evicted{RunID: member, Key: "terminal-check", Policy: wingwire.PolicyFail})
+			_ = c.send(&wingwire.Evicted{RunID: member, Key: "terminal-check", Policy: wingwire.PolicyFail, Reason: d.terminalCheckReason(checkErr)})
 			return
 		}
 		if terminal {
