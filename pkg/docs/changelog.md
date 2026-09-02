@@ -50,6 +50,16 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
+- **controller (Breaking):** Runners no longer need `admin`. New `triggers.claim`,
+  `runs.state`, and `secrets.read` scopes carry the trigger lifecycle, run and
+  node state writes, and single-secret reads, and `start` and `finish` admit
+  only the principal holding that node's claim. Secrets gained an owning
+  repository (schema 22, `sparkwing secrets set --repo <slug>`): a
+  `secrets.read` caller resolves a name against the repository of the run it
+  holds, so a runner token can no longer read another repository's credentials
+  or mint an admin bearer. A secret stored without `--repo` stays readable by
+  every run. `admin` remains a superset, so existing tokens keep working; see
+  the [migration guide](docs/migrations/_unreleased.md#breaking-runner-scopes-split-out-of-admin).
 - **store:** Browser sessions are stored as a sha256 digest of the session id,
   and the CSRF token is derived as an HMAC of that id under a server key
   instead of being written to the database, so a copy of the state database,
