@@ -5,6 +5,47 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## (Breaking) Submitted runs carry an allow-listed environment
+
+- **Before:** `sparkwing runs submit` snapshotted the whole submitting shell to
+  disk and handed it to the run, so the queued snapshot held whatever the
+  terminal held: `AWS_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`, a `kubectl` bearer.
+  A run that a consumer shutdown returned to the queue dispatched again from the
+  consumer's own environment.
+- **After:** Capture keeps only `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
+  `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, then drops every credential-shaped
+  name and value from that set. `SPARKWING_SUBMIT_ENV_ALLOW` widens it by name,
+  or by prefix with a trailing `*`; a bare `*` is refused at submission time,
+  and the credential filter logs at warn the names it removes from an entry an
+  operator wrote by hand. The consumer deletes the snapshot when it starts the
+  run, and a run that returns to the queue without its snapshot fails with
+  "submission environment snapshot is gone" rather than running under the
+  consumer's shell.
+- **Migration:** A submitted pipeline that read `AWS_PROFILE`, `AWS_REGION`,
+  `KUBECONFIG`, `DOCKER_HOST`, or `SSH_AUTH_SOCK` from the submitting shell
+  stops seeing them. Most of those fail loudly; `AWS_PROFILE` and `DOCKER_HOST`
+  do not, because the AWS SDK and the Docker client fall back to a default
+  profile and socket, which can point a deploy at the wrong account. Name what
+  each pipeline needs:
+
+  ```bash
+  SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK' \
+    sparkwing runs submit deploy
+  ```
+
+  The credential filter still applies to what the list names, so a value that
+  reads as a secret is dropped even when named; the warn line says which. Take
+  credentials from the secret store instead. Go callers of
+  `orchestrator.CaptureSubmissionEnvironment` pass a `*slog.Logger` as a
+  trailing argument.
+
+  Resubmit any run that was queued when a consumer was interrupted: its
+  snapshot is gone and the requeued dispatch now fails instead of running with
+  the consumer's environment.
+- **Why:** A queued run is a file on disk that outlives the shell that made it.
+  It should not be a copy of every credential that shell happened to export,
+  and losing the snapshot should narrow what a run can reach, not widen it.
+
 ## (Breaking) Runner scopes split out of admin
 
 - **Before:** The routes a runner calls to do its job all required `admin`:

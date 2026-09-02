@@ -50,11 +50,21 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
-- **cli:** `sparkwing runs submit` now snapshots an allow-listed environment
-  instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
-  `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every credential-shaped
-  name and value, widened by `SPARKWING_SUBMIT_ENV_ALLOW`. The consumer
-  deletes the snapshot when it starts the run rather than when the run ends.
+- **cli (Breaking):** `sparkwing runs submit` now snapshots an allow-listed
+  environment instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`,
+  `HOME`, `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every
+  credential-shaped name and value. A submitted pipeline that read
+  `AWS_PROFILE`, `AWS_REGION`, `KUBECONFIG`, `DOCKER_HOST`, or `SSH_AUTH_SOCK`
+  from the submitting shell no longer sees them, and the AWS and Docker
+  clients answer from a default rather than failing, so name what a pipeline
+  needs:
+  `SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK'`.
+  A bare `*` is refused instead of quietly allowing nothing, and the credential
+  filter logs at warn the names it drops from an explicit entry. The consumer
+  deletes the snapshot when it starts the run; a run that returns to the queue
+  without its snapshot fails rather than inheriting the consumer's own shell.
+  See the
+  [migration guide](docs/migrations/_unreleased.md#breaking-submitted-runs-carry-an-allow-listed-environment).
 
 ### Security
 
