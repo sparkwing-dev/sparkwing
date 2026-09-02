@@ -95,7 +95,26 @@ func TestArtifactsEndpoint_RoundTrip(t *testing.T) {
 
 func TestArtifactsEndpoint_RejectsTraversalKey(t *testing.T) {
 	t.Parallel()
-	const target = "/api/v1/artifacts/..%2f..%2fetc%2fpasswd"
+	targets := []string{
+		"/api/v1/artifacts/..%2f..%2fetc%2fpasswd",
+		"/api/v1/artifacts/%252e%252e%252fetc%252fpasswd",
+		"/api/v1/artifacts/..x",
+		"/api/v1/artifacts/a%23frag",
+		"/api/v1/artifacts/a%3Fdelete=1",
+	}
+	rejectsAll := func(t *testing.T, h http.Handler, art *fakeArtifactStore) {
+		t.Helper()
+		for _, target := range targets {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("%s: status = %d, want 400", target, rec.Code)
+			}
+		}
+		if len(art.gets) != 0 {
+			t.Errorf("store reached with keys %v", art.gets)
+		}
+	}
 
 	t.Run("server", func(t *testing.T) {
 		t.Parallel()
@@ -106,31 +125,13 @@ func TestArtifactsEndpoint_RejectsTraversalKey(t *testing.T) {
 			t.Fatalf("open store: %v", err)
 		}
 		t.Cleanup(func() { _ = st.Close() })
-		h := controller.New(st, nil).WithArtifactStore(art).Handler()
-
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if len(art.gets) != 0 {
-			t.Errorf("store reached with keys %v", art.gets)
-		}
+		rejectsAll(t, controller.New(st, nil).WithArtifactStore(art).Handler(), art)
 	})
 
 	t.Run("loopback", func(t *testing.T) {
 		t.Parallel()
 		art := &fakeArtifactStore{}
-		h := controller.NewLoopback(nil, "run-1", "", nil).WithArtifactStore(art).Handler()
-
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
-		}
-		if len(art.gets) != 0 {
-			t.Errorf("store reached with keys %v", art.gets)
-		}
+		rejectsAll(t, controller.NewLoopback(nil, "run-1", "", nil).WithArtifactStore(art).Handler(), art)
 	})
 }
 

@@ -37,8 +37,9 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, rc)
 }
 
-// safety: ServeMux unescapes %2f inside {key}, so a traversal key is
-// rejected here before any backend joins it to a path or object key.
+// safety: ServeMux unescapes %2f inside {key}, so a traversal or
+// double-encoded key is rejected here before any backend joins it to a
+// path or object key.
 func safeArtifactKey(key string) bool {
-	return storage.SafeRelPath(key) == nil
+	return storage.SafeArtifactKey(key) == nil
 }
