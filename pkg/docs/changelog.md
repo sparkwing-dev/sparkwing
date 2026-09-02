@@ -49,6 +49,15 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Security
+
+- **controller:** First-admin bootstrap is now atomic on Postgres. The
+  check-then-insert locks a single `sparkwing_meta` latch row inside its
+  transaction, so two concurrent bootstrap requests can no longer both read an
+  empty `users` table and each create an admin under a different name. The
+  transaction also ran raw `?` placeholders that Postgres rejects, so bootstrap
+  now goes through the dialect-aware transaction helper.
+
 ## [v0.40.0] - 2026-09-02
 ### Security
 
