@@ -219,14 +219,35 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	return router
 }
 
+const gitcacheStreamLimit = 8
+
 func gitcacheStreamHandler(next http.Handler) http.Handler {
+	slots := make(chan struct{}, gitcacheStreamLimit)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// safety: a half-hour deadline and a proxied Git stream are machine credentials only.
+		if !hasBearerCredential(r) {
+			http.Error(w, "unauthorized -- set Authorization: Bearer <token> header", http.StatusUnauthorized)
+			return
+		}
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			w.Header().Set("Retry-After", "30")
+			http.Error(w, "too many concurrent Git cache streams", http.StatusServiceUnavailable)
+			return
+		}
 		deadline := time.Now().Add(30 * time.Minute)
 		controller := http.NewResponseController(w)
 		_ = controller.SetReadDeadline(deadline)
 		_ = controller.SetWriteDeadline(deadline)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func hasBearerCredential(r *http.Request) bool {
+	scheme, rest, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	return ok && strings.EqualFold(scheme, "bearer") && strings.TrimSpace(rest) != ""
 }
 
 func authControllerURL(opts HandlerOptions) string {

@@ -690,3 +690,91 @@ func assertNoClearedCookies(t *testing.T, cookies []*http.Cookie) {
 		}
 	}
 }
+
+func TestGitcacheMachineProxyRejectsARequestWithNoBearer(t *testing.T) {
+	t.Parallel()
+	reached := false
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(controller.Close)
+	handler := HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle)
+
+	for _, authorization := range []string{"", "Basic dXNlcjpwYXNz", "Bearer", "Bearer   "} {
+		req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/gitcache/seed", strings.NewReader("bundle"))
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "browser-session"})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Authorization %q = %d, want 401", authorization, rec.Code)
+		}
+	}
+	if reached {
+		t.Error("an unauthenticated request reached the controller")
+	}
+}
+
+func TestGitcacheMachineProxyCapsConcurrentStreams(t *testing.T) {
+	release := make(chan struct{})
+	admitted := make(chan struct{}, gitcacheStreamLimit+1)
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		admitted <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer controller.Close()
+	dashboard := httptest.NewServer(HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle))
+	defer dashboard.Close()
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	defer releaseOnce()
+
+	stream := func() (int, error) {
+		req, err := http.NewRequest(http.MethodGet,
+			dashboard.URL+"/api/v1/gitcache/git/widgets/info/refs?service=git-upload-pack", nil)
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("Authorization", "Bearer runner-token")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0, err
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode, nil
+	}
+
+	var wg sync.WaitGroup
+	for range gitcacheStreamLimit {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := stream(); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	for range gitcacheStreamLimit {
+		<-admitted
+	}
+
+	code, err := stream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != http.StatusServiceUnavailable {
+		t.Errorf("stream past the cap = %d, want 503", code)
+	}
+	releaseOnce()
+	wg.Wait()
+}

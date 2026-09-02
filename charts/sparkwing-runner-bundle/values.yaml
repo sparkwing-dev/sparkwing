@@ -288,6 +288,24 @@ serviceAccount:
   #   eks.amazonaws.com/role-arn: arn:aws:iam::123:role/sparkwing-runner
   annotations: {}
 
+# Default-deny ingress for the cache pod. The cache holds the deploy
+# key, mirrored private source, and working-tree snapshots, so only the
+# release's runner and controller pods are admitted to its port.
+networkPolicy:
+  # false removes the policy and leaves reachability to whatever the
+  # cluster's own default is. Every cache route still requires a bearer
+  # token; the policy narrows who can present one.
+  enabled: true
+  # Pod labels of the controller allowed to reach the cache. Empty
+  # admits this release's own controller pod (the one the parent chart
+  # installs). Set it to your controller's labels when it runs under a
+  # different release in the same namespace.
+  controllerPodSelector: {}
+  # Extra NetworkPolicy ingress rules, appended verbatim. Needed when
+  # an out-of-cluster runner pool or a non-ClusterIP Service has to
+  # reach the cache.
+  extraIngress: []
+
 # RBAC. The chart is namespace-scoped: a Role + RoleBinding only.
 # The runner, cache, and logs servers reach the controller over HTTP
 # and never call the Kubernetes API, so the Role carries no rules and

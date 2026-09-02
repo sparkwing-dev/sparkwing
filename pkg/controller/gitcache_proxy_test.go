@@ -121,10 +121,11 @@ func mustRequest(t *testing.T, method, url string, body io.Reader) *http.Request
 }
 
 func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
 	var cacheRequests []string
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "" {
-			t.Fatalf("cache received controller bearer %q", got)
+		if got := r.Header.Get("Authorization"); got != "Bearer cache-secret" {
+			t.Fatalf("cache Authorization = %q, want the cache token and never the caller's", got)
 		}
 		cacheRequests = append(cacheRequests, r.Method+" "+r.URL.RequestURI())
 		switch r.URL.Path {
