@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 func TestSubmissionEnvironmentIsOwnerOnlyAndDiscarded(t *testing.T) {
 	home := t.TempDir()
 	const runID = "run-environment"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"TOKEN=secret", "MODE=test"}); err != nil {
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev", "PATH=/submit/bin"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -35,7 +36,7 @@ func TestSubmissionEnvironmentIsOwnerOnlyAndDiscarded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(env) != 2 || env[0] != "TOKEN=secret" || env[1] != "MODE=test" {
+	if len(env) != 2 || env[0] != "SPARKWING_PROFILE=dev" || env[1] != "PATH=/submit/bin" {
 		t.Fatalf("snapshot = %#v", env)
 	}
 
@@ -72,7 +73,7 @@ func TestReconcileSubmissionEnvironmentsRemovesTerminalSnapshots(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
 	const runID = "run-terminal-environment"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"TOKEN=secret"}); err != nil {
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -107,7 +108,7 @@ func TestReconcileSubmissionEnvironmentsRemovesMalformedResidueAndContinues(t *t
 		t.Fatal(err)
 	}
 	const runID = "run-terminal-after-malformed"
-	if err := CaptureSubmissionEnvironment(home, runID, []string{"TOKEN=secret"}); err != nil {
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
@@ -134,7 +135,7 @@ func TestReconcileSubmissionEnvironmentsRemovesAbandonedTemporaryFile(t *testing
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".submission-environment-crash")
-	if err := os.WriteFile(path, []byte(`{"environment":["TOKEN=secret"]}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"environment":["SPARKWING_PROFILE=dev"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-abandonedSubmissionEnvironmentAge - time.Minute)
@@ -176,5 +177,87 @@ func TestSubmissionWithoutCapturedEnvironmentUsesConsumerEnvironment(t *testing.
 	}
 	if env != nil {
 		t.Fatalf("legacy submission environment = %#v, want nil", env)
+	}
+}
+
+func TestCaptureSubmissionEnvironmentKeepsOnlyAllowedNonCredentialVariables(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want []string
+	}{
+		{
+			name: "keeps the dispatch snapshot shape",
+			env:  []string{"SPARKWING_PROFILE=dev", "GITHUB_REF_NAME=main", "PATH=/bin", "HOME=/u", "AWS_REGION=us-east-1"},
+			want: []string{"SPARKWING_PROFILE=dev", "GITHUB_REF_NAME=main", "PATH=/bin", "HOME=/u"},
+		},
+		{
+			name: "drops credential-shaped names",
+			env:  []string{"GITHUB_TOKEN=gh", "SPARKWING_SECRETS_KEY=k", "AWS_SECRET_ACCESS_KEY=a", "SPARKWING_PROFILE=dev"},
+			want: []string{"SPARKWING_PROFILE=dev"},
+		},
+		{
+			name: "drops credential-shaped values",
+			env:  []string{"SPARKWING_HEADER=Bearer abc", "SPARKWING_DB=postgres://u:p@h/db", "SPARKWING_PROFILE=dev"},
+			want: []string{"SPARKWING_PROFILE=dev"},
+		},
+		{
+			name: "honours the operator allow-list",
+			env: []string{
+				submissionEnvironmentAllowKey + "=AWS_REGION,DOCKER_*",
+				"AWS_REGION=us-east-1", "DOCKER_HOST=tcp://h:1", "DOCKER_PASSWORD=p", "LANG=C",
+			},
+			want: []string{
+				submissionEnvironmentAllowKey + "=AWS_REGION,DOCKER_*",
+				"AWS_REGION=us-east-1", "DOCKER_HOST=tcp://h:1",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			const runID = "run-filter"
+			if err := CaptureSubmissionEnvironment(home, runID, tc.env); err != nil {
+				t.Fatal(err)
+			}
+			got, err := submissionEnvironment(home, &store.Trigger{
+				ID:         runID,
+				TriggerEnv: map[string]string{SubmissionEnvironmentCapturedKey: "1"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("captured environment = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestConsumeSubmissionEnvironmentDeletesTheSnapshotAtRunStart(t *testing.T) {
+	home := t.TempDir()
+	const runID = "run-consume"
+	if err := CaptureSubmissionEnvironment(home, runID, []string{"SPARKWING_PROFILE=dev"}); err != nil {
+		t.Fatal(err)
+	}
+	trig := &store.Trigger{
+		ID:         runID,
+		TriggerEnv: map[string]string{SubmissionEnvironmentCapturedKey: "1"},
+	}
+	env, err := consumeSubmissionEnvironment(home, trig, quietLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(env, []string{"SPARKWING_PROFILE=dev"}) {
+		t.Fatalf("consumed environment = %#v", env)
+	}
+	if _, err := os.Stat(submissionEnvironmentPath(home, runID)); !os.IsNotExist(err) {
+		t.Fatalf("snapshot outlived the start of the run: %v", err)
+	}
+	again, err := consumeSubmissionEnvironment(home, trig, quietLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != nil {
+		t.Fatalf("redispatch environment = %#v, want the consumer environment", again)
 	}
 }

@@ -59,6 +59,34 @@ code change to unlock.
   secret to rewrite it. Secret names holding `..` or an empty path segment
   are rejected. A `Cipher` supplied through `WithSecretsCipher` may also
   implement the new `controller.BoundCipher` to take part in the binding.
+- **helm:** Both charts now default to the Pod Security "restricted" profile:
+  every pod carries `seccompProfile: RuntimeDefault` and every container runs
+  with a read-only root filesystem over a `/tmp` scratch `emptyDir`. The
+  Kubernetes runner Job does the same. `ingress.enabled=true` now fails to
+  render with an empty `ingress.tls` or with `web.requireLogin=false`; set
+  `ingress.allowInsecure=true` to publish the dashboard unencrypted or open
+  anyway.
+- **sdk:** `git.Clone` now authenticates to the git cache named by
+  `SPARKWING_GITCACHE`. The bearer in `SPARKWING_CACHE_TOKEN` travels in the
+  environment as a cache-scoped `http.<cache>/.extraHeader`, never on the
+  command line, and redirects are off for that URL so the header cannot follow
+  the request to another host. A cache that answers 401 no longer breaks the
+  clone: it falls back to the upstream remote, the same as an unreachable
+  cache.
+- **cli:** `sparkwing runs submit` now snapshots an allow-listed environment
+  instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
+  `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every credential-shaped
+  name and value, widened by `SPARKWING_SUBMIT_ENV_ALLOW`. The consumer
+  deletes the snapshot when it starts the run rather than when the run ends.
+
+### Security
+
+- **controller:** First-admin bootstrap is now atomic on Postgres. The
+  check-then-insert locks a single `sparkwing_meta` latch row inside its
+  transaction, so two concurrent bootstrap requests can no longer both read an
+  empty `users` table and each create an admin under a different name. The
+  transaction also ran raw `?` placeholders that Postgres rejects, so bootstrap
+  now goes through the dialect-aware transaction helper.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

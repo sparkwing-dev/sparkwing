@@ -447,7 +447,9 @@ The server variables above configure the cache pod. On the client side,
 set it to a reachable cache server and sparkwing routes clones through
 that server instead of probing for a local one. Empty (the default)
 leaves sparkwing to auto-detect, falling back to a direct clone when no
-gitcache answers.
+gitcache answers. Those clones carry `SPARKWING_CACHE_TOKEN` as their
+bearer, so a cache that guards its git routes still serves them; a cache
+that answers `401` sends the clone to the upstream remote instead.
 
 ### Data directories
 

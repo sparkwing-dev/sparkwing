@@ -394,3 +394,20 @@ CHANGELOG links here.
 - **Why:** Pipeline authors are expected to run code on runners. They are not
   expected to read the key that decrypts every stored secret or the HMAC that
   authenticates every webhook.
+
+## Restricted pod security and the published-dashboard guard
+
+- **Before:** Neither chart set a seccomp profile, every container could
+  write to its image layers, and `ingress.enabled=true` rendered whatever
+  `ingress.tls` and `web.requireLogin` held.
+- **After:** Every pod carries `seccompProfile: RuntimeDefault`, every
+  container runs with a read-only root filesystem over a `/tmp` scratch
+  `emptyDir`, and the Kubernetes runner Job does the same. `sparkwing-full`
+  refuses to render when `ingress.enabled=true` with an empty `ingress.tls`
+  or with `web.requireLogin=false`.
+- **Migration:** An install that publishes the dashboard sets `ingress.tls`
+  and `web.requireLogin=true` before upgrading, or sets
+  `ingress.allowInsecure=true` to keep publishing it unencrypted or open. A
+  custom image whose process writes outside `/tmp` needs its own
+  `emptyDir` mount for that path, or `securityContext.readOnlyRootFilesystem`
+  overridden for that container.

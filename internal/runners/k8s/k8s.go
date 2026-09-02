@@ -301,6 +301,8 @@ func JobName(runID, nodeID string, attempt int) string {
 	return truncate(name, 63)
 }
 
+const scratchVolumeName = "scratch"
+
 const (
 	podCPULimitFactor = 2.0
 
@@ -379,10 +381,13 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: boolPtr(false),
 			RunAsNonRoot:             boolPtr(true),
+			ReadOnlyRootFilesystem:   boolPtr(true),
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
 			},
 		},
+		// safety: the read-only root leaves no writable path, and HOME, the caches, and SPARKWING_HOME all live here.
+		VolumeMounts: []corev1.VolumeMount{{Name: scratchVolumeName, MountPath: "/tmp"}},
 	}
 
 	podSpec := corev1.PodSpec{
@@ -393,6 +398,10 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		NodeSelector:                 r.cfg.NodeSelector,
 		Tolerations:                  r.cfg.Tolerations,
 		Containers:                   []corev1.Container{container},
+		Volumes: []corev1.Volume{{
+			Name:         scratchVolumeName,
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		}},
 		SecurityContext: &corev1.PodSecurityContext{
 			RunAsNonRoot: boolPtr(true),
 			SeccompProfile: &corev1.SeccompProfile{

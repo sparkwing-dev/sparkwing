@@ -47,6 +47,8 @@ var ErrInvalidCredentials = errors.New("invalid username or password")
 
 const metaKeySessionCSRFKey = "session_csrf_key"
 
+const metaKeyBootstrapLatch = "bootstrap_latch"
+
 func sessionDigest(rawSession string) string {
 	sum := sha256.Sum256([]byte(rawSession))
 	return hex.EncodeToString(sum[:])
@@ -326,11 +328,20 @@ func (s *Store) CreateFirstUser(name, password string, scopes []string, now time
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginTx(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("users: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// safety: locking one latch row serializes bootstrap, so racing READ COMMITTED txns cannot both count zero users.
+	if _, err := tx.Exec(
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT (key) DO UPDATE SET updated_at = excluded.updated_at`,
+		metaKeyBootstrapLatch, now.UTC().Format(time.RFC3339), now.UTC().UnixNano(),
+	); err != nil {
+		return nil, fmt.Errorf("users: bootstrap latch: %w", err)
+	}
 
 	var count int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
