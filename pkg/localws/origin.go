@@ -7,27 +7,37 @@ import (
 	"strings"
 )
 
-func originGuard(next http.Handler, allowRemote bool) http.Handler {
+type originPolicy struct {
+	allowRemote bool
+	// safety: with a remote bind the request Host is attacker-controlled,
+	// so the operator's own bind address anchors the Origin check instead.
+	bindHost     string
+	allowOrigins []string
+}
+
+func originGuard(next http.Handler, policy originPolicy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// safety: the local API is unauthenticated, so a Host that is not
 		// loopback means the request arrived through a name that resolves
 		// here from someone else's network -- a DNS rebinding attempt.
-		if !allowRemote && !loopbackHost(r.Host) {
+		if !policy.allowRemote && !loopbackHost(r.Host) {
 			http.Error(w, "forbidden: this server answers loopback hosts only", http.StatusForbidden)
 			return
 		}
 		if origin := r.Header.Get("Origin"); origin != "" {
-			if !originAllowed(origin, r.Host) {
+			if !policy.originAllowed(origin) {
 				http.Error(w, "forbidden: cross-origin request", http.StatusForbidden)
 				return
 			}
 			next.ServeHTTP(w, r)
 			return
 		}
-		// safety: a cross-site GET cannot read the response, but a
-		// mutating one runs pipelines, so reject it when the browser
-		// tells us the initiator was another site.
-		if mutatingMethod(r.Method) && crossSiteFetch(r.Header.Get("Sec-Fetch-Site")) {
+		// safety: a cross-site top-level navigation only renders the
+		// dashboard, but a cross-site subresource -- img, script, fetch,
+		// framed page -- sends no Origin and exists to reach a side effect,
+		// so it is refused whatever the method.
+		if crossSiteFetch(r.Header.Get("Sec-Fetch-Site")) &&
+			(mutatingMethod(r.Method) || r.Header.Get("Sec-Fetch-Dest") != "document") {
 			http.Error(w, "forbidden: cross-site request", http.StatusForbidden)
 			return
 		}
@@ -51,21 +61,38 @@ func crossSiteFetch(secFetchSite string) bool {
 	return true
 }
 
-func originAllowed(origin, host string) bool {
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
+func (p originPolicy) originAllowed(origin string) bool {
+	scheme, host, ok := splitOrigin(origin)
+	if !ok {
 		return false
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return false
-	}
-	if strings.EqualFold(u.Host, host) {
-		return true
 	}
 	// safety: `next dev` serves the dashboard on another loopback port and
 	// forwards its own Origin, so loopback origins stay allowed regardless
-	// of port. Any origin off this machine is not.
-	return loopbackHost(u.Host)
+	// of port. Any origin off this machine needs an explicit opt-in.
+	if loopbackHost(host) {
+		return true
+	}
+	if p.bindHost != "" && strings.EqualFold(host, p.bindHost) {
+		return true
+	}
+	for _, allowed := range p.allowOrigins {
+		allowedScheme, allowedHost, allowedOK := splitOrigin(allowed)
+		if allowedOK && allowedScheme == scheme && strings.EqualFold(allowedHost, host) {
+			return true
+		}
+	}
+	return false
+}
+
+func splitOrigin(origin string) (scheme, host string, ok bool) {
+	u, err := url.Parse(strings.TrimSpace(origin))
+	if err != nil || u.Host == "" {
+		return "", "", false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", "", false
+	}
+	return u.Scheme, u.Host, true
 }
 
 func loopbackHost(hostport string) bool {
@@ -81,7 +108,10 @@ func loopbackHost(hostport string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func loopbackBind(addr string) bool {
+// LoopbackBind reports whether addr binds a loopback interface. A bare
+// host carrying no port is read as the host. Callers use it to decide
+// whether serving the unauthenticated local API needs an explicit opt-in.
+func LoopbackBind(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr
@@ -90,4 +120,18 @@ func loopbackBind(addr string) bool {
 		return false
 	}
 	return loopbackHost(host)
+}
+
+// safety: a wildcard bind names no interface, so it anchors no origin and
+// must not widen the Origin check.
+func bindOriginHost(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || host == "" {
+		return ""
+	}
+	host = strings.Trim(host, "[]")
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		return ""
+	}
+	return net.JoinHostPort(host, port)
 }

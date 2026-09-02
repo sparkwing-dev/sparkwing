@@ -60,6 +60,8 @@ type PoolConfig struct {
 	Namespace string
 
 	ReconcileEvery time.Duration
+
+	WarmerServiceAccount string
 }
 type Principal struct {
 	Name        string

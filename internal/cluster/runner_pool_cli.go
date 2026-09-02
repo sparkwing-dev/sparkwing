@@ -287,6 +287,10 @@ func runRunnerCLI(args []string) error {
 		if *gitcacheURL == "" {
 			return errors.New("--also-claim-triggers requires --gitcache or SPARKWING_GITCACHE_URL")
 		}
+		// safety: without this the child handle-trigger process rejects every trigger instead
+		if *triggerRunnerKind == "k8s" && *triggerRunnerSA == "" {
+			return errors.New("--runner-sa (or SPARKWING_RUNNER_SA) is required with --runner k8s")
+		}
 		go func() {
 			if err := RunTriggerLoop(ctx, TriggerLoopOptions{
 				ControllerURL:   *controllerURL,

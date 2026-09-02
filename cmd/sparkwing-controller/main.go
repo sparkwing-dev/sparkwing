@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -35,6 +36,10 @@ func run(args []string) error {
 		"enable the warm-PVC pool (requires in-cluster K8s access)")
 	poolNamespace := fs.String("pool-namespace", os.Getenv("POD_NAMESPACE"),
 		"namespace the pool manages (default: POD_NAMESPACE)")
+	warmerServiceAccount := fs.String("warmer-service-account",
+		firstNonEmpty(os.Getenv("SPARKWING_WARMER_SA"), pool.WarmerServiceAccountName),
+		"ServiceAccount the warm-pool warmer pods run as; it must exist in the pool "+
+			"namespace and needs no rules (env: SPARKWING_WARMER_SA)")
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"),
 		"kubeconfig path when --pool is set (empty = in-cluster)")
 	secretsKeyFile := fs.String("secrets-key-file", "",
@@ -114,8 +119,9 @@ func run(args []string) error {
 			return fmt.Errorf("pool: %w", kerr)
 		}
 		srv.AttachPool(controller.PoolConfig{
-			Client:    kcli,
-			Namespace: *poolNamespace,
+			Client:               kcli,
+			Namespace:            *poolNamespace,
+			WarmerServiceAccount: *warmerServiceAccount,
 		})
 		checkStorageClasses(ctx, kcli, *poolNamespace)
 	}
@@ -152,6 +158,15 @@ func checkStorageClasses(ctx context.Context, kcli kubernetes.Interface, namespa
 			"Pending. Set storageClassName on the PVCs (helm: "+
 			"--set storage.className=<class>) or mark a StorageClass "+
 			"default with storageclass.kubernetes.io/is-default-class=true.")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func envTruthy(name string) bool {

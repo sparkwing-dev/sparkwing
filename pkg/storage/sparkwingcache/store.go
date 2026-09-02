@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -148,7 +149,11 @@ func (s *Store) authorize(req *http.Request) {
 }
 
 func (s *Store) binURL(key string) string {
-	return s.baseURL + "/bin/" + key
+	segs := strings.Split(key, "/")
+	for i, seg := range segs {
+		segs[i] = url.PathEscape(seg)
+	}
+	return s.baseURL + "/bin/" + strings.Join(segs, "/")
 }
 
 // List is unsupported; the cache server has no enumeration endpoint.

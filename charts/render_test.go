@@ -23,7 +23,7 @@ func TestFullChartVersion(t *testing.T) {
 	if err := yaml.Unmarshal(data, &chart); err != nil {
 		t.Fatal(err)
 	}
-	if chart.Version != "0.1.7" {
+	if chart.Version != "0.1.8" {
 		t.Fatalf("full chart version = %q, want 0.1.7", chart.Version)
 	}
 }
@@ -1042,14 +1042,75 @@ func TestFullChartMountsNoWebServiceAccountToken(t *testing.T) {
 	}
 }
 
-func TestFullChartCreatesTheWarmerServiceAccount(t *testing.T) {
-	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-full", "sparkwing", "default"))
+func TestFullChartScopesTheWarmerServiceAccountToTheRelease(t *testing.T) {
+	const want = "other-sparkwing-full-cache-warmer"
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-full", "other", "default"))
+	var created bool
 	for _, resource := range resources {
-		if resource.Kind == "ServiceAccount" && resource.Metadata.Name == "sparkwing-cache-warmer" {
-			return
+		if resource.Kind == "ServiceAccount" && resource.Metadata.Name == want {
+			created = true
 		}
 	}
-	t.Fatal("no sparkwing-cache-warmer ServiceAccount for the controller's warmer pods")
+	if !created {
+		t.Errorf("no %s ServiceAccount for the controller's warmer pods", want)
+	}
+	controller := componentResource(t, resources, "Deployment", "controller")
+	args := resourceContainer(t, controller).Args
+	got, ok := hasFlag(args, "--warmer-service-account=")
+	if !ok {
+		t.Fatalf("no --warmer-service-account flag in %v; the controller would name the unscoped default", args)
+	}
+	if got != "--warmer-service-account="+want {
+		t.Errorf("warmer-service-account flag = %q, want the release-scoped account", got)
+	}
+}
+
+func TestFullChartWarmerServiceAccountDoesNotCollideAcrossReleases(t *testing.T) {
+	names := map[string]bool{}
+	for _, release := range []string{"sparkwing", "other"} {
+		for _, resource := range renderedResources(t, helmRenderAll(t, "./sparkwing-full", release, "default")) {
+			if resource.Kind != "ServiceAccount" {
+				continue
+			}
+			if names[resource.Metadata.Name] {
+				t.Errorf("ServiceAccount %q renders for both releases; a second install into one namespace fails", resource.Metadata.Name)
+			}
+			names[resource.Metadata.Name] = true
+		}
+	}
+}
+
+func TestRunnerBundleCanRemountTheRunnerToken(t *testing.T) {
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
+		"controller.url=http://controller", "runner.automountServiceAccountToken=true"))
+	pod := componentResource(t, resources, "Deployment", "runner").Spec.Template.Spec
+	if pod.AutomountServiceAccountToken == nil || !*pod.AutomountServiceAccountToken {
+		t.Fatalf("runner automountServiceAccountToken = %v, want true; the k8s trigger runner cannot load its in-cluster config without a token",
+			pod.AutomountServiceAccountToken)
+	}
+	for _, component := range []string{"cache", "logs"} {
+		other := componentResource(t, resources, "Deployment", component).Spec.Template.Spec
+		if other.AutomountServiceAccountToken == nil || *other.AutomountServiceAccountToken {
+			t.Errorf("%s pod automounts a ServiceAccount token when only the runner opts in", component)
+		}
+	}
+}
+
+func TestRunnerBundleRefusesSilentServiceAccountSharing(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
+		"controller.url=http://controller", "serviceAccount.create=false", "serviceAccount.name=my-existing-sa")
+	if !strings.Contains(out, "shareAcrossComponents") {
+		t.Fatalf("render failure does not name the acknowledgement value:\n%s", out)
+	}
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
+		"controller.url=http://controller", "serviceAccount.create=false", "serviceAccount.name=my-existing-sa",
+		"serviceAccount.shareAcrossComponents=true"))
+	for _, component := range []string{"runner", "cache", "logs"} {
+		pod := componentResource(t, resources, "Deployment", component).Spec.Template.Spec
+		if pod.ServiceAccountName != "my-existing-sa" {
+			t.Errorf("%s serviceAccountName = %q, want the operator's pre-created account", component, pod.ServiceAccountName)
+		}
+	}
 }
 
 func TestFullChartVendorsTheTightenedRunnerRBAC(t *testing.T) {

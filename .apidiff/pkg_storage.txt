@@ -43,6 +43,7 @@ type ReadOpts struct {
 	Lines string
 	Grep  string
 }
+func SafeArtifactKey(key string) error
 func SafeLogIDs(runID, nodeID string) error
 func SafeRelPath(id string) error
 func SafeSegment(id string) error

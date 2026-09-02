@@ -109,3 +109,33 @@ func TestSearch_EmptyLogsVolume(t *testing.T) {
 		t.Fatalf("expected zero results, got %+v", body)
 	}
 }
+
+func TestSearch_NodeFilterAcceptsHierarchicalID(t *testing.T) {
+	root := t.TempDir()
+	seedLog(t, root, "run-1", "scan__pkg-a", "pattern here\n")
+	seedLog(t, root, "run-1", "node-b", "pattern here too\n")
+
+	s, err := New(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/logs/search?q=pattern&node_id=scan%2Fpkg-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	var body SearchResponse
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, data)
+	}
+	if body.Total != 1 {
+		t.Fatalf("total=%d want 1 (payload=%+v)", body.Total, body)
+	}
+	if body.Results[0].NodeID != "scan__pkg-a" {
+		t.Errorf("node_id=%q want %q", body.Results[0].NodeID, "scan__pkg-a")
+	}
+}

@@ -144,12 +144,19 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	return nil
 }
 
-func HandlerFromOptions(opts HandlerOptions) http.Handler {
+// BundleFS returns the embedded dashboard bundle rooted at its
+// index.html, for callers that build their own handler chain around
+// HandlerFromOptionsWithBundle.
+func BundleFS() fs.FS {
 	subFS, err := fs.Sub(nextBundle, "next-out")
 	if err != nil {
 		panic(fmt.Sprintf("web: embed fs.Sub failed: %v", err)) //nolint:forbidigo // unreachable post-VerifyBundleEmbedded; build-time invariant
 	}
-	return HandlerFromOptionsWithBundle(opts, subFS)
+	return subFS
+}
+
+func HandlerFromOptions(opts HandlerOptions) http.Handler {
+	return HandlerFromOptionsWithBundle(opts, BundleFS())
 }
 
 func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Handler {
@@ -177,7 +184,8 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles/explain", capacityExplainHandler(opts.Backend))
 
 	if opts.LogsURL != "" {
-		authedMux.Handle("/api/v1/logs/", controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts)))
+		authedMux.Handle("/api/v1/logs/",
+			logsProxyAllowList(controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts))))
 	}
 	if opts.ControllerURL != "" {
 		authedMux.Handle("/api/v1/",

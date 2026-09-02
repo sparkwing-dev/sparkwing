@@ -37,6 +37,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	runFilter := r.URL.Query().Get("run_id")
 	nodeFilter := r.URL.Query().Get("node_id")
+	if nodeFilter != "" {
+		nodeFilter = strings.TrimSuffix(nodeFile(nodeFilter), ".log")
+	}
 
 	limit := 100
 	if v := r.URL.Query().Get("limit"); v != "" {

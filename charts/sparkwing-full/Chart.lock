@@ -1,6 +1,6 @@
 dependencies:
 - name: sparkwing-runner-bundle
   repository: file://../sparkwing-runner-bundle
-  version: 0.1.4
-digest: sha256:584adfb0259ef04c791791c89abe309c86e211c2762c7fd9acae9b4e503681d5
-generated: "2026-09-01T22:18:58.431322-06:00"
+  version: 0.1.5
+digest: sha256:05eb1aef32ac930852d6afad3dbdd0d86df021c48543d1cd00dc7d165147642e
+generated: "2026-09-01T22:48:11.46616-06:00"

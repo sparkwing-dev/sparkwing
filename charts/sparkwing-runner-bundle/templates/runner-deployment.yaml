@@ -22,7 +22,7 @@ spec:
         {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "runner") | nindent 8 }}
     spec:
       serviceAccountName: {{ include "sparkwing-runner-bundle.serviceAccountName" . }}
-      automountServiceAccountToken: false
+      automountServiceAccountToken: {{ .Values.runner.automountServiceAccountToken }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
