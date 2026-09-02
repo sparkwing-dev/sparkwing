@@ -192,6 +192,11 @@ func (p *PrePush) run(ctx context.Context) error {
 	} else {
 		sparkwing.Info(ctx, "installer report: clean")
 	}
+	if _, err := sparkwing.Bash(ctx, "bash bin/service-install-test.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("service installer config guard: %v", err))
+	} else {
+		sparkwing.Info(ctx, "service installer config guard: clean")
+	}
 
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("shellcheck: %v", err))

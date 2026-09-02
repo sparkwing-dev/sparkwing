@@ -303,6 +303,17 @@ jobs:
           name: release-image-digests
           path: dist
 
+      - name: Sign published image digests
+        if: ${{ needs.publish-images.result == 'success' }}
+        env:
+          SPARKWING_UPDATE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
+          SPARKWING_RELEASE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          go run ./cmd/sign-manifest -in dist/image-digests.json -out dist/image-digests.json.sig
+          go run ./cmd/verify-release --dist dist --verify
+          test -f dist/image-digests.json.sig
+
       - name: Extract CHANGELOG section for this tag
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
@@ -522,6 +533,10 @@ jobs:
       id-token: write
       packages: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: scanned-image-*
@@ -585,40 +600,7 @@ jobs:
             actual_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$TAG" '$2 == direct { print $1 }')"
           fi
           test "$actual_sha" = "$EXPECTED_SHA"
-          binaries=(
-            sparkwing-controller
-            sparkwing-runner
-            sparkwing-cache
-            sparkwing-logs
-            sparkwing-web
-          )
-          entries=""
-          for binary in "${binaries[@]}"; do
-            digest="$(tr -d '\r\n' <"scanned-image-digests/$binary")"
-            image="ghcr.io/sparkwing-dev/${binary}"
-            # A published version tag is immutable: an operator who pinned it
-            # audited those bytes, so moving it needs an explicit override.
-            published="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "${image}:${TAG}" 2>/dev/null | tr -d '\r\n ' || true)"
-            if [ -n "$published" ] && [ "$published" != "$digest" ]; then
-              if [ "$FORCE_RETAG" != "true" ]; then
-                echo "${image}:${TAG} already points at ${published}; refusing to move it to ${digest} (rerun with force_retag to override)" >&2
-                exit 1
-              fi
-              echo "::warning::force_retag moves ${image}:${TAG} from ${published} to ${digest}"
-            fi
-            tag_args=(--tag "${image}:${TAG}")
-            if [[ "$TAG" != *-* ]]; then
-              tag_args+=(--tag "${image}:latest")
-            fi
-            docker buildx imagetools create \
-              "${tag_args[@]}" \
-              "${image}@${digest}"
-            entries="${entries:+${entries},}$(printf '{"image":"%s","tag":"%s","digest":"%s"}' "$image" "$TAG" "$digest")"
-          done
-          mkdir -p image-digests
-          printf '{"tag":"%s","images":[%s]}\n' "$TAG" "$entries" |
-            jq . >image-digests/image-digests.json
-          cat image-digests/image-digests.json
+          bash bin/publish-image-tags.sh
 
       - name: Upload published image digests
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

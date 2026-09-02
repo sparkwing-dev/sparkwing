@@ -279,15 +279,29 @@ than accepting an unknown signer.
 
 Container images follow the same rule. The release scans each image by
 digest, signs that digest with cosign, then moves `vX.Y.Z` onto it with
-`docker buildx imagetools create`. Before the move it resolves what the tag
-already points at and fails when the answer is a different digest, so a
-`workflow_dispatch` rerun cannot swap bytes under an operator who pinned the
-tag; the `force_retag` dispatch input is the only override. The floating
-`latest` tag is exempt because it is meant to move. Each release publishes an
-`image-digests.json` asset naming every image, its tag, and its digest, so
-operators can pin digests and diff them between releases. That asset is a
-convenience listing; the cosign signature over the digest is what a verifier
-checks.
+`docker buildx imagetools create`. `bin/publish-image-tags.sh` resolves every
+tag before it moves any of them and fails when one already points at a
+different digest, so a `workflow_dispatch` rerun cannot swap bytes under an
+operator who pinned the tag and a refusal cannot leave the registry
+half-moved; the `force_retag` dispatch input is the only override. A registry
+lookup that fails for any other reason stops the step rather than reading as
+an absent tag. After the moves it re-reads each tag and fails when it does not
+resolve to the pushed digest. The floating `latest` tag is exempt because it is
+meant to move. Each release publishes an `image-digests.json` asset naming
+every image, its tag, and its digest, built from that re-read, so operators can
+pin digests and diff them between releases. The asset carries an
+`image-digests.json.sig` signed by the release key, so a swapped listing does
+not verify; the cosign signature over the digest is still what proves the image
+bytes.
+
+Recovering from a publication-only failure is a choice between two dispatch
+inputs. A rerun with `publish_images: false` keeps the images and tags that
+already landed, republishes the GitHub release, and omits the
+`image-digests.json` asset because no publish job ran. A rerun with
+`publish_images: true` rebuilds the images, so the guard refuses the tag move
+and the run fails; completing it takes `force_retag: true`, which moves the
+version tag onto bytes nobody pinned. Prefer `publish_images: false` unless
+the published images are known bad.
 
 ## Cache service
 

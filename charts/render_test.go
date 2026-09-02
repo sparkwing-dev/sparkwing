@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1958,6 +1959,9 @@ func TestInsecureOptInWithoutTLSAllowsSessionCookiesOverHTTP(t *testing.T) {
 	if insecure != "1" {
 		t.Fatalf("SPARKWING_WEB_INSECURE_COOKIES = %q, want 1 so a browser can hold a session over plain HTTP", insecure)
 	}
+	if !slices.Contains(container.Args, "--allow-insecure-cookies-remote") {
+		t.Fatalf("web args %v lack --allow-insecure-cookies-remote; the pod refuses a non-loopback bind with insecure cookies", container.Args)
+	}
 
 	secured := runnerContainer(t, helmRender(t, "./sparkwing-full", "templates/web-deployment.yaml", "sparkwing",
 		"ingress.enabled=true", "web.requireLogin=true", "ingress.tls[0].secretName=sparkwing-tls"))
@@ -1965,6 +1969,9 @@ func TestInsecureOptInWithoutTLSAllowsSessionCookiesOverHTTP(t *testing.T) {
 		if env.Name == "SPARKWING_WEB_INSECURE_COOKIES" {
 			t.Fatalf("SPARKWING_WEB_INSECURE_COOKIES set behind TLS: %+v", env)
 		}
+	}
+	if slices.Contains(secured.Args, "--allow-insecure-cookies-remote") {
+		t.Fatalf("web args %v carry --allow-insecure-cookies-remote behind TLS", secured.Args)
 	}
 }
 
