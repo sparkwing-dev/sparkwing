@@ -51,6 +51,62 @@ code change to unlock.
 
 ### Security
 
+- **cli:** `~/.config/sparkwing` is now created and kept at `0700` by every
+  writer. `sparkwing configure profiles add/set`, `configure init`, the repos
+  registry, and the dotenv secrets store all route through `fssecure`, and
+  `profiles.yaml` is staged through a randomly named temporary file instead of
+  a predictable `profiles.yaml.tmp`. `configure profiles add` and
+  `configure profiles set` take `--token-stdin`, which prompts without echo on
+  a terminal and reads a pipe otherwise; `--token` still works and its help now
+  says the value is visible in the process list and shell history.
+- **store (Breaking):** Two live tokens can no longer share a prefix. Run-store
+  schema 26 makes the `idx_tokens_prefix` index unique and minting retries when
+  a prefix is already taken, so the 12-character handle
+  `sparkwing cluster tokens revoke --prefix` accepts names one principal.
+  Revoking runs its update inside a transaction and rolls back when the prefix
+  matched more than one row, rather than revoking every match and reporting the
+  ambiguity afterwards, and `store.LookupTokenByPrefix` -- the read behind
+  rotation -- errors on an ambiguous prefix instead of returning the first row.
+  A database that already holds two tokens on one prefix refuses to migrate and
+  names the prefix; see the
+  [migration guide](docs/migrations/_unreleased.md#token-prefixes-are-unique).
+- **sparks:** A `sparks:` entry's `source` is checked as a Go module path
+  before it reaches `go list`, so a malformed path fails with a named error
+  instead of becoming an argument to the go command.
+- **cache + orchestrator:** Every git call that takes a caller-supplied ref or
+  revision now separates it from the option list -- `--` before the positional
+  arguments of `merge-base`, `cat-file`, and `git worktree add`, and
+  `--verify --end-of-options` for `git rev-parse` -- so no such value is read
+  as a flag. `/sync/negotiate` requires each `commits[]` entry to be a 40-64
+  character hex object id, and a retry's recorded revision must be one before
+  the orchestrator materializes it. Short-ref log lines clamp instead of
+  slicing at eight bytes, which crashed the negotiate handler on a shorter ref.
+- **runner:** The Kubernetes runner now clamps a pipeline's declared resource
+  pin to the CPU and memory limits the runner is configured with, so
+  `sparkwing.Cores(64)` in one pipeline can no longer request more than a node
+  has and hold the namespace's capacity. A charge below the ceiling is
+  untouched. `sparkwing-runner-bundle` ships an optional `LimitRange` and
+  `ResourceQuota` (`limitRange.enabled`, `resourceQuota.enabled`, both off) as
+  the cluster-side backstop, and the SDK documentation for `Plan.Resources` no
+  longer claims a pin never caps the work.
+- **logs:** CLI log output now filters terminal escape sequences out of
+  pipeline output. Plain format drops every escape sequence and every C0
+  control byte except tab, so one log record stays one line; the colored
+  format keeps only the SGR codes the web log viewer renders. A pipeline can
+  no longer retitle the operator's terminal, plant an OSC 8 hyperlink, reset
+  the terminal with `ESC c`, or forge a Sparkwing status line in the output of
+  `sparkwing runs logs`.
+- **deploy:** The `mode3-postgres` Terraform module now commits its
+  `.terraform.lock.hcl` and pins providers with `~>` instead of `>=`, so
+  `terraform init` installs the checksummed versions the module was tested
+  against rather than whatever the registry serves that day; the lock records
+  `linux_amd64` and `darwin_arm64`. `allowed_cidr_blocks` now rejects
+  `0.0.0.0/0` and `::/0` at plan time instead of quietly opening the database
+  port to the internet. `install/install.sh` creates `agent.yaml` at mode 600
+  before it writes the token, closing the window a permissive umask left
+  between the heredoc and the `chmod`, and refuses a token carrying anything
+  outside `[A-Za-z0-9_.-]`, which could otherwise close the YAML quote and
+  inject config.
 - **controller:** `GET /api/v1/runs/{id}` and `GET /api/v1/triggers/{id}` now
   admit a caller holding a live claim on that run as well as one holding
   `runs.read` or `triggers.read`. Those are the first two calls a node process
@@ -249,14 +305,13 @@ code change to unlock.
   scan enforces with `-nosec-require-rules` and `-nosec-require-justification`
   so a naked suppression silences nothing, and the comment gate keeps each
   annotation alone on one line so free prose cannot ride behind one.
-- **cli:** `~/.config/sparkwing` is now created and kept at `0700` by every
-  writer. `sparkwing configure profiles add/set`, `configure init`, the repos
-  registry, and the dotenv secrets store all route through `fssecure`, and
-  `profiles.yaml` is staged through a randomly named temporary file instead of
-  a predictable `profiles.yaml.tmp`. `configure profiles add` and
-  `configure profiles set` take `--token-stdin`, which prompts without echo on
-  a terminal and reads a pipe otherwise; `--token` still works and its help now
-  says the value is visible in the process list and shell history.
+- **release:** The release workflow now resolves a version tag's published
+  image digest before it retags, and fails when that tag already points at
+  different bytes. A `workflow_dispatch` rerun with `publish_images: true`
+  used to move `vX.Y.Z` to a freshly built digest, so an operator who pinned
+  the tag got layers nobody audited; moving it now takes the new `force_retag`
+  input. Each release also carries an `image-digests.json` asset listing every
+  published image, its tag, and its digest, so operators can pin and diff them.
 
 ### Added
 

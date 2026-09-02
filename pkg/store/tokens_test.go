@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -16,6 +17,21 @@ func newTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+func dropPrefixUniqueIndex(t *testing.T, s *Store) {
+	t.Helper()
+	if _, err := s.execNoCtx(`DROP INDEX ` + TokenPrefixIndexName); err != nil {
+		t.Fatalf("drop %s: %v", TokenPrefixIndexName, err)
+	}
+}
+
+func collidePrefixes(t *testing.T, s *Store, keep, drop string) {
+	t.Helper()
+	dropPrefixUniqueIndex(t, s)
+	if _, err := s.execNoCtx(`UPDATE tokens SET prefix = ? WHERE prefix = ?`, keep, drop); err != nil {
+		t.Fatalf("collide: %v", err)
+	}
 }
 
 func TestCreateAndLookupToken(t *testing.T) {
@@ -103,9 +119,7 @@ func TestLookupToken_IgnoresCollidedRowsWithDifferentHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateToken B: %v", err)
 	}
-	if _, err := s.execNoCtx(`UPDATE tokens SET prefix = ? WHERE prefix = ?`, tokA.Prefix, tokB.Prefix); err != nil {
-		t.Fatalf("collide: %v", err)
-	}
+	collidePrefixes(t, s, tokA.Prefix, tokB.Prefix)
 
 	got, err := s.LookupToken(rawA, now)
 	if err != nil {
@@ -196,5 +210,122 @@ func TestRotateToken(t *testing.T) {
 	}
 	if _, err := s.LookupToken(rawB, now.Add(time.Second)); err != nil {
 		t.Fatalf("new token should authenticate: %v", err)
+	}
+}
+
+func TestCreateToken_ConcurrentMintsGetDistinctPrefixes(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().UTC()
+
+	const minters = 4
+	prefixes := make([]string, minters)
+	errs := make([]error, minters)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range minters {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			_, tok, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			prefixes[i] = tok.Prefix
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	seen := map[string]struct{}{}
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("minter %d: %v", i, err)
+		}
+		seen[prefixes[i]] = struct{}{}
+	}
+	if len(seen) != minters {
+		t.Fatalf("got %d distinct prefixes from %d mints: %v", len(seen), minters, prefixes)
+	}
+
+	stored, err := s.ListTokens("", true)
+	if err != nil {
+		t.Fatalf("ListTokens: %v", err)
+	}
+	if len(stored) != minters {
+		t.Fatalf("stored %d rows, want %d", len(stored), minters)
+	}
+}
+
+func TestCreateToken_StoreRefusesASecondRowOnOnePrefix(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().UTC()
+
+	_, tok, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	_, err = s.execNoCtx(
+		`INSERT INTO tokens (hash, prefix, principal, kind, scopes, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		"argon2id$00$00", tok.Prefix, "mallory", TokenKindUser, "admin", now.Unix(),
+	)
+	if err == nil {
+		t.Fatal("a second row carrying a live prefix should violate the unique index")
+	}
+	if !isUniqueViolation(err) {
+		t.Fatalf("err = %v, want a unique-constraint violation", err)
+	}
+}
+
+func TestAmbiguousPrefixRefusesLookupRevokeAndRotate(t *testing.T) {
+	cases := []struct {
+		name string
+		act  func(*Store, string, time.Time) error
+	}{
+		{"lookup", func(s *Store, prefix string, _ time.Time) error {
+			_, err := s.LookupTokenByPrefix(prefix)
+			return err
+		}},
+		{"revoke", func(s *Store, prefix string, now time.Time) error {
+			return s.RevokeToken(prefix, now)
+		}},
+		{"rotate", func(s *Store, prefix string, now time.Time) error {
+			_, _, _, err := s.RotateToken(prefix, time.Hour, time.Hour, now)
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestStore(t)
+			now := time.Now().UTC()
+			_, tokA, err := s.CreateToken("alice", TokenKindUser, []string{"admin"}, 0, now)
+			if err != nil {
+				t.Fatalf("CreateToken A: %v", err)
+			}
+			_, tokB, err := s.CreateToken("bob", TokenKindUser, []string{"runs.read"}, 0, now)
+			if err != nil {
+				t.Fatalf("CreateToken B: %v", err)
+			}
+			collidePrefixes(t, s, tokA.Prefix, tokB.Prefix)
+
+			err = tc.act(s, tokA.Prefix, now)
+			if err == nil {
+				t.Fatalf("%s on an ambiguous prefix should fail", tc.name)
+			}
+			if !strings.Contains(err.Error(), "matched 2 rows") {
+				t.Fatalf("err = %v, want the ambiguity refusal", err)
+			}
+
+			live, err := s.ListTokens("", false)
+			if err != nil {
+				t.Fatalf("ListTokens: %v", err)
+			}
+			if len(live) != 2 {
+				t.Fatalf("%d live rows after the refusal, want 2", len(live))
+			}
+		})
 	}
 }

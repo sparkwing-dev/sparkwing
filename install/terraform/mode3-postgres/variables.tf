@@ -48,6 +48,11 @@ variable "allowed_cidr_blocks" {
   description = "CIDR blocks allowed to reach the database on the PostgreSQL port. An alternative to allowed_security_group_ids for hosts without a security group."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for cidr in var.allowed_cidr_blocks : !contains(["0.0.0.0/0", "::/0"], trimspace(cidr))])
+    error_message = "allowed_cidr_blocks must not contain 0.0.0.0/0 or ::/0. Scope ingress to the runners' networks, or use allowed_security_group_ids."
+  }
 }
 
 variable "database_name" {

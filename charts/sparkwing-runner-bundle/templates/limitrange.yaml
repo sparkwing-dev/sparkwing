@@ -1,0 +1,28 @@
+{{- if .Values.limitRange.enabled -}}
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "sparkwing-runner-bundle.componentFullname" (dict "root" . "component" "limits") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.labels" . | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      {{- with .Values.limitRange.max }}
+      max:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.limitRange.min }}
+      min:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.limitRange.default }}
+      default:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.limitRange.defaultRequest }}
+      defaultRequest:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -125,3 +125,25 @@ run "cidr_ingress_is_port_only_and_not_world_open" {
     error_message = "ingress must never admit the whole internet (0.0.0.0/0)"
   }
 }
+
+run "world_open_ipv4_cidr_is_rejected" {
+  command = plan
+
+  variables {
+    engine              = "rds"
+    allowed_cidr_blocks = ["10.0.0.0/16", "0.0.0.0/0"]
+  }
+
+  expect_failures = [var.allowed_cidr_blocks]
+}
+
+run "world_open_ipv6_cidr_is_rejected" {
+  command = plan
+
+  variables {
+    engine              = "rds"
+    allowed_cidr_blocks = ["::/0"]
+  }
+
+  expect_failures = [var.allowed_cidr_blocks]
+}

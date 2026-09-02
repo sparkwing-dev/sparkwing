@@ -299,6 +299,65 @@ func TestUploadDownload_PercentEncodedDotDotIsNoExistenceOracle(t *testing.T) {
 	}
 }
 
+func TestShortClampsARefShorterThanEight(t *testing.T) {
+	cases := []struct{ ref, want string }{
+		{"", ""},
+		{"a", "a"},
+		{"abcdefg", "abcdefg"},
+		{"abcdefgh", "abcdefgh"},
+		{strings.Repeat("a", 40), "aaaaaaaa"},
+	}
+	for _, c := range cases {
+		if got := short(c.ref); got != c.want {
+			t.Errorf("short(%q) = %q, want %q", c.ref, got, c.want)
+		}
+	}
+}
+
+func TestSyncNegotiateRejectsACommitThatIsNotAnObjectID(t *testing.T) {
+	repoURL, bareRepo, _ := gitcacheFixture(t)
+	head := strings.TrimSpace(string(mustGitOut(t, bareRepo, "rev-parse", "main")))
+
+	for _, commit := range []string{"-x", "--upload-pack=evil", "main", head[:7]} {
+		req := httptest.NewRequest(http.MethodPost, "/sync/negotiate",
+			strings.NewReader(`{"repo":"`+repoURL+`","commits":["`+commit+`"]}`))
+		w := httptest.NewRecorder()
+		handleSyncNegotiate(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("commit %q: status %d, want 400", commit, w.Code)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/sync/negotiate",
+		strings.NewReader(`{"repo":"`+repoURL+`","commits":["`+head+`"]}`))
+	w := httptest.NewRecorder()
+	handleSyncNegotiate(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"found":true`) {
+		t.Errorf("full object id: status %d body %q, want the recorded ancestor", w.Code, strings.TrimSpace(w.Body.String()))
+	}
+}
+
+func TestRefArgsStillResolveAfterTheOptionTerminator(t *testing.T) {
+	repoURL, bareRepo, _ := gitcacheFixture(t)
+	head := strings.TrimSpace(string(mustGitOut(t, bareRepo, "rev-parse", "main")))
+
+	for _, query := range []string{"&", "&path=pipelines.yaml"} {
+		req := httptest.NewRequest(http.MethodGet, "/tree-hash?repo="+repoURL+"&branch=main"+query, nil)
+		w := httptest.NewRecorder()
+		handleTreeHash(w, req)
+		if w.Code != http.StatusOK || !gitObjectRE.MatchString(strings.TrimSpace(w.Body.String())) {
+			t.Errorf("tree-hash%q: status %d body %q, want one object id", query, w.Code, strings.TrimSpace(w.Body.String()))
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/branch-contains?repo="+repoURL+"&branch=main&commit="+head, nil)
+	w := httptest.NewRecorder()
+	handleBranchContains(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("branch-contains: status %d, want 200", w.Code)
+	}
+}
+
 func TestGitObjectRE_AcceptsOnlyAnObjectID(t *testing.T) {
 	valid := []string{strings.Repeat("a", 40), strings.Repeat("0", 64), strings.Repeat("F", 40)}
 	for _, sha := range valid {

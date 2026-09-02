@@ -118,6 +118,62 @@ func TestApplyHostCeiling(t *testing.T) {
 	}
 }
 
+func TestApplyCeiling(t *testing.T) {
+	cases := []struct {
+		name      string
+		res       Resolution
+		cores     float64
+		mem       int64
+		wantCores float64
+		wantMem   int64
+	}{
+		{
+			name:      "pin over the ceiling is capped",
+			res:       Resolution{Cores: 64, MemoryBytes: 128 << 30, Source: store.CostSourcePin},
+			cores:     2,
+			mem:       2 << 30,
+			wantCores: 2,
+			wantMem:   2 << 30,
+		},
+		{
+			name:      "measured charge over the ceiling is capped",
+			res:       Resolution{Cores: 8, MemoryBytes: 16 << 30, Source: store.CostSourceMeasured},
+			cores:     4,
+			mem:       8 << 30,
+			wantCores: 4,
+			wantMem:   8 << 30,
+		},
+		{
+			name:      "charge under the ceiling is untouched",
+			res:       Resolution{Cores: 1, MemoryBytes: 1 << 30, Source: store.CostSourcePin},
+			cores:     4,
+			mem:       8 << 30,
+			wantCores: 1,
+			wantMem:   1 << 30,
+		},
+		{
+			name:      "absent ceiling leaves the charge",
+			res:       Resolution{Cores: 64, MemoryBytes: 128 << 30, Source: store.CostSourcePin},
+			wantCores: 64,
+			wantMem:   128 << 30,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ApplyCeiling(tc.res, tc.cores, tc.mem)
+			if got.Cores != tc.wantCores {
+				t.Errorf("cores = %v, want %v", got.Cores, tc.wantCores)
+			}
+			if got.MemoryBytes != tc.wantMem {
+				t.Errorf("memory = %d, want %d", got.MemoryBytes, tc.wantMem)
+			}
+			if got.Source != tc.res.Source {
+				t.Errorf("source = %v, want %v", got.Source, tc.res.Source)
+			}
+		})
+	}
+}
+
 func TestResolve_Order(t *testing.T) {
 	measured := &store.PipelineProfile{
 		P50Duration:     30 * time.Second,
