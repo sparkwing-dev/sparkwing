@@ -5,6 +5,42 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## Cache reads require the bearer token
+
+- **Before:** `sparkwing-cache` demanded a bearer only on its blob and sync
+  routes. Git clone and registration, `/archive`, `/file`, `/tree-hash`,
+  `/branch-contains`, `/repos`, and `/artifacts/` answered anyone who could
+  reach the port.
+- **After:** Every route that touches repository content answers 401 without a
+  valid bearer. `/health`, `/metrics`, `/stats`, and the package proxy under
+  `/proxy/` stay open. `POST /git/register` also validates `name` against
+  `^[A-Za-z0-9._-]{1,64}$` and refuses to repoint an existing name without the
+  token.
+- **Migration:** Give every client that reads the cache directly the same token
+  the cache runs with. The charts do this: the runner and the controller read
+  `SPARKWING_CACHE_TOKEN` from `controller.tokenSecret`. Hand-rolled callers add
+  `Authorization: Bearer <token>`. A cache deliberately left open keeps
+  `--allow-unauthenticated` (`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED=1`), which
+  logs a warning at startup.
+- **Why:** The cache holds the deploy key, mirrored private source, and
+  uncommitted working-tree snapshots. Reaching its Service proves nothing about
+  the caller.
+
+## Cache Service and NetworkPolicy defaults
+
+- **Before:** No chart shipped a NetworkPolicy, and `cache.service.type` was a
+  free knob.
+- **After:** `sparkwing-runner-bundle` renders a default-deny ingress
+  NetworkPolicy for the cache pod admitting only the release's runner and
+  controller pods, and fails the render when `cache.service.type` is not
+  `ClusterIP` while no token Secret is configured.
+- **Migration:** A cluster whose CNI enforces NetworkPolicy and whose runners
+  live outside the release adds peers through `networkPolicy.extraIngress`, or
+  points `networkPolicy.controllerPodSelector` at its own controller's pod
+  labels. `networkPolicy.enabled=false` removes the policy. A published cache
+  Service needs `controller.tokenSecret.name` set and
+  `cache.allowUnauthenticated` left false.
+
 ## Managed Git hooks run locally by default
 
 - **Before:** A managed hook installed without `--profile` inherited the

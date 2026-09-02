@@ -143,6 +143,12 @@ the trusted suffix or an untrusted immediate peer falls back to the TCP peer.
 IPv4-mapped CIDRs with prefix lengths `/96` through `/128` normalize to IPv4;
 broader mapped prefixes fail startup. List proxy networks, not client networks.
 
+The controller throttles `POST /api/v1/auth/login` the same way and takes the
+same `--trusted-proxy-cidrs` flag, because it is reachable without going
+through the dashboard. See
+[security.md](security.md#login-and-hashing-budgets) for its budgets and the
+argon2 memory bound.
+
 The login, first-admin, and logout forms carry a CSRF token in both a
 `SameSite=Strict` cookie and a hidden field. Sparkwing rejects a missing,
 cross-origin, or mismatched token with `403` before it calls the controller.

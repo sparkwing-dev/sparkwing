@@ -33,7 +33,7 @@ func serveProtocolAck(t *testing.T, home string, major int, version string) {
 	if err != nil {
 		t.Fatalf("socket path: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(sock), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatalf("socket dir: %v", err)
 	}
 	ln, err := net.Listen("unix", sock)

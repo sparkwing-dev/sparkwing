@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,8 @@ type Server struct {
 	pool *poolBinding
 
 	auth *Authenticator
+
+	loginLimit *loginLimiter
 
 	githubWebhookSecret  string
 	githubCommitStatuses *githubCommitStatusReporter
@@ -66,6 +69,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		store:               st,
 		dispatcher:          NoopDispatcher{Logger: logger},
 		logger:              logger,
+		loginLimit:          newLoginLimiter(nil),
 		queueTimeout:        15 * time.Minute,
 		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
 		runnerHeadroom:      newRunnerHeadroomRegistry(),
@@ -223,6 +227,14 @@ func (s *Server) claimedBy(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// WithTrustedProxyCIDRs names the proxy source networks allowed to
+// supply X-Forwarded-For for login throttling. Empty keys the login
+// limiter on the TCP peer and ignores forwarded headers.
+func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server {
+	s.loginLimit = newLoginLimiter(prefixes)
+	return s
 }
 
 // WithDispatcher returns a Server that invokes the given dispatcher
@@ -426,7 +438,7 @@ func (s *Server) Handler() http.Handler {
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	router.HandleFunc("GET /api/v1/services", s.handleServices)
-	router.Handle("POST /api/v1/auth/login", http.HandlerFunc(s.handleLogin))
+	router.Handle("POST /api/v1/auth/login", s.loginLimit.middleware(http.HandlerFunc(s.handleLogin)))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))
 	router.Handle("GET /api/v1/auth/bootstrap-needed", http.HandlerFunc(s.handleBootstrapNeeded))

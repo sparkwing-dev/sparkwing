@@ -1,6 +1,9 @@
 package jobs
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -66,6 +69,62 @@ func TestSecurityWorkflowPinsExternalActions(t *testing.T) {
 	}
 	if uses != 8 {
 		t.Fatalf("external action uses = %d, want 8", uses)
+	}
+}
+
+func TestReleaseCheckoutsNeverPersistCredentials(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/release.yaml")
+	checkouts := strings.Count(body, "uses: actions/checkout@")
+	if checkouts == 0 {
+		t.Fatal("release workflow has no checkout steps")
+	}
+	if got := strings.Count(body, "persist-credentials: false"); got != checkouts {
+		t.Fatalf("non-persisting checkouts = %d, want %d", got, checkouts)
+	}
+}
+
+func TestEveryWorkflowPinsActionsByCommitSHA(t *testing.T) {
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatalf("locate repo root: %v", err)
+	}
+	dir := filepath.Join(root, ".github", "workflows")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	sha := regexp.MustCompile(`^[0-9a-f]{40}$`)
+	version := regexp.MustCompile(`^# v\d+\.\d+\.\d+$`)
+	workflows := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || (!strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml")) {
+			continue
+		}
+		workflows++
+		for i, line := range strings.Split(readHostedCIFile(t, ".github/workflows/"+name), "\n") {
+			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "- "))
+			if !strings.HasPrefix(line, "uses: ") {
+				continue
+			}
+			fields := strings.Fields(strings.TrimPrefix(line, "uses: "))
+			action := fields[0]
+			if strings.HasPrefix(action, "./") {
+				continue
+			}
+			where := fmt.Sprintf("%s:%d", name, i+1)
+			_, ref, ok := strings.Cut(action, "@")
+			if !ok || !sha.MatchString(ref) {
+				t.Errorf("%s: action is not pinned to a full commit SHA: %s", where, action)
+				continue
+			}
+			if comment := strings.Join(fields[1:], " "); !version.MatchString(comment) {
+				t.Errorf("%s: pinned action lacks a %q version comment: %s", where, "# vX.Y.Z", line)
+			}
+		}
+	}
+	if workflows < 4 {
+		t.Fatalf("workflows scanned = %d, want every file under .github/workflows", workflows)
 	}
 }
 

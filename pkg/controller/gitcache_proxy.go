@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -134,6 +135,10 @@ func (s *Server) proxyGitcacheRequest(w http.ResponseWriter, r *http.Request, me
 		if value := r.Header.Get(key); value != "" {
 			req.Header.Set(key, value)
 		}
+	}
+	// safety: the cache authenticates every route, and the caller's own bearer is never forwarded.
+	if token := bincache.CacheToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := &http.Client{
 		Timeout: 30 * time.Minute,

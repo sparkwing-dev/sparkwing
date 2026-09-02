@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
@@ -390,7 +393,7 @@ func TestRetainWorkspaceSeedRejectsNewSnapshotAtCapacity(t *testing.T) {
 			runGit(t, repo, "update-ref", "refs/sparkwing-seed/"+sha, sha)
 		}
 		runGit(t, repo, "update-ref", seedRef, sha)
-		err := retainWorkspaceSeed(repo, seedRef, sha, 2)
+		err := retainWorkspaceSeed(repo, seedRef, sha, 2, 24*time.Hour)
 		if i < 2 && err != nil {
 			t.Fatal(err)
 		}
@@ -440,7 +443,7 @@ func TestRetainWorkspaceSeedRefreshesOneRefPerSnapshot(t *testing.T) {
 	runGit(t, repo, "update-ref", "refs/sparkwing-seed/"+sha, sha)
 	for range 3 {
 		runGit(t, repo, "update-ref", seedRef, sha)
-		if err := retainWorkspaceSeed(repo, seedRef, sha, 2); err != nil {
+		if err := retainWorkspaceSeed(repo, seedRef, sha, 2, 24*time.Hour); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -734,7 +737,7 @@ func newTestServer(t *testing.T, token string) *httptest.Server {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	srv := httptest.NewServer(s.mux)
+	srv := httptest.NewServer(s.handler)
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -755,12 +758,18 @@ func TestMuxGuardsEveryWriteRoute(t *testing.T) {
 		{method: http.MethodPost, path: "/sync/seed", guarded: true},
 		{method: http.MethodPost, path: "/artifacts/job1?path=out.txt", guarded: true},
 		{method: http.MethodGet, path: "/artifacts/job1", guarded: true},
+		{method: http.MethodGet, path: "/archive?repo=x&branch=main", guarded: true},
+		{method: http.MethodGet, path: "/repos", guarded: true},
+		{method: http.MethodGet, path: "/file?repo=x&branch=main&path=go.mod", guarded: true},
+		{method: http.MethodGet, path: "/tree-hash?repo=x&branch=main&path=.", guarded: true},
+		{method: http.MethodGet, path: "/branch-contains?repo=x&branch=main&commit=abc", guarded: true},
+		{method: http.MethodPost, path: "/git/register?name=app&repo=https://example.com/a.git", guarded: true},
+		{method: http.MethodPost, path: "/git/refresh?name=app", guarded: true},
+		{method: http.MethodGet, path: "/git/app/info/refs?service=git-upload-pack", guarded: true},
 		{method: http.MethodGet, path: "/health", guarded: false},
-		{method: http.MethodGet, path: "/repos", guarded: false},
 		{method: http.MethodGet, path: "/stats", guarded: false},
 		{method: http.MethodGet, path: "/metrics", guarded: false},
-		{method: http.MethodGet, path: "/git/register", guarded: false},
-		{method: http.MethodGet, path: "/git/refresh", guarded: false},
+		{method: http.MethodGet, path: "/proxy/npm/left-pad", guarded: false},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			req, err := http.NewRequest(tc.method, srv.URL+tc.path, strings.NewReader(""))
@@ -937,5 +946,173 @@ func TestHandleBinLegacyGetRacingAPutKeepsTheSidecarHonest(t *testing.T) {
 			}
 		}
 		binsDir = oldDir
+	}
+}
+
+func TestEveryResponseCarriesNosniff(t *testing.T) {
+	srv := newTestServer(t, "s3cret")
+
+	for _, path := range []string{"/health", "/repos", "/metrics"} {
+		resp, err := srv.Client().Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("%s X-Content-Type-Options = %q, want nosniff", path, got)
+		}
+	}
+}
+
+func TestArtifactDownloadServesAnAttachment(t *testing.T) {
+	srv := newTestServer(t, "s3cret")
+
+	upload, err := http.NewRequest(http.MethodPost, srv.URL+"/artifacts/job-1?path=report.html",
+		strings.NewReader("<script>alert(1)</script>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload.Header.Set("Authorization", "Bearer s3cret")
+	resp, err := srv.Client().Do(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upload = %d, want 200", resp.StatusCode)
+	}
+
+	download, err := http.NewRequest(http.MethodGet, srv.URL+"/artifacts/job-1?glob=report.html", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	download.Header.Set("Authorization", "Bearer s3cret")
+	resp, err = srv.Client().Do(download)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("download = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want application/octet-stream", got)
+	}
+	if got := resp.Header.Get("Content-Disposition"); got != `attachment; filename="report.html"` {
+		t.Errorf("Content-Disposition = %q, want an attachment", got)
+	}
+}
+
+func TestGitRegisterValidatesTheName(t *testing.T) {
+	srv := newTestServer(t, "s3cret")
+
+	for _, name := range []string{"../escape", "a/b", strings.Repeat("n", 65), "na me", ""} {
+		req, err := http.NewRequest(http.MethodPost,
+			srv.URL+"/git/register?repo=https%3A%2F%2Fexample.invalid%2Fa.git&name="+url.QueryEscape(name), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer s3cret")
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("register name %q = %d, want 400", name, resp.StatusCode)
+		}
+	}
+}
+
+func TestGitRegisterRefusesAnUnauthenticatedRepoint(t *testing.T) {
+	srv := newTestServer(t, "")
+	repoNamesMu.Lock()
+	saved := repoNames
+	repoNames = map[string]string{}
+	repoNamesMu.Unlock()
+	t.Cleanup(func() {
+		repoNamesMu.Lock()
+		repoNames = saved
+		repoNamesMu.Unlock()
+	})
+
+	register := func(repo string) int {
+		req, err := http.NewRequest(http.MethodPost,
+			srv.URL+"/git/register?name=app&repo="+url.QueryEscape(repo), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := register("https://example.invalid/first.git"); code != http.StatusOK {
+		t.Fatalf("first registration = %d, want 200", code)
+	}
+	if code := register("https://example.invalid/second.git"); code != http.StatusConflict {
+		t.Errorf("repoint = %d, want 409", code)
+	}
+	repoNamesMu.RLock()
+	got := repoNames["app"]
+	repoNamesMu.RUnlock()
+	if got != "https://example.invalid/first.git" {
+		t.Errorf("registered repo = %q, want the original", got)
+	}
+}
+
+func TestWorkspaceRefExpired(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	ref := func(age time.Duration) string {
+		return fmt.Sprintf("%s%020d/%s", workspaceRefPrefix, now.Add(-age).UnixNano(), strings.Repeat("a", 40))
+	}
+	for _, tc := range []struct {
+		name    string
+		ref     string
+		maxAge  time.Duration
+		expired bool
+	}{
+		{name: "older than the window", ref: ref(48 * time.Hour), maxAge: 24 * time.Hour, expired: true},
+		{name: "inside the window", ref: ref(time.Hour), maxAge: 24 * time.Hour},
+		{name: "expiry disabled", ref: ref(48 * time.Hour), maxAge: 0},
+		{name: "unparsable stamp", ref: workspaceRefPrefix + "not-a-stamp/abc", maxAge: 24 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := workspaceRefExpired(tc.ref, now, tc.maxAge); got != tc.expired {
+				t.Errorf("workspaceRefExpired = %t, want %t", got, tc.expired)
+			}
+		})
+	}
+}
+
+func TestRetainWorkspaceSeedExpiresRefsPastTheMaxAge(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo.git")
+	runGit(t, repo, "init", "--bare")
+	source := filepath.Join(t.TempDir(), "source")
+	runGit(t, source, "init")
+	runGit(t, source, "config", "user.email", "sparkwing@example.invalid")
+	runGit(t, source, "config", "user.name", "Sparkwing Test")
+	runGit(t, source, "commit", "--allow-empty", "-m", "snapshot")
+	sha := strings.TrimSpace(runGit(t, source, "rev-parse", "HEAD"))
+	runGit(t, repo, "fetch", source, sha)
+
+	stale := fmt.Sprintf("%s%020d/%s", workspaceRefPrefix, time.Now().Add(-72*time.Hour).UnixNano(), strings.Repeat("b", 40))
+	runGit(t, repo, "update-ref", stale, sha)
+	seedRef := "refs/sparkwing-workspace-incoming/" + sha
+	runGit(t, repo, "update-ref", seedRef, sha)
+
+	if err := retainWorkspaceSeed(repo, seedRef, sha, 1, 24*time.Hour); err != nil {
+		t.Fatalf("retainWorkspaceSeed: %v", err)
+	}
+
+	refs := strings.Fields(runGit(t, repo, "for-each-ref", "--format=%(refname)", workspaceRefPrefix))
+	if len(refs) != 1 {
+		t.Fatalf("retained refs = %v, want only the new snapshot", refs)
+	}
+	if refs[0] == stale {
+		t.Errorf("retained the expired ref %s", stale)
 	}
 }
