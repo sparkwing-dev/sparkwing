@@ -421,7 +421,8 @@ CHANGELOG links here.
   A runner running the opt-in Kubernetes trigger runner
   (`SPARKWING_TRIGGER_RUNNER=k8s`) needs its token back with
   `--set runner.automountServiceAccountToken=true`, plus a Role that grants
-  `batch/jobs` create; that runner now refuses to start without `--runner-sa`.
+  `batch/jobs` create; that runner now refuses to start without
+  `--trigger-runner-sa` (or `SPARKWING_RUNNER_SA`).
   An install that sets `serviceAccount.create=false` must add
   `serviceAccount.shareAcrossComponents=true` to accept one account for all
   three pods. A controller running the warm pool outside `sparkwing-full` must
