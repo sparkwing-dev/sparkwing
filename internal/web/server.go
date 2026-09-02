@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/netip"
@@ -85,13 +86,17 @@ type HandlerOptions struct {
 	CacheURL          string
 	Token             string
 
-	APIURL string
-
 	Version       string
 	ExtraServices []HealthService
 
 	RequireLogin      bool
 	TrustedProxyCIDRs []netip.Prefix
+
+	// AllowUnauthenticatedRemote lets a token-backed dashboard bind a
+	// non-loopback address without RequireLogin. Everyone who can reach
+	// the listener then drives the controller with the service token, so
+	// callers must opt in explicitly.
+	AllowUnauthenticatedRemote bool
 }
 
 func Serve(ctx context.Context, paths swpaths.Paths, addr string, trustedProxyCIDRs []netip.Prefix) error {
@@ -118,6 +123,9 @@ func Serve(ctx context.Context, paths swpaths.Paths, addr string, trustedProxyCI
 
 func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) error {
 	if err := validateAuthOptions(opts); err != nil {
+		return err
+	}
+	if err := validateRemoteExposure(opts, addr); err != nil {
 		return err
 	}
 	if err := VerifyBundleEmbedded(); err != nil {
@@ -202,6 +210,8 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	// reach the listener while the rest of the dashboard needs a session.
 	authedMux.Handle("GET /docs", docsweb.Handler())
 
+	authedMux.HandleFunc("GET "+runtimeConfigPath, runtimeConfigHandler(opts))
+
 	authedMux.Handle("/", spaHandler(bundleFS, opts))
 
 	router := http.NewServeMux()
@@ -217,7 +227,7 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 		router.Handle("/api/v1/gitcache/", gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false)))
 	}
 	router.Handle("/", sessionAuthMiddleware(opts, bundleFS, authedMux))
-	return router
+	return securityHeadersMiddleware(router)
 }
 
 const gitcacheStreamLimit = 8
@@ -274,6 +284,34 @@ func validateAuthOptions(opts HandlerOptions) error {
 	return nil
 }
 
+// safety: an unauthenticated dashboard that holds a service bearer hands the
+// controller to everyone who can reach a non-loopback listener.
+func validateRemoteExposure(opts HandlerOptions, addr string) error {
+	if opts.RequireLogin || opts.Token == "" || opts.AllowUnauthenticatedRemote || loopbackBind(addr) {
+		return nil
+	}
+	return fmt.Errorf(
+		"dashboard holds a controller token, requires no login, and binds non-loopback address %q: "+
+			"pass --require-login, bind a loopback address, or pass --allow-unauthenticated-remote to accept that "+
+			"every caller who reaches the listener drives the controller", addr)
+}
+
+func loopbackBind(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 	fileServer := http.FileServer(http.FS(bundleFS))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -314,55 +352,45 @@ func isTemplatedPath(p string) bool {
 	return !strings.HasPrefix(p, "_next/") && !strings.HasPrefix(p, "next-dev/")
 }
 
-func serveTemplatedHTML(w http.ResponseWriter, _ *http.Request, bundleFS fs.FS, name string, opts HandlerOptions) {
+func serveTemplatedHTML(w http.ResponseWriter, r *http.Request, bundleFS fs.FS, name string, opts HandlerOptions) {
 	raw, err := fs.ReadFile(bundleFS, name)
 	if err != nil {
 		http.NotFound(w, nil)
 		return
 	}
-	effectiveLogin := loginRequired(opts)
-	frontendToken := opts.Token
-	frontendAPIURL := opts.APIURL
-	if effectiveLogin {
-		frontendToken = ""
-		frontendAPIURL = ""
+	body := raw
+	if nonce := cspNonceFrom(r.Context()); nonce != "" {
+		body = bytes.ReplaceAll(raw, []byte("<script>"), []byte(`<script nonce="`+nonce+`">`))
 	}
-	body := bytes.ReplaceAll(raw,
-		[]byte("__SPARKWING_TOKEN_MARKER__"),
-		[]byte(jsStringEscape(frontendToken)))
-	body = bytes.ReplaceAll(body,
-		[]byte("__SPARKWING_API_URL_MARKER__"),
-		[]byte(jsStringEscape(frontendAPIURL)))
-	body = bytes.ReplaceAll(body,
-		[]byte("__SPARKWING_VERSION_MARKER__"),
-		[]byte(jsStringEscape(opts.Version)))
-	body = bytes.ReplaceAll(body,
-		[]byte("__SPARKWING_REQUIRE_LOGIN_MARKER__"),
-		[]byte(strconv.FormatBool(effectiveLogin)))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(body)
 }
 
-func jsStringEscape(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '<': // safety: prevents injection that breaks out of the surrounding <script> tag
-			b.WriteString(`<`)
-		default:
-			b.WriteRune(r)
-		}
+const runtimeConfigPath = "/sparkwing-runtime.js"
+
+// safety: the dashboard proxies the controller on its own origin, so the
+// browser never needs the service bearer and this payload never carries it.
+func runtimeConfigHandler(opts HandlerOptions) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		body := "window.__SPARKWING_VERSION__=" + jsStringLiteral(opts.Version) + ";\n" +
+			"window.__SPARKWING_REQUIRE_LOGIN__=" + jsStringLiteral(strconv.FormatBool(loginRequired(opts))) + ";\n"
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = io.WriteString(w, body)
 	}
-	return b.String()
+}
+
+// safety: encoding/json escapes <, > and &, so the literal cannot close a
+// script element; the two JavaScript line terminators are escaped here.
+func jsStringLiteral(s string) string {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		return `""`
+	}
+	literal := string(encoded)
+	literal = strings.ReplaceAll(literal, "\u2028", `\u2028`)
+	return strings.ReplaceAll(literal, "\u2029", `\u2029`)
 }
 
 func controllerProxy(controllerURL, token string, loginRequired bool) http.Handler {

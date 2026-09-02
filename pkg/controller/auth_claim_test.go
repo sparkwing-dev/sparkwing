@@ -49,8 +49,11 @@ func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 	}
 
 	authed := client.NewWithToken(srv.URL, nil, raw)
-	if err := authed.MarkNodeReady(ctx, "run-1", "only"); err != nil {
-		t.Fatalf("authed MarkNodeReady: %v", err)
+	if err := authed.MarkNodeReady(ctx, "run-1", "only"); err == nil {
+		t.Fatal("expected MarkNodeReady with a nodes.claim token to fail; readiness is admin-only")
+	}
+	if err := st.MarkNodeReady(ctx, "run-1", "only"); err != nil {
+		t.Fatalf("MarkNodeReady: %v", err)
 	}
 	n, err := authed.ClaimNode(ctx, "agent-1", nil, 30*time.Second, nil)
 	if err != nil {

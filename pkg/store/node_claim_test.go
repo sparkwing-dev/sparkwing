@@ -97,7 +97,7 @@ func TestNodeClaim_ClaimReturnsReadyNodeOnly(t *testing.T) {
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
-	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, nil)
+	n, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 30*time.Second, nil)
 	if err == nil {
 		t.Fatalf("expected ErrNotFound, got node %v", n)
 	}
@@ -108,7 +108,7 @@ func TestNodeClaim_ClaimReturnsReadyNodeOnly(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	n, err = s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, nil)
+	n, err = s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 30*time.Second, nil)
 	if err != nil {
 		t.Fatalf("ClaimNextReadyNode: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestNodeClaim_ClaimReturnsReadyNodeOnly(t *testing.T) {
 		t.Fatalf("lease_expires_at not in future: %v", n.LeaseExpiresAt)
 	}
 
-	_, err = s.ClaimNextReadyNode(ctx, "pod-2", 30*time.Second, nil)
+	_, err = s.ClaimNextReadyNode(ctx, "runner-principal", "pod-2", 30*time.Second, nil)
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after claim, got %v", err)
 	}
@@ -143,7 +143,7 @@ func TestNodeClaim_FIFOOrdering(t *testing.T) {
 	setNodeReadyAt(t, s, "run-1", "older", time.Unix(100, 0))
 	setNodeReadyAt(t, s, "run-2", "newer", time.Unix(200, 0))
 
-	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, nil)
+	n, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 30*time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,13 +159,13 @@ func TestNodeClaim_HeartbeatExtendsLeaseForHolder(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 2*time.Second, nil)
+	n, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 2*time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	firstLease := *n.LeaseExpiresAt
 
-	if err := s.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-1", 10*time.Second); err != nil {
+	if err := s.HeartbeatNodeClaim(ctx, "run-1", "node-a", "runner-principal", "pod-1", 10*time.Second); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
 	n2, _ := s.GetNode(ctx, "run-1", "node-a")
@@ -173,9 +173,55 @@ func TestNodeClaim_HeartbeatExtendsLeaseForHolder(t *testing.T) {
 		t.Fatalf("lease did not extend by at least 7s: %v -> %v", firstLease, n2.LeaseExpiresAt)
 	}
 
-	err = s.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-2", 10*time.Second)
+	err = s.HeartbeatNodeClaim(ctx, "run-1", "node-a", "runner-principal", "pod-2", 10*time.Second)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("expected ErrLockHeld, got %v", err)
+	}
+}
+
+func TestNodeClaim_PrincipalBindingGatesClaimOwnership(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	seedRunAndNode(t, s, "run-1", "node-a")
+	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextReadyNode(ctx, "runner-a", "pod-1", time.Minute, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	for _, tc := range []struct {
+		name      string
+		principal string
+		at        time.Time
+		want      bool
+	}{
+		{"claiming principal", "runner-a", now, true},
+		{"another principal", "runner-b", now, false},
+		{"no principal", "", now, false},
+		{"claiming principal after the lease expires", "runner-a", now.Add(2 * time.Minute), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			held, err := s.PrincipalHoldsNodeClaim(ctx, "run-1", "node-a", tc.principal, tc.at)
+			if err != nil {
+				t.Fatalf("PrincipalHoldsNodeClaim: %v", err)
+			}
+			if held != tc.want {
+				t.Errorf("PrincipalHoldsNodeClaim(%q) = %v, want %v", tc.principal, held, tc.want)
+			}
+			held, err = s.PrincipalHoldsRunClaim(ctx, "run-1", tc.principal, tc.at)
+			if err != nil {
+				t.Fatalf("PrincipalHoldsRunClaim: %v", err)
+			}
+			if held != tc.want {
+				t.Errorf("PrincipalHoldsRunClaim(%q) = %v, want %v", tc.principal, held, tc.want)
+			}
+		})
+	}
+
+	if err := s.HeartbeatNodeClaim(ctx, "run-1", "node-a", "runner-b", "pod-1", time.Minute); !errors.Is(err, store.ErrLockHeld) {
+		t.Errorf("heartbeat from another principal holding the same holder id = %v, want ErrLockHeld", err)
 	}
 }
 
@@ -186,7 +232,7 @@ func TestNodeClaim_ReapReleasesExpiredClaim(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimNextReadyNode(ctx, "pod-dead", 1*time.Millisecond, nil); err != nil {
+	if _, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-dead", 1*time.Millisecond, nil); err != nil {
 		t.Fatal(err)
 	}
 	expireNodeClaim(t, s, "run-1", "node-a")
@@ -199,7 +245,7 @@ func TestNodeClaim_ReapReleasesExpiredClaim(t *testing.T) {
 		t.Fatalf("unexpected reap output: %v", pairs)
 	}
 
-	n, err := s.ClaimNextReadyNode(ctx, "pod-live", 30*time.Second, nil)
+	n, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-live", 30*time.Second, nil)
 	if err != nil {
 		t.Fatalf("claim after reap: %v", err)
 	}
@@ -231,7 +277,7 @@ func TestNodeClaim_RevokeOnlyWhenUnclaimed(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, nil); err != nil {
+	if _, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 30*time.Second, nil); err != nil {
 		t.Fatal(err)
 	}
 	ok, err = s.RevokeNodeReady(ctx, "run-1", "node-a")
@@ -253,7 +299,7 @@ func TestNodeClaim_DoneNodesNotClaimable(t *testing.T) {
 	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, nil)
+	_, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 30*time.Second, nil)
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected done nodes to be unclaimable, got %v", err)
 	}
@@ -282,7 +328,7 @@ func TestNodeClaim_LabelsExactMatch(t *testing.T) {
 	ctx := context.Background()
 	seedNodeWithLabels(t, s, "run-1", "build", []string{"arm64", "laptop"})
 
-	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, []string{"arm64", "laptop"})
+	n, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 30*time.Second, []string{"arm64", "laptop"})
 	if err != nil {
 		t.Fatalf("ClaimNextReadyNode: %v", err)
 	}
@@ -299,7 +345,7 @@ func TestNodeClaim_LabelsSupersetClaims(t *testing.T) {
 	ctx := context.Background()
 	seedNodeWithLabels(t, s, "run-1", "build", []string{"arm64"})
 
-	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, []string{"arm64", "laptop"})
+	n, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 30*time.Second, []string{"arm64", "laptop"})
 	if err != nil {
 		t.Fatalf("ClaimNextReadyNode: %v", err)
 	}
@@ -317,7 +363,7 @@ func TestNodeClaim_LabelsUnmatchedSkipped(t *testing.T) {
 	setNodeReadyAt(t, s, "run-1", "gpu-only", time.Unix(100, 0))
 	setNodeReadyAt(t, s, "run-2", "build", time.Unix(200, 0))
 
-	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, []string{"arm64", "laptop"})
+	n, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 30*time.Second, []string{"arm64", "laptop"})
 	if err != nil {
 		t.Fatalf("ClaimNextReadyNode: %v", err)
 	}
@@ -325,7 +371,7 @@ func TestNodeClaim_LabelsUnmatchedSkipped(t *testing.T) {
 		t.Fatalf("expected 'build' after skipping gpu-only, got %+v", n)
 	}
 
-	n2, err := s.ClaimNextReadyNode(ctx, "pod-gpu", 30*time.Second, []string{"gpu"})
+	n2, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-gpu", 30*time.Second, []string{"gpu"})
 	if err != nil {
 		t.Fatalf("gpu-only should still be claimable by a gpu runner: %v", err)
 	}
@@ -341,7 +387,7 @@ func TestNodeClaim_UnlabeledNodeAlwaysClaimable(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, []string{"arm64"})
+	n, err := s.ClaimNextReadyNode(ctx, "runner-principal", "pod-1", 30*time.Second, []string{"arm64"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -178,10 +178,11 @@ paths:
 
         Values of arguments the pipeline declared `secret:"true"` are
         replaced with `***` by default. `?include=secret_values`
-        returns them in full, and is honored only for tokens carrying
-        `nodes.claim` or `admin` -- a cluster executor fetches the
-        arguments it runs with from this endpoint. Any other token gets
-        the redacted view whether or not it asks. Comma-separate to
+        returns them in full, and is honored for an `admin` token and
+        for a `nodes.claim` token holding an unexpired claim on one of
+        the run's nodes -- a cluster executor fetches the arguments it
+        runs with from this endpoint. Any other caller gets the
+        redacted view whether or not it asks. Comma-separate to
         combine, e.g. `?include=nodes,secret_values`.
       parameters:
         - in: query
@@ -1341,6 +1342,11 @@ paths:
     post:
       tags: [nodes]
       summary: Claim the oldest ready, unclaimed node matching labels.
+      description: |
+        The claim binds to the authenticated principal as well as to
+        `holder_id`. The per-node write routes and the execution view
+        then admit that principal alone while the lease is unexpired;
+        another runner token gets `403` with `"error": "claim_required"`.
       requestBody:
         required: true
         content:

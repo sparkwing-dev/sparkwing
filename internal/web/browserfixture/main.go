@@ -249,7 +249,6 @@ func main() {
 		Backend:       backend.NewStoreBackend(stateStore, dashboardPaths, nil),
 		Paths:         dashboardPaths,
 		ControllerURL: controllerOrigin,
-		APIURL:        controllerOrigin,
 		Token:         serviceToken,
 		Version:       "auth-browser-fixture",
 		RequireLogin:  true,

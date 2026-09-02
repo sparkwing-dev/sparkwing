@@ -1,32 +1,9 @@
-function literalMarker(s: unknown, marker: string): string {
-  if (typeof s !== "string") return "";
-  if (s === marker) return "";
-  return s;
-}
-
 function getApiUrl(): string {
-  if (typeof window !== "undefined") {
-    const injected = literalMarker(
-      (window as unknown as Record<string, unknown>).__SPARKWING_API_URL__,
-      "__SPARKWING_API_URL_MARKER__",
-    );
-    if (injected) return injected;
-    return "";
-  }
+  if (typeof window !== "undefined") return "";
   return process.env.SPARKWING_CONTROLLER_URL || "";
 }
 
 const API_URL = getApiUrl();
-
-function getAuthHeaders(): HeadersInit {
-  if (typeof window === "undefined") return {};
-  const token = literalMarker(
-    (window as unknown as Record<string, unknown>).__SPARKWING_TOKEN__,
-    "__SPARKWING_TOKEN_MARKER__",
-  );
-  if (!token) return {};
-  return { Authorization: `Bearer ${token}` };
-}
 
 function getSessionCSRFHeaders(method: string | undefined): HeadersInit {
   if (typeof window === "undefined" || typeof document === "undefined") {
@@ -89,7 +66,6 @@ function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
   return fetch(url, {
     ...opts,
     headers: {
-      ...getAuthHeaders(),
       ...opts.headers,
       ...getSessionCSRFHeaders(opts.method),
     },

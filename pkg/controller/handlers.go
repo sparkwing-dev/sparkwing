@@ -179,10 +179,28 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
-func secretValuesAllowed(r *http.Request) bool {
+type secretValueGate func(*http.Request) bool
+
+func (s *Server) secretValuesAllowed(r *http.Request) bool {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {
+		return false
+	}
+	if p.HasScope(ScopeAdmin) {
 		return true
+	}
+	if !p.HasScope(ScopeNodesClaim) {
+		return false
+	}
+	// safety: a runner reads a run's credentials only while it holds a claim on one of its nodes.
+	held, err := s.store.PrincipalHoldsRunClaim(r.Context(), r.PathValue("id"), p.Name, time.Now())
+	return err == nil && held
+}
+
+func loopbackSecretValuesAllowed(r *http.Request) bool {
+	p, ok := PrincipalFromContext(r.Context())
+	if !ok {
+		return false
 	}
 	return p.HasScope(ScopeAdmin) || p.HasScope(ScopeNodesClaim)
 }
@@ -216,9 +234,9 @@ func dispatchesForResponse(r *http.Request, in []*store.NodeDispatch) []*store.N
 	return out
 }
 
-func runForResponse(r *http.Request, run *store.Run) *store.Run {
+func runForResponse(r *http.Request, run *store.Run, allowed secretValueGate) *store.Run {
 	if includeHas(r.URL.Query().Get("include"), store.IncludeSecretValues) &&
-		secretValuesAllowed(r) {
+		allowed(r) {
 		return run
 	}
 	return store.RedactedRun(run)
@@ -253,10 +271,10 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		approvals, _ := s.store.ListApprovalsForRun(r.Context(), runID)
 		spawned, _ := s.store.ListSpawnedChildrenByRun(r.Context(), runID)
 		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals, spawned)
-		writeJSON(w, http.StatusOK, map[string]any{"run": runForResponse(r, run), "nodes": decorated})
+		writeJSON(w, http.StatusOK, map[string]any{"run": runForResponse(r, run, s.secretValuesAllowed), "nodes": decorated})
 		return
 	}
-	writeJSON(w, http.StatusOK, runForResponse(r, run))
+	writeJSON(w, http.StatusOK, runForResponse(r, run, s.secretValuesAllowed))
 }
 
 func includeHas(csv, target string) bool {
@@ -946,7 +964,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	n, err := s.store.ClaimNextReadyNode(r.Context(), body.HolderID, lease, body.Labels)
+	n, err := s.store.ClaimNextReadyNode(r.Context(), principalName(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			w.WriteHeader(http.StatusNoContent)
@@ -1009,7 +1027,7 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	if err := s.store.HeartbeatNodeClaim(r.Context(), runID, nodeID, body.HolderID, lease); err != nil {
+	if err := s.store.HeartbeatNodeClaim(r.Context(), runID, nodeID, principalName(r), body.HolderID, lease); err != nil {
 		if errors.Is(err, store.ErrLockHeld) {
 			writeError(w, http.StatusConflict, err)
 			return

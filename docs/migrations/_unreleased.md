@@ -5,6 +5,23 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## The dashboard refuses an unauthenticated remote bind
+
+- **Before:** `sparkwing-web --token ... --addr=0.0.0.0:4343` without
+  `--require-login` served an open dashboard and injected the controller bearer
+  into every HTML page, so any browser that reached the listener held the
+  token.
+- **After:** The bearer stays in the web process and rides only its server-side
+  proxy. That configuration now fails at startup with a message naming the
+  three ways forward.
+- **Migration:** Turn on `--require-login` (chart: `web.requireLogin`), bind a
+  loopback address, or keep the open dashboard by passing
+  `--allow-unauthenticated-remote` (chart: `web.allowUnauthenticatedRemote`).
+  Drop `--api-url` and `web.apiUrl`: the dashboard proxies the API on its own
+  origin, which is also what the new `connect-src 'self'` policy allows.
+- **Why:** An unauthenticated dashboard holding a service token hands the
+  controller to every caller that can reach the port.
+
 ## Cache reads require the bearer token
 
 - **Before:** `sparkwing-cache` demanded a bearer only on its blob and sync
@@ -97,6 +114,32 @@ CHANGELOG links here.
 - **Why:** The name reaches generated git hook scripts, argv, log lines, and
   file paths. A cloned repository could otherwise hand shell execution to
   anyone who ran the documented hooks install command.
+
+## Node claims bind to the claiming principal
+
+- **Before:** Any `nodes.claim` token could write any node of any run, stamp
+  `ready_at` on a node whose dependencies had not finished, and read any run's
+  plaintext secret arguments through `?include=secret_values`. Scope gated the
+  route; nothing gated the object.
+- **After:** `POST /api/v1/nodes/claim` records the authenticated principal
+  alongside `holder_id`. The per-node write routes (`activity`, `touch`,
+  `annotations`, `summary`, `artifact-manifest`, `metrics`, `dispatch`,
+  `steps/*`, `bounce/consume`, `revoke-ready`) answer `403` with
+  `"error": "claim_required"` unless the caller holds that node's unexpired
+  claim, and `heartbeat` answers `409` unless both the principal and the holder
+  id match. `mark-ready` requires `admin`. The execution view returns plaintext
+  arguments to an `admin` principal, or to a `nodes.claim` principal holding an
+  unexpired claim on one of the run's nodes; a controller serving
+  unauthenticated returns the redacted view.
+- **Migration:** Give the token that dispatches nodes to a warm pool `admin`,
+  which it already needs to create, start, and finish nodes. Pool runners that
+  claim their own work keep `nodes.claim`. Mint a token on a controller that
+  serves unauthenticated if its runners fetch secret arguments over HTTP.
+  Claims taken before the upgrade carry no principal, so a runner in flight
+  during the upgrade loses its lease and the node is requeued.
+- **Why:** Every laptop agent and pool replica holds a runner token. A token
+  scoped to claim work should not read another repository's deploy credentials
+  or force a node to run before its dependencies finish.
 
 ## Dashboard proxy allow-list
 

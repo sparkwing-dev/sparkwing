@@ -41,9 +41,14 @@ func execControllerWithSecretRun(t *testing.T, runID string) (*store.Store, *cli
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	raw, _, err := st.CreateToken("pod", store.TokenKindRunner,
+		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	t.Cleanup(srv.Close)
-	return st, client.New(srv.URL, nil)
+	return st, client.NewWithToken(srv.URL, nil, raw)
 }
 
 func TestSecretArgs_ExecutionFetchCarriesPlaintextAndSeedsTheMasker(t *testing.T) {

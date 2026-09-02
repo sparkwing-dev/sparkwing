@@ -346,6 +346,14 @@ func requireScope(scope string, next http.Handler) http.Handler {
 	})
 }
 
+func principalName(r *http.Request) string {
+	p, ok := PrincipalFromContext(r.Context())
+	if !ok {
+		return ""
+	}
+	return p.Name
+}
+
 func (p *Principal) label() string {
 	if p == nil {
 		return ""

@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -88,9 +89,11 @@ const (
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	db      *sql.DB
-	dialect Dialect
-	cleanup func() error
+	db        *sql.DB
+	dialect   Dialect
+	cleanup   func() error
+	csrfKeyMu sync.Mutex
+	csrfKey   []byte
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -514,6 +517,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     -- All NULL on laptop / K8sRunner paths.
     ready_at         INTEGER,
     claimed_by       TEXT,
+    -- claim_principal: the authenticated principal the claim is bound
+    -- to; '' when the controller served the claim unauthenticated.
+    claim_principal  TEXT NOT NULL DEFAULT '',
     lease_expires_at INTEGER,
     -- needs_labels: JSON []string from RunsOn; AND semantics.
     needs_labels     BLOB,
@@ -718,12 +724,12 @@ CREATE TABLE IF NOT EXISTS tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_tokens_prefix ON tokens(prefix);
 
--- Browser sessions; same hash treatment as tokens.
+-- Browser sessions. hash = sha256 of the raw session id; the CSRF token is
+-- an HMAC of that id under a server key, so neither is stored in the clear.
 CREATE TABLE IF NOT EXISTS sessions (
     hash          TEXT PRIMARY KEY,
     principal     TEXT NOT NULL,
     scopes        TEXT NOT NULL,
-    csrf_token    TEXT NOT NULL,
     created_at    INTEGER NOT NULL,
     expires_at    INTEGER NOT NULL,
     last_used_at  INTEGER
@@ -817,7 +823,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 20
+const expectedSchemaVersion = 21
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1207,6 +1213,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.ensureColumns("users", usersScopesCols)
 	case 20:
 		return s.ensureColumns("node_dispatches", nodeDispatchRedactionCols)
+	case 21:
+		return s.rehashSessions(ctx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1274,6 +1282,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "users", usersScopesCols)
 	case 20:
 		return addColumnsTx(ctx, tx, "node_dispatches", nodeDispatchRedactionCols)
+	case 21:
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN IF EXISTS csrf_token`)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1367,6 +1381,7 @@ var columnMigrations = []columnSpec{
 	{"nodes", map[string]string{
 		"ready_at":          "INTEGER",
 		"claimed_by":        "TEXT",
+		"claim_principal":   "TEXT NOT NULL DEFAULT ''",
 		"lease_expires_at":  "INTEGER",
 		"needs_labels":      "BLOB",
 		"status_detail":     "TEXT NOT NULL DEFAULT ''",
@@ -1608,23 +1623,10 @@ func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 }
 
 func (s *Store) ensureColumns(table string, cols map[string]string) error {
-	rows, err := s.queryNoCtx(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+	have, err := s.tableColumns(table)
 	if err != nil {
 		return err
 	}
-	have := map[string]bool{}
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		have[name] = true
-	}
-	_ = rows.Close()
 	for name, typ := range cols {
 		if have[name] {
 			continue
@@ -1638,6 +1640,27 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) tableColumns(table string) (map[string]bool, error) {
+	rows, err := s.queryNoCtx(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+	if err != nil {
+		return nil, err
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		have[name] = true
+	}
+	_ = rows.Close()
+	return have, rows.Err()
 }
 
 func isDuplicateColumnErr(err error) bool {
@@ -2761,11 +2784,17 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 }
 
 // ClaimNextReadyNode flips the oldest claimable node to holderID with
-// a fresh lease. Claimable = ready_at set, unclaimed, !done, and
-// every needs_labels entry appears in runnerLabels. ErrNotFound when
-// no candidate matches. Label-mismatched candidates have their
-// ready_at bumped 1us so they don't starve the FIFO queue.
-func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
+// a fresh lease, bound to principal. Claimable = ready_at set,
+// unclaimed, !done, and every needs_labels entry appears in
+// runnerLabels. ErrNotFound when no candidate matches.
+// Label-mismatched candidates have their ready_at bumped 1us so they
+// don't starve the FIFO queue.
+//
+// principal is the authenticated identity the claim answers to;
+// [Store.PrincipalHoldsNodeClaim] and [Store.HeartbeatNodeClaim] admit
+// only that identity afterwards. Pass "" when the caller is
+// unauthenticated, which leaves the claim unbound.
+func (s *Store) ClaimNextReadyNode(ctx context.Context, principal, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
@@ -2822,9 +2851,9 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 		expires := now.Add(lease)
 		if _, err := tx.ExecContext(
 			ctx,
-			`UPDATE nodes SET claimed_by = ?, lease_expires_at = ?
+			`UPDATE nodes SET claimed_by = ?, claim_principal = ?, lease_expires_at = ?
 			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
-			holderID, expires.UnixNano(), n.RunID, n.NodeID,
+			holderID, principal, expires.UnixNano(), n.RunID, n.NodeID,
 		); err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -2886,8 +2915,9 @@ func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) er
 }
 
 // HeartbeatNodeClaim extends the claim lease; ErrLockHeld when the
-// caller no longer owns the claim.
-func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) error {
+// caller no longer owns the claim. Both the principal the claim was
+// bound to and the holder id it was taken under must match.
+func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, principal, holderID string, lease time.Duration) error {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
@@ -2895,8 +2925,9 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID 
 	res, err := s.exec(
 		ctx,
 		`UPDATE nodes SET lease_expires_at = ?
-		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?`,
-		expires, runID, nodeID, holderID,
+		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
+		    AND COALESCE(claim_principal, '') = ?`,
+		expires, runID, nodeID, holderID, principal,
 	)
 	if err != nil {
 		return err
@@ -2909,6 +2940,46 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID 
 		return ErrLockHeld
 	}
 	return nil
+}
+
+const nodeClaimLiveSQL = `claimed_by IS NOT NULL
+		    AND lease_expires_at IS NOT NULL AND lease_expires_at > ?`
+
+// PrincipalHoldsNodeClaim reports whether principal holds the node's
+// unexpired claim. An empty principal holds nothing, so an
+// unauthenticated caller never passes this check.
+func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID, principal string, now time.Time) (bool, error) {
+	if principal == "" {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM nodes
+		  WHERE run_id = ? AND node_id = ? AND claim_principal = ?
+		    AND `+nodeClaimLiveSQL,
+		runID, nodeID, principal, now.UnixNano()).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
+}
+
+// PrincipalHoldsRunClaim reports whether principal holds an unexpired
+// claim on any node of the run. An empty principal holds nothing.
+func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID, principal string, now time.Time) (bool, error) {
+	if principal == "" {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM nodes
+		  WHERE run_id = ? AND claim_principal = ?
+		    AND `+nodeClaimLiveSQL,
+		runID, principal, now.UnixNano()).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
 }
 
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
@@ -2946,7 +3017,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 		return nil, nil
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET claimed_by = NULL, lease_expires_at = NULL
+		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', lease_expires_at = NULL
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {
@@ -2996,7 +3067,7 @@ UPDATE nodes
    SET `+nodeFailSet+`,
        error = 'runner heartbeat expired',
        failure_reason = ?, finished_at = ?,
-       claimed_by = NULL, lease_expires_at = NULL
+       claimed_by = NULL, claim_principal = '', lease_expires_at = NULL
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			FailureAgentLost, now, p[0], p[1]); err != nil {
 			return nil, err

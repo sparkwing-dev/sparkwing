@@ -85,6 +85,9 @@ spec:
             {{- if .Values.web.requireLogin }}
             - "--require-login"
             {{- end }}
+            {{- if .Values.web.allowUnauthenticatedRemote }}
+            - "--allow-unauthenticated-remote"
+            {{- end }}
             {{- with .Values.web.trustedProxyCIDRs }}
             - {{ printf "--trusted-proxy-cidrs=%s" (join "," .) | quote }}
             {{- end }}

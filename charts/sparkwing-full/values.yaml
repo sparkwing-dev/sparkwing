@@ -178,13 +178,16 @@ web:
   # turn on after bootstrapping the admin user.
   requireLogin: false
 
+  # Accept a token-backed dashboard that anyone reaching the service
+  # port can drive. Required when the token secret is set and
+  # requireLogin is false; the dashboard refuses to start otherwise.
+  allowUnauthenticatedRemote: false
+
   # Proxy source CIDRs allowed to supply X-Forwarded-For. Empty ignores it.
   trustedProxyCIDRs: []
 
-  # Optional: explicit API URL injected into the dashboard's
-  # client-side bundle. Leave empty to use same-origin (the
-  # browser hits the same host that served the SPA). Set when
-  # the API is hosted on a different domain than the SPA.
+  # Deprecated: the dashboard proxies the API on its own origin, so
+  # this value is ignored.
   apiUrl: ""
 
   resources:

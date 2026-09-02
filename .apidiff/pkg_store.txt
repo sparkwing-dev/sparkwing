@@ -481,7 +481,7 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
-func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
+func (s *Store) ClaimNextReadyNode(ctx context.Context, principal, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
 func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines, sources []string) (*Trigger, error)
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error)
@@ -536,7 +536,7 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 func (s *Store) GetSecret(name string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
-func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) error
+func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, principal, holderID string, lease time.Duration) error
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
@@ -566,6 +566,8 @@ func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts Concurren
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
+func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID, principal string, now time.Time) (bool, error)
+func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID, principal string, now time.Time) (bool, error)
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
