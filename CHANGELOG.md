@@ -395,6 +395,15 @@ code change to unlock.
 
 ### Changed
 
+- **release + template-verify:** `sparkwing run template-verify` now reuses a
+  recorded proof for any template whose proof inputs are unchanged, and takes
+  `--exhaustive` to verify everything regardless. The digest covers the
+  template's registry files, its verification manifest fields, the exact
+  working state of the sparkwing and sparks-core checkouts, the Go toolchain,
+  and the identity of every host tool the template needs. Reuse is refused
+  whenever any input cannot be established, and the release pipeline always
+  runs the exhaustive proof. See DELIVERY.md for the input set.
+
 - **release:** The release pipeline now runs a contract preflight before the
   root Go suite. It proves the embedded documentation mirror and the
   documentation, help, and environment-variable contracts in seconds, and it

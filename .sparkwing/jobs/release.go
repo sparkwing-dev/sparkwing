@@ -25,6 +25,10 @@ import (
 
 const templateVerifyReleaseTimeout = time.Hour
 
+// safety: the release proof is exhaustive. A recorded template proof shortens
+// local iteration, never the boundary a tag is cut at.
+var releaseTemplateVerifyArgs = TemplateVerifyArgs{Exhaustive: true}
+
 type ReleaseArgs struct {
 	Version string `flag:"version" desc:"Explicit release version (e.g. v0.24.0); sparkwing is locked to v0.x, so v1.0.0+ is refused. When empty, derived from latest origin tag + --bump."`
 	Bump    string `flag:"bump" desc:"Auto-bump kind when --version is empty: patch|minor|major. Default: minor"`
@@ -40,7 +44,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "Runs a contract preflight (the embedded documentation mirror, and the documentation, help, and environment-variable contracts) before the pre-commit, pre-push and template-verify gates, validates the release shape (clean tree, free tag, non-empty CHANGELOG.md [Unreleased] section), commits the CHANGELOG [Unreleased] rename, then pushes the branch and a vX.Y.Z tag to origin. Afterwards it pins .sparkwing/go.mod and pkg/scaffold to the released version, regenerates the public API snapshots, and restores the dogfood self-replace, in two further commits, and pushes the branch again. The .github/workflows/release.yaml workflow takes over from the tag push to build cross-platform binaries (uploaded to GH Releases) and multi-arch container images (published to GHCR). This pipeline never builds or publishes artifacts itself."
+	return "Runs a contract preflight (the embedded documentation mirror, and the documentation, help, and environment-variable contracts) before the pre-commit, pre-push and template-verify gates (the last exhaustive: the release proof never reuses a recorded one), validates the release shape (clean tree, free tag, non-empty CHANGELOG.md [Unreleased] section), commits the CHANGELOG [Unreleased] rename, then pushes the branch and a vX.Y.Z tag to origin. Afterwards it pins .sparkwing/go.mod and pkg/scaffold to the released version, regenerates the public API snapshots, and restores the dogfood self-replace, in two further commits, and pushes the branch again. The .github/workflows/release.yaml workflow takes over from the tag push to build cross-platform binaries (uploaded to GH Releases) and multi-arch container images (published to GHCR). This pipeline never builds or publishes artifacts itself."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -88,8 +92,9 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	gatePrePush.Needs(clean, gatePreCommit)
 
 	gateTemplates := sparkwing.Job(plan, "gate-template-verify", func(ctx context.Context) error {
-		_, err := sparkwing.RunAndAwait[TemplateVerifySummary, sparkwing.NoInputs](
+		_, err := sparkwing.RunAndAwait[TemplateVerifySummary, TemplateVerifyArgs](
 			ctx, "template-verify", "summary",
+			sparkwing.WithFreshInputs(releaseTemplateVerifyArgs),
 			sparkwing.WithFreshTimeout(templateVerifyReleaseTimeout),
 		)
 		return err

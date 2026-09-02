@@ -167,6 +167,12 @@ func TestReleaseContractPreflightFailsWhenItsTestsAreRenamedAway(t *testing.T) {
 	}
 }
 
+func TestReleaseAlwaysRequestsAnExhaustiveTemplateProof(t *testing.T) {
+	if !releaseTemplateVerifyArgs.Exhaustive {
+		t.Error("the release gate must request an exhaustive template proof; a recorded proof shortens local iteration, never the tag boundary")
+	}
+}
+
 func TestReleasePlanSerializesPrePushAfterPreCommit(t *testing.T) {
 	deps := ancestors(t, releasePlan(t), "gate-pre-push")
 	if !deps["gate-pre-commit"] {
