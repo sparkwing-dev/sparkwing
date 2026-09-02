@@ -3,7 +3,9 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"sync"
@@ -563,12 +565,19 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 		go s.pool.run(ctx, s.logger)
 	}
 
+	errCh := make(chan error, 2)
+
 	metricsSrv := s.metricsServer()
 	if metricsSrv != nil {
+		// safety: a metrics endpoint that never binds leaves the operator blind, so refuse to start instead.
+		metricsLn, err := net.Listen("tcp", metricsSrv.Addr)
+		if err != nil {
+			return fmt.Errorf("controller metrics listener: %w", err)
+		}
 		go func() {
 			s.logger.Info("controller metrics listening", "addr", metricsSrv.Addr)
-			if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				s.logger.Error("controller metrics listener stopped", "err", err)
+			if err := metricsSrv.Serve(metricsLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- fmt.Errorf("controller metrics listener: %w", err)
 			}
 		}()
 		defer func() {
@@ -580,7 +589,6 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 		}()
 	}
 
-	errCh := make(chan error, 1)
 	go func() {
 		s.logger.Info("controller listening", "addr", addr)
 		errCh <- srv.ListenAndServe()

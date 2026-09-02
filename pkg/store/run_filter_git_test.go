@@ -114,3 +114,56 @@ func TestListRunsClampsLimitToTheCap(t *testing.T) {
 		t.Fatalf("rows = %d, want %d", len(runs), store.MaxRunListLimit)
 	}
 }
+
+func TestListTriggersClampsLimitToTheCap(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/state.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	for i := range store.MaxRunListLimit + 5 {
+		if err := st.CreateTrigger(ctx, store.Trigger{
+			ID:        "tg-" + strconv.Itoa(i),
+			Pipeline:  "push",
+			CreatedAt: time.Unix(int64(i+1), 0),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	trigs, err := st.ListTriggers(ctx, store.TriggerFilter{Limit: 1 << 40})
+	if err != nil {
+		t.Fatalf("ListTriggers: %v", err)
+	}
+	if len(trigs) != store.MaxRunListLimit {
+		t.Fatalf("rows = %d, want %d", len(trigs), store.MaxRunListLimit)
+	}
+}
+
+func TestListEventsAfterClampsLimitToTheCap(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/state.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "push", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	for range store.MaxRunListLimit + 5 {
+		if _, err := st.AppendEvent(ctx, "run-1", "node-1", "log", []byte(`{"line":"x"}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	events, err := st.ListEventsAfter(ctx, "run-1", 0, 1<<40)
+	if err != nil {
+		t.Fatalf("ListEventsAfter: %v", err)
+	}
+	if len(events) != store.MaxRunListLimit {
+		t.Fatalf("rows = %d, want %d", len(events), store.MaxRunListLimit)
+	}
+}

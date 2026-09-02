@@ -57,6 +57,7 @@ func (s *Server) handleGitcacheSeed(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGitcacheRegister(w http.ResponseWriter, r *http.Request) {
+	extendGitcacheStreamDeadline(w, r)
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	if !gitcacheRepoName.MatchString(name) {
 		http.Error(w, "name query param must contain only letters, digits, dots, underscores, or hyphens", http.StatusBadRequest)

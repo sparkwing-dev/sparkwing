@@ -289,3 +289,24 @@ func TestMetricsAddr_MovesMetricsOffTheAPIListener(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestMetricsAddr_FailsStartupWhenTheMetricsPortIsTaken(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	srv := controller.New(st, nil).WithMetricsAddr(held.Addr().String())
+	if err := controller.ServeWith(ctx, srv, freeAddr(t)); err == nil {
+		t.Fatal("ServeWith error = nil, want the bind failure")
+	}
+}

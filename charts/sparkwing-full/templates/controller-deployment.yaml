@@ -92,6 +92,9 @@ spec:
             {{- with .Values.controller.argon2MemoryBudgetMB }}
             - {{ printf "--argon2-memory-budget-mb=%d" (int .) | quote }}
             {{- end }}
+            {{- if gt (int .Values.controller.metricsPort) 0 }}
+            - {{ printf "--metrics-addr=:%d" (int .Values.controller.metricsPort) | quote }}
+            {{- end }}
           env:
             - name: SPARKWING_HOME
               value: /data
@@ -145,6 +148,10 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.controller.port }}
+            {{- if gt (int .Values.controller.metricsPort) 0 }}
+            - name: metrics
+              containerPort: {{ .Values.controller.metricsPort }}
+            {{- end }}
           volumeMounts:
             - name: data
               mountPath: /data

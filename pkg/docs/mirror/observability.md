@@ -250,7 +250,12 @@ an ingress fronting that listener publishes pipeline names to anyone who
 asks. `sparkwing-controller --metrics-addr 127.0.0.1:9090`
 (`$SPARKWING_METRICS_ADDR`) moves the endpoint onto its own listener,
 which you can bind to a pod-local or cluster-internal address and leave
-out of the ingress. The API listener then answers `404` for `/metrics`.
+out of the ingress. The API listener then answers `401` for `/metrics`
+when authentication is on, and `404` when it is off. In `sparkwing-full`,
+`controller.metricsPort` passes that flag and exposes the port on the
+controller container only; the controller Service does not publish it,
+so an in-cluster scraper reaches it by pod address. The controller
+refuses to start when that port is already taken.
 
 ### OTLP export
 

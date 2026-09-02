@@ -219,6 +219,36 @@ func TestControllerLoginThrottleFlagsRender(t *testing.T) {
 	}
 }
 
+func TestControllerMetricsPortMovesMetricsOffTheAPIPort(t *testing.T) {
+	render := func(sets ...string) string {
+		return helmRender(t, "./sparkwing-full",
+			"templates/controller-deployment.yaml", "sparkwing", sets...)
+	}
+
+	byDefault := render()
+	if got, ok := hasFlag(webArgs(t, byDefault), "--metrics-addr="); ok {
+		t.Fatalf("default metrics flag = %q, want none", got)
+	}
+	if strings.Contains(byDefault, "name: metrics") {
+		t.Fatalf("default Deployment exposes a metrics port:\n%s", byDefault)
+	}
+
+	configured := render("controller.metricsPort=9090")
+	got, ok := hasFlag(webArgs(t, configured), "--metrics-addr=")
+	if !ok || got != "--metrics-addr=:9090" {
+		t.Fatalf("metrics flag = %q, want --metrics-addr=:9090", got)
+	}
+	if !strings.Contains(configured, "containerPort: 9090") {
+		t.Fatalf("configured Deployment exposes no metrics container port:\n%s", configured)
+	}
+
+	service := helmRender(t, "./sparkwing-full",
+		"templates/controller-service.yaml", "sparkwing", "controller.metricsPort=9090")
+	if strings.Contains(service, "9090") {
+		t.Fatalf("controller Service publishes the metrics port:\n%s", service)
+	}
+}
+
 func TestWebAddrIsOverridable(t *testing.T) {
 	defaultArgs := webArgs(t, helmTemplate(t, "sparkwing"))
 	if got, _ := hasFlag(defaultArgs, "--addr="); got != "--addr=0.0.0.0:4343" {

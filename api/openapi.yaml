@@ -1,3 +1,10 @@
+# GENERATED IN PART by internal/apispec. The path and method inventory and
+# every x-sparkwing-scope value are read from the route registrations in
+# pkg/controller/server.go; summaries, schemas, and examples are hand-written
+# here. Rewrite this file with `bash bin/gen-api-docs.sh` and prove it current
+# with `bash bin/check-api-spec.sh`. Give a route's authorization as
+# x-sparkwing-scope, never as prose, so no two sentences can disagree.
+
 openapi: 3.0.3
 
 info:
@@ -23,7 +30,6 @@ info:
 
     [1]: https://pkg.go.dev/github.com/sparkwing-dev/sparkwing/pkg/controller
     [2]: ../VERSIONING.md
-
   contact:
     name: sparkwing
     url: https://github.com/sparkwing-dev/sparkwing
@@ -70,6 +76,8 @@ tags:
     description: Active runner heartbeats.
   - name: pipelines
     description: Cross-pipeline / cross-repo reads.
+  - name: gitcache
+    description: Controller-side proxy onto the Git cache.
   - name: trends
     description: Aggregate dashboard charts.
   - name: receipts
@@ -86,12 +94,12 @@ paths:
 
   /api/v1/runs:
     post:
+      x-sparkwing-scope: runs.state
       tags: [runs]
       summary: Create a run row directly.
       description: |
         Insert a [Run][1] in the caller-supplied state. Idempotent
         upgrade of `pending` rows pre-allocated by trigger intake.
-        Admin scope.
         [1]: #/components/schemas/Run
       requestBody:
         required: true
@@ -100,59 +108,60 @@ paths:
             schema:
               $ref: "#/components/schemas/Run"
       responses:
-        "201": { description: Created. Empty body. }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "201": {description: Created. Empty body.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
     get:
+      x-sparkwing-scope: runs.read
       tags: [runs]
       summary: List runs filtered by query parameters.
       description: |
         Filters are applied before newest-first ordering and `limit`.
-        Empty result is `{"runs": []}`. Requires `runs.read` scope.
+        Empty result is `{"runs": []}`.
       parameters:
         - in: query
           name: pipeline
-          schema: { type: string }
+          schema: {type: string}
           description: csv of pipeline names.
         - in: query
           name: status
-          schema: { type: string }
+          schema: {type: string}
           description: csv of run statuses (e.g. `running,pending`).
         - in: query
           name: git_sha
-          schema: { type: string }
+          schema: {type: string}
           description: csv of git SHA prefixes.
         - in: query
           name: git_branch
-          schema: { type: string }
+          schema: {type: string}
           description: csv of exact git branch names.
         - in: query
           name: repo
-          schema: { type: string }
+          schema: {type: string}
           description: csv of exact stored repository identities.
         - in: query
           name: repo_url
-          schema: { type: string }
+          schema: {type: string}
           description: csv of exact canonical repository URLs.
         - in: query
           name: root_only
-          schema: { type: boolean }
+          schema: {type: boolean}
           description: When true, exclude child runs.
         - in: query
           name: since
-          schema: { type: string, format: duration }
+          schema: {type: string, format: duration}
           description: Go duration (`1h`, `30m`). Returns runs younger than this.
         - in: query
           name: limit
-          schema: { type: integer, minimum: 1 }
+          schema: {type: integer, minimum: 1}
       responses:
         "200":
           description: List wrapped under `runs`.
           headers:
             X-Sparkwing-Run-Filter-Version:
               description: Native identity-filter contract version.
-              schema: { type: string, enum: ["1"] }
+              schema: {type: string, enum: ["1"]}
           content:
             application/json:
               schema:
@@ -161,14 +170,15 @@ paths:
                 properties:
                   runs:
                     type: array
-                    items: { $ref: "#/components/schemas/Run" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "500": { $ref: "#/components/responses/InternalError" }
+                    items: {$ref: "#/components/schemas/Run"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
+      x-sparkwing-scope: runs.read
       tags: [runs]
       summary: Fetch a single run, optionally with its nodes.
       description: |
@@ -189,10 +199,8 @@ paths:
         - in: query
           name: include
           description: >-
-            Comma-separated. `nodes` wraps the response as
-            `{run, nodes}`; `secret_values` returns unredacted
-            argument values to executor-scoped callers.
-          schema: { type: string, enum: [nodes, secret_values, "nodes,secret_values"] }
+            Comma-separated. `nodes` wraps the response as `{run, nodes}`; `secret_values` returns unredacted argument values to executor-scoped callers.
+          schema: {type: string, enum: [nodes, secret_values, "nodes,secret_values"]}
       responses:
         "200":
           description: Run, or `{run, nodes}` when `include=nodes`.
@@ -204,55 +212,59 @@ paths:
                   - type: object
                     required: [run, nodes]
                     properties:
-                      run: { $ref: "#/components/schemas/Run" }
+                      run: {$ref: "#/components/schemas/Run"}
                       nodes:
                         type: array
-                        items: { $ref: "#/components/schemas/Node" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "500": { $ref: "#/components/responses/InternalError" }
+                        items: {$ref: "#/components/schemas/Node"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
     delete:
+      x-sparkwing-scope: admin
       tags: [runs]
-      summary: Delete a run and its nodes / events. Admin scope.
+      summary: Delete a run and its nodes / events.
       responses:
-        "204": { description: Deleted. }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "204": {description: Deleted.}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/finish:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     post:
+      x-sparkwing-scope: runs.state
       tags: [runs]
-      summary: Mark a run terminal. Admin scope.
+      summary: Mark a run terminal.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/FinishRunRequest" }
+            schema: {$ref: "#/components/schemas/FinishRunRequest"}
       responses:
-        "204": { description: Run finished. }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "204": {description: Run finished.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/plan:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     post:
+      x-sparkwing-scope: runs.state
       tags: [runs]
       summary: Upload the run's plan-snapshot blob.
       description: |
         Body is opaque bytes (typically JSON serialized plan).
-        Content-Type is ignored. Admin scope.
+        Content-Type is ignored.
       requestBody:
         required: true
         content:
           application/octet-stream:
-            schema: { type: string, format: binary }
+            schema: {type: string, format: binary}
       responses:
-        "204": { description: Plan stored. }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "204": {description: Plan stored.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/cancel:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     post:
+      x-sparkwing-scope: runs.write
       tags: [runs]
       summary: Request cancellation. The orchestrator surfaces this via heartbeat.
       requestBody:
@@ -262,20 +274,21 @@ paths:
             schema:
               type: object
               properties:
-                reason: { type: string }
+                reason: {type: string}
       responses:
-        "204": { description: Cancellation requested. }
-        "404": { $ref: "#/components/responses/NotFound" }
+        "204": {description: Cancellation requested.}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/retry:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     post:
+      x-sparkwing-scope: runs.write
       tags: [runs]
       summary: Re-run a failed run. `?full=1` re-runs every node; default skips passed.
       parameters:
         - in: query
           name: full
-          schema: { type: string, enum: ["1", "true"] }
+          schema: {type: string, enum: ["1", "true"]}
           description: When set, re-runs every node regardless of prior outcome.
       responses:
         "200":
@@ -286,16 +299,17 @@ paths:
                 type: object
                 required: [run_id]
                 properties:
-                  run_id: { type: string }
-                  status: { type: string }
-                  trigger_source: { type: string }
-                  started_at: { type: string, format: date-time }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "500": { $ref: "#/components/responses/InternalError" }
+                  run_id: {type: string}
+                  status: {type: string}
+                  trigger_source: {type: string}
+                  started_at: {type: string, format: date-time}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/attempts:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
+      x-sparkwing-scope: runs.read
       tags: [runs]
       summary: List the retry tree for a run.
       description: |
@@ -312,12 +326,13 @@ paths:
                 properties:
                   attempts:
                     type: array
-                    items: { $ref: "#/components/schemas/Run" }
-        "404": { $ref: "#/components/responses/NotFound" }
+                    items: {$ref: "#/components/schemas/Run"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/receipt:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
+      x-sparkwing-scope: runs.read
       tags: [receipts]
       summary: Per-run audit + cost receipt.
       description: |
@@ -328,12 +343,13 @@ paths:
           description: Receipt JSON.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Receipt" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/Receipt"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/nodes:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
+      x-sparkwing-scope: runs.read
       tags: [nodes]
       summary: List nodes for a run, insertion order.
       responses:
@@ -347,26 +363,28 @@ paths:
                 properties:
                   nodes:
                     type: array
-                    items: { $ref: "#/components/schemas/Node" }
-        "500": { $ref: "#/components/responses/InternalError" }
+                    items: {$ref: "#/components/schemas/Node"}
+        "500": {$ref: "#/components/responses/InternalError"}
     post:
+      x-sparkwing-scope: runs.state
       tags: [nodes]
-      summary: Insert a node row in `pending` state. Admin scope.
+      summary: Insert a node row in `pending` state.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/Node" }
+            schema: {$ref: "#/components/schemas/Node"}
       responses:
-        "201": { description: Node created. }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "201": {description: Node created.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     get:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
       summary: Fetch one node.
       responses:
@@ -374,44 +392,47 @@ paths:
           description: Node.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Node" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/Node"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/start:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: runs.state
       tags: [nodes]
-      summary: Mark a node `running`. Admin scope.
+      summary: Mark a node `running`.
       responses:
-        "204": { description: Started. }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "204": {description: Started.}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/finish:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: runs.state
       tags: [nodes]
       summary: Mark a node terminal with outcome + optional output / error.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/FinishNodeRequest" }
+            schema: {$ref: "#/components/schemas/FinishNodeRequest"}
       responses:
-        "204": { description: Finished. }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "204": {description: Finished.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/deps:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: runs.state
       tags: [nodes]
-      summary: Rewrite a node's dependency list. Admin scope.
+      summary: Rewrite a node's dependency list.
       requestBody:
         required: true
         content:
@@ -422,15 +443,16 @@ paths:
               properties:
                 deps:
                   type: array
-                  items: { type: string }
+                  items: {type: string}
       responses:
-        "204": { description: Updated. }
+        "204": {description: Updated.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/output:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     get:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
       summary: Read the raw output JSON for one node.
       description: |
@@ -445,52 +467,51 @@ paths:
               schema:
                 type: string
                 format: byte
-        "404": { $ref: "#/components/responses/NotFound" }
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/dispatch:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
-      summary: Record a node-dispatch attempt. Nodes-claim scope.
+      summary: Record a node-dispatch attempt.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/NodeDispatch" }
+            schema: {$ref: "#/components/schemas/NodeDispatch"}
       responses:
-        "204": { description: Recorded. }
+        "204": {description: Recorded.}
     get:
+      x-sparkwing-scope: runs.read
       tags: [nodes]
       summary: Fetch the latest dispatch (or a specific `?seq=N`) for a node.
       description: >-
-        Admits `runs.read`, but fills `env_json` only for an `admin`
-        principal; every other reader gets the row without it. `redacted_keys`
-        is served to all readers.
+        Admits `runs.read`, but fills `env_json` only for an `admin` principal; every other reader gets the row without it. `redacted_keys` is served to all readers.
       parameters:
         - in: query
           name: seq
-          schema: { type: integer }
+          schema: {type: integer}
       responses:
         "200":
           description: Dispatch row.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/NodeDispatch" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/NodeDispatch"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/dispatches:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     get:
+      x-sparkwing-scope: runs.read
       tags: [nodes]
       summary: List every dispatch attempt for a node.
       description: >-
-        Admits `runs.read`, but fills `env_json` only for an `admin`
-        principal; every other reader gets each row without it.
-        `redacted_keys` is served to all readers.
+        Admits `runs.read`, but fills `env_json` only for an `admin` principal; every other reader gets each row without it. `redacted_keys` is served to all readers.
       responses:
         "200":
           description: Dispatch list.
@@ -498,15 +519,16 @@ paths:
             application/json:
               schema:
                 type: array
-                items: { $ref: "#/components/schemas/NodeDispatch" }
+                items: {$ref: "#/components/schemas/NodeDispatch"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/activity:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
-      summary: Update the node's phase string for the dashboard. Nodes-claim scope.
+      summary: Update the node's phase string for the dashboard.
       requestBody:
         required: true
         content:
@@ -514,25 +536,27 @@ paths:
             schema:
               type: object
               properties:
-                detail: { type: string }
+                detail: {type: string}
       responses:
-        "204": { description: Updated. }
+        "204": {description: Updated.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/touch:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
       summary: Update the node's last-heartbeat timestamp.
       responses:
-        "204": { description: Touched. }
+        "204": {description: Touched.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/annotations:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
       summary: Append one annotation string to the node.
       requestBody:
@@ -543,15 +567,16 @@ paths:
               type: object
               required: [annotation]
               properties:
-                annotation: { type: string }
+                annotation: {type: string}
       responses:
-        "204": { description: Appended. }
+        "204": {description: Appended.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/summary:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
       summary: Overwrite the node-scoped run summary markdown.
       requestBody:
@@ -562,15 +587,16 @@ paths:
               type: object
               required: [summary]
               properties:
-                summary: { type: string }
+                summary: {type: string}
       responses:
-        "204": { description: Stored. }
+        "204": {description: Stored.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
       summary: Record the node's published-artifact manifest digest.
       requestBody:
@@ -581,25 +607,27 @@ paths:
               type: object
               required: [manifest_digest]
               properties:
-                manifest_digest: { type: string }
+                manifest_digest: {type: string}
       responses:
-        "204": { description: Stored. }
+        "204": {description: Stored.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/metrics:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
       summary: Append one metric sample to a node.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/MetricSample" }
+            schema: {$ref: "#/components/schemas/MetricSample"}
       responses:
-        "204": { description: Recorded. }
+        "204": {description: Recorded.}
     get:
+      x-sparkwing-scope: runs.read
       tags: [nodes]
       summary: List metric samples for a node.
       responses:
@@ -613,24 +641,26 @@ paths:
                 properties:
                   metrics:
                     type: array
-                    items: { $ref: "#/components/schemas/MetricSample" }
+                    items: {$ref: "#/components/schemas/MetricSample"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/mark-ready:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: admin
       tags: [nodes]
       summary: Stamp `ready_at` so pool runners can claim the node.
       responses:
-        "204": { description: Stamped. }
-        "404": { $ref: "#/components/responses/NotFound" }
+        "204": {description: Stamped.}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: admin
       tags: [nodes]
       summary: Atomically null `ready_at` iff the node is not claimed.
       responses:
@@ -642,13 +672,14 @@ paths:
                 type: object
                 required: [revoked]
                 properties:
-                  revoked: { type: boolean }
+                  revoked: {type: boolean}
 
   /api/v1/runs/{id}/nodes/{nodeID}/heartbeat:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
       summary: Extend the holding runner's claim lease.
       description: |
@@ -662,18 +693,36 @@ paths:
               type: object
               required: [holder_id]
               properties:
-                holder_id: { type: string }
-                lease_secs: { type: integer, minimum: 0 }
+                holder_id: {type: string}
+                lease_secs: {type: integer, minimum: 0}
       responses:
-        "204": { description: Lease extended. }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "409": { description: Caller is not the current claim holder. }
+        "204": {description: Lease extended.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "409": {description: Caller is not the current claim holder.}
+
+  /api/v1/runs/{id}/heartbeat:
+    parameters: [{$ref: "#/components/parameters/RunID"}]
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [runs]
+      summary: Stamp the run's liveness clock.
+      description: |
+        Keeps the reaper from declaring the run lost while its nodes are
+        between claims. The caller must hold a live claim on one of the
+        run's nodes.
+      responses:
+        "204": {description: Heartbeat recorded. Empty body.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/status:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: runs.state
       tags: [nodes]
       summary: Admin override of a node's status (debug / repair).
       requestBody:
@@ -684,25 +733,91 @@ paths:
               type: object
               required: [status]
               properties:
-                status: { type: string }
+                status: {type: string}
       responses:
-        "204": { description: Updated. }
+        "204": {description: Updated.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/release:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: runs.write
       tags: [debug-pauses]
       summary: Release any active debug pause on the node.
       responses:
-        "204": { description: Released or no-op. }
+        "204": {description: Released or no-op.}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/bounce:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
+    post:
+      x-sparkwing-scope: runs.write
+      tags: [nodes]
+      summary: Ask a running node to restart its process.
+      description: |
+        Records a bounce request against a running node of a live run and
+        stamps the requesting principal. The runner picks it up on its next
+        poll of the GET below.
+      responses:
+        "200":
+          description: The recorded bounce request.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NodeBounce"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The node is not running, or the run is no longer live.: ''}
+        "500": {$ref: "#/components/responses/InternalError"}
+    get:
+      x-sparkwing-scope: nodes.claim
+      tags: [nodes]
+      summary: Poll for a bounce request the runner has not consumed.
+      responses:
+        "200":
+          description: A bounce is pending.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NodeBounce"}
+        "204": {description: No bounce pending. Empty body.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [nodes]
+      summary: Close a bounce request the runner acted on.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seq: {type: integer, format: int64}
+                outcome:
+                  type: string
+                  description: Defaults to `bounced` when omitted.
+      responses:
+        "204": {description: Bounce closed. Empty body.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/debug-pause:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     get:
+      x-sparkwing-scope: runs.read
       tags: [debug-pauses]
       summary: Get the open debug pause for a node.
       responses:
@@ -710,12 +825,13 @@ paths:
           description: Active pause, or 404 when none.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/DebugPause" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/DebugPause"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/debug-pauses:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
+      x-sparkwing-scope: runs.read
       tags: [debug-pauses]
       summary: List every debug pause for a run.
       responses:
@@ -729,21 +845,23 @@ paths:
                 properties:
                   pauses:
                     type: array
-                    items: { $ref: "#/components/schemas/DebugPause" }
+                    items: {$ref: "#/components/schemas/DebugPause"}
     post:
+      x-sparkwing-scope: admin
       tags: [debug-pauses]
-      summary: Create a debug pause on a node. Admin scope.
+      summary: Create a debug pause on a node.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/DebugPause" }
+            schema: {$ref: "#/components/schemas/DebugPause"}
       responses:
-        "201": { description: Created. }
+        "201": {description: Created.}
 
   /api/v1/runs/{id}/paused:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
+      x-sparkwing-scope: runs.read
       tags: [debug-pauses]
       summary: Alias of `/runs/{id}/debug-pauses`. Same response shape.
       responses:
@@ -757,14 +875,14 @@ paths:
                 properties:
                   pauses:
                     type: array
-                    items: { $ref: "#/components/schemas/DebugPause" }
-
+                    items: {$ref: "#/components/schemas/DebugPause"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/steps/start:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [node-steps]
       summary: Mark a step within a node as running.
       requestBody:
@@ -775,15 +893,16 @@ paths:
               type: object
               required: [step_id]
               properties:
-                step_id: { type: string }
+                step_id: {type: string}
       responses:
-        "204": { description: Started. }
+        "204": {description: Started.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/steps/finish:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [node-steps]
       summary: Transition a step to passed / failed.
       requestBody:
@@ -794,18 +913,19 @@ paths:
               type: object
               required: [step_id, status]
               properties:
-                step_id: { type: string }
+                step_id: {type: string}
                 status:
                   type: string
                   enum: [passed, failed]
       responses:
-        "204": { description: Finished. }
+        "204": {description: Finished.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/steps/skip:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [node-steps]
       summary: Record a step as skipped (SkipIf hit).
       requestBody:
@@ -816,16 +936,17 @@ paths:
               type: object
               required: [step_id]
               properties:
-                step_id: { type: string }
-                reason: { type: string }
+                step_id: {type: string}
+                reason: {type: string}
       responses:
-        "204": { description: Recorded. }
+        "204": {description: Recorded.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/steps/annotations:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [node-steps]
       summary: Append one annotation to a step.
       requestBody:
@@ -836,16 +957,17 @@ paths:
               type: object
               required: [step_id, annotation]
               properties:
-                step_id: { type: string }
-                annotation: { type: string }
+                step_id: {type: string}
+                annotation: {type: string}
       responses:
-        "204": { description: Appended. }
+        "204": {description: Appended.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/steps/summary:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [node-steps]
       summary: Overwrite the step-scoped run-summary markdown.
       requestBody:
@@ -856,14 +978,15 @@ paths:
               type: object
               required: [step_id, summary]
               properties:
-                step_id: { type: string }
-                summary: { type: string }
+                step_id: {type: string}
+                summary: {type: string}
       responses:
-        "204": { description: Stored. }
+        "204": {description: Stored.}
 
   /api/v1/runs/{id}/steps:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
+      x-sparkwing-scope: runs.read
       tags: [node-steps]
       summary: List every step in a run with terminal state.
       responses:
@@ -877,22 +1000,22 @@ paths:
                 properties:
                   steps:
                     type: array
-                    items: { $ref: "#/components/schemas/NodeStep" }
-
+                    items: {$ref: "#/components/schemas/NodeStep"}
 
   /api/v1/runs/{id}/events:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
+      x-sparkwing-scope: runs.read
       tags: [events]
       summary: List events for a run, ascending by seq.
       parameters:
         - in: query
           name: after
-          schema: { type: integer }
+          schema: {type: integer}
           description: Return only events with seq > `after`.
         - in: query
           name: limit
-          schema: { type: integer, default: 500, minimum: 1 }
+          schema: {type: integer, default: 500, minimum: 1}
       responses:
         "200":
           description: Events.
@@ -904,10 +1027,11 @@ paths:
                 properties:
                   events:
                     type: array
-                    items: { $ref: "#/components/schemas/Event" }
+                    items: {$ref: "#/components/schemas/Event"}
     post:
+      x-sparkwing-scope: runs.state
       tags: [events]
-      summary: Append one event to a run. Admin scope.
+      summary: Append one event to a run.
       requestBody:
         required: true
         content:
@@ -916,8 +1040,8 @@ paths:
               type: object
               required: [kind]
               properties:
-                node_id: { type: string }
-                kind: { type: string }
+                node_id: {type: string}
+                kind: {type: string}
                 payload:
                   type: string
                   format: byte
@@ -931,11 +1055,11 @@ paths:
                 type: object
                 required: [seq]
                 properties:
-                  seq: { type: integer, format: int64 }
-
+                  seq: {type: integer, format: int64}
 
   /api/v1/triggers:
     post:
+      x-sparkwing-scope: runs.write
       tags: [triggers]
       summary: Submit a new trigger. Persists then notifies the dispatcher.
       description: |
@@ -946,7 +1070,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/TriggerRequest" }
+            schema: {$ref: "#/components/schemas/TriggerRequest"}
       responses:
         "202":
           description: Trigger accepted; orchestrator will run it.
@@ -956,22 +1080,23 @@ paths:
                 type: object
                 required: [run_id, status]
                 properties:
-                  run_id: { type: string }
-                  status: { type: string, enum: [dispatched] }
-        "400": { $ref: "#/components/responses/BadRequest" }
+                  run_id: {type: string}
+                  status: {type: string, enum: [dispatched]}
+        "400": {$ref: "#/components/responses/BadRequest"}
     get:
+      x-sparkwing-scope: triggers.read
       tags: [triggers]
       summary: List triggers (operator view). Filter by `status`, `pipeline`.
       parameters:
         - in: query
           name: status
-          schema: { type: string }
+          schema: {type: string}
         - in: query
           name: pipeline
-          schema: { type: string }
+          schema: {type: string}
         - in: query
           name: limit
-          schema: { type: integer }
+          schema: {type: integer}
       responses:
         "200":
           description: Triggers wrapped under `triggers`.
@@ -983,12 +1108,13 @@ paths:
                 properties:
                   triggers:
                     type: array
-                    items: { $ref: "#/components/schemas/Trigger" }
+                    items: {$ref: "#/components/schemas/Trigger"}
 
   /api/v1/triggers/claim:
     post:
+      x-sparkwing-scope: triggers.claim
       tags: [triggers]
-      summary: Atomically claim the oldest pending trigger. Admin scope.
+      summary: Atomically claim the oldest pending trigger.
       description: |
         Empty body claims any pending trigger. 204 when the queue is
         empty.
@@ -1001,21 +1127,22 @@ paths:
               properties:
                 pipelines:
                   type: array
-                  items: { type: string }
+                  items: {type: string}
                 trigger_sources:
                   type: array
-                  items: { type: string }
+                  items: {type: string}
       responses:
         "200":
           description: Claimed trigger.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Trigger" }
-        "204": { description: Queue empty. }
+              schema: {$ref: "#/components/schemas/Trigger"}
+        "204": {description: Queue empty.}
 
   /api/v1/triggers/{id}:
-    parameters: [{ $ref: "#/components/parameters/TriggerID" }]
+    parameters: [{$ref: "#/components/parameters/TriggerID"}]
     get:
+      x-sparkwing-scope: triggers.read
       tags: [triggers]
       summary: Fetch a single trigger by ID.
       responses:
@@ -1023,12 +1150,13 @@ paths:
           description: Trigger.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Trigger" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/Trigger"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/triggers/{id}/heartbeat:
-    parameters: [{ $ref: "#/components/parameters/TriggerID" }]
+    parameters: [{$ref: "#/components/parameters/TriggerID"}]
     post:
+      x-sparkwing-scope: triggers.claim
       tags: [triggers]
       summary: Extend the worker lease on a claimed trigger.
       responses:
@@ -1040,50 +1168,52 @@ paths:
                 type: object
                 required: [cancel_requested]
                 properties:
-                  cancel_requested: { type: boolean }
-        "404": { description: Trigger missing -- worker should stop. }
+                  cancel_requested: {type: boolean}
+        "404": {description: Trigger missing -- worker should stop.}
 
   /api/v1/triggers/{id}/done:
-    parameters: [{ $ref: "#/components/parameters/TriggerID" }]
+    parameters: [{$ref: "#/components/parameters/TriggerID"}]
     post:
+      x-sparkwing-scope: triggers.claim
       tags: [triggers]
-      summary: Mark a trigger `done`. Idempotent. Admin scope.
+      summary: Mark a trigger `done`. Idempotent.
       responses:
-        "204": { description: Done. }
+        "204": {description: Done.}
 
   /api/v1/triggers/spawned-child:
     get:
+      x-sparkwing-scope: triggers.read
       tags: [triggers]
       summary: Find the child trigger spawned by a parent (run, node, pipeline).
       parameters:
         - in: query
           name: parent_run_id
           required: true
-          schema: { type: string }
+          schema: {type: string}
         - in: query
           name: parent_node_id
           required: true
-          schema: { type: string }
+          schema: {type: string}
         - in: query
           name: pipeline
           required: true
-          schema: { type: string }
+          schema: {type: string}
       responses:
         "200":
           description: Trigger.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Trigger" }
-        "404": { $ref: "#/components/responses/NotFound" }
-
+              schema: {$ref: "#/components/schemas/Trigger"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/approvals/{nodeID}/request:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: admin
       tags: [approvals]
-      summary: Create a pending approval gate (called by the orchestrator). Admin scope.
+      summary: Create a pending approval gate (called by the orchestrator).
       requestBody:
         required: true
         content:
@@ -1091,22 +1221,23 @@ paths:
             schema:
               type: object
               properties:
-                message: { type: string }
-                timeout_ms: { type: integer, format: int64 }
+                message: {type: string}
+                timeout_ms: {type: integer, format: int64}
                 on_timeout:
                   type: string
                   enum: [fail, deny, approve]
       responses:
-        "201": { description: Approval created. }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "201": {description: Approval created.}
+        "400": {$ref: "#/components/responses/BadRequest"}
 
   /api/v1/runs/{id}/approvals/{nodeID}:
     parameters:
-      - { $ref: "#/components/parameters/RunID" }
-      - { $ref: "#/components/parameters/NodeID" }
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
     post:
+      x-sparkwing-scope: approvals.write
       tags: [approvals]
-      summary: Resolve an approval (human or timeout). Requires `approvals.write` scope.
+      summary: Resolve an approval (human or timeout).
       requestBody:
         required: true
         content:
@@ -1118,7 +1249,7 @@ paths:
                 resolution:
                   type: string
                   enum: [approved, denied, timed_out]
-                comment: { type: string }
+                comment: {type: string}
                 approver:
                   type: string
                   description: |
@@ -1127,9 +1258,10 @@ paths:
                     auth enabled the approver is taken from the
                     bearer principal.
       responses:
-        "204": { description: Resolved. }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "204": {description: Resolved.}
+        "400": {$ref: "#/components/responses/BadRequest"}
     get:
+      x-sparkwing-scope: runs.read
       tags: [approvals]
       summary: Fetch an approval by (run, node).
       responses:
@@ -1137,12 +1269,13 @@ paths:
           description: Approval.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Approval" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/Approval"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/runs/{id}/approvals:
-    parameters: [{ $ref: "#/components/parameters/RunID" }]
+    parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
+      x-sparkwing-scope: runs.read
       tags: [approvals]
       summary: List approvals for a run.
       responses:
@@ -1156,10 +1289,11 @@ paths:
                 properties:
                   approvals:
                     type: array
-                    items: { $ref: "#/components/schemas/Approval" }
+                    items: {$ref: "#/components/schemas/Approval"}
 
   /api/v1/approvals/pending:
     get:
+      x-sparkwing-scope: runs.read
       tags: [approvals]
       summary: List every pending approval across runs.
       responses:
@@ -1173,16 +1307,16 @@ paths:
                 properties:
                   approvals:
                     type: array
-                    items: { $ref: "#/components/schemas/Approval" }
-
+                    items: {$ref: "#/components/schemas/Approval"}
 
   /api/v1/concurrency/{key}/acquire:
     parameters:
       - in: path
         name: key
         required: true
-        schema: { type: string }
+        schema: {type: string}
     post:
+      x-sparkwing-scope: admin
       tags: [concurrency]
       summary: Try to acquire a slot under a concurrency key.
       description: |
@@ -1194,31 +1328,32 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/AcquireSlotRequest" }
+            schema: {$ref: "#/components/schemas/AcquireSlotRequest"}
       responses:
         "200":
           description: Granted.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AcquireSlotResponse" }
+              schema: {$ref: "#/components/schemas/AcquireSlotResponse"}
         "202":
           description: Queued / coalesced / cancel_others.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AcquireSlotResponse" }
+              schema: {$ref: "#/components/schemas/AcquireSlotResponse"}
         "429":
           description: Skipped / failed (terminal).
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AcquireSlotResponse" }
+              schema: {$ref: "#/components/schemas/AcquireSlotResponse"}
 
   /api/v1/concurrency/{key}/heartbeat:
     parameters:
       - in: path
         name: key
         required: true
-        schema: { type: string }
+        schema: {type: string}
     post:
+      x-sparkwing-scope: admin
       tags: [concurrency]
       summary: Extend a holder's lease.
       requestBody:
@@ -1229,8 +1364,8 @@ paths:
               type: object
               required: [holder_id]
               properties:
-                holder_id: { type: string }
-                lease_secs: { type: integer }
+                holder_id: {type: string}
+                lease_secs: {type: integer}
       responses:
         "200":
           description: New lease + supersede flag.
@@ -1240,17 +1375,18 @@ paths:
                 type: object
                 required: [lease_expires_at, cancelled_by_newer]
                 properties:
-                  lease_expires_at: { type: string, format: date-time }
-                  cancelled_by_newer: { type: boolean }
-        "409": { description: Lock held by another runner. }
+                  lease_expires_at: {type: string, format: date-time}
+                  cancelled_by_newer: {type: boolean}
+        "409": {description: Lock held by another runner.}
 
   /api/v1/concurrency/{key}/release:
     parameters:
       - in: path
         name: key
         required: true
-        schema: { type: string }
+        schema: {type: string}
     post:
+      x-sparkwing-scope: admin
       tags: [concurrency]
       summary: Release a slot. Idempotent.
       requestBody:
@@ -1261,21 +1397,22 @@ paths:
               type: object
               required: [holder_id, outcome]
               properties:
-                holder_id: { type: string }
-                outcome: { type: string }
-                output_ref: { type: string }
-                cache_key_hash: { type: string }
-                cache_ttl_ns: { type: integer, format: int64 }
+                holder_id: {type: string}
+                outcome: {type: string}
+                output_ref: {type: string}
+                cache_key_hash: {type: string}
+                cache_ttl_ns: {type: integer, format: int64}
       responses:
-        "204": { description: Released. }
+        "204": {description: Released.}
 
   /api/v1/concurrency/{key}/state:
     parameters:
       - in: path
         name: key
         required: true
-        schema: { type: string }
+        schema: {type: string}
     get:
+      x-sparkwing-scope: runs.read
       tags: [concurrency]
       summary: Inspect capacity + holders + waiters under a key.
       responses:
@@ -1283,24 +1420,25 @@ paths:
           description: State snapshot.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/ConcurrencyState" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/ConcurrencyState"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/concurrency/{key}/notify:
     parameters:
       - in: path
         name: key
         required: true
-        schema: { type: string }
+        schema: {type: string}
       - in: query
         name: run_id
         required: true
-        schema: { type: string }
+        schema: {type: string}
       - in: query
         name: node_id
         required: false
-        schema: { type: string }
+        schema: {type: string}
     get:
+      x-sparkwing-scope: runs.read
       tags: [concurrency]
       summary: Server-sent event stream of waiter resolution events.
       description: |
@@ -1340,10 +1478,187 @@ paths:
 
                   `node_id` is present when the request supplied one;
                   `reason` is present only on `stream_end`.
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": {$ref: "#/components/responses/BadRequest"}
+
+  /api/v1/concurrency/{key}/holder:
+    parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
+    get:
+      x-sparkwing-scope: admin
+      tags: [concurrency]
+      summary: Read one holder's slot.
+      parameters:
+        - in: query
+          name: holder_id
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: The holder's slot.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ConcurrencyHolder"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/concurrency/{key}/resolve:
+    parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
+    get:
+      x-sparkwing-scope: admin
+      tags: [concurrency]
+      summary: Resolve one waiter's standing in a single read.
+      description: |
+        Answers where the caller sits in the queue and what the leader it
+        coalesced behind produced. `bypass_read=true` skips the cache
+        lookup. The polling counterpart to the `notify` stream.
+      parameters:
+        - in: query
+          name: run_id
+          required: true
+          schema: {type: string}
+        - in: query
+          name: node_id
+          schema: {type: string}
+        - in: query
+          name: cache_key_hash
+          schema: {type: string}
+        - in: query
+          name: leader_run_id
+          schema: {type: string}
+        - in: query
+          name: leader_node_id
+          schema: {type: string}
+        - in: query
+          name: bypass_read
+          schema: {type: boolean}
+      responses:
+        "200":
+          description: The waiter's status, position, and leader outcome.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ResolveWaiterResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/concurrency/{key}/cancel-waiter:
+    parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
+    post:
+      x-sparkwing-scope: admin
+      tags: [concurrency]
+      summary: Drop one waiter from a key's queue.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [run_id]
+              properties:
+                run_id: {type: string}
+                node_id: {type: string}
+      responses:
+        "200":
+          description: Whether a waiter row was removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cancelled]
+                properties:
+                  cancelled: {type: boolean}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/concurrency/{key}/force-release:
+    parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
+    post:
+      x-sparkwing-scope: admin
+      tags: [concurrency]
+      summary: Drop superseded holders and promote the next waiters.
+      description: |
+        Releases every holder the store marked superseded, then promotes
+        waiters into the slots that freed. The operator escape hatch for a
+        key whose holders died without releasing.
+      responses:
+        "200":
+          description: The holders that were dropped.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dropped:
+                    type: array
+                    items: {$ref: "#/components/schemas/ConcurrencyHolder"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/queue/state:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [concurrency]
+      summary: Snapshot every concurrency key, holder, waiter, and runner.
+      description: |
+        One deployment-wide view for the queue dashboard: per-key capacity
+        and cost held, the live holders, the waiting nodes with their
+        positions, and the headroom each runner last reported.
+      responses:
+        "200":
+          description: The queue snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key: {type: string}
+                        capacity: {type: number}
+                        held: {type: number}
+                  holders:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        run_id: {type: string}
+                        semaphores:
+                          type: array
+                          items: {type: string}
+                        elapsed_ms: {type: integer, format: int64}
+                        origin: {type: string}
+                  waiters:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        run_id: {type: string}
+                        position: {type: integer}
+                        waiting_on:
+                          type: array
+                          items: {type: string}
+                        waiting_ms: {type: integer, format: int64}
+                        origin: {type: string}
+                  runners:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        cores: {type: number}
+                        memory_bytes: {type: integer, format: int64}
+                        queue_depth: {type: integer}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/nodes/claim:
     post:
+      x-sparkwing-scope: nodes.claim
       tags: [nodes]
       summary: Claim the oldest ready, unclaimed node matching labels.
       description: |
@@ -1361,23 +1676,23 @@ paths:
               type: object
               required: [holder_id]
               properties:
-                holder_id: { type: string }
-                lease_secs: { type: integer }
+                holder_id: {type: string}
+                lease_secs: {type: integer}
                 labels:
                   type: array
-                  items: { type: string }
+                  items: {type: string}
       responses:
         "200":
           description: Claimed node.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Node" }
-        "204": { description: Nothing to claim. }
-        "400": { $ref: "#/components/responses/BadRequest" }
-
+              schema: {$ref: "#/components/schemas/Node"}
+        "204": {description: Nothing to claim.}
+        "400": {$ref: "#/components/responses/BadRequest"}
 
   /api/v1/pool:
     get:
+      x-sparkwing-scope: runs.read
       tags: [pool]
       summary: List warm-PVC pool. **cluster-only** (requires `AttachPool`).
       responses:
@@ -1385,18 +1700,19 @@ paths:
           description: Pool snapshot.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/PoolListResponse" }
-        "503": { description: Pool not ready. }
+              schema: {$ref: "#/components/schemas/PoolListResponse"}
+        "503": {description: Pool not ready.}
 
   /api/v1/pool/checkout:
     post:
+      x-sparkwing-scope: admin
       tags: [pool]
       summary: Check out a clean PVC. **cluster-only**.
       parameters:
         - in: query
           name: job_id
           required: true
-          schema: { type: string }
+          schema: {type: string}
       responses:
         "200":
           description: Checked-out PVC name.
@@ -1406,50 +1722,49 @@ paths:
                 type: object
                 required: [pvc]
                 properties:
-                  pvc: { type: string }
-        "409":
-          {
-            description: No clean PVC available -- fall back to cache-less build.,
-          }
+                  pvc: {type: string}
+        "409": {description: No clean PVC available -- fall back to cache-less build.}
 
   /api/v1/pool/return:
     post:
+      x-sparkwing-scope: admin
       tags: [pool]
       summary: Return a PVC to the pool (marks it dirty). **cluster-only**.
       parameters:
         - in: query
           name: pvc
           required: true
-          schema: { type: string }
+          schema: {type: string}
       responses:
-        "204": { description: Returned. }
+        "204": {description: Returned.}
 
   /api/v1/pool/heartbeat:
     post:
+      x-sparkwing-scope: admin
       tags: [pool]
       summary: Keep ownership of an in-use PVC alive. **cluster-only**.
       parameters:
         - in: query
           name: pvc
           required: true
-          schema: { type: string }
+          schema: {type: string}
         - in: query
           name: job_id
           required: true
-          schema: { type: string }
+          schema: {type: string}
       responses:
-        "204": { description: Renewed. }
-        "409": { description: Heartbeat lost (job_id mismatch or PVC expired). }
-
+        "204": {description: Renewed.}
+        "409": {description: Heartbeat lost (job_id mismatch or PVC expired).}
 
   /api/v1/artifacts/{key}:
     parameters:
       - in: path
         name: key
         required: true
-        schema: { type: string }
+        schema: {type: string}
         description: Content-addressed artifact key.
     get:
+      x-sparkwing-scope: runs.read
       tags: [artifacts]
       summary: Stream an artifact's bytes. **laptop-only** (requires `WithArtifactStore`).
       responses:
@@ -1457,34 +1772,33 @@ paths:
           description: Artifact bytes.
           content:
             application/octet-stream:
-              schema: { type: string, format: binary }
-        "404": { $ref: "#/components/responses/NotFound" }
-
+              schema: {type: string, format: binary}
+        "404": {$ref: "#/components/responses/NotFound"}
 
   /api/v1/tokens:
     post:
+      x-sparkwing-scope: admin
       tags: [tokens]
-      summary: Mint a new bearer token. Admin scope.
+      summary: Mint a new bearer token.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/CreateTokenRequest" }
+            schema: {$ref: "#/components/schemas/CreateTokenRequest"}
       responses:
         "201":
           description: New token (raw value is included **once** in this response).
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/CreateTokenResponse" }
+              schema: {$ref: "#/components/schemas/CreateTokenResponse"}
         "400":
           description: >-
-            Invalid request: missing principal or kind, or a scope the
-            controller does not honor (the message names the offending
-            scope and the valid set).
+            Invalid request: missing principal or kind, or a scope the controller does not honor (the message names the offending scope and the valid set).
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Error" }
+              schema: {$ref: "#/components/schemas/Error"}
     get:
+      x-sparkwing-scope: admin
       tags: [tokens]
       summary: List all tokens (no raw values).
       responses:
@@ -1498,16 +1812,16 @@ paths:
                 properties:
                   tokens:
                     type: array
-                    items: { $ref: "#/components/schemas/Token" }
+                    items: {$ref: "#/components/schemas/Token"}
 
   /api/v1/tokens/{prefix}:
     parameters:
       - in: path
         name: prefix
         required: true
-        schema:
-          { type: string, description: The 12-char prefix returned at mint. }
+        schema: {type: string, description: The 12-char prefix returned at mint.}
     get:
+      x-sparkwing-scope: admin
       tags: [tokens]
       summary: Lookup a token by prefix.
       responses:
@@ -1515,21 +1829,23 @@ paths:
           description: Token (no raw value).
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Token" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/Token"}
+        "404": {$ref: "#/components/responses/NotFound"}
     delete:
+      x-sparkwing-scope: admin
       tags: [tokens]
       summary: Revoke a token by prefix.
       responses:
-        "204": { description: Revoked. }
+        "204": {description: Revoked.}
 
   /api/v1/tokens/{prefix}/rotate:
     parameters:
       - in: path
         name: prefix
         required: true
-        schema: { type: string }
+        schema: {type: string}
     post:
+      x-sparkwing-scope: admin
       tags: [tokens]
       summary: Mint a replacement; mark the prior token revoked + replaced_by.
       responses:
@@ -1537,11 +1853,11 @@ paths:
           description: New token.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/CreateTokenResponse" }
-
+              schema: {$ref: "#/components/schemas/CreateTokenResponse"}
 
   /api/v1/users:
     get:
+      x-sparkwing-scope: admin
       tags: [users]
       summary: List local-account users.
       responses:
@@ -1555,10 +1871,14 @@ paths:
                 properties:
                   users:
                     type: array
-                    items: { $ref: "#/components/schemas/User" }
+                    items: {$ref: "#/components/schemas/User"}
     post:
+      x-sparkwing-scope: admin
       tags: [users]
-      summary: Create a user. **Unauthenticated** when no users exist (bootstrap); otherwise admin scope.
+      summary: Create a user, or bootstrap the first admin.
+      description: |
+        Answers without a credential while the users table is empty, and
+        goes back to demanding the route's scope once any user exists.
       requestBody:
         required: true
         content:
@@ -1567,38 +1887,37 @@ paths:
               type: object
               required: [name, password]
               properties:
-                name: { type: string }
-                password: { type: string }
+                name: {type: string}
+                password: {type: string}
                 scopes:
                   type: array
                   description: >-
-                    Scopes this account's dashboard sessions carry. Omit to
-                    grant admin. Ignored on the bootstrap path, which always
-                    creates an admin.
-                  items: { type: string }
+                    Scopes this account's dashboard sessions carry. Omit to grant admin. Ignored on the bootstrap path, which always creates an admin.
+                  items: {type: string}
       responses:
         "201":
           description: User created.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/User" }
-        "409": { description: Bootstrap race lost. }
+              schema: {$ref: "#/components/schemas/User"}
+        "409": {description: Bootstrap race lost.}
 
   /api/v1/users/{name}:
     parameters:
       - in: path
         name: name
         required: true
-        schema: { type: string }
+        schema: {type: string}
     delete:
+      x-sparkwing-scope: admin
       tags: [users]
-      summary: Delete a user. Admin scope.
+      summary: Delete a user.
       responses:
-        "204": { description: Deleted. }
-
+        "204": {description: Deleted.}
 
   /api/v1/auth/login:
     post:
+      x-sparkwing-scope: public
       tags: [auth]
       summary: Exchange username + password for a session id + CSRF token.
       description: Unauthenticated.
@@ -1611,8 +1930,8 @@ paths:
               type: object
               required: [username, password]
               properties:
-                username: { type: string }
-                password: { type: string }
+                username: {type: string}
+                password: {type: string}
       responses:
         "200":
           description: Session created.
@@ -1620,20 +1939,19 @@ paths:
             application/json:
               schema:
                 type: object
-                required:
-                  [session_id, csrf_token, principal, scopes, expires_at]
+                required: [session_id, csrf_token, principal, scopes, expires_at]
                 properties:
-                  session_id: { type: string }
-                  csrf_token: { type: string }
-                  principal: { type: string }
+                  session_id: {type: string}
+                  csrf_token: {type: string}
+                  principal: {type: string}
                   scopes:
                     type: array
-                    items: { type: string }
-                  expires_at:
-                    { type: integer, format: int64, description: Unix seconds. }
+                    items: {type: string}
+                  expires_at: {type: integer, format: int64, description: Unix seconds.}
 
   /api/v1/auth/logout:
     post:
+      x-sparkwing-scope: public
       tags: [auth]
       summary: Delete a session.
       security: []
@@ -1645,12 +1963,13 @@ paths:
               type: object
               required: [session_id]
               properties:
-                session_id: { type: string }
+                session_id: {type: string}
       responses:
-        "204": { description: Logged out. }
+        "204": {description: Logged out.}
 
   /api/v1/auth/session:
     get:
+      x-sparkwing-scope: public
       tags: [auth]
       summary: "Resolve a session id (sent via `Authorization: Session <id>`) to the principal."
       security:
@@ -1663,14 +1982,15 @@ paths:
               schema:
                 type: object
                 properties:
-                  principal: { type: string }
+                  principal: {type: string}
                   scopes:
                     type: array
-                    items: { type: string }
-                  expires_at: { type: integer, format: int64 }
+                    items: {type: string}
+                  expires_at: {type: integer, format: int64}
 
   /api/v1/auth/whoami:
     get:
+      x-sparkwing-scope: authenticated
       tags: [auth]
       summary: Resolve the bearer token to the principal.
       responses:
@@ -1681,15 +2001,16 @@ paths:
               schema:
                 type: object
                 properties:
-                  principal: { type: string }
+                  principal: {type: string}
                   scopes:
                     type: array
-                    items: { type: string }
-                  kind: { type: string }
-        "401": { $ref: "#/components/responses/Unauthorized" }
+                    items: {type: string}
+                  kind: {type: string}
+        "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/auth/bootstrap-needed:
     get:
+      x-sparkwing-scope: public
       tags: [auth]
       summary: Whether the users table is empty (first-run probe).
       security: []
@@ -1701,13 +2022,13 @@ paths:
               schema:
                 type: object
                 properties:
-                  needed: { type: boolean }
-
+                  needed: {type: boolean}
 
   /api/v1/secrets:
     post:
+      x-sparkwing-scope: admin
       tags: [secrets]
-      summary: Create or replace a secret. Admin scope.
+      summary: Create or replace a secret.
       requestBody:
         required: true
         content:
@@ -1716,12 +2037,13 @@ paths:
               type: object
               required: [name, value]
               properties:
-                name: { type: string }
-                value: { type: string }
-                masked: { type: boolean }
+                name: {type: string}
+                value: {type: string}
+                masked: {type: boolean}
       responses:
-        "201": { description: Created. }
+        "201": {description: Created.}
     get:
+      x-sparkwing-scope: admin
       tags: [secrets]
       summary: List secrets (metadata only; values are never returned in list).
       responses:
@@ -1735,15 +2057,16 @@ paths:
                 properties:
                   secrets:
                     type: array
-                    items: { $ref: "#/components/schemas/Secret" }
+                    items: {$ref: "#/components/schemas/Secret"}
 
   /api/v1/secrets/{name}:
     parameters:
       - in: path
         name: name
         required: true
-        schema: { type: string }
+        schema: {type: string}
     get:
+      x-sparkwing-scope: secrets.read
       tags: [secrets]
       summary: Read one secret (value included).
       responses:
@@ -1751,17 +2074,18 @@ paths:
           description: Secret.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Secret" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/Secret"}
+        "404": {$ref: "#/components/responses/NotFound"}
     delete:
+      x-sparkwing-scope: admin
       tags: [secrets]
-      summary: Delete a secret. Admin scope.
+      summary: Delete a secret.
       responses:
-        "204": { description: Deleted. }
-
+        "204": {description: Deleted.}
 
   /api/v1/agents:
     get:
+      x-sparkwing-scope: runs.read
       tags: [agents]
       summary: List recently-heartbeating runners.
       responses:
@@ -1775,10 +2099,11 @@ paths:
                 properties:
                   agents:
                     type: array
-                    items: { $ref: "#/components/schemas/Agent" }
+                    items: {$ref: "#/components/schemas/Agent"}
 
   /api/v1/trends:
     get:
+      x-sparkwing-scope: runs.read
       tags: [trends]
       summary: Aggregate counts for the dashboard's overview chart.
       description: |
@@ -1790,10 +2115,10 @@ paths:
       parameters:
         - in: query
           name: hours
-          schema: { type: integer, minimum: 1, maximum: 336, default: 24 }
+          schema: {type: integer, minimum: 1, maximum: 336, default: 24}
         - in: query
           name: pipeline
-          schema: { type: string }
+          schema: {type: string}
       responses:
         "200":
           description: Trend data.
@@ -1805,7 +2130,7 @@ paths:
                 properties:
                   points:
                     type: array
-                    items: { $ref: "#/components/schemas/TrendPoint" }
+                    items: {$ref: "#/components/schemas/TrendPoint"}
                   pipeline:
                     type: string
                     description: Echoed back only when the request filtered by pipeline.
@@ -1815,34 +2140,208 @@ paths:
       - in: path
         name: name
         required: true
-        schema: { type: string }
+        schema: {type: string}
     get:
+      x-sparkwing-scope: runs.read
       tags: [pipelines]
       summary: The latest matching run for a pipeline (cross-pipeline-ref read).
       parameters:
         - in: query
           name: status
-          schema: { type: string }
+          schema: {type: string}
           description: csv of statuses (default `success`).
         - in: query
           name: max_age
-          schema: { type: string, format: duration }
+          schema: {type: string, format: duration}
       responses:
         "200":
           description: Latest run.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Run" }
-        "404": { $ref: "#/components/responses/NotFound" }
+              schema: {$ref: "#/components/schemas/Run"}
+        "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/pipelines/{name}/profile:
+    parameters: [{$ref: "#/components/parameters/PipelineName"}]
+    get:
+      x-sparkwing-scope: nodes.claim
+      tags: [pipelines]
+      summary: Read a pipeline's measured resource profile.
+      description: |
+        Returns the cores and memory sparkwing measured for past runs, plus
+        any operator pin. `?node=` narrows it to one node; omitting it
+        answers the pipeline-wide profile. A runner reads this to size the
+        work it is about to admit.
+      parameters:
+        - in: query
+          name: node
+          schema: {type: string}
+      responses:
+        "200":
+          description: The stored profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {description: No profile recorded for this pipeline or node.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/pipelines/{name}/profile/pin:
+    parameters: [{$ref: "#/components/parameters/PipelineName"}]
+    put:
+      x-sparkwing-scope: runs.state
+      tags: [pipelines]
+      summary: Pin or clear a pipeline's resource profile.
+      description: |
+        A pin overrides what sparkwing measured. A body whose `cores` and
+        `memory_bytes` are both zero or negative clears the pin instead of
+        setting one.
+      parameters:
+        - in: query
+          name: node
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cores: {type: number}
+                memory_bytes: {type: integer, format: int64}
+      responses:
+        "204": {description: Pin written or cleared. Empty body.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/gitcache/refresh:
+    post:
+      x-sparkwing-scope: runs.write
+      tags: [gitcache]
+      summary: Refresh the cache's mirror of a repository.
+      description: |
+        Proxied to the cache's `/git/refresh`. `repo` is validated with the
+        clone-URL rules, so it cannot name a local path, a loopback or
+        private address, or a URL carrying embedded credentials.
+      parameters:
+        - {$ref: "#/components/parameters/GitcacheRepo"}
+      responses:
+        "200": {description: The cache's answer, forwarded verbatim.: ''}
+        "400": {description: Missing or rejected repo URL.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "502": {description: The cache is unreachable or answered badly.}
+        "503": {description: No cache is configured on this controller.}
+
+  /api/v1/gitcache/seed:
+    post:
+      x-sparkwing-scope: admin
+      tags: [gitcache]
+      summary: Push a pack of objects into the cache's mirror.
+      description: |
+        Proxied to the cache's `/sync/seed` with a 500 MiB body cap.
+        `workspace=1` seeds an uncommitted working-tree snapshot instead of
+        a committed ref.
+      parameters:
+        - {$ref: "#/components/parameters/GitcacheRepo"}
+        - in: query
+          name: sha
+          required: true
+          schema: {type: string, pattern: "^[0-9a-f]{40,64}$"}
+          description: Hex object id the pack tips at.
+        - in: query
+          name: workspace
+          schema: {type: string, enum: ["1"]}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        "200": {description: The cache's answer, forwarded verbatim.: ''}
+        "400": {description: Missing or rejected repo URL, sha: '', or workspace flag.: ''}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "502": {description: The cache is unreachable or answered badly.}
+        "503": {description: No cache is configured on this controller.}
+
+  /api/v1/gitcache/git/register:
+    post:
+      x-sparkwing-scope: admin
+      tags: [gitcache]
+      summary: Map a short cache name onto a repository URL.
+      parameters:
+        - in: query
+          name: name
+          required: true
+          schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}
+        - {$ref: "#/components/parameters/GitcacheRepo"}
+      responses:
+        "200": {description: The cache's answer, forwarded verbatim.: ''}
+        "400": {description: Rejected name or repo URL.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "502": {description: The cache is unreachable or answered badly.}
+        "503": {description: No cache is configured on this controller.}
+
+  /api/v1/gitcache/git/{path}:
+    parameters:
+      - in: path
+        name: path
+        required: true
+        schema: {type: string}
+        description: |
+          `<registered-name>/info/refs` or `<registered-name>/git-upload-pack`.
+          Registered by `POST /api/v1/gitcache/git/register`.
+    get:
+      x-sparkwing-scope: admin
+      tags: [gitcache]
+      summary: Advertise a mirror's refs to a Git client.
+      description: |
+        Forwards `info/refs?service=git-upload-pack` to the cache. Any other
+        suffix or service answers `405`, so the proxy carries reads only.
+        The controller drops the caller's bearer and presents its own cache
+        token, and caps how many Git streams one caller may hold open.
+      parameters:
+        - in: query
+          name: service
+          required: true
+          schema: {type: string, enum: [git-upload-pack]}
+      responses:
+        "200": {description: Git smart-protocol ref advertisement.}
+        "400": {description: The path does not name a registered mirror.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "405": {description: Anything but an upload-pack ref advertisement.}
+        "502": {description: The cache is unreachable or answered badly.}
+        "503": {description: No cache is configured on this controller.}
+    post:
+      x-sparkwing-scope: admin
+      tags: [gitcache]
+      summary: Serve a Git fetch negotiation from a mirror.
+      description: |
+        Forwards `git-upload-pack` to the cache. Any other suffix answers
+        `405`, so a caller cannot push through this proxy.
+      requestBody:
+        required: true
+        content:
+          application/x-git-upload-pack-request:
+            schema: {type: string, format: binary}
+      responses:
+        "200": {description: Git smart-protocol packfile response.}
+        "400": {description: The path does not name a registered mirror.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "405": {description: Anything but an upload-pack fetch.}
+        "502": {description: The cache is unreachable or answered badly.}
+        "503": {description: No cache is configured on this controller.}
 
   /webhooks/github/{pipeline}:
     parameters:
       - in: path
         name: pipeline
         required: true
-        schema: { type: string }
+        schema: {type: string}
     post:
+      x-sparkwing-scope: public
       tags: [webhooks]
       summary: GitHub webhook intake. HMAC-verified; no bearer auth.
       security: []
@@ -1854,16 +2353,40 @@ paths:
               type: object
               description: GitHub webhook payload (push, pull_request, ...).
       responses:
-        "202": { description: Accepted; trigger queued. }
-        "400": { description: Missing X-GitHub-Delivery header or undecodable payload. }
-        "401": { description: Invalid HMAC signature, or no secret covers the named repository. }
-        "404": { description: The repository is not bound to this pipeline. }
-        "409": { description: This body was already accepted; the run it produced is in run_id. }
-        "503": { description: GitHub webhook secret not configured anywhere. }
+        "202": {description: Accepted; trigger queued.}
+        "400": {description: Missing X-GitHub-Delivery header or undecodable payload.}
+        "401": {description: Invalid HMAC signature, or no secret covers the named repository.: ''}
+        "404": {description: The repository is not bound to this pipeline.}
+        "409": {description: This body was already accepted; the run it produced is in run_id.}
+        "503": {description: GitHub webhook secret not configured anywhere.}
 
+  /api/v1/services:
+    get:
+      x-sparkwing-scope: authenticated
+      tags: [health]
+      summary: Announce the cache and logs URLs a runner should use.
+      description: |
+        Any valid bearer satisfies this route, and every client that reads
+        it already holds one. A field is absent when the controller was
+        started without the matching flag; a co-located laptop deployment
+        announces neither, because there the controller URL is already the
+        right answer.
+      responses:
+        "200":
+          description: The announced URLs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cache_pod: {type: string}
+                  logs: {type: string}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {description: This controller announces no services.}
 
   /api/v1/health:
     get:
+      x-sparkwing-scope: public
       tags: [health]
       summary: Process liveness probe.
       security: []
@@ -1875,10 +2398,11 @@ paths:
               schema:
                 type: object
                 properties:
-                  status: { type: string, enum: [ok] }
+                  status: {type: string, enum: [ok]}
 
   /metrics:
     get:
+      x-sparkwing-scope: public
       tags: [health]
       summary: Prometheus scrape endpoint.
       security: []
@@ -1887,7 +2411,7 @@ paths:
           description: Prometheus text exposition format.
           content:
             text/plain:
-              schema: { type: string }
+              schema: {type: string}
 
 components:
   securitySchemes:
@@ -1905,202 +2429,203 @@ components:
       description: |
         `Authorization: Session <session-id>`. Used only by the
         dashboard's browser flow after `POST /api/v1/auth/login`.
-
   parameters:
     RunID:
       in: path
       name: id
       required: true
-      schema: { type: string }
+      schema: {type: string}
       description: Run id (e.g. `run-20260519-150405-a1b2`).
     NodeID:
       in: path
       name: nodeID
       required: true
-      schema: { type: string }
+      schema: {type: string}
     TriggerID:
       in: path
       name: id
       required: true
-      schema: { type: string }
-
+      schema: {type: string}
+    PipelineName:
+      in: path
+      name: name
+      required: true
+      schema: {type: string}
+      description: Pipeline name as declared in `.sparkwing/sparkwing.yaml`.
+    ConcurrencyKey:
+      in: path
+      name: key
+      required: true
+      schema: {type: string}
+      description: Concurrency group key, global across the deployment.
+    GitcacheRepo:
+      in: query
+      name: repo
+      required: true
+      schema: {type: string}
+      description: |
+        Clone URL. Validated before proxying: a local path, a loopback or
+        private address, and a URL carrying embedded credentials are all
+        refused.
   responses:
     BadRequest:
       description: Invalid request (missing field, malformed JSON).
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/Error" }
+          schema: {$ref: "#/components/schemas/Error"}
     Unauthorized:
       description: Missing or invalid bearer token.
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/AuthError" }
+          schema: {$ref: "#/components/schemas/AuthError"}
     Forbidden:
       description: Token does not carry the scope this route requires.
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/AuthError" }
+          schema: {$ref: "#/components/schemas/AuthError"}
     NotFound:
       description: Resource not found.
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/Error" }
+          schema: {$ref: "#/components/schemas/Error"}
     InternalError:
       description: Unhandled server error.
       content:
         application/json:
-          schema: { $ref: "#/components/schemas/Error" }
-
+          schema: {$ref: "#/components/schemas/Error"}
   schemas:
     Error:
       type: object
       description: Canonical error shape for non-2xx responses.
       required: [error]
       properties:
-        error: { type: string }
-
+        error: {type: string}
     AuthError:
       type: object
       description: Error returned by the auth middleware. Carries a missing-scope hint when applicable.
       required: [error]
       properties:
-        error: { type: string }
-        missing_scope: { type: string }
-
+        error: {type: string}
+        missing_scope: {type: string}
     Run:
       type: object
       description: One pipeline invocation row. Mirrors `pkg/store.Run`.
       required: [id, pipeline, status, started_at]
       properties:
-        id: { type: string }
-        pipeline: { type: string }
+        id: {type: string}
+        pipeline: {type: string}
         status:
           type: string
           description: e.g. `pending`, `running`, `success`, `failed`, `cancelled`, `timed_out`.
-        trigger_source: { type: string }
-        git_branch: { type: string }
-        git_sha: { type: string }
+        trigger_source: {type: string}
+        git_branch: {type: string}
+        git_sha: {type: string}
         args:
           type: object
           description: >-
-            Arguments the run was started with. Values of arguments the
-            pipeline declared `secret:"true"` are replaced with `***`;
-            `invocation.secret_args` names them. Runs started before
-            that classification existed carry no `secret_args` and are
-            returned unredacted.
-          additionalProperties: { type: string }
-        error: { type: string }
-        created_at: { type: string, format: date-time }
-        started_at: { type: string, format: date-time }
-        finished_at: { type: string, format: date-time, nullable: true }
-        parent_run_id: { type: string }
-        repo: { type: string }
-        repo_url: { type: string }
-        github_owner: { type: string }
-        github_repo: { type: string }
-        retry_of: { type: string }
-        retried_as: { type: string }
+            Arguments the run was started with. Values of arguments the pipeline declared `secret:"true"` are replaced with `***`; `invocation.secret_args` names them. Runs started before that classification existed carry no `secret_args` and are returned unredacted.
+          additionalProperties: {type: string}
+        error: {type: string}
+        created_at: {type: string, format: date-time}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+        parent_run_id: {type: string}
+        repo: {type: string}
+        repo_url: {type: string}
+        github_owner: {type: string}
+        github_repo: {type: string}
+        retry_of: {type: string}
+        retried_as: {type: string}
         retry_source:
           type: string
           enum: ["", manual, auto]
-        replay_of_run_id: { type: string }
-        replay_of_node_id: { type: string }
+        replay_of_run_id: {type: string}
+        replay_of_node_id: {type: string}
         invocation:
           type: object
           description: >-
-            Free-form snapshot of run-start context (flags, args,
-            binary_source, cwd, ...). `secret_args` lists the argument
-            names the pipeline declared secret; their values are
-            replaced with `***` in `invocation.args` and in the
-            `invocation.reproducer` command line before the response is
-            written.
+            Free-form snapshot of run-start context (flags, args, binary_source, cwd, ...). `secret_args` lists the argument names the pipeline declared secret; their values are replaced with `***` in `invocation.args` and in the `invocation.reproducer` command line before the response is written.
           additionalProperties: true
-        annotation_count: { type: integer }
-        top_annotation: { type: string }
+        annotation_count: {type: integer}
+        top_annotation: {type: string}
         annotations:
           type: array
-          items: { type: string }
-
+          items: {type: string}
     Node:
       type: object
       description: One DAG node row. Mirrors `pkg/store.Node`.
       required: [id, status, deps]
       properties:
-        run_id: { type: string }
-        id: { type: string, description: Node id within the run. }
+        run_id: {type: string}
+        id: {type: string, description: Node id within the run.}
         status:
           type: string
           description: e.g. `pending`, `running`, `done`, `approval_pending`.
-        outcome: { type: string }
+        outcome: {type: string}
         deps:
           type: array
-          items: { type: string }
-        error: { type: string }
+          items: {type: string}
+        error: {type: string}
         output:
           type: string
           format: byte
           description: Raw JSON of the job's run output. Opaque to the controller.
-        started_at: { type: string, format: date-time, nullable: true }
-        finished_at: { type: string, format: date-time, nullable: true }
-        ready_at: { type: string, format: date-time, nullable: true }
-        claimed_by: { type: string }
-        lease_expires_at: { type: string, format: date-time, nullable: true }
+        started_at: {type: string, format: date-time, nullable: true}
+        finished_at: {type: string, format: date-time, nullable: true}
+        ready_at: {type: string, format: date-time, nullable: true}
+        claimed_by: {type: string}
+        lease_expires_at: {type: string, format: date-time, nullable: true}
         needs_labels:
           type: array
-          items: { type: string }
-        status_detail: { type: string }
-        last_heartbeat: { type: string, format: date-time, nullable: true }
-        failure_reason: { type: string }
-        exit_code: { type: integer, nullable: true }
+          items: {type: string}
+        status_detail: {type: string}
+        last_heartbeat: {type: string, format: date-time, nullable: true}
+        failure_reason: {type: string}
+        exit_code: {type: integer, nullable: true}
         annotations:
           type: array
-          items: { type: string }
-        summary: { type: string }
-
+          items: {type: string}
+        summary: {type: string}
     NodeStep:
       type: object
       description: One step inside a node's inner DAG. Mirrors `pkg/store.NodeStep`.
       required: [node_id, step_id, status]
       properties:
-        run_id: { type: string }
-        node_id: { type: string }
-        step_id: { type: string }
+        run_id: {type: string}
+        node_id: {type: string}
+        step_id: {type: string}
         status:
           type: string
           enum: [running, passed, failed, skipped]
-        started_at: { type: string, format: date-time, nullable: true }
-        finished_at: { type: string, format: date-time, nullable: true }
+        started_at: {type: string, format: date-time, nullable: true}
+        finished_at: {type: string, format: date-time, nullable: true}
         annotations:
           type: array
-          items: { type: string }
-        summary: { type: string }
-
+          items: {type: string}
+        summary: {type: string}
     Event:
       type: object
       description: One ordered event in a run's audit stream. Mirrors `pkg/store.Event`.
       required: [run_id, seq, kind, ts]
       properties:
-        run_id: { type: string }
-        seq: { type: integer, format: int64 }
-        node_id: { type: string }
-        kind: { type: string }
-        ts: { type: string, format: date-time }
+        run_id: {type: string}
+        seq: {type: integer, format: int64}
+        node_id: {type: string}
+        kind: {type: string}
+        ts: {type: string, format: date-time}
         payload:
           description: Either a structured JSON object or a raw string (escaped).
-
     NodeDispatch:
       type: object
       description: >-
-        One dispatch-frame snapshot for a node attempt. Mirrors
-        `pkg/store.NodeDispatch`. The byte-typed members carry
-        base64-encoded JSON.
+        One dispatch-frame snapshot for a node attempt. Mirrors `pkg/store.NodeDispatch`. The byte-typed members carry base64-encoded JSON.
       properties:
-        run_id: { type: string }
-        node_id: { type: string }
-        seq: { type: integer }
-        dispatched_at: { type: string, format: date-time }
-        code_version: { type: string }
-        binary_hash: { type: string }
+        run_id: {type: string}
+        node_id: {type: string}
+        seq: {type: integer}
+        dispatched_at: {type: string, format: date-time}
+        code_version: {type: string}
+        binary_hash: {type: string}
         runner_labels:
           type: string
           format: byte
@@ -2109,101 +2634,94 @@ components:
           type: string
           format: byte
           description: >-
-            JSON `map[string]string` of the captured environment. Present
-            only for an `admin` principal; a `runs.read` principal gets the
-            row with this member absent.
+            JSON `map[string]string` of the captured environment. Present only for an `admin` principal; a `runs.read` principal gets the row with this member absent.
         redacted_keys:
           type: string
           format: byte
           description: >-
-            JSON `[]string` naming the variables the snapshot dropped as
-            credential-shaped. Served to every reader of the row.
-        workdir: { type: string }
+            JSON `[]string` naming the variables the snapshot dropped as credential-shaped. Served to every reader of the row.
+        workdir: {type: string}
         input_envelope_json:
           type: string
           format: byte
           description: JSON dispatch envelope; over-cap rows store a truncation stub.
-        input_size_bytes: { type: integer, format: int64 }
-        secret_redactions: { type: integer }
-
+        input_size_bytes: {type: integer, format: int64}
+        secret_redactions: {type: integer}
     MetricSample:
       type: object
       description: One metric data point attached to a node.
       properties:
-        ts: { type: string, format: date-time }
-        name: { type: string }
-        value: { type: number }
+        ts: {type: string, format: date-time}
+        name: {type: string}
+        value: {type: number}
         labels:
           type: object
-          additionalProperties: { type: string }
-
+          additionalProperties: {type: string}
     Trigger:
       type: object
       description: One queued or in-flight trigger. Mirrors `pkg/store.Trigger`.
       required: [id, pipeline, status, created_at]
       properties:
-        id: { type: string }
-        pipeline: { type: string }
+        id: {type: string}
+        pipeline: {type: string}
         args:
           type: object
-          additionalProperties: { type: string }
-        trigger_source: { type: string }
-        trigger_user: { type: string }
+          additionalProperties: {type: string}
+        trigger_source: {type: string}
+        trigger_user: {type: string}
         trigger_env:
           type: object
-          additionalProperties: { type: string }
-        git_branch: { type: string }
-        git_sha: { type: string }
+          additionalProperties: {type: string}
+        git_branch: {type: string}
+        git_sha: {type: string}
         status:
           type: string
           enum: [pending, claimed, done]
-        created_at: { type: string, format: date-time }
-        claimed_at: { type: string, format: date-time, nullable: true }
-        lease_expires_at: { type: string, format: date-time, nullable: true }
-        parent_run_id: { type: string }
-        repo: { type: string }
-        repo_url: { type: string }
-        github_owner: { type: string }
-        github_repo: { type: string }
-        retry_of: { type: string }
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: string, format: date-time, nullable: true}
+        lease_expires_at: {type: string, format: date-time, nullable: true}
+        parent_run_id: {type: string}
+        repo: {type: string}
+        repo_url: {type: string}
+        github_owner: {type: string}
+        github_repo: {type: string}
+        retry_of: {type: string}
         retry_source:
           type: string
           enum: ["", manual, auto]
-        parent_node_id: { type: string }
-        full: { type: boolean }
-
+        parent_node_id: {type: string}
+        full: {type: boolean}
     TriggerRequest:
       type: object
       description: Body of `POST /api/v1/triggers`. `trigger.source` is required.
       required: [pipeline, trigger]
       properties:
-        pipeline: { type: string }
+        pipeline: {type: string}
         args:
           type: object
-          additionalProperties: { type: string }
+          additionalProperties: {type: string}
         trigger:
           type: object
           required: [source]
           properties:
-            source: { type: string }
-            user: { type: string }
+            source: {type: string}
+            user: {type: string}
             env:
               type: object
-              additionalProperties: { type: string }
+              additionalProperties: {type: string}
         git:
           type: object
           properties:
-            branch: { type: string }
-            sha: { type: string }
-            repo: { type: string }
-            repo_url: { type: string }
-            github_owner: { type: string }
-            github_repo: { type: string }
-        parent_run_id: { type: string }
-        parent_node_id: { type: string }
-        retry_of: { type: string }
-        plan_admission: { $ref: "#/components/schemas/TriggerPlanAdmission" }
-
+            branch: {type: string}
+            sha: {type: string}
+            repo: {type: string}
+            repo_url: {type: string}
+            github_owner: {type: string}
+            github_repo: {type: string}
+        parent_run_id: {type: string}
+        parent_node_id: {type: string}
+        retry_of: {type: string}
+        plan_admission: {$ref: "#/components/schemas/TriggerPlanAdmission"}
     TriggerPlanAdmission:
       type: object
       description: Inherited plan-admission holders forwarded from an ancestor run.
@@ -2217,75 +2735,70 @@ components:
         admissions:
           type: object
           description: Full inherited admission set keyed by concurrency key.
-          additionalProperties: { type: string }
+          additionalProperties: {type: string}
         host_admission:
           type: boolean
           description: Whether one inherited holder owns host execution admission.
         host_admission_key:
           type: string
           description: Key in `admissions` whose holder owns host execution admission.
-
     Approval:
       type: object
       description: One human-gate row. Mirrors `pkg/store.Approval`.
       required: [run_id, node_id, requested_at]
       properties:
-        run_id: { type: string }
-        node_id: { type: string }
-        requested_at: { type: string, format: date-time }
-        message: { type: string }
-        timeout_ms: { type: integer, format: int64 }
+        run_id: {type: string}
+        node_id: {type: string}
+        requested_at: {type: string, format: date-time}
+        message: {type: string}
+        timeout_ms: {type: integer, format: int64}
         on_timeout:
           type: string
           enum: [fail, deny, approve]
-        approver: { type: string }
-        resolved_at: { type: string, format: date-time, nullable: true }
+        approver: {type: string}
+        resolved_at: {type: string, format: date-time, nullable: true}
         resolution:
           type: string
           enum: ["", approved, denied, timed_out]
-        comment: { type: string }
-
+        comment: {type: string}
     DebugPause:
       type: object
       description: Operator-induced node pause.
       required: [run_id, node_id, reason, paused_at, expires_at]
       properties:
-        run_id: { type: string }
-        node_id: { type: string }
-        reason: { type: string }
-        paused_at: { type: string, format: date-time }
-        expires_at: { type: string, format: date-time }
-        released_at: { type: string, format: date-time, nullable: true }
-        released_by: { type: string }
-        release_kind: { type: string }
-
+        run_id: {type: string}
+        node_id: {type: string}
+        reason: {type: string}
+        paused_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        released_at: {type: string, format: date-time, nullable: true}
+        released_by: {type: string}
+        release_kind: {type: string}
     Token:
       type: object
       description: One bearer-token row (raw value redacted; only `prefix` is shown after mint).
       properties:
-        prefix: { type: string }
-        principal: { type: string }
-        kind: { type: string }
+        prefix: {type: string}
+        principal: {type: string}
+        kind: {type: string}
         scopes:
           type: array
-          items: { type: string }
-        created_at: { type: string, format: date-time }
-        expires_at: { type: string, format: date-time, nullable: true }
-        last_used_at: { type: string, format: date-time, nullable: true }
-        revoked_at: { type: string, format: date-time, nullable: true }
-        replaced_by: { type: string }
-
+          items: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time, nullable: true}
+        last_used_at: {type: string, format: date-time, nullable: true}
+        revoked_at: {type: string, format: date-time, nullable: true}
+        replaced_by: {type: string}
     CreateTokenRequest:
       type: object
       required: [principal, scopes]
       properties:
-        principal: { type: string }
-        kind: { type: string }
+        principal: {type: string}
+        kind: {type: string}
         scopes:
           type: array
-          items: { type: string }
-        expires_at: { type: string, format: date-time }
-
+          items: {type: string}
+        expires_at: {type: string, format: date-time}
     CreateTokenResponse:
       type: object
       description: Returned only at mint time. The raw `token` is never re-served.
@@ -2294,30 +2807,28 @@ components:
         token:
           type: string
           description: Full bearer token. Copy now; the controller never re-shows it.
-        prefix: { type: string }
-        token_metadata: { $ref: "#/components/schemas/Token" }
-
+        prefix: {type: string}
+        token_metadata: {$ref: "#/components/schemas/Token"}
     Secret:
       type: object
       description: One stored secret. List endpoints redact `value`.
       required: [name]
       properties:
-        name: { type: string }
-        value: { type: string }
-        principal: { type: string }
-        masked: { type: boolean }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-
+        name: {type: string}
+        value: {type: string}
+        principal: {type: string}
+        masked: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
     User:
       type: object
       required: [name, created_at]
       properties:
-        name: { type: string }
+        name: {type: string}
         scopes:
           type: array
           description: Scopes this account's dashboard sessions carry.
-          items: { type: string }
+          items: {type: string}
         created_at:
           type: integer
           format: int64
@@ -2326,22 +2837,20 @@ components:
           type: integer
           format: int64
           nullable: true
-
     Agent:
       type: object
       description: Heartbeating runner.
       properties:
-        id: { type: string }
+        id: {type: string}
         labels:
           type: array
-          items: { type: string }
-        last_heartbeat: { type: string, format: date-time }
+          items: {type: string}
+        last_heartbeat: {type: string, format: date-time}
         in_flight_node:
           type: object
           properties:
-            run_id: { type: string }
-            node_id: { type: string }
-
+            run_id: {type: string}
+            node_id: {type: string}
     TrendPoint:
       type: object
       description: |
@@ -2350,34 +2859,16 @@ components:
         windows <=7 days, otherwise one day. Cached counts a run
         when every node finished with outcome `cached` or
         `satisfied`.
-      required:
-        [
-          bucket,
-          total,
-          passed,
-          failed,
-          cached,
-          avg_dur_ms,
-          p95_dur_ms,
-          avg_wait_ms,
-        ]
+      required: [bucket, total, passed, failed, cached, avg_dur_ms, p95_dur_ms, avg_wait_ms]
       properties:
         bucket:
           type: string
           format: date-time
           description: RFC3339 timestamp at the bucket boundary (UTC).
-        total: { type: integer, description: Runs started in this bucket. }
-        passed:
-          {
-            type: integer,
-            description: Runs with status `success` and at least one non-cached node.,
-          }
-        failed: { type: integer, description: Runs with status `failed`. }
-        cached:
-          {
-            type: integer,
-            description: Runs where every node was `cached` / `satisfied`.,
-          }
+        total: {type: integer, description: Runs started in this bucket.}
+        passed: {type: integer, description: Runs with status `success` and at least one non-cached node.}
+        failed: {type: integer, description: Runs with status `failed`.}
+        cached: {type: integer, description: Runs where every node was `cached` / `satisfied`.}
         avg_dur_ms:
           type: integer
           format: int64
@@ -2397,141 +2888,165 @@ components:
             started_at` (clock skew) are excluded from the
             average; a bucket containing only such runs reports
             zero.
-
     Receipt:
       type: object
       description: |
         Per-run audit + cost receipt. Recomputed from nodes,
         dispatches, and the controller's cost rate (when configured).
       properties:
-        run_id: { type: string }
-        pipeline: { type: string }
-        started_at: { type: string, format: date-time }
-        finished_at: { type: string, format: date-time, nullable: true }
-        compute_cents: { type: integer }
-        cost_rate_source: { type: string }
+        run_id: {type: string}
+        pipeline: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+        compute_cents: {type: integer}
+        cost_rate_source: {type: string}
         nodes:
           type: array
           description: Per-node line items.
           items:
             type: object
             additionalProperties: true
-
     AcquireSlotRequest:
       type: object
       required: [holder_id, run_id]
       properties:
-        holder_id: { type: string }
-        run_id: { type: string }
-        node_id: { type: string }
+        holder_id: {type: string}
+        run_id: {type: string}
+        node_id: {type: string}
         max:
           type: integer
           description: Capacity for this key. Set on every acquire; latest write wins per the store's drift-handling rule.
         policy:
           type: string
           description: e.g. `queue`, `cancel_others`, `skip`, `coalesce`.
-        cache_key_hash: { type: string }
-        cache_ttl_ns: { type: integer, format: int64 }
-        cancel_timeout_ns: { type: integer, format: int64 }
-        lease_secs: { type: integer }
-
+        cache_key_hash: {type: string}
+        cache_ttl_ns: {type: integer, format: int64}
+        cancel_timeout_ns: {type: integer, format: int64}
+        lease_secs: {type: integer}
     AcquireSlotResponse:
       type: object
       required: [kind, granted]
       properties:
-        granted: { type: boolean }
+        granted: {type: boolean}
         kind:
           type: string
-          enum:
-            [
-              granted,
-              cached,
-              queued,
-              coalesced,
-              cancelling_others,
-              skipped,
-              failed,
-            ]
-        holder_id: { type: string }
-        lease_expires_at: { type: string, format: date-time }
-        leader_run_id: { type: string }
-        leader_node_id: { type: string }
-        output_ref: { type: string }
-        origin_run_id: { type: string }
-        origin_node_id: { type: string }
+          enum: [granted, cached, queued, coalesced, cancelling_others, skipped, failed]
+        holder_id: {type: string}
+        lease_expires_at: {type: string, format: date-time}
+        leader_run_id: {type: string}
+        leader_node_id: {type: string}
+        output_ref: {type: string}
+        origin_run_id: {type: string}
+        origin_node_id: {type: string}
         superseded_ids:
           type: array
-          items: { type: string }
-        previous_capacity: { type: integer }
-        drift_note: { type: string }
-
+          items: {type: string}
+        previous_capacity: {type: integer}
+        drift_note: {type: string}
+    ConcurrencyHolder:
+      type: object
+      description: One live or superseded holder of a concurrency slot.
+      properties:
+        holder_id: {type: string}
+        run_id: {type: string}
+        node_id: {type: string}
+        claimed_at: {type: string, format: date-time}
+        lease_expires_at: {type: string, format: date-time}
+        superseded: {type: boolean}
+    ResolveWaiterResponse:
+      type: object
+      description: One waiter's standing in a concurrency key's queue.
+      required: [status]
+      properties:
+        status: {type: string}
+        holder_id: {type: string}
+        holder_lease_expires: {type: string, format: date-time}
+        output_ref: {type: string}
+        origin_run_id: {type: string}
+        origin_node_id: {type: string}
+        leader_run_id: {type: string}
+        leader_node_id: {type: string}
+        leader_outcome: {type: string}
+        leader_failure_reason: {type: string}
+        position: {type: integer}
+        queue_length: {type: integer}
+        holders:
+          type: array
+          items: {$ref: "#/components/schemas/ConcurrencyHolder"}
+    NodeBounce:
+      type: object
+      description: A request that a running node restart its process.
+      properties:
+        run_id: {type: string}
+        node_id: {type: string}
+        seq: {type: integer, format: int64}
+        requested_by: {type: string}
+        requested_at: {type: string, format: date-time}
+        outcome: {type: string}
     ConcurrencyState:
       type: object
       required: [key, capacity, holders, waiters]
       properties:
-        key: { type: string }
-        capacity: { type: integer }
+        key: {type: string}
+        capacity: {type: integer}
         holders:
           type: array
           items:
             type: object
             properties:
-              holder_id: { type: string }
-              run_id: { type: string }
-              node_id: { type: string }
-              claimed_at: { type: string, format: date-time }
-              lease_expires_at: { type: string, format: date-time }
-              superseded: { type: boolean }
+              holder_id: {type: string}
+              run_id: {type: string}
+              node_id: {type: string}
+              claimed_at: {type: string, format: date-time}
+              lease_expires_at: {type: string, format: date-time}
+              superseded: {type: boolean}
         waiters:
           type: array
           items:
             type: object
             properties:
-              run_id: { type: string }
-              node_id: { type: string }
-              arrived_at: { type: string, format: date-time }
-              policy: { type: string }
-              cache_key_hash: { type: string }
-              leader_run_id: { type: string }
-              leader_node_id: { type: string }
-              cancel_timeout: { type: string }
-
+              run_id: {type: string}
+              node_id: {type: string}
+              arrived_at: {type: string, format: date-time}
+              policy: {type: string}
+              cache_key_hash: {type: string}
+              leader_run_id: {type: string}
+              leader_node_id: {type: string}
+              cancel_timeout: {type: string}
     FinishRunRequest:
       type: object
       required: [status]
       properties:
-        status: { type: string }
-        error: { type: string }
-
+        status: {type: string}
+        error: {type: string}
     FinishNodeRequest:
       type: object
       required: [outcome]
       properties:
-        outcome: { type: string }
-        error: { type: string }
+        outcome: {type: string}
+        error: {type: string}
         output:
           type: string
           format: byte
           description: JSON-encoded raw output bytes.
-        failure_reason: { type: string }
-        exit_code: { type: integer, nullable: true }
-
+        failure_reason: {type: string}
+        exit_code: {type: integer, nullable: true}
     PoolListResponse:
       type: object
       description: Snapshot of the warm-PVC pool (cluster-only).
       properties:
-        pool_size: { type: integer }
-        pvc_size: { type: string }
+        pool_size: {type: integer}
+        pvc_size: {type: string}
         pvcs:
           type: array
           items:
             type: object
             required: [name]
             properties:
-              name: { type: string }
+              name: {type: string}
               state:
                 type: string
                 enum: [clean, in-use, dirty, warming, unknown]
-              warmed_at: { type: string }
-              checked_out_by: { type: string }
-              checked_out_at: { type: string }
+              warmed_at: {type: string}
+              checked_out_by: {type: string}
+              checked_out_at: {type: string}

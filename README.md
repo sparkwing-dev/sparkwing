@@ -96,6 +96,10 @@ via `sparkwing dashboard start`) is documented as an OpenAPI 3.0
 spec at
 [`api/openapi.yaml`](./api/openapi.yaml). Every route, request
 shape, response shape, and security requirement is described there.
+The route inventory and each route's `x-sparkwing-scope` are written
+from `pkg/controller/server.go` by `bash bin/gen-api-docs.sh`, and
+`bash bin/check-api-spec.sh` fails when the file and the router
+disagree.
 
 To view it: paste the file into [editor.swagger.io](https://editor.swagger.io)
 for an interactive renderer, or open with any OpenAPI-aware tool
