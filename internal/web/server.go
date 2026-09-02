@@ -230,7 +230,10 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	return securityHeadersMiddleware(router)
 }
 
-const gitcacheStreamLimit = 8
+const (
+	gitcacheStreamLimit = 8
+	gitcacheStreamWait  = 5 * time.Second
+)
 
 func gitcacheStreamHandler(next http.Handler) http.Handler {
 	slots := make(chan struct{}, gitcacheStreamLimit)
@@ -240,11 +243,15 @@ func gitcacheStreamHandler(next http.Handler) http.Handler {
 			http.Error(w, "unauthorized -- set Authorization: Bearer <token> header", http.StatusUnauthorized)
 			return
 		}
+		wait := time.NewTimer(gitcacheStreamWait)
+		defer wait.Stop()
 		select {
 		case slots <- struct{}{}:
 			defer func() { <-slots }()
-		default:
-			w.Header().Set("Retry-After", "30")
+		case <-r.Context().Done():
+			return
+		case <-wait.C:
+			w.Header().Set("Retry-After", strconv.Itoa(int(gitcacheStreamWait.Seconds())))
 			http.Error(w, "too many concurrent Git cache streams", http.StatusServiceUnavailable)
 			return
 		}
@@ -258,7 +265,12 @@ func gitcacheStreamHandler(next http.Handler) http.Handler {
 
 func hasBearerCredential(r *http.Request) bool {
 	scheme, rest, ok := strings.Cut(r.Header.Get("Authorization"), " ")
-	return ok && strings.EqualFold(scheme, "bearer") && strings.TrimSpace(rest) != ""
+	if !ok || !strings.EqualFold(scheme, "bearer") {
+		return false
+	}
+	// safety: only a Sparkwing machine token buys a stream slot and the half-hour deadline behind it.
+	raw := strings.TrimSpace(rest)
+	return len(raw) >= store.PrefixLen && store.TokenKindFromPrefix(raw) != ""
 }
 
 func authControllerURL(opts HandlerOptions) string {

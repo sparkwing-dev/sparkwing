@@ -192,6 +192,21 @@ this empty without losing anything else.
 {{- end }}
 
 {{/*
+Resolved controller cache URL: explicit override wins; otherwise the
+in-cluster cache Service from the runner-bundle sub-chart (only if
+that sub-chart is enabled and its cache component is enabled). Empty
+string when neither applies, in which case the controller's gitcache
+proxy stays off and answers 404.
+*/}}
+{{- define "sparkwing-full.controller.cacheURL" -}}
+{{- if .Values.controller.cache.url -}}
+{{- .Values.controller.cache.url -}}
+{{- else if and (index .Values "sparkwing-runner-bundle" "enabled") (index .Values "sparkwing-runner-bundle" "cache" "enabled") -}}
+{{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-full.bundle.cache.fullname" .) .Release.Namespace -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 The runner-bundle sub-chart's untruncated release-qualified base,
 reproducing its own helper because a parent chart cannot call into a
 sub-chart's helpers.

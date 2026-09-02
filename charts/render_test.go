@@ -315,6 +315,9 @@ type renderedResource struct {
 	Rules []renderedPolicyRule `yaml:"rules"`
 	Spec  struct {
 		Template struct {
+			Metadata struct {
+				Labels map[string]string `yaml:"labels"`
+			} `yaml:"metadata"`
 			Spec struct {
 				ServiceAccountName           string              `yaml:"serviceAccountName"`
 				AutomountServiceAccountToken *bool               `yaml:"automountServiceAccountToken"`
@@ -1293,7 +1296,7 @@ func renderCacheNetworkPolicy(t *testing.T, sets ...string) renderedNetworkPolic
 	return doc
 }
 
-func TestCacheNetworkPolicyAdmitsOnlyTheRunnerAndController(t *testing.T) {
+func TestCacheNetworkPolicyAdmitsEveryCacheClient(t *testing.T) {
 	policy := renderCacheNetworkPolicy(t)
 
 	if !reflect.DeepEqual(policy.Spec.PolicyTypes, []string{"Ingress"}) {
@@ -1303,13 +1306,10 @@ func TestCacheNetworkPolicyAdmitsOnlyTheRunnerAndController(t *testing.T) {
 		t.Errorf("policy selects component %q, want cache", got)
 	}
 	if len(policy.Spec.Ingress) != 1 {
-		t.Fatalf("ingress rules = %d, want 1 default-deny-with-two-peers rule", len(policy.Spec.Ingress))
+		t.Fatalf("ingress rules = %d, want one default-deny rule listing every peer", len(policy.Spec.Ingress))
 	}
 	rule := policy.Spec.Ingress[0]
-	if len(rule.From) != 2 {
-		t.Fatalf("ingress peers = %d, want the runner and the controller", len(rule.From))
-	}
-	for i, want := range []map[string]string{
+	want := []map[string]string{
 		{
 			"app.kubernetes.io/name":      "sparkwing-runner-bundle",
 			"app.kubernetes.io/instance":  "sparkwing",
@@ -1319,9 +1319,20 @@ func TestCacheNetworkPolicyAdmitsOnlyTheRunnerAndController(t *testing.T) {
 			"app.kubernetes.io/instance":  "sparkwing",
 			"app.kubernetes.io/component": "controller",
 		},
-	} {
-		if got := rule.From[i].PodSelector.MatchLabels; !reflect.DeepEqual(got, want) {
-			t.Errorf("ingress peer %d = %v, want %v", i, got, want)
+		{
+			"app.kubernetes.io/instance":  "sparkwing",
+			"app.kubernetes.io/component": "web",
+		},
+		{
+			"app.kubernetes.io/name": "sparkwing-runner",
+		},
+	}
+	if len(rule.From) != len(want) {
+		t.Fatalf("ingress peers = %d, want the runner, controller, dashboard, and k8s runner Job pods", len(rule.From))
+	}
+	for i, peer := range want {
+		if got := rule.From[i].PodSelector.MatchLabels; !reflect.DeepEqual(got, peer) {
+			t.Errorf("ingress peer %d = %v, want %v", i, got, peer)
 		}
 	}
 	if len(rule.Ports) != 1 || rule.Ports[0].Port != 8090 || rule.Ports[0].Protocol != "TCP" {
@@ -1335,6 +1346,69 @@ func TestCacheNetworkPolicyTakesAnExplicitControllerSelector(t *testing.T) {
 	if got := policy.Spec.Ingress[0].From[1].PodSelector.MatchLabels; !reflect.DeepEqual(got, want) {
 		t.Errorf("controller peer = %v, want %v", got, want)
 	}
+}
+
+func TestCacheNetworkPolicyTakesAnExplicitWebSelector(t *testing.T) {
+	policy := renderCacheNetworkPolicy(t, `networkPolicy.webPodSelector.app\.kubernetes\.io/name=my-dashboard`)
+	want := map[string]string{"app.kubernetes.io/name": "my-dashboard"}
+	if got := policy.Spec.Ingress[0].From[2].PodSelector.MatchLabels; !reflect.DeepEqual(got, want) {
+		t.Errorf("web peer = %v, want %v", got, want)
+	}
+}
+
+func TestCacheNetworkPolicyAppendsExtraIngressForAnOffClusterCaller(t *testing.T) {
+	rendered := helmRender(t, "./sparkwing-runner-bundle", "templates/cache-networkpolicy.yaml", "sparkwing",
+		"controller.tokenSecret.name=tok",
+		"networkPolicy.extraIngress[0].from[0].ipBlock.cidr=10.42.0.0/16",
+		"networkPolicy.extraIngress[0].ports[0].protocol=TCP",
+		"networkPolicy.extraIngress[0].ports[0].port=8090")
+	if !strings.Contains(rendered, "10.42.0.0/16") {
+		t.Errorf("extraIngress rule missing from the rendered policy:\n%s", rendered)
+	}
+}
+
+func TestFullChartCacheNetworkPolicyAdmitsTheDashboardPod(t *testing.T) {
+	rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", "default",
+		"sparkwing-runner-bundle.controller.tokenSecret.name=tok")
+	if !strings.Contains(rendered, "kind: NetworkPolicy") {
+		t.Fatal("the flagship chart rendered no cache NetworkPolicy; the vendored sub-chart may be stale")
+	}
+	web := componentResource(t, renderedResources(t, rendered), "Deployment", "web")
+	var policy renderedNetworkPolicy
+	decoder := yaml.NewDecoder(strings.NewReader(rendered))
+	for {
+		var candidate renderedNetworkPolicy
+		if err := decoder.Decode(&candidate); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("decode NetworkPolicy: %v", err)
+		}
+		if candidate.Kind == "NetworkPolicy" {
+			policy = candidate
+		}
+	}
+	if policy.Kind != "NetworkPolicy" {
+		t.Fatal("no NetworkPolicy decoded from the flagship render")
+	}
+	for _, peer := range policy.Spec.Ingress[0].From {
+		if selectorMatches(peer.PodSelector.MatchLabels, web.Spec.Template.Metadata.Labels) {
+			return
+		}
+	}
+	t.Errorf("no ingress peer selects the web pod labels %v", web.Spec.Template.Metadata.Labels)
+}
+
+func selectorMatches(selector, labels map[string]string) bool {
+	if len(selector) == 0 {
+		return false
+	}
+	for key, value := range selector {
+		if labels[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func TestCacheNetworkPolicyIsOptOut(t *testing.T) {
@@ -1381,4 +1455,42 @@ func TestControllerCarriesTheCacheToken(t *testing.T) {
 		return
 	}
 	t.Fatalf("controller has no SPARKWING_CACHE_TOKEN env: %+v", controller.Env)
+}
+
+func TestControllerCarriesTheCacheURLBesideTheToken(t *testing.T) {
+	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
+	env := map[string]string{}
+	var tokenRef *renderedSecretKeyRef
+	for _, e := range controller.Env {
+		env[e.Name] = e.Value
+		if e.Name == "SPARKWING_CACHE_TOKEN" && e.ValueFrom != nil {
+			tokenRef = e.ValueFrom.SecretKeyRef
+		}
+	}
+	const want = "http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
+	if got := env["SPARKWING_CACHE_URL"]; got != want {
+		t.Errorf("SPARKWING_CACHE_URL = %q, want %q", got, want)
+	}
+	if tokenRef == nil {
+		t.Error("controller has no SPARKWING_CACHE_TOKEN secretKeyRef")
+	}
+}
+
+func TestControllerCacheURLOverrideWins(t *testing.T) {
+	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token",
+		"controller.cache.url=http://cache.elsewhere:8090")
+	for _, e := range controller.Env {
+		if e.Name == "SPARKWING_CACHE_URL" && e.Value != "http://cache.elsewhere:8090" {
+			t.Errorf("SPARKWING_CACHE_URL = %q, want the explicit override", e.Value)
+		}
+	}
+}
+
+func TestControllerHasNoCacheURLWhenNoCacheIsDeployed(t *testing.T) {
+	controller := renderController(t, "sparkwing-runner-bundle.enabled=false")
+	for _, e := range controller.Env {
+		if e.Name == "SPARKWING_CACHE_URL" {
+			t.Errorf("rendered SPARKWING_CACHE_URL=%q with no cache deployed", e.Value)
+		}
+	}
 }
