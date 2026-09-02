@@ -252,6 +252,8 @@ func main() {
 		Token:         serviceToken,
 		Version:       "auth-browser-fixture",
 		RequireLogin:  true,
+		// safety: the fixture serves plain HTTP on loopback, so the harness opts its cookies out of Secure.
+		InsecureCookies: os.Getenv("SPARKWING_WEB_INSECURE_COOKIES") == "1",
 	}, os.DirFS(config.webOut))
 	dashboardListener, dashboardServer, err := listen(dashboardHandler)
 	if err != nil {
