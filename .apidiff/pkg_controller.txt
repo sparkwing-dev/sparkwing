@@ -50,6 +50,13 @@ type LoopbackState interface {
 
 	EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (runID string, err error)
 }
+type NamedCipher interface {
+	Cipher
+
+	SealNamed(name, plain string) (string, error)
+
+	OpenNamed(name, envelope string) (string, error)
+}
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
 func NewLoopback(state LoopbackState, runID, token string, logger *slog.Logger) *Loopback

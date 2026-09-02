@@ -19,6 +19,13 @@ func ValidateName(name string) error {
 	}); i >= 0 {
 		return fmt.Errorf("secret name %q contains invalid character %q at index %d (allowed: A-Z a-z 0-9 . _ / -)", name, name[i:i+1], i)
 	}
+	// safety: a name reaching a file path or a scoped lookup must not climb out of it.
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("secret name %q must not contain %q", name, "..")
+	}
+	if strings.Contains(name, "//") {
+		return fmt.Errorf("secret name %q must not contain an empty segment", name)
+	}
 	if name[0] == '.' || name[0] == '/' || name[0] == '-' {
 		return fmt.Errorf("secret name %q must not start with %q", name, name[0:1])
 	}

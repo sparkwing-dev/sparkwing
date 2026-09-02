@@ -48,6 +48,16 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **controller:** Secret envelopes are now bound to the secret's name as
+  additional authenticated data under an `enc:v2:` prefix, so a ciphertext
+  copied onto another name by anyone with database write access fails to
+  open instead of answering under the new name. Envelopes written before
+  the binding (`enc:v1:`) still open; re-set a secret to rewrite it.
+  Secret names holding `..` or an empty path segment are rejected. A
+  `Cipher` supplied through `WithSecretsCipher` may also implement the new
+  `controller.NamedCipher` to take part in the binding.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

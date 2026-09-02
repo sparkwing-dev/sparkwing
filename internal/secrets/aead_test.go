@@ -54,6 +54,74 @@ func TestCipher_NonceVariesPerSeal(t *testing.T) {
 	}
 }
 
+func TestCipher_NameBinding(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(key)
+
+	env, err := c.SealNamed("aws/prod/token", "bound")
+	if err != nil {
+		t.Fatalf("SealNamed: %v", err)
+	}
+	if !strings.HasPrefix(env, "enc:v2:") {
+		t.Fatalf("SealNamed envelope = %q, want an enc:v2: prefix", env)
+	}
+	if !IsEncrypted(env) {
+		t.Fatalf("IsEncrypted(%q) = false, want true", env)
+	}
+	got, err := c.OpenNamed("aws/prod/token", env)
+	if err != nil {
+		t.Fatalf("OpenNamed: %v", err)
+	}
+	if got != "bound" {
+		t.Fatalf("OpenNamed = %q, want bound", got)
+	}
+	if _, err := c.OpenNamed("aws/dev/token", env); err == nil {
+		t.Fatal("OpenNamed accepted an envelope sealed under another name")
+	}
+	if _, err := c.Open(env); err == nil {
+		t.Fatal("Open accepted a name-bound envelope without a name")
+	}
+}
+
+func TestCipher_OpenNamedReadsUnboundEnvelopes(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(key)
+
+	env, err := c.Seal("legacy")
+	if err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+	if !strings.HasPrefix(env, "enc:v1:") {
+		t.Fatalf("Seal envelope = %q, want an enc:v1: prefix", env)
+	}
+	for _, name := range []string{"TOKEN", "OTHER"} {
+		got, oerr := c.OpenNamed(name, env)
+		if oerr != nil {
+			t.Fatalf("OpenNamed(%q): %v", name, oerr)
+		}
+		if got != "legacy" {
+			t.Fatalf("OpenNamed(%q) = %q, want legacy", name, got)
+		}
+	}
+}
+
+func TestCipher_OpenNamedRejectsTampered(t *testing.T) {
+	key, _ := GenerateKey()
+	c, _ := NewCipher(key)
+
+	env, _ := c.SealNamed("TOKEN", "hello")
+	tampered := env[:len(env)-1] + "A"
+	if tampered == env {
+		tampered = env[:len(env)-1] + "B"
+	}
+	if _, err := c.OpenNamed("TOKEN", tampered); err == nil {
+		t.Fatal("OpenNamed accepted a tampered envelope")
+	}
+	if _, err := c.OpenNamed("TOKEN", "plain-no-prefix"); err == nil {
+		t.Fatal("OpenNamed accepted an unsealed value")
+	}
+}
+
 func TestCipher_OpenRejectsUnsealed(t *testing.T) {
 	key, _ := GenerateKey()
 	c, _ := NewCipher(key)

@@ -153,7 +153,8 @@ func (s *Server) reconcileBeforeRead(h http.HandlerFunc) http.HandlerFunc {
 }
 
 // WithSecretsCipher binds the controller's secret encryption-at-rest
-// cipher. Reads are no-ops for rows that predate the cipher. Pass nil
+// cipher. A row written before the cipher was configured fails the
+// read with 500; re-set those secrets through the API. Pass nil
 // to keep the controller running unencrypted. The parameter is the
 // local Cipher interface; any concrete type satisfying that method
 // set works -- the default implementation lives in internal/secrets.
