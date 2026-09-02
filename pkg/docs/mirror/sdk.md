@@ -974,9 +974,10 @@ Limits worth knowing:
 
 Cluster executors are the one caller that needs the real values: a pod
 fetches the arguments it runs with from `GET /api/v1/runs/{id}`. They
-pass `?include=secret_values`, which the controller honors only for
-tokens carrying `nodes.claim` or `admin`. A token with just `runs.read`
-gets the redacted view whether or not it asks.
+pass `?include=secret_values`, which the controller honors for an
+`admin` token and for a `nodes.claim` token holding an unexpired claim
+on one of the run's nodes. Every other caller gets the redacted view
+whether or not it asks.
 
 Supported field types: `string`, `bool`, `int`, `int64`, `float64`,
 `time.Duration`, `[]string` (comma-separated on the wire), and

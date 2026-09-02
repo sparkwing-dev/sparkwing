@@ -463,6 +463,7 @@ sparkwing-runner-bundle:
       enabled: true
       keepOnUninstall: true
   logs:
+    allowUnauthenticated: true
     image:
       repository: ${image_prefix}sparkwing-logs
       tag: $image_tag
@@ -489,6 +490,8 @@ sparkwing-runner-bundle:
     tokenSecret:
       name: sparkwing-token
   cache:
+    allowUnauthenticated: false
+  logs:
     allowUnauthenticated: false
 EOF
 

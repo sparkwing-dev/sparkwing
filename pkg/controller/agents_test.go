@@ -39,10 +39,10 @@ func TestAgents_DerivedFromClaims(t *testing.T) {
 	}
 	_ = st.MarkNodeReady(ctx, "run-a", "n1")
 	_ = st.MarkNodeReady(ctx, "run-a", "n2")
-	if _, err := st.ClaimNextReadyNode(ctx, "runner:laptop-alice:1", 30*time.Second, nil); err != nil {
+	if _, err := st.ClaimNextReadyNode(ctx, "runner-principal", "runner:laptop-alice:1", 30*time.Second, nil); err != nil {
 		t.Fatalf("claim1: %v", err)
 	}
-	if _, err := st.ClaimNextReadyNode(ctx, "pod:run-a:n-pool", 30*time.Second, nil); err != nil {
+	if _, err := st.ClaimNextReadyNode(ctx, "runner-principal", "pod:run-a:n-pool", 30*time.Second, nil); err != nil {
 		t.Fatalf("claim2: %v", err)
 	}
 

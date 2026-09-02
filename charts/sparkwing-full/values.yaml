@@ -65,6 +65,18 @@ controller:
     name: ""
     key: token
 
+  # Proxy source CIDRs allowed to supply X-Forwarded-For for login
+  # throttling. Empty ignores forwarded headers and keys the login
+  # limiter on the TCP peer, which collapses every browser behind a
+  # proxy into one budget. List proxy networks, not client networks.
+  trustedProxyCIDRs: []
+
+  # Memory ceiling in MiB for concurrent argon2id password and token
+  # hashing. Each hash holds 64 MiB while it runs, so the default
+  # admits four at a time and keeps unauthenticated login traffic
+  # inside resources.limits.memory below.
+  argon2MemoryBudgetMB: 256
+
   # Query-free HTTP(S) dashboard base URL used for commit-status run links.
   # Empty or invalid keeps reporting enabled but omits the target URL.
   dashboardURL: ""

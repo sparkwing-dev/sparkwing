@@ -86,6 +86,12 @@ spec:
             {{- if $logsURL }}
             - {{ printf "--logs-url=%s" $logsURL | quote }}
             {{- end }}
+            {{- with .Values.controller.trustedProxyCIDRs }}
+            - {{ printf "--trusted-proxy-cidrs=%s" (join "," .) | quote }}
+            {{- end }}
+            {{- with .Values.controller.argon2MemoryBudgetMB }}
+            - {{ printf "--argon2-memory-budget-mb=%d" (int .) | quote }}
+            {{- end }}
           env:
             - name: SPARKWING_HOME
               value: /data
@@ -110,6 +116,15 @@ spec:
             {{- if .Values.controller.dashboardURL }}
             - name: SPARKWING_DASHBOARD_URL
               value: {{ .Values.controller.dashboardURL | quote }}
+            {{- end }}
+            {{- $bundle := index .Values "sparkwing-runner-bundle" }}
+            {{- $bundleToken := index $bundle "controller" "tokenSecret" }}
+            {{- if and (index $bundle "enabled") (index $bundle "cache" "enabled") (index $bundleToken "name") (index $bundleToken "key") }}
+            - name: SPARKWING_CACHE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ index $bundleToken "name" | quote }}
+                  key: {{ index $bundleToken "key" | quote }}
             {{- end }}
             {{- if .Values.controller.secretsKey.name }}
             - name: SPARKWING_SECRETS_KEY

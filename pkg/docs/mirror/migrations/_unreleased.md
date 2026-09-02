@@ -5,6 +5,7 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+<<<<<<< HEAD
 ## The dashboard refuses an unauthenticated remote bind
 
 - **Before:** `sparkwing-web --token ... --addr=0.0.0.0:4343` without
@@ -21,6 +22,43 @@ CHANGELOG links here.
   origin, which is also what the new `connect-src 'self'` policy allows.
 - **Why:** An unauthenticated dashboard holding a service token hands the
   controller to every caller that can reach the port.
+=======
+## Cache reads require the bearer token
+
+- **Before:** `sparkwing-cache` demanded a bearer only on its blob and sync
+  routes. Git clone and registration, `/archive`, `/file`, `/tree-hash`,
+  `/branch-contains`, `/repos`, and `/artifacts/` answered anyone who could
+  reach the port.
+- **After:** Every route that touches repository content answers 401 without a
+  valid bearer. `/health`, `/metrics`, `/stats`, and the package proxy under
+  `/proxy/` stay open. `POST /git/register` also validates `name` against
+  `^[A-Za-z0-9._-]{1,64}$` and refuses to repoint an existing name without the
+  token.
+- **Migration:** Give every client that reads the cache directly the same token
+  the cache runs with. The charts do this: the runner and the controller read
+  `SPARKWING_CACHE_TOKEN` from `controller.tokenSecret`. Hand-rolled callers add
+  `Authorization: Bearer <token>`. A cache deliberately left open keeps
+  `--allow-unauthenticated` (`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED=1`), which
+  logs a warning at startup.
+- **Why:** The cache holds the deploy key, mirrored private source, and
+  uncommitted working-tree snapshots. Reaching its Service proves nothing about
+  the caller.
+
+## Cache Service and NetworkPolicy defaults
+
+- **Before:** No chart shipped a NetworkPolicy, and `cache.service.type` was a
+  free knob.
+- **After:** `sparkwing-runner-bundle` renders a default-deny ingress
+  NetworkPolicy for the cache pod admitting only the release's runner and
+  controller pods, and fails the render when `cache.service.type` is not
+  `ClusterIP` while no token Secret is configured.
+- **Migration:** A cluster whose CNI enforces NetworkPolicy and whose runners
+  live outside the release adds peers through `networkPolicy.extraIngress`, or
+  points `networkPolicy.controllerPodSelector` at its own controller's pod
+  labels. `networkPolicy.enabled=false` removes the policy. A published cache
+  Service needs `controller.tokenSecret.name` set and
+  `cache.allowUnauthenticated` left false.
+>>>>>>> origin/main
 
 ## Managed Git hooks run locally by default
 
@@ -78,6 +116,32 @@ CHANGELOG links here.
 - **Why:** The name reaches generated git hook scripts, argv, log lines, and
   file paths. A cloned repository could otherwise hand shell execution to
   anyone who ran the documented hooks install command.
+
+## Node claims bind to the claiming principal
+
+- **Before:** Any `nodes.claim` token could write any node of any run, stamp
+  `ready_at` on a node whose dependencies had not finished, and read any run's
+  plaintext secret arguments through `?include=secret_values`. Scope gated the
+  route; nothing gated the object.
+- **After:** `POST /api/v1/nodes/claim` records the authenticated principal
+  alongside `holder_id`. The per-node write routes (`activity`, `touch`,
+  `annotations`, `summary`, `artifact-manifest`, `metrics`, `dispatch`,
+  `steps/*`, `bounce/consume`, `revoke-ready`) answer `403` with
+  `"error": "claim_required"` unless the caller holds that node's unexpired
+  claim, and `heartbeat` answers `409` unless both the principal and the holder
+  id match. `mark-ready` requires `admin`. The execution view returns plaintext
+  arguments to an `admin` principal, or to a `nodes.claim` principal holding an
+  unexpired claim on one of the run's nodes; a controller serving
+  unauthenticated returns the redacted view.
+- **Migration:** Give the token that dispatches nodes to a warm pool `admin`,
+  which it already needs to create, start, and finish nodes. Pool runners that
+  claim their own work keep `nodes.claim`. Mint a token on a controller that
+  serves unauthenticated if its runners fetch secret arguments over HTTP.
+  Claims taken before the upgrade carry no principal, so a runner in flight
+  during the upgrade loses its lease and the node is requeued.
+- **Why:** Every laptop agent and pool replica holds a runner token. A token
+  scoped to claim work should not read another repository's deploy credentials
+  or force a node to run before its dependencies finish.
 
 ## Dashboard proxy allow-list
 

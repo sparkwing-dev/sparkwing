@@ -276,7 +276,7 @@ func (l *Loopback) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		writeStateError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, runForResponse(r, run))
+	writeJSON(w, http.StatusOK, runForResponse(r, run, loopbackSecretValuesAllowed))
 }
 
 func (l *Loopback) getRun(r *http.Request, runID string) (*store.Run, error) {

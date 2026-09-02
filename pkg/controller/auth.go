@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -95,6 +96,9 @@ type Authenticator struct {
 	store    *store.Store
 	cache    sync.Map
 	cacheTTL time.Duration
+	negCache sync.Map
+	negCount atomic.Int64
+	negTTL   time.Duration
 	now      func() time.Time
 }
 
@@ -103,12 +107,27 @@ type authCacheEntry struct {
 	expires   time.Time
 }
 
+type authFailureEntry struct {
+	reason  string
+	expires time.Time
+}
+
+const (
+	negativeAuthCacheTTL = 5 * time.Second
+	negativeAuthCacheCap = 4096
+)
+
 // NewAuthenticator constructs an Authenticator over the given store.
 // Pass cacheTTL=0 to disable caching.
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator {
+	negTTL := time.Duration(0)
+	if cacheTTL > 0 {
+		negTTL = min(negativeAuthCacheTTL, cacheTTL)
+	}
 	return &Authenticator{
 		store:    st,
 		cacheTTL: cacheTTL,
+		negTTL:   negTTL,
 		now:      func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -137,8 +156,13 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
 	if store.TokenKindFromPrefix(raw) == "" {
 		return nil, errors.New("invalid bearer token")
 	}
+	// safety: a replayed wrong guess answers from this cache, so one raw token costs at most one argon2 verification.
+	if reason, ok := a.recentFailure(raw, now); ok {
+		return nil, errors.New(reason)
+	}
 	tok, err := a.store.LookupToken(raw, now)
 	if err != nil {
+		a.rememberFailure(raw, err, now)
 		return nil, err
 	}
 	if tok.RevokedAt != nil && tok.ReplacedBy != "" {
@@ -165,6 +189,53 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error) {
 		})
 	}
 	return principal, nil
+}
+
+func (a *Authenticator) recentFailure(raw string, now time.Time) (string, bool) {
+	if a.negTTL <= 0 {
+		return "", false
+	}
+	v, ok := a.negCache.Load(raw)
+	if !ok {
+		return "", false
+	}
+	e := v.(*authFailureEntry)
+	if !now.Before(e.expires) {
+		a.forgetFailure(raw)
+		return "", false
+	}
+	return e.reason, true
+}
+
+func (a *Authenticator) rememberFailure(raw string, reason error, now time.Time) {
+	if a.negTTL <= 0 {
+		return
+	}
+	if a.negCount.Load() >= negativeAuthCacheCap {
+		a.sweepFailures(now)
+		if a.negCount.Load() >= negativeAuthCacheCap {
+			return
+		}
+	}
+	entry := &authFailureEntry{reason: reason.Error(), expires: now.Add(a.negTTL)}
+	if _, loaded := a.negCache.Swap(raw, entry); !loaded {
+		a.negCount.Add(1)
+	}
+}
+
+func (a *Authenticator) forgetFailure(raw string) {
+	if _, loaded := a.negCache.LoadAndDelete(raw); loaded {
+		a.negCount.Add(-1)
+	}
+}
+
+func (a *Authenticator) sweepFailures(now time.Time) {
+	a.negCache.Range(func(k, v any) bool {
+		if !now.Before(v.(*authFailureEntry).expires) {
+			a.forgetFailure(k.(string))
+		}
+		return true
+	})
 }
 
 // AuthDisabled reports whether the Authenticator has no backing token
@@ -236,6 +307,14 @@ func requireScope(scope string, next http.Handler) http.Handler {
 			Message:      "token lacks required scope: " + scope,
 		})
 	})
+}
+
+func principalName(r *http.Request) string {
+	p, ok := PrincipalFromContext(r.Context())
+	if !ok {
+		return ""
+	}
+	return p.Name
 }
 
 func (p *Principal) label() string {

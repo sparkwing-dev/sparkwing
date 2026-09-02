@@ -210,6 +210,9 @@ func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, r
 	if gcURL == "" {
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
 	}
+	if token == "" {
+		token = CacheToken()
+	}
 	repoSSH, err = sourceurl.ValidateCloneURL(repoSSH)
 	if err != nil {
 		return "", fmt.Errorf("FetchPipelineSource: invalid repo URL: %w", err)
@@ -438,7 +441,7 @@ func gitHTTPEnv(gcURL, token string) []string {
 	return env
 }
 
-func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
+func RefreshRepo(ctx context.Context, gcURL, token, repoURL string) error {
 	if gcURL == "" {
 		return fmt.Errorf("RefreshRepo: gitcache URL required")
 	}
@@ -453,6 +456,9 @@ func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse

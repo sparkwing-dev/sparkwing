@@ -1043,7 +1043,8 @@ kubectl exec -n sparkwing deploy/sparkwing-gitcache -- ls /data/repos/
 
 \`\`\`bash
 # Request a repo archive
-curl -s "http://<gitcache>:8090/archive?repo=https://github.com/you/repo.git&branch=main" -o repo.tar
+curl -s -H "Authorization: Bearer $SPARKWING_CACHE_TOKEN" \\
+  "http://<gitcache>:8090/archive?repo=https://github.com/you/repo.git&branch=main" -o repo.tar
 \`\`\`
 
 The git cache:

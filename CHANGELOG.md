@@ -50,10 +50,6 @@ code change to unlock.
 ## [Unreleased]
 ### Security
 
-- **ci:** Every GitHub Actions workflow now pins its actions to a full commit
-  SHA with a version comment, the release job that prepares binaries no longer
-  persists checkout credentials, and the canonical gate installs dashboard
-  dependencies with `--ignore-scripts`.
 - **web (Breaking):** Dashboard responses carry a Content Security Policy with a
   per-response script nonce, `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and HSTS
@@ -63,12 +59,82 @@ code change to unlock.
   `web.apiUrl` are deprecated and ignored. A token-backed dashboard that binds
   a non-loopback address without `--require-login` refuses to start. See the
   [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
+- **store:** Browser sessions are stored as a sha256 digest of the session id,
+  and the CSRF token is derived as an HMAC of that id under a server key
+  instead of being written to the database, so a copy of the state database,
+  its WAL, or a backup no longer yields replayable dashboard sessions. The
+  schema 21 migration deletes existing session rows, so everyone signs in
+  again after the upgrade.
+- **cache:** The warm-pool controller now accepts only registry references in
+  `warm_images`, logging and dropping every other entry, and passes the list to
+  the privileged warmer pod as container arguments consumed by a fixed script.
+  A ConfigMap writer can no longer smuggle shell into the one privileged
+  workload Sparkwing creates.
+- **controller:** Login now carries per-client, listener-wide, and per-account
+  budgets, and every argon2id verification passes through a memory-sized
+  semaphore, so unauthenticated callers can no longer exhaust the pod by
+  hashing. Size the semaphore with `--argon2-memory-budget-mb` (chart:
+  `controller.argon2MemoryBudgetMB`) and name proxy networks with
+  `--trusted-proxy-cidrs` (chart: `controller.trustedProxyCIDRs`) so throttling
+  keys on the real client. A rejected bearer token is remembered for a few
+  seconds, so a replayed wrong guess costs one hash.
+- **logs:** `sparkwing-logs` gains `--require-auth` /
+  `SPARKWING_REQUIRE_AUTH`, refusing to start without a controller to resolve
+  caller tokens against, reports `"auth"` on `GET /api/v1/health` so
+  `sparkwing cluster status` warns on an open logs service, and rejects the
+  anonymous principal an unauthenticated controller returns from `whoami`. A
+  logs-enabled `sparkwing-runner-bundle` install without
+  `controller.tokenSecret.name` now fails at render time instead of serving,
+  forging, and deleting every run's logs for anything that reaches its Service;
+  set the new `logs.allowUnauthenticated=true` during a bootstrap install.
+- **ci:** Every GitHub Actions workflow now pins its actions to a full commit
+  SHA with a version comment, the release job that prepares binaries no longer
+  persists checkout credentials, and the canonical gate installs dashboard
+  dependencies with `--ignore-scripts`.
 
 ### Fixed
 
 - **admission:** Equal-priority participants keep their service order while
   queued, so sustained arrivals from an older owner cannot move an existing
   request backward indefinitely.
+
+### Security
+
+- **cache (Breaking):** Every cache route that touches repository content --
+  git clone and registration, archives, files, tree hashes, branch membership,
+  the repo listing, and artifacts -- now requires the bearer token, alongside
+  the blob and sync routes that already did. Registration validates the
+  repository name and refuses to repoint an existing one without the token,
+  responses carry `X-Content-Type-Options: nosniff`, artifacts download as
+  attachments, and workspace snapshot refs expire after
+  `WORKSPACE_SEED_MAX_AGE` instead of wedging at the retention cap. The
+  runner-bundle chart ships a default-deny ingress NetworkPolicy for the cache
+  (`networkPolicy.enabled`), issues the controller a cache token, and refuses
+  to render a non-`ClusterIP` cache Service with no token configured. The
+  dashboard's `/api/v1/gitcache/` mount rejects a request with no bearer
+  credential and caps concurrent Git streams. See the
+  [migration guide](docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
+
+### Security
+
+- **cli:** The admission daemon's unix socket is now private to its user.
+  It binds under `$XDG_RUNTIME_DIR` when one is available, refuses a socket
+  directory that is not a `0700` directory owned by the current uid, chmods
+  the socket to `0600`, and drops accepted connections whose kernel-reported
+  peer uid differs. Clients apply the same directory test before dialing, and
+  reach a daemon still serving the pre-upgrade `/tmp` path until it exits.
+
+### Security
+
+- **controller (Breaking):** A node claim now binds to the authenticated
+  principal as well as to the client-supplied `holder_id`, and the per-node
+  write routes admit only the runner holding that unexpired claim. A
+  `nodes.claim` token can no longer write another runner's node, stamp
+  `ready_at` (now `admin`, so a runner cannot skip a node's dependencies), or
+  read a run's plaintext secret arguments without a claim on one of its nodes;
+  an unauthenticated controller serves the redacted view. Runner tokens
+  claiming their own work are unaffected. See the
+  [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-principal).
 
 ## [v0.39.0] - 2026-09-02
 ### Docs

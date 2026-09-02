@@ -193,12 +193,13 @@ func probeAuth(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	return r
 }
 
-func probeLogs(_ context.Context, prof *profile.Profile) profileProbeResult {
+func probeLogs(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "logs", Target: profile.SpecString(prof.Logs)}
 	if prof.Logs == nil {
 		if prof.ControllerURL() != "" {
 			r.Status = "ok"
 			r.Detail = "logs route through the controller"
+			flagUnauthenticatedLogs(ctx, prof, &r)
 			return r
 		}
 		r.Status = "warn"
@@ -207,7 +208,34 @@ func probeLogs(_ context.Context, prof *profile.Profile) profileProbeResult {
 	}
 	r.Status = "ok"
 	r.Detail = "logs backend: " + profile.SpecString(prof.Logs)
+	flagUnauthenticatedLogs(ctx, prof, &r)
 	return r
+}
+
+func flagUnauthenticatedLogs(ctx context.Context, prof *profile.Profile, r *profileProbeResult) {
+	// safety: every lookup failure below leaves r alone; a cluster that announces no logs URL is not an open one.
+	if !prof.HasController() {
+		return
+	}
+	services, err := discovery.ServicesFor(ctx, prof.ControllerURL(), prof.ControllerToken())
+	if err != nil || services.Logs == "" {
+		return
+	}
+	resp, err := httpGetNoAuth(ctx, strings.TrimRight(services.Logs, "/")+"/api/v1/health")
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+	body, err := health.Decode(resp.Body)
+	if err != nil || body.Auth != "disabled" {
+		return
+	}
+	r.Status = "warn"
+	r.Detail = "serving unauthenticated: " + services.Logs +
+		" lets anything that can reach it read, forge, and delete every run's logs"
 }
 
 func probeGitcache(ctx context.Context, prof *profile.Profile) profileProbeResult {

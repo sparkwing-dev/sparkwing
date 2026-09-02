@@ -91,15 +91,16 @@ helm install runners ./charts/sparkwing-runner-bundle \
     --set runner.labels='{cluster,arch=amd64}'
 ```
 
-For a fully unauthenticated test cluster, opt the cache out of its token
-requirement explicitly:
+For a fully unauthenticated test cluster, opt the cache and the logs
+service out of their token requirement explicitly:
 
 ```bash
 helm install runners ./charts/sparkwing-runner-bundle \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
     --set controller.url=http://sparkwing-controller.sparkwing.svc.cluster.local \
-    --set cache.allowUnauthenticated=true
+    --set cache.allowUnauthenticated=true \
+    --set logs.allowUnauthenticated=true
 ```
 
 ## Values cheat sheet
@@ -125,6 +126,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `cache.storage.size` | Cache PVC size. | `20Gi` |
 | `cache.storage.storageClassName` | Override default StorageClass. | `""` |
 | `logs.enabled` | Toggle the log-store sidecar. | `true` |
+| `logs.allowUnauthenticated` | Serve every run's logs without a token. | `false` |
 | `logs.storage.size` | Logs PVC size. | `10Gi` |
 | `runner.automountServiceAccountToken` | Mount the runner pod's API token. Needed only by the k8s trigger runner. | `false` |
 | `serviceAccount.annotations` | Add IRSA / Workload Identity annotations. | `{}` |
@@ -147,6 +149,13 @@ A cache-enabled install without that Secret fails at render time. Set
 `cache.allowUnauthenticated=true` to serve the cache's blob and sync endpoints
 to anything that can reach the Service, which is appropriate only on a
 bootstrap install, before the Secret exists.
+
+A logs-enabled install without it fails the same way, because the logs service
+has no controller to resolve callers against. With the Secret configured the
+chart also passes `--require-auth`, so the pod crashes rather than serving
+open. Set `logs.allowUnauthenticated=true` to let anything that can reach the
+Service read, forge, and delete every run's logs, which is again a bootstrap
+setting to turn back off with the token upgrade.
 
 Trigger claiming always needs a gitcache because it clones and compiles the
 repository before creating a run. If `cache.enabled=false` while

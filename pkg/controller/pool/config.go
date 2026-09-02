@@ -64,7 +64,7 @@ func LoadConfig(ctx context.Context, client kubernetes.Interface, namespace stri
 			return mgr
 		}
 		if len(raw.WarmImages) > 0 {
-			mgr.WarmImages = raw.WarmImages
+			mgr.WarmImages = acceptedWarmImages(raw.WarmImages)
 		}
 		if raw.RefreshInterval != "" {
 			if d, err := time.ParseDuration(raw.RefreshInterval); err == nil {
