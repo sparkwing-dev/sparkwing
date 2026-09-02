@@ -28,6 +28,7 @@ func TestBuildRunInvocation_ProfileSetButNoChainOmits(t *testing.T) {
 }
 
 func TestBuildRunInvocation_LocalOnlyReportsEffectiveBackends(t *testing.T) {
+	t.Setenv("SPARKWING_ALLOW", "")
 	t.Setenv("SPARKWING_PROFILE", "dead-profile")
 	t.Setenv("SPARKWING_SECRETS_PROFILE", "dead-secrets")
 	opts := Options{
