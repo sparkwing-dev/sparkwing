@@ -63,7 +63,12 @@ reports whether it is running; JSON output includes the serving binary, its
 source revision, the runs-store schema that binary understands, and the schema
 this home's store holds. A daemon behind the store cannot read it and refuses
 every run, so status reports it unhealthy and names both schemas; a run that
-hits the same skew fails with that comparison rather than a capacity error.
+hits the same skew fails with that comparison rather than a capacity error. The
+remedy is a sparkwing whose schema matches: install one, or point
+`SPARKWING_WINGD_BIN` at a binary that has it and stop the daemon. Restarting
+does not help when the installed build is the daemon's own build, and status
+says so. A store that exists but cannot be read is reported the same way rather
+than as an absent store.
 `sparkwing daemon restart` replaces only an answering daemon
 when its build differs from the installed Sparkwing build. Add `--force` to
 replace an answering daemon that already serves the installed build. Existing

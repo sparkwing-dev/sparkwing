@@ -423,9 +423,13 @@ code change to unlock.
   names both schema versions instead of sending the operator to
   `sparkwing queue` after a holder that does not exist. The handshake also
   advertises the daemon's runs-store schema, so a newer client refuses before
-  requesting admission, and `sparkwing daemon status` reports
-  `daemon_schema_version` against `store_schema_version` and marks a diverged
-  pair unhealthy.
+  requesting admission and names the remedies that work: install a matching
+  sparkwing, or point `SPARKWING_WINGD_BIN` at one, since a daemon restart
+  respawns the same build. Node-level concurrency failures get the same
+  treatment as plan-level ones. `sparkwing daemon status` reports
+  `daemon_schema_version` against `store_schema_version`, marks a diverged pair
+  unhealthy, says when a restart will not help, and reports a store that exists
+  but cannot be read as `store_schema_error` instead of as an absent store.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

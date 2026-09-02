@@ -102,7 +102,7 @@ func (r *NodeExecutor) runNodeUnderDaemonSem(ctx context.Context, req runner.Req
 			priority, onQueued)
 	}
 	if err != nil {
-		return r.failedDaemonAcquire(ctx, acquireCtx, req, key, limit.QueueTimeout, err)
+		return r.failedDaemonAcquire(ctx, acquireCtx, req, claim, limit.QueueTimeout, err)
 	}
 
 	if releasedWorker || waited {
@@ -150,8 +150,9 @@ func (r *NodeExecutor) runNodeUnderDaemonSem(ctx context.Context, req runner.Req
 	return runner.Result{Outcome: sparkwing.Success, Output: output}
 }
 
-func (r *NodeExecutor) failedDaemonAcquire(ctx, acquireCtx context.Context, req runner.Request, key string, queueTimeout time.Duration, err error) runner.Result {
+func (r *NodeExecutor) failedDaemonAcquire(ctx, acquireCtx context.Context, req runner.Request, claim wingwire.SemaphoreClaim, queueTimeout time.Duration, err error) runner.Result {
 	node := req.Node
+	key := claim.Name
 	if errors.Is(context.Cause(acquireCtx), errNodeQueueTimeout) && ctx.Err() == nil {
 		terr := fmt.Errorf("concurrency key %q: queued %s without a slot under OnLimit:Queue", key, queueTimeout)
 		payload, _ := json.Marshal(map[string]any{
@@ -173,7 +174,7 @@ func (r *NodeExecutor) failedDaemonAcquire(ctx, acquireCtx context.Context, req 
 		case wingwire.PolicySkip:
 			return r.applySkippedConcurrent(ctx, req)
 		case wingwire.PolicyFail:
-			ferr := fmt.Errorf("concurrency key %q slot full under OnLimit:Fail", key)
+			ferr := nodeAdmissionFailure(claim, admErr)
 			r.markFailed(ctx, req.RunID, node.ID(), ferr)
 			return runner.Result{Outcome: sparkwing.Failed, Err: ferr}
 		}

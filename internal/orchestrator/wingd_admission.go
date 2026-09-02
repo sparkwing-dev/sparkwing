@@ -488,7 +488,7 @@ func (la *LocalAdmission) acquireBlocking(
 				return nil, admitSkipped, nil
 			case wingwire.PolicyFail:
 				appendPlanEvent(ctx, backends, runID, "plan_failed_concurrent", nil)
-				return nil, admitProceed, admissionFailure(req, admErr)
+				return nil, admitProceed, admissionFailure(req.Semaphores, admErr)
 			}
 			return nil, admitProceed, fmt.Errorf("local admission: %w", admErr)
 		}
@@ -632,10 +632,23 @@ func queuePositionParts(q wingwire.Queued) (ahead int, noun, reason string) {
 // safety: only a key this request claimed can mean exhausted capacity. Every
 // other key is the daemon's own, and calling one a full slot sends the operator
 // to `sparkwing queue` after a holder that does not exist.
-func admissionFailure(req wingwire.AdmissionRequest, admErr *wingdclient.AdmissionError) error {
-	if requestClaimsKey(req, admErr.Key) {
+func admissionFailure(claims []wingwire.SemaphoreClaim, admErr *wingdclient.AdmissionError) error {
+	if requestClaimsKey(claims, admErr.Key) {
 		return fmt.Errorf("plan concurrency group %q: slot full under OnLimit:Fail; run `sparkwing queue` to see who holds it", admErr.Key)
 	}
+	return daemonRefusal(admErr)
+}
+
+// safety: the node path claims exactly one key, and the daemon evicts under
+// PolicyFail for reasons of its own too, so only that key can mean a full slot.
+func nodeAdmissionFailure(claim wingwire.SemaphoreClaim, admErr *wingdclient.AdmissionError) error {
+	if requestClaimsKey([]wingwire.SemaphoreClaim{claim}, admErr.Key) {
+		return fmt.Errorf("concurrency key %q slot full under OnLimit:Fail", claim.Name)
+	}
+	return daemonRefusal(admErr)
+}
+
+func daemonRefusal(admErr *wingdclient.AdmissionError) error {
 	switch admErr.Key {
 	case "never_admissible":
 		if admErr.Reason != "" {
@@ -643,27 +656,19 @@ func admissionFailure(req wingwire.AdmissionRequest, admErr *wingdclient.Admissi
 		}
 		return errors.New("local admission: a concurrency group's cost exceeds its own capacity; lower the cost or raise the group's limit")
 	case "terminal-check":
-		return fmt.Errorf("local admission: the daemon refused %q before any capacity decision: %s; run `sparkwing daemon status` to compare the daemon's runs-store schema with the store's",
-			admErr.Key, admissionReason(admErr))
+		return fmt.Errorf("local admission: %w; the daemon refused before any capacity decision, so run `sparkwing daemon status` to compare the daemon's runs-store schema with the store's", admErr)
 	default:
-		return fmt.Errorf("local admission: the daemon refused %q: %s", admErr.Key, admissionReason(admErr))
+		return fmt.Errorf("local admission: %w", admErr)
 	}
 }
 
-func requestClaimsKey(req wingwire.AdmissionRequest, key string) bool {
-	for _, claim := range req.Semaphores {
+func requestClaimsKey(claims []wingwire.SemaphoreClaim, key string) bool {
+	for _, claim := range claims {
 		if claim.Name == key {
 			return true
 		}
 	}
 	return false
-}
-
-func admissionReason(admErr *wingdclient.AdmissionError) string {
-	if admErr.Reason != "" {
-		return admErr.Reason
-	}
-	return "the daemon gave no reason"
 }
 
 func evictionHandler(runID string, onEvicted func(error)) func(wingwire.Evicted) {

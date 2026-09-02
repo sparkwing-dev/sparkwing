@@ -284,3 +284,59 @@ func TestInspectDaemonNamesADaemonBehindTheStoreSchema(t *testing.T) {
 		t.Fatalf("a daemon behind the store schema reported healthy: %+v", report)
 	}
 }
+
+func TestInspectDaemonReportsAnUnreadableStoreAsUnhealthy(t *testing.T) {
+	home, err := os.MkdirTemp("/tmp", "sparkwing-daemon-badstore-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	if err := os.MkdirAll(paths.PathsAt(home).StateDB(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := inspectDaemon(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.StoreSchemaError == "" {
+		t.Fatalf("unreadable store reported no error: %+v", report)
+	}
+	if report.StoreSchemaVersion != 0 {
+		t.Fatalf("unreadable store reported schema %d", report.StoreSchemaVersion)
+	}
+}
+
+func TestInspectDaemonLeavesAnAbsentStoreWithoutAnError(t *testing.T) {
+	home, err := os.MkdirTemp("/tmp", "sparkwing-daemon-nostore-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+
+	report, err := inspectDaemon(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.StoreSchemaError != "" || report.StoreSchemaVersion != 0 {
+		t.Fatalf("absent store reported %+v, want a silent zero", report)
+	}
+}
+
+func TestSchemaRemedyNamesWhatActuallyWorks(t *testing.T) {
+	same := schemaRemedy(daemonReport{
+		BinaryVersion: "v0.38.2", InstalledVersion: "v0.38.2",
+		DaemonSchemaVersion: 17, StoreSchemaVersion: 26,
+	})
+	if !strings.Contains(same, "will not help") || !strings.Contains(same, wingdclient.HostBinEnv) || !strings.Contains(same, "26") {
+		t.Fatalf("same-build remedy = %q", same)
+	}
+
+	newer := schemaRemedy(daemonReport{
+		BinaryVersion: "v0.38.2", InstalledVersion: "v0.40.0",
+		DaemonSchemaVersion: 17, StoreSchemaVersion: 26,
+	})
+	if !strings.Contains(newer, "daemon restart") || !strings.Contains(newer, "v0.40.0") {
+		t.Fatalf("newer-install remedy = %q", newer)
+	}
+}

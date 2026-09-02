@@ -26,8 +26,10 @@ type daemonReport struct {
 	PreviousVersion     string `json:"previous_version,omitempty"`
 	PreviousRevision    string `json:"previous_revision,omitempty"`
 	Socket              string `json:"socket"`
+	InstalledVersion    string `json:"installed_version,omitempty"`
 	DaemonSchemaVersion int    `json:"daemon_schema_version,omitempty"`
 	StoreSchemaVersion  int    `json:"store_schema_version,omitempty"`
+	StoreSchemaError    string `json:"store_schema_error,omitempty"`
 	SchemaDiverged      bool   `json:"schema_diverged,omitempty"`
 }
 
@@ -101,7 +103,12 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	if err != nil {
 		return daemonReport{}, err
 	}
-	report := daemonReport{Socket: socket, StoreSchemaVersion: storeSchemaVersion(ctx, home)}
+	report := daemonReport{Socket: socket, InstalledVersion: installedVersion()}
+	version, schemaErr := storeSchemaVersion(ctx, home)
+	report.StoreSchemaVersion = version
+	if schemaErr != nil {
+		report.StoreSchemaError = schemaErr.Error()
+	}
 	info, err := wingdclient.Probe(ctx, socket)
 	if errors.Is(err, wingdclient.ErrNoDaemon) {
 		return report, nil
@@ -117,31 +124,40 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	report.DaemonSchemaVersion = info.StoreSchemaVersion
 	report.SchemaDiverged = report.DaemonSchemaVersion > 0 &&
 		report.StoreSchemaVersion > report.DaemonSchemaVersion
-	if report.SchemaDiverged {
+	if report.SchemaDiverged || report.StoreSchemaError != "" {
 		report.Healthy = false
 	}
 	return report, nil
 }
 
-func storeSchemaVersion(ctx context.Context, home string) int {
+// safety: an absent store is 0 with no error, but a store that exists and
+// cannot be read must be an error. Folding the two together reported an
+// unreadable store as a healthy daemon.
+func storeSchemaVersion(ctx context.Context, home string) (int, error) {
 	root, err := wingd.HomeDir(home)
-	if err != nil || root == "" {
-		return 0
+	if err != nil {
+		return 0, fmt.Errorf("resolve the sparkwing home: %w", err)
+	}
+	if root == "" {
+		return 0, errors.New("the sparkwing home did not resolve to a directory")
 	}
 	db := paths.PathsAt(root).StateDB()
 	if _, err := os.Stat(db); err != nil {
-		return 0
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("stat the runs store: %w", err)
 	}
 	st, err := store.OpenReadOnly(db)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("open the runs store: %w", err)
 	}
 	defer func() { _ = st.Close() }()
 	version, err := st.CurrentSchemaVersion(ctx)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("read the runs-store schema: %w", err)
 	}
-	return version
+	return version, nil
 }
 
 func runDaemonRestart(args []string) error {
@@ -207,6 +223,15 @@ func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
 	return emitDaemonReport(report, format)
 }
 
+func schemaRemedy(report daemonReport) string {
+	if report.InstalledVersion != "" && report.InstalledVersion == report.BinaryVersion {
+		return fmt.Sprintf(
+			"the installed sparkwing is the same build (%s), so `sparkwing daemon restart` will not help; install a sparkwing that understands schema %d, or set %s to a binary that does and stop the daemon",
+			report.InstalledVersion, report.StoreSchemaVersion, wingdclient.HostBinEnv)
+	}
+	return fmt.Sprintf("run `sparkwing daemon restart` to replace it with the installed %s", report.InstalledVersion)
+}
+
 func emitDaemonReport(report daemonReport, output string) error {
 	switch output {
 	case "json":
@@ -230,10 +255,14 @@ func emitDaemonReport(report daemonReport, output string) error {
 			action = "restarted"
 		}
 		fmt.Fprintf(os.Stdout, "wingd %s %s\n", action, report.BinaryVersion)
+		if report.StoreSchemaError != "" {
+			fmt.Fprintf(os.Stdout, "runs store unreadable: %s\n", report.StoreSchemaError)
+		}
 		if report.SchemaDiverged {
 			fmt.Fprintf(os.Stdout,
-				"runs-store schema mismatch: the daemon understands %d, the store is at %d; it will refuse every run until `sparkwing daemon restart`\n",
+				"runs-store schema mismatch: the daemon understands %d, the store is at %d, so it refuses every run\n",
 				report.DaemonSchemaVersion, report.StoreSchemaVersion)
+			fmt.Fprintln(os.Stdout, schemaRemedy(report))
 		}
 		return nil
 	default:

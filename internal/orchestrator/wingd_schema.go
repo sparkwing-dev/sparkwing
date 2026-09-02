@@ -30,11 +30,15 @@ func daemonStoreSchemaSkew(daemonVersion, selfVersion string, daemonSchema, self
 	if daemonSchema == 0 || daemonSchema >= selfSchema {
 		return nil
 	}
+	// safety: `sparkwing daemon restart` respawns the installed build and a
+	// fresh SPARKWING_HOME still spawns the sparkwing on PATH, so neither of
+	// the usual remedies moves a source-built client off a released daemon.
 	return fmt.Errorf("%w: daemon %s understands runs-store schema %d, this binary is %s at schema %d, "+
 		"and the store both share is migrated to the newer one. "+
-		"Run `sparkwing daemon restart` to replace the daemon with a matching build, "+
-		"or set SPARKWING_HOME to run against a daemon of your own",
-		ErrDaemonStoreSchemaTooOld, describeVersion(daemonVersion), daemonSchema, describeVersion(selfVersion), selfSchema)
+		"Install a sparkwing that understands schema %d, or set %s to a binary that does and stop the daemon so the next run brings it up. "+
+		"`sparkwing daemon restart` respawns the same build, and a fresh SPARKWING_HOME still hosts the daemon from the sparkwing on PATH",
+		ErrDaemonStoreSchemaTooOld, describeVersion(daemonVersion), daemonSchema, describeVersion(selfVersion), selfSchema,
+		selfSchema, wingdclient.HostBinEnv)
 }
 
 func describeVersion(v string) string {

@@ -60,7 +60,7 @@ var cmdDaemonRecoverState = Command{
 var cmdDaemonStatus = Command{
 	Path:        "sparkwing daemon status",
 	Synopsis:    "Report whether wingd is running and which build it serves",
-	Description: `Read-only daemon status. An absent daemon is a healthy stopped state and exits zero. An unreachable socket fails instead of pretending the admission queue is empty. The JSON running_revision identifies the exact source build when available. It also reports daemon_schema_version (the runs-store schema the daemon binary understands) against store_schema_version (the schema this home's store holds); a daemon behind the store refuses every run, and the report marks it unhealthy.`,
+	Description: `Read-only daemon status. An absent daemon is a healthy stopped state and exits zero. An unreachable socket fails instead of pretending the admission queue is empty. The JSON running_revision identifies the exact source build when available. It also reports daemon_schema_version (the runs-store schema the daemon binary understands) against store_schema_version (the schema this home's store holds); a daemon behind the store refuses every run, and the report marks it unhealthy and names the remedy that works, which is not a restart when the installed sparkwing is the same build. A store that exists but cannot be read is reported as store_schema_error and also marks the daemon unhealthy, rather than passing as an absent store.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
