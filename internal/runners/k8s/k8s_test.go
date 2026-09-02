@@ -1,12 +1,16 @@
 package k8s
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -472,9 +476,8 @@ func bytesOf(q resource.Quantity) int64 {
 }
 
 func TestPodResources_PinDrivesRequestAndPolicyLimit(t *testing.T) {
-	roomy := Config{CPURequest: "100m", CPULimit: "16", MemoryRequest: "128Mi", MemoryLimit: "64Gi"}
 	res := capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin}
-	rr := podResources(res, roomy)
+	rr := podResources(res, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 4000 {
 		t.Errorf("cpu request = %dm, want 4000m", got)
 	}
@@ -489,6 +492,11 @@ func TestPodResources_PinDrivesRequestAndPolicyLimit(t *testing.T) {
 	}
 }
 
+var ceilingCfg = Config{
+	CPURequest: "100m", CPULimit: "2", MemoryRequest: "128Mi", MemoryLimit: "2Gi",
+	CPUCeiling: 2, MemoryCeiling: 2 << 30,
+}
+
 func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -500,36 +508,54 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 		wantMemLim int64
 	}{
 		{
-			name:       "pin over the cpu ceiling is capped",
+			name:       "pin over the cpu ceiling is capped, burst included",
 			res:        capacity.Resolution{Cores: 64, MemoryBytes: 1 << 30, Source: store.CostSourcePin},
-			cfg:        defaultsCfg,
+			cfg:        ceilingCfg,
 			wantCPUReq: 2000,
-			wantCPULim: int64(2000 * podCPULimitFactor),
+			wantCPULim: 2000,
 			wantMemReq: 1 << 30,
 			wantMemLim: int64(float64(1<<30) * podMemoryLimitFactor),
 		},
 		{
-			name:       "pin over the memory ceiling is capped",
+			name:       "pin over the memory ceiling is capped, burst included",
 			res:        capacity.Resolution{Cores: 1, MemoryBytes: 128 << 30, Source: store.CostSourcePin},
-			cfg:        defaultsCfg,
+			cfg:        ceilingCfg,
 			wantCPUReq: 1000,
 			wantCPULim: int64(1000 * podCPULimitFactor),
 			wantMemReq: 2 << 30,
-			wantMemLim: int64(float64(2<<30) * podMemoryLimitFactor),
+			wantMemLim: 2 << 30,
 		},
 		{
 			name:       "measured charge over the ceiling is capped too",
 			res:        capacity.Resolution{Cores: 8, MemoryBytes: 16 << 30, Source: store.CostSourceMeasured},
-			cfg:        defaultsCfg,
+			cfg:        ceilingCfg,
 			wantCPUReq: 2000,
-			wantCPULim: int64(2000 * podCPULimitFactor),
+			wantCPULim: 2000,
 			wantMemReq: 2 << 30,
-			wantMemLim: int64(float64(2<<30) * podMemoryLimitFactor),
+			wantMemLim: 2 << 30,
+		},
+		{
+			name:       "a charge under the ceiling keeps its full burst",
+			res:        capacity.Resolution{Cores: 0.5, MemoryBytes: 1 << 30, Source: store.CostSourcePin},
+			cfg:        ceilingCfg,
+			wantCPUReq: 500,
+			wantCPULim: 1000,
+			wantMemReq: 1 << 30,
+			wantMemLim: int64(float64(1<<30) * podMemoryLimitFactor),
+		},
+		{
+			name:       "the unmeasured fallback size is capped by the ceiling as well",
+			res:        capacity.Resolution{Cores: 8, Source: store.CostSourceDefault},
+			cfg:        Config{CPURequest: "100m", CPULimit: "2", MemoryRequest: "128Mi", MemoryLimit: "2Gi", CPUCeiling: 1, MemoryCeiling: 1 << 30},
+			wantCPUReq: 100,
+			wantCPULim: 1000,
+			wantMemReq: 128 << 20,
+			wantMemLim: 1 << 30,
 		},
 		{
 			name:       "no configured ceiling leaves the pin alone",
 			res:        capacity.Resolution{Cores: 64, MemoryBytes: 128 << 30, Source: store.CostSourcePin},
-			cfg:        Config{CPURequest: "100m", MemoryRequest: "128Mi"},
+			cfg:        defaultsCfg,
 			wantCPUReq: 64000,
 			wantCPULim: int64(64000 * podCPULimitFactor),
 			wantMemReq: 128 << 30,
@@ -552,6 +578,79 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 				t.Errorf("mem limit = %d, want %d", got, tc.wantMemLim)
 			}
 		})
+	}
+}
+
+func TestPodResources_FloorsATinyPinAtTheMeasuredCoreFloor(t *testing.T) {
+	for _, cores := range []float64{0.0004, 1e-9, 0.05} {
+		res := capacity.Resolution{Cores: cores, MemoryBytes: 1 << 30, Source: store.CostSourcePin}
+		rr := podResources(res, defaultsCfg)
+		want := int64(capacity.MeasuredCoreFloor * 1000)
+		if got := milli(rr.Requests[corev1.ResourceCPU]); got != want {
+			t.Errorf("pin %v cores: cpu request = %dm, want the %dm floor", cores, got, want)
+		}
+		if got := milli(rr.Limits[corev1.ResourceCPU]); got != int64(float64(want)*podCPULimitFactor) {
+			t.Errorf("pin %v cores: cpu limit = %dm, want %dm", cores, got, int64(float64(want)*podCPULimitFactor))
+		}
+	}
+}
+
+func TestPodResources_CeilingUnderTheFloorStillWins(t *testing.T) {
+	cfg := Config{CPURequest: "100m", MemoryRequest: "128Mi", CPUCeiling: 0.05}
+	res := capacity.Resolution{Cores: 0.0004, MemoryBytes: 1 << 30, Source: store.CostSourcePin}
+	rr := podResources(res, cfg)
+	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 50 {
+		t.Errorf("cpu request = %dm, want the 50m ceiling, which outranks the core floor", got)
+	}
+}
+
+func TestParseCeilingRejectsWhatItCannotEnforce(t *testing.T) {
+	cpuCases := []struct {
+		in      string
+		want    float64
+		wantErr bool
+	}{
+		{in: "", want: 0},
+		{in: "8", want: 8},
+		{in: "500m", want: 0.5},
+		{in: "2 cores", wantErr: true},
+		{in: "0", wantErr: true},
+		{in: "-1", wantErr: true},
+	}
+	for _, tc := range cpuCases {
+		got, err := ParseCPUCeiling(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ParseCPUCeiling(%q) = %v, want an error", tc.in, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("ParseCPUCeiling(%q) = %v, %v, want %v", tc.in, got, err, tc.want)
+		}
+	}
+	memCases := []struct {
+		in      string
+		want    int64
+		wantErr bool
+	}{
+		{in: "", want: 0},
+		{in: "2Gi", want: 2 << 30},
+		{in: "2 GB", wantErr: true},
+		{in: "0", wantErr: true},
+		{in: "-1Gi", wantErr: true},
+	}
+	for _, tc := range memCases {
+		got, err := ParseMemoryCeiling(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ParseMemoryCeiling(%q) = %v, want an error", tc.in, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("ParseMemoryCeiling(%q) = %v, %v, want %v", tc.in, got, err, tc.want)
+		}
 	}
 }
 
@@ -620,6 +719,75 @@ func TestResolveResources_ClearsControllerPinWhenNodeDeclaresNone(t *testing.T) 
 	}
 	if profile.PinnedCores != 0 || profile.PinnedMemoryBytes != 0 {
 		t.Fatalf("controller pin = %.2f cores/%d bytes, want cleared after undeclared node", profile.PinnedCores, profile.PinnedMemoryBytes)
+	}
+}
+
+func TestResolveResources_AnnouncesTheClampOnBothChannels(t *testing.T) {
+	ctx := context.Background()
+	var mu sync.Mutex
+	var events []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasSuffix(req.URL.Path, "/events") {
+			body, _ := io.ReadAll(req.Body)
+			mu.Lock()
+			events = append(events, string(body))
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	var logs bytes.Buffer
+	r := &Runner{
+		ctrl:   client.New(srv.URL, nil),
+		cfg:    ceilingCfg,
+		logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}
+	plan := sparkwing.NewPlan()
+	node := sparkwing.Job(plan, "build", func(context.Context) error { return nil }).
+		Resources(sparkwing.Cores(64), sparkwing.MemoryGB(128))
+	req := runner.Request{RunID: "run-1", Pipeline: "deploy", NodeID: "build", Node: node}
+
+	if res := r.resolveResources(ctx, req); res.Cores != 64 {
+		t.Fatalf("resolved cores = %v, want the unclamped charge; podResources owns the clamp", res.Cores)
+	}
+	line := logs.String()
+	for _, want := range []string{"64.0 cores", "ceiling 2.0", "sized at 2.0 cores"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("log = %q, want a line naming %q", line, want)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 1 || !strings.Contains(events[0], "resource_clamped") {
+		t.Fatalf("run events = %v, want one resource_clamped warning", events)
+	}
+}
+
+func TestResolveResources_StaysQuietUnderTheCeiling(t *testing.T) {
+	ctx := context.Background()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasSuffix(req.URL.Path, "/events") {
+			t.Errorf("unexpected run event for a charge under the ceiling")
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	var logs bytes.Buffer
+	r := &Runner{
+		ctrl:   client.New(srv.URL, nil),
+		cfg:    ceilingCfg,
+		logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}
+	plan := sparkwing.NewPlan()
+	node := sparkwing.Job(plan, "build", func(context.Context) error { return nil }).
+		Resources(sparkwing.Cores(1), sparkwing.MemoryGB(1))
+	r.resolveResources(ctx, runner.Request{RunID: "run-1", Pipeline: "deploy", NodeID: "build", Node: node})
+	if logs.Len() != 0 {
+		t.Fatalf("log = %q, want silence when the ceiling does not bite", logs.String())
 	}
 }
 

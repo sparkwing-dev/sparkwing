@@ -35,6 +35,10 @@ type K8sRunnerFactoryConfig struct {
 	DependencyProxyFallbackURL string
 
 	ImagePullPolicy string
+
+	CPUCeiling string
+
+	MemoryCeiling string
 }
 
 func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Trigger) runner.Runner, error) {
@@ -54,6 +58,15 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 	pullPolicy, err := k8srunner.ParsePullPolicy(cfg.ImagePullPolicy)
 	if err != nil {
 		return nil, fmt.Errorf("--image-pull-policy: %w", err)
+	}
+	// safety: a ceiling that fails to parse must refuse to start, not silently cap nothing
+	cpuCeiling, err := k8srunner.ParseCPUCeiling(cfg.CPUCeiling)
+	if err != nil {
+		return nil, fmt.Errorf("--k8s-cpu-ceiling: %w", err)
+	}
+	memoryCeiling, err := k8srunner.ParseMemoryCeiling(cfg.MemoryCeiling)
+	if err != nil {
+		return nil, fmt.Errorf("--k8s-memory-ceiling: %w", err)
 	}
 	var rc *rest.Config
 	if cfg.Kubeconfig != "" {
@@ -85,6 +98,8 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		MemoryRequest:      "128Mi",
 		CPULimit:           "2",
 		MemoryLimit:        "2Gi",
+		CPUCeiling:         cpuCeiling,
+		MemoryCeiling:      memoryCeiling,
 		PollInterval:       time.Second,
 	}
 	logger := slog.Default()

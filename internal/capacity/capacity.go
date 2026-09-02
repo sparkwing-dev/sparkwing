@@ -16,7 +16,7 @@ const (
 
 	coldStartFraction = 0.5
 
-	measuredCoreFloor = 0.1
+	MeasuredCoreFloor = 0.1
 
 	WarmStartMultiple = 1.0
 
@@ -73,7 +73,7 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 	}
 	versionChanged := planHash != "" && profile.PlanHash != "" && profile.PlanHash != planHash
 	if !versionChanged && measurementQualifies(profile) {
-		res.Cores = math.Max(chargedCores(profile), measuredCoreFloor)
+		res.Cores = math.Max(chargedCores(profile), MeasuredCoreFloor)
 		res.MemoryBytes = profile.PeakMemoryBytes
 		res.Source = store.CostSourceMeasured
 		return res
@@ -122,7 +122,7 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 			res.Source = store.CostSourceFloor
 		}
 	}
-	res.Cores = math.Max(cores, measuredCoreFloor)
+	res.Cores = math.Max(cores, MeasuredCoreFloor)
 
 	mem := int64(WarmStartMultiple * float64(prevMem))
 	if fm := int64(SafetyMultiple * float64(floorMem)); fm > mem {

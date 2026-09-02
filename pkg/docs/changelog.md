@@ -52,12 +52,21 @@ code change to unlock.
 ### Security
 
 - **runner:** The Kubernetes runner now clamps a pipeline's declared resource
-  pin to the CPU and memory limits the runner is configured with, so
-  `sparkwing.Cores(64)` in one pipeline can no longer request more than a node
-  has and hold the namespace's capacity. A charge below the ceiling is
-  untouched. `sparkwing-runner-bundle` ships an optional `LimitRange` and
-  `ResourceQuota` (`limitRange.enabled`, `resourceQuota.enabled`, both off) as
-  the cluster-side backstop, and the SDK documentation for `Plan.Resources` no
+  pin to an operator ceiling, so `sparkwing.Cores(64)` in one pipeline can no
+  longer request more than a node has and hold the namespace's capacity. The
+  ceiling is `--k8s-cpu-ceiling` / `--k8s-memory-ceiling`
+  (`SPARKWING_K8S_CPU_CEILING`, `SPARKWING_K8S_MEMORY_CEILING`, chart values
+  `runner.jobCeiling.cpu` and `runner.jobCeiling.memory`); it is unset by
+  default, meaning no ceiling, and a value that is not a positive Kubernetes
+  quantity fails at runner startup. A clamped pod is sized at the ceiling
+  request and burst limit alike, and the runner logs the pin, the ceiling, and
+  the result and records it on the run as a `resource_clamped` event. A pin
+  below the 0.1-core measurement floor no longer renders `cpu: 0`, which
+  escaped both the ceiling and any namespace quota.
+  `sparkwing-runner-bundle` ships an optional `LimitRange` and `ResourceQuota`
+  (`limitRange.enabled`, `resourceQuota.enabled`, both off, the quota now
+  requiring the LimitRange) as the cluster-side backstop, with a real
+  `limitRange.min` floor, and the SDK documentation for `Plan.Resources` no
   longer claims a pin never caps the work.
 - **logs:** CLI log output now filters terminal escape sequences out of
   pipeline output. Plain format drops every escape sequence and every C0
