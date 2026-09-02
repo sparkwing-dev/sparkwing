@@ -208,7 +208,8 @@ func proxyServeFromCache(w http.ResponseWriter, r *http.Request, registry, key s
 	}
 
 	// #nosec G703 -- the path is a registry name from the hard-coded table plus a sha256 cache key
-	if _, err := os.Stat(bodyPath); err != nil {
+	_, err = os.Stat(bodyPath)
+	if err != nil {
 		return false
 	}
 
@@ -385,7 +386,7 @@ func proxyWriteCachedBody(w http.ResponseWriter, r *http.Request, registry strin
 	old, replacement := proxyRewriteRule(reg, base)
 	if err := proxyStreamReplace(w, src, old, replacement); err != nil {
 		// #nosec G706 -- %q escapes control characters in the caller-supplied path
-		log.Printf("warning: proxy rewrite stream %s/%s: %v", registry, truncatePath(meta.Path), err)
+		log.Printf("warning: proxy rewrite stream %s/%q: %v", registry, truncatePath(meta.Path), err)
 	}
 	return true
 }

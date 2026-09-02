@@ -233,7 +233,10 @@ func TestValidateGitRef(t *testing.T) {
 		}
 	}
 
-	invalid := []string{"", "; rm -rf /", "main$(evil)", "branch name", "a..b", "--format=evil"}
+	invalid := []string{
+		"", "; rm -rf /", "main$(evil)", "branch name", "a..b", "--format=evil",
+		"--show-toplevel", "--all", "--git-dir", "-x",
+	}
 	for _, ref := range invalid {
 		if err := validateGitRef(ref); err == nil {
 			t.Errorf("expected %q to be invalid", ref)
@@ -252,6 +255,63 @@ func TestArtifactUpload_AbsolutePath(t *testing.T) {
 
 	if w.Code != 400 {
 		t.Errorf("expected 400 for absolute path, got %d", w.Code)
+	}
+}
+
+func TestArtifactUpload_AtPrefixedPath(t *testing.T) {
+	oldDir := artifactsDir
+	artifactsDir = t.TempDir()
+	defer func() { artifactsDir = oldDir }()
+
+	for _, p := range []string{"@inline.tar", "sub/@inline.tar"} {
+		req := httptest.NewRequest(http.MethodPost, "/artifacts/job123?path="+p, strings.NewReader("evil"))
+		w := httptest.NewRecorder()
+		handleArtifacts(w, req)
+
+		if w.Code != 400 {
+			t.Errorf("expected 400 for %q, got %d", p, w.Code)
+		}
+	}
+}
+
+func TestUploadDownload_PercentEncodedDotDotIsNoExistenceOracle(t *testing.T) {
+	oldDir := uploadsDir
+	uploadsDir = t.TempDir()
+	defer func() { uploadsDir = oldDir }()
+
+	present := filepath.Join(filepath.Dir(uploadsDir), "present.tar.gz")
+	if err := os.WriteFile(present, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(present) })
+
+	for _, name := range []string{"present", "absent"} {
+		req := httptest.NewRequest(http.MethodGet, "/uploads/%2e%2e/"+name+".tar.gz", nil)
+		w := httptest.NewRecorder()
+		handleUploadDownload(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s: expected 400, got %d (%s)", name, w.Code, strings.TrimSpace(w.Body.String()))
+		}
+		if !strings.Contains(w.Body.String(), "invalid upload ID") {
+			t.Errorf("%s: body %q does not name the rejected id", name, strings.TrimSpace(w.Body.String()))
+		}
+	}
+}
+
+func TestGitObjectRE_AcceptsOnlyAnObjectID(t *testing.T) {
+	valid := []string{strings.Repeat("a", 40), strings.Repeat("0", 64), strings.Repeat("F", 40)}
+	for _, sha := range valid {
+		if !gitObjectRE.MatchString(sha) {
+			t.Errorf("expected %q to be a git object id", sha)
+		}
+	}
+
+	invalid := []string{"", ".", "..", "/data/repos", "../../etc/passwd", "HEAD", strings.Repeat("z", 40)}
+	for _, sha := range invalid {
+		if gitObjectRE.MatchString(sha) {
+			t.Errorf("expected %q not to be a git object id", sha)
+		}
 	}
 }
 
