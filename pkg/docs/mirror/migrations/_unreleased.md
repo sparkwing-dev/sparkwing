@@ -70,15 +70,52 @@ CHANGELOG links here.
 - **Before:** No chart shipped a NetworkPolicy, and `cache.service.type` was a
   free knob.
 - **After:** `sparkwing-runner-bundle` renders a default-deny ingress
-  NetworkPolicy for the cache pod admitting only the release's runner and
-  controller pods, and fails the render when `cache.service.type` is not
-  `ClusterIP` while no token Secret is configured.
-- **Migration:** A cluster whose CNI enforces NetworkPolicy and whose runners
-  live outside the release adds peers through `networkPolicy.extraIngress`, or
-  points `networkPolicy.controllerPodSelector` at its own controller's pod
-  labels. `networkPolicy.enabled=false` removes the policy. A published cache
-  Service needs `controller.tokenSecret.name` set and
+  NetworkPolicy for the cache pod admitting the release's runner, controller,
+  and dashboard pods plus the Job pods the Kubernetes runner backend creates
+  (`app.kubernetes.io/name: sparkwing-runner`), and fails the render when
+  `cache.service.type` is not `ClusterIP` while no token Secret is configured.
+- **Migration:** A cluster whose CNI enforces NetworkPolicy and whose
+  controller or runner pool lives outside the cluster adds peers through
+  `networkPolicy.extraIngress`, giving the rule an `ipBlock` for the caller's
+  source range. A dashboard or controller under a different release points
+  `networkPolicy.webPodSelector` or `networkPolicy.controllerPodSelector` at
+  its own pod labels, and `networkPolicy.runnerJobPodSelector` matches the
+  runner Jobs. `networkPolicy.enabled=false` removes the policy. A published
+  cache Service needs `controller.tokenSecret.name` set and
   `cache.allowUnauthenticated` left false.
+
+## The controller is told where its cache is
+
+- **Before:** `sparkwing-full` gave the controller `SPARKWING_CACHE_TOKEN` but
+  no cache URL, so every `/api/v1/gitcache/*` route answered
+  `404 gitcache proxy is not configured` and `pipeline trigger --working-tree`
+  from off-cluster failed at the seed.
+- **After:** The controller Deployment also carries `SPARKWING_CACHE_URL`,
+  pointing at the bundled cache Service whenever the sub-chart and its cache
+  are enabled.
+- **Migration:** None for a stock install. A cache you run yourself goes in
+  `controller.cache.url`.
+
+## Cache metrics no longer name repositories
+
+- **Before:** The unauthenticated `/metrics` endpoint exported one fetch and
+  reclone series per mirrored repository, labelled with the repository
+  directory name, which is an offline-computable hash of the clone URL.
+- **After:** Those series carry no `repo` label, so scraping `/metrics` cannot
+  enumerate the mirror set or confirm a guessed repository.
+- **Migration:** A dashboard that broke fetch duration out per repository loses
+  that split. Aggregate views are unchanged.
+
+## Expired workspace seeds are archived, not deleted
+
+- **Before:** A workspace ref older than `WORKSPACE_SEED_MAX_AGE` was deleted
+  on the next seed and its objects were pruned immediately, so retrying an
+  older `pipeline trigger --working-tree` run failed with a missing object.
+- **After:** Expiry moves the ref to `refs/sparkwing-workspace-archive/`, which
+  keeps the objects reachable for another seven times
+  `WORKSPACE_SEED_MAX_AGE` or until 128 archived refs accumulate.
+- **Migration:** None. Raise `WORKSPACE_SEED_MAX_AGE` if your retries run
+  further behind than the archive window; set it negative to disable expiry.
 
 ## Managed Git hooks run locally by default
 

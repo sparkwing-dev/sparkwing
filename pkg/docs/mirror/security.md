@@ -124,12 +124,23 @@ seed writes use only `SPARKWING_CACHE_TOKEN`; direct-cache mode never receives
 the controller bearer.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
-cache pod (`networkPolicy.enabled`, on by default) that admits only the
-release's runner and controller pods, and refuses to render a non-`ClusterIP`
-cache Service unless a token Secret is configured. `pipeline trigger
---working-tree` may seed uncommitted source; the cache retains up to 128
-workspace refs per repository and expires them after
-`WORKSPACE_SEED_MAX_AGE` (24 hours by default).
+cache pod (`networkPolicy.enabled`, on by default). It admits the release's
+runner, controller, and dashboard pods plus the Job pods the Kubernetes runner
+backend creates (`app.kubernetes.io/name: sparkwing-runner`), and refuses to
+render a non-`ClusterIP` cache Service unless a token Secret is configured. A
+controller or runner pool outside the cluster reaches the cache through
+`networkPolicy.extraIngress`, which is appended to the rule verbatim and takes
+an `ipBlock` for the caller's source range.
+
+`pipeline trigger --working-tree` may seed uncommitted source; the cache
+retains up to 128 workspace refs per repository and expires them after
+`WORKSPACE_SEED_MAX_AGE` (24 hours by default). Expiry moves the ref into
+`refs/sparkwing-workspace-archive/` rather than dropping it, so a retry of an
+older working-tree run still finds its snapshot; archived refs are dropped
+after seven times `WORKSPACE_SEED_MAX_AGE`, or once 128 of them accumulate.
+
+The cache's unauthenticated `/metrics` carries no per-repository label, so
+scraping it does not enumerate or confirm the mirror set.
 
 ## Local daemon socket
 

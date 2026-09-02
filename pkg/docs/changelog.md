@@ -146,13 +146,36 @@ code change to unlock.
   repository name and refuses to repoint an existing one without the token,
   responses carry `X-Content-Type-Options: nosniff`, artifacts download as
   attachments, and workspace snapshot refs expire after
-  `WORKSPACE_SEED_MAX_AGE` instead of wedging at the retention cap. The
-  runner-bundle chart ships a default-deny ingress NetworkPolicy for the cache
-  (`networkPolicy.enabled`), issues the controller a cache token, and refuses
-  to render a non-`ClusterIP` cache Service with no token configured. The
-  dashboard's `/api/v1/gitcache/` mount rejects a request with no bearer
-  credential and caps concurrent Git streams. See the
+  `WORKSPACE_SEED_MAX_AGE` instead of wedging at the retention cap. A cache
+  started with `--allow-unauthenticated` still accepts a repoint, so a squatted
+  name is recoverable without a restart. The runner-bundle chart ships a
+  default-deny ingress NetworkPolicy for the cache (`networkPolicy.enabled`)
+  admitting the release's runner, controller, and dashboard pods plus the Job
+  pods the Kubernetes runner backend creates, issues the controller a cache
+  token, and refuses to render a non-`ClusterIP` cache Service with no token
+  configured. An off-cluster controller or runner pool is admitted through
+  `networkPolicy.extraIngress`. The dashboard's `/api/v1/gitcache/` mount
+  requires a Sparkwing machine token shape rather than any string, and a
+  request that arrives at the concurrent-stream cap waits a few seconds for a
+  slot before answering `503` with `Retry-After`. See the
   [migration guide](docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
+- **cache:** The unauthenticated `/metrics` endpoint no longer labels its fetch
+  and reclone series with the repository directory name, which is an
+  offline-computable hash of the clone URL. Scraping the cache can no longer
+  enumerate the mirror set or confirm a guessed repository. See the
+  [migration guide](docs/migrations/_unreleased.md#cache-metrics-no-longer-name-repositories).
+- **cache:** A workspace snapshot ref past `WORKSPACE_SEED_MAX_AGE` is now
+  moved to `refs/sparkwing-workspace-archive/` instead of being deleted with
+  its objects pruned, so retrying an older `pipeline trigger --working-tree`
+  run still finds its source. Archived refs are dropped after seven times the
+  window, or once 128 accumulate. See the
+  [migration guide](docs/migrations/_unreleased.md#expired-workspace-seeds-are-archived-not-deleted).
+- **cache:** `sparkwing-full` now renders `SPARKWING_CACHE_URL` on the
+  controller beside `SPARKWING_CACHE_TOKEN`, so the controller's
+  `/api/v1/gitcache/*` proxy works on a stock install instead of answering
+  `404 gitcache proxy is not configured`. Override it with
+  `controller.cache.url`. See the
+  [migration guide](docs/migrations/_unreleased.md#the-controller-is-told-where-its-cache-is).
 - **cli:** The admission daemon's unix socket is now private to its user.
   It binds under `$XDG_RUNTIME_DIR` when one is available, refuses a socket
   directory that is not a `0700` directory owned by the current uid, chmods
