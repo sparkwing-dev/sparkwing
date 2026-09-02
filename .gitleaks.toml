@@ -10,5 +10,5 @@ description = "Illustrative token in the security guide and its embedded mirror"
 regexes = ['''sw_a1b2c3d4e5f6g7h8i9j0k1l2m3n4''']
 
 [[allowlists]]
-description = "Exact artifact and cache key test fixtures"
-regexes = ['''abcd1234-ef567890''', '''artifacts/blobs/0f1e''']
+description = "Placeholder cache key in a retired artifact store test"
+regexes = ['''abcd1234-ef567890''']
