@@ -19,6 +19,10 @@ func ValidateCloneURL(raw string) (string, error) {
 	if strings.ContainsAny(raw, " \t\r\n") {
 		return "", fmt.Errorf("repo URL contains whitespace")
 	}
+	// safety: git reads a leading dash as an option rather than a repository.
+	if strings.HasPrefix(raw, "-") {
+		return "", fmt.Errorf("repo URL must not begin with '-'")
+	}
 	if match := scpLikeRE.FindStringSubmatch(raw); match != nil {
 		if err := validateHost(match[1]); err != nil {
 			return "", err

@@ -26,6 +26,21 @@ external self-host), use the standalone
 [`sparkwing-runner-bundle`](../sparkwing-runner-bundle/) chart
 instead -- this chart pulls it in as a dependency.
 
+## Render the chart
+
+`helm template` stops on the sub-chart's `validate.yaml` unless the runner
+token Secret is named, and the value lives under the sub-chart's key. The
+minimal read-only render is:
+
+```bash
+helm template sparkwing ./charts/sparkwing-full \
+  --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token
+```
+
+`charts/render_test.go` injects that same value, so what it exercises is what
+this renders. The sub-chart is vendored in the repository, so this works in a
+fresh clone with no `helm dependency update` first.
+
 ## Topology
 
 ```
@@ -413,7 +428,7 @@ create one.
 ```yaml
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.6"
+    version: "0.1.7"
     repository: "file://../sparkwing-runner-bundle"
     condition: sparkwing-runner-bundle.enabled
 ```
@@ -431,6 +446,16 @@ helm dep up ./charts/sparkwing-full
 
 This refreshes `Chart.lock` and re-vendors the sub-chart under
 `charts/`.
+
+The vendored `sparkwing-runner-bundle-<version>.tgz` is committed. Helm
+refuses to lint, template, or install a chart whose declared dependency is
+missing from `charts/`, and nothing in the build packages the chart, so
+dropping the tarball would make every documented command in this README fail
+in a fresh clone until the reader ran `helm dependency build` first. The price
+is that two branches that both re-vendor conflict on a binary file;
+`TestVendoredRunnerBundleMatchesItsSource` in `charts/vendor_test.go` compares
+the vendored `values.yaml` and `templates/` against the source chart, and
+`bash bin/regen-all.sh` re-vendors only when that comparison fails.
 
 ## Image registry
 
@@ -503,9 +528,10 @@ The first visit to /login on a fresh cluster offers a "create first
 admin" form. If the users table is already seeded, add accounts with
 `sparkwing cluster users add`.
 
-**`helm template` fails with "no chart found at file://../sparkwing-runner-bundle"**
-You skipped `helm dep up`. Run it once before lint / template /
-install.
+**`helm template` fails with "missing in charts/ directory: sparkwing-runner-bundle"**
+The vendored sub-chart tarball was deleted. Restore it with
+`git checkout charts/sparkwing-full/charts`, or rebuild it with
+`helm dep up ./charts/sparkwing-full`.
 
 ## Source
 

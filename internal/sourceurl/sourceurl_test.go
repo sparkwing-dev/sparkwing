@@ -57,6 +57,8 @@ func TestValidateCloneURLRejectsUnsafeInputs(t *testing.T) {
 		"https://100.100.100.200/repo.git",
 		"https://100.64.0.1/repo.git",
 		"https://3232235777/repo.git",
+		"-upayload@example.com:repo.git",
+		"--upload-pack@example.com:repo.git",
 	}
 	for _, tc := range cases {
 		t.Run(tc, func(t *testing.T) {
