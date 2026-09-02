@@ -39,8 +39,11 @@ filters. It also requires a complete SHA-1 repository. Both modes require an
 A runner started with `--trigger-runner k8s` instead creates one Kubernetes
 Job per node; that is opt-in and neither Helm chart enables it. It requires
 `--runner-sa` (or `SPARKWING_RUNNER_SA`) so the Job pods run under a named
-ServiceAccount rather than the namespace default. Those pods mount no
-ServiceAccount token.
+ServiceAccount rather than the namespace default, and the runner refuses to
+start without it. Those pods mount no ServiceAccount token. The runner pod
+itself does need one to create the Jobs: set
+`runner.automountServiceAccountToken=true` when you run this mode from the
+runner bundle, along with a Role that grants `batch/jobs` create.
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and

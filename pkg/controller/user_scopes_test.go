@@ -134,6 +134,36 @@ func TestCreateUser_RejectsUnknownScope(t *testing.T) {
 	}
 }
 
+func TestCreateUser_RejectsMalformedScopeList(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		scopes []string
+		want   string
+	}{
+		{name: "empty entry", scopes: []string{""}, want: "empty scope"},
+		{name: "blank entry beside a real one", scopes: []string{controller.ScopeRunsRead, "  "}, want: "empty scope"},
+		{
+			name:   "repeated entry",
+			scopes: []string{controller.ScopeRunsRead, controller.ScopeRunsRead},
+			want:   "duplicate scope",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ts := userScopesServer(t)
+			bootstrapAdmin(t, ts)
+			status, body := postUserJSON(t, ts.URL+"/api/v1/users", map[string]any{
+				"name": "narrow", "password": "correct-horse", "scopes": test.scopes,
+			})
+			if status != http.StatusBadRequest {
+				t.Fatalf("create user with %v = %d: %s", test.scopes, status, body)
+			}
+			if !bytes.Contains(body, []byte(test.want)) {
+				t.Errorf("error should name the problem %q; got %s", test.want, body)
+			}
+		})
+	}
+}
+
 func TestListUsers_ReportsScopes(t *testing.T) {
 	ts := userScopesServer(t)
 	bootstrapAdmin(t, ts)

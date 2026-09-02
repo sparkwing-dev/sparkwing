@@ -530,6 +530,9 @@ export async function deleteRun(runID: string): Promise<void> {
   const res = await authFetch(`${API_URL}/api/v1/runs/${runID}`, {
     method: "DELETE",
   });
+  if (res.status === 403) {
+    throw new Error("delete needs the admin scope");
+  }
   if (!res.ok && res.status !== 204) {
     throw new Error(`delete failed: ${res.status}`);
   }

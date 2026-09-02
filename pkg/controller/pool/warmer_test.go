@@ -25,7 +25,7 @@ func TestWarmPVCCancellationStopsAndDeletesTheWarmer(t *testing.T) {
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		result <- WarmPVC(ctx, client, "builds", "sparkwing-cache-pool-1", nil)
+		result <- WarmPVC(ctx, client, "builds", "sparkwing-cache-pool-1", "", nil)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -59,38 +59,50 @@ func TestWarmPVCCancellationStopsAndDeletesTheWarmer(t *testing.T) {
 }
 
 func TestWarmPVCRunsUnderAnUnprivilegedServiceAccountWithNoToken(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	tests := []struct {
+		name           string
+		serviceAccount string
+		want           string
+	}{
+		{name: "empty falls back to the default", serviceAccount: "", want: WarmerServiceAccountName},
+		{name: "release-scoped name is honored", serviceAccount: "other-cache-warmer", want: "other-cache-warmer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-	client := fake.NewSimpleClientset()
-	created := make(chan *corev1.Pod, 1)
-	client.PrependReactor("create", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
-		created <- action.(ktesting.CreateAction).GetObject().(*corev1.Pod)
-		cancel()
-		return false, nil, nil
-	})
+			client := fake.NewSimpleClientset()
+			created := make(chan *corev1.Pod, 1)
+			client.PrependReactor("create", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+				created <- action.(ktesting.CreateAction).GetObject().(*corev1.Pod)
+				cancel()
+				return false, nil, nil
+			})
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_ = WarmPVC(ctx, client, "builds", "sparkwing-cache-pool-1", nil)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				_ = WarmPVC(ctx, client, "builds", "sparkwing-cache-pool-1", tt.serviceAccount, nil)
+			}()
+			t.Cleanup(func() {
+				cancel()
+				<-done
+			})
 
-	timer := time.NewTimer(time.Second)
-	defer timer.Stop()
-	select {
-	case pod := <-created:
-		if pod.Spec.ServiceAccountName != WarmerServiceAccountName {
-			t.Errorf("warmer service account = %q, want %q", pod.Spec.ServiceAccountName, WarmerServiceAccountName)
-		}
-		if pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
-			t.Errorf("automountServiceAccountToken = %v, want false", pod.Spec.AutomountServiceAccountToken)
-		}
-	case <-timer.C:
-		t.Fatal("WarmPVC never created a warmer pod")
+			timer := time.NewTimer(time.Second)
+			defer timer.Stop()
+			select {
+			case pod := <-created:
+				if pod.Spec.ServiceAccountName != tt.want {
+					t.Errorf("warmer service account = %q, want %q", pod.Spec.ServiceAccountName, tt.want)
+				}
+				if pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
+					t.Errorf("automountServiceAccountToken = %v, want false", pod.Spec.AutomountServiceAccountToken)
+				}
+			case <-timer.C:
+				t.Fatal("WarmPVC never created a warmer pod")
+			}
+		})
 	}
 }
