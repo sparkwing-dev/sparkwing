@@ -5,6 +5,52 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## (Breaking) Runner scopes split out of admin
+
+- **Before:** The routes a runner calls to do its job all required `admin`:
+  `POST /api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`,
+  `POST /api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/nodes`,
+  `/runs/{id}/nodes/{nodeID}/start`, `finish`, `/runs/{id}/events`, and
+  `GET /api/v1/secrets/{name}`. `docs/auth.md` and both chart READMEs said a
+  runner needed `nodes.claim` plus `logs.write`, so an operator who followed
+  them shipped a broken runner and fixed it by granting `admin`. The token in
+  the pod that executes pipeline code could therefore mint tokens, read every
+  user, and read every secret in the cluster.
+- **After:** Three new scopes carry that work. `triggers.claim` unlocks the
+  trigger worker lifecycle. `runs.state` unlocks run create and finish, node
+  create, event append, and per-node `start` and `finish`; the two per-node
+  routes additionally require that the caller holds the node's unexpired claim.
+  `secrets.read` unlocks `GET /api/v1/secrets/{name}` alone. Secrets gained an
+  owning repository: run-store schema 22 widens the secrets primary key to
+  `(name, repo)`, `sparkwing secrets set --repo <slug>` stores a
+  repository-scoped row, and a `secrets.read` principal without `admin`
+  resolves a name against the repository of the run whose claim it holds,
+  falling back to an unscoped row only when that repository owns none. A
+  secret stored without `--repo` stays readable by every run. `admin` remains a
+  superset, so existing tokens keep working. The trigger loop no longer puts
+  `--token` on the child process argv; the child reads
+  `SPARKWING_AGENT_TOKEN` from its environment.
+- **Migration:** Upgrade the controller before the runners so the schema-22
+  table exists; older binaries refuse the upgraded SQL store. Re-mint each
+  runner token with `nodes.claim`, `triggers.claim`, `runs.state`,
+  `secrets.read`, and `logs.write`, and drop `admin` from it. A runner that
+  drives nodes in-process without claiming them first still needs `admin`,
+  because `start` and `finish` are claim-bound; give a warm-pool dispatcher
+  `admin` as before. Scope each repository's credentials with
+  `sparkwing secrets set --repo <slug>` and re-check which of the remaining
+  unscoped secrets should stay readable by every run. Go callers of
+  `store.CreateOrReplaceSecret` pass the repo slug as a new `string` argument
+  before `masked`, and `store.DeleteSecret` takes the slug as a second
+  argument; `client.CreateSecret`, `GetSecret`, and `DeleteSecret` keep their
+  signatures and address the unscoped row, with `CreateSecretForRepo`,
+  `GetSecretForRepo`, and `DeleteSecretForRepo` addressing a repository's own.
+- **Why:** Every pool replica and laptop agent holds a runner token, and the
+  process that executes pipeline code holds it too. A token scoped to run work
+  should not be able to mint an admin bearer or read another repository's
+  deploy key with one `os.Getenv`. Keeping the bearer out of the pipeline
+  body's reach entirely, by brokering these calls through a supervisor process,
+  is the remaining design step.
+
 ## Session rows are hashed and the CSRF column is dropped
 
 - **Before:** `sessions` held the raw browser session id and its CSRF token in

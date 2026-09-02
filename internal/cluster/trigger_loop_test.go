@@ -114,6 +114,9 @@ func TestHandleTriggerArgsPutFlagsBeforeTriggerID(t *testing.T) {
 	if got[len(got)-1] != "trigger-1" {
 		t.Fatalf("handleTriggerArgs() last arg = %q, want trigger id", got[len(got)-1])
 	}
+	if slices.Contains(got, "--token") || slices.Contains(got, "token") {
+		t.Fatalf("handleTriggerArgs() = %#v, want the bearer off argv", got)
+	}
 }
 
 func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {

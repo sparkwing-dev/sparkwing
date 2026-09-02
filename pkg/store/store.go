@@ -747,13 +747,16 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Pipeline secrets; encryption at rest is up to the volume.
 CREATE TABLE IF NOT EXISTS secrets (
-    name       TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
     value      TEXT NOT NULL,
     principal  TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     -- masked=0 = non-sensitive config (not redacted in run output).
-    masked     INTEGER NOT NULL DEFAULT 1
+    masked     INTEGER NOT NULL DEFAULT 1,
+    -- repo='' is unscoped: every run resolves it.
+    repo       TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (name, repo)
 );
 
 -- Debug pauses; one row per (run, node, reason).
@@ -823,7 +826,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 21
+const expectedSchemaVersion = 22
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1215,6 +1218,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.ensureColumns("node_dispatches", nodeDispatchRedactionCols)
 	case 21:
 		return s.rehashSessions(ctx)
+	case 22:
+		return s.addSecretRepoScope(ctx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1288,6 +1293,13 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		}
 		_, err := tx.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN IF EXISTS csrf_token`)
 		return err
+	case 22:
+		for _, stmt := range secretRepoScopePostgres {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1619,6 +1631,41 @@ func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 		return err
 	}
 	_, err = tx.Exec(`UPDATE runs SET annotations_json = ? WHERE id = ?`, next, runID)
+	return err
+}
+
+// hack: SQLite cannot alter a primary key in place, so widening it to (name, repo) rebuilds the table.
+const secretsRepoRebuildSQLite = `
+CREATE TABLE secrets_repo_scoped (
+    name       TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    principal  TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    masked     INTEGER NOT NULL DEFAULT 1,
+    repo       TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (name, repo)
+);
+INSERT INTO secrets_repo_scoped (name, value, principal, created_at, updated_at, masked, repo)
+    SELECT name, value, principal, created_at, updated_at, masked, '' FROM secrets;
+DROP TABLE secrets;
+ALTER TABLE secrets_repo_scoped RENAME TO secrets;`
+
+var secretRepoScopePostgres = []string{
+	`ALTER TABLE secrets ADD COLUMN IF NOT EXISTS repo TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE secrets DROP CONSTRAINT IF EXISTS secrets_pkey`,
+	`ALTER TABLE secrets ADD PRIMARY KEY (name, repo)`,
+}
+
+func (s *Store) addSecretRepoScope(ctx context.Context) error {
+	have, err := s.tableColumns("secrets")
+	if err != nil {
+		return err
+	}
+	if have["repo"] {
+		return nil
+	}
+	_, err = s.exec(ctx, secretsRepoRebuildSQLite)
 	return err
 }
 

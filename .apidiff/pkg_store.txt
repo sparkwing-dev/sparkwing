@@ -62,6 +62,7 @@ const ApprovalResolutionDenied = "denied"
 const ApprovalResolutionTimedOut = "timed_out"
 func Argon2Concurrency(budget int64) int
 const Argon2HashBytes = int64(argonMemory) << 10
+func Argon2Slots() int
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
@@ -136,6 +137,7 @@ type DebugPause struct {
 	ReleasedBy  string
 	ReleaseKind string
 }
+const DefaultArgon2AcquireTimeout = 250 * time.Millisecond
 const DefaultArgon2MemoryBudget = int64(256) << 20
 const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
@@ -153,12 +155,18 @@ func DisplayProfileKey(key string) string
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
+var ErrHashingBusy = errors.New("hashing capacity is saturated")
+var ErrInvalidCredentials = errors.New("invalid username or password")
+var ErrInvalidToken = errors.New("invalid token")
 var ErrLockHeld = errors.New("held by another holder")
+var ErrNoTokenCandidates = errors.New("unknown token")
 var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
 var ErrRunNotLive = errors.New("run is not live")
 var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
+var ErrTokenRevoked = errors.New("token is revoked or expired")
+var ErrUnknownToken = errors.New("unknown token")
 type Event struct {
 	RunID   string
 	Seq     int64
@@ -436,6 +444,7 @@ type Secret struct {
 	Name      string
 	Value     string
 	Principal string
+	Repo      string
 	Masked    bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -450,6 +459,7 @@ type Session struct {
 	LastUsedAt *time.Time
 }
 const SessionIDLen = 32
+func SetArgon2AcquireTimeout(d time.Duration) time.Duration
 func SetArgon2MemoryBudget(budget int64) int
 func SetBinaryVersion(v string)
 type SkewError struct {
@@ -499,7 +509,7 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error
 func (s *Store) CreateFirstUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CreateNode(ctx context.Context, n Node) error
-func (s *Store) CreateOrReplaceSecret(name, value, principal string, masked bool, now time.Time) error
+func (s *Store) CreateOrReplaceSecret(name, value, principal, repo string, masked bool, now time.Time) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (raw string, tok *Token, err error)
@@ -508,7 +518,7 @@ func (s *Store) CreateUser(name, password string, scopes []string, now time.Time
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
-func (s *Store) DeleteSecret(name string) error
+func (s *Store) DeleteSecret(name, repo string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteUser(name string, now time.Time) ([]string, error)
 func (s *Store) Dialect() Dialect
@@ -535,6 +545,7 @@ func (s *Store) GetPipelineProfile(ctx context.Context, pipeline, nodeID string)
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error)
 func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
 func (s *Store) GetSecret(name string) (*Secret, error)
+func (s *Store) GetSecretForRepo(name, repo string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, principal, holderID string, lease time.Duration) error
@@ -581,6 +592,7 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
+func (s *Store) RepoForPrincipalClaim(ctx context.Context, principal string, now time.Time) (string, error)
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)

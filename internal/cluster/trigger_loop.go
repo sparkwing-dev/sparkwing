@@ -263,10 +263,10 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 }
 
 func handleTriggerArgs(triggerID string, opts TriggerLoopOptions) []string {
+	// safety: the child reads the bearer from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
 	childArgs := []string{
 		"handle-trigger",
 		"--controller", opts.ControllerURL,
-		"--token", opts.Token,
 	}
 	if opts.LogsURL != "" {
 		childArgs = append(childArgs, "--logs", opts.LogsURL)

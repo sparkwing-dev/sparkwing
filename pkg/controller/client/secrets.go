@@ -18,6 +18,7 @@ type Secret struct {
 	Name      string `json:"name"`
 	Value     string `json:"value,omitempty"`
 	Principal string `json:"principal"`
+	Repo      string `json:"repo,omitempty"`
 	Masked    bool   `json:"masked"`
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`
@@ -26,14 +27,29 @@ type Secret struct {
 // CreateSecret uploads value under name, replacing any existing row.
 // masked=false registers non-secret config (region, log level, etc).
 func (c *Client) CreateSecret(ctx context.Context, name, value string, masked bool) error {
-	body := map[string]any{"name": name, "value": value, "masked": masked}
+	return c.CreateSecretForRepo(ctx, name, value, "", masked)
+}
+
+// CreateSecretForRepo uploads value under name, owned by the given
+// repository slug. An empty repo stores the secret unscoped, where
+// every run resolves it.
+func (c *Client) CreateSecretForRepo(ctx context.Context, name, value, repo string, masked bool) error {
+	body := map[string]any{"name": name, "value": value, "repo": repo, "masked": masked}
 	return c.post(ctx, "/api/v1/secrets", body, http.StatusNoContent, nil)
 }
 
 // GetSecret fetches one row including its value. Returns
 // store.ErrNotFound when the secret doesn't exist.
 func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error) {
-	u := fmt.Sprintf("%s/api/v1/secrets/%s", c.baseURL, url.PathEscape(name))
+	return c.GetSecretForRepo(ctx, name, "")
+}
+
+// GetSecretForRepo fetches the row a repository owns, falling back to
+// the unscoped row. The repo hint is honored only for an admin
+// caller; a narrower principal reads the repository of the run it
+// holds a claim in.
+func (c *Client) GetSecretForRepo(ctx context.Context, name, repo string) (*Secret, error) {
+	u := fmt.Sprintf("%s/api/v1/secrets/%s%s", c.baseURL, url.PathEscape(name), repoQuery(repo))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -85,7 +101,13 @@ func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error) {
 // DeleteSecret removes the row by name. Returns store.ErrNotFound
 // when no row existed.
 func (c *Client) DeleteSecret(ctx context.Context, name string) error {
-	u := fmt.Sprintf("%s/api/v1/secrets/%s", c.baseURL, url.PathEscape(name))
+	return c.DeleteSecretForRepo(ctx, name, "")
+}
+
+// DeleteSecretForRepo removes the row a repository owns. An empty
+// repo removes the unscoped row.
+func (c *Client) DeleteSecretForRepo(ctx context.Context, name, repo string) error {
+	u := fmt.Sprintf("%s/api/v1/secrets/%s%s", c.baseURL, url.PathEscape(name), repoQuery(repo))
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
 		return err
@@ -103,4 +125,11 @@ func (c *Client) DeleteSecret(ctx context.Context, name string) error {
 	default:
 		return readHTTPError(resp)
 	}
+}
+
+func repoQuery(repo string) string {
+	if repo == "" {
+		return ""
+	}
+	return "?repo=" + url.QueryEscape(repo)
 }

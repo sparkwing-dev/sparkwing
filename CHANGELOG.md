@@ -51,6 +51,16 @@ code change to unlock.
 
 ### Security
 
+- **controller (Breaking):** Runners no longer need `admin`. New `triggers.claim`,
+  `runs.state`, and `secrets.read` scopes carry the trigger lifecycle, run and
+  node state writes, and single-secret reads, and `start` and `finish` admit
+  only the principal holding that node's claim. Secrets gained an owning
+  repository (schema 22, `sparkwing secrets set --repo <slug>`): a
+  `secrets.read` caller resolves a name against the repository of the run it
+  holds, so a runner token can no longer read another repository's credentials
+  or mint an admin bearer. A secret stored without `--repo` stays readable by
+  every run. `admin` remains a superset, so existing tokens keep working; see
+  the [migration guide](docs/migrations/_unreleased.md#breaking-runner-scopes-split-out-of-admin).
 - **cli:** The admission daemon's unix socket is now private to its user. Its
   path stays a pure function of `SPARKWING_HOME`, so every caller resolves the
   same socket whatever its environment. The daemon refuses a base directory
@@ -103,14 +113,18 @@ code change to unlock.
   a fixed script. A ConfigMap writer can no longer smuggle shell into the one
   privileged workload Sparkwing creates, nor flood the controller log with
   rejections.
-- **controller:** Login now carries per-client, listener-wide, and per-account
-  budgets, and every argon2id verification passes through a memory-sized
-  semaphore, so unauthenticated callers can no longer exhaust the pod by
-  hashing. Size the semaphore with `--argon2-memory-budget-mb` (chart:
-  `controller.argon2MemoryBudgetMB`) and name proxy networks with
-  `--trusted-proxy-cidrs` (chart: `controller.trustedProxyCIDRs`) so throttling
-  keys on the real client. A rejected bearer token is remembered for a few
-  seconds, so a replayed wrong guess costs one hash.
+- **controller:** Login now carries per-client, listener-wide, and
+  per-account-per-client budgets, bearer verification carries a per-token-prefix
+  failure budget, and every argon2id verification passes through a memory-sized
+  semaphore that sheds with `503` and a `Retry-After` instead of queueing, so
+  unauthenticated callers can no longer exhaust the pod by hashing and no
+  stranger can lock a named user out. Size the semaphore with
+  `--argon2-memory-budget-mb` (chart: `controller.argon2MemoryBudgetMB`) and
+  name proxy networks with `--trusted-proxy-cidrs` (chart:
+  `controller.trustedProxyCIDRs`, which must include the dashboard pod's source)
+  so throttling keys on the real browser. A rejected bearer token is remembered
+  for a few seconds, so a replayed wrong guess costs one hash; store failures
+  are never cached and never echoed to an unauthenticated caller.
 - **logs:** `sparkwing-logs` gains `--require-auth` /
   `SPARKWING_REQUIRE_AUTH`, refusing to start without a controller to resolve
   caller tokens against, reports `"auth"` on `GET /api/v1/health` so
@@ -191,6 +205,15 @@ code change to unlock.
   an unauthenticated controller serves the redacted view. Runner tokens
   claiming their own work are unaffected. See the
   [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-principal).
+
+### Added
+
+- **sdk:** `pkg/store` exports the sentinel errors authentication turns on --
+  `ErrInvalidCredentials`, `ErrInvalidToken`, `ErrUnknownToken`,
+  `ErrNoTokenCandidates`, `ErrTokenRevoked`, and `ErrHashingBusy` -- plus
+  `Argon2Slots` and `SetArgon2AcquireTimeout`, so a caller can tell a rejected
+  credential from a controller that could not answer. `pkg/controller` gains
+  `Authenticator.WithTrustedProxyCIDRs` and `Authenticator.WithLogger`.
 
 ### Fixed
 

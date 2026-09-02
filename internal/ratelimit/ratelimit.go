@@ -8,15 +8,19 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 )
 
 // MaxKeys bounds how many buckets one Limiter tracks. Keys come from
-// untrusted input, so the map is swept and then closed to new keys
-// rather than grown without limit.
+// untrusted input, so a full map sheds its least recently used
+// buckets rather than growing without limit or refusing new keys.
 const MaxKeys = 50000
+
+// perf: evicting this fraction in one pass amortizes the O(n) scan across the insertions that follow it.
+const evictFraction = 16
 
 type bucket struct {
 	tokens     float64
@@ -43,12 +47,13 @@ func New(burst int, window time.Duration) *Limiter {
 }
 
 // Allow consumes one token for key and reports whether it was
-// available. It reports false when the key space is exhausted.
+// available. A full key space evicts its least recently used buckets,
+// so an unseen client is always served.
 func (l *Limiter) Allow(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	b := l.refill(key, now, true)
-	if b == nil || b.tokens < 1 {
+	if b.tokens < 1 {
 		return false
 	}
 	b.tokens--
@@ -56,8 +61,7 @@ func (l *Limiter) Allow(key string, now time.Time) bool {
 }
 
 // Peek reports whether key has a token without consuming one. An
-// exhausted key space reports true; the caller's other limiters still
-// bound the flow.
+// untracked key reports true; it has spent nothing yet.
 func (l *Limiter) Peek(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -71,9 +75,6 @@ func (l *Limiter) Penalize(key string, now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	b := l.refill(key, now, true)
-	if b == nil {
-		return
-	}
 	b.tokens = max(b.tokens-1, 0)
 }
 
@@ -98,10 +99,7 @@ func (l *Limiter) refill(key string, now time.Time, create bool) *bucket {
 			return nil
 		}
 		if len(l.buckets) >= MaxKeys {
-			l.gcLocked(now)
-			if len(l.buckets) >= MaxKeys {
-				return nil
-			}
+			l.evictLocked(now)
 		}
 		b = &bucket{tokens: l.burst, lastRefill: now}
 		l.buckets[key] = b
@@ -114,6 +112,25 @@ func (l *Limiter) refill(key string, now time.Time, create bool) *bucket {
 		b.lastRefill = now
 	}
 	return b
+}
+
+// safety: refusing a new key would let a key flood deny every unseen client, so a full map drops its coldest buckets.
+func (l *Limiter) evictLocked(now time.Time) {
+	l.gcLocked(now)
+	if len(l.buckets) < MaxKeys {
+		return
+	}
+	seen := make([]time.Time, 0, len(l.buckets))
+	for _, b := range l.buckets {
+		seen = append(seen, b.lastRefill)
+	}
+	slices.SortFunc(seen, func(a, b time.Time) int { return a.Compare(b) })
+	cutoff := seen[len(seen)/evictFraction]
+	for k, b := range l.buckets {
+		if !b.lastRefill.After(cutoff) {
+			delete(l.buckets, k)
+		}
+	}
 }
 
 func (l *Limiter) gcLocked(now time.Time) {
