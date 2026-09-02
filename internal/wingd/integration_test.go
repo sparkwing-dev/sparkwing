@@ -1459,7 +1459,7 @@ func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
 	}
 }
 
-func TestOwnerRunAdmissionOrderPromotesOlderOwnerDescendant(t *testing.T) {
+func TestServiceOrderPromotesEarlierParticipantAcrossOwners(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
 
@@ -1494,8 +1494,8 @@ func TestOwnerRunAdmissionOrderPromotesOlderOwnerDescendant(t *testing.T) {
 	})
 	select {
 	case q := <-olderPositions:
-		if q.Position != 1 {
-			t.Fatalf("older child position = %d, want 1 ahead of newer owner's child", q.Position)
+		if q.Position != 2 {
+			t.Fatalf("older child position = %d, want 2 behind the earlier participant", q.Position)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("older child did not queue")
@@ -1504,13 +1504,13 @@ func TestOwnerRunAdmissionOrderPromotesOlderOwnerDescendant(t *testing.T) {
 	if err := blocker.Release(); err != nil {
 		t.Fatalf("release blocker: %v", err)
 	}
-	first := waitResult(t, olderResult, 2*time.Second)
+	first := waitResult(t, newerResult, 2*time.Second)
 	if first.err != nil || first.lease == nil {
-		t.Fatalf("older owner's child was not promoted: lease=%v err=%v", first.lease, first.err)
+		t.Fatalf("earlier participant was not promoted: lease=%v err=%v", first.lease, first.err)
 	}
 	select {
-	case r := <-newerResult:
-		t.Fatalf("newer owner's child resolved first: lease=%v err=%v", r.lease, r.err)
+	case r := <-olderResult:
+		t.Fatalf("later participant resolved first: lease=%v err=%v", r.lease, r.err)
 	case <-time.After(100 * time.Millisecond):
 	}
 

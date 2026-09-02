@@ -40,8 +40,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	// safety: a drained failure budget answers before VerifyUser, so guessing one account costs no argon2 work.
+	if !s.loginLimit.accountAllowed(req.Username, now) {
+		writeRetryAfter(w, loginFailureWindow, "too many failed login attempts for this account")
+		return
+	}
 	u, err := s.store.VerifyUser(req.Username, req.Password, now)
 	if err != nil {
+		s.loginLimit.accountFailed(req.Username, now)
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}

@@ -230,6 +230,13 @@ cache:
 logs:
   enabled: true
 
+  # Serve the log routes to anyone who can reach the Service. false (the
+  # default) requires controller.tokenSecret so the logs service can
+  # resolve each caller's bearer against the controller, and passes
+  # --require-auth so the pod refuses to start open. true is only
+  # appropriate on a bootstrap install, before the Secret exists.
+  allowUnauthenticated: false
+
   replicas: 1
 
   image:

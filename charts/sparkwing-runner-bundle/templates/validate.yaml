@@ -7,6 +7,9 @@
 {{- if and .Values.cache.enabled (ne .Values.cache.service.type "ClusterIP") (or .Values.cache.allowUnauthenticated (not .Values.controller.tokenSecret.name)) -}}
 {{- fail (printf "sparkwing-runner-bundle: cache.service.type=%s publishes the cache outside the cluster with no bearer token on its routes. Set cache.service.type=ClusterIP, or set controller.tokenSecret.name and leave cache.allowUnauthenticated=false" .Values.cache.service.type) -}}
 {{- end -}}
+{{- if and .Values.logs.enabled (not .Values.controller.tokenSecret.name) (not .Values.logs.allowUnauthenticated) -}}
+{{- fail "sparkwing-runner-bundle: logs.enabled=true requires controller.tokenSecret.name, the Secret whose bearer the logs service resolves against the controller before it serves a log route. Set logs.allowUnauthenticated=true to let anyone who can reach the Service read, forge, and delete every run's logs instead" -}}
+{{- end -}}
 {{- $externalGitcache := false -}}
 {{- range .Values.runner.extraEnv -}}
 {{- if eq (default "" .name) "SPARKWING_GITCACHE_URL" -}}

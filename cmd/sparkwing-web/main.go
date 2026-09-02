@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/netip"
 	"os"
 	"os/signal"
-	"strings"
 
 	flag "github.com/spf13/pflag"
 
@@ -15,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -53,7 +52,7 @@ func run(args []string) error {
 	artifactsSpec := fs.String("artifacts-spec", "", "inline artifact backend spec; only consulted when state is object-store-backed")
 
 	_ = fs.Parse(args)
-	trustedProxyCIDRs, err := parseTrustedProxyCIDRs(*trustedProxyCIDRsRaw)
+	trustedProxyCIDRs, err := ratelimit.ParseTrustedProxyCIDRs(*trustedProxyCIDRsRaw)
 	if err != nil {
 		return fmt.Errorf("--trusted-proxy-cidrs: %w", err)
 	}
@@ -136,30 +135,6 @@ func run(args []string) error {
 	}
 
 	return web.Serve(ctx, paths, *addr, trustedProxyCIDRs)
-}
-
-func parseTrustedProxyCIDRs(raw string) ([]netip.Prefix, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	parts := strings.Split(raw, ",")
-	prefixes := make([]netip.Prefix, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		prefix, err := netip.ParsePrefix(part)
-		if err != nil {
-			return nil, fmt.Errorf("invalid CIDR %q: %w", part, err)
-		}
-		if prefix.Addr().Is4In6() {
-			if prefix.Bits() < 96 {
-				return nil, fmt.Errorf("IPv4-mapped CIDR %q must use prefix length /96 through /128", part)
-			}
-			prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-96)
-		}
-		prefixes = append(prefixes, prefix.Masked())
-	}
-	return prefixes, nil
 }
 
 func validateLoginBackend(requireLogin bool, controllerURL string) error {

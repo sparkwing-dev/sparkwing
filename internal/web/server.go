@@ -23,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/docsweb"
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -206,7 +207,7 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	router := http.NewServeMux()
 	router.HandleFunc("/api/health", healthHandler)
 	router.HandleFunc("GET /login", loginPageHandler(opts))
-	loginLimiter := newRateLimiter(loginRateBurst, loginRateWindow)
+	loginLimiter := ratelimit.New(loginRateBurst, loginRateWindow)
 	router.Handle("POST /login",
 		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, loginSubmitHandler(opts))))
 	router.Handle("POST /login/bootstrap",

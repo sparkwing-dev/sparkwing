@@ -328,6 +328,10 @@ func (s *Server) whoami(ctx context.Context, rawToken string) (*logsPrincipal, e
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return nil, fmt.Errorf("whoami decode: %w", err)
 	}
+	// safety: an unauthenticated controller answers whoami 200 for any string, so its anonymous principal is not a caller.
+	if body.Kind == "none" || body.Principal == "unauthed" {
+		return nil, errors.New("controller resolved the token to its unauthenticated principal")
+	}
 	return &logsPrincipal{
 		Name:        body.Principal,
 		Kind:        body.Kind,
@@ -402,12 +406,17 @@ func serveWithTokens(ctx context.Context, root, addr, controllerURL string, logg
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	var problems []string
 
+	authState := "enabled"
+	if s.authDisabled() {
+		authState = "disabled"
+	}
+
 	canary := filepath.Join(s.root, ".health-check")
 	if err := s.writeFile(canary, []byte("ok")); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, `{"status":"degraded","problems":["root: %s"]}`,
-			strings.ReplaceAll(err.Error(), `"`, `\"`))
+		fmt.Fprintf(w, `{"status":"degraded","auth":%q,"problems":["root: %s"]}`,
+			authState, strings.ReplaceAll(err.Error(), `"`, `\"`))
 		return
 	}
 	_ = os.Remove(canary)
@@ -427,10 +436,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	resp := `{"status":"ok"}`
+	resp := fmt.Sprintf(`{"status":"ok","auth":%q}`, authState)
 	if len(problems) > 0 {
 		buf, _ := json.Marshal(map[string]any{
 			"status":   "degraded",
+			"auth":     authState,
 			"problems": problems,
 		})
 		resp = string(buf)

@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/argon2"
 )
 
 // Session is one row in the sessions table.
@@ -333,7 +331,7 @@ func hashPassword(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	key := argonKey(password, salt)
 	return fmt.Sprintf("argon2id$%s$%s", hex.EncodeToString(salt), hex.EncodeToString(key)), nil
 }
 
@@ -350,6 +348,6 @@ func verifyPassword(password, stored string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	cand := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	cand := argonKey(password, salt)
 	return subtle.ConstantTimeCompare(cand, key) == 1, nil
 }
