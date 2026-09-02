@@ -48,6 +48,17 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **logs:** Bound what one runner token can spend on the logs service. Appends
+  read the request body before taking a lock that is now sharded per run and
+  node, so a slow POST no longer stalls every other node's writes. New
+  `--max-node-bytes`, `--max-run-bytes`, `--min-free-bytes`, `--retention`,
+  `--sweep-interval`, `--search-max-bytes`, and `--search-timeout` flags (each
+  with a `SPARKWING_LOGS_*` environment variable) cap stored bytes, expire old
+  runs, and bound one search; `GET /api/v1/logs/search` now requires `run_id`
+  and reports `"truncated": true` when a budget stops the scan. See the
+  [operator checklist](docs/security.md#operator-checklist).
 
 ## [v0.40.0] - 2026-09-02
 ### Security

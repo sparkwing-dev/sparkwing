@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -36,7 +38,39 @@ func run(args []string) error {
 			"guarding against accidentally deploying a logs service that serves, forges, and "+
 			"deletes every run's logs for anyone who can reach it. Leave unset "+
 			"for laptop-local use.")
+
+	defaults := logs.DefaultLimits()
+	maxNodeBytes := fs.Int64("max-node-bytes", envInt64("SPARKWING_LOGS_MAX_NODE_BYTES", defaults.MaxNodeBytes),
+		"stored-byte cap for one node's log; further appends land a truncation marker instead. "+
+			"0 disables the cap (env: SPARKWING_LOGS_MAX_NODE_BYTES)")
+	maxRunBytes := fs.Int64("max-run-bytes", envInt64("SPARKWING_LOGS_MAX_RUN_BYTES", defaults.MaxRunBytes),
+		"stored-byte cap for all node logs in one run; 0 disables the cap "+
+			"(env: SPARKWING_LOGS_MAX_RUN_BYTES)")
+	minFreeBytes := fs.Int64("min-free-bytes", envInt64("SPARKWING_LOGS_MIN_FREE_BYTES", int64(defaults.MinFreeBytes)),
+		"free space on the storage volume below which appends are rejected with 507; "+
+			"0 disables the floor (env: SPARKWING_LOGS_MIN_FREE_BYTES)")
+	retention := fs.Duration("retention", envDuration("SPARKWING_LOGS_RETENTION", defaults.Retention),
+		"how long a run's logs survive after their last write; 0 keeps them forever "+
+			"(env: SPARKWING_LOGS_RETENTION)")
+	sweepInterval := fs.Duration("sweep-interval", envDuration("SPARKWING_LOGS_SWEEP_INTERVAL", defaults.SweepInterval),
+		"how often the retention sweeper runs (env: SPARKWING_LOGS_SWEEP_INTERVAL)")
+	searchMaxBytes := fs.Int64("search-max-bytes", envInt64("SPARKWING_LOGS_SEARCH_MAX_BYTES", defaults.SearchMaxBytes),
+		"bytes one search request may read before it returns a truncated result; "+
+			"0 disables the cap (env: SPARKWING_LOGS_SEARCH_MAX_BYTES)")
+	searchTimeout := fs.Duration("search-timeout", envDuration("SPARKWING_LOGS_SEARCH_TIMEOUT", defaults.SearchTimeout),
+		"how long one search request may scan before it returns a truncated result; "+
+			"0 disables the deadline (env: SPARKWING_LOGS_SEARCH_TIMEOUT)")
 	_ = fs.Parse(args)
+
+	limits := logs.Limits{
+		MaxNodeBytes:   nonNegative(*maxNodeBytes),
+		MaxRunBytes:    nonNegative(*maxRunBytes),
+		MinFreeBytes:   uint64(nonNegative(*minFreeBytes)),
+		Retention:      *retention,
+		SweepInterval:  *sweepInterval,
+		SearchMaxBytes: nonNegative(*searchMaxBytes),
+		SearchTimeout:  *searchTimeout,
+	}
 
 	if *requireAuth {
 		if err := checkControllerURL(*controllerURL); err != nil {
@@ -60,10 +94,44 @@ func run(args []string) error {
 	defer stop()
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-logs"})
 	defer func() { _ = tel.Shutdown(context.Background()) }()
-	if privateRoot {
-		return logs.ServePrivateWithTokens(ctx, *root, *addr, *controllerURL, nil)
+	return logs.ServeWith(ctx, logs.ServeOptions{
+		Root:          *root,
+		Addr:          *addr,
+		ControllerURL: *controllerURL,
+		Private:       privateRoot,
+		Limits:        &limits,
+	})
+}
+
+func nonNegative(n int64) int64 {
+	if n < 0 {
+		return 0
 	}
-	return logs.ServeWithTokens(ctx, *root, *addr, *controllerURL, nil)
+	return n
+}
+
+func envInt64(name string, def int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n < 0 {
+		return def
+	}
+	return n
+}
+
+func envDuration(name string, def time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return def
+	}
+	return d
 }
 
 // safety: --require-auth advertises auth on /api/v1/health, so a URL that resolves no token must not start.

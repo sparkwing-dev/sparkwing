@@ -2,13 +2,14 @@ package logs
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
-	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // SearchResult mirrors web/src/lib/api.ts:LogSearchResult. One
@@ -21,11 +22,20 @@ type SearchResult struct {
 }
 
 // SearchResponse matches the dashboard's LogSearchResponse shape.
+// Truncated reports that a byte, time, or cancellation budget stopped
+// the scan before it read every matching line.
 type SearchResponse struct {
-	Query   string         `json:"query"`
-	Results []SearchResult `json:"results"`
-	Total   int            `json:"total"`
+	Query     string         `json:"query"`
+	Results   []SearchResult `json:"results"`
+	Total     int            `json:"total"`
+	Truncated bool           `json:"truncated,omitempty"`
 }
+
+const (
+	defaultSearchLimit = 100
+	maxSearchLimit     = 500
+	searchClockEvery   = 512
+)
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -33,103 +43,155 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeLogsErr(w, http.StatusBadRequest, "q is required")
 		return
 	}
-	needle := strings.ToLower(q)
 
+	// safety: without a run id the scan walks every stored run, so an unfiltered query is refused.
 	runFilter := r.URL.Query().Get("run_id")
+	if runFilter == "" {
+		writeLogsErr(w, http.StatusBadRequest, "run_id is required")
+		return
+	}
+	if err := validateID(runFilter); err != nil {
+		writeLogsErr(w, http.StatusBadRequest, "run_id: "+err.Error())
+		return
+	}
+
 	nodeFilter := r.URL.Query().Get("node_id")
 	if nodeFilter != "" {
+		if err := validateNodeID(nodeFilter); err != nil {
+			writeLogsErr(w, http.StatusBadRequest, "node_id: "+err.Error())
+			return
+		}
 		nodeFilter = strings.TrimSuffix(nodeFile(nodeFilter), ".log")
 	}
 
-	limit := 100
+	limit := defaultSearchLimit
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			limit = n
 		}
 	}
-	if limit > 500 {
-		limit = 500
+	if limit > maxSearchLimit {
+		limit = maxSearchLimit
 	}
 
 	resp := SearchResponse{Query: q, Results: []SearchResult{}}
 
-	runsDir := filepath.Join(s.root, "runs")
-	if _, err := os.Stat(runsDir); err != nil {
-		writeJSONResponse(w, http.StatusOK, resp)
+	root, err := s.openRunsRoot()
+	if err != nil {
+		s.storeError(w, "open runs root", err)
+		return
+	}
+	defer func() { _ = root.Close() }()
+	entries, err := readRunDir(root, runFilter)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSONResponse(w, http.StatusOK, resp)
+			return
+		}
+		s.storeError(w, "read run dir", err)
 		return
 	}
 
-	err := filepath.WalkDir(runsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	budget := s.newSearchBudget(r.Context())
+	needle := strings.ToLower(q)
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".log") {
+			continue
 		}
-		if d.IsDir() {
-			if path == runsDir {
-				return nil
-			}
-			if runFilter != "" && filepath.Base(path) != runFilter {
-				rel, _ := filepath.Rel(runsDir, path)
-				if !strings.Contains(rel, string(filepath.Separator)) {
-					return fs.SkipDir
-				}
-			}
-			return nil
-		}
-		if !strings.HasSuffix(d.Name(), ".log") {
-			return nil
-		}
-		rel, rerr := filepath.Rel(runsDir, path)
-		if rerr != nil {
-			return nil
-		}
-		parts := strings.Split(filepath.ToSlash(rel), "/")
-		if len(parts) != 2 {
-			return nil
-		}
-		runID := parts[0]
-		nodeID := strings.TrimSuffix(parts[1], ".log")
-		if runFilter != "" && runID != runFilter {
-			return nil
-		}
+		nodeID := strings.TrimSuffix(name, ".log")
 		if nodeFilter != "" && nodeID != nodeFilter {
-			return nil
+			continue
 		}
-
-		if len(resp.Results) >= limit {
-			return fs.SkipAll
+		if budget.spent() || len(resp.Results) >= limit {
+			resp.Truncated = true
+			break
 		}
-		f, oerr := os.Open(path)
+		f, oerr := root.Open(filepath.Join(runFilter, name))
 		if oerr != nil {
-			return nil
+			continue
 		}
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		lineNo := 0
-		for scanner.Scan() {
-			lineNo++
-			line := scanner.Text()
-			if !strings.Contains(strings.ToLower(line), needle) {
-				continue
-			}
-			resp.Total++
-			if len(resp.Results) < limit {
-				resp.Results = append(resp.Results, SearchResult{
-					RunID:   runID,
-					NodeID:  nodeID,
-					Line:    lineNo,
-					Content: line,
-				})
-			}
+		scanNode(f, needle, runFilter, nodeID, limit, budget, &resp)
+		_ = f.Close()
+		if budget.spent() {
+			resp.Truncated = true
+			break
 		}
-		return nil
-	})
-	if err != nil {
-		writeLogsErr(w, http.StatusInternalServerError, err.Error())
-		return
 	}
 
 	writeJSONResponse(w, http.StatusOK, resp)
+}
+
+func scanNode(f *os.File, needle, runID, nodeID string, limit int, budget *searchBudget, resp *SearchResponse) {
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	lineNo := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		lineNo++
+		if budget.charge(int64(len(line)) + 1) {
+			return
+		}
+		if !strings.Contains(strings.ToLower(line), needle) {
+			continue
+		}
+		resp.Total++
+		if len(resp.Results) < limit {
+			resp.Results = append(resp.Results, SearchResult{
+				RunID:   runID,
+				NodeID:  nodeID,
+				Line:    lineNo,
+				Content: line,
+			})
+		}
+	}
+}
+
+type searchBudget struct {
+	ctx      context.Context
+	deadline time.Time
+	maxBytes int64
+	bytes    int64
+	lines    int
+	stopped  bool
+}
+
+func (s *Server) newSearchBudget(ctx context.Context) *searchBudget {
+	b := &searchBudget{ctx: ctx, maxBytes: s.limits.SearchMaxBytes}
+	if s.limits.SearchTimeout > 0 {
+		b.deadline = time.Now().Add(s.limits.SearchTimeout)
+	}
+	return b
+}
+
+func (b *searchBudget) spent() bool {
+	if b.stopped {
+		return true
+	}
+	if b.ctx.Err() != nil {
+		b.stopped = true
+	}
+	return b.stopped
+}
+
+// perf: the wall clock is read once per block of lines because a per-line read costs more than the scan itself.
+func (b *searchBudget) charge(n int64) bool {
+	if b.stopped {
+		return true
+	}
+	b.bytes += n
+	if b.maxBytes > 0 && b.bytes > b.maxBytes {
+		b.stopped = true
+		return true
+	}
+	b.lines++
+	if b.lines%searchClockEvery != 0 {
+		return false
+	}
+	if b.ctx.Err() != nil || (!b.deadline.IsZero() && time.Now().After(b.deadline)) {
+		b.stopped = true
+	}
+	return b.stopped
 }
 
 func writeJSONResponse(w http.ResponseWriter, status int, body any) {
