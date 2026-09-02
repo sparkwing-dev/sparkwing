@@ -15,7 +15,7 @@ func NodeTimeoutPausedForTest(ctx context.Context) bool {
 	return controller.err == nil && controller.paused
 }
 
-func NodeTimeoutStateForTest(ctx context.Context) (remaining time.Duration, paused bool, ok bool) {
+func NodeTimeoutStateForTest(ctx context.Context) (remaining time.Duration, paused, ok bool) {
 	controller := nodeTimeoutControllerFromContext(ctx)
 	if controller == nil {
 		return 0, false, false

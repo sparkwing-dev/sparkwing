@@ -8,7 +8,7 @@ import (
 	"os/exec"
 )
 
-func execChild(bin string, args []string, env []string) error {
+func execChild(bin string, args, env []string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = os.Stdin, os.Stdout, os.Stderr, env
 	if err := cmd.Run(); err != nil {

@@ -355,7 +355,7 @@ func (s *etaSimulation) resourceBudget(run *etaRun, resource string) (demand, us
 				older = saturatingAddUint64(older, nonnegativeInt64(holder.cores))
 			}
 		}
-		return
+		return demand, used, older, capacity, ok
 	case "memory":
 		demand, capacity, ok = run.mem, s.capMem, true
 		for _, holder := range s.active {
@@ -364,7 +364,7 @@ func (s *etaSimulation) resourceBudget(run *etaRun, resource string) (demand, us
 				older = saturatingAddUint64(older, holder.mem)
 			}
 		}
-		return
+		return demand, used, older, capacity, ok
 	}
 	key := resource[len("semaphore:"):]
 	claim, found := etaClaimFor(run, key)
@@ -382,7 +382,7 @@ func (s *etaSimulation) resourceBudget(run *etaRun, resource string) (demand, us
 			older = saturatingAddUint64(older, held.cost)
 		}
 	}
-	return
+	return demand, used, older, capacity, ok
 }
 
 func etaFitsCost(used, cost, capacity uint64) bool {

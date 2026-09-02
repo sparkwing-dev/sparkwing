@@ -13,11 +13,11 @@ import (
 
 const childTerminationGrace = 5 * time.Second
 
-func execChild(bin string, args []string, env []string) error {
+func execChild(bin string, args, env []string) error {
 	return execChildWith(bin, args, env, nil)
 }
 
-func execChildWith(bin string, args []string, env []string, beforeStart func()) error {
+func execChildWith(bin string, args, env []string, beforeStart func()) error {
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	cmd := exec.Command(bin, args...)
