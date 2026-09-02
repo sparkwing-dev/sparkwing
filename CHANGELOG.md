@@ -71,6 +71,15 @@ code change to unlock.
   transaction, so an interrupted upgrade leaves the database on the last
   version it fully applied instead of a half-built schema the next open
   refuses to repair. Postgres already migrated inside one transaction.
+- **store:** Concurrency reservations work against Postgres. The marker that
+  tags an inherited holder in `concurrency_holders.node_id` was a NUL-prefixed
+  string, and Postgres refuses NUL in a text column, so every acquire and
+  release on a Postgres-backed deployment failed with SQLSTATE 22021 and fell
+  through to the reaper. The marker is now `\inherited:`, a shape no node id
+  can take because node ids may not contain a backslash, and the object-store
+  backend uses the same shape. Run-store schema 27 rewrites the marker in an
+  existing SQLite database, so no row is left in a form the new code cannot
+  match; a Postgres database needs no rewrite because it never accepted one.
 - **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
   it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
   of printing a skip and exiting 0, so the comment and `#nosec` annotation

@@ -277,19 +277,15 @@ func TestPostgresResolveWaiterPromotesOnceUnderConcurrentPoll(t *testing.T) {
 	st := openPGTestStore(t)
 	ctx := context.Background()
 
-	if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	acquireT(t, st, store.AcquireSlotRequest{
 		Key: "resolve-slot", HolderID: "leader", RunID: "leader", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
-	}); err != nil {
-		t.Fatalf("acquire leader: %v", err)
-	}
+	})
 	for i := 0; i < 2; i++ {
-		if _, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		acquireT(t, st, store.AcquireSlotRequest{
 			Key: "resolve-slot", HolderID: fmt.Sprintf("w-%d", i), RunID: fmt.Sprintf("waiter-%d", i), NodeID: "n",
 			Capacity: 1, Policy: store.OnLimitQueue,
-		}); err != nil {
-			t.Fatalf("acquire waiter %d: %v", i, err)
-		}
+		})
 	}
 	if _, err := st.DB().ExecContext(ctx,
 		`DELETE FROM concurrency_holders WHERE key = $1 AND holder_id = $2`,

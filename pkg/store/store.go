@@ -854,7 +854,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 26
+const expectedSchemaVersion = 27
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1271,6 +1271,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return addTriggerWebhookReplayKey(ctx, tx)
 	case 26:
 		return uniqueTokenPrefixIndexTx(ctx, tx)
+	case 27:
+		return rewriteLegacyInheritedHolderMarkers(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1370,6 +1372,11 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return err
 	case 26:
 		return uniqueTokenPrefixIndexTx(ctx, tx)
+	case 27:
+		// safety: Postgres refused every write of the NUL marker with
+		// SQLSTATE 22021, so no row here can carry it and the rewrite
+		// would only bind a NUL that Postgres rejects again.
+		return nil
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

@@ -87,7 +87,9 @@ type s3Holder struct {
 
 const (
 	inheritedS3HolderDeclaredCapacity = -1
-	inheritedS3HolderNodePrefix       = "\x00inherited:"
+	// safety: the marker shares the store's shape so the two backends
+	// stay comparable, and node ids can never hold a backslash.
+	inheritedS3HolderNodePrefix = `\inherited:`
 )
 
 func inheritedS3HolderNodeID(holderID string) string {
