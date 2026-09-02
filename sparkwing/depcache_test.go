@@ -238,12 +238,97 @@ func TestExtractRejectsSymlinkChain(t *testing.T) {
 	if err := extractDepCacheArchive(rf, dest); err == nil {
 		t.Fatal("symlink chain out of the destination was accepted")
 	}
+	if _, err := os.Readlink(filepath.Join(dest, "e")); !os.IsNotExist(err) {
+		t.Fatalf("escaping link was left in the destination (readlink err=%v)", err)
+	}
 	data, err := os.ReadFile(victim)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(data) != "original" {
 		t.Fatalf("file outside the destination was overwritten: %q", data)
+	}
+}
+
+func writeSymlinkedAncestorArchive(t *testing.T, path string, depth int, target string) {
+	t.Helper()
+	var hdrs []*tar.Header
+	var parts []string
+	for range depth {
+		parts = append(parts, "d")
+		hdrs = append(hdrs, &tar.Header{Name: strings.Join(parts, "/"), Typeflag: tar.TypeDir, Mode: 0o755})
+	}
+	deep := strings.Join(parts, "/")
+	hdrs = append(hdrs,
+		&tar.Header{Name: deep + "/L", Typeflag: tar.TypeSymlink, Linkname: strings.Repeat("../", depth), Mode: 0o777},
+		&tar.Header{Name: deep + "/L/pwn", Typeflag: tar.TypeSymlink, Linkname: strings.Repeat("../", depth+1) + target, Mode: 0o777},
+	)
+	writeRawDepArchive(t, path, hdrs, nil)
+}
+
+func TestExtractRejectsLinkUnderSymlinkedAncestor(t *testing.T) {
+	for _, depth := range []int{1, 40} {
+		t.Run(fmt.Sprintf("depth%d", depth), func(t *testing.T) {
+			base := t.TempDir()
+			dest := filepath.Join(base, "dest")
+			archive := filepath.Join(t.TempDir(), "esc.tar.gz")
+			writeSymlinkedAncestorArchive(t, archive, depth, "etc/passwd")
+
+			rf, err := os.Open(archive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rf.Close()
+			if err := extractDepCacheArchive(rf, dest); err == nil {
+				t.Fatal("link under a symlinked ancestor was accepted")
+			}
+			if _, err := os.Readlink(filepath.Join(dest, "pwn")); !os.IsNotExist(err) {
+				t.Fatalf("escaping link was left in the destination (readlink err=%v)", err)
+			}
+		})
+	}
+}
+
+func TestExtractRejectsAbsoluteLinkTarget(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "dest")
+	archive := filepath.Join(t.TempDir(), "abs.tar.gz")
+	writeRawDepArchive(t, archive, []*tar.Header{
+		{Name: "link", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd", Mode: 0o777},
+	}, nil)
+
+	rf, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rf.Close()
+	if err := extractDepCacheArchive(rf, dest); err == nil {
+		t.Fatal("absolute link target was accepted")
+	}
+	if _, err := os.Readlink(filepath.Join(dest, "link")); !os.IsNotExist(err) {
+		t.Fatalf("absolute link was left in the destination (readlink err=%v)", err)
+	}
+}
+
+func TestExtractKeepsContainedRelativeLink(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "dest")
+	archive := filepath.Join(t.TempDir(), "ok.tar.gz")
+	writeRawDepArchive(t, archive, []*tar.Header{
+		{Name: "bin", Typeflag: tar.TypeDir, Mode: 0o755},
+		{Name: "lib/tool", Typeflag: tar.TypeReg, Mode: 0o644, Size: 2},
+		{Name: "bin/tool", Typeflag: tar.TypeSymlink, Linkname: "../lib/tool", Mode: 0o777},
+	}, map[string][]byte{"lib/tool": []byte("ok")})
+
+	rf, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rf.Close()
+	if err := extractDepCacheArchive(rf, dest); err != nil {
+		t.Fatalf("contained relative link rejected: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dest, "bin", "tool"))
+	if err != nil || string(got) != "ok" {
+		t.Fatalf("link does not resolve to the archived file: %q err=%v", got, err)
 	}
 }
 

@@ -93,11 +93,16 @@ code change to unlock.
 - **cache + orchestrator:** The dependency-cache and lint-cache archives now
   extract through one `os.Root`-backed implementation that refuses to follow a
   symlink out of the target directory, so a chain of links inside an archive can
-  no longer land a file outside the cache. Both extractors share one extraction
-  budget, which the lint cache previously lacked entirely, and both mask entry
-  modes to `0o777`. Consumed artifacts stage through the workspace root under a
-  per-blob size cap with the manifest mode masked the same way, so a symlink
-  left in a workspace cannot capture the write.
+  no longer land a file outside the cache. An archived symlink is rejected when
+  its target is absolute, when it climbs past the entry's own depth, or when any
+  ancestor of the entry is itself a symlink, and directory modes are clamped to
+  `0o755` instead of being restored from the archive verbatim. Each extraction
+  is bounded by its own size budget, which the lint cache previously lacked
+  entirely, and the lint cache now expands into a sibling directory that is
+  renamed into place, so a rejected entry leaves the previous cache intact.
+  Consumed artifacts stage through the workspace root under a per-blob and a
+  per-run size cap with the manifest mode masked to `0o777`, so a symlink left
+  in a workspace cannot capture the write.
 
 ## [v0.40.0] - 2026-09-02
 ### Security

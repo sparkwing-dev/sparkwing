@@ -10,6 +10,7 @@ import (
 	"strings"
 )
 
+// safety: bounds one extraction, so a gzip bomb cannot fill the disk.
 var maxExtractBytes = int64(20 << 30)
 
 type tarExtractPolicy struct {
@@ -64,7 +65,10 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 			if err := root.MkdirAll(rel, provisionalDirPerm); err != nil {
 				return err
 			}
-			deferredDirModes = append(deferredDirModes, dirMode{rel, hdr.FileInfo().Mode().Perm() | policy.minDirPerm})
+			// safety: chmod ignores the umask, so clamp the archive's mode
+			// instead of letting it leave a world-writable directory.
+			mode := hdr.FileInfo().Mode().Perm()&maxDirPerm | policy.minDirPerm
+			deferredDirModes = append(deferredDirModes, dirMode{rel, mode})
 
 		case tar.TypeReg:
 			if err := mkdirParent(root, rel); err != nil {
@@ -95,10 +99,10 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 			if !policy.allowSymlinks {
 				continue
 			}
-			if err := symlinkStaysInside(dir, filepath.Join(dir, rel), hdr.Linkname); err != nil {
+			if err := mkdirParent(root, rel); err != nil {
 				return err
 			}
-			if err := mkdirParent(root, rel); err != nil {
+			if err := symlinkStaysInside(root, rel, hdr.Linkname); err != nil {
 				return err
 			}
 			_ = root.Remove(rel)
@@ -119,7 +123,10 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 	return nil
 }
 
-const provisionalDirPerm = fs.FileMode(0o700)
+const (
+	provisionalDirPerm = fs.FileMode(0o755)
+	maxDirPerm         = fs.FileMode(0o755)
+)
 
 func mkdirParent(root *os.Root, rel string) error {
 	parent := filepath.Dir(rel)
@@ -137,16 +144,82 @@ func secureArchiveRel(name string) (string, error) {
 	return clean, nil
 }
 
-func symlinkStaysInside(root, dest, linkname string) error {
-	var target string
-	if filepath.IsAbs(linkname) {
-		target = filepath.Clean(linkname)
-	} else {
-		target = filepath.Clean(filepath.Join(filepath.Dir(dest), linkname))
+// safety: os.Root constrains where a link is created, never where it points,
+// so measure the target from the entry's real parent, not its lexical one.
+func symlinkStaysInside(root *os.Root, rel, linkname string) error {
+	link := filepath.FromSlash(linkname)
+	if link == "" || filepath.IsAbs(link) {
+		return fmt.Errorf("archive symlink %q -> %q is not a relative link", rel, linkname)
 	}
-	rel, err := filepath.Rel(filepath.Clean(root), target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("archive symlink %q -> %q escapes the target directory", dest, linkname)
+	if err := refuseSymlinkedAncestors(root, rel); err != nil {
+		return err
+	}
+	target := filepath.Clean(filepath.Join(filepath.Dir(rel), link))
+	if target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("archive symlink %q -> %q escapes the target directory", rel, linkname)
+	}
+	return nil
+}
+
+// safety: a symlinked ancestor makes the entry's real depth shallower than its
+// name, which is how a link that reads as contained lands outside the root.
+func refuseSymlinkedAncestors(root *os.Root, rel string) error {
+	parent := filepath.Dir(rel)
+	if parent == "." {
+		return nil
+	}
+	parts := strings.Split(parent, string(filepath.Separator))
+	for i := range parts {
+		ancestor := filepath.Join(parts[:i+1]...)
+		fi, err := root.Lstat(ancestor)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if fi.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("archive entry %q sits under the symlinked directory %q", rel, filepath.ToSlash(ancestor))
+		}
+	}
+	return nil
+}
+
+// safety: extract beside the target and swap it in with a rename, so a
+// concurrent reader sees the previous cache or the new one, never a partial
+// one, and a rejected entry leaves the previous cache in place.
+func extractIntoDirStaged(dir, stagePattern string, extract func(stage string) error) error {
+	parent := filepath.Dir(dir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	stage, err := os.MkdirTemp(parent, stagePattern)
+	if err != nil {
+		return err
+	}
+	if err := extract(stage); err != nil {
+		_ = os.RemoveAll(stage)
+		return err
+	}
+
+	retired := stage + ".retired"
+	swapped := false
+	switch err := os.Rename(dir, retired); {
+	case err == nil:
+		swapped = true
+	case !os.IsNotExist(err):
+		_ = os.RemoveAll(stage)
+		return err
+	}
+	if err := os.Rename(stage, dir); err != nil {
+		if swapped {
+			_ = os.Rename(retired, dir)
+		}
+		_ = os.RemoveAll(stage)
+		return err
+	}
+	if swapped {
+		_ = os.RemoveAll(retired)
 	}
 	return nil
 }
