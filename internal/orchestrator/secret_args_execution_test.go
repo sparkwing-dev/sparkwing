@@ -41,9 +41,14 @@ func execControllerWithSecretRun(t *testing.T, runID string) (*store.Store, *cli
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	raw, _, err := st.CreateToken("pod", store.TokenKindRunner,
+		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	t.Cleanup(srv.Close)
-	return st, client.New(srv.URL, nil)
+	return st, client.NewWithToken(srv.URL, nil, raw)
 }
 
 func TestSecretArgs_ExecutionFetchCarriesPlaintextAndSeedsTheMasker(t *testing.T) {
@@ -188,5 +193,36 @@ func TestSecretArgs_RemoteReplaySideloadRoundTripsPlaintext(t *testing.T) {
 	}
 	if replay.RedactedForDisplay().Args["token"] != store.RedactedArgValue {
 		t.Error("replay run does not redact for display")
+	}
+}
+
+func TestSecretArgs_ExecutionFetchOnAnUnauthenticatedController(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	err = st.CreateRun(context.Background(), store.Run{
+		ID: "run-1", Pipeline: "deploy", Status: "running",
+		Args: map[string]string{"token": execSecretValue, "env": execVisibleValue},
+		Invocation: map[string]any{
+			"args":                        map[string]string{"token": execSecretValue},
+			store.InvocationSecretArgsKey: []string{"token"},
+		},
+		StartedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	t.Cleanup(srv.Close)
+
+	run, err := client.New(srv.URL, nil).GetRunForExecution(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("GetRunForExecution: %v", err)
+	}
+	if run.Args["token"] != execSecretValue {
+		t.Fatalf("pod fetched args[token] = %q from an unauthenticated controller, want plaintext -- it would execute with that literal",
+			run.Args["token"])
 	}
 }

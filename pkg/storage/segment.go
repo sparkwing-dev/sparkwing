@@ -46,6 +46,28 @@ func SafeRelPath(id string) error {
 	return nil
 }
 
+// SafeArtifactKey validates an artifact key: a SafeRelPath whose segments
+// use only ASCII letters, digits, ".", "_", and "-" and never start with a
+// dot, so the key survives URL, object-store, and shard handling unchanged.
+func SafeArtifactKey(key string) error {
+	if err := SafeRelPath(key); err != nil {
+		return err
+	}
+	for _, seg := range strings.Split(key, "/") {
+		if seg[0] == '.' {
+			return fmt.Errorf("storage: artifact key segment %q starts with a dot", seg)
+		}
+		for _, r := range seg {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			default:
+				return fmt.Errorf("storage: artifact key %q contains %q", key, r)
+			}
+		}
+	}
+	return nil
+}
+
 // SafeLogIDs validates a (runID, nodeID) pair at a log-store boundary:
 // the run ID is a single segment, the node ID may be hierarchical.
 func SafeLogIDs(runID, nodeID string) error {

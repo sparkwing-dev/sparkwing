@@ -135,16 +135,27 @@ func TestRunnerFallsBackAfterClaimWindow(t *testing.T) {
 
 func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
 	claimed := make(chan struct{})
+	revokeServed := make(chan struct{})
+	var touches atomic.Int64
 	st, ctrl, cleanup := newWarmPoolFixture(t, nil, func(next http.Handler, st *store.Store) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if strings.HasSuffix(req.URL.Path, "/touch") {
+				touches.Add(1)
+			}
 			if strings.HasSuffix(req.URL.Path, "/revoke-ready") {
-				node, err := st.ClaimNextReadyNode(req.Context(), "agent:remote-workstation", time.Minute, nil)
+				node, err := st.ClaimNextReadyNode(req.Context(), store.ClaimIdentity{
+					Principal:   "remote-workstation",
+					TokenPrefix: "swr_remote-workstation",
+				}, "agent:remote-workstation", time.Minute, nil)
 				if err != nil {
 					t.Errorf("claim during handoff: %v", err)
 				} else if node.NodeID != "build" {
 					t.Errorf("claimed node = %q, want build", node.NodeID)
 				}
 				close(claimed)
+				next.ServeHTTP(w, req)
+				close(revokeServed)
+				return
 			}
 			next.ServeHTTP(w, req)
 		})
@@ -152,8 +163,9 @@ func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
 	defer cleanup()
 	fallback := &fallbackRunner{}
 	r := New(ctrl, fallback, Config{
-		PollInterval:     5 * time.Millisecond,
-		ClaimWaitTimeout: 10 * time.Millisecond,
+		PollInterval:      5 * time.Millisecond,
+		ClaimWaitTimeout:  10 * time.Millisecond,
+		HeartbeatInterval: time.Millisecond,
 	}, quietTestLogger())
 
 	done := make(chan runner.Result, 1)
@@ -165,6 +177,17 @@ func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
 	case <-claimed:
 	case <-time.After(time.Second):
 		t.Fatal("runner never attempted the fallback handoff")
+	}
+	select {
+	case <-revokeServed:
+	case <-time.After(time.Second):
+		t.Fatal("runner never completed the fallback handoff request")
+	}
+	time.Sleep(10 * time.Millisecond)
+	touchCount := touches.Load()
+	time.Sleep(10 * time.Millisecond)
+	if got := touches.Load(); got != touchCount {
+		t.Fatalf("pre-claim heartbeat continued after handoff: %d -> %d", touchCount, got)
 	}
 	if err := st.FinishNode(context.Background(), "run-1", "build", string(sparkwing.Failed), "remote failure", []byte(`{"remote":true}`)); err != nil {
 		t.Fatal(err)
@@ -274,8 +297,9 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 	defer cleanup()
 	fallback := &fallbackRunner{}
 	r := New(ctrl, fallback, Config{
-		PollInterval:     5 * time.Millisecond,
-		ClaimWaitTimeout: time.Second,
+		PollInterval:      time.Millisecond,
+		ClaimWaitTimeout:  time.Second,
+		HeartbeatInterval: time.Millisecond,
 	}, quietTestLogger())
 
 	done := make(chan runner.Result, 1)
@@ -283,7 +307,10 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 		done <- r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
 	}()
 	for {
-		node, err := st.ClaimNextReadyNode(context.Background(), "agent:offline-server", time.Millisecond, nil)
+		node, err := st.ClaimNextReadyNode(context.Background(), store.ClaimIdentity{
+			Principal:   "offline-server",
+			TokenPrefix: "swr_offline-server",
+		}, "agent:offline-server", 10*time.Millisecond, nil)
 		if err == nil {
 			if node.NodeID != "build" {
 				t.Fatalf("claimed node = %q, want build", node.NodeID)
@@ -295,7 +322,17 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	time.Sleep(2 * time.Millisecond)
+	for {
+		node, err := st.GetNode(context.Background(), "run-1", "build")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if node.StatusDetail == "claimed by agent:offline-server" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
 	pairs, err := store.Maintenance.FailExpiredNodeClaims(st, context.Background())
 	if err != nil {
 		t.Fatal(err)

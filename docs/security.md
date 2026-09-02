@@ -2,6 +2,11 @@
 
 How sparkwing protects code, credentials, and infrastructure.
 
+Report suspected vulnerabilities through
+[GitHub's private vulnerability form](https://github.com/sparkwing-dev/sparkwing/security/advisories/new),
+not a public issue. The repository [security policy](https://github.com/sparkwing-dev/sparkwing/security/policy)
+defines supported versions and the information to include.
+
 ## Authentication and authorization
 
 Controller and logs requests carry a bearer token; each route declares
@@ -11,6 +16,63 @@ kinds, the scope set, per-endpoint enforcement, the unauthenticated
 endpoints, and first-visit admin bootstrap -- is in
 [auth.md](auth.md). Sparkwing does not have a "root token"; the `admin`
 scope is the superset.
+
+## Login and hashing budgets
+
+`POST /api/v1/auth/login` is the controller's only unauthenticated route
+that hashes a password, so it carries its own budgets. One client gets 30
+attempts a minute; the listener as a whole gets 600 per concurrent argon2
+slot, which bounds hashing work without throttling a fleet's real logins.
+Both answer `429` with `Retry-After` once drained.
+
+A failed login also charges a budget keyed on the account **and** the
+client address: 5 failures, refilling one every three minutes. Keying it
+on both is deliberate. An account-only budget would let any stranger lock
+a named user out of the dashboard with 20 requests an hour, so a wrong
+guesser only ever slows itself down; the per-client and listener buckets
+remain the outer bound on how much guessing one source can do. The budget
+charges failures only, so a busy account is never locked out by its
+successes.
+
+Bearer verification carries the same protection, keyed on the client
+address and the 12-character token prefix, which is public
+(`sparkwing cluster tokens list` prints it). Ten failed verifications for one
+prefix from one client in a minute and further attempts answer `429`
+without hashing. Keying on the pair matters for the same reason it does
+for login: a prefix-only budget would let a stranger who reads a prefix
+deny that runner its own token on any cold cache. Only a genuine hash
+mismatch spends the budget, so a prefix that matches no stored row costs
+an indexed `SELECT` and nothing more, and a valid token served from the
+principal cache spends nothing at all. The controller also remembers a
+rejected raw token for five seconds, so a client replaying one wrong
+guess pays for a single hash; that cache evicts its coldest entries when
+full rather than closing to new ones.
+
+Every argon2id verification, login and bearer-token lookup alike, passes
+through a semaphore sized by `--argon2-memory-budget-mb` (chart:
+`controller.argon2MemoryBudgetMB`, default 256). One hash holds 64 MiB
+while it runs, so the default admits four at a time. A hash waits at most
+250ms for a slot; past that the request is shed with `503` and a
+`Retry-After` rather than queued, so a flood cannot grow an unbounded
+backlog behind legitimate callers. Raise the budget only alongside the
+pod's memory limit. A runner whose token is in the 60-second principal
+cache never reaches the store or the semaphore at all, so heartbeats are
+unaffected by a login flood.
+
+An unauthenticated caller never sees a store error verbatim. Anything
+that is not an authentication rejection answers `503` with a generic
+message and the detail goes to the controller log.
+
+Login throttling keys on the TCP peer and ignores forwarded headers until
+you name the proxy networks in `--trusted-proxy-cidrs` (chart:
+`controller.trustedProxyCIDRs`). The dashboard forwards each browser's
+address to the controller, so that list must include the web pod's source
+or every dashboard login shares one client budget. Set the web pod's
+address where you pin it; where the pod IP is unknown, set the cluster pod
+CIDR (`10.244.0.0/16` on kubeadm and kind, `10.42.0.0/16` on k3s) and
+accept that any pod in that range can then supply `X-Forwarded-For`. List
+the narrowest range that contains the web pod. Leaving it empty stays safe
+and turns coarse: every browser then shares the proxy's budget.
 
 ## Webhooks
 
@@ -65,21 +127,101 @@ than accepting an unknown signer.
 
 ## Cache service
 
-`sparkwing-cache` requires a bearer token on its external **write**
-endpoints (`--api-token`, falling back to `$SPARKWING_API_TOKEN`); an
-empty token disables auth. Read endpoints (clone, file access, repo
-listing) are reachable only in-cluster via the Service, not the
-ingress. In-cluster callers reach it directly without a token.
+`sparkwing-cache` requires a bearer token (`--api-token`, falling back to
+`$SPARKWING_API_TOKEN`) on every route that touches repository content: git
+clone and registration, archives, single files, tree hashes, branch
+membership, the repo listing, artifacts, and the blob and sync endpoints. It
+refuses to start without one unless the operator passes
+`--allow-unauthenticated` (`$SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`), which
+logs a startup warning. The guard has no network-location exemption: an
+in-cluster caller, a port-forward, and an ingress request are all rejected
+without the bearer, because a caller-controlled header cannot prove where a
+request came from. `/health`, `/metrics`, `/stats`, and the pull-through
+package proxy under `/proxy/` stay open, because package managers fetch
+through the proxy without a credential and it serves upstream registry bytes
+rather than repository content.
 
-Off-cluster runners read Git through the controller's admin-scoped
-`/api/v1/gitcache/git/...` proxy. The controller removes its bearer before the
-internal request and permits only registration and upload-pack reads. A
-login-enabled dashboard exposes that path to machine bearers without accepting
-browser session credentials. Direct-cache binary and seed writes use only
-`SPARKWING_CACHE_TOKEN`; direct-cache mode never receives the controller bearer.
-Keep the raw cache Service private: `pipeline trigger --working-tree` may seed
-uncommitted source, and the cache retains up to 128 workspace refs per
-repository.
+Registering a repository name validates it against
+`^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a
+different repository requires the token even on an unauthenticated cache.
+Every response carries `X-Content-Type-Options: nosniff`, and artifact
+downloads are served as `application/octet-stream` attachments.
+
+Off-cluster runners read Git through
+`/api/v1/runs/<run>/gitcache/git/...`. That route requires `nodes.claim`, a
+live claim on the named run, and the repository recorded on its trigger. The
+unscoped `/api/v1/gitcache/git/...` route remains admin-only. The controller
+drops the caller's bearer and presents its own cache credential upstream, and
+permits only registration and upload-pack reads. A login-enabled dashboard
+exposes those paths to machine bearers without accepting browser sessions:
+the mount rejects a request carrying no bearer before it extends the half-hour
+stream deadline or proxies anything, and caps concurrent Git streams. A
+direct cache uses the separately configured `cache_token` instead.
+
+The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
+cache pod (`networkPolicy.enabled`, on by default). It admits the release's
+runner, controller, and dashboard pods plus the Job pods the Kubernetes runner
+backend creates (`app.kubernetes.io/name: sparkwing-runner`), and refuses to
+render a non-`ClusterIP` cache Service unless a token Secret is configured. A
+controller or runner pool outside the cluster reaches the cache through
+`networkPolicy.extraIngress`, which is appended to the rule verbatim and takes
+an `ipBlock` for the caller's source range.
+
+`pipeline trigger --working-tree` may seed uncommitted source; the cache
+retains up to 128 workspace refs per repository and expires them after
+`WORKSPACE_SEED_MAX_AGE` (24 hours by default). Expiry moves the ref into
+`refs/sparkwing-workspace-archive/` rather than dropping it, so a retry of an
+older working-tree run still finds its snapshot; archived refs are dropped
+after seven times `WORKSPACE_SEED_MAX_AGE`, or once 128 of them accumulate.
+
+The cache's unauthenticated `/metrics` carries no per-repository label, so
+scraping it does not enumerate or confirm the mirror set.
+
+## Local daemon socket
+
+The admission daemon (`wingd`) is a per-user process on the developer's
+own machine. It serves a unix socket at
+`/tmp/sparkwing-<uid>-<hash>/d.sock`, where the hash covers
+`SPARKWING_HOME`. The path is a pure function of the home: no
+environment variable moves it, so a cron job, a privilege-elevated
+shell, and an interactive session all resolve the same socket for the
+same home. It sits under `/tmp` rather than under the home because a
+unix socket path is capped at 104 bytes on macOS. Windows uses the
+process temp directory instead. The trust boundary is the user account,
+not the machine: everyone logged into the same host as the same user
+shares one daemon and can queue, inspect, cancel, and drain its runs.
+The protocol carries no token, and adding one would not change that -- a
+token readable by the account is readable by anything running as the
+account.
+
+Other accounts on the host are outside the boundary, and the checks
+below keep them out. The base directory must be a directory carrying the
+sticky bit, or else not be writable by other accounts, so no one can
+rename this user's socket directory away and substitute their own. The
+daemon then creates its socket directory with `Mkdir` and refuses to
+serve if the path already exists as anything but a real directory owned
+by the current uid with mode `0700`, so another account cannot
+pre-create it and collect connections; a foreign directory at that path
+is a refusal that names it, never a redirect somewhere else. The bound
+socket is chmodded to `0600`. Every accepted connection is checked
+against the kernel's peer credentials (`SO_PEERCRED` on Linux,
+`LOCAL_PEERCRED` on macOS and FreeBSD) and dropped when the caller's uid
+differs, which holds even where socket file modes are not enforced on
+connect. Clients apply the same base and directory tests before dialing,
+including the peer sweep behind `sparkwing doctor`, so a `sparkwing`
+command refuses to hand a handshake to a socket sitting in a directory
+this user does not own.
+
+The ownership, mode, and peer-credential checks are unix-only. Windows
+reports no uid for a unix socket peer and has no sticky bit, so the
+per-user temp directory is the only separation there, and the daemon
+neither refuses a connection on credentials nor sweeps a stale socket
+directory away.
+
+Root is not excluded by any of this; a root account on the host can read
+the daemon's memory whatever the socket says. On a shared host, give
+each user their own `SPARKWING_HOME`, which is the unit of daemon
+isolation.
 
 ## Container hardening
 
@@ -121,6 +263,37 @@ The signing key is release machinery, not per-user configuration:
   ./cmd/verify-release --public-key` prints the secret's public key and
   enforces trust-set membership before release assets are signed.
 
+## Static analysis
+
+The `security-scan` pipeline runs four local scanners. The Security GitHub
+Actions workflow runs it on every pull request, on pushes to `main`, and
+weekly. The release workflow calls the same workflow against the resolved tag
+commit and waits for every security job before building release artifacts.
+
+- **gosec** over the public module and the `.sparkwing` pipeline module,
+  with the rules that describe how a CI tool works (file inclusion and
+  subprocess arguments named by its inputs, cache directory permissions)
+  excluded. The pipeline writes a repository-relative SARIF file that the
+  workflow uploads to GitHub code scanning. Gosec findings remain report-only
+  until the pipeline runs with `--strict`; they do not block a pull request or
+  release by themselves.
+- **govulncheck** in source mode over `./...`, in addition to the
+  binary-mode scan the `pre-push` gate runs against every shipped
+  executable.
+- **gitleaks** over the available git history. `.gitleaks.toml` allow-lists two
+  exact documentation and test-fixture values, and `.gitleaksignore` names one
+  historical generated-bundle false positive by fingerprint. No path is
+  excluded.
+- **`npm audit`** over the dashboard's production dependencies at the
+  `high` threshold.
+
+The hosted workflow also runs CodeQL for Go and TypeScript with the
+`security-extended` query suite. CodeQL alerts remain report-only. The workflow
+pins external actions to commit SHAs, and the three Go-based local scanners use
+pinned module versions. The installed npm version and advisory database supply
+`npm audit`; CodeQL has no local pipeline step. A release stops when a scanner
+cannot complete or when govulncheck, gitleaks, or `npm audit` finds a failure.
+
 ## Operator checklist
 
 - **Set the auth tokens.** With an empty tokens table the controller
@@ -134,6 +307,21 @@ The signing key is release machinery, not per-user configuration:
   instead -- once you are past bootstrap -- set `SPARKWING_REQUIRE_AUTH=1`
   (or `--require-auth`) so the pod refuses to start with an empty tokens
   table. See [auth.md](auth.md).
+- **Point the logs service at a controller.** Without `--controller`
+  (`SPARKWING_CONTROLLER_URL`) `sparkwing-logs` resolves no tokens, so
+  anything that reaches its Service can read, forge, and delete every
+  run's logs. It reports `"auth": "disabled"` on `GET /api/v1/health`
+  and `sparkwing cluster status` flags the logs probe as a warning. Set
+  `SPARKWING_REQUIRE_AUTH=1` (or `--require-auth`) so the pod refuses to
+  start without an absolute `http(s)` controller URL, which keeps a
+  typo from advertising `"auth": "enabled"` on a service whose every
+  token lookup fails. The runner-bundle chart wires the controller URL
+  from `controller.tokenSecret`, and a logs-enabled install without that
+  Secret fails at render time unless you set
+  `logs.allowUnauthenticated=true`. `cluster status` warns rather than
+  passing whenever it cannot read the logs service's auth state: no
+  announced logs URL, a health body with no `auth` field (an image
+  older than the report), or a degraded service.
 - **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
   behind an ingress/proxy that enforces HTTPS.
 - **Pin image digests** rather than floating tags.

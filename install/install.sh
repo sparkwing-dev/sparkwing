@@ -40,15 +40,13 @@ detect_platform() {
     Darwin) echo "macos" ;;
     Linux)  echo "linux" ;;
     MINGW*|MSYS*|CYGWIN*)
-      err "This installer is for the Linux/macOS sparkwing-runner Service.
+      err "This service installer is for Linux and macOS.
 
-The cluster-mode runner is not supported on Windows. For the Windows CLI
-(\`sparkwing.exe\`), run the public installer in this same Git Bash:
+Run the native Windows agent manually under your service manager:
 
-  curl -fsSL https://sparkwing.dev/install.sh | bash
+  sparkwing-runner.exe agent --config %USERPROFILE%\\.config\\sparkwing\\agent.yaml
 
-Windows CLI users dispatch pipelines to Linux/macOS runners or to a
-remote cluster -- there's no local runner Service to install." ;;
+Or run this installer inside WSL when systemd user services are enabled." ;;
     *) err "unsupported platform: $(uname -s). Supported: Darwin (macOS), Linux." ;;
   esac
 }
@@ -86,6 +84,8 @@ fi
 
 CONTROLLER_URL="${SPARKWING_CONTROLLER:-}"
 LOGS_URL="${SPARKWING_LOGS:-}"
+GITCACHE_URL="${SPARKWING_GITCACHE_URL:-}"
+CACHE_TOKEN="${SPARKWING_CACHE_TOKEN:-}"
 API_TOKEN="${SPARKWING_API_TOKEN:-}"
 RUNNER_NAME="${RUNNER_NAME:-}"
 MAX_CONCURRENT="${MAX_CONCURRENT:-}"
@@ -98,6 +98,9 @@ if [ -z "$LOGS_URL" ]; then
 fi
 if [ -z "$API_TOKEN" ]; then
   API_TOKEN="$(ask_secret 'API token (will not be echoed)')"
+fi
+if [ -z "$GITCACHE_URL" ]; then
+  GITCACHE_URL="${CONTROLLER_URL%/}/api/v1/gitcache"
 fi
 if [ -z "$API_TOKEN" ]; then
   err "API token is required. Get one from your team's sparkwing admin."
@@ -115,6 +118,7 @@ log "config summary:"
 log "  binary:         $BINARY_PATH"
 log "  controller:     $CONTROLLER_URL"
 log "  logs:           $LOGS_URL"
+log "  gitcache:       $GITCACHE_URL"
 log "  runner name:    $RUNNER_NAME"
 log "  max concurrent: $MAX_CONCURRENT"
 log ""
@@ -137,6 +141,8 @@ mkdir -p "$CONFIG_DIR"
 cat > "$CONFIG_PATH" <<YAML
 controller: "${CONTROLLER_URL}"
 logs: "${LOGS_URL}"
+gitcache: "${GITCACHE_URL}"
+cache_token: "${CACHE_TOKEN}"
 token: "${API_TOKEN}"
 max_concurrent: ${MAX_CONCURRENT}
 holder_prefix: "${RUNNER_NAME}"

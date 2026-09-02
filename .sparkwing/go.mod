@@ -4,17 +4,10 @@ go 1.26.0
 
 require (
 	github.com/sparkwing-dev/sparks-core/templates v0.31.0
-	github.com/sparkwing-dev/sparkwing v0.38.2
+	github.com/sparkwing-dev/sparkwing v0.40.0
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/mod v0.40.0
 )
-
-// The pipelines tree is consumed as the same module path the SDK
-// itself ships, so the require above is a placeholder; this replace
-// pins it to the parent checkout (the sparkwing repo root). The
-// pattern follows the standard "consumer .sparkwing/ uses a local
-// replace during development" convention; here the parent IS the
-// SDK rather than a sibling.
-replace github.com/sparkwing-dev/sparkwing => ..
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
@@ -87,7 +80,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
@@ -98,7 +90,7 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/grpc v1.82.1 // indirect
+	google.golang.org/grpc v1.83.1 // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
@@ -118,3 +110,11 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+// The pipelines tree is consumed as the same module path the SDK
+// itself ships, so the require above is a placeholder; this replace
+// pins it to the parent checkout (the sparkwing repo root). The
+// pattern follows the standard "consumer .sparkwing/ uses a local
+// replace during development" convention; here the parent IS the
+// SDK rather than a sibling.
+replace github.com/sparkwing-dev/sparkwing => ..

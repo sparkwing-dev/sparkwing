@@ -2,9 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +18,118 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func setCoordinatedControllerProfile(t *testing.T, controllerURL string) {
+	t.Helper()
+	writeInnerProfiles(t, fmt.Sprintf(`
+profiles:
+  remote:
+    controller: { url: %s }
+    secrets: { type: controller }
+    state: { type: controller }
+    cache: { type: controller }
+    logs: { type: controller }
+`, controllerURL))
+	t.Setenv("SPARKWING_PROFILE", "remote")
+}
+
+func TestCoordinatedChildSurfaces_LocalOnlyNeverOpensProfileBackends(t *testing.T) {
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "remote surface reached", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	setCoordinatedControllerProfile(t, srv.URL)
+	t.Setenv("SPARKWING_LOCAL_ONLY", "1")
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	secretsDir := filepath.Join(home, ".config", "sparkwing")
+	if err := os.MkdirAll(secretsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "secrets.env"), []byte("TOKEN=local-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "gate")
+	if err != nil {
+		t.Fatalf("coordinatedChildSurfaces: %v", err)
+	}
+	if art != nil || logs != nil {
+		t.Fatalf("local-only child opened remote surfaces: cache=%T logs=%T", art, logs)
+	}
+	value, _, err := source.Read("TOKEN")
+	if err != nil || value != "local-token" {
+		t.Fatalf("local secret = %q, %v; want local-token", value, err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("local-only child made %d controller request(s)", got)
+	}
+}
+
+func TestCoordinatedChildSurfaces_ProfileBackendsRemainRemoteWithoutLocalOnly(t *testing.T) {
+	var requests atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		switch {
+		case r.URL.Path == "/api/v1/secrets/TOKEN":
+			fmt.Fprintln(w, `{"value":"remote-token","masked":true}`)
+		case r.URL.Path == "/bin/probe":
+			w.WriteHeader(http.StatusNotFound)
+		case r.URL.Path == "/api/v1/logs/run/node":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCoordinatedControllerProfile(t, srv.URL)
+	t.Setenv("SPARKWING_LOCAL_ONLY", "")
+
+	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "gate")
+	if err != nil {
+		t.Fatalf("coordinatedChildSurfaces: %v", err)
+	}
+	value, masked, err := source.Read("TOKEN")
+	if err != nil || value != "remote-token" || !masked {
+		t.Fatalf("remote secret = %q, masked=%v, err=%v", value, masked, err)
+	}
+	if found, err := art.Has(context.Background(), "probe"); err != nil || found {
+		t.Fatalf("remote cache probe = %v, %v; want missing", found, err)
+	}
+	nodeLog, err := logs.OpenNodeLog("run", "node", nil)
+	if err != nil {
+		t.Fatalf("open remote log: %v", err)
+	}
+	nodeLog.Log("info", "remote log")
+	if err := nodeLog.Close(); err != nil {
+		t.Fatalf("close remote log: %v", err)
+	}
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("normal child made %d controller request(s), want secrets, cache, and logs", got)
+	}
+}
+
+func TestCoordinatedChildSurfaces_UnreachableProfileStillFailsWithoutLocalOnly(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	controllerURL := srv.URL
+	srv.Close()
+	setCoordinatedControllerProfile(t, controllerURL)
+	t.Setenv("SPARKWING_LOCAL_ONLY", "")
+
+	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "gate")
+	if err != nil {
+		t.Fatalf("opening remote clients: %v", err)
+	}
+	if source == nil || art == nil || logs == nil {
+		t.Fatalf("normal child did not retain its profile: secrets=%T cache=%T logs=%T", source, art, logs)
+	}
+	if _, _, err := source.Read("TOKEN"); err == nil || !strings.Contains(err.Error(), controllerURL) {
+		t.Fatalf("unreachable secret error = %v", err)
+	}
+}
 
 func TestCoordinatedLogBackend_NoLogsSurfaceKeepsTheRunsOwnFiles(t *testing.T) {
 	ctx := context.Background()

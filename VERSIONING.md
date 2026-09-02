@@ -42,6 +42,11 @@ Pre-1.0, a covered symbol is removed outright in the release that replaces it. T
 
 While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go semver convention. Once Sparkwing reaches `v1.0.0`, breaking changes will be confined to major bumps.
 
+## Security support
+
+Only the latest published release receives security fixes. Report suspected
+vulnerabilities privately through the process in [SECURITY.md](./SECURITY.md).
+
 ## Release process
 
 - Every user-visible change requires a `CHANGELOG.md` entry under the current `[Unreleased]` section.

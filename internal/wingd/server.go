@@ -208,6 +208,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 				return nil
 			}
 		}
+		if perr := checkPeerCredentials(nc); perr != nil {
+			d.cfg.logf("%v", perr)
+			_ = nc.Close()
+			continue
+		}
 		c := newConn(d, nc)
 		d.mu.Lock()
 		d.conns[c] = struct{}{}

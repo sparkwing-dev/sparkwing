@@ -1,0 +1,103 @@
+name: Security
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Immutable source revision to scan
+        required: false
+        type: string
+        default: ""
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Security / scanners
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            go.sum
+            .sparkwing/go.sum
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the checked-out Sparkwing CLI
+        run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
+
+      - name: Run the security-scan pipeline
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+        run: '"$RUNNER_TEMP/sparkwing" run security-scan --report-dir="$RUNNER_TEMP/security"'
+
+      # Fork tokens cannot write code-scanning alerts; scanners still run.
+      - name: Upload gosec findings to code scanning
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          sarif_file: ${{ runner.temp }}/security/gosec.sarif
+          category: gosec
+
+  codeql:
+    name: Security / CodeQL ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: matrix.language == 'go'
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.sum
+
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          category: codeql/${{ matrix.language }}

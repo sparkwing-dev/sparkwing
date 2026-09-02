@@ -238,7 +238,7 @@ func runTokensRotate(args []string) error {
 	fs := flag.NewFlagSet(cmdTokensRotate.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
 	prefix := fs.String("prefix", "", "non-secret token prefix")
-	grace := fs.Duration("grace", 24*time.Hour, "window during which the old token still authenticates")
+	grace := fs.Duration("grace", 24*time.Hour, "window during which the old token still authenticates (max 168h)")
 	ttl := fs.Duration("ttl", 0, "TTL of the new token (0 = preserve the old token's remaining TTL)")
 	if err := parseAndCheck(cmdTokensRotate, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {

@@ -1,11 +1,11 @@
 package web
 
 import (
-	"net"
 	"net/http"
-	"strings"
-	"sync"
+	"net/netip"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 const (
@@ -13,63 +13,12 @@ const (
 	loginRateWindow = 60 * time.Second
 )
 
-type rateBucket struct {
-	tokens     float64
-	lastRefill time.Time
-}
-
-type rateLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]*rateBucket
-	burst   float64
-	window  time.Duration
-}
-
-func newRateLimiter(burst int, window time.Duration) *rateLimiter {
-	return &rateLimiter{
-		buckets: make(map[string]*rateBucket),
-		burst:   float64(burst),
-		window:  window,
-	}
-}
-
-func (l *rateLimiter) allow(key string, now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	b, ok := l.buckets[key]
-	if !ok {
-		b = &rateBucket{tokens: l.burst, lastRefill: now}
-		l.buckets[key] = b
-	}
-	elapsed := now.Sub(b.lastRefill)
-	if elapsed > 0 {
-		b.tokens += float64(elapsed) / float64(l.window) * l.burst
-		b.tokens = min(b.tokens, l.burst)
-		b.lastRefill = now
-	}
-	if b.tokens < 1 {
-		return false
-	}
-	b.tokens--
-	return true
-}
-
-func (l *rateLimiter) gc(now time.Time) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for k, b := range l.buckets {
-		if now.Sub(b.lastRefill) > 2*l.window && b.tokens >= l.burst {
-			delete(l.buckets, k)
-		}
-	}
-}
-
-func rateLimitMiddleware(l *rateLimiter, next http.Handler) http.Handler {
+func rateLimitMiddleware(l *ratelimit.Limiter, trustedProxyCIDRs []netip.Prefix, next http.Handler) http.Handler {
 	go func() {
 		t := time.NewTicker(5 * time.Minute)
 		defer t.Stop()
 		for range t.C {
-			l.gc(time.Now())
+			l.GC(time.Now())
 		}
 	}()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -77,7 +26,7 @@ func rateLimitMiddleware(l *rateLimiter, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !l.allow(clientIP(r), time.Now()) {
+		if !l.Allow(ratelimit.ClientIP(r, trustedProxyCIDRs), time.Now()) {
 			w.Header().Set("Retry-After", "60")
 			http.Error(w,
 				"too many login attempts; try again in a minute",
@@ -86,20 +35,4 @@ func rateLimitMiddleware(l *rateLimiter, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			xff = xff[:i]
-		}
-		if ip := strings.TrimSpace(xff); ip != "" {
-			return ip
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }

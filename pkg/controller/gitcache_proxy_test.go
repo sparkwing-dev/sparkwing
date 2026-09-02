@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -121,10 +124,11 @@ func mustRequest(t *testing.T, method, url string, body io.Reader) *http.Request
 }
 
 func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
 	var cacheRequests []string
 	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "" {
-			t.Fatalf("cache received controller bearer %q", got)
+		if got := r.Header.Get("Authorization"); got != "Bearer cache-secret" {
+			t.Fatalf("cache Authorization = %q, want the cache token and never the caller's", got)
 		}
 		cacheRequests = append(cacheRequests, r.Method+" "+r.URL.RequestURI())
 		switch r.URL.Path {
@@ -210,6 +214,132 @@ func TestGitcacheProxy_ReadsRequireAdminAndStripBearer(t *testing.T) {
 	}
 	if len(cacheRequests) != 3 {
 		t.Fatalf("cache requests = %v", cacheRequests)
+	}
+}
+
+func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
+	repoURL := "https://git.example.com/acme/widgets.git"
+	cacheName := bincache.ClaimedRepoNameFromURL(repoURL)
+	var cacheRequests []string
+	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer cache-secret" {
+			t.Fatalf("cache Authorization = %q, want cache token", got)
+		}
+		cacheRequests = append(cacheRequests, r.Method+" "+r.URL.RequestURI())
+		switch r.URL.Path {
+		case "/git/register":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case "/git/" + cacheName + "/info/refs":
+			_, _ = w.Write([]byte("refs"))
+		case "/git/" + cacheName + "/git-upload-pack":
+			_, _ = w.Write([]byte("pack"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer cache.Close()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	owner, _, err := st.CreateToken("workstation", store.TokenKindRunner,
+		[]string{controller.ScopeNodesClaim}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger, _, err := st.CreateToken("stranger", store.TokenKindRunner,
+		[]string{controller.ScopeNodesClaim}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateTrigger(ctx, store.Trigger{
+		ID: "run-remote", Pipeline: "build", Status: "running", CreatedAt: now,
+		Repo: "acme/widgets", RepoURL: repoURL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-remote", Pipeline: "build", Status: "running", StartedAt: now,
+		Repo: "acme/widgets", RepoURL: repoURL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-remote", NodeID: "compile", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-remote", "compile"); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).EnableAuthFromStore()
+	srv := httptest.NewServer(ctrl.Handler())
+	defer srv.Close()
+	claimed, err := client.NewWithToken(srv.URL, nil, owner).
+		ClaimNode(ctx, "agent:workstation:1", nil, time.Minute, nil)
+	if err != nil || claimed == nil {
+		t.Fatalf("ClaimNode = %+v, %v", claimed, err)
+	}
+
+	request := func(method, path, token, body string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	base := "/api/v1/runs/run-remote/gitcache/git"
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, base + "/register?name=" + cacheName + "&repo=" + repoURL, ""},
+		{http.MethodGet, base + "/" + cacheName + "/info/refs?service=git-upload-pack", ""},
+		{http.MethodPost, base + "/" + cacheName + "/git-upload-pack", "want"},
+	} {
+		resp := request(tc.method, tc.path, owner, tc.body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s %s status = %d, want 200", tc.method, tc.path, resp.StatusCode)
+		}
+	}
+	for name, path := range map[string]string{
+		"same-basename foreign repository": base + "/register?name=" +
+			bincache.ClaimedRepoNameFromURL("https://git.example.com/other/widgets.git") +
+			"&repo=https://git.example.com/other/widgets.git",
+		"foreign cache name": base + "/other/info/refs?service=git-upload-pack",
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp := request(http.MethodPost, path, owner, "")
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", resp.StatusCode)
+			}
+		})
+	}
+	resp := request(http.MethodGet, base+"/"+cacheName+"/info/refs?service=git-upload-pack", stranger, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("unclaimed runner status = %d, want 403", resp.StatusCode)
+	}
+	resp = request(http.MethodGet, "/api/v1/gitcache/git/widgets/info/refs?service=git-upload-pack", owner, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("unscoped proxy status = %d, want 403", resp.StatusCode)
+	}
+	if len(cacheRequests) != 3 {
+		t.Fatalf("cache requests = %v, want only the three claimed-source reads", cacheRequests)
 	}
 }
 

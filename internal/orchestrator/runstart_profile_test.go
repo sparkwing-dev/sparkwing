@@ -27,7 +27,42 @@ func TestBuildRunInvocation_ProfileSetButNoChainOmits(t *testing.T) {
 	}
 }
 
+func TestBuildRunInvocation_LocalOnlyReportsEffectiveBackends(t *testing.T) {
+	t.Setenv("SPARKWING_ALLOW", "")
+	t.Setenv("SPARKWING_PROFILE", "dead-profile")
+	t.Setenv("SPARKWING_SECRETS_PROFILE", "dead-secrets")
+	opts := Options{
+		Pipeline:     "demo",
+		LocalOnly:    true,
+		Profile:      &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev"}},
+		ProfileChain: &profile.Chain{Selected: "prod", Source: profile.ChainSourceFlag},
+	}
+	inv := buildRunInvocation(opts, "run-1", "", nil)
+	if _, ok := inv["profile"]; ok {
+		t.Fatalf("local-only invocation reported an active profile: %#v", inv["profile"])
+	}
+	be, ok := inv["backends"].(map[string]any)
+	if !ok || be["state"] != "sqlite" || be["logs"] != "filesystem" || be["cache"] != "filesystem" {
+		t.Fatalf("local-only backends = %#v", inv["backends"])
+	}
+	flags, ok := inv["flags"].(map[string]any)
+	if !ok || flags["local_only"] != true {
+		t.Fatalf("local-only flags = %#v", inv["flags"])
+	}
+	if _, ok := flags["secrets"]; ok {
+		t.Fatalf("local-only flags reported inactive secrets profile: %#v", flags)
+	}
+	if _, ok := flags["profile"]; ok {
+		t.Fatalf("local-only flags reported inactive profile: %#v", flags)
+	}
+	if inv["reproducer"] != "sparkwing run demo --sw-local-only" {
+		t.Fatalf("local-only reproducer = %q", inv["reproducer"])
+	}
+}
+
 func TestBuildRunInvocation_FlagSourceController(t *testing.T) {
+	t.Setenv("SPARKWING_PROFILE", "prod")
+	t.Setenv("SPARKWING_SECRETS_PROFILE", "vault")
 	opts := Options{
 		Pipeline:     "demo",
 		Profile:      &profile.Profile{Name: "prod", Controller: &profile.ControllerSpec{URL: "https://api.example.dev", Token: "swu_secret"}},
@@ -50,6 +85,10 @@ func TestBuildRunInvocation_FlagSourceController(t *testing.T) {
 	}
 	if _, leaked := prof["controller"]; leaked {
 		t.Error("profile block must not carry a controller field")
+	}
+	flags := inv["flags"].(map[string]any)
+	if flags["profile"] != "prod" || flags["secrets"] != "vault" {
+		t.Errorf("normal profile flags = %#v", flags)
 	}
 	for k, v := range prof {
 		if s, ok := v.(string); ok && (s == "https://api.example.dev" || s == "swu_secret") {

@@ -42,7 +42,7 @@ echo "Building sparkwing-cache..."
 (cd .. && go build -o /tmp/sparkwing-cache ./cmd/sparkwing-cache/)
 
 PROXY_DIR=$(mktemp -d)
-PROXY_CACHE_DIR="$PROXY_DIR" PORT=$PROXY_PORT /tmp/sparkwing-cache &
+PROXY_CACHE_DIR="$PROXY_DIR" PORT=$PROXY_PORT /tmp/sparkwing-cache --allow-unauthenticated &
 PROXY_PID=$!
 
 for i in $(seq 1 30); do

@@ -40,7 +40,10 @@ A runner started with `--trigger-runner k8s` creates one Kubernetes Job per
 node. `--trigger-runner warm` offers nodes to remote agents first and uses
 Kubernetes for unlabeled overflow. Both modes are opt-in; the runner-bundle
 chart exposes them through `runner.triggerRunner.kind`, while `inprocess`
-remains the default.
+remains the default. The chart supplies the named runner ServiceAccount,
+namespace-scoped Job and pod-read permissions, and requires
+`runner.automountServiceAccountToken=true` so the trigger worker can call the
+Kubernetes API. The spawned Jobs mount no ServiceAccount token.
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and

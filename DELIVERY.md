@@ -17,11 +17,18 @@ this file is a menu and checklist, not a command that every change must run.
 - **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
-  the change touches those boundaries. Verify dashboard changes against real
-  local state with `bash bin/dev-start.sh` (dashboard backend on :4343, `next
-  dev` on :3100) and stop it with `bash bin/dev-stop.sh`; the browser gate uses
-  deterministic API fixtures on OS-assigned local ports and does not replace
-  that product exercise or exercise Kubernetes.
+  the change touches those boundaries. `sparkwing run security-scan` runs gosec,
+  source-mode govulncheck, gitleaks, and `npm audit`. The Security workflow runs
+  it on every pull request and uploads gosec findings to code scanning. The
+  release workflow runs it and hosted CodeQL against the resolved tag commit
+  before any artifact build. Gosec and CodeQL report alerts; govulncheck,
+  gitleaks, and `npm audit` fail the gate. Run the local pipeline when a change
+  touches an HTTP handler, auth, file paths built from input, subprocess
+  arguments, or a dependency. Verify dashboard changes against real local state
+  with `bash bin/dev-start.sh` (dashboard backend on :4343, `next dev` on :3100)
+  and stop it with `bash bin/dev-stop.sh`; the browser gate uses deterministic
+  API fixtures on OS-assigned local ports and does not replace that product
+  exercise or exercise Kubernetes.
 - **Kubernetes product path:** `sparkwing run k8s-e2e` proves authenticated
   webhook intake, runner execution, logs, cancellation, retry, restarts, and
   retained state against an explicit Kubernetes context and caller-supplied

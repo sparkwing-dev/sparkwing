@@ -263,10 +263,10 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 }
 
 func handleTriggerArgs(triggerID string, opts TriggerLoopOptions) []string {
+	// safety: the child reads the bearer from SPARKWING_AGENT_TOKEN; argv is world-readable in /proc.
 	childArgs := []string{
 		"handle-trigger",
 		"--controller", opts.ControllerURL,
-		"--token", opts.Token,
 	}
 	if opts.LogsURL != "" {
 		childArgs = append(childArgs, "--logs", opts.LogsURL)
@@ -407,7 +407,7 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 	}
 	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
 		if binaryCacheURL != "" {
-			if fetchErr := bincache.TryBinary(binaryCacheURL, key, tempPath); fetchErr == nil {
+			if fetchErr := bincache.TryBinary(binaryCacheURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
 				logger.Warn("trigger loop: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)

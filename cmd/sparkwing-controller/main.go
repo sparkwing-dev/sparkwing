@@ -16,8 +16,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -35,6 +37,10 @@ func run(args []string) error {
 		"enable the warm-PVC pool (requires in-cluster K8s access)")
 	poolNamespace := fs.String("pool-namespace", os.Getenv("POD_NAMESPACE"),
 		"namespace the pool manages (default: POD_NAMESPACE)")
+	warmerServiceAccount := fs.String("warmer-service-account",
+		firstNonEmpty(os.Getenv("SPARKWING_WARMER_SA"), pool.WarmerServiceAccountName),
+		"ServiceAccount the warm-pool warmer pods run as; it must exist in the pool "+
+			"namespace and needs no rules (env: SPARKWING_WARMER_SA)")
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"),
 		"kubeconfig path when --pool is set (empty = in-cluster)")
 	secretsKeyFile := fs.String("secrets-key-file", "",
@@ -50,6 +56,17 @@ func run(args []string) error {
 			"the announcement, which is correct only when one process serves both.")
 	cacheURL := fs.String("cache-url", os.Getenv("SPARKWING_CACHE_URL"),
 		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
+	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
+		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For "+
+			"for login throttling; empty ignores forwarded headers and keys the "+
+			"limiter on the TCP peer")
+	argonBudgetMB := fs.Int("argon2-memory-budget-mb",
+		int(store.DefaultArgon2MemoryBudget>>20),
+		fmt.Sprintf("memory ceiling in MiB for concurrent argon2id password and "+
+			"token hashing. Each hash holds %d MiB while it runs, so the default "+
+			"admits %d at a time and the rest queue.",
+			store.Argon2HashBytes>>20,
+			store.Argon2Concurrency(store.DefaultArgon2MemoryBudget)))
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -57,18 +74,27 @@ func run(args []string) error {
 			"controller) and for laptop-local use.")
 	_ = fs.Parse(args)
 
+	trustedProxyCIDRs, err := ratelimit.ParseTrustedProxyCIDRs(*trustedProxyCIDRsRaw)
+	if err != nil {
+		return fmt.Errorf("--trusted-proxy-cidrs: %w", err)
+	}
+	if *argonBudgetMB < 1 {
+		return fmt.Errorf("--argon2-memory-budget-mb must be at least 1")
+	}
+	store.SetArgon2MemoryBudget(int64(*argonBudgetMB) << 20)
+
 	emitStartupProvenance(os.Stderr)
 
-	p, err := paths.DefaultPaths()
-	if err != nil {
-		return err
+	p, perr := paths.DefaultPaths()
+	if perr != nil {
+		return perr
 	}
 	if err := p.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(p.StateDB())
-	if err != nil {
-		return mapStoreOpenError(err)
+	st, serr := store.Open(p.StateDB())
+	if serr != nil {
+		return mapStoreOpenError(serr)
 	}
 	defer func() { _ = st.Close() }()
 
@@ -90,6 +116,7 @@ func run(args []string) error {
 	}
 
 	srv := controller.New(st, nil).
+		WithTrustedProxyCIDRs(trustedProxyCIDRs).
 		EnableAuthFromStore().
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
 		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), os.Getenv("SPARKWING_DASHBOARD_URL")).
@@ -114,8 +141,9 @@ func run(args []string) error {
 			return fmt.Errorf("pool: %w", kerr)
 		}
 		srv.AttachPool(controller.PoolConfig{
-			Client:    kcli,
-			Namespace: *poolNamespace,
+			Client:               kcli,
+			Namespace:            *poolNamespace,
+			WarmerServiceAccount: *warmerServiceAccount,
 		})
 		checkStorageClasses(ctx, kcli, *poolNamespace)
 	}
@@ -152,6 +180,15 @@ func checkStorageClasses(ctx context.Context, kcli kubernetes.Interface, namespa
 			"Pending. Set storageClassName on the PVCs (helm: "+
 			"--set storage.className=<class>) or mark a StorageClass "+
 			"default with storageclass.kubernetes.io/is-default-class=true.")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func envTruthy(name string) bool {

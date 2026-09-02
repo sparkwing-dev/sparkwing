@@ -1,6 +1,9 @@
 package admission
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestWeighted_PromotionBackfillsPastNonFittingHeavyHead(t *testing.T) {
 	l := testLedger(t, 0, 0)
@@ -158,7 +161,7 @@ func TestPriority_PromotesHighPriorityWaiterBeforeLowerPriorityQueue(t *testing.
 	}
 }
 
-func TestOwnerAdmissionRankOrdersEqualPriorityDescendants(t *testing.T) {
+func TestServiceOrderKeepsEqualPriorityDescendantsBehindEarlierWaiters(t *testing.T) {
 	l := testLedger(t, 1, 0)
 	older := mustGrant(t, l, Request{ID: "owner-older"})
 	newer := mustGrant(t, l, Request{ID: "owner-newer"})
@@ -167,20 +170,20 @@ func TestOwnerAdmissionRankOrdersEqualPriorityDescendants(t *testing.T) {
 	if pos := mustQueue(t, l, Request{ID: "newer-child", OwnerID: "owner-newer", Cores: 1}); pos != 0 {
 		t.Fatalf("newer child position = %d, want 0", pos)
 	}
-	if pos := mustQueue(t, l, Request{ID: "older-child", OwnerID: "owner-older", Cores: 1}); pos != 0 {
-		t.Fatalf("older child position = %d, want 0 ahead of the newer owner", pos)
+	if pos := mustQueue(t, l, Request{ID: "older-child", OwnerID: "owner-older", Cores: 1}); pos != 1 {
+		t.Fatalf("older child position = %d, want 1 behind the earlier participant", pos)
 	}
-	if pos := mustQueue(t, l, Request{ID: "older-child-2", OwnerID: "owner-older", Cores: 1}); pos != 1 {
-		t.Fatalf("second older child position = %d, want 1 behind its sibling", pos)
+	if pos := mustQueue(t, l, Request{ID: "older-child-2", OwnerID: "owner-older", Cores: 1}); pos != 2 {
+		t.Fatalf("second older child position = %d, want 2 behind earlier participants", pos)
 	}
 
 	snap := l.Snapshot()
-	if len(snap.Waiters) != 3 || snap.Waiters[0].RequestID != "older-child" ||
-		snap.Waiters[1].RequestID != "older-child-2" || snap.Waiters[2].RequestID != "newer-child" {
-		t.Fatalf("owner-ranked waiters = %+v", snap.Waiters)
+	if len(snap.Waiters) != 3 || snap.Waiters[0].RequestID != "newer-child" ||
+		snap.Waiters[1].RequestID != "older-child" || snap.Waiters[2].RequestID != "older-child-2" {
+		t.Fatalf("service-ordered waiters = %+v", snap.Waiters)
 	}
-	if snap.Waiters[0].OwnerID != "owner-older" || snap.Waiters[0].OwnerAdmit != snap.Leases[0].Admit {
-		t.Fatalf("older owner identity/rank not persisted: waiter=%+v leases=%+v", snap.Waiters[0], snap.Leases)
+	if snap.Waiters[1].OwnerID != "owner-older" || snap.Waiters[1].OwnerAdmit != snap.Leases[0].Admit {
+		t.Fatalf("older owner identity/rank not persisted: waiter=%+v leases=%+v", snap.Waiters[1], snap.Leases)
 	}
 
 	restored, err := Restore(snap, func() string { return "restored" })
@@ -189,16 +192,16 @@ func TestOwnerAdmissionRankOrdersEqualPriorityDescendants(t *testing.T) {
 	}
 	events := mustRelease(t, restored, holder.ID, "holder")
 	wantKinds(t, events, EventReleased, EventPromoted)
-	if events[1].RequestID != "older-child" {
-		t.Fatalf("first promoted after restore = %q, want older-child", events[1].RequestID)
+	if events[1].RequestID != "newer-child" {
+		t.Fatalf("first promoted after restore = %q, want newer-child", events[1].RequestID)
 	}
 	var promoted LeaseState
 	for _, lease := range restored.Snapshot().Leases {
-		if lease.RequestID == "older-child" {
+		if lease.RequestID == "newer-child" {
 			promoted = lease
 		}
 	}
-	if promoted.OwnerID != "owner-older" || promoted.OwnerAdmit != snap.Leases[0].Admit {
+	if promoted.OwnerID != "owner-newer" || promoted.OwnerAdmit != snap.Leases[1].Admit {
 		t.Fatalf("promoted lease lost owner identity/rank: %+v", promoted)
 	}
 
@@ -206,7 +209,28 @@ func TestOwnerAdmissionRankOrdersEqualPriorityDescendants(t *testing.T) {
 	_ = newer
 }
 
-func TestOwnerAdmissionRankRespectsPriorityAndOwnerlessFIFO(t *testing.T) {
+func TestServiceOrderSurvivesSustainedArrivalsFromAnOlderOwner(t *testing.T) {
+	l := testLedger(t, 1, 0)
+	mustGrant(t, l, Request{ID: "owner-older"})
+	mustGrant(t, l, Request{ID: "owner-newer"})
+	holder := mustGrant(t, l, Request{ID: "holder", Cores: 1})
+	mustQueue(t, l, Request{ID: "waiting-first", OwnerID: "owner-newer", Cores: 1})
+
+	for i := range 40 {
+		mustQueue(t, l, Request{ID: fmt.Sprintf("later-%02d", i), OwnerID: "owner-older", Cores: 1})
+		if got := l.Snapshot().Waiters[0].RequestID; got != "waiting-first" {
+			t.Fatalf("arrival %d moved the older participant behind %q", i+1, got)
+		}
+	}
+
+	events := mustRelease(t, l, holder.ID, "holder")
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "waiting-first" {
+		t.Fatalf("first service = %q, want waiting-first", events[1].RequestID)
+	}
+}
+
+func TestServiceOrderRespectsPriorityAndOwnerlessFIFO(t *testing.T) {
 	l := testLedger(t, 1, 0)
 	mustGrant(t, l, Request{ID: "owner-older"})
 	mustGrant(t, l, Request{ID: "owner-newer"})
@@ -223,7 +247,7 @@ func TestOwnerAdmissionRankRespectsPriorityAndOwnerlessFIFO(t *testing.T) {
 	}
 	snap := l.Snapshot()
 	got := []string{snap.Waiters[0].RequestID, snap.Waiters[1].RequestID, snap.Waiters[2].RequestID}
-	want := []string{"older-low", "ownerless-first", "ownerless-second"}
+	want := []string{"ownerless-first", "older-low", "ownerless-second"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("remaining order = %v, want %v", got, want)

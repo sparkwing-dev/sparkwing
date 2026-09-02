@@ -23,6 +23,7 @@ spec:
         {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "runner") | nindent 8 }}
     spec:
       serviceAccountName: {{ include "sparkwing-runner-bundle.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.runner.automountServiceAccountToken }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -139,6 +140,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.controller.tokenSecret.name | quote }}
                   key: {{ .Values.controller.tokenSecret.key | quote }}
+            {{- if .Values.cache.enabled }}
+            - name: SPARKWING_CACHE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.tokenSecret.name | quote }}
+                  key: {{ .Values.controller.tokenSecret.key | quote }}
+            {{- end }}
             {{- end }}
             {{- with (include "sparkwing-runner-bundle.runnerDependencyProxyEnv" .) }}
             {{- . | nindent 12 }}

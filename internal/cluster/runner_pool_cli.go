@@ -23,6 +23,8 @@ import (
 type PoolLoopConfig struct {
 	ControllerURL     string
 	LogsURL           string
+	GitcacheURL       string
+	CacheToken        string
 	Token             string
 	HolderPrefix      string
 	Labels            []string
@@ -80,7 +82,7 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 	}
 
 	exec := func(execCtx context.Context, n *store.Node, holderID string) {
-		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.Token,
+		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.Token, cfg.CacheToken,
 			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger, admission, provider)
 	}
 	return runPoolLoop(ctx, cfg, ctrl, exec, provider, logger)
@@ -191,7 +193,7 @@ func runRunnerCLI(args []string) error {
 	maxConcurrent := fs.Int("max-concurrent", 1,
 		"max nodes this runner will execute in parallel")
 	lease := fs.Duration("lease", store.DefaultLeaseDuration,
-		"initial claim lease the controller grants on each claim")
+		"initial claim lease to request on each claim; the controller clamps it to 10m")
 	holderPrefix := fs.String("holder-prefix", "",
 		"holder id prefix (defaults to HOSTNAME or 'runner')")
 	var labels multiFlag
@@ -214,13 +216,13 @@ func runRunnerCLI(args []string) error {
 	triggerRunnerKind := fs.String("trigger-runner", os.Getenv("SPARKWING_TRIGGER_RUNNER"),
 		"node runner used by claimed triggers: inprocess | k8s | warm")
 	triggerRunnerNamespace := fs.String("trigger-runner-namespace", os.Getenv("POD_NAMESPACE"),
-		"namespace for trigger-spawned runner Jobs (k8s)")
+		"namespace for trigger-spawned runner Jobs (k8s or warm fallback)")
 	triggerRunnerImage := fs.String("trigger-runner-image", os.Getenv("SPARKWING_RUNNER_IMAGE"),
-		"runner image for trigger-spawned runner Jobs (k8s)")
+		"runner image for trigger-spawned runner Jobs (k8s or warm fallback)")
 	triggerRunnerSA := fs.String("trigger-runner-sa", os.Getenv("SPARKWING_RUNNER_SA"),
-		"service account for trigger-spawned runner Jobs (k8s)")
+		"service account for trigger-spawned runner Jobs (k8s or warm fallback)")
 	triggerRunnerPullSecret := fs.String("trigger-runner-image-pull-secret", os.Getenv("SPARKWING_IMAGE_PULL_SECRET"),
-		"imagePullSecret for trigger-spawned runner Jobs (k8s)")
+		"imagePullSecret for trigger-spawned runner Jobs (k8s or warm fallback)")
 	triggerRunnerCtrlURL := fs.String("trigger-runner-controller-url", os.Getenv("SPARKWING_RUNNER_CONTROLLER_URL"),
 		"controller URL for trigger-spawned runner Jobs (defaults to --controller)")
 	triggerRunnerLogsURL := fs.String("trigger-runner-logs-url", os.Getenv("SPARKWING_RUNNER_LOGS_URL"),
@@ -252,6 +254,13 @@ func runRunnerCLI(args []string) error {
 	if *controllerURL == "" {
 		fs.Usage()
 		return errors.New("--controller is required")
+	}
+	if *triggerRunnerKind != "" && *triggerRunnerKind != "inprocess" &&
+		*triggerRunnerKind != "k8s" && *triggerRunnerKind != "warm" {
+		return fmt.Errorf("--trigger-runner=%q: expected inprocess, k8s, or warm", *triggerRunnerKind)
+	}
+	if (*triggerRunnerKind == "k8s" || *triggerRunnerKind == "warm") && !*alsoClaimTriggers {
+		return errors.New("--trigger-runner=k8s or warm requires --also-claim-triggers")
 	}
 	if *triggerRunnerKind == "warm" && *claimNodes {
 		return errors.New("--trigger-runner=warm requires --claim-nodes=false so this process does not race remote agents")
@@ -289,6 +298,12 @@ func runRunnerCLI(args []string) error {
 	if *alsoClaimTriggers {
 		if *gitcacheURL == "" {
 			return errors.New("--also-claim-triggers requires --gitcache or SPARKWING_GITCACHE_URL")
+		}
+		// safety: without this the child rejects each claimed trigger after admission.
+		usesK8sJobs := *triggerRunnerKind == "k8s" ||
+			(*triggerRunnerKind == "warm" && *triggerRunnerImage != "")
+		if usesK8sJobs && *triggerRunnerSA == "" {
+			return fmt.Errorf("--trigger-runner-sa (or SPARKWING_RUNNER_SA) is required with --trigger-runner=%s", *triggerRunnerKind)
 		}
 		go func() {
 			if err := RunTriggerLoop(ctx, TriggerLoopOptions{
@@ -329,6 +344,8 @@ func runRunnerCLI(args []string) error {
 	return RunPoolLoop(ctx, PoolLoopConfig{
 		ControllerURL:     *controllerURL,
 		LogsURL:           *logsURL,
+		GitcacheURL:       *gitcacheURL,
+		CacheToken:        os.Getenv("SPARKWING_CACHE_TOKEN"),
 		Token:             *token,
 		HolderPrefix:      *holderPrefix,
 		Labels:            []string(labels),
@@ -353,7 +370,7 @@ func currentHeadroom(ctx context.Context, provider headroomProvider) *client.Hea
 func executePooledNode(
 	ctx context.Context,
 	ctrl *client.Client,
-	controllerURL, logsURL, token string,
+	controllerURL, logsURL, gitcacheURL, token, cacheToken string,
 	n *store.Node,
 	holderID string,
 	lease, hbInterval time.Duration,
@@ -380,7 +397,7 @@ func executePooledNode(
 	}()
 
 	res, err := orchestrator.RunNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
-		&stdoutLogger{}, logger, admission)
+		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken))
 	cancel()
 	hbWG.Wait()
 

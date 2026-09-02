@@ -1,236 +1,134 @@
-# Self-hosting sparkwing without Kubernetes
+# Self-hosting Sparkwing
 
-Deploy sparkwing without Kubernetes. Two flavors:
+For the use cases that the former Compose example covered, choose one of these
+supported paths:
 
-1. **Server side** on a single host via `docker compose`. Runs the
-   whole control plane (controller, logs, cache, web).
-2. **Runner side** on a laptop via launchd (macOS) or systemd user
-   service (Linux). Contributes compute to a shared controller.
+- Run pipelines and the dashboard directly on one machine when you do not need
+  a shared controller.
+- Deploy the complete controller, dashboard, and runner stack to Kubernetes
+  with the `sparkwing-full` Helm chart.
 
-These two together give you the "trusted team laptop fleet" deployment
-target: one cheap VPS + team laptops.
+The former Docker Compose example was not a released or acceptance-tested
+distribution. It depended on private image coordinates and stale controller
+settings, so Sparkwing no longer presents it as an install path.
 
-> **Note:** the `docker-compose.yaml`, launchd plist template, systemd
-> unit template, and `install.sh` below live under `install/` in the
-> sparkwing repository. Run the snippets from a checkout of the repo,
-> with the `sparkwing` binary on PATH.
+## Direct local execution
 
-## Server side: docker-compose
+Run a pipeline on the machine where you invoke Sparkwing:
 
 ```bash
-cd install/docker-compose
-cp .env.example .env
-# edit .env -- set SPARKWING_API_TOKEN, GITHUB_WEBHOOK_SECRET, and
-# public hostnames
-docker compose up -d
-docker compose logs -f
+sparkwing run build
+sparkwing dashboard start
 ```
 
-The compose file ships with internal image refs. Replace each `image:`
-with the published GHCR equivalent --
-`ghcr.io/sparkwing-dev/sparkwing-{cache,logs,controller,web}:vX.Y.Z` --
-before `docker compose up`.
+This path needs no controller or Kubernetes cluster. Runs, logs, and cache
+metadata stay under `~/.sparkwing/` unless the selected profile routes a
+backend elsewhere. See [Local execution](local-execution.md) for profiles,
+remote backends, and the distinction between running and triggering a
+pipeline.
 
-You'll need a reverse proxy in front handling TLS. Caddy is recommended
-for the simplest setup -- see `install/docker-compose/Caddyfile.example`.
-Traefik, nginx, or Cloudflare tunnels also work.
+## Shared controller and dashboard
 
-To publish pull-request results back to GitHub, set `GITHUB_TOKEN` in
-`.env`. Use a fine-grained token with **Commit statuses: Read and write**
-for every repository this controller serves, or a classic token with
-`repo:status`. The compose deployment passes `DASHBOARD_URL` through as
-`SPARKWING_DASHBOARD_URL`, so each `sparkwing/<pipeline>` status links to
-that run in the dashboard. The dashboard URL must use HTTP or HTTPS, include
-a host, and omit credentials, a query, and a fragment; invalid values omit
-the status link. Leave `GITHUB_TOKEN` unset to disable outbound status
-reporting. A GitHub API failure is logged and does not reject the webhook or
-change the run result.
+Use the [`sparkwing-full` Helm chart](../charts/sparkwing-full/README.md) for a
+shared controller, dashboard, cache, logs service, and Kubernetes runner. The
+chart requires Kubernetes and an explicitly compatible image set; its README
+lists the required values and install command.
 
-What runs:
+The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
+an explicit cluster and caller-supplied images. It does not create or delete a
+cluster.
 
-- `controller` - queue, dispatcher, webhooks, pool management, state store.
-- `sparkwing-logs` - streaming log store. Runners write, dashboard reads.
-- `gitcache` - git server, artifact blob store, package registry proxy.
-- `web` - dashboard.
+## Migrating from the Docker Compose example
 
-All state persists in docker volumes. Backup `controller-data`,
-`gitcache-data`, and `logs-data` to protect history.
+Treat the Helm installation as a new deployment. Sparkwing provides no
+in-place conversion or automatic import for the old Compose volumes. Keep
+`controller-data`, `gitcache-data`, and `logs-data` until you decide whether
+their history must be retained, then:
 
-The `sparkwing-logs` storage policy is explicit: omitting `--root` uses
-`$SPARKWING_HOME/logs-service` with owner-only directories and files. Supplying
-`--root` selects the operator-managed shared/PVC contract (creation modes 0755
-for directories and 0644 for files, reduced by the process umask); use the
-volume's ACL, ownership, umask, or Kubernetes security context to limit which
-service accounts can read it.
+1. Deploy `sparkwing-full` with one compatible image set.
+2. Recreate controller tokens and update remote profiles with the new URL.
+3. Point workstation runners and webhooks at the new controller.
+4. Retire the Compose stack only after the new path completes a real pipeline.
 
-### Where to host
+Pipelines that do not need shared history can move to direct local execution
+instead.
 
-Works anywhere docker-compose runs:
+## Add workstation capacity
 
-- **$5-10/mo VPS** (Hetzner, Vultr, Digital Ocean, Linode)
-- **Fly.io** (with minor tweaks -- Fly has its own TLS + networking)
-- **Railway** (similar)
-- **Home lab** (Raspberry Pi, old Mac, always-on desktop)
-- **Tailscale + a laptop at the office** (no public IP needed)
-
-Picking a host: you need docker, an always-on network connection,
-and enough disk for log/git retention. 2GB RAM and 20GB disk cover a
-small team comfortably.
-
-## Runner side: launchd / systemd
+After a controller is running, a Linux or macOS workstation can run
+`sparkwing-runner` as a user service. From a Sparkwing source checkout:
 
 ```bash
-# Make sure sparkwing-runner is on your PATH first:
 go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
-
-# Then run the installer:
 bash install/install.sh
 ```
 
-The script is interactive. It'll ask for:
+The installer asks for the controller URL, logs URL, API token, runner name,
+and maximum concurrent jobs. On macOS it installs a LaunchAgent under
+`~/Library/LaunchAgents/`. On Linux it installs a systemd user unit under
+`~/.config/systemd/user/`.
 
-- Controller URL (public URL of your team's sparkwing server)
-- Logs URL (same)
-- API token (from your team's sparkwing admin)
-- Runner name (defaults to `<hostname>-runner` -- the lowercased short hostname with a `-runner` suffix)
-- Max concurrent jobs
+The agent defaults `gitcache` to the controller's claim-scoped proxy. Set
+`SPARKWING_GITCACHE_URL` and `SPARKWING_CACHE_TOKEN` only for a direct cache on
+a trusted LAN, VPN, or tailnet. The same values are stored in the mode-0600
+agent configuration.
 
-On **macOS** it writes a LaunchAgent plist to `~/Library/LaunchAgents/`
-and loads it. The runner starts at login and persists across sessions.
-
-On **Linux** it writes a systemd user unit to
-`~/.config/systemd/user/` and enables it. Note: if you want the
-runner to keep running after you log out, enable lingering with
-`loginctl enable-linger $USER` as root.
-
-### Non-interactive install
-
-For scripting or docs:
+For unattended installation, supply the same values as environment variables:
 
 ```bash
 SPARKWING_CONTROLLER=https://api-sparkwing.example.com \
 SPARKWING_LOGS=https://logs-sparkwing.example.com \
-SPARKWING_API_TOKEN=$MY_TOKEN \
+SPARKWING_API_TOKEN="$MY_TOKEN" \
 RUNNER_NAME=dev-laptop \
 MAX_CONCURRENT=2 \
 bash install/install.sh --yes
 ```
 
-### Useful commands after install
+The installer writes the token to `~/.config/sparkwing/agent.yaml` with mode
+`0600`. The service uses that file rather than embedding the token in its
+launchd plist or systemd unit.
 
-**macOS:**
+The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
+--config <path>` command, but the bundled installer does not create a Windows
+service. Supervise it with the service manager you already use, or run the
+Linux installer inside WSL when systemd user services are enabled.
+
+### Operate the service
+
+On macOS:
 
 ```bash
-# view runner logs
 tail -f ~/.sparkwing/runner.log
-
-# check running state
 launchctl list | grep sparkwing
-
-# pause (runner stops claiming new jobs; existing jobs finish)
 launchctl unload ~/Library/LaunchAgents/com.sparkwing.runner.plist
-
-# resume
 launchctl load ~/Library/LaunchAgents/com.sparkwing.runner.plist
-
-# uninstall
-launchctl unload ~/Library/LaunchAgents/com.sparkwing.runner.plist
-rm ~/Library/LaunchAgents/com.sparkwing.runner.plist
 ```
 
-**Linux:**
+On Linux:
 
 ```bash
-# view runner logs
 journalctl --user -u sparkwing-runner -f
-
-# check state
 systemctl --user status sparkwing-runner
-
-# pause
 systemctl --user stop sparkwing-runner
-
-# resume
 systemctl --user start sparkwing-runner
-
-# uninstall
-systemctl --user disable --now sparkwing-runner
-rm ~/.config/systemd/user/sparkwing-runner.service
 ```
 
-## How the two pieces fit together
+Enable lingering with `loginctl enable-linger $USER` if the Linux runner must
+remain active after logout.
 
-```
-             GitHub webhook
-                  │
-                  ▼
-         ┌────────────────┐
-         │   (reverse     │
-         │    proxy +     │     single-host deployment
-         │    TLS)        │
-         └────────┬───────┘
-                  │
-                  ▼
-         sparkwing-controller
-         (HMAC verification)
-                  │
-                  │ enqueue
-                  ▼
-          [pending job]
-                                      │
-                ┌─────────────────────┴──────────────────────┐
-                │                                              │
-                ▼                                              ▼
-    long-polled by laptop 1                    long-polled by laptop 2
-    running the sparkwing-runner               running the sparkwing-runner
-    Service (installed above)                  Service (installed above)
-                │                                              │
-                │ claims + runs                                │ claims + runs
-                │                                              │
-                ▼                                              ▼
-    Docker Desktop on laptop 1              Docker Desktop on laptop 2
-                │                                              │
-                │ streams logs + status back                   │
-                │ over HTTPS with bearer token                 │
-                ▼                                              ▼
-       sparkwing-logs  ◀──────────── sparkwing-controller ────────▶ dashboard
-```
+### Troubleshooting
 
-No Kubernetes. No helm. No operators. Just Go binaries on commodity
-hardware.
+**The runner returns `401 unauthorized`.** Confirm that `token:` in
+`~/.config/sparkwing/agent.yaml` is a valid controller token.
 
-## Troubleshooting
+**The runner does not claim work.** Confirm that the pipeline was remotely
+triggered and that the runner can reach the configured controller and logs
+URLs.
 
-**Runner says "401 unauthorized" on poll.** Token mismatch. Verify the
-`token:` field in `~/.config/sparkwing/agent.yaml` matches what's set in
-the server's `.env`. The launchd plist and systemd unit never hold the
-token themselves -- they only point at the config file.
+**A private repository cannot be cloned.** Confirm that the controller has a
+cache URL, that the agent's claim is still live, and that the cache service can
+reach the repository with its configured Git credentials.
 
-**Runner connects but never claims a job.** Check that you're actually
-triggering jobs -- `POST https://api.example.com/api/v1/triggers` with the
-bearer header (see [api-reference.md](api-reference.md) for the body), or
-just `sparkwing pipeline trigger <name> --profile prod`. Also check the
-dashboard for the job status.
-
-**Pipeline build fails with "git: could not read Username for github.com".**
-The runner needs SSH access to clone private repos. Make sure your
-laptop has an SSH agent running with a key authorized on GitHub, and
-that the LaunchAgent inherits it. On macOS this usually means running
-`ssh-add ~/.ssh/id_ed25519` before the runner starts. For persistent
-SSH agent across reboots, use [ssh-agent as a launchd service](https://apple.stackexchange.com/q/254468).
-
-**Runner runs but Docker commands fail.** Ensure Docker Desktop (or
-colima/rancher-desktop) is running before the runner claims a job. On
-macOS, the LaunchAgent inherits the user's Docker socket.
-
-**Pull-request runs have no GitHub status.** Confirm the controller has a
-non-empty `GITHUB_TOKEN`, the token can write commit statuses in that
-repository, and the webhook delivery is a `pull_request` event. Read the
-controller log for `github commit status update failed`; status reporting
-is best-effort and never changes the Sparkwing run result.
-
-**Logs stop arriving in the dashboard.** Check `sparkwing-logs` health
-on the server and the logs hostname is reachable from the laptop. The
-runner silently drops log writes on HTTP errors to avoid wedging the
-job -- use `curl https://logs.example.com/api/v1/health` from the laptop
-to confirm connectivity.
+**A Docker step fails.** Docker is a pipeline dependency, not a Sparkwing
+service requirement. Install and start Docker only on machines assigned jobs
+that invoke it.

@@ -167,3 +167,32 @@ func TestResolveDashboardPaths_UnsetHomeStaysOutOfTheRealHome(t *testing.T) {
 		t.Errorf("home = %q, want a path under the test sandbox %s", dp.home, os.TempDir())
 	}
 }
+
+func TestRunDashboardStart_RefusesNonLoopbackAddr(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	err := runDashboardStart([]string{"--addr", "0.0.0.0:4343"})
+	if err == nil {
+		t.Fatal("start accepted a non-loopback --addr without --allow-remote")
+	}
+	if !strings.Contains(err.Error(), "--allow-remote") {
+		t.Fatalf("error = %v, want it to name the opt-in flag", err)
+	}
+}
+
+func TestDashboardStartHelpExposesOriginPolicy(t *testing.T) {
+	var found bool
+	for _, spec := range cmdDashboardStart.Flags {
+		if spec.Name == "allow-origin" {
+			found = spec.Argument == "ORIGINS" && strings.Contains(spec.Desc, "--allow-remote")
+		}
+	}
+	if !found {
+		t.Fatalf("dashboard start help flags = %#v, want --allow-origin ORIGINS", cmdDashboardStart.Flags)
+	}
+	for _, example := range cmdDashboardStart.Examples {
+		if strings.Contains(example.Command, "--allow-origin http://dashboard.example.com:4343") {
+			return
+		}
+	}
+	t.Fatalf("dashboard start examples = %#v, want a public-host --allow-origin example", cmdDashboardStart.Examples)
+}

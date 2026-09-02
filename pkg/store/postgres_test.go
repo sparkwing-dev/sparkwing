@@ -24,6 +24,17 @@ func pgTestDSN(t *testing.T) string {
 
 func openPGTestStore(t *testing.T) *store.Store {
 	t.Helper()
+	scoped := pgTestSchemaDSN(t)
+	st, err := store.OpenPostgres(context.Background(), scoped)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
+func pgTestSchemaDSN(t *testing.T) string {
+	t.Helper()
 	baseDSN := pgTestDSN(t)
 	schema := "sw_test_" + sanitize(t.Name()) + "_" + uniq()
 
@@ -40,23 +51,13 @@ func openPGTestStore(t *testing.T) *store.Store {
 	_ = admin.Close()
 
 	scoped := withSearchPath(baseDSN, schema)
-	st, err := store.OpenPostgres(context.Background(), scoped)
-	if err != nil {
-		if cleanup, e := store.OpenPostgres(adminCtx, baseDSN); e == nil {
-			_, _ = cleanup.DB().Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
-			_ = cleanup.Close()
-		}
-		t.Fatalf("open postgres against schema %s: %v", schema, err)
-	}
-
 	t.Cleanup(func() {
-		_ = st.Close()
 		if cleanup, e := store.OpenPostgres(context.Background(), baseDSN); e == nil {
 			_, _ = cleanup.DB().Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
 			_ = cleanup.Close()
 		}
 	})
-	return st
+	return scoped
 }
 
 var uniqCounter struct {
@@ -112,6 +113,49 @@ func TestPostgresOpenAndMigrate(t *testing.T) {
 	}
 }
 
+func TestSchemaV18_PostgresScrubsSecretInputHash(t *testing.T) {
+	scoped := pgTestSchemaDSN(t)
+	ctx := context.Background()
+	st, err := store.OpenPostgres(ctx, scoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "legacy-secret", Pipeline: "deploy", Status: "success", StartedAt: time.Now(),
+		Args: map[string]string{"token": "low-entropy"},
+		Invocation: map[string]any{
+			"args":                        map[string]string{"token": "low-entropy"},
+			store.InvocationSecretArgsKey: []string{"token"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacy := []byte(`{"args":{"token":"low-entropy"},"inputs_hash":"sha256:oracle","secret_args":["token"]}`)
+	if _, err := st.DB().ExecContext(ctx, `UPDATE runs SET invocation_json = $1 WHERE id = 'legacy-secret'`, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(ctx, `DELETE FROM sparkwing_schema_version WHERE version >= 18`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	up, err := store.OpenPostgres(ctx, scoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer up.Close()
+	var raw []byte
+	if err := up.DB().QueryRowContext(ctx,
+		`SELECT invocation_json FROM runs WHERE id = 'legacy-secret'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "inputs_hash") {
+		t.Errorf("Postgres migration retained secret inputs_hash: %s", raw)
+	}
+}
+
 func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 	st := openPGTestStore(t)
 	ctx := context.Background()
@@ -138,7 +182,7 @@ func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			n, err := st.ClaimNextReadyNode(ctx, fmt.Sprintf("h-%d", id), time.Minute, nil)
+			n, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, fmt.Sprintf("h-%d", id), time.Minute, nil)
 			mu.Lock()
 			defer mu.Unlock()
 			switch {

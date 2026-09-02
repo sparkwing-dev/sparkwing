@@ -11,8 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// BuildWarmRunnerFactory returns a runner factory that offers nodes to remote
-// agents before using the optional fallback runner.
+// BuildWarmRunnerFactory keeps the legacy worker and combined runner on one atomic fallback handoff.
 func BuildWarmRunnerFactory(
 	controllerURL, token string,
 	cfg warmpool.Config,

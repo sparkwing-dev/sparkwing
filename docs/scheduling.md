@@ -131,21 +131,22 @@ controller over outbound HTTP(S), so the machine needs no inbound listener or
 mandatory private-network product. A LAN, VPN, or tailnet may still provide a
 direct cache path.
 
-The agent advertises labels, concurrency, and available CPU and memory on its
-claim and heartbeat calls. The controller infers the agent from those calls;
-there is no separate idle-agent registration. Saturated and offline agents
-stop claiming. After a short internal window, an unclaimed unlabeled node is
+Every claim attempt carries the agent's labels. Local admission also reports
+available CPU and memory with claims and heartbeats. The controller's agent
+view derives from active or completed claims; an idle agent that has never
+claimed a node is not registered. Saturated and offline agents stop claiming.
+After a short internal window, an unclaimed unlabeled node is
 atomically removed from the agent queue and sent to the configured Kubernetes
 runner. A claim that wins that handoff owns the node, so the Kubernetes
 fallback cannot execute it a second time. Labeled nodes never use this
 fallback because Kubernetes Jobs do not advertise the agent labels; they wait
 for a compatible agent and remain subject to the normal queue timeout.
 
-In the runner-bundle chart, set `runner.triggerRunner.kind: warm`. In the full
-chart, the path is
-`sparkwing-runner-bundle.runner.triggerRunner.kind: warm`. The default remains
-`inprocess`. Warm mode reuses the chart's existing Kubernetes runner settings
-and grants only namespace-scoped Job CRUD needed by overflow.
+In the runner-bundle chart, set `runner.triggerRunner.kind: warm` and
+`runner.automountServiceAccountToken: true`. In the full chart, prefix both
+paths with `sparkwing-runner-bundle.`. The default remains `inprocess`. Warm
+mode reuses the chart's existing Kubernetes runner settings and grants only
+the namespace-scoped Job lifecycle and pod-read access overflow needs.
 
 ## Direct (`sparkwing run`) vs dispatched (`trigger`)
 

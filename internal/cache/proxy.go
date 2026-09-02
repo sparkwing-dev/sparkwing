@@ -1,15 +1,19 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +47,13 @@ type proxyMeta struct {
 	StatusCode  int    `json:"status_code"`
 }
 
+const (
+	proxyRewriteChunk = 64 << 10
+	proxyHostError    = "missing or malformed Host header"
+)
+
+var proxyHostPattern = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?(\.[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?)*$`)
+
 var (
 	proxyDir      = "/data/proxy"
 	proxyCacheTTL = 10 * time.Minute
@@ -51,6 +62,9 @@ var (
 
 	proxyKeyLocks   = map[string]*sync.RWMutex{}
 	proxyKeyLocksMu sync.Mutex
+
+	proxyPublicBase         string
+	proxyTrustForwardedHost bool
 )
 
 func proxyKeyLock(key string) *sync.RWMutex {
@@ -196,15 +210,7 @@ func proxyServeFromCache(w http.ResponseWriter, r *http.Request, registry, key s
 		return false
 	}
 
-	w.Header().Set("Content-Type", meta.ContentType)
-	w.Header().Set("X-Proxy-Cache", "HIT")
-	w.Header().Set("X-Proxy-Cached-At", time.Unix(meta.CachedAt, 0).Format(time.RFC3339))
-	if r.Method == http.MethodHead {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", meta.Size))
-		return true
-	}
-	http.ServeFile(w, r, bodyPath)
-	return true
+	return proxyWriteCachedBody(w, r, registry, meta, bodyPath, "HIT")
 }
 
 func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, remotePath, key string) {
@@ -249,11 +255,25 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 		return
 	}
 
-	if reg.RewriteBody && len(body) > 0 {
-		body = proxyRewriteBody(body, reg, r)
+	immutable := isImmutable(remotePath)
+	stored, served := body, body
+	perRequest := false
+	if proxyShouldRewrite(reg, immutable) && len(body) > 0 {
+		if proxyPublicBase != "" {
+			stored = proxyRewriteBody(body, reg, proxyPublicBase)
+			served = stored
+		} else {
+			base, ok := proxyBaseForRequest(r)
+			if !ok {
+				http.Error(w, proxyHostError, http.StatusBadRequest)
+				return
+			}
+			// safety: the cached copy stays unrewritten so a forged Host cannot reach another client.
+			served = proxyRewriteBody(body, reg, base)
+			perRequest = true
+		}
 	}
 
-	immutable := isImmutable(remotePath)
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/octet-stream"
@@ -266,14 +286,14 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 		Path:        remotePath,
 		ContentType: contentType,
 		CachedAt:    time.Now().Unix(),
-		Size:        int64(len(body)),
+		Size:        int64(len(stored)),
 		Immutable:   immutable,
 		StatusCode:  resp.StatusCode,
 	}
 	metaJSON, _ := json.Marshal(meta)
 
 	tmpBody := bodyPath + ".tmp"
-	if err := os.WriteFile(tmpBody, body, 0o644); err != nil {
+	if err := os.WriteFile(tmpBody, stored, 0o644); err != nil {
 		log.Printf("warning: proxy cache write error: %v", err)
 	} else {
 		if err := os.Rename(tmpBody, bodyPath); err != nil {
@@ -284,11 +304,12 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 		}
 	}
 
-	log.Printf("proxy: MISS %s/%s (%d bytes, immutable=%v)", reg.Name, truncatePath(remotePath), len(body), immutable)
+	log.Printf("proxy: MISS %s/%s (%d bytes, immutable=%v)", reg.Name, truncatePath(remotePath), len(stored), immutable)
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("X-Proxy-Cache", "MISS")
-	w.Write(body)
+	proxySetCacheability(w, meta, perRequest)
+	w.Write(served)
 }
 
 func proxyServeStale(w http.ResponseWriter, r *http.Request, registry, key string) bool {
@@ -307,39 +328,227 @@ func proxyServeStale(w http.ResponseWriter, r *http.Request, registry, key strin
 		return false
 	}
 
-	log.Printf("proxy: STALE %s/%s (upstream down)", registry, truncatePath(meta.Path))
-	w.Header().Set("Content-Type", meta.ContentType)
-	w.Header().Set("X-Proxy-Cache", "STALE")
-	if r.Method == http.MethodHead {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", meta.Size))
-		return true
+	if !proxyWriteCachedBody(w, r, registry, meta, bodyPath, "STALE") {
+		return false
 	}
-	http.ServeFile(w, r, bodyPath)
+	log.Printf("proxy: STALE %s/%s (upstream down)", registry, truncatePath(meta.Path))
 	return true
 }
 
-func proxyRewriteBody(body []byte, reg Registry, r *http.Request) []byte {
+func proxyWriteCachedBody(w http.ResponseWriter, r *http.Request, registry string, meta proxyMeta, bodyPath, status string) bool {
+	reg, known := defaultRegistries[registry]
+	rewrite := proxyPublicBase == "" && known && proxyShouldRewrite(reg, meta.Immutable) && meta.Size > 0
+
+	base := ""
+	var src *os.File
+	if rewrite {
+		var ok bool
+		if base, ok = proxyBaseForRequest(r); !ok {
+			http.Error(w, proxyHostError, http.StatusBadRequest)
+			return true
+		}
+		// perf: HEAD answers from the metadata alone, so a large mutable entry is never opened or read.
+		if r.Method != http.MethodHead {
+			f, err := os.Open(bodyPath)
+			if err != nil {
+				return false
+			}
+			defer f.Close()
+			src = f
+		}
+	}
+
+	w.Header().Set("Content-Type", meta.ContentType)
+	w.Header().Set("X-Proxy-Cache", status)
+	w.Header().Set("X-Proxy-Cached-At", time.Unix(meta.CachedAt, 0).Format(time.RFC3339))
+	proxySetCacheability(w, meta, rewrite)
+
+	if !rewrite {
+		if r.Method == http.MethodHead {
+			w.Header().Set("Content-Length", strconv.FormatInt(meta.Size, 10))
+			return true
+		}
+		http.ServeFile(w, r, bodyPath)
+		return true
+	}
+	if src == nil {
+		return true
+	}
+
+	old, replacement := proxyRewriteRule(reg, base)
+	if err := proxyStreamReplace(w, src, old, replacement); err != nil {
+		log.Printf("warning: proxy rewrite stream %s/%s: %v", registry, truncatePath(meta.Path), err)
+	}
+	return true
+}
+
+func proxySetCacheability(w http.ResponseWriter, meta proxyMeta, perRequestRewrite bool) {
+	if perRequestRewrite {
+		// safety: the body carries this request's own Host, so no shared cache may hand it to another client.
+		vary := "Host"
+		if proxyTrustForwardedHost {
+			vary = "Host, X-Forwarded-Host"
+		}
+		w.Header().Set("Vary", vary)
+		w.Header().Set("Cache-Control", "private, max-age=0")
+		return
+	}
+	ttl := proxyCacheTTL
+	if meta.Immutable {
+		ttl = proxyMaxAge
+	}
+	remaining := ttl - time.Since(time.Unix(meta.CachedAt, 0))
+	if remaining < 0 {
+		remaining = 0
+	}
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int64((remaining+time.Second-1)/time.Second)))
+}
+
+func proxyStreamReplace(dst io.Writer, src io.Reader, old, replacement string) error {
+	if old == "" {
+		_, err := io.Copy(dst, src)
+		return err
+	}
+	oldBytes, newBytes := []byte(old), []byte(replacement)
+	buf := make([]byte, proxyRewriteChunk)
+	window := make([]byte, 0, proxyRewriteChunk+len(oldBytes))
+	for {
+		n, readErr := src.Read(buf)
+		if n > 0 {
+			window = append(window, buf[:n]...)
+			rest, err := proxyFlushReplaced(dst, window, oldBytes, newBytes)
+			if err != nil {
+				return err
+			}
+			window = append(window[:0], rest...)
+		}
+		if readErr == io.EOF {
+			_, err := dst.Write(bytes.ReplaceAll(window, oldBytes, newBytes))
+			return err
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+}
+
+func proxyFlushReplaced(dst io.Writer, window, old, replacement []byte) ([]byte, error) {
+	pos := 0
+	for {
+		idx := bytes.Index(window[pos:], old)
+		if idx < 0 {
+			break
+		}
+		if _, err := dst.Write(window[pos : pos+idx]); err != nil {
+			return nil, err
+		}
+		if _, err := dst.Write(replacement); err != nil {
+			return nil, err
+		}
+		pos += idx + len(old)
+	}
+	// safety: the last len(old)-1 bytes stay buffered so a match split across two reads is still replaced.
+	keep := len(old) - 1
+	if keep > len(window)-pos {
+		keep = len(window) - pos
+	}
+	if _, err := dst.Write(window[pos : len(window)-keep]); err != nil {
+		return nil, err
+	}
+	return window[len(window)-keep:], nil
+}
+
+func proxyShouldRewrite(reg Registry, immutable bool) bool {
+	// perf: content-addressed artifacts carry no upstream URLs and can be huge, so they stream from disk untouched.
+	return reg.RewriteBody && !immutable
+}
+
+func normalizeProxyPublicBase(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("cache: invalid public URL %q: %w", raw, err)
+	}
+	if u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", fmt.Errorf("cache: public URL must be an absolute http or https URL, got %q", raw)
+	}
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return "", fmt.Errorf("cache: public URL must carry no query or fragment, got %q", raw)
+	}
+	if path := strings.TrimSuffix(u.Path, "/"); path != "" && path != "/proxy" {
+		return "", fmt.Errorf("cache: public URL must be a scheme and host with no path beyond /proxy, got %q", raw)
+	}
+	return u.Scheme + "://" + u.Host + "/proxy", nil
+}
+
+func proxyBaseForRequest(r *http.Request) (string, bool) {
+	if proxyPublicBase != "" {
+		return proxyPublicBase, true
+	}
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
 	host := r.Host
-	if host == "" {
-		host = r.Header.Get("X-Forwarded-Host")
+	// safety: forwarded headers are caller-controlled unless a trusted reverse proxy is the only way in.
+	if proxyTrustForwardedHost {
+		if fwd := lastForwardedValue(r.Header.Get("X-Forwarded-Host")); fwd != "" {
+			host = fwd
+		}
+		if proto := lastForwardedValue(r.Header.Get("X-Forwarded-Proto")); proto == "http" || proto == "https" {
+			scheme = proto
+		}
 	}
-	proxyBase := fmt.Sprintf("%s://%s/proxy", scheme, host)
+	if !validProxyHost(host) {
+		return "", false
+	}
+	return scheme + "://" + host + "/proxy", true
+}
 
-	s := string(body)
+func lastForwardedValue(header string) string {
+	idx := strings.LastIndex(header, ",")
+	// safety: proxies append, so the right-most element is the nearest trusted hop and the left-most is the client's.
+	return strings.TrimSpace(header[idx+1:])
+}
 
+func validProxyHost(host string) bool {
+	if host == "" || len(host) > 255 {
+		return false
+	}
+	name := host
+	if h, port, err := net.SplitHostPort(host); err == nil {
+		if port == "" || strings.TrimLeft(port, "0123456789") != "" {
+			return false
+		}
+		name = h
+	} else if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		name = host[1 : len(host)-1]
+	}
+	if strings.Contains(name, ":") {
+		return net.ParseIP(name) != nil
+	}
+	return proxyHostPattern.MatchString(strings.TrimSuffix(name, "."))
+}
+
+func proxyRewriteRule(reg Registry, proxyBase string) (string, string) {
 	switch reg.Name {
 	case "npm":
-		s = strings.ReplaceAll(s, reg.Upstream, proxyBase+"/npm")
-
+		return reg.Upstream, proxyBase + "/npm"
 	case "pypi":
-		s = strings.ReplaceAll(s, "https://files.pythonhosted.org", proxyBase+"/pythonhosted")
+		return "https://files.pythonhosted.org", proxyBase + "/pythonhosted"
 	}
+	return "", ""
+}
 
-	return []byte(s)
+func proxyRewriteBody(body []byte, reg Registry, proxyBase string) []byte {
+	old, replacement := proxyRewriteRule(reg, proxyBase)
+	if old == "" {
+		return body
+	}
+	return bytes.ReplaceAll(body, []byte(old), []byte(replacement))
 }
 
 func isImmutable(path string) bool {

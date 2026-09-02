@@ -7,15 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -94,11 +95,54 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("id, pipeline, status are required"))
 		return
 	}
+	if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(ScopeAdmin) {
+		held, err := s.ownsRun(r.Context(), body.ID, claimIdentity(r))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !held {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:      "claim_required",
+				Principal: p.label(),
+				Message:   "run " + body.ID + " is not claimed by this principal",
+			})
+			return
+		}
+		if !s.bindRunRepoToTrigger(w, r, &body) {
+			return
+		}
+	}
 	if err := s.store.CreateRun(r.Context(), body); err != nil {
+		if errors.Is(err, store.ErrSecretInputHash) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+// safety: the trigger names the repository a run's secrets resolve against, and the caller never does.
+func (s *Server) bindRunRepoToTrigger(w http.ResponseWriter, r *http.Request, run *store.Run) bool {
+	trig, err := s.store.GetTrigger(r.Context(), run.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if trig == nil {
+		run.Repo, run.RepoURL, run.GithubOwner, run.GithubRepo = "", "", "", ""
+		return true
+	}
+	if run.Repo != "" && run.Repo != trig.Repo {
+		writeError(w, http.StatusBadRequest,
+			fmt.Errorf("repo %q does not match the trigger's repository %q", run.Repo, trig.Repo))
+		return false
+	}
+	run.Repo, run.RepoURL = trig.Repo, trig.RepoURL
+	run.GithubOwner, run.GithubRepo = trig.GithubOwner, trig.GithubRepo
+	return true
 }
 
 type finishRunReq struct {
@@ -174,17 +218,66 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
-func secretValuesAllowed(r *http.Request) bool {
+type secretValueGate func(*http.Request) bool
+
+func (s *Server) secretValuesAllowed(r *http.Request) bool {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {
+		// safety: with auth off the whole API is open, and redacting here would
+		// feed runners "***" as a real argument value instead of failing.
+		return s.authMiddleware().AuthDisabled()
+	}
+	if p.HasScope(ScopeAdmin) {
 		return true
+	}
+	if !p.HasScope(ScopeNodesClaim) {
+		return false
+	}
+	// safety: a runner reads a run's credentials only while it holds a claim on one of its nodes.
+	held, err := s.store.PrincipalHoldsRunClaim(r.Context(), r.PathValue("id"), claimIdentity(r), time.Now())
+	return err == nil && held
+}
+
+func loopbackSecretValuesAllowed(r *http.Request) bool {
+	p, ok := PrincipalFromContext(r.Context())
+	if !ok {
+		return false
 	}
 	return p.HasScope(ScopeAdmin) || p.HasScope(ScopeNodesClaim)
 }
 
-func runForResponse(r *http.Request, run *store.Run) *store.Run {
+func dispatchEnvAllowed(r *http.Request) bool {
+	p, ok := PrincipalFromContext(r.Context())
+	if !ok {
+		return true
+	}
+	return p.HasScope(ScopeAdmin)
+}
+
+func dispatchForResponse(r *http.Request, d *store.NodeDispatch) *store.NodeDispatch {
+	if d == nil || dispatchEnvAllowed(r) {
+		return d
+	}
+	// safety: the captured environment is admin-only; every reader still sees which keys it lost.
+	stripped := *d
+	stripped.EnvJSON = nil
+	return &stripped
+}
+
+func dispatchesForResponse(r *http.Request, in []*store.NodeDispatch) []*store.NodeDispatch {
+	if dispatchEnvAllowed(r) {
+		return in
+	}
+	out := make([]*store.NodeDispatch, 0, len(in))
+	for _, d := range in {
+		out = append(out, dispatchForResponse(r, d))
+	}
+	return out
+}
+
+func runForResponse(r *http.Request, run *store.Run, allowed secretValueGate) *store.Run {
 	if includeHas(r.URL.Query().Get("include"), store.IncludeSecretValues) &&
-		secretValuesAllowed(r) {
+		allowed(r) {
 		return run
 	}
 	return store.RedactedRun(run)
@@ -219,10 +312,10 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		approvals, _ := s.store.ListApprovalsForRun(r.Context(), runID)
 		spawned, _ := s.store.ListSpawnedChildrenByRun(r.Context(), runID)
 		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals, spawned)
-		writeJSON(w, http.StatusOK, map[string]any{"run": runForResponse(r, run), "nodes": decorated})
+		writeJSON(w, http.StatusOK, map[string]any{"run": runForResponse(r, run, s.secretValuesAllowed), "nodes": decorated})
 		return
 	}
-	writeJSON(w, http.StatusOK, runForResponse(r, run))
+	writeJSON(w, http.StatusOK, runForResponse(r, run, s.secretValuesAllowed))
 }
 
 func includeHas(csv, target string) bool {
@@ -435,7 +528,8 @@ func sanitizeTriggerEnv(env map[string]string) map[string]string {
 	}
 	cleaned := make(map[string]string, len(env))
 	for key, value := range env {
-		if key == wingwire.LeaseTokenEnv || key == wingwire.ChildLeaseTokenEnv {
+		// safety: trigger_env is served whole to every triggers.read principal, so no credential-named key may persist.
+		if envredact.CredentialName(key) {
 			continue
 		}
 		cleaned[key] = value
@@ -462,6 +556,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID := newRunID()
+	repoInherited := body.ParentRunID != "" && body.Git.Repo == ""
 
 	if body.ParentRunID != "" {
 		ancestors, err := s.store.GetRunAncestorPipelines(r.Context(), body.ParentRunID)
@@ -532,6 +627,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		ParentRunID:   body.ParentRunID,
 		ParentNodeID:  body.ParentNodeID,
 		RetryOf:       body.RetryOf,
+		RepoInherited: repoInherited,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
 		return
@@ -706,7 +802,7 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	t, err := s.store.ClaimNextTriggerFor(r.Context(), 0, body.Pipelines, body.TriggerSources)
+	t, err := s.store.ClaimNextTriggerFor(r.Context(), claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			w.WriteHeader(http.StatusNoContent)
@@ -725,13 +821,43 @@ func newRunID() string {
 	return fmt.Sprintf("run-%s-%s", ts, hex.EncodeToString(suffix[:]))
 }
 
+const (
+	maxJSONBody = 1 << 20
+	// safety: a secret value is caller data, so it gets its own ceiling
+	// rather than an exemption from the shared decode path.
+	maxSecretJSONBody = 8 << 20
+)
+
 func decodeJSON(r *http.Request, v any) error {
+	return decodeJSONLimit(r, v, maxJSONBody)
+}
+
+func decodeJSONLimit(r *http.Request, v any, limit int64) error {
 	defer r.Body.Close()
-	body := http.MaxBytesReader(nil, r.Body, 1<<20)
+	// safety: an application/json body forces a CORS preflight, so a page
+	// on another site cannot post one as a simple request.
+	if err := requireJSONContentType(r.Header.Get("Content-Type")); err != nil {
+		return err
+	}
+	body := http.MaxBytesReader(nil, r.Body, limit)
 	dec := json.NewDecoder(body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return err
+	}
+	return nil
+}
+
+func requireJSONContentType(header string) error {
+	if header == "" {
+		return errors.New("content-type application/json required")
+	}
+	mediaType, _, err := mime.ParseMediaType(header)
+	if err != nil {
+		return fmt.Errorf("content-type %q: %w", header, err)
+	}
+	if mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json") {
+		return fmt.Errorf("content-type %q: application/json required", mediaType)
 	}
 	return nil
 }
@@ -824,7 +950,7 @@ func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, d)
+	writeJSON(w, http.StatusOK, dispatchForResponse(r, d))
 }
 
 func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request) {
@@ -838,7 +964,7 @@ func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request
 	if out == nil {
 		out = []*store.NodeDispatch{}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, dispatchesForResponse(r, out))
 }
 
 type claimNodeReq struct {
@@ -879,7 +1005,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	n, err := s.store.ClaimNextReadyNode(r.Context(), body.HolderID, lease, body.Labels)
+	n, err := s.store.ClaimNextReadyNode(r.Context(), claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			w.WriteHeader(http.StatusNoContent)
@@ -942,7 +1068,7 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	if err := s.store.HeartbeatNodeClaim(r.Context(), runID, nodeID, body.HolderID, lease); err != nil {
+	if err := s.store.HeartbeatNodeClaim(r.Context(), runID, nodeID, claimIdentity(r), body.HolderID, lease); err != nil {
 		if errors.Is(err, store.ErrLockHeld) {
 			writeError(w, http.StatusConflict, err)
 			return

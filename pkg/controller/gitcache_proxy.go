@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -64,6 +65,9 @@ func (s *Server) handleGitcacheRegister(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	if !s.claimedGitcacheRepoAllowed(w, r, name, repoURL) {
+		return
+	}
 	q := neturl.Values{}
 	q.Set("name", name)
 	q.Set("repo", repoURL)
@@ -78,6 +82,9 @@ func (s *Server) handleGitcacheGit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid Git cache path", http.StatusBadRequest)
 		return
 	}
+	if !s.claimedGitcacheRepoAllowed(w, r, parts[0], "") {
+		return
+	}
 	switch {
 	case r.Method == http.MethodGet && parts[1] == "info/refs" && r.URL.Query().Get("service") == "git-upload-pack":
 		q := neturl.Values{}
@@ -88,6 +95,35 @@ func (s *Server) handleGitcacheGit(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "read-only Git upload-pack requests only", http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Request, name, repoURL string) bool {
+	runID := r.PathValue("id")
+	if runID == "" {
+		return true
+	}
+	if principal, ok := PrincipalFromContext(r.Context()); ok && principal.HasScope(ScopeAdmin) {
+		return true
+	}
+	trigger, err := s.store.GetTrigger(r.Context(), runID)
+	if err != nil {
+		http.Error(w, "resolve claimed run source", http.StatusForbidden)
+		return false
+	}
+	expectedURL := trigger.RepoURL
+	repo := trigger.TriggerEnv["GITHUB_REPOSITORY"]
+	if repo == "" && trigger.GithubOwner != "" && trigger.GithubRepo != "" {
+		repo = trigger.GithubOwner + "/" + trigger.GithubRepo
+	}
+	if repo != "" {
+		expectedURL = bincache.RepoURLFromGitHub(repo)
+	}
+	expectedURL, err = sourceurl.ValidateCloneURL(expectedURL)
+	if err != nil || bincache.ClaimedRepoNameFromURL(expectedURL) != name || (repoURL != "" && repoURL != expectedURL) {
+		http.Error(w, "cache repository is not the source of the claimed run", http.StatusForbidden)
+		return false
+	}
+	return true
 }
 
 func validateGitcacheRepoURL(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -134,6 +170,10 @@ func (s *Server) proxyGitcacheRequest(w http.ResponseWriter, r *http.Request, me
 		if value := r.Header.Get(key); value != "" {
 			req.Header.Set(key, value)
 		}
+	}
+	// safety: the cache authenticates every route, and the caller's own bearer is never forwarded.
+	if token := bincache.CacheToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := &http.Client{
 		Timeout: 30 * time.Minute,

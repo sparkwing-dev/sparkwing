@@ -178,10 +178,12 @@ paths:
 
         Values of arguments the pipeline declared `secret:"true"` are
         replaced with `***` by default. `?include=secret_values`
-        returns them in full, and is honored only for tokens carrying
-        `nodes.claim` or `admin` -- a cluster executor fetches the
-        arguments it runs with from this endpoint. Any other token gets
-        the redacted view whether or not it asks. Comma-separate to
+        returns them in full, and is honored for an `admin` token and
+        for a `nodes.claim` token holding an unexpired claim on one of
+        the run's nodes -- a cluster executor fetches the arguments it
+        runs with from this endpoint. A controller running with
+        authentication disabled honors it for every caller. Any other
+        caller gets the redacted view whether or not it asks. Comma-separate to
         combine, e.g. `?include=nodes,secret_values`.
       parameters:
         - in: query
@@ -462,6 +464,10 @@ paths:
     get:
       tags: [nodes]
       summary: Fetch the latest dispatch (or a specific `?seq=N`) for a node.
+      description: >-
+        Admits `runs.read`, but fills `env_json` only for an `admin`
+        principal; every other reader gets the row without it. `redacted_keys`
+        is served to all readers.
       parameters:
         - in: query
           name: seq
@@ -481,18 +487,18 @@ paths:
     get:
       tags: [nodes]
       summary: List every dispatch attempt for a node.
+      description: >-
+        Admits `runs.read`, but fills `env_json` only for an `admin`
+        principal; every other reader gets each row without it.
+        `redacted_keys` is served to all readers.
       responses:
         "200":
           description: Dispatch list.
           content:
             application/json:
               schema:
-                type: object
-                required: [dispatches]
-                properties:
-                  dispatches:
-                    type: array
-                    items: { $ref: "#/components/schemas/NodeDispatch" }
+                type: array
+                items: { $ref: "#/components/schemas/NodeDispatch" }
 
   /api/v1/runs/{id}/nodes/{nodeID}/activity:
     parameters:
@@ -645,6 +651,9 @@ paths:
     post:
       tags: [nodes]
       summary: Extend the holding runner's claim lease.
+      description: |
+        `lease_secs` is clamped to the server cap of 10 minutes, so a
+        heartbeat cannot extend a claim past the claim's own bound.
       requestBody:
         required: true
         content:
@@ -1337,6 +1346,13 @@ paths:
     post:
       tags: [nodes]
       summary: Claim the oldest ready, unclaimed node matching labels.
+      description: |
+        The claim binds to the claiming token -- its prefix segment and
+        principal name -- as well as to `holder_id`. The per-node write
+        routes and the execution view then admit that token alone while
+        the lease is unexpired; another runner token gets `403` with
+        `"error": "claim_required"`, even one carrying the same principal
+        name. `lease_secs` is clamped to the server cap of 10 minutes.
       requestBody:
         required: true
         content:
@@ -1553,6 +1569,13 @@ paths:
               properties:
                 name: { type: string }
                 password: { type: string }
+                scopes:
+                  type: array
+                  description: >-
+                    Scopes this account's dashboard sessions carry. Omit to
+                    grant admin. Ignored on the bootstrap path, which always
+                    creates an admin.
+                  items: { type: string }
       responses:
         "201":
           description: User created.
@@ -2064,21 +2087,41 @@ components:
 
     NodeDispatch:
       type: object
-      description: One attempt to dispatch a node to a runner.
+      description: >-
+        One dispatch-frame snapshot for a node attempt. Mirrors
+        `pkg/store.NodeDispatch`. The byte-typed members carry
+        base64-encoded JSON.
       properties:
         run_id: { type: string }
         node_id: { type: string }
         seq: { type: integer }
-        kind: { type: string }
-        runner: { type: string }
-        target: { type: string }
-        started_at: { type: string, format: date-time }
-        finished_at: { type: string, format: date-time, nullable: true }
-        outcome: { type: string }
-        error: { type: string }
-        attrs:
-          type: object
-          additionalProperties: true
+        dispatched_at: { type: string, format: date-time }
+        code_version: { type: string }
+        binary_hash: { type: string }
+        runner_labels:
+          type: string
+          format: byte
+          description: JSON `[]string` of the labels the dispatch required.
+        env_json:
+          type: string
+          format: byte
+          description: >-
+            JSON `map[string]string` of the captured environment. Present
+            only for an `admin` principal; a `runs.read` principal gets the
+            row with this member absent.
+        redacted_keys:
+          type: string
+          format: byte
+          description: >-
+            JSON `[]string` naming the variables the snapshot dropped as
+            credential-shaped. Served to every reader of the row.
+        workdir: { type: string }
+        input_envelope_json:
+          type: string
+          format: byte
+          description: JSON dispatch envelope; over-cap rows store a truncation stub.
+        input_size_bytes: { type: integer, format: int64 }
+        secret_redactions: { type: integer }
 
     MetricSample:
       type: object
@@ -2268,6 +2311,10 @@ components:
       required: [name, created_at]
       properties:
         name: { type: string }
+        scopes:
+          type: array
+          description: Scopes this account's dashboard sessions carry.
+          items: { type: string }
         created_at:
           type: integer
           format: int64

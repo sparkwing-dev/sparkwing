@@ -19,6 +19,8 @@ const (
 	GateUninstalled GateState = "uninstalled"
 
 	GateBorrowed GateState = "borrowed"
+
+	GateBroken GateState = "broken"
 )
 
 type RepoGates struct {
@@ -43,6 +45,8 @@ type RepoGates struct {
 	Missing []string `json:"missing,omitempty"`
 
 	State GateState `json:"state"`
+
+	ConfigError string `json:"config_error,omitempty"`
 }
 
 func (r RepoGates) NotFiring() []string {
@@ -55,6 +59,9 @@ func (r RepoGates) NotFiring() []string {
 var BlockingHooks = []string{"pre-commit", "pre-push"}
 
 func (r RepoGates) Gated() bool {
+	if r.State == GateBroken {
+		return false
+	}
 	for _, name := range append(r.NotFiring(), r.Borrowed...) {
 		if slices.Contains(BlockingHooks, name) {
 			return false
@@ -64,6 +71,9 @@ func (r RepoGates) Gated() bool {
 }
 
 func (r RepoGates) Summary() string {
+	if r.State == GateBroken {
+		return fmt.Sprintf("%s: %s", r.Repo, r.ConfigError)
+	}
 	var parts []string
 	if len(r.Borrowed) > 0 {
 		parts = append(parts, fmt.Sprintf("%s fires out of %s, which is not this repo's hook directory, so nothing here declares or keeps it",
@@ -83,6 +93,9 @@ func (r RepoGates) Summary() string {
 }
 
 func (r RepoGates) Remedy() string {
+	if r.State == GateBroken {
+		return fmt.Sprintf("fix the config, then sparkwing pipeline hooks install --repo %s", r.Repo)
+	}
 	if len(r.Borrowed) > 0 || (r.Scope == "local" && len(r.NotFiring()) > 0) {
 		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing pipeline hooks install --repo %s", r.Repo, r.Repo)
 	}
@@ -135,13 +148,24 @@ func Survey(git Git, repoRoot string, declared []string) RepoGates {
 	return row
 }
 
-func SurveyFleet(git Git, repoRoots []string, declared func(repoRoot string) []string) []RepoGates {
+// Broken reports a repository whose project config does not load, so its
+// declared gates cannot be known.
+func Broken(repoRoot string, err error) RepoGates {
+	return RepoGates{Repo: repoRoot, State: GateBroken, ConfigError: err.Error()}
+}
+
+func SurveyFleet(git Git, repoRoots []string, declared func(repoRoot string) ([]string, error)) []RepoGates {
 	git = cacheMachineWideConfig(git)
 	rows := make([]RepoGates, 0, len(repoRoots))
 	for _, root := range repoRoots {
 		var names []string
 		if declared != nil {
-			names = declared(root)
+			got, err := declared(root)
+			if err != nil {
+				rows = append(rows, Broken(root, err))
+				continue
+			}
+			names = got
 		}
 		rows = append(rows, Survey(git, root, names))
 	}

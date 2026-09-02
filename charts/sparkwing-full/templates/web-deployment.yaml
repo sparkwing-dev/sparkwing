@@ -20,6 +20,7 @@ spec:
       labels:
         {{- include "sparkwing-full.componentSelectorLabels" (dict "root" . "component" "web") | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -68,7 +69,7 @@ spec:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           command: ["/usr/local/bin/sparkwing-web"]
           args:
-            - {{ printf "--addr=0.0.0.0:%d" (int .Values.web.port) | quote }}
+            - {{ printf "--addr=%s" (.Values.web.addr | default (printf "0.0.0.0:%d" (int .Values.web.port))) | quote }}
             - {{ printf "--controller=%s" (include "sparkwing-full.web.controllerURL" .) | quote }}
             {{- $logsURL := include "sparkwing-full.web.logsURL" . }}
             {{- if $logsURL }}
@@ -78,22 +79,25 @@ spec:
             {{- if $cacheURL }}
             - {{ printf "--cache=%s" $cacheURL | quote }}
             {{- end }}
-            {{- if .Values.web.apiUrl }}
-            - {{ printf "--api-url=%s" .Values.web.apiUrl | quote }}
-            {{- end }}
             {{- if .Values.web.requireLogin }}
             - "--require-login"
+            {{- end }}
+            {{- if .Values.web.allowUnauthenticatedRemote }}
+            - "--allow-unauthenticated-remote"
+            {{- end }}
+            {{- with .Values.web.trustedProxyCIDRs }}
+            - {{ printf "--trusted-proxy-cidrs=%s" (join "," .) | quote }}
             {{- end }}
           env:
             - name: SPARKWING_HOME
               value: /tmp/sparkwing
-            {{- if .Values.web.tokenSecret.name }}
+            {{- $tokenSecret := include "sparkwing-full.web.tokenSecretName" . }}
+            {{- if $tokenSecret }}
             - name: SPARKWING_AGENT_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.web.tokenSecret.name | quote }}
-                  key: {{ .Values.web.tokenSecret.key | quote }}
-                  optional: true
+                  name: {{ $tokenSecret | quote }}
+                  key: {{ include "sparkwing-full.web.tokenSecretKey" . | quote }}
             {{- end }}
             - name: OTEL_SERVICE_NAME
               value: "sparkwing-web"

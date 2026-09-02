@@ -1,11 +1,14 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -29,7 +32,7 @@ type loginResp struct {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -38,13 +41,23 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
+	client := s.loginLimit.client(r)
+	// safety: a drained failure budget answers before VerifyUser, so guessing one account costs no argon2 work.
+	if !s.loginLimit.accountAllowed(req.Username, client, now) {
+		writeRetryAfter(w, loginFailureWindow, "too many failed login attempts for this account")
+		return
+	}
 	u, err := s.store.VerifyUser(req.Username, req.Password, now)
 	if err != nil {
+		if !errors.Is(err, store.ErrInvalidCredentials) {
+			s.writeLoginUnavailable(w, err)
+			return
+		}
+		s.loginLimit.accountFailed(req.Username, client, now)
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
-	scopes := []string{ScopeAdmin}
-	rawSession, csrf, sess, err := s.store.CreateSession(u.Name, scopes, sessionTTL, now)
+	rawSession, csrf, sess, err := s.store.CreateSession(u.Name, u.Scopes, sessionTTL, now)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -58,9 +71,21 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SessionID: rawSession,
 		CSRFToken: csrf,
 		Principal: u.Name,
-		Scopes:    scopes,
+		Scopes:    u.Scopes,
 		ExpiresAt: sess.ExpiresAt.Unix(),
 	})
+}
+
+// safety: the caller is unauthenticated, so a login the controller could not decide answers a generic 503.
+func (s *Server) writeLoginUnavailable(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrHashingBusy) {
+		writeRetryAfterStatus(w, http.StatusServiceUnavailable, authBusyRetryAfter,
+			"authentication is busy, retry shortly")
+		return
+	}
+	s.logger.Error("login.unavailable", "error", err.Error())
+	writeRetryAfterStatus(w, http.StatusServiceUnavailable, authUnavailableRetryAfter,
+		"authentication is temporarily unavailable")
 }
 
 type logoutReq struct {
@@ -69,7 +94,7 @@ type logoutReq struct {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	var req logoutReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -101,6 +126,11 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	sess, err := s.store.LookupSession(raw, now)
 	if err != nil {
+		// safety: a backend fault answered 401 would read as expiry and clear the dashboard's session cookies.
+		if errors.Is(err, store.ErrSessionBackend) {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
@@ -129,30 +159,63 @@ func extractSessionHeader(r *http.Request) string {
 }
 
 type createUserReq struct {
-	Name     string `json:"name"`
-	Password string `json:"password"`
+	Name     string   `json:"name"`
+	Password string   `json:"password"`
+	Scopes   []string `json:"scopes,omitempty"`
 }
 
 type userJSON struct {
-	Name        string `json:"name"`
-	CreatedAt   int64  `json:"created_at"`
-	LastLoginAt *int64 `json:"last_login_at,omitempty"`
+	Name        string   `json:"name"`
+	Scopes      []string `json:"scopes"`
+	CreatedAt   int64    `json:"created_at"`
+	LastLoginAt *int64   `json:"last_login_at,omitempty"`
+}
+
+func requestedUserScopes(req createUserReq) ([]string, error) {
+	if len(req.Scopes) == 0 {
+		// safety: an omitted scope set grants admin, matching what an operator
+		// who names no scopes has always received from this route.
+		return []string{ScopeAdmin}, nil
+	}
+	// safety: a blank or repeated entry is dropped on the way to storage, so the
+	// account would sign in holding a narrower scope set than the operator named.
+	seen := make(map[string]struct{}, len(req.Scopes))
+	for _, s := range req.Scopes {
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" {
+			return nil, fmt.Errorf("empty scope (valid: %s)", strings.Join(allScopes, ", "))
+		}
+		if _, dup := seen[trimmed]; dup {
+			return nil, fmt.Errorf("duplicate scope %s", strconv.Quote(trimmed))
+		}
+		seen[trimmed] = struct{}{}
+	}
+	if err := validateScopes(req.Scopes); err != nil {
+		return nil, err
+	}
+	return req.Scopes, nil
 }
 
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	var req createUserReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	u, err := s.store.CreateUser(req.Name, req.Password, time.Now().UTC())
+	scopes, err := requestedUserScopes(req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	s.logger.Info("user created", "name", u.Name)
+	u, err := s.store.CreateUser(req.Name, req.Password, scopes, time.Now().UTC())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	s.logger.Info("user created", "name", u.Name, "scopes", u.Scopes)
 	writeJSON(w, http.StatusCreated, userJSON{
 		Name:      u.Name,
+		Scopes:    u.Scopes,
 		CreatedAt: u.CreatedAt.Unix(),
 	})
 }
@@ -163,11 +226,11 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req createUserReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	u, err := s.store.CreateFirstUser(req.Name, req.Password, time.Now().UTC())
+	u, err := s.store.CreateFirstUser(req.Name, req.Password, []string{ScopeAdmin}, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, store.ErrBootstrapClosed) {
 			s.markBootstrapClosed()
@@ -187,6 +250,7 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 	s.markBootstrapClosed()
 	writeJSON(w, http.StatusCreated, userJSON{
 		Name:      u.Name,
+		Scopes:    u.Scopes,
 		CreatedAt: u.CreatedAt.Unix(),
 	})
 }
@@ -205,7 +269,7 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]userJSON, 0, len(users))
 	for _, u := range users {
-		row := userJSON{Name: u.Name, CreatedAt: u.CreatedAt.Unix()}
+		row := userJSON{Name: u.Name, Scopes: u.Scopes, CreatedAt: u.CreatedAt.Unix()}
 		if u.LastLoginAt != nil {
 			v := u.LastLoginAt.Unix()
 			row.LastLoginAt = &v
@@ -217,12 +281,41 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := s.store.DeleteUser(name); err != nil {
-		writeError(w, http.StatusNotFound, err)
+	who := authwire.AnonymousPrincipal
+	keep := ""
+	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
+		who = p.Name
+		// safety: revoking the requesting token would lock the operator out mid-incident.
+		keep = p.TokenPrefix
+	}
+	sessions, revoked, err := s.store.DeleteUser(name, keep, time.Now().UTC())
+	if err != nil {
+		if errors.Is(err, store.ErrUserNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		s.logger.Error("user delete failed", "name", name, "by", who, "err", err)
+		writeError(w, http.StatusInternalServerError, errors.New("could not delete user"))
 		return
 	}
+	for _, prefix := range revoked {
+		s.auth.Invalidate(prefix)
+	}
+	s.logger.Info(
+		"user deleted",
+		"name", name,
+		"sessions", sessions,
+		"revoked_prefixes", revoked,
+		"by", who,
+	)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+const (
+	defaultRotateGrace = 24 * time.Hour
+	// safety: a rotation must not mint an unbounded window in which the replaced token still authenticates.
+	maxRotateGrace = 7 * 24 * time.Hour
+)
 
 type rotateReq struct {
 	GraceSecs int64 `json:"grace_secs,omitempty"`
@@ -240,14 +333,21 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 	prefix := r.PathValue("prefix")
 	var req rotateReq
 	if r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := decodeJSON(r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 	}
-	grace := 24 * time.Hour
+	grace := defaultRotateGrace
 	if req.GraceSecs > 0 {
 		grace = time.Duration(req.GraceSecs) * time.Second
+	}
+	if grace > maxRotateGrace {
+		writeError(w, http.StatusBadRequest, fmt.Errorf(
+			"grace_secs must not exceed %d (%s)",
+			int64(maxRotateGrace.Seconds()), maxRotateGrace,
+		))
+		return
 	}
 	var ttl time.Duration
 	if req.TTLSecs > 0 {
@@ -271,6 +371,7 @@ func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	s.auth.Invalidate(prefix)
 	s.logger.Info(
 		"token rotated",
 		"from_prefix", oldTok.Prefix,

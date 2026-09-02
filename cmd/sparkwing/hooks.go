@@ -56,21 +56,21 @@ func runHooksInstall(args []string) error {
 	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	fleet := fs.Bool("fleet", false, "install into every registered repo")
 	noProve := fs.Bool("no-prove", false, "claim core.hooksPath without running the gate first")
-	profileName := fs.String("profile", "", "pin the hook's runs to this storage profile (default: whatever the project's config selects)")
+	profileName := fs.String("profile", "", "pin the hook's runs to this storage profile (default: local-only)")
 	if err := parseAndCheck(cmdHooksInstall, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	opts := installOptions{prove: runPipelineForProof, profile: *profileName}
-	if *noProve {
-		opts.prove = nil
-	}
+	opts := installOptions{profile: *profileName}
 	if opts.profile != "" {
 		if _, err := resolveProfileFlag(opts.profile); err != nil {
 			return fmt.Errorf("hooks install: %w", err)
 		}
+	}
+	if !*noProve {
+		opts.prove = runPipelineForProof(opts.profile)
 	}
 	if *fleet {
 		if *repo != "" {
@@ -101,7 +101,12 @@ func installFleet(opts installOptions) error {
 	var ungated, failed []string
 	for _, root := range roots {
 		sparkwingDir := filepath.Join(root, ".sparkwing")
-		declared := declaredHookNames(root)
+		declared, err := declaredHookNames(root)
+		if err != nil {
+			fmt.Fprintf(os.Stdout, "\n=== %s\nerror: %v\n", root, err)
+			failed = append(failed, filepath.Base(root))
+			continue
+		}
 		if len(declared) == 0 {
 			noGate++
 			continue
@@ -186,12 +191,12 @@ func declaredHooks(sparkwingDir string) (map[string][]string, error) {
 	return out, nil
 }
 
-func declaredHookNames(repoRoot string) []string {
+func declaredHookNames(repoRoot string) ([]string, error) {
 	declared, err := declaredHooks(filepath.Join(repoRoot, ".sparkwing"))
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("config does not load: %w", err)
 	}
-	return slices.Sorted(maps.Keys(declared))
+	return slices.Sorted(maps.Keys(declared)), nil
 }
 
 func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installOptions) (bool, error) {
@@ -216,7 +221,11 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 	plan, proceed := prepareHookInstall(git, repoRoot, hooksDir,
 		prospectiveUnforwardedGlobalHooks(globalHooks, hooksDir), hooksToRun, opts.prove)
 	if !proceed {
-		return githooks.Survey(git, repoRoot, declaredHookNames(repoRoot)).Gated(), nil
+		declared, err := declaredHookNames(repoRoot)
+		if err != nil {
+			return false, err
+		}
+		return githooks.Survey(git, repoRoot, declared).Gated(), nil
 	}
 	currentGlobalHooks := chainableGlobalHooks(git, hooksDir)
 	currentGlobalState, err := captureGlobalHookState(git, hooksDir, currentGlobalHooks)
@@ -639,15 +648,23 @@ func proveGates(prove Prover, repoRoot string, hooksToRun map[string][]string) m
 	return failed
 }
 
-func runPipelineForProof(repoRoot, pipeline string) error {
-	cmd := exec.Command("sparkwing", "run", pipeline)
-	cmd.Dir = repoRoot
-	cmd.Env = append(os.Environ(), "SPARKWING_LOG_FORMAT=quiet")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return nil
+func runPipelineForProof(profileName string) Prover {
+	return func(repoRoot, pipeline string) error {
+		args := []string{"run", pipeline, "--sw-local-only"}
+		if profileName != "" {
+			args = []string{"run", pipeline, "--profile", profileName}
+		}
+		cmd := exec.Command("sparkwing", args...)
+		cmd.Dir = repoRoot
+		env := removeEnv(os.Environ(), "SPARKWING_PROFILE")
+		env = removeEnv(env, "SPARKWING_SECRETS_PROFILE")
+		cmd.Env = append(env, "SPARKWING_LOG_FORMAT=quiet")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		return fmt.Errorf("%w: %s", err, lastLine(out))
 	}
-	return fmt.Errorf("%w: %s", err, lastLine(out))
 }
 
 func lastLine(out []byte) string {
@@ -788,7 +805,11 @@ func statusHooks(git githooks.Git, repoRoot string) error {
 		fmt.Fprintln(os.Stdout, "no sparkwing hooks installed")
 		fmt.Fprintln(os.Stdout, "run: sparkwing pipeline hooks install")
 	}
-	survey := githooks.Survey(git, repoRoot, declaredHookNames(repoRoot))
+	declared, err := declaredHookNames(repoRoot)
+	if err != nil {
+		return err
+	}
+	survey := githooks.Survey(git, repoRoot, declared)
 	if len(survey.NotFiring()) > 0 || len(survey.Borrowed) > 0 {
 		fmt.Fprintf(os.Stdout, "\nwarning: %s\n  %s\n", survey.Summary(), survey.Remedy())
 	}
@@ -895,8 +916,7 @@ func describeManagedHook(script string) (pipes []string, chained bool) {
 	for line := range strings.SplitSeq(script, "\n") {
 		line = strings.TrimSpace(line)
 		if rest, ok := strings.CutPrefix(line, "sparkwing run "); ok {
-			name, _, _ := strings.Cut(rest, " ")
-			pipes = append(pipes, name)
+			pipes = append(pipes, firstShellWord(rest))
 		}
 		if strings.HasPrefix(line, "exec \"$hook\"") {
 			chained = true
@@ -949,13 +969,14 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool, profile
 		b.WriteString("(\n")
 		b.WriteString(gitenv.ShellUnbind())
 
-		b.WriteString("unset SPARKWING_PROFILE\n")
-		flag := ""
+		b.WriteString("unset SPARKWING_PROFILE SPARKWING_SECRETS_PROFILE\n")
+		flag := " --sw-local-only"
 		if profileName != "" {
 			flag = " --profile " + shellSingleQuote(profileName)
 		}
 		for _, p := range pipes {
-			fmt.Fprintf(&b, "sparkwing run %s%s%s%s\n", p, flag, stdin, tolerate)
+			// safety: pipeline names come from repo config, so quote before they reach sh.
+			fmt.Fprintf(&b, "sparkwing run %s%s%s%s\n", shellSingleQuote(p), flag, stdin, tolerate)
 		}
 		b.WriteString(")\n")
 	}
@@ -979,4 +1000,27 @@ func renderGlobalChain(hookName string) string {
 
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func firstShellWord(s string) string {
+	if !strings.HasPrefix(s, "'") {
+		word, _, _ := strings.Cut(s, " ")
+		return word
+	}
+	var b strings.Builder
+	quoted := false
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '\'':
+			quoted = !quoted
+		case s[i] == '\\' && !quoted && i+1 < len(s):
+			i++
+			b.WriteByte(s[i])
+		case s[i] == ' ' && !quoted:
+			return b.String()
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }

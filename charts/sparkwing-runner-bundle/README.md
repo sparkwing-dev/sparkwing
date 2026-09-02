@@ -91,13 +91,16 @@ helm install runners ./charts/sparkwing-runner-bundle \
     --set runner.labels='{cluster,arch=amd64}'
 ```
 
-For a fully unauthenticated test cluster:
+For a fully unauthenticated test cluster, opt the cache and the logs
+service out of their token requirement explicitly:
 
 ```bash
 helm install runners ./charts/sparkwing-runner-bundle \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
-    --set controller.url=http://sparkwing-controller.sparkwing.svc.cluster.local
+    --set controller.url=http://sparkwing-controller.sparkwing.svc.cluster.local \
+    --set cache.allowUnauthenticated=true \
+    --set logs.allowUnauthenticated=true
 ```
 
 ## Values cheat sheet
@@ -117,20 +120,26 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
+| `cache.allowUnauthenticated` | Serve the cache's blob and sync endpoints without a token. | `false` |
 | `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
+| `cache.publicUrl` | Base URL the proxy rewrites registry bodies against. Empty on a non-ClusterIP Service means each response is rewritten from its own request `Host`. | in-cluster Service URL on a ClusterIP Service |
 | `cache.repos` | `GITCACHE_REPOS` -- comma-separated `alias=url`. | `""` |
 | `cache.sshKeySecret.name` | Required SSH-key Secret when configured. | `""` |
 | `cache.storage.size` | Cache PVC size. | `20Gi` |
 | `cache.storage.storageClassName` | Override default StorageClass. | `""` |
 | `logs.enabled` | Toggle the log-store sidecar. | `true` |
+| `logs.allowUnauthenticated` | Serve every run's logs without a token. | `false` |
 | `logs.storage.size` | Logs PVC size. | `10Gi` |
+| `runner.automountServiceAccountToken` | Mount the runner pod's API token. Required by the `k8s` and `warm` trigger runners. | `false` |
 | `serviceAccount.annotations` | Add IRSA / Workload Identity annotations. | `{}` |
+| `serviceAccount.shareAcrossComponents` | Accept one shared account when `serviceAccount.create=false`. | `false` |
 | `imagePullSecrets` | Private-registry pull secrets for all 3 images. | `[]` |
 
 ### Remote capacity before Kubernetes
 
-Set `runner.triggerRunner.kind=warm` to offer each unlabeled pipeline node to
-remote agents before creating a Kubernetes Job. Remote agents may run on
+Set `runner.triggerRunner.kind=warm` and
+`runner.automountServiceAccountToken=true` to offer each unlabeled pipeline
+node to remote agents before creating a Kubernetes Job. Remote agents may run on
 Windows, macOS, or Linux workstations and servers. They poll the controller
 over outbound HTTP(S); they need no inbound route, and Tailscale is optional.
 Labels and advertised capacity keep incompatible or saturated machines from
@@ -139,22 +148,40 @@ Kubernetes after a short internal claim window. A labeled node stays queued
 for a matching agent because the fallback Job does not advertise agent labels.
 
 Warm mode reuses the runner image, pull policy, namespace, service account,
-and cache configuration already present in this chart. It also grants the
-runner Role namespace-scoped create, get, list, watch, and delete access to
-Jobs. The default `inprocess` mode retains the prior arguments and RBAC.
+and cache configuration already present in this chart. It grants the runner
+Role namespace-scoped Job create, get, and delete plus pod list. The default
+`inprocess` mode retains the prior arguments and empty Role.
 The fallback `run-node` process receives the runner token in its environment,
 so use warm mode only for trusted pipeline code and rotate short-lived tokens.
 
 ## Auth
 
 The runner reads its bearer token from `controller.tokenSecret` and uses it
-for controller claims and writes to the logs service. Configuring that Secret
+for controller claims and writes to the logs service. Mint it with
+`nodes.claim`, `triggers.claim`, `runs.state`, `secrets.read`, and
+`logs.write`: enough to claim triggers and nodes, drive the runs it claimed
+from plan to finish, read the secrets its repository owns, and ship logs. It
+needs no `admin`. A warm-pool dispatcher that marks nodes ready for a pool is
+the exception and keeps an `admin` token. Configuring that Secret
 also enables logs-service auth: the logs service forwards each caller's
 incoming Authorization header to the resolved controller's
 `/api/v1/auth/whoami` endpoint and enforces the returned scopes. It does not
-receive a second service bearer. Leaving the Secret name empty keeps both the
-standalone and full chart's documented test install unauthenticated. Once a
-Secret name is configured, its key and the Secret itself are required.
+receive a second service bearer. The same Secret becomes the runner's
+`SPARKWING_CACHE_TOKEN` and the cache's `SPARKWING_API_TOKEN`, so both sides of
+the binary and dependency cache share one bearer. Once a Secret name is
+configured, its key and the Secret itself are required.
+
+A cache-enabled install without that Secret fails at render time. Set
+`cache.allowUnauthenticated=true` to serve the cache's blob and sync endpoints
+to anything that can reach the Service, which is appropriate only on a
+bootstrap install, before the Secret exists.
+
+A logs-enabled install without it fails the same way, because the logs service
+has no controller to resolve callers against. With the Secret configured the
+chart also passes `--require-auth`, so the pod crashes rather than serving
+open. Set `logs.allowUnauthenticated=true` to let anything that can reach the
+Service read, forge, and delete every run's logs, which is again a bootstrap
+setting to turn back off with the token upgrade.
 
 Trigger claiming always needs a gitcache because it clones and compiles the
 repository before creating a run. If `cache.enabled=false` while
@@ -202,24 +229,37 @@ container.
 
 ## RBAC
 
-The chart creates a namespace-scoped Role + RoleBinding. The runner
-SA can:
+The chart creates a namespace-scoped Role + RoleBinding with no rules.
+The runner, cache, and logs servers talk to the controller over HTTP and
+never call the Kubernetes API, so none of them mounts a ServiceAccount
+token: every pod sets `automountServiceAccountToken: false`, and the
+cache and logs pods run under their own ServiceAccounts rather than the
+runner's.
 
-- Read pods + pod logs + events (for self-debugging output)
-- Read configmaps + secrets (so pipelines can mount config)
+The opt-in `k8s` and `warm` trigger runners call the API to create and inspect
+runner Jobs. Give the runner pod a token when selecting either mode:
 
-It cannot create / update / delete cluster resources. Pipelines
-that need to mutate cluster state (e.g. `kubectl apply`,
-sealed-secrets, helm-installs) should bring their own RBAC outside
-this chart.
+```bash
+--set runner.automountServiceAccountToken=true
+```
+
+Pipelines that need to reach the cluster API (e.g. `kubectl apply`,
+sealed-secrets, helm-installs) should bring their own ServiceAccount and
+RBAC outside this chart.
 
 If you don't want the chart-managed Role at all:
 
 ```bash
 --set rbac.create=false \
 --set serviceAccount.create=false \
---set serviceAccount.name=my-existing-sa
+--set serviceAccount.name=my-existing-sa \
+--set serviceAccount.shareAcrossComponents=true
 ```
+
+`serviceAccount.create=false` runs all three pods under that one account.
+The render fails without `shareAcrossComponents=true` so the sharing is a
+recorded choice; the chart never invents `-cache` and `-logs` names you
+have not created.
 
 ## Image registry
 

@@ -119,8 +119,10 @@ surfaces ship with matching entries.
 
 ## Reporting issues
 
-Open an issue at
+Open a public issue for bugs and feature requests at
 [github.com/sparkwing-dev/sparkwing/issues](https://github.com/sparkwing-dev/sparkwing/issues).
+Report suspected vulnerabilities privately by following the
+[security policy](./SECURITY.md).
 
 ## License
 

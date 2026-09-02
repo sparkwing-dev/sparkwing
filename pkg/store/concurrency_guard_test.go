@@ -24,8 +24,8 @@ func TestConcurrencyGuard_CanonicalSQLSitesOnly(t *testing.T) {
 			t.Errorf("%q appears %d times in pkg/store sources, want exactly 1 (inside %s)", needle, got, helper)
 		}
 	}
-	if got := strings.Count(src, "lease_expires_at > ?"); got != 2 {
-		t.Errorf("%q appears %d times in pkg/store sources, want exactly 2 (holderLiveSQL + holderLeaseLiveSQL)", "lease_expires_at > ?", got)
+	if got := strings.Count(src, "lease_expires_at > ?"); got != 4 {
+		t.Errorf("%q appears %d times in pkg/store sources, want exactly 4 (holderLiveSQL + holderLeaseLiveSQL + nodeClaimLiveSQL + triggerClaimLiveSQL)", "lease_expires_at > ?", got)
 	}
 	if got := strings.Count(src, "DELETE FROM concurrency_holders"); got != 2 {
 		t.Errorf("%q appears %d times in pkg/store sources, want exactly 2 (txDeleteHolder + CancelWaiter)", "DELETE FROM concurrency_holders", got)

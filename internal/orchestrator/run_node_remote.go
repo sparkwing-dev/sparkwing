@@ -34,15 +34,19 @@ func runNodeRemote(
 	ctx context.Context,
 	trigger *store.Trigger,
 	run *store.Run,
-	controllerURL, logsURL, runID, nodeID, token string,
+	controllerURL, logsURL, gitcacheURL, cacheToken, runID, nodeID, token string,
 	logger *slog.Logger,
 ) (runner.Result, error) {
-	gcURL := bincache.CacheURL()
+	gcURL := strings.TrimRight(gitcacheURL, "/")
+	if gcURL == "" {
+		gcURL = bincache.CacheURL()
+	}
 	if gcURL == "" {
 		return runner.Result{},
 			fmt.Errorf("pipeline %q not registered in this runner image, and SPARKWING_GITCACHE_URL is unset so we cannot fall back to remote compile",
 				run.Pipeline)
 	}
+	gcURL = bincache.ControllerRunGitcacheURL(gcURL, controllerURL, runID)
 
 	repoURL, sourceErr := remoteTriggerSourceURL(trigger)
 	if sourceErr != nil {
@@ -70,11 +74,12 @@ func runNodeRemote(
 		return runner.Result{}, fmt.Errorf("create private work directory: %w", err)
 	}
 
-	fetchSource := bincache.FetchPipelineSourceWithToken
+	fetchSource := bincache.FetchPipelineSourceWithCredentials
 	if strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") {
-		fetchSource = bincache.FetchPipelineWorkspaceSourceWithToken
+		fetchSource = bincache.FetchPipelineWorkspaceSourceWithCredentials
 	}
-	sparkwingDir, err := fetchSource(gcURL, controllerURL, token, repoURL, branch, trigger.GitSHA, workDir)
+	sparkwingDir, err := fetchSource(gcURL, controllerURL, token, cacheToken,
+		repoURL, branch, trigger.GitSHA, workDir)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("fetch source: %w", err)
 	}
@@ -83,7 +88,10 @@ func runNodeRemote(
 	if bincache.ControllerGitcacheToken(gcURL, controllerURL, token) != "" {
 		binaryCacheURL = ""
 	}
-	binary, err := resolveRemoteBinary(sparkwingDir, binaryCacheURL, bincache.CacheToken(), logger)
+	if cacheToken == "" {
+		cacheToken = bincache.CacheToken()
+	}
+	binary, err := resolveRemoteBinary(sparkwingDir, binaryCacheURL, cacheToken, logger)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
 	}
@@ -165,7 +173,7 @@ func resolveRemoteBinary(sparkwingDir, gcURL, token string, logger *slog.Logger)
 	compiled := false
 	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
 		if gcURL != "" {
-			if fetchErr := bincache.TryBinary(gcURL, key, tempPath); fetchErr == nil {
+			if fetchErr := bincache.TryBinary(gcURL, token, key, tempPath); fetchErr == nil {
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
 				logger.Warn("runNodeRemote: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)

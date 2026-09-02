@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"sort"
 	"strings"
 )
@@ -40,6 +41,37 @@ const RedactedArgValue = "***"
 // spelling.
 const IncludeSecretValues = "secret_values"
 
+// ErrSecretInputHash rejects a run snapshot that would make a supplied
+// secret argument guessable through its deterministic input hash.
+var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
+
+// ValidateRunInvocation rejects secret-bearing input hashes before a
+// state backend persists the run. A malformed secret_args value fails
+// closed when inputs_hash is present.
+func ValidateRunInvocation(r Run) error {
+	if _, ok := r.Invocation["inputs_hash"]; !ok {
+		return nil
+	}
+	raw, classified := r.Invocation[InvocationSecretArgsKey]
+	if !classified {
+		return nil
+	}
+	names, valid := decodeStringSliceChecked(raw)
+	if !valid {
+		return ErrSecretInputHash
+	}
+	invArgs := invocationArgs(r.Invocation)
+	for _, name := range names {
+		if _, ok := r.Args[name]; ok {
+			return ErrSecretInputHash
+		}
+		if _, ok := invArgs[name]; ok {
+			return ErrSecretInputHash
+		}
+	}
+	return nil
+}
+
 // SecretArgNames returns the arg names this run declared secret, or
 // nil when the run carries no classification.
 //
@@ -57,27 +89,39 @@ func (r Run) SecretArgNames() []string {
 }
 
 func decodeStringSlice(v any) []string {
+	out, _ := decodeStringSliceChecked(v)
+	return out
+}
+
+func decodeStringSliceChecked(v any) ([]string, bool) {
 	switch typed := v.(type) {
 	case []string:
 		if len(typed) == 0 {
-			return nil
+			return nil, true
 		}
 		out := make([]string, 0, len(typed))
-		out = append(out, typed...)
-		return out
+		for _, s := range typed {
+			if s == "" {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
 	case []any:
 		out := make([]string, 0, len(typed))
 		for _, item := range typed {
-			if s, ok := item.(string); ok && s != "" {
-				out = append(out, s)
+			s, ok := item.(string)
+			if !ok || s == "" {
+				return nil, false
 			}
+			out = append(out, s)
 		}
 		if len(out) == 0 {
-			return nil
+			return nil, true
 		}
-		return out
+		return out, true
 	default:
-		return nil
+		return nil, false
 	}
 }
 
@@ -158,7 +202,8 @@ func redactInvocation(inv map[string]any, secret map[string]struct{}, values map
 	}
 	args := invocationArgs(inv)
 	repro, _ := inv["reproducer"].(string)
-	if len(args) == 0 && repro == "" {
+	_, hasInputsHash := inv["inputs_hash"]
+	if len(args) == 0 && repro == "" && !hasInputsHash {
 		return inv
 	}
 
@@ -166,6 +211,7 @@ func redactInvocation(inv map[string]any, secret map[string]struct{}, values map
 	for k, v := range inv {
 		out[k] = v
 	}
+	delete(out, "inputs_hash")
 	if len(args) > 0 {
 
 		redacted := make(map[string]string, len(args))

@@ -22,6 +22,15 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
 }) => {
   test.setTimeout(120_000);
   const dashboard = await startAuthenticatedDashboard();
+  const cspViolations: string[] = [];
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      /content security policy/i.test(message.text())
+    ) {
+      cspViolations.push(message.text());
+    }
+  });
   const browserAuthorizations: (string | null)[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -114,23 +123,32 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
       sameSite: "Strict",
     });
 
-    const html = await (await page.request.get(`${dashboard.origin}/`)).text();
+    const indexResponse = await page.request.get(`${dashboard.origin}/`);
+    const html = await indexResponse.text();
     expect(html).not.toContain(dashboard.service_token);
-    expect(html).toContain('window.__SPARKWING_TOKEN__=""');
+    expect(html).not.toContain("__SPARKWING_TOKEN__");
+    const headers = indexResponse.headers();
+    expect(headers["content-security-policy"]).toContain("default-src 'self'");
+    expect(headers["content-security-policy"]).toContain(
+      "frame-ancestors 'none'",
+    );
+    expect(headers["content-security-policy"]).toContain("object-src 'none'");
+    expect(headers["x-frame-options"]).toBe("DENY");
+    expect(headers["x-content-type-options"]).toBe("nosniff");
+    expect(headers["referrer-policy"]).toBe("same-origin");
     expect(
       await page.evaluate(() => {
         const runtime = window as unknown as {
           __SPARKWING_TOKEN__?: string;
-          __SPARKWING_API_URL__?: string;
           __SPARKWING_REQUIRE_LOGIN__?: string;
         };
         return {
           token: runtime.__SPARKWING_TOKEN__,
-          apiURL: runtime.__SPARKWING_API_URL__,
           requireLogin: runtime.__SPARKWING_REQUIRE_LOGIN__,
         };
       }),
-    ).toEqual({ token: "", apiURL: "", requireLogin: "true" });
+    ).toEqual({ token: undefined, requireLogin: "true" });
+    expect(cspViolations).toEqual([]);
 
     const malformedCookieErrors: string[] = [];
     const captureMalformedCookieError = (error: Error) => {

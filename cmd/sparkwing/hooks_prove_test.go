@@ -348,7 +348,7 @@ func TestHooksInstall_PriorHookStaysLiveUntilProofPasses(t *testing.T) {
 	}
 	f.git(t, "add", "-A")
 	f.git(t, "commit", "-m", "invoke prior hook during proof")
-	if ran := f.ranPipelines(t); !strings.Contains(ran, "run old-gate") || strings.Contains(ran, "run gate\n") {
+	if ran := f.ranPipelines(t); !strings.Contains(ran, "run old-gate --sw-local-only") || strings.Contains(ran, "run gate --sw-local-only") {
 		t.Fatalf("commit during proof did not run only the prior hook: %q", ran)
 	}
 
@@ -362,7 +362,7 @@ func TestHooksInstall_PriorHookStaysLiveUntilProofPasses(t *testing.T) {
 		t.Fatal("installer did not publish after proof passed")
 	}
 	after := readRepoFile(t, priorPath)
-	if after == priorBody || !strings.Contains(after, "sparkwing run gate") {
+	if after == priorBody || !strings.Contains(after, "sparkwing run 'gate'") {
 		t.Fatalf("passed proof did not atomically publish the replacement:\n%s", after)
 	}
 	if got := f.git(t, "config", "--local", "core.hooksPath"); got != priorConfig {
@@ -371,7 +371,7 @@ func TestHooksInstall_PriorHookStaysLiveUntilProofPasses(t *testing.T) {
 	writeRepoFile(t, filepath.Join(f.repo, "after-proof"), "published\n")
 	f.git(t, "add", "-A")
 	f.git(t, "commit", "-m", "invoke replacement hook")
-	if ran := f.ranPipelines(t); !strings.Contains(ran, "run gate\n") {
+	if ran := f.ranPipelines(t); !strings.Contains(ran, "run gate --sw-local-only") {
 		t.Fatalf("published replacement hook did not fire: %q", ran)
 	}
 }
@@ -606,14 +606,22 @@ func TestDeclaredHookNames_ReadsTheTriggersThePipelinesDeclare(t *testing.T) {
       pre_commit: {}
       pre_push: {}
 `)
-	got := strings.Join(declaredHookNames(f.repo), ",")
+	names, err := declaredHookNames(f.repo)
+	if err != nil {
+		t.Fatalf("declaredHookNames: %v", err)
+	}
+	got := strings.Join(names, ",")
 	if got != "pre-commit,pre-push" {
 		t.Errorf("declaredHookNames = %q, want %q", got, "pre-commit,pre-push")
 	}
 }
 
 func TestDeclaredHookNames_UnreadableProjectDeclaresNothing(t *testing.T) {
-	if got := declaredHookNames(t.TempDir()); got != nil {
+	got, err := declaredHookNames(t.TempDir())
+	if err != nil {
+		t.Fatalf("declaredHookNames: %v", err)
+	}
+	if got != nil {
 		t.Errorf("declaredHookNames = %v, want nil for a directory with no project", got)
 	}
 }

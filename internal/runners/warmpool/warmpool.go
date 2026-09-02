@@ -16,7 +16,8 @@ import (
 type Config struct {
 	PollInterval time.Duration
 
-	ClaimWaitTimeout time.Duration
+	ClaimWaitTimeout  time.Duration
+	HeartbeatInterval time.Duration
 }
 
 type Runner struct {
@@ -32,6 +33,9 @@ func New(ctrl *client.Client, fallback runner.Runner, cfg Config, logger *slog.L
 	}
 	if cfg.ClaimWaitTimeout <= 0 {
 		cfg.ClaimWaitTimeout = 5 * time.Second
+	}
+	if cfg.HeartbeatInterval <= 0 {
+		cfg.HeartbeatInterval = 5 * time.Second
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -49,7 +53,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 
 	hbCtx, stopHB := context.WithCancel(ctx)
 	defer stopHB()
-	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, r.logger)
+	go heartbeatLoop(hbCtx, r.ctrl, req.RunID, req.NodeID, r.cfg.HeartbeatInterval, r.logger)
 
 	poll := time.NewTicker(r.cfg.PollInterval)
 	defer poll.Stop()
@@ -81,6 +85,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			}
 			if n.ClaimedBy != "" {
 				if !claimedSeen {
+					stopHB()
 					_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID,
 						fmt.Sprintf("claimed by %s", n.ClaimedBy))
 				}
@@ -107,6 +112,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				}
 				if !revoked {
 					// safety: an agent claimed between GetNode and RevokeNodeReady; let it finish
+					stopHB()
 					claimedSeen = true
 					continue
 				}
@@ -125,9 +131,15 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	}
 }
 
-func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) {
+func heartbeatLoop(
+	ctx context.Context,
+	ctrl *client.Client,
+	runID, nodeID string,
+	interval time.Duration,
+	logger *slog.Logger,
+) {
 	_ = ctrl.TouchNodeHeartbeat(ctx, runID, nodeID)
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {

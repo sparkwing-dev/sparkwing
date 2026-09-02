@@ -262,6 +262,9 @@ atomic rename; a later installation error restores every prior managed hook,
 global-hook forwarder, file mode, and config value. No partial set is armed.
 --no-prove arms anyway.
 
+Hooks installed without --profile prove and run their pipelines with
+--sw-local-only. Pass --profile NAME when the gate should use shared storage.
+
 --fleet counts as armed only the repos a gate now fires in. A repo whose gates
 could not run is named as left ungated, and one that declares no pre_commit or
 pre_push trigger is counted apart: nothing there can refuse a commit, so there
@@ -274,7 +277,7 @@ was never a gate to arm.
 | `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Install into every registered repo instead of one |
 | `--no-prove` | Claim core.hooksPath without running the gate first |
-| `--profile NAME` | Pin the hook's runs to this storage profile (default: whatever the project's config selects) |
+| `--profile NAME` | Pin the hook's runs to this storage profile (default: local-only) |
 
 ### Examples
 
@@ -662,7 +665,7 @@ Args.
 | `--sw-stop-at STEP` | Stop the run after STEP |
 | `--sw-only GLOB` | Run only jobs whose ID matches GLOB (plus their Needs ancestors) |
 | `--sw-no-cache` | Ignore cached per-node results (writes still happen) |
-| `--sw-local-only` | Force local state, cache, and logs for this run; ignore any configured shared backends |
+| `--sw-local-only` | Force local secrets, state, cache, and logs for this run; ignore any configured shared backends |
 | `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |

@@ -86,7 +86,7 @@ func TestRenderHookScript_BlockingHooksAbortOnFailure(t *testing.T) {
 		if !strings.Contains(script, "set -e") {
 			t.Errorf("%s hook should set -e so git aborts on failure:\n%s", hook, script)
 		}
-		if !strings.Contains(script, "sparkwing run lint\n") {
+		if !strings.Contains(script, "sparkwing run 'lint' --sw-local-only\n") {
 			t.Errorf("%s hook should invoke each pipeline plainly:\n%s", hook, script)
 		}
 		if strings.Contains(script, "|| true") {
@@ -110,7 +110,7 @@ func TestRenderHookScript_PostCommitIsNonBlocking(t *testing.T) {
 		t.Errorf("post-commit hook must not set -e (the commit already landed):\n%s", script)
 	}
 	for _, p := range []string{"self-install", "notify"} {
-		if !strings.Contains(script, "sparkwing run "+p+" || true\n") {
+		if !strings.Contains(script, "sparkwing run '"+p+"' --sw-local-only || true\n") {
 			t.Errorf("post-commit hook should tolerate %q failing and continue:\n%s", p, script)
 		}
 	}
@@ -121,7 +121,7 @@ func TestRenderHookScript_PostCommitIsNonBlocking(t *testing.T) {
 
 func TestRenderHookScript_ChainRunsThePipelineBeforeTheGlobalHook(t *testing.T) {
 	script := renderHookScript("pre-push", []string{"gate"}, true, "")
-	run := strings.Index(script, "sparkwing run gate")
+	run := strings.Index(script, "sparkwing run 'gate'")
 	chain := strings.Index(script, `exec "$hook"`)
 	if run < 0 || chain < 0 {
 		t.Fatalf("chained hook should run the pipeline and then hand off:\n%s", script)
@@ -135,7 +135,7 @@ func TestRenderHookScript_ChainRunsThePipelineBeforeTheGlobalHook(t *testing.T) 
 	if !strings.Contains(script, "git config --global --type=path core.hooksPath") {
 		t.Errorf("chained hook should resolve the global hooks path when it runs:\n%s", script)
 	}
-	if !strings.Contains(script, "sparkwing run gate </dev/null") {
+	if !strings.Contains(script, "sparkwing run 'gate' --sw-local-only </dev/null") {
 		t.Errorf("a chained hook must leave its own stdin for the global hook:\n%s", script)
 	}
 }
@@ -160,7 +160,7 @@ func TestRenderHookScript_BlockingGatesCarryTheSelfTestGuard(t *testing.T) {
 			t.Errorf("%s hook cannot be asked to refuse:\n%s", hook, script)
 		}
 		guard := strings.Index(script, githooks.SelfTestEnv)
-		run := strings.Index(script, "sparkwing run gate")
+		run := strings.Index(script, "sparkwing run 'gate'")
 		if guard > run {
 			t.Errorf("the guard must exit before the gate runs, or the check costs a full gate:\n%s", script)
 		}
@@ -186,7 +186,7 @@ func TestHooksInstall_WritesPostCommitHook(t *testing.T) {
 	if !strings.Contains(post, sparkwingHookMarker) {
 		t.Errorf("post-commit hook missing managed marker:\n%s", post)
 	}
-	if !strings.Contains(post, "sparkwing run self-install || true") {
+	if !strings.Contains(post, "sparkwing run 'self-install' --sw-local-only || true") {
 		t.Errorf("post-commit hook should invoke its pipeline non-blocking:\n%s", post)
 	}
 	if strings.Contains(post, "set -e") {
@@ -194,7 +194,7 @@ func TestHooksInstall_WritesPostCommitHook(t *testing.T) {
 	}
 
 	pre := readRepoFile(t, filepath.Join(repo, ".git", "hooks", "pre-commit"))
-	if !strings.Contains(pre, "set -e") || !strings.Contains(pre, "sparkwing run lint") {
+	if !strings.Contains(pre, "set -e") || !strings.Contains(pre, "sparkwing run 'lint'") {
 		t.Errorf("pre-commit hook should stay blocking:\n%s", pre)
 	}
 
@@ -239,7 +239,7 @@ func TestHooksInstall_ChainsAGlobalHooksPathInsteadOfLosingIt(t *testing.T) {
 	}
 
 	pre := readRepoFile(t, filepath.Join(hooksDir, "pre-commit"))
-	if !strings.Contains(pre, "sparkwing run lint") || !strings.Contains(pre, `hook="$global/pre-commit"`) {
+	if !strings.Contains(pre, "sparkwing run 'lint'") || !strings.Contains(pre, `hook="$global/pre-commit"`) {
 		t.Errorf("a hook both layers define should run the gate then the global hook:\n%s", pre)
 	}
 

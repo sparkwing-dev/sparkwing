@@ -3,8 +3,12 @@ package logs_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -128,5 +132,215 @@ func TestLogs_PathTraversalRejected(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("path traversal status=%d want 400", resp.StatusCode)
+	}
+}
+
+func TestLogs_UnsafeIDsRejected(t *testing.T) {
+	dir := t.TempDir()
+	s, err := logs.New(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	c := logs.NewClient(srv.URL, nil)
+	if err := c.Append(context.Background(), "run-keep", "step-a", []byte("keep me\n")); err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(dir, "runs", "run-keep", "step-a.log")
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "delete-dot-encoded", method: http.MethodDelete, path: "/api/v1/logs/%2e"},
+		{name: "delete-dot-dot-encoded", method: http.MethodDelete, path: "/api/v1/logs/%2e%2e"},
+		{name: "delete-parent-escape", method: http.MethodDelete, path: "/api/v1/logs/..%2Fruns"},
+		{name: "read-run-dot-encoded", method: http.MethodGet, path: "/api/v1/logs/%2e"},
+		{name: "read-node-outside-run", method: http.MethodGet, path: "/api/v1/logs/%2e/step-a"},
+		{name: "append-node-outside-run", method: http.MethodPost, path: "/api/v1/logs/%2e/step-a"},
+		{name: "append-encoded-separator", method: http.MethodPost, path: "/api/v1/logs/run-keep/%2Fetc%2Fpasswd"},
+		{name: "append-node-dot", method: http.MethodPost, path: "/api/v1/logs/run-keep/%2e"},
+		{name: "stream-dot-encoded", method: http.MethodGet, path: "/api/v1/logs/%2e/step-a/stream"},
+		{name: "append-control-node", method: http.MethodPost, path: "/api/v1/logs/run-keep/step%01a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(tc.method, srv.URL+tc.path, strings.NewReader("pwn"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("%s %s status=%d, want 400", tc.method, tc.path, resp.StatusCode)
+			}
+			if _, err := os.Stat(kept); err != nil {
+				t.Fatalf("existing log gone after %s %s: %v", tc.method, tc.path, err)
+			}
+		})
+	}
+
+	for _, tc := range []struct{ name, run, node string }{
+		{name: "empty-run", run: "", node: "step-a"},
+		{name: "empty-node", run: "run-keep", node: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := c.Append(context.Background(), tc.run, tc.node, []byte("pwn")); err == nil {
+				t.Errorf("Append(%q, %q) succeeded, want rejection", tc.run, tc.node)
+			}
+		})
+	}
+}
+
+func TestLogs_RealIDsAccepted(t *testing.T) {
+	c, dir, stop := newLogsServer(t)
+	defer stop()
+
+	ctx := context.Background()
+	for _, id := range []string{"run-20260901-120000-ab12", "run-20260901-120000-1f2e3d4c"} {
+		for _, node := range []string{"build.amd64-v2", "gate_pre-commit", "a"} {
+			if err := c.Append(ctx, id, node, []byte("line\n")); err != nil {
+				t.Fatalf("Append(%q, %q): %v", id, node, err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "runs", id, node+".log")); err != nil {
+				t.Fatalf("log for (%q, %q) missing: %v", id, node, err)
+			}
+		}
+	}
+}
+
+func TestLogs_HierarchicalNodeIDRoundTrip(t *testing.T) {
+	c, dir, stop := newLogsServer(t)
+	defer stop()
+
+	ctx := context.Background()
+	if err := c.Append(ctx, "run-1", "scan/pkg-a", []byte("child line\n")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	got, err := c.Read(ctx, "run-1", "scan/pkg-a")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if string(got) != "child line\n" {
+		t.Errorf("Read: got %q, want %q", got, "child line\n")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "runs", "run-1", "scan__pkg-a.log")); err != nil {
+		t.Fatalf("flat log file missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "runs", "run-1", "scan")); err == nil {
+		t.Error("hierarchical node id created a nested directory")
+	}
+
+	run, err := c.ReadRun(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("ReadRun: %v", err)
+	}
+	if !strings.Contains(string(run), "=== scan__pkg-a ===") {
+		t.Errorf("ReadRun: got %q", run)
+	}
+}
+
+func TestLogs_NodeIDLengthCapCoversSuffix(t *testing.T) {
+	c, _, stop := newLogsServer(t)
+	defer stop()
+
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		node    string
+		wantErr bool
+	}{
+		{name: "fits-with-suffix", node: strings.Repeat("n", 251)},
+		{name: "suffix-overflows", node: strings.Repeat("n", 252), wantErr: true},
+		{name: "mapped-suffix-overflows", node: strings.Repeat("n", 125) + "/" + strings.Repeat("m", 125), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := c.Append(ctx, "run-len", tc.node, []byte("x\n"))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Append succeeded, want rejection")
+				}
+				if !strings.Contains(err.Error(), "400") {
+					t.Errorf("Append err = %v, want a 400", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Append: %v", err)
+			}
+		})
+	}
+}
+
+func TestLogs_StoreErrorsHideRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on Windows")
+	}
+	dir := t.TempDir()
+	s, err := logs.New(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.log")
+	if err := os.WriteFile(secret, []byte("TOPSECRET\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "runs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "runs", "evil")); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	for _, tc := range []struct{ name, method, path string }{
+		{name: "read-run-through-symlink", method: http.MethodGet, path: "/api/v1/logs/evil"},
+		{name: "read-node-through-symlink", method: http.MethodGet, path: "/api/v1/logs/evil/secret"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(tc.method, srv.URL+tc.path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			if strings.Contains(string(body), "TOPSECRET") {
+				t.Fatalf("%s leaked the symlink target: %q", tc.path, body)
+			}
+			if strings.Contains(string(body), dir) {
+				t.Errorf("%s echoed the server root: %q", tc.path, body)
+			}
+		})
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/v1/logs/evil", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if _, err := os.Stat(secret); err != nil {
+		t.Fatalf("delete through symlink removed the target: %v", err)
 	}
 }

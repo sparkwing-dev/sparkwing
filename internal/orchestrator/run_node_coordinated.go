@@ -16,13 +16,23 @@ import (
 )
 
 type runNodeConfig struct {
-	coordinated bool
+	coordinated   bool
+	gitcacheURL   string
+	gitcacheToken string
 }
 
 type RunNodeOption func(*runNodeConfig)
 
 func Coordinated() RunNodeOption {
 	return func(c *runNodeConfig) { c.coordinated = true }
+}
+
+// WithGitcache avoids process-global cache credentials when one agent executes concurrent nodes.
+func WithGitcache(url, token string) RunNodeOption {
+	return func(c *runNodeConfig) {
+		c.gitcacheURL = url
+		c.gitcacheToken = token
+	}
 }
 
 func (r *NodeExecutor) executeCoordinated(ctx context.Context, req runner.Request) runner.Result {
@@ -66,26 +76,27 @@ func coordinatedChildSurfaces(ctx context.Context, pipeline string) (secrets.Sou
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("run-node --coordinated: resolve profile: %w", err)
 	}
+	localOnly := os.Getenv("SPARKWING_LOCAL_ONLY") == "1"
 
-	art, err := coordinatedArtifactStore(ctx, prof)
-	if err != nil {
-		return nil, nil, nil, err
+	var art storage.ArtifactStore
+	var logs LogBackend
+	if !localOnly {
+		art, err = coordinatedArtifactStore(ctx, prof)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		logs, err = coordinatedLogBackend(ctx, prof)
+		if err != nil {
+			return nil, art, nil, err
+		}
 	}
 
-	logs, err := coordinatedLogBackend(ctx, prof)
-	if err != nil {
-		return nil, art, nil, err
-	}
-
-	source, err := selectSecretResolver(ctx, Options{Profile: prof})
+	source, err := selectSecretResolver(ctx, Options{Profile: prof, LocalOnly: localOnly})
 	if err != nil {
 		return nil, art, logs, fmt.Errorf("run-node --coordinated: secrets backend: %w", err)
 	}
 	if source == nil {
-		// safety: RunLocal's own default when the profile declares no secrets
-		// surface. The child has to make the same choice or a laptop
-		// pipeline's Secret() calls start failing the moment its nodes
-		// move out of the dispatcher's process.
 		source = secrets.NewDotenvSource("")
 	}
 	return source, art, logs, nil

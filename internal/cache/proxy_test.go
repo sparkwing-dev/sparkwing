@@ -2,14 +2,17 @@ package cache
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -136,14 +139,20 @@ func withTestProxy(t *testing.T, registries map[string]Registry, fn func()) {
 	t.Helper()
 	oldRegistries := defaultRegistries
 	oldProxyDir := proxyDir
+	oldPublicBase := proxyPublicBase
+	oldTrustForwarded := proxyTrustForwardedHost
 	defaultRegistries = registries
 	proxyDir = t.TempDir()
+	proxyPublicBase = ""
+	proxyTrustForwardedHost = false
 	for name := range registries {
 		os.MkdirAll(filepath.Join(proxyDir, name), 0o755)
 	}
 	defer func() {
 		defaultRegistries = oldRegistries
 		proxyDir = oldProxyDir
+		proxyPublicBase = oldPublicBase
+		proxyTrustForwardedHost = oldTrustForwarded
 	}()
 	fn()
 }
@@ -355,10 +364,7 @@ func TestProxyRewriteBody_Npm(t *testing.T) {
 	body := []byte(`{"name":"lodash","dist":{"tarball":"https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz"}}`)
 	reg := Registry{Name: "npm", Upstream: "https://registry.npmjs.org", RewriteBody: true}
 
-	req := httptest.NewRequest(http.MethodGet, "/proxy/npm/lodash", nil)
-	req.Host = "gitcache.local:8091"
-
-	result := proxyRewriteBody(body, reg, req)
+	result := proxyRewriteBody(body, reg, "http://gitcache.local:8091/proxy")
 	s := string(result)
 
 	if strings.Contains(s, "registry.npmjs.org") {
@@ -373,10 +379,7 @@ func TestProxyRewriteBody_Pypi(t *testing.T) {
 	body := []byte(`<a href="https://files.pythonhosted.org/packages/ab/cd/requests-2.31.0.tar.gz">requests-2.31.0.tar.gz</a>`)
 	reg := Registry{Name: "pypi", Upstream: "https://pypi.org", RewriteBody: true}
 
-	req := httptest.NewRequest(http.MethodGet, "/proxy/pypi/simple/requests/", nil)
-	req.Host = "gitcache.local:8091"
-
-	result := proxyRewriteBody(body, reg, req)
+	result := proxyRewriteBody(body, reg, "http://gitcache.local:8091/proxy")
 	s := string(result)
 
 	if strings.Contains(s, "files.pythonhosted.org") {
@@ -391,10 +394,7 @@ func TestProxyRewriteBody_NoRewrite(t *testing.T) {
 	body := []byte(`{"some":"data"}`)
 	reg := Registry{Name: "rubygems", Upstream: "https://rubygems.org", RewriteBody: false}
 
-	req := httptest.NewRequest(http.MethodGet, "/proxy/rubygems/api/v1/gems/rails.json", nil)
-	req.Host = "gitcache.local:8091"
-
-	result := proxyRewriteBody(body, reg, req)
+	result := proxyRewriteBody(body, reg, "http://gitcache.local:8091/proxy")
 	if string(result) != string(body) {
 		t.Errorf("non-rewrite registry should return body unchanged")
 	}
@@ -428,4 +428,441 @@ func TestHandleProxyStats(t *testing.T) {
 	if files != 1 {
 		t.Errorf("expected 1 cached file, got %.0f", files)
 	}
+}
+
+func npmProxyRequest(host, path string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/proxy/npm/"+path, nil)
+	req.Host = host
+	return req
+}
+
+func TestHandleProxy_ForgedHostDoesNotPoisonLaterRequests(t *testing.T) {
+	var upstream *httptest.Server
+	upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"name":"pkg","dist":{"tarball":"%s/pkg/-/pkg-1.0.0.tgz"}}`, upstream.URL)
+	}))
+	defer upstream.Close()
+
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: upstream.URL, RewriteBody: true},
+	}, func() {
+		w1 := httptest.NewRecorder()
+		handleProxy(w1, npmProxyRequest("evil.example.com", "pkg"))
+		if w1.Header().Get("X-Proxy-Cache") != "MISS" {
+			t.Fatalf("first request should be MISS, got %s", w1.Header().Get("X-Proxy-Cache"))
+		}
+		if !strings.Contains(w1.Body.String(), "http://evil.example.com/proxy/npm/") {
+			t.Fatalf("attacker response should carry its own Host, got: %s", w1.Body.String())
+		}
+
+		w2 := httptest.NewRecorder()
+		handleProxy(w2, npmProxyRequest("cache.internal", "pkg"))
+		if w2.Header().Get("X-Proxy-Cache") != "HIT" {
+			t.Fatalf("second request should be HIT, got %s", w2.Header().Get("X-Proxy-Cache"))
+		}
+		body := w2.Body.String()
+		if strings.Contains(body, "evil.example.com") {
+			t.Errorf("cached body was poisoned by the forged Host: %s", body)
+		}
+		if !strings.Contains(body, "http://cache.internal/proxy/npm/pkg/-/pkg-1.0.0.tgz") {
+			t.Errorf("expected a rewrite against the second request Host, got: %s", body)
+		}
+
+		cached, err := os.ReadFile(filepath.Join(proxyDir, "npm", proxyCacheKey("npm", "pkg")+".body"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(cached), upstream.URL) {
+			t.Errorf("cached body should stay unrewritten, got: %s", cached)
+		}
+	})
+}
+
+func TestHandleProxy_PublicBaseRewritesAndCaches(t *testing.T) {
+	var upstream *httptest.Server
+	upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"name":"pkg","dist":{"tarball":"%s/pkg/-/pkg-1.0.0.tgz"}}`, upstream.URL)
+	}))
+	defer upstream.Close()
+
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: upstream.URL, RewriteBody: true},
+	}, func() {
+		proxyPublicBase = "http://cache.internal:8090/proxy"
+
+		w1 := httptest.NewRecorder()
+		handleProxy(w1, npmProxyRequest("evil.example.com", "pkg"))
+		if !strings.Contains(w1.Body.String(), "http://cache.internal:8090/proxy/npm/pkg/-/pkg-1.0.0.tgz") {
+			t.Errorf("expected the configured base, got: %s", w1.Body.String())
+		}
+
+		cached, err := os.ReadFile(filepath.Join(proxyDir, "npm", proxyCacheKey("npm", "pkg")+".body"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(cached), "http://cache.internal:8090/proxy/npm/") {
+			t.Errorf("configured base should be cached rewritten, got: %s", cached)
+		}
+
+		w2 := httptest.NewRecorder()
+		handleProxy(w2, npmProxyRequest("cache.internal:8090", "pkg"))
+		if strings.Contains(w2.Body.String(), "evil.example.com") {
+			t.Errorf("configured base must ignore the request Host, got: %s", w2.Body.String())
+		}
+	})
+}
+
+func TestProxyBaseForRequest(t *testing.T) {
+	tests := []struct {
+		name          string
+		publicBase    string
+		trustForward  bool
+		host          string
+		forwardedHost string
+		forwardedProt string
+		want          string
+		wantOK        bool
+	}{
+		{name: "request host", host: "cache.internal:8090", want: "http://cache.internal:8090/proxy", wantOK: true},
+		{
+			name:          "forwarded host ignored by default",
+			host:          "cache.internal",
+			forwardedHost: "evil.example.com",
+			want:          "http://cache.internal/proxy",
+			wantOK:        true,
+		},
+		{
+			name:          "right-most forwarded host wins when trusted",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: "evil.example.com, cache.example.com",
+			forwardedProt: "http, https",
+			want:          "https://cache.example.com/proxy",
+			wantOK:        true,
+		},
+		{
+			name:          "malformed forwarded host is rejected",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: `x"}}`,
+			wantOK:        false,
+		},
+		{
+			name:          "forwarded host with a path is rejected",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: "evil.example.com/proxy/npm",
+			wantOK:        false,
+		},
+		{
+			name:          "container host names are accepted",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: "sparkwing_cache:8090",
+			want:          "http://sparkwing_cache:8090/proxy",
+			wantOK:        true,
+		},
+		{
+			name:          "bracketed ipv6 forwarded host is accepted",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: "[2001:db8::1]:8090",
+			want:          "http://[2001:db8::1]:8090/proxy",
+			wantOK:        true,
+		},
+		{
+			name:          "empty host without a trusted forwarded host is rejected",
+			forwardedHost: "cache.example.com",
+			wantOK:        false,
+		},
+		{
+			name:          "empty host falls back to a trusted forwarded host",
+			trustForward:  true,
+			forwardedHost: "cache.example.com",
+			want:          "http://cache.example.com/proxy",
+			wantOK:        true,
+		},
+		{
+			name:          "configured base wins",
+			publicBase:    "http://configured.internal/proxy",
+			trustForward:  true,
+			host:          "cache.internal",
+			forwardedHost: "evil.example.com",
+			want:          "http://configured.internal/proxy",
+			wantOK:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldBase, oldTrust := proxyPublicBase, proxyTrustForwardedHost
+			proxyPublicBase, proxyTrustForwardedHost = tt.publicBase, tt.trustForward
+			defer func() { proxyPublicBase, proxyTrustForwardedHost = oldBase, oldTrust }()
+
+			req := httptest.NewRequest(http.MethodGet, "/proxy/npm/pkg", nil)
+			req.Host = tt.host
+			if tt.forwardedHost != "" {
+				req.Header.Set("X-Forwarded-Host", tt.forwardedHost)
+			}
+			if tt.forwardedProt != "" {
+				req.Header.Set("X-Forwarded-Proto", tt.forwardedProt)
+			}
+			got, ok := proxyBaseForRequest(req)
+			if ok != tt.wantOK {
+				t.Fatalf("proxyBaseForRequest() ok = %v, want %v (got %q)", ok, tt.wantOK, got)
+			}
+			if ok && got != tt.want {
+				t.Errorf("proxyBaseForRequest() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeProxyPublicBase(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{in: "", want: ""},
+		{in: "  ", want: ""},
+		{in: "http://cache.internal:8090", want: "http://cache.internal:8090/proxy"},
+		{in: "https://cache.example.com/", want: "https://cache.example.com/proxy"},
+		{in: "https://cache.example.com/proxy", want: "https://cache.example.com/proxy"},
+		{in: "cache.internal:8090", wantErr: true},
+		{in: "ftp://cache.internal", wantErr: true},
+		{in: "://", wantErr: true},
+		{in: "http://cache.internal//", wantErr: true},
+		{in: "http://cache.internal/proxy/npm", wantErr: true},
+		{in: "http://cache.internal/a/b/", wantErr: true},
+		{in: "http://cache.internal/?a=b", wantErr: true},
+		{in: "http://cache.internal/#frag", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			got, err := normalizeProxyPublicBase(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error for %q, got %q", tt.in, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("normalizeProxyPublicBase(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func writeCachedProxyEntry(t *testing.T, registry, path string, body []byte, immutable bool) {
+	t.Helper()
+	key := proxyCacheKey(registry, path)
+	meta := proxyMeta{
+		Path:        path,
+		ContentType: "application/json",
+		CachedAt:    time.Now().Unix(),
+		Size:        int64(len(body)),
+		Immutable:   immutable,
+		StatusCode:  200,
+	}
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proxyDir, registry, key+".body"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proxyDir, registry, key+".meta"), metaJSON, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func largePackument(t *testing.T, upstream string, size int) []byte {
+	t.Helper()
+	filler := strings.Repeat("x", 4096)
+	var b strings.Builder
+	for b.Len() < size {
+		fmt.Fprintf(&b, `{"tarball":"%s/pkg/-/pkg-1.0.0.tgz","pad":"%s"}`+"\n", upstream, filler)
+	}
+	return []byte(b.String())
+}
+
+func TestHandleProxy_HeadOnLargeMutableEntryDoesNotReadTheBody(t *testing.T) {
+	const upstream = "https://registry.npmjs.org"
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: upstream, RewriteBody: true},
+	}, func() {
+		body := largePackument(t, upstream, 8<<20)
+		writeCachedProxyEntry(t, "npm", "pkg", body, false)
+
+		req := httptest.NewRequest(http.MethodHead, "/proxy/npm/pkg", nil)
+		req.Host = "cache.internal"
+		w := httptest.NewRecorder()
+
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		handleProxy(w, req)
+		runtime.ReadMemStats(&after)
+
+		if w.Header().Get("X-Proxy-Cache") != "HIT" {
+			t.Fatalf("expected a cache HIT, got %q", w.Header().Get("X-Proxy-Cache"))
+		}
+		if w.Body.Len() != 0 {
+			t.Errorf("HEAD wrote %d body bytes", w.Body.Len())
+		}
+		allocated := after.TotalAlloc - before.TotalAlloc
+		t.Logf("HEAD on a %d byte cached entry allocated %d bytes", len(body), allocated)
+		if limit := uint64(len(body) / 8); allocated > limit {
+			t.Errorf("HEAD on a %d byte entry allocated %d bytes, want under %d", len(body), allocated, limit)
+		}
+
+		get := httptest.NewRequest(http.MethodGet, "/proxy/npm/pkg", nil)
+		get.Host = "cache.internal"
+		gw := httptest.NewRecorder()
+		handleProxy(gw, get)
+		if strings.Contains(gw.Body.String(), upstream) {
+			t.Error("streamed GET should have rewritten every upstream URL")
+		}
+		if want := strings.Count(string(body), upstream); strings.Count(gw.Body.String(), "http://cache.internal/proxy/npm/") != want {
+			t.Errorf("streamed GET rewrote %d occurrences, want %d",
+				strings.Count(gw.Body.String(), "http://cache.internal/proxy/npm/"), want)
+		}
+	})
+}
+
+func TestProxyStreamReplace(t *testing.T) {
+	const old = "https://registry.npmjs.org"
+	const replacement = "http://cache.internal/proxy/npm"
+
+	offsets := []int{0, 17, proxyRewriteChunk - len(old) - 1, proxyRewriteChunk - len(old)/2, proxyRewriteChunk - 1, 2*proxyRewriteChunk + 5}
+	for _, offset := range offsets {
+		t.Run(fmt.Sprintf("offset-%d", offset), func(t *testing.T) {
+			body := strings.Repeat("a", offset) + old + strings.Repeat("b", proxyRewriteChunk)
+			var out strings.Builder
+			if err := proxyStreamReplace(&out, strings.NewReader(body), old, replacement); err != nil {
+				t.Fatal(err)
+			}
+			if want := strings.ReplaceAll(body, old, replacement); out.String() != want {
+				t.Errorf("stream rewrite differs from a whole-body rewrite at offset %d", offset)
+			}
+		})
+	}
+
+	t.Run("one byte reads", func(t *testing.T) {
+		body := "head " + old + " tail " + old
+		var out strings.Builder
+		if err := proxyStreamReplace(&out, iotest.OneByteReader(strings.NewReader(body)), old, replacement); err != nil {
+			t.Fatal(err)
+		}
+		if want := strings.ReplaceAll(body, old, replacement); out.String() != want {
+			t.Errorf("proxyStreamReplace() = %q, want %q", out.String(), want)
+		}
+	})
+
+	t.Run("no rule copies through", func(t *testing.T) {
+		var out strings.Builder
+		if err := proxyStreamReplace(&out, strings.NewReader("body"), "", ""); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != "body" {
+			t.Errorf("proxyStreamReplace() = %q, want %q", out.String(), "body")
+		}
+	})
+}
+
+func TestHandleProxy_ServeTimeRewritesAreNotSharedCacheable(t *testing.T) {
+	var upstream *httptest.Server
+	upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"name":"pkg","dist":{"tarball":"%s/pkg/-/pkg-1.0.0.tgz"}}`, upstream.URL)
+	}))
+	defer upstream.Close()
+
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: upstream.URL, RewriteBody: true},
+	}, func() {
+		miss := httptest.NewRecorder()
+		handleProxy(miss, npmProxyRequest("cache.internal", "pkg"))
+		if got := miss.Header().Get("Cache-Control"); got != "private, max-age=0" {
+			t.Errorf("MISS Cache-Control = %q, want %q", got, "private, max-age=0")
+		}
+		if got := miss.Header().Get("Vary"); got != "Host" {
+			t.Errorf("MISS Vary = %q, want %q", got, "Host")
+		}
+
+		hit := httptest.NewRecorder()
+		handleProxy(hit, npmProxyRequest("cache.internal", "pkg"))
+		if got := hit.Header().Get("Cache-Control"); got != "private, max-age=0" {
+			t.Errorf("HIT Cache-Control = %q, want %q", got, "private, max-age=0")
+		}
+		if got := hit.Header().Get("Vary"); got != "Host" {
+			t.Errorf("HIT Vary = %q, want %q", got, "Host")
+		}
+
+		proxyTrustForwardedHost = true
+		trusted := httptest.NewRecorder()
+		handleProxy(trusted, npmProxyRequest("cache.internal", "pkg"))
+		if got := trusted.Header().Get("Vary"); got != "Host, X-Forwarded-Host" {
+			t.Errorf("trusted Vary = %q, want %q", got, "Host, X-Forwarded-Host")
+		}
+	})
+}
+
+func TestHandleProxy_ConfiguredBaseStaysPubliclyCacheable(t *testing.T) {
+	var upstream *httptest.Server
+	upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"name":"pkg","dist":{"tarball":"%s/pkg/-/pkg-1.0.0.tgz"}}`, upstream.URL)
+	}))
+	defer upstream.Close()
+
+	oldTTL := proxyCacheTTL
+	proxyCacheTTL = 10 * time.Minute
+	defer func() { proxyCacheTTL = oldTTL }()
+
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: upstream.URL, RewriteBody: true},
+	}, func() {
+		proxyPublicBase = "http://cache.internal:8090/proxy"
+
+		miss := httptest.NewRecorder()
+		handleProxy(miss, npmProxyRequest("cache.internal:8090", "pkg"))
+		if got := miss.Header().Get("Cache-Control"); got != "public, max-age=600" {
+			t.Errorf("MISS Cache-Control = %q, want %q", got, "public, max-age=600")
+		}
+		if got := miss.Header().Get("Vary"); got != "" {
+			t.Errorf("MISS Vary = %q, want none", got)
+		}
+
+		hit := httptest.NewRecorder()
+		handleProxy(hit, npmProxyRequest("cache.internal:8090", "pkg"))
+		if got := hit.Header().Get("Cache-Control"); !strings.HasPrefix(got, "public, max-age=") {
+			t.Errorf("HIT Cache-Control = %q, want a public max-age", got)
+		}
+	})
+}
+
+func TestHandleProxy_MissingHostIsRejected(t *testing.T) {
+	withTestProxy(t, map[string]Registry{
+		"npm": {Name: "npm", Upstream: "https://registry.npmjs.org", RewriteBody: true},
+	}, func() {
+		req := httptest.NewRequest(http.MethodGet, "/proxy/npm/pkg", nil)
+		req.Host = ""
+		req.Header.Set("X-Forwarded-Host", "evil.example.com")
+		w := httptest.NewRecorder()
+		handleProxy(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for a request with no usable Host, got %d", w.Code)
+		}
+		if strings.Contains(w.Body.String(), "evil.example.com") {
+			t.Errorf("untrusted forwarded host leaked into the response: %s", w.Body.String())
+		}
+	})
 }

@@ -1,0 +1,45 @@
+{{- if and .Values.cache.enabled .Values.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sparkwing-runner-bundle.cache.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "cache") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "cache") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "runner") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- if .Values.networkPolicy.controllerPodSelector }}
+              {{- toYaml .Values.networkPolicy.controllerPodSelector | nindent 14 }}
+              {{- else }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: controller
+              {{- end }}
+        - podSelector:
+            matchLabels:
+              {{- if .Values.networkPolicy.webPodSelector }}
+              {{- toYaml .Values.networkPolicy.webPodSelector | nindent 14 }}
+              {{- else }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: web
+              {{- end }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.runnerJobPodSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.cache.service.targetPort }}
+    {{- with .Values.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

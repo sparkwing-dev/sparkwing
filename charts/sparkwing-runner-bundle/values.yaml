@@ -94,6 +94,12 @@ runner:
     # k8s sends every node to Kubernetes.
     kind: inprocess
 
+  # Mount the runner pod's ServiceAccount token. The runner reaches the
+  # controller over HTTP and needs no API access, so this stays false.
+  # Set it true for triggerRunner.kind k8s or warm, whose trigger worker
+  # creates and inspects runner Jobs through the Kubernetes API.
+  automountServiceAccountToken: false
+
   # Optional metrics scrape port. The Prometheus client registry on
   # the runner serves /metrics here. Disable by setting to 0.
   metricsPort: 9090
@@ -137,6 +143,13 @@ cache:
   # starting a runner that exits immediately.
   enabled: true
 
+  # Serve the cache's blob and sync endpoints to anyone who can reach
+  # the Service. false (the default) requires controller.tokenSecret so
+  # the cache and the runner share one bearer; true passes
+  # --allow-unauthenticated to the cache and is only appropriate on a
+  # bootstrap install, before the Secret exists.
+  allowUnauthenticated: false
+
   # RWO PVC -- replicas: 1 is the only safe value.
   replicas: 1
 
@@ -145,6 +158,17 @@ cache:
     repository: ghcr.io/sparkwing-dev/sparkwing-cache
     tag: "" # falls back to .Chart.AppVersion
     pullPolicy: IfNotPresent
+
+  # Base URL clients use to reach this cache. The package proxy
+  # rewrites the upstream URLs inside npm packuments and PyPI simple
+  # pages against it, so a fixed base is correct only when every client
+  # dials the cache at the same address. Empty uses the in-cluster
+  # Service URL when service.type is ClusterIP, and otherwise stays
+  # unset so the proxy rewrites each response from its own request Host
+  # -- which is what an out-of-cluster runner pool or a port-forward
+  # needs. Set it when an Ingress or a load balancer is the one address
+  # every client uses.
+  publicUrl: ""
 
   service:
     # ClusterIP: only the runner needs to reach the cache. Set to
@@ -222,6 +246,13 @@ cache:
 logs:
   enabled: true
 
+  # Serve the log routes to anyone who can reach the Service. false (the
+  # default) requires controller.tokenSecret so the logs service can
+  # resolve each caller's bearer against the controller, and passes
+  # --require-auth so the pod refuses to start open. true is only
+  # appropriate on a bootstrap install, before the Secret exists.
+  allowUnauthenticated: false
+
   replicas: 1
 
   image:
@@ -260,22 +291,68 @@ logs:
   affinity: {}
 
 # -----------------------------------------------------------------------
-# 5. ServiceAccount. Shared by runner + cache + logs.
+# 5. ServiceAccount. The runner, cache, and logs pods each get their
+#    own; only the runner's is bound to the chart's Role.
 # -----------------------------------------------------------------------
 serviceAccount:
   # Create one (true) or use an existing SA you've already RBAC'd.
   create: true
-  # Empty + create=true => name is generated from .Release.Name.
+  # Names the runner SA; empty + create=true => generated from
+  # .Release.Name. The cache and logs SAs always follow their
+  # component names.
   name: ""
+  # create=false gives the chart one pre-created account for all three
+  # pods, which is the sharing the separate accounts exist to end. The
+  # render fails until you set this true, so the choice is recorded in
+  # your values rather than made by omission.
+  shareAcrossComponents: false
   # Annotations on the SA. Common case: IRSA (EKS) role binding for
   # ECR / S3 access on the runner side.
   #   eks.amazonaws.com/role-arn: arn:aws:iam::123:role/sparkwing-runner
   annotations: {}
 
+# Default-deny ingress for the cache pod. The cache holds the deploy
+# key, mirrored private source, and working-tree snapshots, so only the
+# release's runner and controller pods are admitted to its port.
+networkPolicy:
+  # false removes the policy and leaves reachability to whatever the
+  # cluster's own default is. Every cache route still requires a bearer
+  # token; the policy narrows who can present one.
+  enabled: true
+  # Pod labels of the controller allowed to reach the cache. Empty
+  # admits this release's own controller pod (the one the parent chart
+  # installs). Set it to your controller's labels when it runs under a
+  # different release in the same namespace.
+  controllerPodSelector: {}
+  # Pod labels of the dashboard allowed to probe the cache. Empty
+  # admits this release's own web pod, which reads the cache's
+  # /health on every services-panel refresh. Set it to your
+  # dashboard's labels when it runs under a different release.
+  webPodSelector: {}
+  # Pod labels of the Job pods the k8s runner backend creates. Those
+  # pods carry neither an instance nor a component label, so they need
+  # a peer of their own; they are handed the cache URL and token and
+  # read the dependency proxy through it.
+  runnerJobPodSelector:
+    app.kubernetes.io/name: sparkwing-runner
+  # Extra NetworkPolicy ingress rules, appended verbatim. Needed when
+  # a controller or runner pool runs outside the cluster (give the
+  # rule an ipBlock for its source range), or when a non-ClusterIP
+  # Service has to reach the cache. Example:
+  #   extraIngress:
+  #     - from:
+  #         - ipBlock:
+  #             cidr: 10.42.0.0/16
+  #       ports:
+  #         - protocol: TCP
+  #           port: 8090
+  extraIngress: []
+
 # RBAC. The chart is namespace-scoped: a Role + RoleBinding only.
-# Runners do NOT need cluster-admin. The default permissions cover
-# the runner reading its own pod metadata and surfacing pod events
-# to the controller for debugging.
+# The runner, cache, and logs servers reach the controller over HTTP
+# and never call the Kubernetes API, so the Role carries no rules and
+# no pod mounts a ServiceAccount token by default. Pipelines that
+# must reach the API should bring their own Role outside this chart.
 rbac:
   create: true
 

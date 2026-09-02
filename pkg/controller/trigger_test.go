@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/inprocdispatch"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -160,6 +161,71 @@ func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
 	}
 	if trigger.TriggerEnv["SAFE"] != "kept" {
 		t.Fatalf("safe env = %q, want kept", trigger.TriggerEnv["SAFE"])
+	}
+}
+
+func TestTrigger_DropsCredentialEnvKeys(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	capture := &captureDispatcher{}
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(capture)
+	srv := httptest.NewServer(srvController.Handler())
+	defer srv.Close()
+
+	resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+		"pipeline": "demo",
+		"trigger": map[string]any{
+			"source": "manual",
+			"env": map[string]string{
+				"SPARKWING_LEASE_TOKEN":         "stale-local-token",
+				"NPM_TOKEN":                     "npm-bearer",
+				"SPARKWING_PG_URL":              "postgres://sparkwing:hunter2@db.example/sparkwing",
+				"GITHUB_REPOSITORY":             "sparkwing-dev/sparkwing",
+				retryprovenance.RepoDirKey:      "/src/sparkwing",
+				retryprovenance.RevisionKey:     "deadbeef",
+				retryprovenance.PlanHashKey:     "plan-1",
+				retryprovenance.RepoIdentityKey: "github.com/sparkwing-dev/sparkwing",
+			},
+		},
+	})
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		t.Fatalf("status=%d want 202 (body: %s)", resp.StatusCode, body)
+	}
+	var body struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	trigger, err := st.GetTrigger(context.Background(), body.RunID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	for _, key := range []string{"SPARKWING_LEASE_TOKEN", "NPM_TOKEN", "SPARKWING_PG_URL"} {
+		if _, ok := trigger.TriggerEnv[key]; ok {
+			t.Fatalf("%s persisted in trigger_env: %+v", key, trigger.TriggerEnv)
+		}
+	}
+	for key, want := range map[string]string{
+		"GITHUB_REPOSITORY":             "sparkwing-dev/sparkwing",
+		retryprovenance.RepoDirKey:      "/src/sparkwing",
+		retryprovenance.RevisionKey:     "deadbeef",
+		retryprovenance.PlanHashKey:     "plan-1",
+		retryprovenance.RepoIdentityKey: "github.com/sparkwing-dev/sparkwing",
+	} {
+		if trigger.TriggerEnv[key] != want {
+			t.Fatalf("%s = %q, want %q", key, trigger.TriggerEnv[key], want)
+		}
 	}
 }
 
@@ -431,4 +497,52 @@ func postJSON(t *testing.T, url string, body any) *http.Response {
 	}
 	t.Cleanup(func() { resp.Body.Close() })
 	return resp
+}
+
+func TestTrigger_RequiresJSONContentType(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(&captureDispatcher{})
+	srv := httptest.NewServer(srvController.Handler())
+	defer srv.Close()
+
+	cases := []struct {
+		name        string
+		contentType string
+		wantStatus  int
+	}{
+		{name: "simple cross-site post", contentType: "text/plain;charset=UTF-8", wantStatus: http.StatusBadRequest},
+		{name: "form post", contentType: "application/x-www-form-urlencoded", wantStatus: http.StatusBadRequest},
+		{name: "absent", contentType: "", wantStatus: http.StatusBadRequest},
+		{name: "json", contentType: "application/json", wantStatus: http.StatusAccepted},
+		{name: "json with charset", contentType: "application/json; charset=utf-8", wantStatus: http.StatusAccepted},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"pipeline":"demo","trigger":{"source":"test"}}`
+			req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/triggers", bytes.NewReader([]byte(body)))
+			if err != nil {
+				t.Fatalf("create request: %v", err)
+			}
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("post: %v", err)
+			}
+			defer resp.Body.Close()
+			raw, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != tc.wantStatus {
+				t.Fatalf("status = %d body = %q, want %d", resp.StatusCode, raw, tc.wantStatus)
+			}
+		})
+	}
 }

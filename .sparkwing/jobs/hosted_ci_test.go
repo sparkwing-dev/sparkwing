@@ -105,9 +105,9 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 
 func TestCanonicalPreCommitOwnsDashboardDependencyInstallation(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
-	install := "- name: Install dashboard dependencies\n        if: matrix.gate == 'pre-commit'\n        run: npm ci --prefix web"
+	install := "- name: Install dashboard dependencies\n        if: matrix.gate == 'pre-commit'\n        run: npm ci --ignore-scripts --prefix web"
 	requireWorkflowText(t, body, install)
-	if got := strings.Count(body, "npm ci --prefix web"); got != 1 {
+	if got := strings.Count(body, "npm ci --ignore-scripts --prefix web"); got != 1 {
 		t.Fatalf("dashboard dependency install count = %d, want 1", got)
 	}
 	installAt := strings.Index(body, install)
@@ -168,17 +168,25 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 		"release_tag: ${{ inputs.tag || github.ref_name }}",
 		"contents: read",
 	)
+	requireWorkflowText(t, workflowJob(t, body, "security"),
+		"needs: validate-tag",
+		"uses: ./.github/workflows/security.yaml",
+		"source_ref: ${{ needs.validate-tag.outputs.source_sha }}",
+		"security-events: write",
+	)
 	requireWorkflowText(t, workflowJob(t, body, "build"),
-		"needs: [validate-tag, canonical]",
+		"needs: [validate-tag, canonical, security]",
 		"needs.canonical.result == 'success'",
+		"needs.security.result == 'success'",
 		"ref: ${{ needs.validate-tag.outputs.source_sha }}",
 		"path: .release-tools",
 		".release-tools/bin/check-release-binary-vulnerabilities.sh",
 		`go-version: "1.26.6"`,
 	)
 	requireWorkflowText(t, workflowJob(t, body, "build-images"),
-		"needs: [validate-tag, canonical]",
+		"needs: [validate-tag, canonical, security]",
 		"needs.canonical.result == 'success'",
+		"needs.security.result == 'success'",
 		"contents: read",
 		"packages: write",
 		"persist-credentials: false",

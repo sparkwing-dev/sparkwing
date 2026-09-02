@@ -75,7 +75,7 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	done := make(chan struct{})
 	var serveErr error
 	go func() {
-		serveErr = web.Serve(ctx, paths, addr)
+		serveErr = web.Serve(ctx, paths, addr, web.HandlerOptions{})
 		close(done)
 	}()
 	var stopOnce sync.Once
@@ -172,8 +172,13 @@ func TestAPI_StaticIndexServed(t *testing.T) {
 	if !strings.Contains(string(body), "<title>Sparkwing</title>") {
 		t.Fatalf("index missing expected title: %s", string(body))
 	}
-	if !strings.Contains(string(body), `window.__SPARKWING_TOKEN__="";`) {
-		t.Fatalf("token template not substituted in index")
+	if strings.Contains(string(body), "__SPARKWING_TOKEN__") {
+		t.Fatalf("index carries a runtime bearer slot: %s", string(body))
+	}
+
+	config := mustGetText(t, base+"/sparkwing-runtime.js")
+	if !strings.Contains(config, `window.__SPARKWING_REQUIRE_LOGIN__="false";`) {
+		t.Fatalf("runtime config missing its login mode: %s", config)
 	}
 }
 

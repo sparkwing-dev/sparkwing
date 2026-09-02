@@ -1021,9 +1021,15 @@ var cmdDebugRerun = Command{
 the env + workdir the orchestrator saw at dispatch time. Local mode
 exec's $SHELL with the snapshot env applied and writes upstream Ref
 outputs to ~/.sparkwing/rerun/<run>/<node>/refs so they're cat-able
-from the shell. Cluster mode shells out to 'kubectl run' against a
-runner image (--image or $SPARKWING_RERUN_IMAGE) with the snapshot
-env materialized as --env=K=V flags.
+from the shell. Cluster mode pipes a debug-pod manifest to 'kubectl
+create' against a runner image (--image or $SPARKWING_RERUN_IMAGE),
+carrying the snapshot env on stdin, then attaches to the pod and
+deletes it on exit.
+
+Snapshots drop credential-shaped names and values and rewrite the
+userinfo of any URL or DSN they keep, and the controller serves the
+captured env only to an admin token. The banner names the keys the
+snapshot dropped; export those yourself.
 
 Replays do NOT freeze the rest of the cluster: secrets re-resolve
 through the standard sparkwing.Secret API on demand, and the runner
@@ -1690,9 +1696,15 @@ accepting TCP connections so callers can immediately curl it.
 
 Replaces any resident dashboard: a live server on file is drained
 and a fresh one takes its place. It refuses only when the resident
-dashboard is a newer version than this CLI.`,
+dashboard is a newer version than this CLI.
+
+The listener accepts loopback Host headers and rejects a browser Origin
+that is neither loopback, the --addr host, nor listed in --allow-origin.
+--allow-remote widens the Host check only.`,
 	Flags: []FlagSpec{
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
+		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets.", Group: "Bind"},
+		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/profiles.yaml (uses its log_store + artifact_store)", Group: "Storage"},
 		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
@@ -1706,6 +1718,7 @@ dashboard is a newer version than this CLI.`,
 		{"Use an alternate port", "sparkwing dashboard start --addr 127.0.0.1:5000"},
 		{"Isolate state under a scratch dir", "sparkwing dashboard start --home " + helpExampleScratchDir("sparkwing-x")},
 		{"Tail CI runs from S3 (no SQLite)", "sparkwing dashboard start --profile ci-smoke --no-local-store --read-only"},
+		{"Serve a LAN bind under a browser-facing name", "sparkwing dashboard start --addr 192.168.1.20:4343 --allow-remote --allow-origin http://dashboard.example.com:4343"},
 	},
 }
 
@@ -2061,10 +2074,12 @@ var cmdTokensRotate = Command{
 	Synopsis: "Mint a replacement token with a grace window",
 	Description: `Creates a new token and schedules the old token for revocation
 after --grace. During the grace window, both tokens work, which
-lets callers cycle credentials without downtime.`,
+lets callers cycle credentials without downtime. The controller
+caps --grace at 7 days, and revoking the old prefix cuts a grace
+window short.`,
 	Flags: []FlagSpec{
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret prefix of the token to rotate", Required: true, Group: "Input"},
-		{Name: "grace", Argument: "DURATION", Desc: "Window during which the old token still authenticates", Default: "24h", Group: "Input"},
+		{Name: "grace", Argument: "DURATION", Desc: "Window during which the old token still authenticates (max 168h)", Default: "24h", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "TTL of the new token (0 = preserve the old token's remaining TTL)", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
@@ -2089,14 +2104,17 @@ var cmdUsersAdd = Command{
 is a TTY (the password is not shown on-screen or recorded in
 shell history). Passing --password skips the prompt -- useful
 for CI seed flows but leaks via shell history if used
-interactively.`,
+interactively. --scope sets what the account's dashboard
+sessions may reach; omitting it grants admin.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Dashboard username", Required: true, Group: "Input"},
 		{Name: "password", Argument: "PASSWORD", Desc: "Password (omit to prompt interactively)", Group: "Input"},
+		{Name: "scope", Argument: "LIST", Desc: "Comma-separated scopes (omit to grant admin)", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
 		{"Interactive add", "sparkwing cluster users add --name alice --profile prod"},
+		{"Read-only dashboard account", "sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod"},
 		{"Non-interactive add for CI", `sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod`},
 	},
 }
@@ -2104,8 +2122,8 @@ interactively.`,
 var cmdUsersList = Command{
 	Path:     "sparkwing cluster users list",
 	Synopsis: "Print every user",
-	Description: `Prints name, created_at, and last_login_at for every user in
-the controller's users table.`,
+	Description: `Prints name, scopes, created_at, and last_login_at for every
+user in the controller's users table.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
@@ -2117,9 +2135,11 @@ the controller's users table.`,
 var cmdUsersDelete = Command{
 	Path:     "sparkwing cluster users delete",
 	Synopsis: "Remove a dashboard user",
-	Description: `Deletes the user row. Any sessions that user holds remain
-valid until their individual expiry -- sparkwing does not
-proactively invalidate active cookies on delete.`,
+	Description: `Deletes the user row, every session that user holds, and
+revokes every token minted under that principal name except the token
+this request authenticates with, in one transaction. The sessions and
+tokens are revoked and the auth cache on the serving replica is
+cleared; auth.md describes the windows that remain elsewhere.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Dashboard username to remove", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
@@ -2393,6 +2413,9 @@ rows on demand and prints it as JSON. The receipt bundles identity
 hashes (pipeline_version_hash, inputs_hash, plan_hash, per-node
 outputs_hash), per-step observability (durations, outcomes), and
 runner-time and compute-cost accounting.
+
+inputs_hash is empty when the run carries a caller-supplied
+secret:"true" argument, so the receipt cannot verify guesses of that value.
 
 Local mode reads from the SQLite store and reports zero cost because no
 local billing rate is configured. --profile NAME reads from the remote
@@ -2865,6 +2888,9 @@ atomic rename; a later installation error restores every prior managed hook,
 global-hook forwarder, file mode, and config value. No partial set is armed.
 --no-prove arms anyway.
 
+Hooks installed without --profile prove and run their pipelines with
+--sw-local-only. Pass --profile NAME when the gate should use shared storage.
+
 --fleet counts as armed only the repos a gate now fires in. A repo whose gates
 could not run is named as left ungated, and one that declares no pre_commit or
 pre_push trigger is counted apart: nothing there can refuse a commit, so there
@@ -2873,7 +2899,7 @@ was never a gate to arm.`,
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Install into every registered repo instead of one", Group: "Input"},
 		{Name: "no-prove", Desc: "Claim core.hooksPath without running the gate first", Group: "Behavior"},
-		{Name: "profile", Argument: "NAME", Desc: "Pin the hook's runs to this storage profile (default: whatever the project's config selects)", Group: "Storage"},
+		{Name: "profile", Argument: "NAME", Desc: "Pin the hook's runs to this storage profile (default: local-only)", Group: "Storage"},
 	},
 	Examples: []Example{
 		{"Install in the current repo", "sparkwing pipeline hooks install"},
@@ -3005,6 +3031,8 @@ does not land in shell history.`,
 		{Name: "value", Type: FlagString, Argument: "VALUE", Desc: "Secret value (prefer --file for long values)", RequiredWhen: "when --file is not set", ConflictsWith: []string{"file"}, Group: "Input"},
 		{Name: "file", Type: FlagString, Argument: "PATH", Desc: "Read value from file (keeps value out of shell history)", RequiredWhen: "when --value is not set", ConflictsWith: []string{"value"}, Group: "Input"},
 		{Name: "plain", Type: FlagBool, Desc: "Store as non-masked config (e.g. REGION, LOG_LEVEL) -- value will NOT be redacted in run logs. Default is masked.", Group: "Input"},
+		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Scope the secret to one repository slug (controller only)", ConflictsWith: []string{"shared"}, Group: "Input"},
+		{Name: "shared", Type: FlagBool, Desc: "Let every run read this unscoped secret (controller only). Without --repo or --shared the secret answers admin callers only.", ConflictsWith: []string{"repo"}, Group: "Input"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
@@ -3012,6 +3040,8 @@ does not land in shell history.`,
 		{"Set a local masked secret", "sparkwing secrets set --name API_TOKEN --value abc123"},
 		{"Set from a file", "sparkwing secrets set --name TLS_CERT --file ./tls.crt --profile prod"},
 		{"Set non-masked config", "sparkwing secrets set --name REGION --value us-east-1 --plain --profile prod"},
+		{"Scope a secret to one repository", "sparkwing secrets set --name DEPLOY_KEY --file ./key --repo acme/web --profile prod"},
+		{"Let every run read one secret", "sparkwing secrets set --name NPM_TOKEN --file ./npmrc --shared --profile prod"},
 	},
 }
 
@@ -3023,6 +3053,7 @@ named profile's controller. Prints only the raw value (no trailing newline)
 so it can be piped into another command. Use 'secrets list' for metadata.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name", Required: true, Group: "Input"},
+		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Read the row owned by one repository slug (controller only); omit for the unscoped row", Group: "Input"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
@@ -3054,6 +3085,7 @@ var cmdSecretDelete = Command{
 	Description: `Deletes the secret from local files when --profile is omitted, or from the named profile's controller. Pipelines that reference the name will fail to resolve until the secret is re-added.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name to remove", Required: true, Group: "Input"},
+		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Remove the row owned by one repository slug (controller only); omit for the unscoped row", Group: "Input"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},

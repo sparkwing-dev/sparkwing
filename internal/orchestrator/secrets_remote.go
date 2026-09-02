@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -11,7 +12,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func remoteSecretSource(profName string) (secrets.Source, error) {
+func applySecretsProfileOverride(opts *Options) error {
+	if opts.LocalOnly {
+		return nil
+	}
+	prof := os.Getenv("SPARKWING_SECRETS_PROFILE")
+	if prof == "" {
+		return nil
+	}
+	src, err := remoteSecretSource(prof, opts.RunID)
+	if err != nil {
+		return err
+	}
+	opts.SecretSource = src
+	return nil
+}
+
+func remoteSecretSource(profName, runID string) (secrets.Source, error) {
 	if profName == "" {
 		return nil, errors.New("profile name is required")
 	}
@@ -32,7 +49,7 @@ func remoteSecretSource(profName string) (secrets.Source, error) {
 	}
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	return secrets.SourceFunc(func(name string) (string, bool, error) {
-		sec, gerr := c.GetSecret(context.Background(), name)
+		sec, gerr := c.GetSecretForRun(context.Background(), name, runID)
 		if gerr != nil {
 			if errors.Is(gerr, store.ErrNotFound) {
 				return "", false, secrets.ErrSecretMissing

@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-func TestRemoteSecretSource_ResolvesAgainstProfile(t *testing.T) {
+func TestApplySecretsProfileOverride_NormalReadsRemoteProfile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/secrets/") {
 			http.NotFound(w, r)
@@ -45,11 +45,13 @@ profiles:
 	if err := os.WriteFile(filepath.Join(cfgDir, "profiles.yaml"), []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write profiles.yaml: %v", err)
 	}
+	t.Setenv("SPARKWING_SECRETS_PROFILE", "stage")
 
-	src, err := remoteSecretSource("stage")
-	if err != nil {
-		t.Fatalf("remoteSecretSource: %v", err)
+	var opts Options
+	if err := applySecretsProfileOverride(&opts); err != nil {
+		t.Fatalf("applySecretsProfileOverride: %v", err)
 	}
+	src := opts.SecretSource
 
 	got, masked, err := src.Read("TOKEN")
 	if err != nil {
@@ -62,6 +64,26 @@ profiles:
 	_, _, err = src.Read("MISSING")
 	if !errors.Is(err, secrets.ErrSecretMissing) {
 		t.Fatalf("Read missing: err = %v, want ErrSecretMissing", err)
+	}
+}
+
+func TestApplySecretsProfileOverride_LocalOnlyDoesNotOpenRemoteProfile(t *testing.T) {
+	profiles := filepath.Join(t.TempDir(), "profiles.yaml")
+	if err := os.WriteFile(profiles, []byte(`profiles:
+  dead:
+    controller: { url: http://127.0.0.1:1 }
+`), 0o600); err != nil {
+		t.Fatalf("write profiles: %v", err)
+	}
+	t.Setenv("SPARKWING_PROFILES", profiles)
+	t.Setenv("SPARKWING_SECRETS_PROFILE", "dead")
+
+	opts := Options{LocalOnly: true}
+	if err := applySecretsProfileOverride(&opts); err != nil {
+		t.Fatalf("local-only override: %v", err)
+	}
+	if opts.SecretSource != nil {
+		t.Fatalf("local-only run opened remote source %T", opts.SecretSource)
 	}
 }
 
@@ -79,13 +101,13 @@ profiles:
 		t.Fatalf("write: %v", err)
 	}
 
-	if _, err := remoteSecretSource(""); err == nil {
+	if _, err := remoteSecretSource("", ""); err == nil {
 		t.Fatal("empty profile name must error")
 	}
-	if _, err := remoteSecretSource("ghost"); err == nil {
+	if _, err := remoteSecretSource("ghost", ""); err == nil {
 		t.Fatal("unknown profile must error")
 	}
-	if _, err := remoteSecretSource("only"); err == nil {
+	if _, err := remoteSecretSource("only", ""); err == nil {
 		t.Fatal("profile without controller must error")
 	}
 }

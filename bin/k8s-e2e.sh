@@ -452,6 +452,7 @@ sparkwing-runner-bundle:
     maxClaimsBeforeRestart: 0
     alsoClaimTriggers: true
   cache:
+    allowUnauthenticated: true
     image:
       repository: ${image_prefix}sparkwing-cache
       tag: $image_tag
@@ -462,6 +463,7 @@ sparkwing-runner-bundle:
       enabled: true
       keepOnUninstall: true
   logs:
+    allowUnauthenticated: true
     image:
       repository: ${image_prefix}sparkwing-logs
       tag: $image_tag
@@ -487,6 +489,10 @@ sparkwing-runner-bundle:
   controller:
     tokenSecret:
       name: sparkwing-token
+  cache:
+    allowUnauthenticated: false
+  logs:
+    allowUnauthenticated: false
 EOF
 
 helm_e2e lint "$repo_root/charts/sparkwing-full" -f "$bootstrap_values"

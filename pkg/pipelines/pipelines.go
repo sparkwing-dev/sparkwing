@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -19,7 +20,8 @@ type Config struct {
 // One Go entrypoint can back many pipelines, each with its own policy.
 type Pipeline struct {
 	// Name is the invocable name (`sparkwing run <name>`); must equal
-	// the string passed to the SDK's Register call.
+	// the string passed to the SDK's Register call. It must match
+	// `^[A-Za-z0-9][A-Za-z0-9._-]*$`.
 	Name string `yaml:"name"`
 
 	// Entrypoint is the Go pipeline struct type that implements this
@@ -42,7 +44,9 @@ type Pipeline struct {
 	// matches; Require fires when not every token matches. Token
 	// vocabulary: `profile:local`, `profile:controller`,
 	// `profile:name=<name>`, `arg:<flag>=<value>`,
-	// `git:branch=<name>`, `git:branch=default`. `arg:` tokens read the
+	// `git:branch=<name>`, `git:branch=default`. A literal branch matches
+	// the checked-out head. The default token matches only when the
+	// dispatch supplies default-branch metadata. `arg:` tokens read the
 	// merged argument set the run executes with, so a value supplied by
 	// defaults.args or this entry's own args: block is guarded exactly
 	// like one typed on the command line. See pkg/pipelines/guards.go.
@@ -189,13 +193,14 @@ type Triggers struct {
 	PostCommitHook *PostCommitHookTrigger `yaml:"post_commit,omitempty"`
 }
 
-// PushTrigger fires on git push events matching the rules.
+// PushTrigger records intent for GitHub push events. The controller dispatches
+// the pipeline named by the webhook URL without evaluating Branches or Paths.
 type PushTrigger struct {
-	// Branches limits the trigger to pushes on these branches (glob
-	// patterns); empty matches any branch.
+	// Branches records the intended push branch globs. It does not gate
+	// webhook dispatch.
 	Branches []string `yaml:"branches,omitempty"`
-	// Paths limits the trigger to pushes touching these path globs;
-	// empty matches any path.
+	// Paths records the intended changed-path globs. It does not gate
+	// webhook dispatch.
 	Paths []string `yaml:"paths,omitempty"`
 }
 
@@ -209,14 +214,14 @@ type PushTrigger struct {
 // Actions and Branches are declarative filters that record intent.
 // Like on.push's branches/paths, the controller does not gate on them
 // today (it applies the default action set and dispatches whichever
-// pipeline the webhook URL names); scope a pull_request trigger by
-// pointing its GitHub webhook only at the pipeline you want it to fire.
+// pipeline the webhook URL names). A pipeline branch guard can gate the
+// checked-out branch, but it does not match the pull request's base branch.
 type PullRequestTrigger struct {
-	// Actions limits the trigger to these pull_request actions; empty
-	// means the default set (opened, synchronize, reopened).
+	// Actions records the intended pull_request actions. The controller
+	// applies its opened, synchronize, and reopened set independently.
 	Actions []string `yaml:"actions,omitempty"`
-	// Branches limits the trigger to pull requests whose base branch
-	// matches these globs; empty matches any base branch.
+	// Branches records the intended pull-request base branch globs. It does
+	// not gate webhook dispatch.
 	Branches []string `yaml:"branches,omitempty"`
 }
 
@@ -261,6 +266,9 @@ func Parse(r io.Reader) (*Config, error) {
 	return &cfg, nil
 }
 
+// safety: the name reaches shell-rendered git hooks, argv, log lines, and file paths.
+var pipelineNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
 // Validate returns an error describing any structural problem in the
 // config.
 func (c *Config) Validate() error {
@@ -268,6 +276,9 @@ func (c *Config) Validate() error {
 	for i, p := range c.Pipelines {
 		if p.Name == "" {
 			return fmt.Errorf("pipelines[%d]: name is required", i)
+		}
+		if !pipelineNamePattern.MatchString(p.Name) {
+			return fmt.Errorf("pipeline %q: name must match %s", p.Name, pipelineNamePattern)
 		}
 		if p.Entrypoint == "" {
 			return fmt.Errorf("pipeline %q: entrypoint is required", p.Name)

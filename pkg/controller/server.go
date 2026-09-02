@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,8 @@ type Server struct {
 	pool *poolBinding
 
 	auth *Authenticator
+
+	loginLimit *loginLimiter
 
 	githubWebhookSecret  string
 	githubCommitStatuses *githubCommitStatusReporter
@@ -66,6 +69,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		store:               st,
 		dispatcher:          NoopDispatcher{Logger: logger},
 		logger:              logger,
+		loginLimit:          newLoginLimiter(nil),
 		queueTimeout:        15 * time.Minute,
 		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
 		runnerHeadroom:      newRunnerHeadroomRegistry(),
@@ -194,9 +198,94 @@ func (s *Server) authMiddleware() *Authenticator {
 	if s.auth != nil {
 		return s.auth
 	}
-	return &Authenticator{
-		now: func() time.Time { return time.Now().UTC() },
+	return NewAuthenticator(nil, 0).WithLogger(s.logger)
+}
+
+// safety: a live claim, not scope alone, decides who may write a node.
+// Check and write use separate transactions, so expiry can admit one stale
+// write; closing that gap requires threading the claimant through every mutation.
+func (s *Server) claimedBy(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFromContext(r.Context())
+		if !ok || p.HasScope(ScopeAdmin) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
+		claimant := claimIdentity(r)
+		held, err := s.store.PrincipalHoldsNodeClaim(r.Context(), runID, nodeID, claimant, time.Now())
+		if err == nil && !held {
+			held, err = s.store.PrincipalHoldsTriggerClaim(r.Context(), runID, claimant, time.Now())
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !held {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:      "claim_required",
+				Principal: p.label(),
+				Message:   "node " + runID + "/" + nodeID + " is not claimed by this principal",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// safety: a claim-scoped token touches only runs it is actually working on; admin bypasses.
+func (s *Server) claimedRun(next http.Handler) http.Handler {
+	return s.runMember(false, next)
+}
+
+// safety: ownership is a live claim on one of the run's nodes or on the trigger the run came from.
+func (s *Server) ownsRun(ctx context.Context, runID string, claimant store.ClaimIdentity) (bool, error) {
+	held, err := s.store.PrincipalHoldsRunClaim(ctx, runID, claimant, time.Now())
+	if err != nil || held {
+		return held, err
 	}
+	return s.store.PrincipalHoldsTriggerClaim(ctx, runID, claimant, time.Now())
+}
+
+// safety: reads a runs.read token already gets stay open; a claim-only token is held to its own runs.
+func (s *Server) readableRun(next http.Handler) http.Handler {
+	return s.runMember(true, next)
+}
+
+func (s *Server) runMember(readerBypass bool, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFromContext(r.Context())
+		if !ok || p.HasScope(ScopeAdmin) || (readerBypass && p.HasScope(ScopeRunsRead)) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		runID := r.PathValue("id")
+		held, err := s.ownsRun(r.Context(), runID, claimIdentity(r))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !held {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:      "claim_required",
+				Principal: p.label(),
+				Message:   "run " + runID + " is not claimed by this principal",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// WithTrustedProxyCIDRs names the proxy source networks allowed to
+// supply X-Forwarded-For for login throttling. Empty keys the login
+// limiter on the TCP peer and ignores forwarded headers.
+func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server {
+	s.loginLimit = newLoginLimiter(prefixes)
+	if s.auth != nil {
+		s.auth.WithTrustedProxyCIDRs(prefixes)
+	}
+	return s
 }
 
 // WithDispatcher returns a Server that invokes the given dispatcher
@@ -220,7 +309,9 @@ func (s *Server) EnableAuthFromStore() *Server {
 		s.logger.Warn("controller serving unauthenticated: tokens table is empty, every endpoint is open; mint an admin token and restart to enable auth")
 		return s
 	}
-	s.auth = NewAuthenticator(s.store, 60*time.Second)
+	s.auth = NewAuthenticator(s.store, 60*time.Second).
+		WithTrustedProxyCIDRs(s.loginLimit.trusted).
+		WithLogger(s.logger)
 	return s
 }
 
@@ -264,30 +355,30 @@ func (s *Server) WithAuthenticator(a *Authenticator) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.Handle("POST /api/v1/runs", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateRun)))
+	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateRun)))
 	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleListRuns)))
 	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleGetRun)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodes)))
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
-	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinishRun)))
-	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUpdatePlanSnapshot)))
+	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleFinishRun))))
+	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdatePlanSnapshot))))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateNode)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeAdmin, http.HandlerFunc(s.handleStartNode)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinishNode)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUpdateNodeDeps)))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetNode)))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetNodeOutput)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleWriteNodeDispatch)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleCreateNode))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleStartNode))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleFinishNode))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdateNodeDeps))))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNode))))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNodeOutput))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleWriteNodeDispatch))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeDispatch)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeDispatches)))
 
-	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeAdmin, http.HandlerFunc(s.handleAppendEvent)))
+	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleAppendEvent))))
 
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
-	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeAdmin, http.HandlerFunc(s.handleClaimTrigger)))
-	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handleHeartbeat)))
-	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinishTrigger)))
+	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleClaimTrigger)))
+	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleHeartbeat)))
+	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleFinishTrigger)))
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
@@ -297,6 +388,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
 	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheGit)))
 	mux.Handle("POST /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheGit)))
+	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/register", requireScope(ScopeNodesClaim,
+		s.claimedRun(http.HandlerFunc(s.handleGitcacheRegister))))
+	mux.Handle("GET /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
+		s.claimedRun(http.HandlerFunc(s.handleGitcacheGit))))
+	mux.Handle("POST /api/v1/runs/{id}/gitcache/git/{path...}", requireScope(ScopeNodesClaim,
+		s.claimedRun(http.HandlerFunc(s.handleGitcacheGit))))
 
 	mux.Handle("POST /api/v1/runs/{id}/cancel", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCancelRun)))
 
@@ -308,9 +405,11 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
 	mux.Handle("GET /api/v1/pipelines/{name}/profile", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetPipelineProfile)))
-	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleSetPipelinePin)))
+	// safety: a pin becomes a hard Kubernetes limit for every later run of that pipeline,
+	// so it is a dispatcher write, not something a node-claiming replica may reach.
+	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeRunsState, http.HandlerFunc(s.handleSetPipelinePin)))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleAddNodeMetric)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAddNodeMetric))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeMetrics)))
 
 	mux.Handle("DELETE /api/v1/runs/{id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteRun)))
@@ -327,22 +426,24 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
 
 	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleClaimNode)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleMarkNodeReady)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRevokeNodeReady)))
+	// safety: readiness is a dispatcher decision; a runner token must not skip a node's dependencies.
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready", requireScope(ScopeAdmin, http.HandlerFunc(s.handleMarkNodeReady)))
+	// safety: revoke-ready acts only on an unclaimed node, so claim ownership can never stand in for admin.
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRevokeNodeReady)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatNodeClaim)))
-	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleTouchRunHeartbeat)))
+	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRun(http.HandlerFunc(s.handleTouchRunHeartbeat))))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleUpdateNodeActivity)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleTouchNodeHeartbeat)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/annotations", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleAppendNodeAnnotation)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/summary", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleSetNodeSummary)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleSetNodeArtifactManifest)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/annotations", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAppendNodeAnnotation))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/summary", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetNodeSummary))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetNodeArtifactManifest))))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/start", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleStartNodeStep)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/finish", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleFinishNodeStep)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/skip", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleSkipNodeStep)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/annotations", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleAppendStepAnnotation)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/summary", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleSetStepSummary)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/start", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleStartNodeStep))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeStep))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/skip", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSkipNodeStep))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/annotations", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAppendStepAnnotation))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/summary", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetStepSummary))))
 	mux.Handle("GET /api/v1/runs/{id}/steps", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeSteps)))
 
 	mux.Handle("POST /api/v1/runs/{id}/debug-pauses", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateDebugPause)))
@@ -355,9 +456,9 @@ func (s *Server) Handler() http.Handler {
 	// safety: nodes.claim may consume only the bounce request already assigned
 	// to that supervising runner; creating one still requires runs.write.
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRequestNodeBounce)))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handlePendingNodeBounce)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleConsumeNodeBounce)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetNodeStatus)))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handlePendingNodeBounce))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleConsumeNodeBounce))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleSetNodeStatus))))
 
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}/request", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRequestApproval)))
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeApprovalsWrite, http.HandlerFunc(s.handleResolveApproval)))
@@ -391,7 +492,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret)))
 	mux.Handle("GET /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListSecrets)))
-	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGetSecret)))
+	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret)))
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret)))
 
 	authed := s.authMiddleware().Middleware(mux)
@@ -399,7 +500,7 @@ func (s *Server) Handler() http.Handler {
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	router.HandleFunc("GET /api/v1/services", s.handleServices)
-	router.Handle("POST /api/v1/auth/login", http.HandlerFunc(s.handleLogin))
+	router.Handle("POST /api/v1/auth/login", s.loginLimit.middleware(http.HandlerFunc(s.handleLogin)))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))
 	router.Handle("GET /api/v1/auth/bootstrap-needed", http.HandlerFunc(s.handleBootstrapNeeded))
@@ -412,7 +513,7 @@ func (s *Server) Handler() http.Handler {
 
 func gitcacheStreamDeadlineHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/gitcache/seed" || strings.HasPrefix(r.URL.Path, "/api/v1/gitcache/git/") {
+		if r.URL.Path == "/api/v1/gitcache/seed" || strings.Contains(r.URL.Path, "/gitcache/git/") {
 			extendGitcacheStreamDeadline(w)
 		}
 		next.ServeHTTP(w, r)

@@ -526,3 +526,29 @@ func TestResolveResources_ClearsControllerPinWhenNodeDeclaresNone(t *testing.T) 
 		t.Fatalf("controller pin = %.2f cores/%d bytes, want cleared after undeclared node", profile.PinnedCores, profile.PinnedMemoryBytes)
 	}
 }
+
+func TestBuildJob_MountsNoServiceAccountToken(t *testing.T) {
+	r := &Runner{cfg: Config{Image: "img", ServiceAccountName: "runner-jobs"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	pod := job.Spec.Template.Spec
+	if pod.ServiceAccountName != "runner-jobs" {
+		t.Fatalf("service account = %q, want runner-jobs", pod.ServiceAccountName)
+	}
+	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
+		t.Fatalf("automountServiceAccountToken = %v, want false", pod.AutomountServiceAccountToken)
+	}
+}
+
+func TestBuildJob_PassesTheCacheTokenThrough(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
+	if got := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_TOKEN"]; got != "s3cret" {
+		t.Fatalf("SPARKWING_CACHE_TOKEN = %q, want the runner's own cache bearer", got)
+	}
+}
+
+func TestBuildJob_OmitsTheCacheTokenWhenTheRunnerHasNone(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "")
+	if _, ok := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_TOKEN"]; ok {
+		t.Fatal("SPARKWING_CACHE_TOKEN should be absent when the runner has none")
+	}
+}

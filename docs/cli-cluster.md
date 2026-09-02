@@ -411,14 +411,16 @@ Mint a replacement token with a grace window
 
 Creates a new token and schedules the old token for revocation
 after --grace. During the grace window, both tokens work, which
-lets callers cycle credentials without downtime.
+lets callers cycle credentials without downtime. The controller
+caps --grace at 7 days, and revoking the old prefix cuts a grace
+window short.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--prefix PREFIX` | Non-secret prefix of the token to rotate (required) |
-| `--grace DURATION` | Window during which the old token still authenticates (default: 24h) |
+| `--grace DURATION` | Window during which the old token still authenticates (max 168h) (default: 24h) |
 | `--ttl DURATION` | TTL of the new token (0 = preserve the old token's remaining TTL) |
 | `--profile NAME` | Profile name (required) |
 
@@ -451,7 +453,8 @@ Prompts for a password on stdin with echo disabled when stdin
 is a TTY (the password is not shown on-screen or recorded in
 shell history). Passing --password skips the prompt -- useful
 for CI seed flows but leaks via shell history if used
-interactively.
+interactively. --scope sets what the account's dashboard
+sessions may reach; omitting it grants admin.
 
 ### Flags
 
@@ -459,6 +462,7 @@ interactively.
 |---|---|
 | `--name NAME` | Dashboard username (required) |
 | `--password PASSWORD` | Password (omit to prompt interactively) |
+| `--scope LIST` | Comma-separated scopes (omit to grant admin) |
 | `--profile NAME` | Profile name (required) |
 
 ### Examples
@@ -466,6 +470,9 @@ interactively.
 ```sh
 # Interactive add
 sparkwing cluster users add --name alice --profile prod
+
+# Read-only dashboard account
+sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod
 
 # Non-interactive add for CI
 sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod
@@ -475,9 +482,11 @@ sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod
 
 Remove a dashboard user
 
-Deletes the user row. Any sessions that user holds remain
-valid until their individual expiry -- sparkwing does not
-proactively invalidate active cookies on delete.
+Deletes the user row, every session that user holds, and
+revokes every token minted under that principal name except the token
+this request authenticates with, in one transaction. The sessions and
+tokens are revoked and the auth cache on the serving replica is
+cleared; auth.md describes the windows that remain elsewhere.
 
 ### Flags
 
@@ -497,8 +506,8 @@ sparkwing cluster users delete --name alice --profile prod
 
 Print every user
 
-Prints name, created_at, and last_login_at for every user in
-the controller's users table.
+Prints name, scopes, created_at, and last_login_at for every
+user in the controller's users table.
 
 ### Flags
 

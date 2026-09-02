@@ -17,6 +17,9 @@ pipelines:
   - name: static-analysis
     entrypoint: StaticAnalysis
 
+  - name: security-scan
+    entrypoint: SecurityScan
+
   - name: integration
     entrypoint: Integration
 

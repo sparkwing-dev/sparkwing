@@ -90,9 +90,14 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # so create this Secret AFTER the first `helm install` -- see Auth below.
 #   kubectl -n sparkwing create secret generic sparkwing-token \
 #       --from-literal=token=swr_...
-# Tokens carry scopes: a runner token needs `nodes.claim` +
-# `logs.write`, the web pod's needs `runs.read` + `logs.read`; an
-# `admin` token covers both.
+# Tokens carry scopes: a runner token needs `nodes.claim`,
+# `triggers.claim`, `runs.state`, `secrets.read`, and `logs.write`.
+# The web pod's needs `runs.read` + `logs.read`, plus
+# `runs.write` where operators cancel, retry, or release runs from the
+# dashboard and `approvals.write` where they resolve approval gates.
+# Deleting a run from the dashboard needs `admin` on the web token AND
+# on the signed-in account; leave it off to keep deletion on the CLI.
+# Mint the two separately so neither carries the other's reach.
 ```
 
 ## Install from source
@@ -119,10 +124,14 @@ sparkwing-runner-bundle:
 helm dep up ./charts/sparkwing-full
 
 # Install the complete stack with an explicitly compatible image set. This
-# source-test configuration has no auth, webhook verification, or encryption-at-rest.
+# source-test configuration has no auth, webhook verification, or encryption-at-rest,
+# so the cache and the logs service must opt out of their token requirement
+# explicitly.
 helm install sparkwing ./charts/sparkwing-full \
     --namespace sparkwing --create-namespace \
-    -f compatible-images.yaml
+    -f compatible-images.yaml \
+    --set sparkwing-runner-bundle.cache.allowUnauthenticated=true \
+    --set sparkwing-runner-bundle.logs.allowUnauthenticated=true
 ```
 
 ### Verify the source stack in Kubernetes
@@ -198,6 +207,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for commit-status run links; invalid values omit the link. | `""` |
 | `controller.secretsKey.name` | Secret holding 32-byte encryption key. | `""` |
 | `controller.pool.enabled` | Enable warm-PVC pool (needs RBAC). | `true` |
+| `controller.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. Include the web pod's source, or dashboard logins all share one budget; when the pod IP is unknown, use the cluster pod CIDR. | `[]` |
+| `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
 
 ### Web
 
@@ -208,8 +219,10 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `web.controller.url` | Override controller URL. | (auto-computed in-cluster) |
 | `web.logs.url` | Override logs URL. | (auto-computed from sub-chart) |
 | `web.cache.url` | Cache the services panel probes. Probe-only; empty and no bundled cache leaves it off the panel. | (auto-computed from sub-chart) |
-| `web.tokenSecret.name` | Secret holding the controller-bearer token. | `""` |
+| `web.tokenSecret.name` | Secret holding the controller-bearer token. | (defaults to `sparkwing-runner-bundle.controller.tokenSecret`) |
+| `web.addr` | Address the web pod binds. Empty binds `0.0.0.0:<web.port>`, which the Service needs; a loopback value is reachable only through a port-forward. | `""` |
 | `web.requireLogin` | Gate the dashboard behind /login (first visit offers first-admin signup). | `false` |
+| `web.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. | `[]` |
 
 ### Security and volume ownership
 
@@ -238,10 +251,13 @@ for the full schema; a few commonly overridden keys:
 | --- | --- | --- |
 | `sparkwing-runner-bundle.enabled` | Toggle the whole runner side. | `true` |
 | `sparkwing-runner-bundle.controller.url` | Where the runner claims from. | (in-cluster controller Service) |
-| `sparkwing-runner-bundle.controller.tokenSecret.name` | Bearer-token Secret. | `""` |
+| `sparkwing-runner-bundle.controller.tokenSecret.name` | Bearer-token Secret, shared by the runner and the cache. | `""` |
+| `sparkwing-runner-bundle.cache.allowUnauthenticated` | Serve the cache without a token (bootstrap only). | `false` |
+| `sparkwing-runner-bundle.logs.allowUnauthenticated` | Serve every run's logs without a token (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
 | `sparkwing-runner-bundle.runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
+| `sparkwing-runner-bundle.runner.automountServiceAccountToken` | Mount the runner pod's API token for `k8s` or `warm` trigger execution. | `false` |
 | `sparkwing-runner-bundle.volumePermissions.enabled` | Run a CHOWN-only init before the runner. | `true` |
 | `sparkwing-runner-bundle.cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 
@@ -253,12 +269,13 @@ Nested `sparkwing-runner-bundle.nameOverride` and `fullnameOverride` values are
 included in the web and controller URLs for the bundled logs and cache
 Services.
 
-Set `sparkwing-runner-bundle.runner.triggerRunner.kind=warm` to offer
+Set `sparkwing-runner-bundle.runner.triggerRunner.kind=warm` and
+`sparkwing-runner-bundle.runner.automountServiceAccountToken=true` to offer
 unlabeled nodes to outbound-only remote agents before using Kubernetes Jobs
 for overflow. This mode reuses the bundled runner image, namespace, service
-account, pull policy, and cache. It adds namespace-scoped Job CRUD to the
-runner Role. The default `inprocess` mode keeps the existing behavior and does
-not grant Job mutation.
+account, pull policy, and cache. It grants namespace-scoped Job lifecycle and
+pod-read access to the runner Role. The default `inprocess` mode keeps the
+existing behavior and renders an empty Role.
 The fallback `run-node` process receives the runner token in its environment,
 so use warm mode only for trusted pipeline code and rotate short-lived tokens.
 
@@ -282,18 +299,33 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    Auth only takes effect on that restart -- the tokens table is read
    once at startup.
 
-2. Stash the token in the `sparkwing-token` Secret (see Pre-install
-   above) and reference it from `web.tokenSecret.name` /
-   `sparkwing-runner-bundle.controller.tokenSecret.name`.
+2. Mint one token per consumer, stash each in a Secret (see Pre-install
+   above), and reference them from `web.tokenSecret.name` /
+   `sparkwing-runner-bundle.controller.tokenSecret.name`. Separate tokens keep
+   the web pod's proxy bearer to the dashboard's scopes.
 
    A configured Secret name requires a non-empty key; the chart rejects
-   incomplete pairs. Runner and cache Secret references are required, so
+   incomplete pairs. Web, runner, and cache Secret references are required, so
    Kubernetes holds those pods until the configured Secret is present.
+   `sparkwing-runner-bundle.controller.tokenSecret` is also what the cache
+   reads as `SPARKWING_API_TOKEN`, the runner as `SPARKWING_CACHE_TOKEN`, and
+   the logs service as the signal to resolve callers against the controller;
+   a cache-enabled install without it fails at render time unless
+   `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, and a
+   logs-enabled one unless
+   `sparkwing-runner-bundle.logs.allowUnauthenticated=true`. The bootstrap
+   window above needs both and the token upgrade should turn both back off.
+
+   An install that sets only `sparkwing-runner-bundle.controller.tokenSecret`
+   gives the web pod that same Secret, so the dashboard's log panes carry a
+   bearer the authenticated logs service accepts. Set `web.tokenSecret.name`
+   to hand the dashboard its own narrower token instead.
 
 3. Set `web.requireLogin=true` to gate the dashboard behind `/login`.
    On a fresh cluster `/login` renders a "create first admin" form and
    the account you create there becomes the admin; afterwards, seed
-   users with `sparkwing cluster users add`. Login cookies are `Secure`,
+   users with `sparkwing cluster users add`, whose `--scope` bounds what a
+   signed-in account reaches through the dashboard proxy. Login cookies are `Secure`,
    so configure an HTTPS ingress before signing in. The chart's plain HTTP
    port-forward remains useful for probes but cannot retain a browser login.
 
@@ -361,7 +393,7 @@ create one.
 ```yaml
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.1"
+    version: "0.1.6"
     repository: "file://../sparkwing-runner-bundle"
     condition: sparkwing-runner-bundle.enabled
 ```

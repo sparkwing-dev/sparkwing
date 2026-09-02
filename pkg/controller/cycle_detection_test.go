@@ -191,6 +191,9 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	if got.TriggerSource != "pipeline-working-tree@laptop.local" {
 		t.Errorf("TriggerSource: got %q, want parent workspace placement", got.TriggerSource)
 	}
+	if !got.RepoInherited {
+		t.Error("RepoInherited = false, want same-repository routing provenance")
+	}
 }
 
 func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
@@ -247,6 +250,9 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	}
 	if got.GitSHA != "explicitSHA" {
 		t.Errorf("GitSHA: explicit value clobbered: %q", got.GitSHA)
+	}
+	if got.RepoInherited {
+		t.Error("RepoInherited = true for an explicit repository")
 	}
 }
 

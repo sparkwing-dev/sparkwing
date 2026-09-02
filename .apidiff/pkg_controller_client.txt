@@ -53,9 +53,11 @@ func (c *Client) CreateDebugPause(ctx context.Context, p store.DebugPause) error
 func (c *Client) CreateNode(ctx context.Context, n store.Node) error
 func (c *Client) CreateRun(ctx context.Context, r store.Run) error
 func (c *Client) CreateSecret(ctx context.Context, name, value string, masked bool) error
+func (c *Client) CreateSecretForRepo(ctx context.Context, name, value, repo string, masked, shared bool) error
 func (c *Client) CreateTrigger(ctx context.Context, req TriggerRequest) (*TriggerResponse, error)
 func (c *Client) DeleteRun(ctx context.Context, runID string) error
 func (c *Client) DeleteSecret(ctx context.Context, name string) error
+func (c *Client) DeleteSecretForRepo(ctx context.Context, name, repo string) error
 func (c *Client) EnqueueTrigger(
 	ctx context.Context,
 	pipeline string,
@@ -99,6 +101,8 @@ func (c *Client) GetRun(ctx context.Context, runID string) (*store.Run, error)
 func (c *Client) GetRunForExecution(ctx context.Context, runID string) (*store.Run, error)
 func (c *Client) GetRunReceipt(ctx context.Context, runID string) ([]byte, error)
 func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error)
+func (c *Client) GetSecretForRepo(ctx context.Context, name, repo string) (*Secret, error)
+func (c *Client) GetSecretForRun(ctx context.Context, name, runID string) (*Secret, error)
 func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)
 func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error)
@@ -172,7 +176,9 @@ type Secret struct {
 	Name      string
 	Value     string
 	Principal string
+	Repo      string
 	Masked    bool
+	Shared    bool
 	CreatedAt int64
 	UpdatedAt int64
 }

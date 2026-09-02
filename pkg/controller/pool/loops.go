@@ -32,7 +32,7 @@ func ReconcileLoop(ctx context.Context, client kubernetes.Interface, p *Pool, ns
 }
 
 // WarmingLoop picks the stalest dirty PVC and rewarms it, then sleeps.
-func WarmingLoop(ctx context.Context, client kubernetes.Interface, p *Pool, ns string) {
+func WarmingLoop(ctx context.Context, client kubernetes.Interface, p *Pool, ns, warmerServiceAccount string) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -64,7 +64,7 @@ func WarmingLoop(ctx context.Context, client kubernetes.Interface, p *Pool, ns s
 		}
 
 		warmStart := time.Now()
-		if err := WarmPVC(ctx, client, ns, pvcName, cfg.WarmImages); err != nil {
+		if err := WarmPVC(ctx, client, ns, pvcName, warmerServiceAccount, cfg.WarmImages); err != nil {
 			log.Printf("pool: warning: warming %s failed: %v - reverting to dirty", pvcName, err)
 			if poolWarmDur != nil {
 				poolWarmDur.Record(ctx, time.Since(warmStart).Seconds(),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -50,5 +51,39 @@ func TestSecretsRoundTrip(t *testing.T) {
 	}
 	if _, err := c.GetSecret(ctx, "api_token"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("GetSecret after delete: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestSecrets_AdminReadResolvesTheNamedRunsRepository(t *testing.T) {
+	f, _ := newScopedFixture(t, runnerScopes)
+	ctx := context.Background()
+	admin, _, err := f.store.CreateToken("ops", store.TokenKindUser,
+		[]string{"admin"}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateToken admin: %v", err)
+	}
+	c := client.NewWithToken(f.url, nil, admin)
+
+	seedSecret(t, f.store, "DEPLOY_KEY", "web-key", "acme/web", false)
+	seedRunNode(t, f.store, "run-web", "build")
+	setRunRepo(t, f.store, "run-web", "acme/web")
+
+	if _, err := c.GetSecret(ctx, "DEPLOY_KEY"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetSecret without a repository = %v, want ErrNotFound", err)
+	}
+	for _, get := range []struct {
+		name string
+		call func() (*client.Secret, error)
+	}{
+		{"by repo", func() (*client.Secret, error) { return c.GetSecretForRepo(ctx, "DEPLOY_KEY", "acme/web") }},
+		{"by run", func() (*client.Secret, error) { return c.GetSecretForRun(ctx, "DEPLOY_KEY", "run-web") }},
+	} {
+		sec, err := get.call()
+		if err != nil {
+			t.Fatalf("admin read %s: %v", get.name, err)
+		}
+		if sec.Value != "web-key" {
+			t.Errorf("admin read %s = %q, want web-key", get.name, sec.Value)
+		}
 	}
 }

@@ -56,7 +56,8 @@ automatically on next startup or access.
 ### Manual registration
 
 ```bash
-curl -X POST "http://sparkwing-cache:8090/git/register?name=gitops&repo=git@github.com:user/repo.git"
+curl -X POST -H "Authorization: Bearer $SPARKWING_CACHE_TOKEN" \
+  "http://sparkwing-cache:8090/git/register?name=gitops&repo=git@github.com:user/repo.git"
 ```
 
 ### Seeding (no SSH required)
@@ -70,7 +71,8 @@ sha=$(git rev-parse HEAD)
 git update-ref "refs/sparkwing-seed/$sha" "$sha"
 git bundle create /tmp/repo.bundle "refs/sparkwing-seed/$sha"
 git update-ref -d "refs/sparkwing-seed/$sha"
-curl -X POST "http://gitcache:8090/sync/seed?repo=git@github.com:user/repo.git&sha=$sha" \
+curl -X POST -H "Authorization: Bearer $SPARKWING_CACHE_TOKEN" \
+  "http://gitcache:8090/sync/seed?repo=git@github.com:user/repo.git&sha=$sha" \
   --data-binary @/tmp/repo.bundle
 ```
 
@@ -107,15 +109,16 @@ cache Service, so set both: `--cache-pod-url` for the
 externally-reachable URL operators hit directly, `--cache-url` for the
 controller-to-cache proxy target.
 
-Off-cluster runners can set `SPARKWING_GITCACHE_URL` to
-`https://<controller>/api/v1/gitcache`. The controller exposes admin-scoped
-registration and read-only smart-Git proxy routes at that prefix and removes
-the caller's bearer before contacting the internal cache. This keeps the raw
-Git cache private while a laptop, desktop, or bare-metal runner uses outbound
-HTTPS only. The dashboard ingress exposes this prefix as a machine-bearer route
-even when browser login is required. A direct cache URL over a LAN, VPN, or
-tailnet remains supported; direct binary and seed writes use only
-`SPARKWING_CACHE_TOKEN`, never the runner's controller token.
+Off-cluster agents default `gitcache` to
+`https://<controller>/api/v1/gitcache`. During node execution the runner
+narrows that URL to `/api/v1/runs/<run>/gitcache`; the `nodes.claim` bearer may
+register and read only the repository of its live run claim. The controller
+removes that bearer before contacting the internal cache. The unscoped
+`/api/v1/gitcache/git/...` routes remain admin-only. This keeps the raw cache
+private while a workstation or server uses outbound HTTPS only. The dashboard
+ingress exposes these routes to machine bearers without accepting browser
+session credentials. A direct cache URL over a LAN, VPN, or tailnet remains
+supported through `agent.yaml` `gitcache` and `cache_token`.
 
 ## Background Fetch
 
@@ -289,21 +292,53 @@ authenticate the push. The PAT needs write access to the gitops repo.
 ## Auth
 
 The cache is exposed externally via ingress at your dashboard host's
-`cache-` subdomain. The blob and sync endpoints require a bearer token
--- `/bin/...`, `/cache/...`, `/upload`, `/uploads/...`,
-`/sync/negotiate`, and `/sync/seed` -- on reads as well as writes. Git
-protocol, archive/file, artifact, proxy, and status routes on the raw cache are
-unauthenticated. Keep that service private when it can contain uncommitted
-source. The controller's `/api/v1/gitcache/git/...` proxy requires admin scope
-and permits upload-pack reads only. Authenticated requests carry the token as:
+`cache-` subdomain. Every route except `/health`, `/metrics`, `/stats`, and the
+package proxy under `/proxy/` requires a bearer token, on reads as well as
+writes: the git protocol and registration routes (`/git/...`), the source read
+routes (`/archive`, `/file`, `/tree-hash`, `/branch-contains`, `/repos`),
+`/artifacts/...`, and the blob and sync routes (`/bin/...`, `/cache/...`,
+`/upload`, `/uploads/...`, `/sync/negotiate`, `/sync/seed`). The package proxy
+stays open because Go, npm, and pip fetch through it without a credential;
+it serves upstream registry bytes, not repository content. The controller's
+`/api/v1/gitcache/git/...` proxy requires admin scope and permits upload-pack
+reads only. Authenticated requests carry the token as:
 
 ```
 Authorization: Bearer <SPARKWING_API_TOKEN>
 ```
 
-In-cluster requests (from controller, runners) skip auth - they reach
-the cache via the k8s Service without the `X-Forwarded-For` header that
-the ingress sets.
+Every caller presents the token, in-cluster ones included. Reaching the
+cache through the k8s Service rather than the ingress proves nothing about
+the caller, so requests to those endpoints without a valid bearer get 401
+wherever they come from. Runners and the controller read the token from
+`SPARKWING_CACHE_TOKEN`.
+
+`POST /git/register` accepts a `name` of 1-64 alphanumeric, dash, underscore,
+or dot characters, and refuses to repoint a name that is already registered to
+a different repository unless the request carries the token. Registering the
+same name to the same URL stays idempotent.
+
+Every response carries `X-Content-Type-Options: nosniff`, and artifact
+downloads carry `Content-Type: application/octet-stream` with
+`Content-Disposition: attachment`, so a stored HTML or SVG artifact cannot
+execute in a browser on the cache's origin.
+
+The cache refuses to start without a token. A laptop or test setup that
+wants the endpoints open passes `--allow-unauthenticated` (or
+`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED=1`); the pod logs a warning at
+startup so an unauthenticated deployment is visible.
+
+### Network policy
+
+The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
+cache pod, admitting only the release's runner and controller pods on the
+cache port. Set `networkPolicy.enabled=false` to drop it, point
+`networkPolicy.controllerPodSelector` at your own controller's pod labels when
+it runs under a different release, and add peers through
+`networkPolicy.extraIngress` for an out-of-cluster runner pool. The chart
+refuses to render a non-`ClusterIP` `cache.service.type` unless
+`controller.tokenSecret.name` is set and `cache.allowUnauthenticated` is false,
+so a published cache always demands a bearer.
 
 ## API Endpoints
 
@@ -311,20 +346,20 @@ the ingress sets.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/git/register?name=X&repo=Y` | Register a repo name |
-| GET | `/git/<name>/info/refs?service=git-upload-pack` | Clone/fetch discovery |
-| POST | `/git/<name>/git-upload-pack` | Clone/fetch data |
+| POST | `/git/register?name=X&repo=Y` | Register a repo name; `name` is 1-64 alphanumeric/dash/underscore/dot chars (auth required) |
+| GET | `/git/<name>/info/refs?service=git-upload-pack` | Clone/fetch discovery (auth required) |
+| POST | `/git/<name>/git-upload-pack` | Clone/fetch data (auth required) |
 | POST | `/git/<name>/git-receive-pack` | **Returns 403** (read-only) |
-| POST | `/git/refresh?name=X` (or `?repo=Y`) | Synchronous fetch of one bare repo (eager refresh) |
+| POST | `/git/refresh?name=X` (or `?repo=Y`) | Synchronous fetch of one bare repo (auth required) |
 
 ### Archives & Files
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/archive?repo=X&branch=Y` | Download repo as tar.gz |
-| GET | `/file?repo=X&branch=Y&path=Z` | Get a single file |
-| GET | `/tree-hash?repo=X&branch=Y&path=Z` | Content-addressable hash |
-| GET | `/branch-contains?repo=X&branch=Y&commit=Z` | Check if commit is on branch |
+| GET | `/archive?repo=X&branch=Y` | Download repo as tar.gz (auth required) |
+| GET | `/file?repo=X&branch=Y&path=Z` | Get a single file (auth required) |
+| GET | `/tree-hash?repo=X&branch=Y&path=Z` | Content-addressable hash (auth required) |
+| GET | `/branch-contains?repo=X&branch=Y&commit=Z` | Check if commit is on branch (auth required) |
 
 ### Uploads (Code Sync)
 
@@ -334,22 +369,38 @@ the ingress sets.
 | POST | `/upload?repo=X&base=Y` | Incremental upload on base commit |
 | GET | `/uploads/<id>` | Download uploaded tarball (auth required) |
 | POST | `/sync/negotiate` | Find common ancestor (auth required) |
-| POST | `/sync/seed?repo=X&sha=Y[&workspace=1]` | Seed repo from a SHA-scoped git bundle; workspace mode caps retained refs (auth required) |
+| POST | `/sync/seed?repo=X&sha=Y[&workspace=1]` | Seed repo from a SHA-scoped git bundle; workspace mode caps retained refs at 128 and archives refs past `WORKSPACE_SEED_MAX_AGE` (auth required) |
 
 ### Artifacts
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/artifacts/<jobID>?path=X` | Upload artifact |
-| GET | `/artifacts/<jobID>` | List artifacts |
-| GET | `/artifacts/<jobID>?glob=X` | Download matching artifacts |
+| POST | `/artifacts/<jobID>?path=X` | Upload artifact (auth required) |
+| GET | `/artifacts/<jobID>` | List artifacts (auth required) |
+| GET | `/artifacts/<jobID>?glob=X` | Download matching artifacts as an attachment (auth required) |
+
+`<jobID>` must be one path segment of 1-128 alphanumeric, dash, underscore, or
+dot characters. Anything else is rejected with 400 before a path is built.
 
 ### Binary & Dependency Cache
 
+A `/bin/<name>` key folds the repository's `.sparkwing/` source inputs, not the
+binary's content, so the cache records the sha-256 of each uploaded body and the
+writing principal's token fingerprint beside the blob and serves that digest on
+every download. Clients hash what they download and discard a mismatch before
+the binary lands, and treat a response without a digest as a miss.
+
+The digest covers the window between the upload and the download: bytes altered
+in transit, or altered on the cache's disk without also rewriting the recorded
+digest, are discarded and the client recompiles. It says nothing about who
+uploaded the binary, because the cache derives the digest from the body it was
+handed. The bearer token on `PUT /bin/<name>` is what keeps an attacker from
+uploading a poisoned binary along with a digest that attests it.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/bin/<name>` | Download cached binary (auth required) |
-| PUT | `/bin/<name>` | Upload binary to cache (auth required) |
+| GET | `/bin/<name>` | Download cached binary; carries `Digest: sha-256=<base64>` and `ETag` (auth required) |
+| PUT | `/bin/<name>` | Upload binary to cache; returns its digest (auth required) |
 | GET | `/cache/<key>` | Download cached dependency archive (auth required) |
 | HEAD | `/cache/<key>` | Check if cache entry exists (auth required) |
 | PUT | `/cache/<key>` | Upload dependency archive to cache (auth required) |
@@ -366,7 +417,7 @@ the ingress sets.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check (`{"status":"ok"}`) |
-| GET | `/repos` | List registered repos |
+| GET | `/repos` | List registered repos (auth required) |
 
 ## Deployment
 
@@ -382,11 +433,13 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 
 | Variable | Description |
 |----------|-------------|
-| `SPARKWING_API_TOKEN` | Bearer token for write endpoint auth |
+| `SPARKWING_API_TOKEN` | Bearer token for every route outside `/health`, `/metrics`, `/stats`, and `/proxy/`. Required unless auth is disabled |
+| `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED` | Start without a token, leaving those routes open |
 | `GITCACHE_REPOS` | Comma-separated `name=url` pairs for auto-registration |
 | `FETCH_INTERVAL` | Background fetch interval (default: `30s`) |
 | `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch (default: `15s`; negative disables) |
 | `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones of one repo (default: `1h`; negative disables) |
+| `WORKSPACE_SEED_MAX_AGE` | How long a working-tree snapshot ref is retained before the next seed archives it under `refs/sparkwing-workspace-archive/`, where it survives another seven times this window so a retry still finds its snapshot (default: `24h`; negative disables expiry) |
 | `DATA_DIR` | Override data root (default: `/data`) |
 | `PORT` | Listen port (default: `8090`) |
 

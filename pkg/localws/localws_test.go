@@ -7,16 +7,20 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestLocalPaths_ExplicitHomeDoesNotMutateEnvironment(t *testing.T) {
@@ -325,3 +329,116 @@ func mustGet(t *testing.T, url string) *http.Response {
 }
 
 func readerOf(s string) io.Reader { return strings.NewReader(s) }
+
+func TestBuildHandler_ServesDashboardConfigAndSecurityHeaders(t *testing.T) {
+	paths, err := localPaths(t.TempDir())
+	if err != nil {
+		t.Fatalf("localPaths: %v", err)
+	}
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	bundle := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte(
+			`<html><head><script src="/sparkwing-runtime.js"></script></head><body></body></html>`)},
+	}
+	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
+		paths:   paths,
+		backend: backend.NewStoreBackend(st, paths, nil),
+		store:   st,
+	}, bundle)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/sparkwing-runtime.js")
+	if err != nil {
+		t.Fatalf("get runtime config: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("runtime config = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), `window.__SPARKWING_VERSION__="v1.2.3"`) {
+		t.Errorf("runtime config lost the CLI version: %s", body)
+	}
+	if got := resp.Header.Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+	if got := resp.Header.Get("Content-Security-Policy"); !strings.Contains(got, "frame-ancestors 'none'") {
+		t.Errorf("Content-Security-Policy = %q, want frame-ancestors 'none'", got)
+	}
+}
+
+func TestBuildHandler_SecurityHeadersOnEveryLocalRoute(t *testing.T) {
+	paths, err := localPaths(t.TempDir())
+	if err != nil {
+		t.Fatalf("localPaths: %v", err)
+	}
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	bundle := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<html><body>stub dashboard</body></html>")},
+	}
+	handler := buildHandler(ctx, cancel, Options{Addr: "127.0.0.1:4343", Version: "v1.2.3"}, handlerParts{
+		paths:   paths,
+		backend: backend.NewStoreBackend(st, paths, nil),
+		store:   st,
+		ctrl:    controller.New(st, nil),
+	}, bundle)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	for _, path := range []string{
+		"/",
+		"/sparkwing-runtime.js",
+		"/api/v1/version",
+		"/api/v1/queue",
+		"/api/v1/pipelines",
+		"/api/v1/capabilities",
+		"/api/v1/runs",
+	} {
+		t.Run(path, func(t *testing.T) {
+			resp, err := http.Get(srv.URL + path)
+			if err != nil {
+				t.Fatalf("get %s: %v", path, err)
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+			}
+			if got := resp.Header.Get("X-Frame-Options"); got != "DENY" {
+				t.Errorf("X-Frame-Options = %q, want DENY", got)
+			}
+			if got := resp.Header.Get("Content-Security-Policy"); !strings.Contains(got, "frame-ancestors 'none'") {
+				t.Errorf("Content-Security-Policy = %q, want frame-ancestors 'none'", got)
+			}
+			if got := resp.Header.Get("Strict-Transport-Security"); got != "" {
+				t.Errorf("Strict-Transport-Security = %q, want none on a plain HTTP dashboard", got)
+			}
+			if strings.HasPrefix(path, "/api/") && resp.StatusCode == http.StatusOK {
+				if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "application/json") {
+					t.Errorf("%s Content-Type = %q, want JSON: %s", path, ct, body)
+				}
+			}
+		})
+	}
+}

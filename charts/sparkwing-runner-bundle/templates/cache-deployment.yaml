@@ -18,7 +18,8 @@ spec:
       labels:
         {{- include "sparkwing-runner-bundle.componentSelectorLabels" (dict "root" . "component" "cache") | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "sparkwing-runner-bundle.serviceAccountName" . }}
+      serviceAccountName: {{ include "sparkwing-runner-bundle.cacheServiceAccountName" . }}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -45,7 +46,15 @@ spec:
           imagePullPolicy: {{ .Values.cache.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          {{- if .Values.cache.allowUnauthenticated }}
+          args:
+            - --allow-unauthenticated
+          {{- end }}
           env:
+            {{- with (include "sparkwing-runner-bundle.cachePublicURL" .) }}
+            - name: SPARKWING_CACHE_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.cache.repos }}
             - name: GITCACHE_REPOS
               value: {{ .Values.cache.repos | quote }}

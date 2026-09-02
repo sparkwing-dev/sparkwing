@@ -146,22 +146,22 @@ func (l *Loopback) WithArtifactStore(a storage.ArtifactStore) *Loopback {
 func (l *Loopback) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.Handle("POST /api/v1/runs", requireScope(ScopeAdmin, http.HandlerFunc(l.handleCreateRun)))
+	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(l.handleCreateRun)))
 	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleGetRun)))
-	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeAdmin, l.ownRun(l.handleFinishRun)))
-	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeAdmin, l.ownRun(l.handleUpdatePlanSnapshot)))
+	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, l.ownRun(l.handleFinishRun)))
+	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeRunsState, l.ownRun(l.handleUpdatePlanSnapshot)))
 	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, l.ownRun(l.handleTouchRunHeartbeat)))
-	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeAdmin, l.ownRun(l.handleAppendEvent)))
+	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, l.ownRun(l.handleAppendEvent)))
 	mux.Handle("GET /api/v1/runs/{id}/steps", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleListNodeSteps)))
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(l.handlePipelineLatest)))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeAdmin, l.ownRun(l.handleCreateNode)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, l.ownRun(l.handleCreateNode)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", requireScope(ScopeNodesClaim, http.HandlerFunc(l.handleGetNode)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", requireScope(ScopeNodesClaim, http.HandlerFunc(l.handleGetNodeOutput)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeAdmin, l.ownRun(l.handleStartNode)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeAdmin, l.ownRun(l.handleFinishNode)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeAdmin, l.ownRun(l.handleUpdateNodeDeps)))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeAdmin, l.ownRun(l.handleSetNodeStatus)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeRunsState, l.ownRun(l.handleStartNode)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeRunsState, l.ownRun(l.handleFinishNode)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeRunsState, l.ownRun(l.handleUpdateNodeDeps)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeRunsState, l.ownRun(l.handleSetNodeStatus)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, l.ownRun(l.handleUpdateNodeActivity)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, l.ownRun(l.handleTouchNodeHeartbeat)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/annotations", requireScope(ScopeNodesClaim, l.ownRun(l.handleAppendNodeAnnotation)))
@@ -276,7 +276,7 @@ func (l *Loopback) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		writeStateError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, runForResponse(r, run))
+	writeJSON(w, http.StatusOK, runForResponse(r, run, loopbackSecretValuesAllowed))
 }
 
 func (l *Loopback) getRun(r *http.Request, runID string) (*store.Run, error) {
@@ -603,7 +603,7 @@ func (l *Loopback) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request)
 		writeStateError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, d)
+	writeJSON(w, http.StatusOK, dispatchForResponse(r, d))
 }
 
 func (l *Loopback) handleListNodeDispatches(w http.ResponseWriter, r *http.Request) {
@@ -615,7 +615,7 @@ func (l *Loopback) handleListNodeDispatches(w http.ResponseWriter, r *http.Reque
 	if out == nil {
 		out = []*store.NodeDispatch{}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, dispatchesForResponse(r, out))
 }
 
 func (l *Loopback) handleStartNodeStep(w http.ResponseWriter, r *http.Request) {
@@ -1021,6 +1021,10 @@ func (l *Loopback) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing key", http.StatusBadRequest)
 		return
 	}
+	if !safeArtifactKey(key) {
+		http.Error(w, "invalid key", http.StatusBadRequest)
+		return
+	}
 	rc, err := l.artifactStore.Get(r.Context(), key)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -1037,6 +1041,8 @@ func (l *Loopback) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 
 func writeStateError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, store.ErrSecretInputHash):
+		writeError(w, http.StatusBadRequest, err)
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, storage.ErrNotFound):
 		writeError(w, http.StatusNotFound, err)
 	case errors.Is(err, storage.ErrNotSupported):

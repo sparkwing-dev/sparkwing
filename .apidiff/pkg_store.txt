@@ -60,9 +60,16 @@ const ApprovalOnTimeoutFail = "fail"
 const ApprovalResolutionApproved = "approved"
 const ApprovalResolutionDenied = "denied"
 const ApprovalResolutionTimedOut = "timed_out"
+func Argon2Concurrency(budget int64) int
+const Argon2HashBytes = int64(argonMemory) << 10
+func Argon2Slots() int
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
+type ClaimIdentity struct {
+	Principal   string
+	TokenPrefix string
+}
 func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
 func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
 type ConcurrencyHolder struct {
@@ -134,6 +141,8 @@ type DebugPause struct {
 	ReleasedBy  string
 	ReleaseKind string
 }
+const DefaultArgon2AcquireTimeout = 250 * time.Millisecond
+const DefaultArgon2MemoryBudget = int64(256) << 20
 const DefaultBusyTimeoutMS = 30000
 const DefaultCancelTimeout = 60 * time.Second
 const DefaultConcurrencyCacheCap = 10_000
@@ -150,10 +159,19 @@ func DisplayProfileKey(key string) string
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
+var ErrHashingBusy = errors.New("hashing capacity is saturated")
+var ErrInvalidCredentials = errors.New("invalid username or password")
+var ErrInvalidToken = errors.New("invalid token")
 var ErrLockHeld = errors.New("held by another holder")
+var ErrNoTokenCandidates = errors.New("unknown token")
 var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
 var ErrRunNotLive = errors.New("run is not live")
+var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
+var ErrSessionBackend = errors.New("sessions: backend unavailable")
+var ErrTokenRevoked = errors.New("token is revoked or expired")
+var ErrUnknownToken = errors.New("unknown token")
+var ErrUserNotFound = errors.New("user not found")
 type Event struct {
 	RunID   string
 	Seq     int64
@@ -193,6 +211,7 @@ var Maintenance = storeMaintenanceFns{
 	SweepLRUConcurrencyCache:     (*Store).sweepLRUConcurrencyCache,
 	ReconcileConcurrencyKeys:     (*Store).reconcileConcurrencyKeys,
 }
+const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
 type MetricSample struct {
 	TS            time.Time
@@ -262,6 +281,7 @@ type NodeDispatch struct {
 	InputEnvelope    []byte
 	InputSizeBytes   int64
 	SecretRedactions int
+	RedactedKeys     []byte
 }
 const NodeStatusApprovalPending = "approval_pending"
 type NodeStep struct {
@@ -430,7 +450,9 @@ type Secret struct {
 	Name      string
 	Value     string
 	Principal string
+	Repo      string
 	Masked    bool
+	Shared    bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -444,6 +466,8 @@ type Session struct {
 	LastUsedAt *time.Time
 }
 const SessionIDLen = 32
+func SetArgon2AcquireTimeout(d time.Duration) time.Duration
+func SetArgon2MemoryBudget(budget int64) int
 func SetBinaryVersion(v string)
 type SkewError struct {
 	DBVersion        int
@@ -475,9 +499,9 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
-func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
+func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
 func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error)
-func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines, sources []string) (*Trigger, error)
+func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity, lease time.Duration, pipelines, sources []string) (*Trigger, error)
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error)
 func (s *Store) Close() error
 func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
@@ -490,20 +514,20 @@ func (s *Store) CountPendingTriggers(ctx context.Context) (int, error)
 func (s *Store) CountUsers() (int, error)
 func (s *Store) CreateApproval(ctx context.Context, a Approval) error
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error
-func (s *Store) CreateFirstUser(name, password string, now time.Time) (*User, error)
+func (s *Store) CreateFirstUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CreateNode(ctx context.Context, n Node) error
-func (s *Store) CreateOrReplaceSecret(name, value, principal string, masked bool, now time.Time) error
+func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (raw string, tok *Token, err error)
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
-func (s *Store) CreateUser(name, password string, now time.Time) (*User, error)
+func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
-func (s *Store) DeleteSecret(name string) error
+func (s *Store) DeleteSecret(name, repo string) error
 func (s *Store) DeleteSession(rawSession string) error
-func (s *Store) DeleteUser(name string) error
+func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error)
 func (s *Store) Dialect() Dialect
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
@@ -528,9 +552,11 @@ func (s *Store) GetPipelineProfile(ctx context.Context, pipeline, nodeID string)
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error)
 func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
 func (s *Store) GetSecret(name string) (*Secret, error)
+func (s *Store) GetSecretForRepo(name, repo string) (*Secret, error)
+func (s *Store) GetSecretForRun(name, repo string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
-func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) error
+func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
@@ -560,6 +586,9 @@ func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts Concurren
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
+func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, now time.Time) (bool, error)
+func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)
+func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
@@ -572,6 +601,8 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
+func (s *Store) RepoForClaimedRun(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (string, error)
+func (s *Store) ReposForClaimant(ctx context.Context, claimant ClaimIdentity, now time.Time) ([]string, error)
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
@@ -667,9 +698,11 @@ const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 type User struct {
 	Name        string
 	PWHash      string
+	Scopes      []string
 	CreatedAt   time.Time
 	LastLoginAt *time.Time
 }
+func ValidateRunInvocation(r Run) error
 const WaiterCached WaiterStatus = "cached"
 const WaiterCancelled WaiterStatus = "cancelled"
 const WaiterLeaderFinished WaiterStatus = "leader_finished"

@@ -50,9 +50,26 @@ Pool management runs inside sparkwing-controller in the sparkwing namespace.
   2. `clean` PVCs older than `refresh_interval` (default 1 hour)
 - Launches an ephemeral warmer pod that:
   - Mounts the target PVC at `/var/lib/docker`
-  - Runs a privileged DinD container
+  - Runs a privileged DinD container under the warmer ServiceAccount with
+    no API token mounted
   - Pulls all images listed in the ConfigMap
   - Timeout: 30 minutes per warm cycle
+
+The warmer pod names its ServiceAccount explicitly, so that account must
+exist in the pool namespace or Kubernetes rejects the pod. The name comes
+from `--warmer-service-account` (env `SPARKWING_WARMER_SA`), which defaults
+to `sparkwing-cache-warmer`. `sparkwing-full` creates a release-scoped
+`<release>-sparkwing-full-cache-warmer` whenever `controller.pool.enabled`
+is true and passes the flag, so two releases in one namespace do not fight
+over one account. Create the account yourself when you run the controller
+outside that chart:
+
+```bash
+kubectl create serviceaccount sparkwing-cache-warmer -n <pool-namespace>
+```
+
+It needs no Role or RoleBinding.
+
 - On success: marks PVC `clean`, updates `warmed-at`
 - On failure: marks PVC `dirty` for retry
 
@@ -79,8 +96,20 @@ ConfigMap named `sparkwing-cache-config`. The warming parameters
 warming loop, so changes take effect without a restart. The remaining
 parameters (`pool_size`, `pvc_size`, `heartbeat_timeout`, and
 `startup_grace`) are read once at controller startup and require a
-restart to change. The YAML below is the value stored under
-`data.config.yaml`:
+restart to change.
+
+Each `warm_images` entry must be a registry reference: an optional host
+and port, where the host is a DNS name or a bracketed IPv6 address such
+as `[::1]:5000`, then a lowercase path, an optional tag, and an optional
+`@sha256:` digest. The controller drops every other entry rather than
+passing it to the privileged warmer pod, and reports what it dropped in
+one summary line per read. It reads the first 64 entries and ignores the
+rest.
+
+The grammar is narrower than `docker pull`: it accepts `sha256`
+digests only, and it requires lowercase hexadecimal in a digest.
+
+The YAML below is the value stored under `data.config.yaml`:
 
 ```yaml
 # Images to pre-pull into each pool PVC

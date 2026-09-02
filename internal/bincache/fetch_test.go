@@ -1,7 +1,11 @@
 package bincache
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/cgi"
@@ -32,6 +36,20 @@ func TestRepoNameFromURL(t *testing.T) {
 		if got := RepoNameFromURL(c.in); got != c.want {
 			t.Errorf("RepoNameFromURL(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestClaimedRepoNameFromURL_DistinguishesEqualBasenames(t *testing.T) {
+	first := ClaimedRepoNameFromURL("https://git.example.com/acme/widgets.git")
+	second := ClaimedRepoNameFromURL("https://git.example.com/other/widgets.git")
+	if first == second {
+		t.Fatalf("claim-scoped names collide: %q", first)
+	}
+	if !strings.HasPrefix(first, "repo-") || len(first) != 64 {
+		t.Fatalf("claim-scoped name = %q", first)
+	}
+	if got := ClaimedRepoNameFromURL("  https://git.example.com/acme/widgets.git  "); got != first {
+		t.Fatalf("normalized claim-scoped name = %q, want %q", got, first)
 	}
 }
 
@@ -483,6 +501,66 @@ func TestControllerGitcacheToken_RequiresExactControllerOriginAndPath(t *testing
 	}
 }
 
+func TestControllerRunGitcacheURL_UsesClaimBoundControllerPath(t *testing.T) {
+	controller := "https://controller.example:8443/sparkwing"
+	base := controller + "/api/v1/gitcache"
+	want := controller + "/api/v1/runs/run-123/gitcache"
+	if got := ControllerRunGitcacheURL(base, controller, "run-123"); got != want {
+		t.Fatalf("ControllerRunGitcacheURL = %q, want %q", got, want)
+	}
+	if got := ControllerGitcacheToken(want, controller, "runner-token"); got != "runner-token" {
+		t.Fatalf("claim-bound controller token = %q, want runner-token", got)
+	}
+	direct := "https://cache.tail.example"
+	if got := ControllerRunGitcacheURL(direct, controller, "run-123"); got != direct {
+		t.Fatalf("direct cache URL changed to %q", got)
+	}
+}
+
+func TestControllerRunGitcacheURL_UsesClaimScopedRepoIdentity(t *testing.T) {
+	controller := "https://controller.example"
+	gcURL := controller + "/api/v1/runs/run-123/gitcache"
+	repoURL := "https://git.example.com/acme/widgets.git"
+	if got := controllerClaimedRepoName(gcURL, controller, repoURL); got != ClaimedRepoNameFromURL(repoURL) {
+		t.Fatalf("claim-scoped name = %q", got)
+	}
+	if got := controllerClaimedRepoName("https://cache.example", controller, repoURL); got != "" {
+		t.Fatalf("direct-cache name override = %q", got)
+	}
+}
+
+func TestFetchPipelineSourceWithCredentials_UsesOnlyTheDirectCacheToken(t *testing.T) {
+	repoParent := t.TempDir()
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	execPath := gitExecPath(t)
+	if execPath == "" {
+		t.Skip("git --exec-path unavailable")
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/git/register", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	mux.Handle("/git/", &cgi.Handler{
+		Path: filepath.Join(execPath, "git-http-backend"),
+		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
+		Root: "/git",
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer cache-token" {
+			http.Error(w, "wrong bearer", http.StatusUnauthorized)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	if _, err := FetchPipelineSourceWithCredentials(srv.URL, "https://controller.example",
+		"controller-token", "cache-token", "git@github.com:sparkwing-dev/sparkwing.git",
+		"main", tipSHA, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSeedWorkspaceBundle_DoesNotFollowRedirectWithToken(t *testing.T) {
 	var targetRequests int
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -550,7 +628,7 @@ func TestTryBinary_DoesNotInstallRedirectedContent(t *testing.T) {
 	}))
 	defer source.Close()
 	dest := filepath.Join(t.TempDir(), "pipeline")
-	err := TryBinary(source.URL, "deadbeef-cafebabe", dest)
+	err := TryBinary(source.URL, "", "deadbeef-cafebabe", dest)
 	if err == nil || !strings.Contains(err.Error(), "307") {
 		t.Fatalf("error = %v, want redirect rejection", err)
 	}
@@ -559,5 +637,110 @@ func TestTryBinary_DoesNotInstallRedirectedContent(t *testing.T) {
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
 		t.Fatalf("redirected binary was installed: %v", err)
+	}
+}
+
+func TestTryBinary_VerifiesAdvertisedDigest(t *testing.T) {
+	body := []byte("compiled pipeline bytes")
+	sum := sha256.Sum256(body)
+	honest := base64.StdEncoding.EncodeToString(sum[:])
+	other := sha256.Sum256([]byte("attacker bytes"))
+
+	cases := []struct {
+		name    string
+		digest  string
+		served  []byte
+		wantErr bool
+	}{
+		{name: "matching digest", digest: "sha-256=" + honest, served: body},
+		{name: "tampered body", digest: "sha-256=" + honest, served: []byte("attacker bytes"), wantErr: true},
+		{name: "tampered digest", digest: "sha-256=" + base64.StdEncoding.EncodeToString(other[:]), served: body, wantErr: true},
+		{name: "absent digest", digest: "", served: body, wantErr: true},
+		{name: "unsupported algorithm", digest: "md5=" + honest, served: body, wantErr: true},
+		{name: "undecodable digest", digest: "sha-256=not-base64!", served: body, wantErr: true},
+		{name: "short digest", digest: "sha-256=" + base64.StdEncoding.EncodeToString(sum[:16]), served: body, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.digest != "" {
+					w.Header().Set("Digest", tc.digest)
+				}
+				_, _ = w.Write(tc.served)
+			}))
+			defer srv.Close()
+
+			dest := filepath.Join(t.TempDir(), "pipeline")
+			err := TryBinary(srv.URL, "cache-token", "deadbeef-cafebabe", dest)
+			if tc.wantErr {
+				if !errors.Is(err, ErrDigest) {
+					t.Fatalf("err = %v, want ErrDigest", err)
+				}
+				if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+					t.Fatalf("unverified binary was installed: %v", statErr)
+				}
+				if _, statErr := os.Stat(dest + ".tmp"); !os.IsNotExist(statErr) {
+					t.Errorf("temp download left behind: %v", statErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("TryBinary: %v", err)
+			}
+			got, readErr := os.ReadFile(dest)
+			if readErr != nil {
+				t.Fatalf("read dest: %v", readErr)
+			}
+			if !bytes.Equal(got, body) {
+				t.Errorf("payload = %q, want %q", got, body)
+			}
+		})
+	}
+}
+
+func TestUploadBinary_RejectsDifferentStoredDigest(t *testing.T) {
+	other := sha256.Sum256([]byte("something else"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Digest", "sha-256="+base64.StdEncoding.EncodeToString(other[:]))
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	src := filepath.Join(t.TempDir(), "pipeline")
+	if err := os.WriteFile(src, []byte("compiled pipeline bytes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := UploadBinary(srv.URL, "cache-token", "deadbeef-cafebabe", src)
+	if !errors.Is(err, ErrDigest) {
+		t.Fatalf("err = %v, want ErrDigest", err)
+	}
+}
+
+func TestTryBinary_SendsTokenAsBearer(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		token string
+		want  string
+	}{
+		{name: "token", token: "cache-token", want: "Bearer cache-token"},
+		{name: "no token", token: "", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var authz string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authz = r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer srv.Close()
+
+			dest := filepath.Join(t.TempDir(), "pipeline")
+			if err := TryBinary(srv.URL, tc.token, "deadbeef-cafebabe", dest); !errors.Is(err, ErrMiss) {
+				t.Fatalf("error = %v, want ErrMiss", err)
+			}
+			if authz != tc.want {
+				t.Fatalf("Authorization = %q, want %q", authz, tc.want)
+			}
+		})
 	}
 }

@@ -49,15 +49,27 @@ func run(args []string) error {
 	fs.DurationVar(&cfg.ProxyMaxAge, "proxy-max-age",
 		envDuration("PROXY_MAX_AGE", cfg.ProxyMaxAge),
 		"cleanup threshold for immutable proxy entries (content-addressed files). Falls back to $PROXY_MAX_AGE.")
+	fs.StringVar(&cfg.PublicURL, "public-url",
+		envOr("SPARKWING_CACHE_PUBLIC_URL", cfg.PublicURL),
+		"base URL clients use to reach this cache (e.g. http://sparkwing-cache.sparkwing.svc.cluster.local): a scheme and host, optionally with a /proxy path. Registry bodies are rewritten against it and the rewritten copy is cached, so it is correct only when every client dials the same address. Changing it leaves cached mutable entries on the old value until their TTL expires. Empty rewrites each response from its own request Host and caches the upstream body untouched. Falls back to $SPARKWING_CACHE_PUBLIC_URL.")
+	fs.BoolVar(&cfg.TrustForwardedHost, "trust-forwarded-host",
+		envBool("SPARKWING_CACHE_TRUST_FORWARDED_HOST", cfg.TrustForwardedHost),
+		"honor X-Forwarded-Host and X-Forwarded-Proto when rewriting registry bodies from the request, taking the right-most element of each. Only safe when a reverse proxy is the only route to this port, and inert when --public-url is set. Falls back to $SPARKWING_CACHE_TRUST_FORWARDED_HOST.")
 	fs.StringVar(&cfg.APIToken, "api-token",
 		envOr("SPARKWING_API_TOKEN", cfg.APIToken),
-		"bearer token required on external write endpoints. Empty disables auth. Falls back to $SPARKWING_API_TOKEN.")
+		"bearer token required on the git, blob, artifact, and sync endpoints. Required unless --allow-unauthenticated is set. Falls back to $SPARKWING_API_TOKEN.")
+	fs.BoolVar(&cfg.AllowUnauthenticated, "allow-unauthenticated",
+		envBool("SPARKWING_CACHE_ALLOW_UNAUTHENTICATED", cfg.AllowUnauthenticated),
+		"start without a bearer token, leaving the git, blob, artifact, and sync endpoints open to anyone who can reach the port. Falls back to $SPARKWING_CACHE_ALLOW_UNAUTHENTICATED.")
 	fs.StringVar(&cfg.AutoRegisterRepos, "auto-register-repos",
 		envOr("GITCACHE_REPOS", cfg.AutoRegisterRepos),
 		"comma-separated name=url pairs cloned into the gitcache on startup. Falls back to $GITCACHE_REPOS.")
 	fs.StringVar(&cfg.SSHKeyDir, "ssh-key-dir",
 		envOr("SSH_KEY_DIR", cfg.SSHKeyDir),
 		"directory containing the SSH key + known_hosts (typically a k8s secret mount). Falls back to $SSH_KEY_DIR.")
+	fs.DurationVar(&cfg.WorkspaceSeedMaxAge, "workspace-seed-max-age",
+		envDuration("WORKSPACE_SEED_MAX_AGE", cfg.WorkspaceSeedMaxAge),
+		"how long a working-tree snapshot ref is retained before the next seed expires it. Negative disables expiry. Falls back to $WORKSPACE_SEED_MAX_AGE.")
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
@@ -76,6 +88,15 @@ func run(args []string) error {
 func envOr(name, fallback string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envBool(name string, fallback bool) bool {
+	if v := os.Getenv(name); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
 	}
 	return fallback
 }

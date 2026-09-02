@@ -21,7 +21,7 @@ func newBounceTestServer(t *testing.T) (*Server, string, *store.Store) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	raw, _, err := st.CreateToken("alice", store.TokenKindUser,
+	raw, tok, err := st.CreateToken("alice", store.TokenKindUser,
 		[]string{ScopeRunsWrite, ScopeNodesClaim}, 0, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
@@ -39,6 +39,12 @@ func newBounceTestServer(t *testing.T) (*Server, string, *store.Store) {
 	}
 	if err := st.StartNode(ctx, "run-1", "build"); err != nil {
 		t.Fatalf("StartNode: %v", err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-1", "build"); err != nil {
+		t.Fatalf("MarkNodeReady: %v", err)
+	}
+	if _, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "alice", TokenPrefix: tok.Prefix}, "holder-1", time.Minute, nil); err != nil {
+		t.Fatalf("ClaimNextReadyNode: %v", err)
 	}
 	return New(st, nil).WithAuthenticator(NewAuthenticator(st, 0)), raw, st
 }

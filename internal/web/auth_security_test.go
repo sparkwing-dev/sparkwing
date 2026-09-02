@@ -11,39 +11,71 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 var authTestBundle = fstest.MapFS{
 	"index.html": &fstest.MapFile{Data: []byte("<html>dashboard</html>")},
 }
 
-func TestSameOriginRequestUsesCookiePolicyForOriginFormRequests(t *testing.T) {
+func TestSameOriginRequestUsesTLSEvidenceForOriginFormRequests(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name          string
-		secureCookies bool
-		origin        string
-		want          bool
+		name    string
+		overTLS bool
+		origin  string
+		want    bool
 	}{
-		{name: "secure accepts HTTPS", secureCookies: true, origin: "https://dashboard.example:8443", want: true},
-		{name: "secure rejects HTTP", secureCookies: true, origin: "http://dashboard.example:8443"},
-		{name: "insecure accepts HTTP", origin: "http://dashboard.example:8443", want: true},
-		{name: "insecure rejects HTTPS", origin: "https://dashboard.example:8443"},
-		{name: "rejects different host", secureCookies: true, origin: "https://attacker.example:8443"},
-		{name: "rejects different port", secureCookies: true, origin: "https://dashboard.example:9443"},
+		{name: "TLS accepts HTTPS", overTLS: true, origin: "https://dashboard.example:8443", want: true},
+		{name: "TLS rejects HTTP", overTLS: true, origin: "http://dashboard.example:8443"},
+		{name: "no evidence accepts HTTP", origin: "http://dashboard.example:8443", want: true},
+		{name: "no evidence accepts HTTPS", origin: "https://dashboard.example:8443", want: true},
+		{name: "rejects different host", overTLS: true, origin: "https://attacker.example:8443"},
+		{name: "rejects different port", overTLS: true, origin: "https://dashboard.example:9443"},
+		{name: "rejects missing origin", overTLS: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/runs", nil)
 			req.Host = "dashboard.example:8443"
-			req.Header.Set("Origin", test.origin)
+			if test.origin != "" {
+				req.Header.Set("Origin", test.origin)
+			}
 			if req.URL.IsAbs() {
 				t.Fatalf("test request URL = %q, want production origin form", req.URL)
 			}
-			if got := sameOriginRequestForCookiePolicy(req, test.secureCookies); got != test.want {
+			if got := sameOriginRequestOverTLS(req, test.overTLS); got != test.want {
 				t.Errorf("same-origin decision = %t, want %t", got, test.want)
 			}
 		})
+	}
+}
+
+func TestSameOriginRequestBehindHTTPSProxyKeepsSecureCookies(t *testing.T) {
+	t.Parallel()
+	trusted, err := ratelimit.ParseTrustedProxyCIDRs("10.0.0.0/8")
+	if err != nil {
+		t.Fatalf("parse CIDRs: %v", err)
+	}
+	opts := HandlerOptions{TrustedProxyCIDRs: trusted}
+
+	var decided bool
+	handler := securityHeadersMiddleware(opts, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		decided = sameOriginRequest(r)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/login", nil)
+	req.RemoteAddr = "10.1.2.3:9999"
+	req.Host = "dashboard.example"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("Origin", "https://dashboard.example")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if !decided {
+		t.Error("forwarded https origin rejected; the login POST would 403 behind a TLS proxy")
+	}
+	if !cookieSecure {
+		t.Error("test assumes the default Secure cookie policy")
 	}
 }
 
@@ -333,6 +365,7 @@ func TestUnsafeAPIProxyRequiresSessionBoundCSRF(t *testing.T) {
 		if r.URL.Path == "/api/v1/auth/session" {
 			_ = json.NewEncoder(w).Encode(sessionResp{
 				Principal: "admin",
+				Scopes:    []string{"admin"},
 				CSRFToken: "session-token",
 				ExpiresAt: time.Now().Add(time.Hour).Unix(),
 			})
@@ -382,7 +415,7 @@ func TestUnsafeAPIProxyRequiresSessionBoundCSRF(t *testing.T) {
 		{name: "cookie header mismatch", origin: "https://dashboard.example.com", cookieToken: "attacker-token", headerToken: "session-token"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			rec := request("/api/v1/mutate", test.origin, test.cookieToken, test.headerToken)
+			rec := request("/api/v1/runs/r1/cancel", test.origin, test.cookieToken, test.headerToken)
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403", rec.Code)
 			}
@@ -395,16 +428,17 @@ func TestUnsafeAPIProxyRequiresSessionBoundCSRF(t *testing.T) {
 	}
 	mu.Unlock()
 
-	for _, path := range []string{"/api/v1/mutate", "/api/v1/logs/mutate"} {
-		rec := request(path, "https://dashboard.example.com", "session-token", "session-token")
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("legitimate mutation %s = %d, want 204", path, rec.Code)
-		}
+	rec := request("/api/v1/runs/r1/cancel", "https://dashboard.example.com", "session-token", "session-token")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("legitimate mutation = %d, want 204", rec.Code)
+	}
+	if forged := request("/api/v1/logs/r1", "https://dashboard.example.com", "session-token", "session-token"); forged.Code != http.StatusNotFound {
+		t.Fatalf("logs write = %d, want 404", forged.Code)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(requests) != 2 {
-		t.Fatalf("upstream requests = %+v, want controller and logs mutation", requests)
+	if len(requests) != 1 {
+		t.Fatalf("upstream requests = %+v, want the controller mutation only", requests)
 	}
 	for _, got := range requests {
 		if got.body != `{"action":"cancel"}` || got.authorization != "Bearer service-token" ||
@@ -425,7 +459,7 @@ func TestSessionlessProxyPreservesDirectAuthorization(t *testing.T) {
 	}))
 	t.Cleanup(controller.Close)
 	handler := HandlerFromOptionsWithBundle(HandlerOptions{ControllerURL: controller.URL}, authTestBundle)
-	req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/mutate", strings.NewReader("payload"))
+	req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/runs/r1/cancel", strings.NewReader("payload"))
 	req.Header.Set("Origin", "https://attacker.example.com")
 	req.Header.Set("Authorization", "Bearer direct-user-token")
 	req.Header.Set(csrfHeaderName, "browser-token")
@@ -457,7 +491,7 @@ func TestGitcacheMachineProxyBypassesBrowserSessionAndPreservesBearer(t *testing
 		RequireLogin:  true,
 	}, authTestBundle)
 	req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/gitcache/seed", strings.NewReader("bundle"))
-	req.Header.Set("Authorization", "Bearer runner-admin-token")
+	req.Header.Set("Authorization", "Bearer swr_0123456789abcdef")
 	req.Header.Set("Proxy-Authorization", "Bearer proxy-secret")
 	req.Header.Set(csrfHeaderName, "browser-token")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "browser-session"})
@@ -466,8 +500,37 @@ func TestGitcacheMachineProxyBypassesBrowserSessionAndPreservesBearer(t *testing
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("machine proxy status = %d, want 204", rec.Code)
 	}
-	if path != "/api/v1/gitcache/seed" || authorization != "Bearer runner-admin-token" || proxyAuthorization != "" || cookie != "" || csrf != "" {
+	if path != "/api/v1/gitcache/seed" || authorization != "Bearer swr_0123456789abcdef" || proxyAuthorization != "" || cookie != "" || csrf != "" {
 		t.Fatalf("machine proxy boundary = path %q Authorization %q Proxy-Authorization %q Cookie %q CSRF %q", path, authorization, proxyAuthorization, cookie, csrf)
+	}
+}
+
+func TestClaimedRunGitcacheMachineProxyBypassesBrowserSession(t *testing.T) {
+	t.Parallel()
+	var authorization, cookie, path string
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		cookie = r.Header.Get("Cookie")
+		path = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(controller.Close)
+	handler := HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle)
+	req := httptest.NewRequest(http.MethodGet,
+		"https://dashboard.example.com/api/v1/runs/run-1/gitcache/git/widgets/info/refs?service=git-upload-pack", nil)
+	req.Header.Set("Authorization", "Bearer swr_0123456789abcdef")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "browser-session"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("machine proxy status = %d, want 204", rec.Code)
+	}
+	if path != "/api/v1/runs/run-1/gitcache/git/widgets/info/refs" ||
+		authorization != "Bearer swr_0123456789abcdef" || cookie != "" {
+		t.Fatalf("machine proxy boundary = path %q Authorization %q Cookie %q", path, authorization, cookie)
 	}
 }
 
@@ -493,7 +556,7 @@ func TestGitcacheMachineProxyAllowsSlowPackStreamBeyondDefaultDeadline(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Authorization", "Bearer runner-token")
+	req.Header.Set("Authorization", "Bearer swr_0123456789abcdef")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -686,5 +749,151 @@ func assertNoClearedCookies(t *testing.T, cookies []*http.Cookie) {
 		if (cookie.Name == sessionCookieName || cookie.Name == csrfCookieName) && cookie.MaxAge < 0 {
 			t.Fatalf("failed logout cleared %s", cookie.Name)
 		}
+	}
+}
+
+func TestGitcacheMachineProxyRejectsARequestWithNoBearer(t *testing.T) {
+	t.Parallel()
+	reached := false
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(controller.Close)
+	handler := HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle)
+
+	for _, authorization := range []string{
+		"", "Basic dXNlcjpwYXNz", "Bearer", "Bearer   ",
+		"Bearer x", "Bearer swr_short", "Bearer nope_0123456789abcdef",
+	} {
+		req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/gitcache/seed", strings.NewReader("bundle"))
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "browser-session"})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Authorization %q = %d, want 401", authorization, rec.Code)
+		}
+	}
+	if reached {
+		t.Error("an unauthenticated request reached the controller")
+	}
+}
+
+func TestGitcacheMachineProxyCapsConcurrentStreams(t *testing.T) {
+	release := make(chan struct{})
+	admitted := make(chan struct{}, gitcacheStreamLimit+1)
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		admitted <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer controller.Close()
+	dashboard := httptest.NewServer(HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle))
+	defer dashboard.Close()
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	defer releaseOnce()
+
+	stream := gitcacheStream(dashboard.URL)
+
+	var wg sync.WaitGroup
+	for range gitcacheStreamLimit {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, _, err := stream(); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	for range gitcacheStreamLimit {
+		<-admitted
+	}
+
+	code, retryAfter, err := stream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != http.StatusServiceUnavailable {
+		t.Errorf("stream past the cap = %d, want 503", code)
+	}
+	if retryAfter == "" {
+		t.Error("503 past the cap carried no Retry-After")
+	}
+	releaseOnce()
+	wg.Wait()
+}
+
+func TestGitcacheMachineProxyQueuesForAFreeStreamSlot(t *testing.T) {
+	release := make(chan struct{})
+	admitted := make(chan struct{}, gitcacheStreamLimit+1)
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		admitted <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer controller.Close()
+	dashboard := httptest.NewServer(HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle))
+	defer dashboard.Close()
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	defer releaseOnce()
+
+	stream := gitcacheStream(dashboard.URL)
+	var wg sync.WaitGroup
+	for range gitcacheStreamLimit {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, _, err := stream(); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	for range gitcacheStreamLimit {
+		<-admitted
+	}
+
+	queued := make(chan int, 1)
+	go func() {
+		code, _, err := stream()
+		if err != nil {
+			t.Error(err)
+		}
+		queued <- code
+	}()
+	time.Sleep(50 * time.Millisecond)
+	releaseOnce()
+	if code := <-queued; code != http.StatusNoContent {
+		t.Errorf("queued stream = %d, want 204 once a slot freed inside the wait", code)
+	}
+	wg.Wait()
+}
+
+func gitcacheStream(dashboardURL string) func() (int, string, error) {
+	return func() (int, string, error) {
+		req, err := http.NewRequest(http.MethodGet,
+			dashboardURL+"/api/v1/gitcache/git/widgets/info/refs?service=git-upload-pack", nil)
+		if err != nil {
+			return 0, "", err
+		}
+		req.Header.Set("Authorization", "Bearer swr_0123456789abcdef")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return 0, "", err
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode, resp.Header.Get("Retry-After"), nil
 	}
 }

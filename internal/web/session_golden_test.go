@@ -82,7 +82,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 			state.logoutSessions = append(state.logoutSessions, body["session_id"])
 			delete(state.activeSessions, body["session_id"])
 			w.WriteHeader(http.StatusNoContent)
-		case "/api/v1/probe":
+		case "/api/v1/agents":
 			state.proxyAuth = r.Header.Get("Authorization")
 			state.proxyCalls++
 			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
@@ -110,7 +110,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	unauthenticatedAPI := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	unauthenticatedAPI := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/agents", nil)
 	unauthenticatedAPI.Header.Set("Accept", "application/json")
 	resp = doDashboardRequest(t, client, unauthenticatedAPI)
 	if resp.StatusCode != http.StatusUnauthorized {
@@ -160,7 +160,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	assertClearedSessionCookies(t, resp.Cookies())
 	resp.Body.Close()
 
-	copiedSession := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	copiedSession := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/agents", nil)
 	copiedSession.Header.Set("Accept", "application/json")
 	copiedSession.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-1"})
 	resp = doDashboardRequest(t, client, copiedSession)
@@ -169,7 +169,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	stolenBearer := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	stolenBearer := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/agents", nil)
 	stolenBearer.Header.Set("Accept", "application/json")
 	stolenBearer.Header.Set("Authorization", "Bearer service-token")
 	resp = doDashboardRequest(t, client, stolenBearer)
@@ -197,7 +197,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	resp.Body.Close()
 	assertSessionCookies(t, loginCookies, "session-2", "csrf-session-2")
 
-	proxy := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	proxy := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/agents", nil)
 	proxy.Header.Set("Accept", "application/json")
 	addAuthCookies(t, proxy, loginCookies)
 	resp = doDashboardRequest(t, client, proxy)
@@ -209,7 +209,7 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 	state.Lock()
 	delete(state.activeSessions, "session-2")
 	state.Unlock()
-	revoked := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/probe", nil)
+	revoked := newDashboardRequest(t, http.MethodGet, dashboard.URL+"/api/v1/agents", nil)
 	revoked.Header.Set("Accept", "application/json")
 	addAuthCookies(t, revoked, loginCookies)
 	resp = doDashboardRequest(t, client, revoked)
@@ -239,38 +239,39 @@ func TestClusterDashboardSessionAndProxyGoldenPath(t *testing.T) {
 
 	bundle := fstest.MapFS{
 		"index.html": &fstest.MapFile{Data: []byte(
-			`<script>window.__SPARKWING_TOKEN__="__SPARKWING_TOKEN_MARKER__";window.__SPARKWING_API_URL__="__SPARKWING_API_URL_MARKER__";window.__SPARKWING_REQUIRE_LOGIN__="__SPARKWING_REQUIRE_LOGIN_MARKER__";</script>`,
+			`<script src="/sparkwing-runtime.js"></script><script>self.__next_f.push([0])</script>`,
 		)},
 	}
-	recorder := httptest.NewRecorder()
-	spaHandler(fs.FS(bundle), HandlerOptions{
-		Token:         "service-token",
-		APIURL:        "https://controller.example.test",
-		ControllerURL: controller.URL,
-		RequireLogin:  true,
-	}).ServeHTTP(
-		recorder,
-		httptest.NewRequest(http.MethodGet, "/", nil),
-	)
-	if strings.Contains(recorder.Body.String(), "service-token") ||
-		!strings.Contains(recorder.Body.String(), `window.__SPARKWING_TOKEN__="";`) ||
-		!strings.Contains(recorder.Body.String(), `window.__SPARKWING_API_URL__="";`) ||
-		!strings.Contains(recorder.Body.String(), `window.__SPARKWING_REQUIRE_LOGIN__="true";`) {
-		t.Errorf("authenticated dashboard HTML exposed its service token or lost auth config: %s", recorder.Body.String())
-	}
+	for _, tc := range []struct {
+		name         string
+		requireLogin bool
+		wantLogin    string
+	}{
+		{name: "session mode", requireLogin: true, wantLogin: `"true"`},
+		{name: "sessionless mode", wantLogin: `"false"`},
+	} {
+		opts := HandlerOptions{
+			Token:         "service-token",
+			ControllerURL: controller.URL,
+			Version:       "v9.9.9",
+			RequireLogin:  tc.requireLogin,
+		}
+		page := httptest.NewRecorder()
+		spaHandler(fs.FS(bundle), opts).ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/", nil))
+		if strings.Contains(page.Body.String(), "service-token") {
+			t.Errorf("%s: dashboard HTML exposed its service token: %s", tc.name, page.Body.String())
+		}
 
-	sessionless := httptest.NewRecorder()
-	spaHandler(fs.FS(bundle), HandlerOptions{
-		Token:  "service-token",
-		APIURL: "https://controller.example.test",
-	}).ServeHTTP(
-		sessionless,
-		httptest.NewRequest(http.MethodGet, "/", nil),
-	)
-	if !strings.Contains(sessionless.Body.String(), `window.__SPARKWING_TOKEN__="service-token";`) ||
-		!strings.Contains(sessionless.Body.String(), `window.__SPARKWING_API_URL__="https://controller.example.test";`) ||
-		!strings.Contains(sessionless.Body.String(), `window.__SPARKWING_REQUIRE_LOGIN__="false";`) {
-		t.Errorf("sessionless dashboard lost its existing runtime token behavior: %s", sessionless.Body.String())
+		config := httptest.NewRecorder()
+		runtimeConfigHandler(opts)(config, httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil))
+		body := config.Body.String()
+		if strings.Contains(body, "service-token") {
+			t.Errorf("%s: runtime config exposed its service token: %s", tc.name, body)
+		}
+		if !strings.Contains(body, `window.__SPARKWING_REQUIRE_LOGIN__=`+tc.wantLogin) ||
+			!strings.Contains(body, `window.__SPARKWING_VERSION__="v9.9.9"`) {
+			t.Errorf("%s: runtime config lost its dashboard configuration: %s", tc.name, body)
+		}
 	}
 }
 

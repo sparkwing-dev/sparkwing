@@ -1,5 +1,6 @@
 # pkg/localws
 
+func LoopbackBind(addr string) bool
 type Options struct {
 	Addr string
 	Home string
@@ -16,6 +17,10 @@ type Options struct {
 	ReadOnly bool
 
 	NoLocalStore bool
+
+	AllowRemote bool
+
+	AllowOrigins []string
 
 	Version string
 }

@@ -115,6 +115,15 @@ name so it doesn't collide with the sub-chart's SA.
 {{- end }}
 
 {{/*
+ServiceAccount name for the warm-pool warmer pods. Release-scoped so two
+releases in one namespace do not fight over the same account; the
+controller is told the name with --warmer-service-account.
+*/}}
+{{- define "sparkwing-full.warmerServiceAccountName" -}}
+{{- include "sparkwing-full.componentFullname" (dict "root" . "component" "cache-warmer") }}
+{{- end }}
+
+{{/*
 Resolved image tag for a component: per-component image.tag wins,
 otherwise fall back to .Chart.AppVersion.
 Usage: {{ include "sparkwing-full.image" (dict "img" .Values.controller.image "root" .) }}
@@ -183,6 +192,21 @@ this empty without losing anything else.
 {{- end }}
 
 {{/*
+Resolved controller cache URL: explicit override wins; otherwise the
+in-cluster cache Service from the runner-bundle sub-chart (only if
+that sub-chart is enabled and its cache component is enabled). Empty
+string when neither applies, in which case the controller's gitcache
+proxy stays off and answers 404.
+*/}}
+{{- define "sparkwing-full.controller.cacheURL" -}}
+{{- if .Values.controller.cache.url -}}
+{{- .Values.controller.cache.url -}}
+{{- else if and (index .Values "sparkwing-runner-bundle" "enabled") (index .Values "sparkwing-runner-bundle" "cache" "enabled") -}}
+{{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-full.bundle.cache.fullname" .) .Release.Namespace -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 The runner-bundle sub-chart's untruncated release-qualified base,
 reproducing its own helper because a parent chart cannot call into a
 sub-chart's helpers.
@@ -219,4 +243,28 @@ sub-chart's helpers.
 
 {{- define "sparkwing-full.bundle.cache.fullname" -}}
 {{- include "sparkwing-full.bundle.componentFullname" (dict "root" . "component" "cache") -}}
+{{- end }}
+
+{{/*
+Resolved web.tokenSecret: the explicit web Secret wins; otherwise the
+runner-bundle's controller.tokenSecret, so the dashboard carries a
+bearer whenever the bundled logs service validates one. Without this
+default an operator who sets only the bundle's Secret gets a web pod
+with no SPARKWING_AGENT_TOKEN and 401s on every log pane. Empty when
+neither is set (the fully unauthenticated bootstrap install).
+*/}}
+{{- define "sparkwing-full.web.tokenSecretName" -}}
+{{- if .Values.web.tokenSecret.name -}}
+{{- .Values.web.tokenSecret.name -}}
+{{- else if index .Values "sparkwing-runner-bundle" "enabled" -}}
+{{- index .Values "sparkwing-runner-bundle" "controller" "tokenSecret" "name" -}}
+{{- end -}}
+{{- end }}
+
+{{- define "sparkwing-full.web.tokenSecretKey" -}}
+{{- if .Values.web.tokenSecret.name -}}
+{{- .Values.web.tokenSecret.key -}}
+{{- else if index .Values "sparkwing-runner-bundle" "enabled" -}}
+{{- index .Values "sparkwing-runner-bundle" "controller" "tokenSecret" "key" -}}
+{{- end -}}
 {{- end }}

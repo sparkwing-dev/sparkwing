@@ -56,7 +56,417 @@ code change to unlock.
   Windows, macOS, and Linux agents before using Kubernetes Jobs for unlabeled
   overflow. Agent claims win atomically over fallback, labels remain hard
   placement constraints, and the chart reuses its existing fallback settings
-  while granting only namespace-scoped Job CRUD. Defaults remain `inprocess`.
+  while granting only namespace-scoped Job lifecycle and pod-read access.
+  Remote nodes fetch only the repository of their live claim through a new
+  `nodes.claim`-scoped controller Git proxy; direct caches use the separate
+  `gitcache` and `cache_token` agent settings. Defaults remain `inprocess`.
+
+## [v0.40.0] - 2026-09-02
+### Security
+
+- **dependencies:** Upgrade gRPC-Go from v1.82.1 to v1.83.1, which fixes
+  CVE-2026-84304 in all six release binaries and the five service images. The
+  v0.39.0 image scan caught the vulnerable version and stopped publication
+  before a GitHub release was created.
+- **controller (Breaking):** Runners no longer need `admin`. New `triggers.claim`,
+  `runs.state`, and `secrets.read` scopes carry the trigger lifecycle, run and
+  node state writes, and single-secret reads, and `start` and `finish` admit
+  only the principal holding that node's claim. Secrets gained an owning
+  repository (schema 22, `sparkwing secrets set --repo <slug>`): a
+  `secrets.read` caller resolves a name against the repository of the run it
+  holds, so a runner token can no longer read another repository's credentials
+  or mint an admin bearer. Every `runs.state` write is bound to a run the caller
+  owns, through a node claim or the run's trigger claim, so one runner token
+  cannot finish, re-plan, or forge events on a stranger's run, and a run's
+  repository comes from its trigger and never from the request. An unscoped
+  secret answers `admin` only until `sparkwing secrets set --shared` opens it to
+  every run (schema 23). `admin` remains a superset, so existing tokens keep
+  working; see the
+  [migration guide](docs/migrations/_unreleased.md#breaking-runner-scopes-split-out-of-admin).
+- **cli:** The admission daemon's unix socket is now private to its user. Its
+  path stays a pure function of `SPARKWING_HOME`, so every caller resolves the
+  same socket whatever its environment. The daemon refuses a base directory
+  that other accounts can write without the sticky bit, refuses a socket
+  directory that is not a `0700` directory owned by the current uid, chmods the
+  socket to `0600`, and drops accepted connections whose kernel-reported peer
+  uid differs. Clients apply the same tests before dialing, including the peer
+  sweep behind `sparkwing doctor`. These checks are unix-only.
+- **cache:** The package proxy rewrites the npm and PyPI URLs it serves against
+  `--public-url` (`SPARKWING_CACHE_PUBLIC_URL`, chart: `cache.publicUrl`,
+  defaulting to the in-cluster Service URL on a `ClusterIP` Service and empty on
+  any other, where clients dial more than one address) and caches that copy.
+  Without a public URL the upstream body is cached untouched and every response
+  is rewritten from its own request's `Host`, so a forged `Host` no longer
+  poisons the packument each later build reads. That rewrite streams and `HEAD`
+  answers from the cached metadata, so entry size no longer becomes memory, and
+  the responses carry `Cache-Control: private, max-age=0` plus `Vary: Host` so
+  no shared intermediary hands one client's body to another; a fixed base stays
+  `Cache-Control: public` for the entry TTL. `X-Forwarded-Host` and
+  `X-Forwarded-Proto` count only when `--trust-forwarded-host`
+  (`SPARKWING_CACHE_TRUST_FORWARDED_HOST`) is set, are read right-most first,
+  and must parse as a host with an optional port; a request with no usable
+  `Host` is refused with `400`. A public URL with a path beyond `/proxy`, a
+  query, or a fragment now fails startup naming the value.
+- **controller (Breaking):** Revoking a token, rotating one, or deleting a user now takes
+  effect on the serving replica immediately: the auth cache drops the affected
+  prefixes and rechecks each cached entry's `expires_at` and `revoked_at` on
+  every hit, and an authentication that was already reading the row when the
+  revoke landed no longer re-caches it. Revoke can cut an open rotation grace
+  window short, `grace_secs` is capped at 7 days, and deleting a user also
+  deletes its sessions and revokes its tokens in one transaction, except the
+  token the delete request itself authenticates with. `Store.DeleteUser` takes
+  a `now` and a token prefix to keep, returns the deleted session count and the
+  revoked prefixes, and reports a missing user as `store.ErrUserNotFound`; the
+  route answers `404` only for that and `500` for a storage failure. See
+  [auth.md](docs/auth.md#how-long-revocation-takes-to-bite) for the windows that
+  remain across replicas, the per-run loopback controller, and the logs service.
+- **web (Breaking):** Dashboard responses carry a Content Security Policy with a
+  per-response script nonce, `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and HSTS
+  when the request arrives over TLS. The page reads its configuration from
+  `/sparkwing-runtime.js` rather than an inline script, and the controller
+  bearer stays server-side in both login modes, so `--api-url` is deprecated
+  and ignored and the chart no longer renders it. A token-backed dashboard that
+  binds a non-loopback address without `--require-login` refuses to start. See
+  the [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-unauthenticated-remote-bind).
+- **web:** `Strict-Transport-Security` now needs evidence that browsers reach
+  the dashboard over TLS: a TLS listener, `X-Forwarded-Proto: https` from a
+  peer inside `--trusted-proxy-cidrs`, or the new `--hsts` flag for operators
+  who terminate TLS elsewhere. The same evidence, rather than the
+  `SPARKWING_WEB_INSECURE_COOKIES` override, decides the scheme the login CSRF
+  check expects, so a login behind an HTTPS proxy works with `Secure` cookies
+  intact. `sparkwing dashboard` carries the headers on its API routes too,
+  `--token` without a controller, logs, or profile backend is now a startup
+  error, and `sparkwing-full` gains `web.addr` (default `0.0.0.0:<port>`) so a
+  loopback bind is expressible from the chart.
+- **store (Breaking):** Browser sessions are stored as a sha256 digest of the
+  session id, and the CSRF token is derived as an HMAC of that id under a
+  server key instead of being written to the database, so a copy of the state
+  database, its WAL, or a backup no longer yields replayable dashboard
+  sessions. Schema 21 drops the `sessions.csrf_token` column and deletes every
+  session row: everyone signs in again, and it is the first migration a
+  still-running older binary cannot read past. A session lookup that fails on
+  the store or the signing key now answers `500` instead of `401`, so the
+  dashboard reports a backend fault rather than signing the browser out. See
+  the [migration guide](docs/migrations/_unreleased.md#session-rows-are-hashed-and-the-csrf-column-is-dropped).
+- **cache:** The warm-pool controller now accepts only registry references in
+  `warm_images` -- a DNS or bracketed IPv6 host, a lowercase path, an optional
+  tag, and a lowercase `sha256` digest -- reads at most 64 entries per config
+  read, summarizes what it dropped in one log line per read, and passes the
+  accepted list to the privileged warmer pod as container arguments consumed by
+  a fixed script. A ConfigMap writer can no longer smuggle shell into the one
+  privileged workload Sparkwing creates, nor flood the controller log with
+  rejections.
+- **controller:** Login now carries per-client, listener-wide, and
+  per-account-per-client budgets, bearer verification carries a per-token-prefix
+  failure budget, and every argon2id verification passes through a memory-sized
+  semaphore that sheds with `503` and a `Retry-After` instead of queueing, so
+  unauthenticated callers can no longer exhaust the pod by hashing and no
+  stranger can lock a named user out. Size the semaphore with
+  `--argon2-memory-budget-mb` (chart: `controller.argon2MemoryBudgetMB`) and
+  name proxy networks with `--trusted-proxy-cidrs` (chart:
+  `controller.trustedProxyCIDRs`, which must include the dashboard pod's source)
+  so throttling keys on the real browser. A rejected bearer token is remembered
+  for a few seconds, so a replayed wrong guess costs one hash; store failures
+  are never cached and never echoed to an unauthenticated caller.
+- **logs:** `sparkwing-logs` gains `--require-auth` /
+  `SPARKWING_REQUIRE_AUTH`, refusing to start without a controller to resolve
+  caller tokens against, reports `"auth"` on `GET /api/v1/health` so
+  `sparkwing cluster status` warns on an open logs service, and rejects the
+  anonymous principal an unauthenticated controller returns from `whoami`. A
+  logs-enabled `sparkwing-runner-bundle` install without
+  `controller.tokenSecret.name` now fails at render time instead of serving,
+  forging, and deleting every run's logs for anything that reaches its Service;
+  set the new `logs.allowUnauthenticated=true` during a bootstrap install.
+- **logs:** `sparkwing-full` now vendors a runner bundle that carries that
+  guard, so a full-chart install refuses to render a logs service with no
+  `sparkwing-runner-bundle.controller.tokenSecret.name` unless
+  `logs.allowUnauthenticated=true`, and the web pod falls back to that Secret so
+  the dashboard's log panes still authenticate. `--require-auth` rejects a
+  controller URL that is not an absolute `http(s)` URL instead of advertising
+  `"auth":"enabled"` on a service whose every token lookup fails, and `sparkwing
+  cluster status` warns instead of passing when it cannot read the logs
+  service's auth state -- no announced logs URL, no `auth` field, or a degraded
+  service -- and when the controller resolves the profile's bearer to its
+  anonymous principal.
+- **ci:** Every GitHub Actions workflow now pins its actions to a full commit
+  SHA with a version comment, the release job that prepares binaries no longer
+  persists checkout credentials, and the canonical gate installs dashboard
+  dependencies with `--ignore-scripts`. The policy gate parses each workflow as
+  YAML and checks every pin against `.github/action-pins.txt`, so a changed SHA,
+  a renamed owner, or a dropped `persist-credentials: false` fails until the
+  table is updated on purpose, and `.github/dependabot.yml` proposes weekly
+  action, Go module, and dashboard dependency updates.
+- **cache (Breaking):** Every cache route that touches repository content --
+  git clone and registration, archives, files, tree hashes, branch membership,
+  the repo listing, and artifacts -- now requires the bearer token, alongside
+  the blob and sync routes that already did. Registration validates the
+  repository name and refuses to repoint an existing one without the token,
+  responses carry `X-Content-Type-Options: nosniff`, artifacts download as
+  attachments, and workspace snapshot refs expire after
+  `WORKSPACE_SEED_MAX_AGE` instead of wedging at the retention cap. A cache
+  started with `--allow-unauthenticated` still accepts a repoint, so a squatted
+  name is recoverable without a restart. The runner-bundle chart ships a
+  default-deny ingress NetworkPolicy for the cache (`networkPolicy.enabled`)
+  admitting the release's runner, controller, and dashboard pods plus the Job
+  pods the Kubernetes runner backend creates, issues the controller a cache
+  token, and refuses to render a non-`ClusterIP` cache Service with no token
+  configured. An off-cluster controller or runner pool is admitted through
+  `networkPolicy.extraIngress`. The dashboard's `/api/v1/gitcache/` mount
+  requires a Sparkwing machine token shape rather than any string, and a
+  request that arrives at the concurrent-stream cap waits a few seconds for a
+  slot before answering `503` with `Retry-After`. See the
+  [migration guide](docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
+- **cache:** The unauthenticated `/metrics` endpoint no longer labels its fetch
+  and reclone series with the repository directory name, which is an
+  offline-computable hash of the clone URL. Scraping the cache can no longer
+  enumerate the mirror set or confirm a guessed repository. See the
+  [migration guide](docs/migrations/_unreleased.md#cache-metrics-no-longer-name-repositories).
+- **cache:** A workspace snapshot ref past `WORKSPACE_SEED_MAX_AGE` is now
+  moved to `refs/sparkwing-workspace-archive/` instead of being deleted with
+  its objects pruned, so retrying an older `pipeline trigger --working-tree`
+  run still finds its source. Archived refs are dropped after seven times the
+  window, or once 128 accumulate. See the
+  [migration guide](docs/migrations/_unreleased.md#expired-workspace-seeds-are-archived-not-deleted).
+- **cache:** `sparkwing-full` now renders `SPARKWING_CACHE_URL` on the
+  controller beside `SPARKWING_CACHE_TOKEN`, so the controller's
+  `/api/v1/gitcache/*` proxy works on a stock install instead of answering
+  `404 gitcache proxy is not configured`. Override it with
+  `controller.cache.url`. See the
+  [migration guide](docs/migrations/_unreleased.md#the-controller-is-told-where-its-cache-is).
+- **cli:** The admission daemon's unix socket is now private to its user.
+  It binds under `$XDG_RUNTIME_DIR` when one is available, refuses a socket
+  directory that is not a `0700` directory owned by the current uid, chmods
+  the socket to `0600`, and drops accepted connections whose kernel-reported
+  peer uid differs. Clients apply the same directory test before dialing, and
+  reach a daemon still serving the pre-upgrade `/tmp` path until it exits.
+- **controller (Breaking):** A node claim now binds to the claiming token -- its
+  prefix segment and principal name -- as well as to the client-supplied
+  `holder_id`, and the per-node write routes admit only the token holding that
+  unexpired claim, so two tokens sharing a principal name cannot act on each
+  other's claims. `lease_secs` is clamped to 10 minutes on the claim and on
+  every heartbeat, so a claimant cannot pick how long its own authorization
+  lasts. A `nodes.claim` token can no longer write another runner's node, read
+  or heartbeat a run it holds no claim on, stamp or revoke `ready_at` (both now
+  `admin`, so a runner cannot skip a node's dependencies), pin a pipeline's
+  resources (now `runs.state`), or read a run's plaintext secret arguments without a
+  claim on one of its nodes. A controller running with authentication disabled
+  still serves plaintext arguments, because the whole API is open there and a
+  redacted argument would execute as the literal `***`. Runner tokens claiming
+  their own work are unaffected. See the
+  [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-token).
+- **docs:** the security guide names `sparkwing cluster tokens list`, the CLI reference lists `secrets --repo`, and the gitleaks history exception covers the argon2 hashing seam, which is renamed so future scans stay clean.
+
+### Added
+
+- **sdk:** `pkg/store` exports the sentinel errors authentication turns on --
+  `ErrInvalidCredentials`, `ErrInvalidToken`, `ErrUnknownToken`,
+  `ErrNoTokenCandidates`, `ErrTokenRevoked`, and `ErrHashingBusy` -- plus
+  `Argon2Slots` and `SetArgon2AcquireTimeout`, so a caller can tell a rejected
+  credential from a controller that could not answer. `pkg/controller` gains
+  `Authenticator.WithTrustedProxyCIDRs` and `Authenticator.WithLogger`.
+
+### Fixed
+
+- **admission:** Equal-priority participants keep their service order while
+  queued, so sustained arrivals from an older owner cannot move an existing
+  request backward indefinitely.
+
+## [v0.39.0] - 2026-09-02
+### Docs
+
+- **docs:** The warm-pool guide's outcome list renders as a list again, and the
+  `sparkwing runs` reference is regenerated from the CLI help.
+- **security:** The security policy now identifies the supported release and
+  provides a private GitHub vulnerability-reporting path.
+
+### Changed
+
+- **hooks (Breaking):** Managed Git hooks installed without `--profile` now
+  prove and run with `--sw-local-only`, so a project's default profile cannot
+  make local Git actions depend on a controller. Pass `--profile NAME` to keep
+  shared storage. See the
+  [migration guide](docs/migrations/_unreleased.md#managed-git-hooks-run-locally-by-default).
+
+### Fixed
+
+- **controller:** Same-repository `RunAndAwait` calls keep their routing
+  provenance, so local execution resolves the caller's checkout instead of an
+  unrelated registered checkout.
+- **security (Breaking):** Run-store schema 18 removes `inputs_hash` from runs
+  with caller-supplied secret arguments, eliminating an offline guessing
+  oracle from SQL stores, run APIs, logs, receipts, and new state dumps. Older
+  binaries refuse the upgraded SQL store. Built-in state backends now return
+  `store.ErrSecretInputHash` for an unsafe `CreateRun`, and `POST /api/v1/runs`
+  returns 400, so an older remote writer cannot reintroduce the hash. See the
+  [migration guide](docs/migrations/_unreleased.md#secret-input-hash-migration).
+- **helm:** A configured web controller-token Secret is now required, so a
+  missing Secret or key keeps the web pod unready instead of starting a proxy
+  without its controller credential.
+- **orchestrator:** `--sw-local-only` now keeps coordinated child cache, logs,
+  and secrets local instead of reopening the run's resolved profile.
+- **docs:** Self-hosting guidance now points operators to direct local
+  execution or the complete Helm chart. The unsupported Docker Compose example
+  and its private image coordinates have been removed, with migration guidance
+  for prior testers.
+- **web:** Run selection now discards superseded detail responses, so a slow
+  request cannot replace the selected run with stale nodes or metadata.
+- **docs:** Trigger filter documentation now distinguishes declarative
+  `branches`, `paths`, and `actions` metadata from enforceable run guards and
+  shows how to require a literal checked-out branch before any step starts.
+  The `default` branch token requires dispatch metadata that controller
+  webhook and local trigger claims do not supply.
+
+### Security
+
+- **orchestrator + controller:** Dispatch snapshots now filter on the value as
+  well as the name. A captured URL or DSN keeps its host and loses its
+  userinfo, a bearer header, PEM block, or JSON body with a token or password
+  field is dropped and named in `redacted_keys`, and `SPARKWING_PG_URL`,
+  `DATABASE_URL`, `PGPASSWORD`, and `PGURL` join the dropped names; a short
+  allow-list keeps well-known configuration such as `GIT_AUTHOR_NAME` and
+  `GOPRIVATE`. `POST /api/v1/triggers` applies the same name rule to
+  `trigger.env`, so a credential-named key no longer reaches the `trigger_env`
+  a `triggers.read` principal can read. Cluster-mode `sparkwing debug rerun`
+  deletes its debug pod on interrupt as well as on normal exit.
+- **helm:** `sparkwing-runner-bundle` stamps `SPARKWING_CACHE_TOKEN` on the
+  runner from the same Secret the cache reads `SPARKWING_API_TOKEN` from, and
+  trigger-spawned runner Jobs pass that token through. A cache-enabled install
+  without `controller.tokenSecret.name` now fails at render time instead of
+  crashlooping; set the new `cache.allowUnauthenticated=true` to serve the cache
+  without a token during a bootstrap install.
+- **cache:** `POST /artifacts/{jobID}` requires the bearer token and rejects a
+  job ID that is not one plain path segment, so an anonymous caller can no
+  longer write an executable into the binary cache and have it served back with
+  a matching digest. The bearer scheme is parsed case-insensitively, a header
+  with no `Bearer` scheme is no longer a credential, and a whitespace-only
+  `--api-token` is treated as absent. Uploads to `/bin/<key>` stage the blob
+  before recording its digest, so a failed write leaves no digest attesting
+  bytes that were never stored.
+- **dashboard:** The local listener refuses cross-site subresource loads,
+  not just cross-site writes, so an `img` or `fetch` from another page
+  cannot reach a side-effecting GET. `--allow-remote` now widens the `Host`
+  check alone: a foreign browser `Origin` is still refused unless it is
+  loopback, the `--addr` host, or listed in the new
+  `--allow-origin`. Login, logout, user, bootstrap, token, and secret
+  writes decode through the shared JSON path, so they require an
+  `application/json` body and a bounded one.
+- **web:** The dashboard's logs-service proxy now forwards only the four log
+  reads the dashboard makes, each gated on the session's `logs.read` scope, so
+  a signed-in browser can no longer delete a run's logs or append forged log
+  lines with the web pod's service bearer. Creating a dashboard user rejects a
+  blank or repeated scope instead of storing an account that cannot reach any
+  route.
+- **storage:** Artifact keys are limited to ASCII letters, digits, `.`, `_`, and
+  `-` with no dot-leading segment, and the cache-backed artifact store escapes
+  every key segment in its request path, so a double-encoded or `#`/`?` key
+  cannot reach an object store as a different path.
+- **orchestrator (Breaking):** Node dispatch snapshots drop credential-shaped
+  environment variables, mask registered secret values in the ones they keep,
+  and name every dropped key in a new `redacted_keys` field so a replay can say
+  what it will not reproduce. Run-store schema 20 adds that column.
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch` and its list form return
+  `env_json` only to an `admin` principal. Cluster-mode `sparkwing debug rerun`
+  sends the pod manifest to `kubectl` on stdin, keeping env values off the
+  command line and out of the echoed banner. See the
+  [migration guide](docs/migrations/_unreleased.md#dispatch-snapshot-credentials).
+- **cache:** Cached pipeline binaries now carry a verified sha-256 digest.
+  The cache stores the digest and the writing principal's token fingerprint
+  beside each uploaded binary, serves them as `Digest` and `ETag`, and writes
+  the digest as a companion object in an artifact store. Clients hash what they
+  download and discard a mismatch before the binary lands, so bytes altered in
+  transit or altered on the cache's disk after the upload are recompiled
+  instead of executed. Write authentication, not the digest, is what stops a
+  poisoned upload, because the cache derives the digest from the body it was
+  handed. A download without a digest counts as a miss, and an artifact-store
+  blob published before the companion object existed is hashed and backfilled
+  on its first fetch, so binaries stored by an older cache are recompiled once.
+- **web (Breaking):** The dashboard proxy now forwards only the controller
+  routes the dashboard itself calls and checks the signed-in session's scopes
+  against each one, so a logged-in browser can no longer mint tokens, read
+  secrets, or create users with the web pod's service bearer. Sessions carry
+  the scopes of their user rather than a fixed `admin`, run-store schema 19
+  adds a `users.scopes` column defaulting existing accounts to `admin`, and
+  `sparkwing cluster users add --scope` creates narrower accounts.
+  `store.CreateUser` and `store.CreateFirstUser` now take that scope set. See the
+  [migration guide](docs/migrations/_unreleased.md#dashboard-proxy-allow-list).
+- **runner (Breaking):** Runner Job pods mount no ServiceAccount token, and
+  `--runner k8s` now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead
+  of silently landing pipeline code on the namespace default ServiceAccount.
+  `--trigger-runner k8s` checks the same flag at startup rather than failing
+  once per claimed trigger. See the
+  [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
+- **controller (Breaking):** `controller.PoolConfig` adds
+  `WarmerServiceAccount`, and `pool.WarmPVC` and `pool.WarmingLoop` now accept
+  the warmer ServiceAccount name so integrations can use a release-scoped
+  identity. See the
+  [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
+- **helm (Breaking):** The runner Role no longer reads namespace Secrets,
+  ConfigMaps, pods, or events, and no chart pod mounts a ServiceAccount token
+  unless `runner.automountServiceAccountToken` asks for one. The cache and logs
+  pods get their own ServiceAccounts instead of sharing the runner's, and
+  `serviceAccount.create=false` now requires
+  `serviceAccount.shareAcrossComponents=true` to accept one shared account.
+  `sparkwing-full` creates a release-scoped, unprivileged cache-warmer
+  ServiceAccount and names it to the controller with
+  `--warmer-service-account`. Controllers running the warm pool outside that
+  chart must create that ServiceAccount in the pool namespace;
+  `pool.WarmerServiceAccountName` exposes its exact name to Go integrations.
+  See the
+  [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
+- **cache:** The cache no longer serves an authenticated endpoint to a request
+  that omits `X-Forwarded-For`, so `PUT /bin/<key>`, `PUT /cache/<key>`,
+  `POST /upload`, and the sync routes now require the bearer token from every
+  caller, in-cluster ones included. The service refuses to start without
+  `--api-token` unless `--allow-unauthenticated`
+  (`SPARKWING_CACHE_ALLOW_UNAUTHENTICATED`) is set, and cached-binary and
+  lint-cache reads now send `SPARKWING_CACHE_TOKEN`.
+- **cli + config (Breaking):** Generated git hooks now single-quote each pipeline
+  name, and `sparkwing.yaml` rejects a pipeline name outside
+  `^[A-Za-z0-9][A-Za-z0-9._-]*$`, so a repository's config cannot hand shell
+  execution to anyone who runs `sparkwing pipeline hooks install`. A config
+  holding a name outside that pattern no longer loads at all, so every command
+  that reads it fails until the pipeline is renamed in the YAML and in the
+  matching `Register(...)` string. See the
+  [migration guide](docs/migrations/_unreleased.md#pipeline-name-charset).
+- **storage:** Artifact keys are now validated before the filesystem store
+  joins them to a path, and the store opens every blob through `os.Root`, so
+  `GET /api/v1/artifacts/{key}` can no longer read, overwrite, or delete files
+  outside the artifact root. The controller and loopback handlers reject a
+  traversal key with 400 before any backend sees it.
+- **ci:** A `security-scan` pipeline runs gosec, source-mode govulncheck,
+  gitleaks, and `npm audit`, and the Security workflow runs it on every pull
+  request with gosec findings uploaded to GitHub code scanning alongside CodeQL
+  for Go and TypeScript. The release workflow scans the resolved tag commit and
+  waits before building artifacts. Govulncheck, gitleaks, and `npm audit` fail
+  the gate; gosec and CodeQL report without blocking on findings.
+- **dashboard:** The local dashboard listener now answers only loopback hosts
+  and same-origin or loopback browser origins, so a page on another site can no
+  longer trigger runs or read state through the unauthenticated local API, and
+  a rebound DNS name is refused. `sparkwing dashboard start --addr` requires a
+  loopback address unless `--allow-remote` opts in.
+- **controller:** Mutating JSON routes now require a
+  `Content-Type: application/json` request header, so a cross-site simple
+  request cannot reach a handler without a CORS preflight.
+- **web:** Login throttling now ignores forwarded client addresses unless the
+  connecting proxy matches an explicit trusted CIDR. Trusted append-style proxy
+  chains use the nearest untrusted address. Malformed entries in the trusted
+  suffix or an untrusted immediate peer use the TCP peer address. Configure
+  `--trusted-proxy-cidrs` or the chart's `web.trustedProxyCIDRs` to retain
+  per-client buckets behind a reverse proxy.
+- **logs:** Run identifiers must now be a single path segment, and every
+  segment of a node identifier must be one that `filepath.Clean` leaves
+  unchanged, so a request carrying a percent-encoded `.` can no longer address
+  the runs root itself and delete every run's logs. Hierarchical node
+  identifiers such as `parent/child`, which spawned children carry, are stored
+  as one flat `parent__child.log` file the way local runs already store them,
+  instead of being rejected until the writer gives up.
+- **logs:** The log service opens, lists, and removes run directories through
+  an `os.Root` confined to the runs root, so a symlink planted at `runs/<name>`
+  can no longer read or delete files outside it. Filesystem failures answer
+  with a generic message instead of the server's absolute path, and the
+  identifier length cap counts the `.log` suffix, so an over-long node id is
+  rejected with a 400 rather than failing as an unretryable 500.
 
 ## [v0.38.2] - 2026-09-01
 

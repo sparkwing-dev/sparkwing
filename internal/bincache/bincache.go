@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -44,10 +45,35 @@ func CacheToken() string {
 	return os.Getenv("SPARKWING_CACHE_TOKEN")
 }
 
-func TryBinary(gcURL, hash, dest string) error {
+// ErrDigest reports a cached binary whose bytes do not match the digest the cache advertised,
+// or a response that carried no digest at all.
+var ErrDigest = errors.New("remote binary cache: digest verification failed")
+
+func parseDigestHeader(value string) ([]byte, error) {
+	for _, member := range strings.Split(value, ",") {
+		name, encoded, ok := strings.Cut(strings.TrimSpace(member), "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(name), "sha-256") {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+		if err != nil {
+			return nil, fmt.Errorf("%w: undecodable sha-256 digest", ErrDigest)
+		}
+		if len(raw) != sha256.Size {
+			return nil, fmt.Errorf("%w: sha-256 digest is %d bytes", ErrDigest, len(raw))
+		}
+		return raw, nil
+	}
+	return nil, fmt.Errorf("%w: response carried no sha-256 digest", ErrDigest)
+}
+
+func TryBinary(gcURL, token, hash, dest string) error {
 	req, err := http.NewRequest(http.MethodGet, gcURL+"/bin/"+hash, nil)
 	if err != nil {
 		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	cli := &http.Client{
 		Timeout: 30 * time.Second,
@@ -66,6 +92,10 @@ func TryBinary(gcURL, hash, dest string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bin cache GET: %s", resp.Status)
 	}
+	want, err := parseDigestHeader(resp.Header.Get("Digest"))
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
@@ -74,7 +104,8 @@ func TryBinary(gcURL, hash, dest string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	sum := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(f, sum), resp.Body); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return err
@@ -82,6 +113,11 @@ func TryBinary(gcURL, hash, dest string) error {
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp)
 		return err
+	}
+	// safety: the key folds source inputs, not content, so only this digest ties the bytes to the cache entry.
+	if !bytes.Equal(sum.Sum(nil), want) {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("%w: %s", ErrDigest, hash)
 	}
 	return os.Rename(tmp, dest)
 }
@@ -113,26 +149,71 @@ func UploadBinary(gcURL, token, hash, src string) error {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("bin cache PUT %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
+	if header := resp.Header.Get("Digest"); header != "" {
+		stored, err := parseDigestHeader(header)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		if !bytes.Equal(stored, sum[:]) {
+			return fmt.Errorf("%w: cache stored different bytes for %s", ErrDigest, hash)
+		}
+	}
 	return nil
 }
 
 func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return fetchPipelineSource(gcURL, "", repoSSH, branch, sha, parentDir, false)
+	return fetchPipelineSource(gcURL, "", repoSSH, branch, sha, parentDir, false, "")
 }
 
 // FetchPipelineSourceWithToken authenticates cache reads only when gcURL is the controller's proxy.
 func FetchPipelineSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	bearer := ControllerGitcacheToken(gcURL, controllerURL, token)
-	return fetchPipelineSource(gcURL, bearer, repoSSH, branch, sha, parentDir, false)
+	return FetchPipelineSourceWithCredentials(gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
 }
 
 // FetchPipelineWorkspaceSourceWithToken materializes workspace blobs without checkout transformations.
 func FetchPipelineWorkspaceSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	bearer := ControllerGitcacheToken(gcURL, controllerURL, token)
-	return fetchPipelineSource(gcURL, bearer, repoSSH, branch, sha, parentDir, true)
+	return FetchPipelineWorkspaceSourceWithCredentials(gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
 }
 
-// ControllerGitcacheToken returns token only for the controller's exact cache-proxy origin and path.
+// FetchPipelineSourceWithCredentials prevents a controller bearer from crossing into a direct cache origin.
+func FetchPipelineSourceWithCredentials(
+	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
+) (sparkwingDir string, err error) {
+	bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken)
+	if bearer == "" {
+		bearer = cacheToken
+	}
+	return fetchPipelineSource(gcURL, bearer, repoSSH, branch, sha, parentDir, false,
+		controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
+}
+
+// FetchPipelineWorkspaceSourceWithCredentials combines raw workspace restoration with the same origin credential fence.
+func FetchPipelineWorkspaceSourceWithCredentials(
+	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
+) (sparkwingDir string, err error) {
+	bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken)
+	if bearer == "" {
+		bearer = cacheToken
+	}
+	return fetchPipelineSource(gcURL, bearer, repoSSH, branch, sha, parentDir, true,
+		controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
+}
+
+// ControllerRunGitcacheURL turns the admin cache proxy into the claim-bound route used by node executors.
+func ControllerRunGitcacheURL(gcURL, controllerURL, runID string) string {
+	cache, cacheErr := parseCacheEndpoint(gcURL)
+	controller, controllerErr := parseCacheEndpoint(controllerURL)
+	if cacheErr != nil || controllerErr != nil || runID == "" ||
+		!strings.EqualFold(cache.Scheme, controller.Scheme) ||
+		!strings.EqualFold(cache.Host, controller.Host) ||
+		strings.TrimRight(cache.Path, "/") != controllerGitcachePath(controller.Path) {
+		return strings.TrimRight(gcURL, "/")
+	}
+	return strings.TrimRight(controllerURL, "/") + "/api/v1/runs/" + neturl.PathEscape(runID) + "/gitcache"
+}
+
+// ControllerGitcacheToken returns token only for the controller's exact cache-proxy origin and a reviewed proxy path.
 func ControllerGitcacheToken(gcURL, controllerURL, token string) string {
 	if token == "" {
 		return ""
@@ -144,11 +225,32 @@ func ControllerGitcacheToken(gcURL, controllerURL, token string) string {
 		!strings.EqualFold(cache.Host, controller.Host) {
 		return ""
 	}
-	wantPath := strings.TrimRight(controller.Path, "/") + "/api/v1/gitcache"
-	if strings.TrimRight(cache.Path, "/") != wantPath {
+	if !controllerGitcacheProxyPath(cache.Path, controller.Path) {
 		return ""
 	}
 	return token
+}
+
+func controllerGitcachePath(controllerPath string) string {
+	return strings.TrimRight(controllerPath, "/") + "/api/v1/gitcache"
+}
+
+func controllerGitcacheProxyPath(cachePath, controllerPath string) bool {
+	path := strings.TrimRight(cachePath, "/")
+	if path == controllerGitcachePath(controllerPath) {
+		return true
+	}
+	return controllerRunGitcacheProxyPath(path, controllerPath)
+}
+
+func controllerRunGitcacheProxyPath(cachePath, controllerPath string) bool {
+	path := strings.TrimRight(cachePath, "/")
+	prefix := strings.TrimRight(controllerPath, "/") + "/api/v1/runs/"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, "/gitcache") {
+		return false
+	}
+	runID := strings.TrimSuffix(strings.TrimPrefix(path, prefix), "/gitcache")
+	return runID != "" && !strings.Contains(runID, "/")
 }
 
 func parseCacheEndpoint(raw string) (*neturl.URL, error) {
@@ -160,9 +262,24 @@ func parseCacheEndpoint(raw string) (*neturl.URL, error) {
 	return u, nil
 }
 
-func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool) (sparkwingDir string, err error) {
+func controllerClaimedRepoName(gcURL, controllerURL, repoURL string) string {
+	cache, cacheErr := parseCacheEndpoint(gcURL)
+	controller, controllerErr := parseCacheEndpoint(controllerURL)
+	if cacheErr != nil || controllerErr != nil ||
+		!strings.EqualFold(cache.Scheme, controller.Scheme) ||
+		!strings.EqualFold(cache.Host, controller.Host) ||
+		!controllerRunGitcacheProxyPath(cache.Path, controller.Path) {
+		return ""
+	}
+	return ClaimedRepoNameFromURL(repoURL)
+}
+
+func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool, cacheName string) (sparkwingDir string, err error) {
 	if gcURL == "" {
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
+	}
+	if token == "" {
+		token = CacheToken()
 	}
 	repoSSH, err = sourceurl.ValidateCloneURL(repoSSH)
 	if err != nil {
@@ -171,7 +288,10 @@ func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, r
 	if branch == "" {
 		branch = "main"
 	}
-	name := RepoNameFromURL(repoSSH)
+	name := cacheName
+	if name == "" {
+		name = RepoNameFromURL(repoSSH)
+	}
 	if name == "" {
 		return "", fmt.Errorf("FetchPipelineSource: cannot derive repo name from %q", repoSSH)
 	}
@@ -392,7 +512,7 @@ func gitHTTPEnv(gcURL, token string) []string {
 	return env
 }
 
-func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
+func RefreshRepo(ctx context.Context, gcURL, token, repoURL string) error {
 	if gcURL == "" {
 		return fmt.Errorf("RefreshRepo: gitcache URL required")
 	}
@@ -407,6 +527,9 @@ func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
@@ -639,6 +762,17 @@ func RepoNameFromURL(repoURL string) string {
 		return repoURL[i+1:]
 	}
 	return repoURL
+}
+
+// ClaimedRepoNameFromURL prevents equal basenames from sharing a claim-scoped cache authorization path.
+func ClaimedRepoNameFromURL(repoURL string) string {
+	if normalized, err := sourceurl.ValidateCloneURL(repoURL); err == nil {
+		repoURL = normalized
+	} else {
+		repoURL = strings.TrimSpace(repoURL)
+	}
+	sum := sha256.Sum256([]byte(repoURL))
+	return fmt.Sprintf("repo-%x", sum)[:64]
 }
 
 func RepoURLFromGitHub(fullName string) string {

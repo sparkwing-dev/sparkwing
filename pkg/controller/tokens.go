@@ -1,11 +1,11 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -59,7 +59,7 @@ type createTokenResp struct {
 
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	var req createTokenReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -126,8 +126,9 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
+	s.auth.Invalidate(prefix)
 	p, _ := PrincipalFromContext(r.Context())
-	who := "unauthed"
+	who := authwire.AnonymousPrincipal
 	if p != nil {
 		who = p.Name
 	}
@@ -146,8 +147,8 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {
 		writeJSON(w, http.StatusOK, whoamiResp{
-			Principal: "unauthed",
-			Kind:      "none",
+			Principal: authwire.AnonymousPrincipal,
+			Kind:      authwire.AnonymousKind,
 			Scopes:    nil,
 		})
 		return

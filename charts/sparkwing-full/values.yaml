@@ -65,9 +65,37 @@ controller:
     name: ""
     key: token
 
+  # Proxy source CIDRs allowed to supply X-Forwarded-For for login
+  # throttling. This must include the dashboard pod's address: the web
+  # deployment forwards each browser's address to the controller, and
+  # an untrusted source is ignored, which collapses every dashboard
+  # login into one budget. Set the web pod's address when you pin it;
+  # when the pod IP is unknown, set the cluster pod CIDR, for example
+  # 10.244.0.0/16 (kubeadm/kind), 10.42.0.0/16 (k3s), or the value of
+  # `kubectl cluster-info dump | grep cluster-cidr`. Every pod in the
+  # listed range can then supply X-Forwarded-For, so list the
+  # narrowest range that contains the web pod. Empty keys the limiter
+  # on the TCP peer. List proxy networks, not client networks.
+  trustedProxyCIDRs: []
+
+  # Memory ceiling in MiB for concurrent argon2id password and token
+  # hashing. Each hash holds 64 MiB while it runs, so the default
+  # admits four at a time and keeps unauthenticated login traffic
+  # inside resources.limits.memory below.
+  argon2MemoryBudgetMB: 256
+
   # Query-free HTTP(S) dashboard base URL used for commit-status run links.
   # Empty or invalid keeps reporting enabled but omits the target URL.
   dashboardURL: ""
+
+  cache:
+    # Which sparkwing-cache the controller's gitcache proxy forwards
+    # to, so off-cluster callers can clone and seed through
+    # /api/v1/gitcache/. Empty = auto-generate to point at the bundled
+    # sparkwing-runner-bundle's cache Service; if that sub-chart or its
+    # cache is disabled, the controller runs without a cache URL and
+    # the proxy routes answer 404.
+    url: ""
 
   # Secrets-store encryption key. When set, the controller encrypts
   # secret values stored in the state DB at rest. Without it, the
@@ -131,6 +159,12 @@ web:
   # Bind addr. Service maps :80 -> :4343.
   port: 4343
 
+  # Address sparkwing-web binds. Empty = 0.0.0.0:<port>, which the
+  # Service needs. Set "127.0.0.1:4343" to keep a token-backed
+  # dashboard off the pod network; the Service then reaches nothing,
+  # so this is for a kubectl port-forward or a sidecar only.
+  addr: ""
+
   controller:
     # Where the web pod proxies /api/v1/* to. Empty = auto-generate
     # to point at the in-cluster controller Service. Override if
@@ -155,8 +189,12 @@ web:
     url: ""
 
   # Bearer token the web pod uses when proxying to the controller
-  # (so the controller's /api/v1/auth checks pass). Reference an
-  # existing Secret; the chart does NOT create it.
+  # (so the controller's /api/v1/auth checks pass) and when reading
+  # from an authenticated logs service. Reference an existing Secret;
+  # the chart does NOT create it. Empty falls back to
+  # sparkwing-runner-bundle.controller.tokenSecret, so an install that
+  # names only that Secret still gets working log panes; set a name
+  # here to give the dashboard its own narrower token.
   tokenSecret:
     name: ""
     key: token
@@ -166,11 +204,13 @@ web:
   # turn on after bootstrapping the admin user.
   requireLogin: false
 
-  # Optional: explicit API URL injected into the dashboard's
-  # client-side bundle. Leave empty to use same-origin (the
-  # browser hits the same host that served the SPA). Set when
-  # the API is hosted on a different domain than the SPA.
-  apiUrl: ""
+  # Accept a token-backed dashboard that anyone reaching the service
+  # port can drive. Required when the token secret is set and
+  # requireLogin is false; the dashboard refuses to start otherwise.
+  allowUnauthenticatedRemote: false
+
+  # Proxy source CIDRs allowed to supply X-Forwarded-For. Empty ignores it.
+  trustedProxyCIDRs: []
 
   resources:
     requests:

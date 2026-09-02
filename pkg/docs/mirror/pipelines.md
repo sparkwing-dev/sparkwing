@@ -11,9 +11,10 @@ lint` -- see [authoring-pipelines.md](authoring-pipelines.md).
 > default. On Windows, install
 > [Git for Windows](https://git-scm.com/download/win) and run pipelines
 > from the Git Bash terminal it ships -- `sparkwing.Exec` (no-shell,
-> arg-vector form) works without it. The cluster-mode `sparkwing-runner`
-> Service is Linux/macOS only; Windows users dispatch pipelines to
-> remote runners or to a remote cluster.
+> arg-vector form) works without it. The bundled `sparkwing-runner` service
+> installer supports Linux and macOS. On Windows, supervise
+> `sparkwing-runner.exe agent` yourself or use the Linux installer inside WSL
+> when systemd user services are enabled.
 
 ## Pipeline registry
 
@@ -40,7 +41,7 @@ pipelines:
 Each entry has (these are the only valid keys; an unknown field is a
 hard parse error):
 
-- **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", ...)` string
+- **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", ...)` string and match `^[A-Za-z0-9][A-Za-z0-9._-]*$`
 - **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
 - **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (cron expression, UTC; declarative -- recorded, not evaluated), `webhook`, `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
@@ -93,8 +94,13 @@ pipelines:
 
 `branches` / `paths` / `actions` record intent: the controller does not
 read your `sparkwing.yaml`, so it dispatches whichever pipeline the
-webhook URL names. Scope a trigger by pointing its GitHub webhook only
-at that pipeline's URL -- see [hooks](hooks.md).
+webhook URL names. To require a checked-out branch before any step runs,
+add `guards: {require: [git:branch=main]}` with its literal name. For pull
+requests this compares the head branch, not the base branch.
+`git:branch=default` requires default-branch metadata that controller webhook
+and local trigger claims do not supply. Branch guards do not express path
+restrictions, custom pull-request actions, or pull-request base-branch
+matching. See [hooks](hooks.md) for the enforcement boundary and examples.
 
 Webhook delivery is handled by the controller - see
 `POST /webhooks/github/{pipeline}` in [api](api.md). Git hooks are not

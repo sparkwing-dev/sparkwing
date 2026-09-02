@@ -3,45 +3,12 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
-
-func TestRateLimiter_BucketDrainAndRefill(t *testing.T) {
-	l := newRateLimiter(3, time.Minute)
-	now := time.Unix(0, 0)
-
-	for i := range 3 {
-		if !l.allow("1.2.3.4", now) {
-			t.Fatalf("expected allow on attempt %d", i+1)
-		}
-	}
-	if l.allow("1.2.3.4", now) {
-		t.Fatalf("expected deny once bucket drains")
-	}
-
-	half := now.Add(30 * time.Second)
-	if !l.allow("1.2.3.4", half) {
-		t.Fatalf("expected allow after half-window refill")
-	}
-	if l.allow("1.2.3.4", half) {
-		t.Fatalf("expected deny after the half-window allow consumed the refill")
-	}
-}
-
-func TestRateLimiter_IsolatedPerKey(t *testing.T) {
-	l := newRateLimiter(2, time.Minute)
-	now := time.Unix(0, 0)
-	for range 2 {
-		_ = l.allow("attacker", now)
-	}
-	if l.allow("attacker", now) {
-		t.Fatalf("attacker bucket should be drained")
-	}
-	if !l.allow("victim", now) {
-		t.Fatalf("victim should be unaffected by attacker's drain")
-	}
-}
 
 func TestRateLimitMiddleware_Returns429(t *testing.T) {
 	hits := 0
@@ -49,8 +16,8 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 		hits++
 		w.WriteHeader(http.StatusOK)
 	})
-	l := newRateLimiter(2, time.Minute)
-	h := rateLimitMiddleware(l, inner)
+	l := ratelimit.New(2, time.Minute)
+	h := rateLimitMiddleware(l, nil, inner)
 
 	send := func(method string) int {
 		req := httptest.NewRequest(method, "/login", nil)
@@ -75,29 +42,75 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 	}
 }
 
-func TestClientIP_XForwardedFor(t *testing.T) {
-	cases := []struct {
-		name       string
-		xff        string
-		remoteAddr string
-		want       string
-	}{
-		{"xff single", "203.0.113.5", "10.0.0.1:5000", "203.0.113.5"},
-		{"xff chain", "203.0.113.5, 10.0.0.99", "10.0.0.1:5000", "203.0.113.5"},
-		{"xff with spaces", "  203.0.113.5  ", "10.0.0.1:5000", "203.0.113.5"},
-		{"no xff", "", "10.0.0.1:5000", "10.0.0.1"},
-		{"no port in remoteaddr", "", "127.0.0.1", "127.0.0.1"},
+func TestRateLimitMiddleware_DirectPeerCannotRotateWithForwardedHeader(t *testing.T) {
+	hits := 0
+	h := rateLimitMiddleware(ratelimit.New(2, time.Minute), nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusOK)
+	}))
+	for attempt, forwarded := range []string{"198.51.100.1", "198.51.100.2", "198.51.100.3"} {
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		req.RemoteAddr = "203.0.113.9:5000"
+		req.Header.Set("X-Forwarded-For", forwarded)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		want := http.StatusOK
+		if attempt == 2 {
+			want = http.StatusTooManyRequests
+		}
+		if rec.Code != want {
+			t.Fatalf("attempt %d status = %d, want %d", attempt+1, rec.Code, want)
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/login", nil)
-			req.RemoteAddr = tc.remoteAddr
-			if tc.xff != "" {
-				req.Header.Set("X-Forwarded-For", tc.xff)
-			}
-			if got := clientIP(req); got != tc.want {
-				t.Fatalf("clientIP=%q want %q", got, tc.want)
-			}
-		})
+	if hits != 2 {
+		t.Fatalf("handler hits = %d, want 2", hits)
+	}
+}
+
+func TestRateLimitMiddleware_TrustedProxyIgnoresSpoofedLeftChain(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	h := rateLimitMiddleware(ratelimit.New(2, time.Minute), trusted, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	for attempt, spoofed := range []string{"unknown", "also-bad", "still-not-an-ip"} {
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		req.RemoteAddr = "10.0.0.5:5000"
+		req.Header.Set("X-Forwarded-For", spoofed+", 203.0.113.9")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		want := http.StatusOK
+		if attempt == 2 {
+			want = http.StatusTooManyRequests
+		}
+		if rec.Code != want {
+			t.Fatalf("attempt %d status = %d, want %d", attempt+1, rec.Code, want)
+		}
+	}
+}
+
+func TestRateLimitMiddleware_MalformedLeftPrefixDoesNotCollapseClients(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	h := rateLimitMiddleware(ratelimit.New(1, time.Minute), trusted, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	send := func(client string) int {
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		req.RemoteAddr = "10.0.0.5:5000"
+		req.Header.Set("X-Forwarded-For", "unknown, "+client)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for attempt, tc := range []struct {
+		client string
+		want   int
+	}{
+		{client: "203.0.113.9", want: http.StatusOK},
+		{client: "203.0.113.10", want: http.StatusOK},
+		{client: "203.0.113.9", want: http.StatusTooManyRequests},
+	} {
+		if got := send(tc.client); got != tc.want {
+			t.Fatalf("attempt %d status = %d, want %d", attempt+1, got, tc.want)
+		}
 	}
 }

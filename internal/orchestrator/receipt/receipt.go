@@ -75,11 +75,22 @@ func BuildReceipt(run *store.Run, nodes []*store.Node, rate float64, rateSource 
 func buildIdentity(run *store.Run, nodes []*store.Node) Identity {
 	id := Identity{
 		PipelineVersionHash: hashBytes(run.PlanSnapshot),
-		InputsHash:          hashCanonical(run.Args),
 		PlanHash:            planTopologyHash(nodes),
 		OutputsHash:         outputsHashes(nodes),
 	}
+	if !containsNamedArg(run.Args, run.SecretArgNames()) {
+		id.InputsHash = hashCanonical(run.Args)
+	}
 	return id
+}
+
+func containsNamedArg(args map[string]string, names []string) bool {
+	for _, name := range names {
+		if _, ok := args[name]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func planTopologyHash(nodes []*store.Node) string {

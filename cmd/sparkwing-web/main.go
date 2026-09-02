@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -39,16 +40,31 @@ func run(args []string) error {
 			"the dashboard reads nothing else from the cache. Empty leaves it off the panel.")
 
 	token := fs.String("token", "", "controller bearer token (also SPARKWING_AGENT_TOKEN)")
-	apiURL := fs.String("api-url", "", "public API URL injected into the dashboard (default: same origin)")
+	_ = fs.String("api-url", "", "deprecated; the dashboard proxies the API on its own origin")
 	requireLogin := fs.Bool("require-login", false,
 		"require controller-backed browser sessions; needs --controller or a profile with controller.url. Leave off for laptop-local dev.")
+	allowUnauthenticatedRemote := fs.Bool("allow-unauthenticated-remote", false,
+		"serve a token-backed dashboard without --require-login on a non-loopback address, handing the controller to every caller that reaches it")
+	hsts := fs.Bool("hsts", false,
+		"assert that browsers reach this dashboard over TLS: send Strict-Transport-Security and require an https origin on unsafe requests. "+
+			"Unneeded when this process serves TLS itself or a proxy in --trusted-proxy-cidrs forwards X-Forwarded-Proto")
+	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
+		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For; empty ignores forwarded headers")
 
 	profileName := fs.String("profile", "", "storage profile name from ~/.config/sparkwing/profiles.yaml whose surfaces the dashboard reads")
 	stateSpec := fs.String("state-spec", "", "inline state backend spec, e.g. postgres://user:pw@host/db or s3://bucket/prefix")
 	logsSpecFlag := fs.String("logs-spec", "", "inline logs backend spec, e.g. s3://bucket/logs or stdout:")
 	artifactsSpec := fs.String("artifacts-spec", "", "inline artifact backend spec; only consulted when state is object-store-backed")
 
+	if err := fs.MarkDeprecated("api-url", "the dashboard proxies the API on its own origin"); err != nil {
+		return err
+	}
+
 	_ = fs.Parse(args)
+	trustedProxyCIDRs, err := ratelimit.ParseTrustedProxyCIDRs(*trustedProxyCIDRsRaw)
+	if err != nil {
+		return fmt.Errorf("--trusted-proxy-cidrs: %w", err)
+	}
 
 	paths, err := swpaths.DefaultPaths()
 	if err != nil {
@@ -86,8 +102,11 @@ func run(args []string) error {
 			AuthControllerURL: authControllerURL,
 			CacheURL:          *cacheURL,
 			Token:             *token,
-			APIURL:            *apiURL,
 			RequireLogin:      *requireLogin,
+			TrustedProxyCIDRs: trustedProxyCIDRs,
+			HSTS:              *hsts,
+
+			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
@@ -110,22 +129,31 @@ func run(args []string) error {
 			c = client.New(*controllerURL, nil)
 		}
 		opts := web.HandlerOptions{
-			Backend:       backend.NewClientBackend(c, logStore),
-			Paths:         paths,
-			ControllerURL: *controllerURL,
-			LogsURL:       *logsURL,
-			CacheURL:      *cacheURL,
-			Token:         *token,
-			APIURL:        *apiURL,
-			RequireLogin:  *requireLogin,
+			Backend:           backend.NewClientBackend(c, logStore),
+			Paths:             paths,
+			ControllerURL:     *controllerURL,
+			LogsURL:           *logsURL,
+			CacheURL:          *cacheURL,
+			Token:             *token,
+			RequireLogin:      *requireLogin,
+			TrustedProxyCIDRs: trustedProxyCIDRs,
+			HSTS:              *hsts,
+
+			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
 	if err := validateLoginBackend(*requireLogin, ""); err != nil {
 		return err
 	}
+	if *token != "" {
+		return fmt.Errorf("--token (or SPARKWING_AGENT_TOKEN) has no backend to authenticate to; pass --controller URL, --logs URL, or --profile NAME, or drop the token")
+	}
 
-	return web.Serve(ctx, paths, *addr)
+	return web.Serve(ctx, paths, *addr, web.HandlerOptions{
+		TrustedProxyCIDRs: trustedProxyCIDRs,
+		HSTS:              *hsts,
+	})
 }
 
 func validateLoginBackend(requireLogin bool, controllerURL string) error {

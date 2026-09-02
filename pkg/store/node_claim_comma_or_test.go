@@ -25,7 +25,7 @@ func TestNodeClaim_CommaORTermClaimableByEitherAlternative(t *testing.T) {
 			s := newStoreT(t)
 			seedNodeWithLabels(t, s, "run-1", "build", []string{"os=linux,os=macos"})
 
-			n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, tc.runner)
+			n, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-1", 30*time.Second, tc.runner)
 			if tc.wantClaim {
 				if err != nil {
 					t.Fatalf("expected claim, got err=%v", err)
@@ -59,7 +59,7 @@ func TestNodeClaim_MixedAndOrTerms(t *testing.T) {
 			s := newStoreT(t)
 			seedNodeWithLabels(t, s, "run-1", "build", []string{"os=linux,os=macos", "arch=amd64"})
 
-			n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, tc.runner)
+			n, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-1", 30*time.Second, tc.runner)
 			if tc.wantClaim {
 				if err != nil {
 					t.Fatalf("expected claim, got err=%v", err)
@@ -81,7 +81,7 @@ func TestNodeClaim_BareLabelCommaOR(t *testing.T) {
 	s := newStoreT(t)
 	seedNodeWithLabels(t, s, "run-1", "accel", []string{"gpu,fpga"})
 
-	n, err := s.ClaimNextReadyNode(ctx, "pod-fpga", 30*time.Second, []string{"fpga"})
+	n, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-fpga", 30*time.Second, []string{"fpga"})
 	if err != nil {
 		t.Fatalf("fpga runner should claim accel: %v", err)
 	}

@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -22,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/docsweb"
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -83,15 +86,29 @@ type HandlerOptions struct {
 	CacheURL          string
 	Token             string
 
-	APIURL string
-
 	Version       string
 	ExtraServices []HealthService
 
-	RequireLogin bool
+	RequireLogin      bool
+	TrustedProxyCIDRs []netip.Prefix
+
+	// HSTS asserts that browsers reach this dashboard over TLS even
+	// though the process serves plaintext, for operators who terminate
+	// TLS in front of it without forwarding a trusted X-Forwarded-Proto.
+	// It emits Strict-Transport-Security and makes the CSRF origin check
+	// demand an https origin.
+	HSTS bool
+
+	// AllowUnauthenticatedRemote lets a token-backed dashboard bind a
+	// non-loopback address without RequireLogin. Everyone who can reach
+	// the listener then drives the controller with the service token, so
+	// callers must opt in explicitly.
+	AllowUnauthenticatedRemote bool
 }
 
-func Serve(ctx context.Context, paths swpaths.Paths, addr string) error {
+// Serve runs the store-backed dashboard on addr. Backend and Paths come
+// from paths; every other field of opts is used as given.
+func Serve(ctx context.Context, paths swpaths.Paths, addr string, opts HandlerOptions) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
@@ -105,13 +122,16 @@ func Serve(ctx context.Context, paths swpaths.Paths, addr string) error {
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	return ServeWithOptions(ctx,
-		HandlerOptions{Backend: backend.NewStoreBackend(st, paths, nil), Paths: paths},
-		addr)
+	opts.Backend = backend.NewStoreBackend(st, paths, nil)
+	opts.Paths = paths
+	return ServeWithOptions(ctx, opts, addr)
 }
 
 func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) error {
 	if err := validateAuthOptions(opts); err != nil {
+		return err
+	}
+	if err := validateRemoteExposure(opts, addr); err != nil {
 		return err
 	}
 	if err := VerifyBundleEmbedded(); err != nil {
@@ -139,12 +159,19 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	return nil
 }
 
-func HandlerFromOptions(opts HandlerOptions) http.Handler {
+// BundleFS returns the embedded dashboard bundle rooted at its
+// index.html, for callers that build their own handler chain around
+// HandlerFromOptionsWithBundle.
+func BundleFS() fs.FS {
 	subFS, err := fs.Sub(nextBundle, "next-out")
 	if err != nil {
 		panic(fmt.Sprintf("web: embed fs.Sub failed: %v", err)) //nolint:forbidigo // unreachable post-VerifyBundleEmbedded; build-time invariant
 	}
-	return HandlerFromOptionsWithBundle(opts, subFS)
+	return subFS
+}
+
+func HandlerFromOptions(opts HandlerOptions) http.Handler {
+	return HandlerFromOptionsWithBundle(opts, BundleFS())
 }
 
 func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Handler {
@@ -172,10 +199,12 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles/explain", capacityExplainHandler(opts.Backend))
 
 	if opts.LogsURL != "" {
-		authedMux.Handle("/api/v1/logs/", controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts)))
+		authedMux.Handle("/api/v1/logs/",
+			logsProxyAllowList(controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts))))
 	}
 	if opts.ControllerURL != "" {
-		authedMux.Handle("/api/v1/", controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts)))
+		authedMux.Handle("/api/v1/",
+			proxyAllowList(controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts))))
 	} else {
 		authedMux.HandleFunc("GET /api/v1/runs", ListRunsHandler(opts.Backend))
 		authedMux.HandleFunc("GET /api/v1/runs/{id}", GetRunHandler(opts.Backend))
@@ -187,32 +216,69 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	// reach the listener while the rest of the dashboard needs a session.
 	authedMux.Handle("GET /docs", docsweb.Handler())
 
+	authedMux.HandleFunc("GET "+runtimeConfigPath, runtimeConfigHandler(opts))
+
 	authedMux.Handle("/", spaHandler(bundleFS, opts))
 
 	router := http.NewServeMux()
 	router.HandleFunc("/api/health", healthHandler)
 	router.HandleFunc("GET /login", loginPageHandler(opts))
-	loginLimiter := newRateLimiter(loginRateBurst, loginRateWindow)
+	loginLimiter := ratelimit.New(loginRateBurst, loginRateWindow)
 	router.Handle("POST /login",
-		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, loginSubmitHandler(opts))))
+		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, loginSubmitHandler(opts))))
 	router.Handle("POST /login/bootstrap",
-		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, bootstrapSubmitHandler(opts))))
+		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, bootstrapSubmitHandler(opts))))
 	router.Handle("POST /logout", csrfFormMiddleware(logoutHandler(opts)))
 	if opts.ControllerURL != "" {
-		router.Handle("/api/v1/gitcache/", gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false)))
+		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false))
+		router.Handle("/api/v1/gitcache/", gitcacheProxy)
+		router.Handle("/api/v1/runs/{id}/gitcache/", gitcacheProxy)
 	}
 	router.Handle("/", sessionAuthMiddleware(opts, bundleFS, authedMux))
-	return router
+	return securityHeadersMiddleware(opts, router)
 }
 
+const (
+	gitcacheStreamLimit = 8
+	gitcacheStreamWait  = 5 * time.Second
+)
+
 func gitcacheStreamHandler(next http.Handler) http.Handler {
+	slots := make(chan struct{}, gitcacheStreamLimit)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// safety: a half-hour deadline and a proxied Git stream are machine credentials only.
+		if !hasBearerCredential(r) {
+			http.Error(w, "unauthorized -- set Authorization: Bearer <token> header", http.StatusUnauthorized)
+			return
+		}
+		wait := time.NewTimer(gitcacheStreamWait)
+		defer wait.Stop()
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		case <-r.Context().Done():
+			return
+		case <-wait.C:
+			w.Header().Set("Retry-After", strconv.Itoa(int(gitcacheStreamWait.Seconds())))
+			http.Error(w, "too many concurrent Git cache streams", http.StatusServiceUnavailable)
+			return
+		}
 		deadline := time.Now().Add(30 * time.Minute)
 		controller := http.NewResponseController(w)
 		_ = controller.SetReadDeadline(deadline)
 		_ = controller.SetWriteDeadline(deadline)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func hasBearerCredential(r *http.Request) bool {
+	scheme, rest, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !ok || !strings.EqualFold(scheme, "bearer") {
+		return false
+	}
+	// safety: only a Sparkwing machine token buys a stream slot and the half-hour deadline behind it.
+	raw := strings.TrimSpace(rest)
+	return len(raw) >= store.PrefixLen && store.TokenKindFromPrefix(raw) != ""
 }
 
 func authControllerURL(opts HandlerOptions) string {
@@ -236,6 +302,34 @@ func validateAuthOptions(opts HandlerOptions) error {
 		return fmt.Errorf("controller session backend must be an absolute http(s) URL without credentials, query, or fragment: %q", raw)
 	}
 	return nil
+}
+
+// safety: an unauthenticated dashboard that holds a service bearer hands the
+// controller to everyone who can reach a non-loopback listener.
+func validateRemoteExposure(opts HandlerOptions, addr string) error {
+	if opts.RequireLogin || opts.Token == "" || opts.AllowUnauthenticatedRemote || loopbackBind(addr) {
+		return nil
+	}
+	return fmt.Errorf(
+		"dashboard holds a controller token, requires no login, and binds non-loopback address %q: "+
+			"pass --require-login, bind a loopback address, or pass --allow-unauthenticated-remote to accept that "+
+			"every caller who reaches the listener drives the controller", addr)
+}
+
+func loopbackBind(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
@@ -278,55 +372,156 @@ func isTemplatedPath(p string) bool {
 	return !strings.HasPrefix(p, "_next/") && !strings.HasPrefix(p, "next-dev/")
 }
 
-func serveTemplatedHTML(w http.ResponseWriter, _ *http.Request, bundleFS fs.FS, name string, opts HandlerOptions) {
+func serveTemplatedHTML(w http.ResponseWriter, r *http.Request, bundleFS fs.FS, name string, opts HandlerOptions) {
 	raw, err := fs.ReadFile(bundleFS, name)
 	if err != nil {
 		http.NotFound(w, nil)
 		return
 	}
-	effectiveLogin := loginRequired(opts)
-	frontendToken := opts.Token
-	frontendAPIURL := opts.APIURL
-	if effectiveLogin {
-		frontendToken = ""
-		frontendAPIURL = ""
+	body := raw
+	if nonce := cspNonceFrom(r.Context()); nonce != "" {
+		body = nonceInlineScripts(raw, nonce)
 	}
-	body := bytes.ReplaceAll(raw,
-		[]byte("__SPARKWING_TOKEN_MARKER__"),
-		[]byte(jsStringEscape(frontendToken)))
-	body = bytes.ReplaceAll(body,
-		[]byte("__SPARKWING_API_URL_MARKER__"),
-		[]byte(jsStringEscape(frontendAPIURL)))
-	body = bytes.ReplaceAll(body,
-		[]byte("__SPARKWING_VERSION_MARKER__"),
-		[]byte(jsStringEscape(opts.Version)))
-	body = bytes.ReplaceAll(body,
-		[]byte("__SPARKWING_REQUIRE_LOGIN_MARKER__"),
-		[]byte(strconv.FormatBool(effectiveLogin)))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(body)
 }
 
-func jsStringEscape(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '<': // safety: prevents injection that breaks out of the surrounding <script> tag
-			b.WriteString(`<`)
-		default:
-			b.WriteRune(r)
+// safety: every inline script needs the nonce or the CSP blanks the page, so
+// the scan follows tag syntax instead of one literal spelling of the tag.
+func nonceInlineScripts(raw []byte, nonce string) []byte {
+	attr := []byte(` nonce="` + nonce + `"`)
+	out := make([]byte, 0, len(raw)+len(attr))
+	for i := 0; i < len(raw); {
+		open := bytes.IndexByte(raw[i:], '<')
+		if open < 0 {
+			return append(out, raw[i:]...)
+		}
+		open += i
+		out = append(out, raw[i:open+1]...)
+		i = open + 1
+		if !opensScriptTag(raw, open) {
+			continue
+		}
+		end := tagEnd(raw, open)
+		if end < 0 {
+			continue
+		}
+		tag := raw[open+1 : end]
+		if !tagHasAttr(tag, "src") {
+			cut := len(tag)
+			for cut > 0 && (asciiSpace(tag[cut-1]) || tag[cut-1] == '/') {
+				cut--
+			}
+			out = append(out, tag[:cut]...)
+			out = append(out, attr...)
+			tag = tag[cut:]
+		}
+		out = append(out, tag...)
+		out = append(out, '>')
+		i = end + 1
+	}
+	return out
+}
+
+func opensScriptTag(raw []byte, open int) bool {
+	name := open + 1 + len("script")
+	if name > len(raw) || !strings.EqualFold(string(raw[open+1:name]), "script") {
+		return false
+	}
+	return name == len(raw) || asciiSpace(raw[name]) || raw[name] == '>' || raw[name] == '/'
+}
+
+func tagEnd(raw []byte, open int) int {
+	var quote byte
+	for i := open + 1; i < len(raw); i++ {
+		switch c := raw[i]; {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '>':
+			return i
 		}
 	}
-	return b.String()
+	return -1
+}
+
+func tagHasAttr(tag []byte, name string) bool {
+	i := 0
+	for i < len(tag) && !asciiSpace(tag[i]) {
+		i++
+	}
+	for i < len(tag) {
+		for i < len(tag) && (asciiSpace(tag[i]) || tag[i] == '/') {
+			i++
+		}
+		start := i
+		for i < len(tag) && !asciiSpace(tag[i]) && tag[i] != '=' && tag[i] != '/' {
+			i++
+		}
+		if i == start {
+			return false
+		}
+		if strings.EqualFold(string(tag[start:i]), name) {
+			return true
+		}
+		for i < len(tag) && asciiSpace(tag[i]) {
+			i++
+		}
+		if i == len(tag) || tag[i] != '=' {
+			continue
+		}
+		i++
+		for i < len(tag) && asciiSpace(tag[i]) {
+			i++
+		}
+		if i < len(tag) && (tag[i] == '"' || tag[i] == '\'') {
+			quote := tag[i]
+			i++
+			for i < len(tag) && tag[i] != quote {
+				i++
+			}
+			i++
+			continue
+		}
+		for i < len(tag) && !asciiSpace(tag[i]) {
+			i++
+		}
+	}
+	return false
+}
+
+func asciiSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
+}
+
+const runtimeConfigPath = "/sparkwing-runtime.js"
+
+// safety: the dashboard proxies the controller on its own origin, so the
+// browser never needs the service bearer and this payload never carries it.
+func runtimeConfigHandler(opts HandlerOptions) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		body := "window.__SPARKWING_VERSION__=" + jsStringLiteral(opts.Version) + ";\n" +
+			"window.__SPARKWING_REQUIRE_LOGIN__=" + jsStringLiteral(strconv.FormatBool(loginRequired(opts))) + ";\n"
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = io.WriteString(w, body)
+	}
+}
+
+// safety: encoding/json escapes <, > and &, so the literal cannot close a
+// script element; the two JavaScript line terminators are escaped here.
+func jsStringLiteral(s string) string {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		return `""`
+	}
+	literal := string(encoded)
+	literal = strings.ReplaceAll(literal, "\u2028", `\u2028`)
+	return strings.ReplaceAll(literal, "\u2029", `\u2029`)
 }
 
 func controllerProxy(controllerURL, token string, loginRequired bool) http.Handler {

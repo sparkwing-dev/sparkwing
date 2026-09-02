@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,9 +19,13 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
+
+// safety: NAME_MAX is 255 bytes, so the cap covers the mapped node id plus its ".log" suffix.
+const maxFileNameBytes = 255
 
 // Server handles HTTP requests against a filesystem-backed log store.
 type Server struct {
@@ -83,11 +89,19 @@ func (s *Server) writeFile(path string, body []byte) error {
 	return os.WriteFile(path, body, s.fileMode)
 }
 
-func (s *Server) openAppend(path string) (*os.File, error) {
-	if s.fileMode == fssecure.FileMode {
-		return fssecure.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+func (s *Server) openAppend(root *os.Root, name string) (*os.File, error) {
+	f, err := root.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, s.fileMode)
+	if err != nil {
+		return nil, err
 	}
-	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, s.fileMode)
+	if s.fileMode != fssecure.FileMode {
+		return f, nil
+	}
+	if err := fssecure.TightenOpen(f); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
 }
 
 // WithControllerAuth wires the controller's /api/v1/auth/whoami
@@ -315,6 +329,10 @@ func (s *Server) whoami(ctx context.Context, rawToken string) (*logsPrincipal, e
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return nil, fmt.Errorf("whoami decode: %w", err)
 	}
+	// safety: an unauthenticated controller answers whoami 200 for any string, so its anonymous principal is not a caller.
+	if body.Kind == authwire.AnonymousKind || body.Principal == authwire.AnonymousPrincipal {
+		return nil, errors.New("controller resolved the token to its unauthenticated principal")
+	}
 	return &logsPrincipal{
 		Name:        body.Principal,
 		Kind:        body.Kind,
@@ -389,12 +407,17 @@ func serveWithTokens(ctx context.Context, root, addr, controllerURL string, logg
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	var problems []string
 
+	authState := "enabled"
+	if s.authDisabled() {
+		authState = "disabled"
+	}
+
 	canary := filepath.Join(s.root, ".health-check")
 	if err := s.writeFile(canary, []byte("ok")); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, `{"status":"degraded","problems":["root: %s"]}`,
-			strings.ReplaceAll(err.Error(), `"`, `\"`))
+		fmt.Fprintf(w, `{"status":"degraded","auth":%q,"problems":["root: %s"]}`,
+			authState, strings.ReplaceAll(err.Error(), `"`, `\"`))
 		return
 	}
 	_ = os.Remove(canary)
@@ -414,10 +437,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 
-	resp := `{"status":"ok"}`
+	resp := fmt.Sprintf(`{"status":"ok","auth":%q}`, authState)
 	if len(problems) > 0 {
 		buf, _ := json.Marshal(map[string]any{
 			"status":   "degraded",
+			"auth":     authState,
 			"problems": problems,
 		})
 		resp = string(buf)
@@ -456,7 +480,7 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "runID: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := validateID(nodeID); err != nil {
+	if err := validateNodeID(nodeID); err != nil {
 		http.Error(w, "nodeID: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -464,9 +488,14 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	body := http.MaxBytesReader(w, r.Body, 4<<20)
 	defer r.Body.Close()
 
-	path, err := s.pathFor(runID, nodeID)
+	root, err := s.openRunsRoot()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.storeError(w, "open runs root", err)
+		return
+	}
+	defer func() { _ = root.Close() }()
+	if err := s.ensureRunDir(root, runID); err != nil {
+		s.storeError(w, "create run dir", err)
 		return
 	}
 
@@ -474,14 +503,14 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	f, err := s.openAppend(path)
+	f, err := s.openAppend(root, nodePath(runID, nodeID))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.storeError(w, "open node log", err)
 		return
 	}
 	defer f.Close()
 	if _, err := io.Copy(f, body); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.storeError(w, "write node log", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -490,8 +519,7 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runID")
 	nodeID := r.PathValue("nodeID")
-	path, err := s.pathFor(runID, nodeID)
-	if err != nil {
+	if err := validateIDs(runID, nodeID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -501,14 +529,21 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(path)
+	root, err := s.openRunsRoot()
+	if err != nil {
+		s.storeError(w, "open runs root", err)
+		return
+	}
+	defer func() { _ = root.Close() }()
+
+	f, err := root.Open(nodePath(runID, nodeID))
 	if err != nil {
 		if os.IsNotExist(err) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.storeError(w, "open node log", err)
 		return
 	}
 	defer f.Close()
@@ -647,12 +682,17 @@ func sliceRange[T any](lines []T, a, b int) []T {
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runID")
 	if err := validateID(runID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "runID: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	runDir := filepath.Join(s.root, "runs", runID)
-	if err := os.RemoveAll(runDir); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	root, err := s.openRunsRoot()
+	if err != nil {
+		s.storeError(w, "open runs root", err)
+		return
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.RemoveAll(runID); err != nil {
+		s.storeError(w, "remove run dir", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -661,18 +701,23 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleReadRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runID")
 	if err := validateID(runID); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "runID: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	runDir := filepath.Join(s.root, "runs", runID)
-	entries, err := os.ReadDir(runDir)
+	root, err := s.openRunsRoot()
+	if err != nil {
+		s.storeError(w, "open runs root", err)
+		return
+	}
+	defer func() { _ = root.Close() }()
+	entries, err := readRunDir(root, runID)
 	if err != nil {
 		if os.IsNotExist(err) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.storeError(w, "read run dir", err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -687,9 +732,9 @@ func (s *Server) handleReadRun(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w)
 		}
 		fmt.Fprintf(w, "=== %s ===\n", nodeID)
-		f, err := os.Open(filepath.Join(runDir, name))
+		f, err := root.Open(filepath.Join(runID, name))
 		if err != nil {
-			fmt.Fprintf(w, "(error reading %s: %v)\n", nodeID, err)
+			fmt.Fprintf(w, "(error reading %s)\n", nodeID)
 			continue
 		}
 		_, _ = io.Copy(w, f)
@@ -700,17 +745,23 @@ func (s *Server) handleReadRun(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runID")
 	nodeID := r.PathValue("nodeID")
-	path, err := s.pathFor(runID, nodeID)
-	if err != nil {
+	if err := validateIDs(runID, nodeID); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	path := nodePath(runID, nodeID)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
+	root, err := s.openRunsRoot()
+	if err != nil {
+		s.storeError(w, "open runs root", err)
+		return
+	}
+	defer func() { _ = root.Close() }()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -735,7 +786,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case <-ticker.C:
-			f, err := os.Open(path)
+			f, err := root.Open(path)
 			if err != nil {
 				continue
 			}
@@ -791,25 +842,111 @@ func sseEscape(s string) string {
 	return s
 }
 
-func (s *Server) pathFor(runID, nodeID string) (string, error) {
-	if err := validateID(runID); err != nil {
-		return "", fmt.Errorf("runID: %w", err)
-	}
-	if err := validateID(nodeID); err != nil {
-		return "", fmt.Errorf("nodeID: %w", err)
-	}
-	dir := filepath.Join(s.root, "runs", runID)
+// safety: os.Root confines every open, readdir and remove to the runs
+// tree, so a symlink planted at runs/<name> cannot be followed out of it.
+func (s *Server) openRunsRoot() (*os.Root, error) {
+	dir := filepath.Join(s.root, "runs")
 	if err := s.ensureDir(dir); err != nil {
-		return "", err
+		return nil, err
 	}
-	return filepath.Join(dir, nodeID+".log"), nil
+	return os.OpenRoot(dir)
+}
+
+func (s *Server) ensureRunDir(root *os.Root, runID string) error {
+	if err := root.Mkdir(runID, s.dirMode); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	if s.dirMode != fssecure.DirMode {
+		return nil
+	}
+	info, err := root.Stat(runID)
+	if err != nil {
+		return err
+	}
+	if perm := info.Mode().Perm(); perm&fssecure.DirMode != perm {
+		return root.Chmod(runID, perm&fssecure.DirMode)
+	}
+	return nil
+}
+
+func readRunDir(root *os.Root, runID string) ([]fs.DirEntry, error) {
+	d, err := root.Open(runID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := d.ReadDir(-1)
+	_ = d.Close()
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(entries, func(a, b fs.DirEntry) int {
+		return strings.Compare(a.Name(), b.Name())
+	})
+	return entries, nil
+}
+
+func (s *Server) storeError(w http.ResponseWriter, op string, err error) {
+	// safety: the detail names an absolute server path, so only the log gets it.
+	s.logger.Error("logs store", "op", op, "err", err)
+	http.Error(w, "log store error", http.StatusInternalServerError)
+}
+
+func validateIDs(runID, nodeID string) error {
+	if err := validateID(runID); err != nil {
+		return fmt.Errorf("runID: %w", err)
+	}
+	if err := validateNodeID(nodeID); err != nil {
+		return fmt.Errorf("nodeID: %w", err)
+	}
+	return nil
+}
+
+func nodePath(runID, nodeID string) string {
+	return filepath.Join(runID, nodeFile(nodeID))
+}
+
+// safety: a hierarchical node id collapses to one file name, so the
+// join stays exactly one level under the run directory.
+func nodeFile(nodeID string) string {
+	return strings.ReplaceAll(nodeID, "/", "__") + ".log"
 }
 
 func validateID(s string) error {
+	if err := validateIDSegment(s); err != nil {
+		return err
+	}
+	if len(s) > maxFileNameBytes {
+		return errors.New("too long")
+	}
+	return nil
+}
+
+func validateNodeID(s string) error {
 	if s == "" {
 		return errors.New("empty")
 	}
-	if strings.Contains(s, "..") || strings.ContainsAny(s, "/\\") {
+	for seg := range strings.SplitSeq(s, "/") {
+		if err := validateIDSegment(seg); err != nil {
+			return err
+		}
+	}
+	if len(nodeFile(s)) > maxFileNameBytes {
+		return errors.New("too long")
+	}
+	return nil
+}
+
+func validateIDSegment(s string) error {
+	if s == "" {
+		return errors.New("empty")
+	}
+	for _, r := range s {
+		if r == '/' || r == '\\' || r < 0x20 || r == 0x7f {
+			return errors.New("invalid characters")
+		}
+	}
+	// safety: filepath.Join collapses "." and "..", so only ids that survive Clean unchanged may address a directory.
+	if s == "." || s == ".." || filepath.Clean(s) != s {
 		return errors.New("invalid characters")
 	}
 	return nil

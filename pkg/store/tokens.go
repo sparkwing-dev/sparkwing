@@ -11,8 +11,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/argon2"
 )
 
 // Token kinds (stored in the `kind` column).
@@ -40,6 +38,17 @@ const (
 // PrefixLen is 12: chars 0-2 = kind marker, char 3 = underscore, chars
 // 4-11 = 48 bits of entropy.
 const PrefixLen = 12
+
+// Bearer rejection reasons. ErrNoTokenCandidates and ErrUnknownToken
+// carry the same message so the response never tells a caller whether
+// a prefix exists; only ErrUnknownToken means a stored hash was
+// actually compared.
+var (
+	ErrInvalidToken      = errors.New("invalid token")
+	ErrNoTokenCandidates = errors.New("unknown token")
+	ErrUnknownToken      = errors.New("unknown token")
+	ErrTokenRevoked      = errors.New("token is revoked or expired")
+)
 
 // Token is one row in the tokens table.
 type Token struct {
@@ -143,7 +152,7 @@ func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Du
 // deadlock if a cursor is still open.
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 	if len(raw) < PrefixLen {
-		return nil, errors.New("invalid token")
+		return nil, ErrInvalidToken
 	}
 	prefix := raw[:PrefixLen]
 
@@ -152,7 +161,7 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 		return nil, err
 	}
 	if len(candidates) == 0 {
-		return nil, errors.New("unknown token")
+		return nil, ErrNoTokenCandidates
 	}
 
 	for i := range candidates {
@@ -165,7 +174,7 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 			continue
 		}
 		if !t.IsValid(now) {
-			return nil, errors.New("token is revoked or expired")
+			return nil, ErrTokenRevoked
 		}
 		_, _ = s.execNoCtx(
 			`UPDATE tokens SET last_used_at = ? WHERE hash = ?`,
@@ -175,7 +184,7 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 		t.LastUsedAt = &ts
 		return t, nil
 	}
-	return nil, errors.New("unknown token")
+	return nil, ErrUnknownToken
 }
 
 func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
@@ -223,11 +232,14 @@ func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
 	return out, rows.Err()
 }
 
-// RevokeToken sets revoked_at=now; row is kept for audit.
+// RevokeToken sets revoked_at=now; row is kept for audit. A token
+// already carrying a future revoked_at from a rotation grace window is
+// clamped down to now, so an operator can cut a leaked token short.
 func (s *Store) RevokeToken(prefix string, now time.Time) error {
+	ts := now.UTC().Unix()
 	res, err := s.execNoCtx(
-		`UPDATE tokens SET revoked_at = ? WHERE prefix = ? AND revoked_at IS NULL`,
-		now.UTC().Unix(), prefix,
+		`UPDATE tokens SET revoked_at = ? WHERE prefix = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
+		ts, prefix, ts,
 	)
 	if err != nil {
 		return fmt.Errorf("tokens: revoke: %w", err)
@@ -368,7 +380,10 @@ func hashToken(raw string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(raw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	key, err := argonKey(raw, salt)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("argon2id$%s$%s", hex.EncodeToString(salt), hex.EncodeToString(key)), nil
 }
 
@@ -385,7 +400,10 @@ func verifyToken(raw, stored string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	cand := argon2.IDKey([]byte(raw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	cand, err := argonKey(raw, salt)
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(cand, key) == 1, nil
 }
 

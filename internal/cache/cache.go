@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,13 +34,21 @@ type Config struct {
 
 	ProxyMaxAge time.Duration
 
+	PublicURL string
+
+	TrustForwardedHost bool
+
 	APIToken string
+
+	AllowUnauthenticated bool
 
 	AutoRegisterRepos string
 
 	SSHKeyDir string
 
 	GitForkLimit int
+
+	WorkspaceSeedMaxAge time.Duration
 }
 
 func DefaultConfig() Config {
@@ -54,15 +63,18 @@ func DefaultConfig() Config {
 		ProxyMaxAge:      7 * 24 * time.Hour,
 		SSHKeyDir:        "/etc/ssh-key",
 		GitForkLimit:     4,
+
+		WorkspaceSeedMaxAge: 24 * time.Hour,
 	}
 }
 
 type Server struct {
-	cfg  Config
-	tel  *otelutil.Telemetry
-	mux  *http.ServeMux
-	http *http.Server
-	wg   sync.WaitGroup
+	cfg     Config
+	tel     *otelutil.Telemetry
+	mux     *http.ServeMux
+	handler http.Handler
+	http    *http.Server
+	wg      sync.WaitGroup
 }
 
 func New(cfg Config) (*Server, error) {
@@ -72,6 +84,17 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.DataDir == "" {
 		return nil, fmt.Errorf("cache: DataDir is required")
+	}
+	// safety: a Secret key holding only a newline must not count as a configured credential.
+	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
+	if cfg.APIToken == "" {
+		if !cfg.AllowUnauthenticated {
+			return nil, fmt.Errorf("cache: an API token is required: set --api-token (or $SPARKWING_API_TOKEN), " +
+				"or pass --allow-unauthenticated to serve the git, blob, artifact, and sync endpoints to anyone who can reach the port")
+		}
+		log.Printf("WARNING: sparkwing-cache is serving the git, blob, artifact, and sync endpoints without authentication (--allow-unauthenticated)")
+	} else {
+		log.Printf("sparkwing-cache requires a bearer token on the git, blob, artifact, and sync endpoints")
 	}
 	if cfg.ProxyDir == "" {
 		cfg.ProxyDir = filepath.Join(cfg.DataDir, "proxy")
@@ -92,11 +115,18 @@ func New(cfg Config) (*Server, error) {
 	if cfg.ProxyMaxAge <= 0 {
 		cfg.ProxyMaxAge = 7 * 24 * time.Hour
 	}
+	publicBase, err := normalizeProxyPublicBase(cfg.PublicURL)
+	if err != nil {
+		return nil, err
+	}
 	if cfg.SSHKeyDir == "" {
 		cfg.SSHKeyDir = "/etc/ssh-key"
 	}
 	if cfg.GitForkLimit <= 0 {
 		cfg.GitForkLimit = 4
+	}
+	if cfg.WorkspaceSeedMaxAge == 0 {
+		cfg.WorkspaceSeedMaxAge = 24 * time.Hour
 	}
 
 	dataRoot = cfg.DataDir
@@ -110,55 +140,68 @@ func New(cfg Config) (*Server, error) {
 	proxyDir = cfg.ProxyDir
 	proxyCacheTTL = cfg.ProxyCacheTTL
 	proxyMaxAge = cfg.ProxyMaxAge
+	proxyPublicBase = publicBase
+	proxyTrustForwardedHost = cfg.TrustForwardedHost
 	apiToken = cfg.APIToken
 	sshKeyDir = cfg.SSHKeyDir
 	autoRegisterReposSpec = cfg.AutoRegisterRepos
 	fetchFreshWindow = cfg.FetchFreshWindow
 	recloneCooldown = cfg.RecloneCooldown
 	gitForkSem = make(chan struct{}, cfg.GitForkLimit)
+	workspaceSeedMaxAge = cfg.WorkspaceSeedMaxAge
 
 	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, proxyDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("cache: mkdir %s: %w", d, err)
 		}
 	}
+	if proxyPublicBase != "" {
+		log.Printf("sparkwing-cache rewrites proxied registry bodies against %s", proxyPublicBase)
+	} else {
+		log.Printf("sparkwing-cache rewrites proxied registry bodies per request from the Host header; " +
+			"set --public-url (or $SPARKWING_CACHE_PUBLIC_URL) to rewrite against one fixed base")
+	}
+
 	loadRepoNames()
 	initProxy()
+
+	s := &Server{cfg: cfg}
+	// bug: instruments bind to the meter provider current when they are created, so telemetry starts first.
+	s.tel = otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
 	initGitcacheMetrics()
 	initProxyMetrics()
 	setupSSH()
 	autoRegisterRepos()
 
-	s := &Server{cfg: cfg}
-	s.tel = otelutil.Init(context.Background(), otelutil.Config{ServiceName: "sparkwing-cache"})
-
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("/health", handleHealthCombined)
 
-	s.mux.HandleFunc("/archive", handleArchive)
-	s.mux.HandleFunc("/repos", handleRepos)
-	s.mux.HandleFunc("/artifacts/", handleArtifacts)
-	s.mux.HandleFunc("/file", handleFile)
-	s.mux.HandleFunc("/tree-hash", handleTreeHash)
-	s.mux.HandleFunc("/branch-contains", handleBranchContains)
+	s.mux.HandleFunc("/archive", requireToken(handleArchive))
+	s.mux.HandleFunc("/repos", requireToken(handleRepos))
+	s.mux.HandleFunc("/artifacts/", requireToken(handleArtifacts))
+	s.mux.HandleFunc("/file", requireToken(handleFile))
+	s.mux.HandleFunc("/tree-hash", requireToken(handleTreeHash))
+	s.mux.HandleFunc("/branch-contains", requireToken(handleBranchContains))
 	s.mux.HandleFunc("/bin/", requireToken(handleBin))
 	s.mux.HandleFunc("/cache/", requireToken(handleCache))
 	s.mux.HandleFunc("/upload", requireToken(handleUpload))
 	s.mux.HandleFunc("/uploads/", requireToken(handleUploadDownload))
 	s.mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
 	s.mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))
-	s.mux.HandleFunc("/git/register", handleGitRegister)
-	s.mux.HandleFunc("/git/refresh", handleGitRefresh)
-	s.mux.HandleFunc("/git/", handleGit)
+	s.mux.HandleFunc("/git/register", requireToken(handleGitRegister))
+	s.mux.HandleFunc("/git/refresh", requireToken(handleGitRefresh))
+	s.mux.HandleFunc("/git/", requireToken(handleGit))
 
 	s.mux.HandleFunc("/proxy/", handleProxy)
 	s.mux.HandleFunc("/stats", handleProxyStats)
 
 	s.mux.Handle("/metrics", s.tel.PromHandler)
 
+	s.handler = withSecurityHeaders(s.mux)
+
 	s.http = &http.Server{
 		Addr:         cfg.Addr,
-		Handler:      otelhttp.NewHandler(s.mux, "sparkwing-cache"),
+		Handler:      otelhttp.NewHandler(s.handler, "sparkwing-cache"),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 5 * time.Minute,
 		IdleTimeout:  120 * time.Second,
@@ -204,6 +247,14 @@ func (s *Server) Run(ctx context.Context) error {
 	s.wg.Wait()
 	log.Printf("sparkwing-cache stopped")
 	return <-serveErr
+}
+
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// safety: cache bodies are caller-supplied, so no response may be content-sniffed into a script.
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) bool {

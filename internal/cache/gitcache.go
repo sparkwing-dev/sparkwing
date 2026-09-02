@@ -4,15 +4,20 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -117,6 +122,8 @@ var (
 
 	recloneCooldown = 1 * time.Hour
 
+	workspaceSeedMaxAge = 24 * time.Hour
+
 	repoLocks   = map[string]*sync.Mutex{}
 	repoLocksMu sync.Mutex
 )
@@ -165,20 +172,39 @@ func setupSSH() {
 	log.Printf("SSH key configured from %s", sshKeyDir)
 }
 
+func bearerToken(r *http.Request) string {
+	scheme, rest, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	// safety: RFC 7235 makes the scheme case-insensitive, and a header with no scheme is not a credential.
+	if !ok || !strings.EqualFold(scheme, "bearer") {
+		return ""
+	}
+	return strings.TrimSpace(rest)
+}
+
+// safety: repointing a name redirects every clone of it, so a tokened cache demands the token. An open
+// cache has one anonymous caller, and refusing there would make a squatted name permanent.
+func mayRepoint(r *http.Request) bool {
+	return apiToken == "" || authenticated(r)
+}
+
+func authenticated(r *http.Request) bool {
+	if apiToken == "" {
+		return false
+	}
+	got := bearerToken(r)
+	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(apiToken)) == 1
+}
+
 func requireToken(next http.HandlerFunc) http.HandlerFunc {
 	token := apiToken
 	return func(w http.ResponseWriter, r *http.Request) {
+		// safety: an empty token reaches here only when the operator asked for it at startup.
 		if token == "" {
 			next(w, r)
 			return
 		}
-		auth := r.Header.Get("Authorization")
-		got := strings.TrimPrefix(auth, "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1 {
-			next(w, r)
-			return
-		}
-		if r.Header.Get("X-Forwarded-For") == "" {
+		got := bearerToken(r)
+		if got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1 {
 			next(w, r)
 			return
 		}
@@ -401,8 +427,8 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 			out, err := mirrorFetch(1*time.Minute, bare)
 			mu.Unlock()
 			if gitcacheFetchDur != nil {
-				gitcacheFetchDur.Record(context.Background(), time.Since(fetchStart).Seconds(),
-					metric.WithAttributes(attribute.String("repo", e.Name())))
+				// safety: /metrics is unauthenticated, and a per-repo label enumerates the mirror set.
+				gitcacheFetchDur.Record(context.Background(), time.Since(fetchStart).Seconds())
 			}
 
 			fetched++
@@ -529,9 +555,8 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 			log.Printf("recovery reclone: %s -- fetch failed, recloning from origin (this re-downloads the whole repository): %v %s",
 				hash, err, strings.TrimSpace(out))
 			if gitcacheRecoveryRecl != nil {
-				gitcacheRecoveryRecl.Add(r.Context(), 1, metric.WithAttributes(
-					attribute.String("repo", hash),
-				))
+				// safety: /metrics is unauthenticated, and a per-repo label enumerates the mirror set.
+				gitcacheRecoveryRecl.Add(r.Context(), 1)
 			}
 			if recloneOut, err2 := recloneMirror(repoURL, bareRepo); err2 != nil {
 				log.Printf("recovery reclone: %s failed: %v %s", hash, err2, strings.TrimSpace(recloneOut))
@@ -822,6 +847,163 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 
 var validBinHash = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}$`)
 
+type binMeta struct {
+	SHA256    string `json:"sha256"`
+	Size      int64  `json:"size"`
+	Principal string `json:"principal"`
+	WrittenAt string `json:"written_at"`
+}
+
+func binMetaPath(hash string) string { return filepath.Join(binsDir, hash+".meta.json") }
+
+func writingPrincipal(r *http.Request) string {
+	token := bearerToken(r)
+	if token == "" {
+		return "anonymous"
+	}
+	// safety: fingerprint the bearer so attribution never persists the credential itself.
+	sum := sha256.Sum256([]byte(token))
+	return "token:" + hex.EncodeToString(sum[:])[:12]
+}
+
+func readBinMeta(hash string) (binMeta, error) {
+	var meta binMeta
+	data, err := os.ReadFile(binMetaPath(hash))
+	if err != nil {
+		return meta, err
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return meta, err
+	}
+	if _, err := hex.DecodeString(meta.SHA256); err != nil || len(meta.SHA256) != 64 {
+		return binMeta{}, fmt.Errorf("bin meta %s: malformed digest", hash)
+	}
+	return meta, nil
+}
+
+func writeBinMeta(hash string, meta binMeta) error {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(binsDir, "meta-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, binMetaPath(hash)); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
+func createBinMeta(hash string, meta binMeta) error {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(binMetaPath(hash), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		_ = os.Remove(binMetaPath(hash))
+		return err
+	}
+	return f.Close()
+}
+
+var binKeyLocks sync.Map
+
+func binKeyLock(hash string) *sync.Mutex {
+	mu, _ := binKeyLocks.LoadOrStore(hash, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
+func binDigest(hash string, f *os.File) (string, error) {
+	if meta, err := readBinMeta(hash); err == nil {
+		return meta.SHA256, nil
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	digest := hex.EncodeToString(h.Sum(nil))
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	meta := binMeta{SHA256: digest, Size: info.Size(), Principal: "unknown", WrittenAt: info.ModTime().UTC().Format(time.RFC3339)}
+	// safety: never replace a sidecar an upload wrote while this read was hashing the older blob.
+	if err := createBinMeta(hash, meta); err != nil && !errors.Is(err, fs.ErrExist) {
+		log.Printf("warning: bin meta write %s: %v", hash, err)
+	}
+	return digest, nil
+}
+
+func setBinDigestHeaders(w http.ResponseWriter, digest string) error {
+	raw, err := hex.DecodeString(digest)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Digest", "sha-256="+base64.StdEncoding.EncodeToString(raw))
+	w.Header().Set("ETag", `"`+digest+`"`)
+	return nil
+}
+
+func openBinForRead(hash, path string) (*os.File, string, error) {
+	// safety: an upload replaces the blob by rename, so the fd and its digest must be taken under one lock.
+	mu := binKeyLock(hash)
+	mu.Lock()
+	defer mu.Unlock()
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, "", err
+	}
+	digest, err := binDigest(hash, f)
+	if err != nil {
+		f.Close()
+		return nil, "", err
+	}
+	return f, digest, nil
+}
+
+func stageBinBlob(data []byte) (string, error) {
+	tmp, err := os.CreateTemp(binsDir, "bin-*.tmp")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	return tmpPath, nil
+}
+
 func handleBin(w http.ResponseWriter, r *http.Request) {
 	hash := strings.TrimPrefix(r.URL.Path, "/bin/")
 	if !validBinHash.MatchString(hash) {
@@ -833,12 +1015,21 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		f, err := os.Open(path)
+		f, digest, err := openBinForRead(hash, path)
 		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
+			if os.IsNotExist(err) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			log.Printf("warning: bin digest %s: %v", hash, err)
+			http.Error(w, "digest unavailable", http.StatusInternalServerError)
 			return
 		}
 		defer f.Close()
+		if err := setBinDigestHeaders(w, digest); err != nil {
+			http.Error(w, "digest unavailable", http.StatusInternalServerError)
+			return
+		}
 		info, _ := f.Stat()
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
@@ -854,11 +1045,41 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := os.WriteFile(path, data, 0o755); err != nil {
+		sum := sha256.Sum256(data)
+		digest := hex.EncodeToString(sum[:])
+		principal := writingPrincipal(r)
+
+		mu := binKeyLock(hash)
+		mu.Lock()
+		defer mu.Unlock()
+
+		tmpPath, err := stageBinBlob(data)
+		if err != nil {
+			log.Printf("warning: bin stage %s: %v", hash, err)
 			http.Error(w, "write error", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("bin cache: stored %s (%d bytes)", hash, len(data))
+		// safety: record the digest before the blob so a torn write serves a mismatch the client discards.
+		meta := binMeta{SHA256: digest, Size: int64(len(data)), Principal: principal, WrittenAt: time.Now().UTC().Format(time.RFC3339)}
+		if err := writeBinMeta(hash, meta); err != nil {
+			_ = os.Remove(tmpPath)
+			log.Printf("warning: bin meta write %s: %v", hash, err)
+			http.Error(w, "write error", http.StatusInternalServerError)
+			return
+		}
+		if err := os.Rename(tmpPath, path); err != nil {
+			_ = os.Remove(tmpPath)
+			// safety: a digest with no blob behind it would brick the entry for every later reader.
+			_ = os.Remove(binMetaPath(hash))
+			log.Printf("warning: bin write %s: %v", hash, err)
+			http.Error(w, "write error", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("bin cache: stored %s (%d bytes) sha256=%s principal=%s", hash, len(data), digest, principal)
+		if err := setBinDigestHeaders(w, digest); err != nil {
+			http.Error(w, "digest unavailable", http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusCreated)
 
 	default:
@@ -941,6 +1162,15 @@ func handleCache(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+const workspaceRefPrefix = "refs/sparkwing-workspace/"
+
+const (
+	workspaceArchiveRefPrefix = "refs/sparkwing-workspace-archive/"
+	workspaceArchiveAgeFactor = 7
+)
+
+var validJobID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+
 func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/artifacts/")
 	parts := strings.SplitN(path, "/", 2)
@@ -949,6 +1179,11 @@ func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jobID := parts[0]
+	// safety: the path is decoded here, so a job ID that is not one segment escapes the root.
+	if jobID == "." || jobID == ".." || !validJobID.MatchString(jobID) {
+		http.Error(w, "invalid job ID: must be 1-128 alphanumeric/dash/underscore/dot chars", http.StatusBadRequest)
+		return
+	}
 
 	switch r.Method {
 	case http.MethodPost:
@@ -979,9 +1214,10 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 
 	jobDir := filepath.Join(artifactsDir, jobID)
 	dest := filepath.Join(jobDir, artifactPath)
-	absJobDir, _ := filepath.Abs(jobDir)
+	absRoot, _ := filepath.Abs(artifactsDir)
 	absDest, _ := filepath.Abs(dest)
-	if !strings.HasPrefix(absDest, absJobDir+string(filepath.Separator)) {
+	// safety: contain against the artifacts root, not the job directory a job ID could have moved.
+	if !strings.HasPrefix(absDest, absRoot+string(filepath.Separator)) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
@@ -1042,16 +1278,24 @@ func artifactDownload(w http.ResponseWriter, r *http.Request, jobID string) {
 	}
 
 	if len(matches) == 1 {
+		// safety: an artifact is caller-supplied content, so it downloads instead of rendering in place.
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", attachmentDisposition(filepath.Base(matches[0])))
 		http.ServeFile(w, r, filepath.Join(jobDir, matches[0]))
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/tar")
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", attachmentDisposition(jobID+".tar"))
 	cmd := exec.Command("tar", append([]string{"-cf", "-", "-C", jobDir}, matches...)...)
 	cmd.Stdout = w
 	if err := cmd.Run(); err != nil {
 		log.Printf("warning: tar artifacts for %s: %v", jobID, err)
 	}
+}
+
+func attachmentDisposition(name string) string {
+	return "attachment; filename=" + strconv.Quote(strings.ReplaceAll(name, `"`, ""))
 }
 
 func artifactList(w http.ResponseWriter, r *http.Request, jobID string) {
@@ -1359,7 +1603,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if workspace {
-		if err := retainWorkspaceSeed(bareRepo, seedRef, sha, 128); err != nil {
+		if err := retainWorkspaceSeed(bareRepo, seedRef, sha, 128, workspaceSeedMaxAge); err != nil {
 			_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
 			pruneUnreachableSeedObjects(bareRepo)
 			http.Error(w, "retain workspace seed: "+err.Error(), http.StatusInternalServerError)
@@ -1373,38 +1617,105 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "size": size})
 }
 
-func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int) error {
-	out, err := gitCmd("-C", bareRepo, "for-each-ref", "--format=%(refname)", "--sort=-refname", "refs/sparkwing-workspace/")
+type workspaceRef struct {
+	name   string
+	object string
+}
+
+func listWorkspaceRefs(bareRepo, prefix string) ([]workspaceRef, error) {
+	out, err := gitCmd("-C", bareRepo, "for-each-ref", "--format=%(refname) %(objectname)", "--sort=-refname", prefix)
 	if err != nil {
-		return fmt.Errorf("list workspace refs: %w: %s", err, out)
+		return nil, fmt.Errorf("list %s refs: %w: %s", prefix, err, out)
 	}
-	refs := strings.Fields(out)
-	kept := refs[:0]
-	var duplicates []string
-	for _, existing := range refs {
-		if strings.HasSuffix(existing, "/"+sha) {
-			duplicates = append(duplicates, existing)
+	var refs []workspaceRef
+	for _, line := range strings.Split(out, "\n") {
+		name, object, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || name == "" || object == "" {
 			continue
 		}
-		kept = append(kept, existing)
+		refs = append(refs, workspaceRef{name: name, object: object})
 	}
-	if len(kept) >= limit {
+	return refs, nil
+}
+
+func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int, maxAge time.Duration) error {
+	refs, err := listWorkspaceRefs(bareRepo, workspaceRefPrefix)
+	if err != nil {
+		return err
+	}
+	kept := 0
+	var superseded []string
+	var expired []workspaceRef
+	now := time.Now().UTC()
+	for _, existing := range refs {
+		switch {
+		case strings.HasSuffix(existing.name, "/"+sha):
+			superseded = append(superseded, existing.name)
+		case workspaceRefExpired(existing.name, workspaceRefPrefix, now, maxAge):
+			expired = append(expired, existing)
+		default:
+			kept++
+		}
+	}
+	if kept >= limit {
 		_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
 		return fmt.Errorf("workspace ref limit %d reached", limit)
 	}
-	ref := fmt.Sprintf("refs/sparkwing-workspace/%020d/%s", time.Now().UTC().UnixNano(), sha)
+	ref := fmt.Sprintf(workspaceRefPrefix+"%020d/%s", now.UnixNano(), sha)
 	if out, err := gitCmd("-C", bareRepo, "update-ref", ref, sha); err != nil {
 		return fmt.Errorf("create workspace ref: %w: %s", err, out)
 	}
-	for _, duplicate := range duplicates {
-		if deleted, deleteErr := gitCmd("-C", bareRepo, "update-ref", "-d", duplicate); deleteErr != nil {
-			return fmt.Errorf("refresh workspace ref %s: %w: %s", duplicate, deleteErr, deleted)
+	// safety: a retry of an older run still fetches its snapshot, so expiry archives the ref instead of dropping objects.
+	for _, aged := range expired {
+		archived := workspaceArchiveRefPrefix + strings.TrimPrefix(aged.name, workspaceRefPrefix)
+		if out, err := gitCmd("-C", bareRepo, "update-ref", archived, aged.object); err != nil {
+			return fmt.Errorf("archive workspace ref %s: %w: %s", aged.name, err, out)
 		}
+		superseded = append(superseded, aged.name)
+	}
+	for _, stale := range superseded {
+		if deleted, deleteErr := gitCmd("-C", bareRepo, "update-ref", "-d", stale); deleteErr != nil {
+			return fmt.Errorf("expire workspace ref %s: %w: %s", stale, deleteErr, deleted)
+		}
+	}
+	if err := pruneWorkspaceArchive(bareRepo, limit, maxAge, now); err != nil {
+		return err
 	}
 	if out, err := gitCmd("-C", bareRepo, "update-ref", "-d", seedRef); err != nil {
 		return fmt.Errorf("remove transient seed ref: %w: %s", err, out)
 	}
 	return nil
+}
+
+func pruneWorkspaceArchive(bareRepo string, limit int, maxAge time.Duration, now time.Time) error {
+	archived, err := listWorkspaceRefs(bareRepo, workspaceArchiveRefPrefix)
+	if err != nil {
+		return err
+	}
+	for i, aged := range archived {
+		if i < limit && !workspaceRefExpired(aged.name, workspaceArchiveRefPrefix, now, maxAge*workspaceArchiveAgeFactor) {
+			continue
+		}
+		if out, err := gitCmd("-C", bareRepo, "update-ref", "-d", aged.name); err != nil {
+			return fmt.Errorf("expire archived workspace ref %s: %w: %s", aged.name, err, out)
+		}
+	}
+	return nil
+}
+
+func workspaceRefExpired(ref, prefix string, now time.Time, maxAge time.Duration) bool {
+	if maxAge <= 0 {
+		return false
+	}
+	stamp, _, ok := strings.Cut(strings.TrimPrefix(ref, prefix), "/")
+	if !ok {
+		return false
+	}
+	nanos, err := strconv.ParseInt(stamp, 10, 64)
+	if err != nil {
+		return false
+	}
+	return now.Sub(time.Unix(0, nanos)) > maxAge
 }
 
 func pruneUnreachableSeedObjects(bareRepo string) {
@@ -1442,6 +1753,8 @@ func saveRepoNames() {
 	}
 }
 
+var validRepoName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
 func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -1454,6 +1767,10 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name and repo required", http.StatusBadRequest)
 		return
 	}
+	if !validRepoName.MatchString(name) {
+		http.Error(w, "invalid name: must be 1-64 alphanumeric/dash/underscore/dot chars", http.StatusBadRequest)
+		return
+	}
 	var err error
 	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
 	if err != nil {
@@ -1464,6 +1781,17 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	hash := repoHash(repoURL)
 
 	repoNamesMu.Lock()
+	existing, known := repoNames[name]
+	repointing := known && existing != repoURL
+	if repointing && !mayRepoint(r) {
+		repoNamesMu.Unlock()
+		http.Error(w, "name is already registered to another repository", http.StatusConflict)
+		return
+	}
+	if repointing {
+		log.Printf("git register: repointing %q from %s to %s", name,
+			sourceurl.Redact(existing), sourceurl.Redact(repoURL))
+	}
 	repoNames[name] = repoURL
 	saveRepoNames()
 	repoNamesMu.Unlock()
@@ -1550,6 +1878,10 @@ func autoRegisterRepos() {
 			continue
 		}
 		name, repoURL := parts[0], parts[1]
+		if !validRepoName.MatchString(name) {
+			log.Printf("auto-register: skipping invalid name %q (want 1-64 alphanumeric/dash/underscore/dot chars)", name)
+			continue
+		}
 		var err error
 		repoURL, err = sourceurl.ValidateCloneURL(repoURL)
 		if err != nil {

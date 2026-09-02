@@ -6,21 +6,17 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "sparkwing-runner-bundle.labels" . | nindent 4 }}
+{{- if and .Values.runner.alsoClaimTriggers (or (eq .Values.runner.triggerRunner.kind "k8s") (eq .Values.runner.triggerRunner.kind "warm")) }}
 rules:
-  - apiGroups: [""]
-    resources: ["pods", "pods/log"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
-    verbs: ["get", "list", "watch"]
-  {{- if and .Values.runner.alsoClaimTriggers (or (eq .Values.runner.triggerRunner.kind "k8s") (eq .Values.runner.triggerRunner.kind "warm")) }}
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch", "delete"]
-  {{- end }}
+    verbs: ["create", "get", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+{{- else }}
+rules: []
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

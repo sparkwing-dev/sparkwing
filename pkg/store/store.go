@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -88,9 +89,11 @@ const (
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	db      *sql.DB
-	dialect Dialect
-	cleanup func() error
+	db        *sql.DB
+	dialect   Dialect
+	cleanup   func() error
+	csrfKeyMu sync.Mutex
+	csrfKey   []byte
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -514,6 +517,13 @@ CREATE TABLE IF NOT EXISTS nodes (
     -- All NULL on laptop / K8sRunner paths.
     ready_at         INTEGER,
     claimed_by       TEXT,
+    -- claim_principal: the authenticated principal the claim is bound
+    -- to; '' when the controller served the claim unauthenticated.
+    -- Display only: two tokens may carry the same principal name.
+    claim_principal  TEXT NOT NULL DEFAULT '',
+    -- claim_token_prefix: the claiming token's prefix segment. Unique
+    -- per token, so this is what the ownership predicates match on.
+    claim_token_prefix TEXT NOT NULL DEFAULT '',
     lease_expires_at INTEGER,
     -- needs_labels: JSON []string from RunsOn; AND semantics.
     needs_labels     BLOB,
@@ -583,7 +593,9 @@ CREATE TABLE IF NOT EXISTS triggers (
     retry_of              TEXT NOT NULL DEFAULT '',
     parent_node_id        TEXT NOT NULL DEFAULT '',
     idempotency_key       TEXT NOT NULL DEFAULT '',
-    claim_seq             INTEGER NOT NULL DEFAULT 0
+    claim_seq             INTEGER NOT NULL DEFAULT 0,
+    claim_principal       TEXT NOT NULL DEFAULT '',
+    claim_token_prefix    TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_triggers_pending
@@ -718,12 +730,12 @@ CREATE TABLE IF NOT EXISTS tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_tokens_prefix ON tokens(prefix);
 
--- Browser sessions; same hash treatment as tokens.
+-- Browser sessions. hash = sha256 of the raw session id; the CSRF token is
+-- an HMAC of that id under a server key, so neither is stored in the clear.
 CREATE TABLE IF NOT EXISTS sessions (
     hash          TEXT PRIMARY KEY,
     principal     TEXT NOT NULL,
     scopes        TEXT NOT NULL,
-    csrf_token    TEXT NOT NULL,
     created_at    INTEGER NOT NULL,
     expires_at    INTEGER NOT NULL,
     last_used_at  INTEGER
@@ -735,18 +747,24 @@ CREATE TABLE IF NOT EXISTS users (
     name          TEXT PRIMARY KEY,
     pw_hash       TEXT NOT NULL,
     created_at    INTEGER NOT NULL,
-    last_login_at INTEGER
+    last_login_at INTEGER,
+    scopes        TEXT NOT NULL DEFAULT 'admin'
 );
 
 -- Pipeline secrets; encryption at rest is up to the volume.
 CREATE TABLE IF NOT EXISTS secrets (
-    name       TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
     value      TEXT NOT NULL,
     principal  TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     -- masked=0 = non-sensitive config (not redacted in run output).
-    masked     INTEGER NOT NULL DEFAULT 1
+    masked     INTEGER NOT NULL DEFAULT 1,
+    -- repo='' is unscoped: only a shared unscoped row answers a run.
+    repo       TEXT NOT NULL DEFAULT '',
+    -- shared=1 lets an unscoped row answer a run that names no repo of its own.
+    shared     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (name, repo)
 );
 
 -- Debug pauses; one row per (run, node, reason).
@@ -800,6 +818,7 @@ CREATE TABLE IF NOT EXISTS node_dispatches (
     input_envelope_json BLOB,
     input_size_bytes    INTEGER NOT NULL DEFAULT 0,
     secret_redactions   INTEGER NOT NULL DEFAULT 0,
+    redacted_keys       BLOB,
     PRIMARY KEY (run_id, node_id, seq),
     FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
@@ -815,7 +834,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 17
+const expectedSchemaVersion = 23
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1199,6 +1218,21 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 	case 17:
 		_, err := s.exec(ctx, runIdentityIndexes)
 		return err
+	case 18:
+		return scrubSecretInputHashes(ctx, s.db)
+	case 19:
+		return s.ensureColumns("users", usersScopesCols)
+	case 20:
+		return s.ensureColumns("node_dispatches", nodeDispatchRedactionCols)
+	case 21:
+		return s.rehashSessions(ctx)
+	case 22:
+		return s.addSecretRepoScope(ctx)
+	case 23:
+		if err := s.ensureColumns("secrets", secretsSharedCols); err != nil {
+			return err
+		}
+		return s.ensureColumns("triggers", triggerClaimOwnerCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1260,9 +1294,95 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 17:
 		_, err := tx.ExecContext(ctx, runIdentityIndexes)
 		return err
+	case 18:
+		return scrubSecretInputHashes(ctx, tx)
+	case 19:
+		return addColumnsTx(ctx, tx, "users", usersScopesCols)
+	case 20:
+		return addColumnsTx(ctx, tx, "node_dispatches", nodeDispatchRedactionCols)
+	case 21:
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sessions`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN IF EXISTS csrf_token`)
+		return err
+	case 22:
+		for _, stmt := range secretRepoScopePostgres {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return err
+			}
+		}
+		return nil
+	case 23:
+		if err := addColumnsTx(ctx, tx, "secrets", secretsSharedCols); err != nil {
+			return err
+		}
+		return addColumnsTx(ctx, tx, "triggers", triggerClaimOwnerCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
+}
+
+type migrationQueryExecer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func scrubSecretInputHashes(ctx context.Context, q migrationQueryExecer) error {
+	rows, err := q.QueryContext(ctx, `SELECT id, args_json, invocation_json FROM runs WHERE invocation_json IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	type update struct {
+		id   string
+		json []byte
+	}
+	var updates []update
+	for rows.Next() {
+		var id string
+		var argsRaw []byte
+		var raw []byte
+		if err := rows.Scan(&id, &argsRaw, &raw); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		var args map[string]string
+		argsText := strings.TrimSpace(string(argsRaw))
+		if argsText != "" && argsText != "null" {
+			if err := json.Unmarshal(argsRaw, &args); err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("decode run %s args_json: %w", id, err)
+			}
+		}
+		var inv map[string]any
+		if err := json.Unmarshal(raw, &inv); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("decode run %s invocation_json: %w", id, err)
+		}
+		if !errors.Is(ValidateRunInvocation(Run{Args: args, Invocation: inv}), ErrSecretInputHash) {
+			continue
+		}
+		delete(inv, "inputs_hash")
+		cleaned, err := json.Marshal(inv)
+		if err != nil {
+			_ = rows.Close()
+			return err
+		}
+		updates = append(updates, update{id: id, json: cleaned})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range updates {
+		if _, err := q.ExecContext(ctx, `UPDATE runs SET invocation_json = ? WHERE id = ?`, item.json, item.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func addColumnsTx(ctx context.Context, tx *storeTx, table string, cols map[string]string) error {
@@ -1289,17 +1409,19 @@ var columnMigrations = []columnSpec{
 		"summary":          "TEXT NOT NULL DEFAULT ''",
 	}},
 	{"nodes", map[string]string{
-		"ready_at":          "INTEGER",
-		"claimed_by":        "TEXT",
-		"lease_expires_at":  "INTEGER",
-		"needs_labels":      "BLOB",
-		"status_detail":     "TEXT NOT NULL DEFAULT ''",
-		"last_heartbeat":    "INTEGER",
-		"failure_reason":    "TEXT NOT NULL DEFAULT ''",
-		"exit_code":         "INTEGER",
-		"annotations_json":  "BLOB",
-		"summary":           "TEXT NOT NULL DEFAULT ''",
-		"artifact_manifest": "TEXT NOT NULL DEFAULT ''",
+		"ready_at":           "INTEGER",
+		"claimed_by":         "TEXT",
+		"claim_principal":    "TEXT NOT NULL DEFAULT ''",
+		"claim_token_prefix": "TEXT NOT NULL DEFAULT ''",
+		"lease_expires_at":   "INTEGER",
+		"needs_labels":       "BLOB",
+		"status_detail":      "TEXT NOT NULL DEFAULT ''",
+		"last_heartbeat":     "INTEGER",
+		"failure_reason":     "TEXT NOT NULL DEFAULT ''",
+		"exit_code":          "INTEGER",
+		"annotations_json":   "BLOB",
+		"summary":            "TEXT NOT NULL DEFAULT ''",
+		"artifact_manifest":  "TEXT NOT NULL DEFAULT ''",
 	}},
 	{"runs", map[string]string{
 		"parent_run_id":     "TEXT",
@@ -1392,8 +1514,16 @@ var nodesUsageCols = map[string]string{
 	"process_wall_nanos": "INTEGER NOT NULL DEFAULT 0",
 }
 
+var nodeDispatchRedactionCols = map[string]string{
+	"redacted_keys": "BLOB",
+}
+
 var nodeMetricsCPUTimeCols = map[string]string{
 	"cpu_time_nanos": "INTEGER NOT NULL DEFAULT 0",
+}
+
+var usersScopesCols = map[string]string{
+	"scopes": "TEXT NOT NULL DEFAULT 'admin'",
 }
 
 var triggerRepoInheritedCols = map[string]string{
@@ -1403,6 +1533,15 @@ var triggerRepoInheritedCols = map[string]string{
 var triggerSubmissionCols = map[string]string{
 	"idempotency_key": "TEXT NOT NULL DEFAULT ''",
 	"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
+}
+
+var triggerClaimOwnerCols = map[string]string{
+	"claim_principal":    "TEXT NOT NULL DEFAULT ''",
+	"claim_token_prefix": "TEXT NOT NULL DEFAULT ''",
+}
+
+var secretsSharedCols = map[string]string{
+	"shared": "INTEGER NOT NULL DEFAULT 0",
 }
 
 // TriggerIdempotencyIndexName is the unique index enforcing at most one
@@ -1523,24 +1662,58 @@ func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	return err
 }
 
-func (s *Store) ensureColumns(table string, cols map[string]string) error {
-	rows, err := s.queryNoCtx(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+// hack: SQLite cannot alter a primary key in place, so widening it to (name, repo) rebuilds the table.
+var secretsRepoRebuildSQLite = []string{
+	`DROP TABLE IF EXISTS secrets_repo_scoped`,
+	`CREATE TABLE secrets_repo_scoped (
+    name       TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    principal  TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    masked     INTEGER NOT NULL DEFAULT 1,
+    repo       TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (name, repo)
+)`,
+	`INSERT INTO secrets_repo_scoped (name, value, principal, created_at, updated_at, masked, repo)
+    SELECT name, value, principal, created_at, updated_at, masked, '' FROM secrets`,
+	`DROP TABLE secrets`,
+	`ALTER TABLE secrets_repo_scoped RENAME TO secrets`,
+}
+
+var secretRepoScopePostgres = []string{
+	`ALTER TABLE secrets ADD COLUMN IF NOT EXISTS repo TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE secrets DROP CONSTRAINT IF EXISTS secrets_pkey`,
+	`ALTER TABLE secrets ADD PRIMARY KEY (name, repo)`,
+}
+
+// safety: the rebuild drops the live table, so a crash mid-sequence must roll back rather than leave no secrets table.
+func (s *Store) addSecretRepoScope(ctx context.Context) error {
+	have, err := s.tableColumns("secrets")
 	if err != nil {
 		return err
 	}
-	have := map[string]bool{}
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			_ = rows.Close()
+	if have["repo"] {
+		return nil
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range secretsRepoRebuildSQLite {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
-		have[name] = true
 	}
-	_ = rows.Close()
+	return tx.Commit()
+}
+
+func (s *Store) ensureColumns(table string, cols map[string]string) error {
+	have, err := s.tableColumns(table)
+	if err != nil {
+		return err
+	}
 	for name, typ := range cols {
 		if have[name] {
 			continue
@@ -1554,6 +1727,27 @@ func (s *Store) ensureColumns(table string, cols map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) tableColumns(table string) (map[string]bool, error) {
+	rows, err := s.queryNoCtx(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+	if err != nil {
+		return nil, err
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		have[name] = true
+	}
+	_ = rows.Close()
+	return have, rows.Err()
 }
 
 func isDuplicateColumnErr(err error) bool {
@@ -1620,7 +1814,14 @@ type Run struct {
 // caller's status. Idempotent for the (pending -> running) transition
 // the orchestrator performs at start-of-run; non-pending existing rows
 // are left untouched so this stays a no-op on retry / replay paths.
+// The repository identity (repo, repo URL, GitHub owner and name) is
+// written once, at the insert that first names it, and every later
+// upsert keeps it: secret resolution reads it, so a caller that can
+// upsert a run must not be able to repoint it.
 func (s *Store) CreateRun(ctx context.Context, r Run) error {
+	if err := ValidateRunInvocation(r); err != nil {
+		return err
+	}
 	argsJSON, _ := json.Marshal(r.Args)
 	var invocationJSON []byte
 	if len(r.Invocation) > 0 {
@@ -1652,10 +1853,10 @@ ON CONFLICT(id) DO UPDATE SET
     plan_json       = excluded.plan_json,
     started_at      = excluded.started_at,
     parent_run_id   = excluded.parent_run_id,
-    repo            = excluded.repo,
-    repo_url        = excluded.repo_url,
-    github_owner    = excluded.github_owner,
-    github_repo     = excluded.github_repo,
+    repo            = CASE WHEN runs.repo = '' THEN excluded.repo ELSE runs.repo END,
+    repo_url        = CASE WHEN runs.repo_url = '' THEN excluded.repo_url ELSE runs.repo_url END,
+    github_owner    = CASE WHEN runs.github_owner = '' THEN excluded.github_owner ELSE runs.github_owner END,
+    github_repo     = CASE WHEN runs.github_repo = '' THEN excluded.github_repo ELSE runs.github_repo END,
     retry_of        = excluded.retry_of,
     retried_as      = excluded.retried_as,
     retry_source    = excluded.retry_source,
@@ -2674,14 +2875,19 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 }
 
 // ClaimNextReadyNode flips the oldest claimable node to holderID with
-// a fresh lease. Claimable = ready_at set, unclaimed, !done, and
-// every needs_labels entry appears in runnerLabels. ErrNotFound when
-// no candidate matches. Label-mismatched candidates have their
-// ready_at bumped 1us so they don't starve the FIFO queue.
-func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
-	if lease <= 0 {
-		lease = DefaultLeaseDuration
-	}
+// a fresh lease, bound to principal. Claimable = ready_at set,
+// unclaimed, !done, and every needs_labels entry appears in
+// runnerLabels. ErrNotFound when no candidate matches.
+// Label-mismatched candidates have their ready_at bumped 1us so they
+// don't starve the FIFO queue.
+//
+// claimant is the authenticated token the claim answers to;
+// [Store.PrincipalHoldsNodeClaim] and [Store.HeartbeatNodeClaim] admit
+// only that token afterwards. Pass the zero value when the caller is
+// unauthenticated, which leaves the claim unbound. lease is clamped to
+// [MaxLeaseDuration].
+func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
+	lease = clampNodeLease(lease)
 	labelSet := make(map[string]struct{}, len(runnerLabels))
 	for _, l := range runnerLabels {
 		if l != "" {
@@ -2735,9 +2941,10 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 		expires := now.Add(lease)
 		if _, err := tx.ExecContext(
 			ctx,
-			`UPDATE nodes SET claimed_by = ?, lease_expires_at = ?
+			`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
+			        lease_expires_at = ?
 			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
-			holderID, expires.UnixNano(), n.RunID, n.NodeID,
+			holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(), n.RunID, n.NodeID,
 		); err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -2799,17 +3006,18 @@ func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) er
 }
 
 // HeartbeatNodeClaim extends the claim lease; ErrLockHeld when the
-// caller no longer owns the claim.
-func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration) error {
-	if lease <= 0 {
-		lease = DefaultLeaseDuration
-	}
-	expires := time.Now().Add(lease).UnixNano()
+// caller no longer owns the claim. The token the claim was bound to and
+// the holder id it was taken under must both match. lease is clamped to
+// [MaxLeaseDuration], so a heartbeat cannot outrun the claim cap.
+func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error {
+	expires := time.Now().Add(clampNodeLease(lease)).UnixNano()
 	res, err := s.exec(
 		ctx,
 		`UPDATE nodes SET lease_expires_at = ?
-		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?`,
-		expires, runID, nodeID, holderID,
+		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
+		    AND COALESCE(claim_principal, '') = ?
+		    AND COALESCE(claim_token_prefix, '') = ?`,
+		expires, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
 	)
 	if err != nil {
 		return err
@@ -2822,6 +3030,72 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID 
 		return ErrLockHeld
 	}
 	return nil
+}
+
+const nodeClaimLiveSQL = `claimed_by IS NOT NULL
+		    AND lease_expires_at IS NOT NULL AND lease_expires_at > ?`
+
+const triggerClaimLiveSQL = `status = 'claimed'
+		    AND lease_expires_at IS NOT NULL AND lease_expires_at > ?`
+
+// PrincipalHoldsTriggerClaim reports whether claimant holds the
+// trigger's unexpired claim. A trigger id is the id of the run it
+// creates, so this is the ownership proof a dispatcher has before any
+// node of that run is claimed. An unbound claimant holds nothing.
+func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error) {
+	if !claimant.bound() {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM triggers
+		  WHERE id = ? AND claim_principal = ?
+		    AND claim_token_prefix = ?
+		    AND `+triggerClaimLiveSQL,
+		triggerID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
+}
+
+// PrincipalHoldsNodeClaim reports whether claimant holds the node's
+// unexpired claim. An unbound claimant holds nothing, so an
+// unauthenticated caller never passes this check.
+func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, now time.Time) (bool, error) {
+	if !claimant.bound() {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM nodes
+		  WHERE run_id = ? AND node_id = ? AND claim_principal = ?
+		    AND claim_token_prefix = ?
+		    AND `+nodeClaimLiveSQL,
+		runID, nodeID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
+}
+
+// PrincipalHoldsRunClaim reports whether claimant holds an unexpired
+// claim on any node of the run. An unbound claimant holds nothing.
+func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error) {
+	if !claimant.bound() {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM nodes
+		  WHERE run_id = ? AND claim_principal = ?
+		    AND claim_token_prefix = ?
+		    AND `+nodeClaimLiveSQL,
+		runID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
 }
 
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
@@ -2859,7 +3133,8 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 		return nil, nil
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET claimed_by = NULL, lease_expires_at = NULL
+		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
+		        lease_expires_at = NULL
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {
@@ -2909,7 +3184,8 @@ UPDATE nodes
    SET `+nodeFailSet+`,
        error = 'runner heartbeat expired',
        failure_reason = ?, finished_at = ?,
-       claimed_by = NULL, lease_expires_at = NULL
+       claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
+       lease_expires_at = NULL
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			FailureAgentLost, now, p[0], p[1]); err != nil {
 			return nil, err
@@ -3287,6 +3563,30 @@ type Trigger struct {
 // CPU-bound pauses; short enough to re-queue dead runners.
 const DefaultLeaseDuration = 3 * time.Minute
 
+// MaxLeaseDuration caps the lease a claimant may ask for. The claim is
+// an authorization window, so the claimant must not pick how long its
+// own access lasts; longer requests are clamped, not rejected, because
+// a heartbeat renews well inside the cap.
+const MaxLeaseDuration = 10 * time.Minute
+
+// safety: an unbounded lease would make a claim an unreapable, permanent grant.
+func clampNodeLease(lease time.Duration) time.Duration {
+	if lease <= 0 {
+		return DefaultLeaseDuration
+	}
+	return min(lease, MaxLeaseDuration)
+}
+
+// ClaimIdentity is the token a node claim answers to. TokenPrefix is
+// unique per token and is what the ownership predicates match on;
+// Principal is the display label, which two tokens may share.
+type ClaimIdentity struct {
+	Principal   string
+	TokenPrefix string
+}
+
+func (c ClaimIdentity) bound() bool { return c.TokenPrefix != "" }
+
 // CreateTrigger inserts a new trigger with status='pending'.
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	argsJSON, _ := json.Marshal(t.Args)
@@ -3652,11 +3952,12 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 // ClaimNextTrigger flips the oldest pending trigger to 'claimed'.
 // ErrNotFound when empty. lease=0 uses DefaultLeaseDuration.
 func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error) {
-	return s.ClaimNextTriggerFor(ctx, lease, nil, nil)
+	return s.ClaimNextTriggerFor(ctx, ClaimIdentity{}, lease, nil, nil)
 }
 
-// ClaimNextTriggerFor adds pipeline/source filter sets (AND semantics).
-func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pipelines, sources []string) (*Trigger, error) {
+// ClaimNextTriggerFor adds pipeline/source filter sets (AND semantics)
+// and records claimant as the token the claim answers to.
+func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity, lease time.Duration, pipelines, sources []string) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
@@ -3721,9 +4022,11 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	expires := now.Add(lease)
 	if _, err := tx.ExecContext(
 		ctx,
-		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1
+		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1,
+		        claim_principal = ?, claim_token_prefix = ?
 		  WHERE id = ?`,
-		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(), t.ID,
+		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(),
+		claimant.Principal, claimant.TokenPrefix, t.ID,
 	); err != nil {
 		return nil, err
 	}
