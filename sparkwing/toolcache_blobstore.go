@@ -243,64 +243,22 @@ func extractLintCacheArchive(r io.Reader, destDir, runningWorkdir string) error 
 		return err
 	}
 
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("extract lint cache: %w", err)
-		}
-
-		name := hdr.Name
-		if !strings.HasPrefix(name, "cache/") {
-			continue
-		}
-		rel := strings.TrimPrefix(name, "cache/")
-		if rel == "" || rel == "." {
-			continue
-		}
-
-		target := filepath.Join(destDir, filepath.FromSlash(rel))
-		// safety: reject path-traversal entries
-		if !strings.HasPrefix(target+string(os.PathSeparator), destDir+string(os.PathSeparator)) {
-			continue
-		}
-
-		if hdr.Typeflag == tar.TypeDir {
-			if err := os.MkdirAll(target, fs.FileMode(hdr.Mode)&0o777|0o700); err != nil {
-				return err
-			}
-			continue
-		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue
-		}
-
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return err
-		}
-		tmp := target + ".tmp"
-		f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fs.FileMode(hdr.Mode)&0o777|0o600)
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(f, tr)
-		closeErr := f.Close()
-		if copyErr != nil {
-			_ = os.Remove(tmp)
-			return fmt.Errorf("extract lint cache: write %s: %w", rel, copyErr)
-		}
-		if closeErr != nil {
-			_ = os.Remove(tmp)
-			return fmt.Errorf("extract lint cache: close %s: %w", rel, closeErr)
-		}
-		if err := os.Rename(tmp, target); err != nil {
-			_ = os.Remove(tmp)
-			return err
-		}
+	if err := extractTarInRoot(tr, destDir, tarExtractPolicy{
+		minDirPerm:  0o700,
+		minFilePerm: 0o600,
+		rename:      lintCacheEntryName,
+	}); err != nil {
+		return fmt.Errorf("extract lint cache: %w", err)
 	}
 	return nil
+}
+
+func lintCacheEntryName(name string) (string, bool) {
+	rel, ok := strings.CutPrefix(name, "cache/")
+	if !ok || rel == "" {
+		return "", false
+	}
+	return rel, true
 }
 
 func isDirEmpty(dir string) (bool, error) {

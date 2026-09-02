@@ -211,6 +211,98 @@ func TestStageConsumedArtifacts_RejectsEscapingManifestPath(t *testing.T) {
 	}
 }
 
+func publishManifestEntry(t *testing.T, art storage.ArtifactStore, producerID, path string, mode uint32, body []byte) stubNodeReader {
+	t.Helper()
+	ctx := context.Background()
+	const blobDigest = "2222222222222222222222222222222222222222222222222222222222222222"
+	if err := putBytes(ctx, art, artifactBlobKey(blobDigest), body); err != nil {
+		t.Fatalf("put blob: %v", err)
+	}
+	mb, err := json.Marshal(artifactManifest{Entries: []artifactEntry{
+		{Path: path, Digest: blobDigest, Mode: mode},
+	}})
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	const manifestDigest = "3333333333333333333333333333333333333333333333333333333333333333"
+	if err := putBytes(ctx, art, artifactManifestKey(manifestDigest), mb); err != nil {
+		t.Fatalf("put manifest: %v", err)
+	}
+	return stubNodeReader{nodes: map[string]*store.Node{
+		producerID: {NodeID: producerID, ArtifactManifest: manifestDigest},
+	}}
+}
+
+func TestStageConsumedArtifacts_RefusesSymlinkedDestination(t *testing.T) {
+	art := newTestArtifactStore(t)
+	outer := t.TempDir()
+	consumerWS := filepath.Join(outer, "ws")
+	if err := os.MkdirAll(consumerWS, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(outer, "outside")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "a.txt")
+	if err := os.WriteFile(victim, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(consumerWS, "dist")); err != nil {
+		t.Fatal(err)
+	}
+	reader := publishManifestEntry(t, art, "build", "dist/a.txt", 0o644, []byte("pwned"))
+
+	if _, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
+		[]sparkwing.ConsumeEdge{{Producer: "build"}}); err == nil {
+		t.Fatal("expected an error staging through a symlink out of the workspace")
+	}
+	got, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "original" {
+		t.Fatalf("file outside the workspace was overwritten: %q", got)
+	}
+}
+
+func TestStageConsumedArtifacts_MasksManifestMode(t *testing.T) {
+	art := newTestArtifactStore(t)
+	reader := publishManifestEntry(t, art, "build", "bin/run.sh",
+		uint32(os.ModeSetuid|os.ModeSetgid|0o755), []byte("#!/bin/sh\n"))
+	consumerWS := t.TempDir()
+
+	if _, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
+		[]sparkwing.ConsumeEdge{{Producer: "build"}}); err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(consumerWS, "bin", "run.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&^os.FileMode(0o777) != 0 {
+		t.Fatalf("staged mode kept bits outside 0o777: %v", info.Mode())
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("mode = %o, want 755", info.Mode().Perm())
+	}
+}
+
+func TestStageConsumedArtifacts_RejectsOversizedBlob(t *testing.T) {
+	orig := maxStagedArtifactBytes
+	maxStagedArtifactBytes = 1 << 10
+	defer func() { maxStagedArtifactBytes = orig }()
+
+	art := newTestArtifactStore(t)
+	reader := publishManifestEntry(t, art, "build", "big.bin", 0o644, make([]byte, 64<<10))
+	consumerWS := t.TempDir()
+
+	if _, err := stageConsumedArtifacts(context.Background(), art, reader, "run-1", consumerWS,
+		[]sparkwing.ConsumeEdge{{Producer: "build"}}); err == nil {
+		t.Fatal("oversized blob staged past the cap")
+	}
+}
+
 func TestResolveArtifactStoreFromEnv_OpensURL(t *testing.T) {
 	t.Setenv(ArtifactStoreEnvVar, "fs://"+t.TempDir())
 	s, err := resolveArtifactStoreFromEnv(context.Background())

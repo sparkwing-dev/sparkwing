@@ -24,6 +24,16 @@
 // failure path for auth rejections (preserves the missing scope so
 // callers can prompt the user precisely).
 //
+// # Resource bounds
+//
+// [Limits] caps stored bytes per node and per run, holds the free-space
+// floor below which appends are rejected, sets the retention the
+// sweeper enforces, and bounds one search request. [DefaultLimits]
+// carries the shipped values; [Server.WithLimits] and
+// [ServeOptions] replace them. A node or run that reaches its cap gets
+// [TruncationMarker] appended once, and a search stopped by a budget
+// reports Truncated on its [SearchResponse].
+//
 // # Storage shape (v1)
 //
 // One file per (run_id, node_id) under `root/runs/<run_id>/<node_id>.log`,

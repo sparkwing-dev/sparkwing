@@ -23,6 +23,22 @@ func (c *Client) Read(ctx context.Context, runID, nodeID string) ([]byte, error)
 func (c *Client) ReadFiltered(ctx context.Context, runID, nodeID string, f ReadFilter) ([]byte, error)
 func (c *Client) ReadRun(ctx context.Context, runID string) ([]byte, error)
 func (c *Client) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
+func DefaultLimits() Limits
+type Limits struct {
+	MaxNodeBytes int64
+
+	MaxRunBytes int64
+
+	MinFreeBytes uint64
+
+	Retention time.Duration
+
+	SweepInterval time.Duration
+
+	SearchMaxBytes int64
+
+	SearchTimeout time.Duration
+}
 func New(root string, logger *slog.Logger) (*Server, error)
 func NewClient(baseURL string, httpClient *http.Client) *Client
 func NewClientWithToken(baseURL string, httpClient *http.Client, token string) *Client
@@ -34,9 +50,10 @@ type ReadFilter struct {
 	Grep  string
 }
 type SearchResponse struct {
-	Query   string
-	Results []SearchResult
-	Total   int
+	Query     string
+	Results   []SearchResult
+	Total     int
+	Truncated bool
 }
 type SearchResult struct {
 	RunID   string
@@ -45,12 +62,30 @@ type SearchResult struct {
 	Content string
 }
 func Serve(ctx context.Context, root, addr string, logger *slog.Logger) error
+type ServeOptions struct {
+	Root string
+
+	Addr string
+
+	ControllerURL string
+
+	Private bool
+
+	Logger *slog.Logger
+
+	Limits *Limits
+}
 func ServePrivateWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error
+func ServeWith(ctx context.Context, opts ServeOptions) error
 func ServeWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error
 type Server struct {
 }
 func (s *Server) Handler() http.Handler
+func (s *Server) StartSweeper(ctx context.Context)
+func (s *Server) SweepOnce(now time.Time) (int, error)
 func (s *Server) WithControllerAuth(controllerURL string, cacheTTL time.Duration) *Server
+func (s *Server) WithLimits(l Limits) *Server
+const TruncationMarker = "[sparkwing-logs] truncated: byte cap reached\n"
 
 # methods on un-declared receiver types (likely a bug)
 func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error)
