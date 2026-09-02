@@ -23,7 +23,7 @@ func (PreCommit) ShortHelp() string {
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports) over the staged Go files, or over the Go files changed since origin/main when nothing is staged, and checks on the staged change: no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters step names the mode it ran in, and the lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -218,10 +218,11 @@ func runGofmt(ctx context.Context) error {
 }
 
 func runFormatters(ctx context.Context) error {
-	files, err := stagedGoFiles(ctx)
+	files, scope, err := formatterScope(ctx)
 	if err != nil {
 		return err
 	}
+	sparkwing.Info(ctx, "formatters: %s", scope)
 	if len(files) == 0 {
 		return nil
 	}
@@ -229,7 +230,6 @@ func runFormatters(ctx context.Context) error {
 	for _, f := range files {
 		quoted = append(quoted, fmt.Sprintf("%q", f))
 	}
-	sparkwing.Info(ctx, "formatters: checking %d staged Go file(s)", len(files))
 
 	_, runErr := sparkwing.Bash(ctx, "golangci-lint fmt --diff "+strings.Join(quoted, " ")).Capture()
 	if runErr == nil {
@@ -237,10 +237,52 @@ func runFormatters(ctx context.Context) error {
 	}
 	var execErr *sparkwing.ExecError
 	if errors.As(runErr, &execErr) && strings.TrimSpace(execErr.Stdout) != "" {
-		return fmt.Errorf("staged files do not match the configured formatters; run `golangci-lint fmt %s`:\n%s",
-			strings.Join(files, " "), strings.TrimSpace(execErr.Stdout))
+		return fmt.Errorf("%s do not match the configured formatters; run `golangci-lint fmt %s`:\n%s",
+			scope, strings.Join(files, " "), strings.TrimSpace(execErr.Stdout))
 	}
 	return fmt.Errorf("golangci-lint fmt: %w", runErr)
+}
+
+func formatterScope(ctx context.Context) ([]string, string, error) {
+	staged, err := stagedGoFiles(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(staged) > 0 {
+		return staged, fmt.Sprintf("%d staged Go file(s)", len(staged)), nil
+	}
+	base, err := resolveFormatterBase(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	changed, err := goFilesChangedSince(ctx, base)
+	if err != nil {
+		return nil, "", err
+	}
+	return changed, fmt.Sprintf("nothing staged, so %d Go file(s) changed since %s (%s)",
+		len(changed), gateBaselineRef, base), nil
+}
+
+func resolveFormatterBase(ctx context.Context) (string, error) {
+	sha, err := sparkwing.Bash(ctx, "git merge-base "+gateBaselineRef+" HEAD").String()
+	sha = strings.TrimSpace(sha)
+	if err != nil || sha == "" {
+		return "", fmt.Errorf("formatters: could not run -- nothing is staged, so the step formats "+
+			"the change since %s, and this checkout cannot resolve it. Run `%s`",
+			gateBaselineRef, fetchBaselineHint())
+	}
+	if len(sha) > 12 {
+		sha = sha[:12]
+	}
+	return sha, nil
+}
+
+func goFilesChangedSince(ctx context.Context, base string) ([]string, error) {
+	all, err := sparkwing.Bash(ctx, "git diff --name-only --diff-filter=ACMR "+base).Lines()
+	if err != nil {
+		return nil, fmt.Errorf("list the change since %s: %w", base, err)
+	}
+	return existingGoFiles(all), nil
 }
 
 func stagedGoFiles(ctx context.Context) ([]string, error) {
@@ -248,6 +290,10 @@ func stagedGoFiles(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list the staged change: %w", err)
 	}
+	return existingGoFiles(all), nil
+}
+
+func existingGoFiles(all []string) []string {
 	out := make([]string, 0, len(all))
 	for _, f := range all {
 		if !strings.HasSuffix(f, ".go") || strings.Contains(f, "node_modules/") {
@@ -258,7 +304,7 @@ func stagedGoFiles(ctx context.Context) ([]string, error) {
 		}
 		out = append(out, f)
 	}
-	return out, nil
+	return out
 }
 
 func checkDocsMirror(ctx context.Context) error {

@@ -650,6 +650,42 @@ func TestFormattersRefuseDriftTheStagedChangeIntroduces(t *testing.T) {
 	}
 }
 
+func TestFormattersCheckTheRangeWhenNothingIsStaged(t *testing.T) {
+	root := gateFixtureRepo(t)
+	ctx := context.Background()
+	requireGolangciLint(t)
+	withFormattersConfig(t, root)
+	gitCommitAll(t, root, "clean base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+	writeGoFile(t, filepath.Join(root, "internal", "drifted.go"), gofumptDrift)
+	gitCommitAll(t, root, "drift committed without a gate run")
+
+	err := runFormatters(ctx)
+	if err == nil {
+		t.Fatal("the formatters step passed committed drift that the hosted gate would reject")
+	}
+	if !strings.Contains(err.Error(), "drifted.go") {
+		t.Errorf("the failure does not name the file to fix: %v", err)
+	}
+	if !strings.Contains(err.Error(), "nothing staged") {
+		t.Errorf("the failure does not name the mode the step ran in: %v", err)
+	}
+}
+
+func TestFormattersRefuseToJudgeWithoutTheBaseline(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+
+	err := runFormatters(context.Background())
+	if err == nil {
+		t.Fatal("the formatters step reported success without resolving a base")
+	}
+	if !strings.Contains(err.Error(), "origin/main") || !strings.Contains(err.Error(), "git fetch") {
+		t.Errorf("the failure does not name the ref to fetch: %v", err)
+	}
+}
+
 func TestStagedGoFilesSkipsNodeModules(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")

@@ -41,7 +41,7 @@ func lintSlotCost() int {
 	return cost
 }
 
-const lintBaselineRef = "origin/main"
+const gateBaselineRef = "origin/main"
 
 func lintCommandFor(holdsBudget bool) string {
 	flag := "--allow-serial-runners"
@@ -149,22 +149,22 @@ func resolveLintBaseline(ctx context.Context) (string, error) {
 	sha, err := sparkwing.Bash(ctx,
 		`git -C "$SPARKWING_WORKDIR" rev-parse --verify --quiet "$LINT_BASELINE_REF^{commit}"`,
 	).Env("SPARKWING_WORKDIR", sparkwing.Path()).
-		Env("LINT_BASELINE_REF", lintBaselineRef).
+		Env("LINT_BASELINE_REF", gateBaselineRef).
 		String()
 	sha = strings.TrimSpace(sha)
 	if err != nil || sha == "" {
 		return "", fmt.Errorf("golangci-lint: could not run -- .golangci.yml baselines findings against "+
 			"%s and this checkout cannot resolve it, so the linter would report every standing "+
-			"finding in the tree against this change. Run `%s`", lintBaselineRef, fetchBaselineHint())
+			"finding in the tree against this change. Run `%s`", gateBaselineRef, fetchBaselineHint())
 	}
 	if len(sha) > 12 {
 		sha = sha[:12]
 	}
-	return fmt.Sprintf("baseline %s at %s", lintBaselineRef, sha), nil
+	return fmt.Sprintf("baseline %s at %s", gateBaselineRef, sha), nil
 }
 
 func fetchBaselineHint() string {
-	remote, branch, ok := strings.Cut(lintBaselineRef, "/")
+	remote, branch, ok := strings.Cut(gateBaselineRef, "/")
 	if !ok || remote == "" || branch == "" {
 		return "git fetch --all"
 	}

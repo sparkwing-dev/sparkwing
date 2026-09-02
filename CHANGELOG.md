@@ -49,6 +49,15 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **ci:** The pre-commit formatters step judges the whole change, not only what
+  is staged. It checks the staged Go files when something is staged and the Go
+  files changed since `origin/main` otherwise, so a clean worktree no longer
+  passes a check the hosted gate fails on the same commits. The step log names
+  which mode it ran in, and the step refuses to run when the checkout cannot
+  resolve `origin/main`.
+
 ### Security
 
 - **store (Breaking):** Run-store schema 26 makes the `idx_tokens_prefix` index
