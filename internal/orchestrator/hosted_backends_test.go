@@ -2,11 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
+
+	storagefs "github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
@@ -238,13 +244,12 @@ func TestHostedRun_BrokenDaemonStoreTakesTheDirectPath(t *testing.T) {
 		t.Fatalf("ensure root: %v", err)
 	}
 
-	// safety: the daemon holds a store it cannot open while this run's own
-	// store path is fine, which is the skew the fallback exists for: the
-	// process that can still open the file is the run.
+	// safety: the daemon holds a store that records a requirement its binary
+	// does not understand, which is the skew the fallback exists for, while
+	// this run's own store is a file it opens fine. Two homes because one
+	// process cannot be both binaries at once.
 	brokenHome := wingdTestHome(t)
-	if err := os.MkdirAll(PathsAt(brokenHome).StateDB(), 0o755); err != nil {
-		t.Fatalf("break the daemon's store: %v", err)
-	}
+	requireUnknownFeature(t, PathsAt(brokenHome).StateDB())
 	brokenRuns, err := NewHeldRunStore(brokenHome)
 	if err != nil {
 		t.Fatalf("held run store: %v", err)
@@ -281,9 +286,14 @@ func TestHostedRun_BrokenDaemonStoreTakesTheDirectPath(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "runs store") {
-		t.Fatalf("the fallback line does not name the daemon's reason: %q", joined)
+	if len(lines) != 1 {
+		t.Fatalf("the run printed %d selection line(s), want exactly 1: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "a-feature-from-the-future") {
+		t.Fatalf("the fallback line does not name the daemon's store error: %q", lines[0])
+	}
+	if !strings.Contains(lines[0], paths.StateDB()) {
+		t.Fatalf("the fallback line does not name the store this run opened: %q", lines[0])
 	}
 }
 
@@ -520,5 +530,66 @@ func TestWingdAPI_UnknownRouteAnswersUnsupportedWithNoStore(t *testing.T) {
 	}
 	if body.Error != controller.UnsupportedRouteError || body.Route == "" {
 		t.Fatalf("body = %+v, want the unsupported-route answer", body)
+	}
+}
+
+// safety: stamps a schema requirement no build knows, so opening the store at
+// path fails the way an older binary meeting a newer store does.
+func requireUnknownFeature(t *testing.T, path string) {
+	t.Helper()
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close %s: %v", path, err)
+	}
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("reopen %s: %v", path, err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(
+		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES (?, ?, ?)`,
+		"a-feature-from-the-future", time.Now().UnixNano(), "v99.0.0",
+	); err != nil {
+		t.Fatalf("stamp the requirement: %v", err)
+	}
+	if _, err := store.Open(path); err == nil {
+		t.Fatal("the store still opens after an unknown requirement was stamped")
+	}
+}
+
+func TestWingdAPI_ArtifactRouteFollowsTheConfiguredStore(t *testing.T) {
+	probe := func(api *wingdAPI, path string) int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, apiBaseURL+path, nil)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		api.route(rec, req)
+		return rec.Code
+	}
+
+	home := wingdTestHome(t)
+	runs, err := NewHeldRunStore(home)
+	if err != nil {
+		t.Fatalf("held run store: %v", err)
+	}
+	t.Cleanup(func() { _ = runs.Close() })
+
+	art, err := storagefs.NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("artifact store: %v", err)
+	}
+	withStore := newWingdAPI(runs, art, nil)
+	if got := probe(withStore, "/api/v1/artifacts/some-key"); got == http.StatusNotFound {
+		t.Fatal("a daemon that configured an artifact store reported its artifact route unsupported")
+	}
+
+	without := newWingdAPI(runs, nil, nil)
+	if got := probe(without, "/api/v1/artifacts/some-key"); got != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 from a daemon with no artifact store", got)
 	}
 }
