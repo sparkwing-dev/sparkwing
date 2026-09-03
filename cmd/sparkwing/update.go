@@ -233,57 +233,7 @@ type installedRelease struct {
 }
 
 func downloadAndInstall(version, currentBin string) (installedRelease, error) {
-	suffix := runtime.GOOS + "-" + runtime.GOARCH
-	ext := ""
-	if runtime.GOOS == "windows" {
-		ext = ".exe"
-	}
-	asset := "sparkwing-" + suffix + ext
-	base := updateBaseURL + "/" + version
-
-	tmpDir, err := os.MkdirTemp("", "sparkwing-update-")
-	if err != nil {
-		return installedRelease{}, fmt.Errorf("mkdir tmp: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
-
-	binPath := filepath.Join(tmpDir, asset)
-	if err := downloadFile(base+"/"+asset, binPath, maxAssetBytes); err != nil {
-		return installedRelease{}, fmt.Errorf("download %s: %w", asset, err)
-	}
-	assetSigPath := binPath + ".sig"
-	if err := downloadFile(base+"/"+asset+".sig", assetSigPath, maxMetadataBytes); err != nil {
-		return installedRelease{}, fmt.Errorf("download %s.sig: %w", asset, err)
-	}
-	sumsPath := filepath.Join(tmpDir, "SHA256SUMS")
-	if err := downloadFile(base+"/SHA256SUMS", sumsPath, maxMetadataBytes); err != nil {
-		return installedRelease{}, fmt.Errorf("download SHA256SUMS: %w", err)
-	}
-	sumsSigPath := sumsPath + ".sig"
-	if err := downloadFile(base+"/SHA256SUMS.sig", sumsSigPath, maxMetadataBytes); err != nil {
-		return installedRelease{}, fmt.Errorf("download SHA256SUMS.sig: %w", err)
-	}
-	assetBody, err := os.ReadFile(binPath)
-	if err != nil {
-		return installedRelease{}, err
-	}
-	assetSig, err := os.ReadFile(assetSigPath)
-	if err != nil {
-		return installedRelease{}, err
-	}
-	manifest, err := os.ReadFile(sumsPath)
-	if err != nil {
-		return installedRelease{}, err
-	}
-	manifestSig, err := os.ReadFile(sumsSigPath)
-	if err != nil {
-		return installedRelease{}, err
-	}
-	publicKeys, err := releasePublicKeys()
-	if err != nil {
-		return installedRelease{}, err
-	}
-	verified, err := verifyReleaseAssetWithTrustSet(publicKeys, manifest, manifestSig, asset, assetBody, assetSig)
+	verified, err := fetchVerifiedRelease(version)
 	if err != nil {
 		return installedRelease{}, err
 	}
@@ -291,6 +241,72 @@ func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 		return installedRelease{}, err
 	}
 	return installedRelease{path: currentBin, version: version, digest: verified.digest}, nil
+}
+
+// releaseAssetName is the release asset this OS/arch installs.
+func releaseAssetName() string {
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+	return "sparkwing-" + runtime.GOOS + "-" + runtime.GOARCH + ext
+}
+
+func releaseBaseURL(version string) string { return updateBaseURL + "/" + version }
+
+// fetchVerifiedRelease downloads a release asset and its signatures and returns
+// the asset only after the Ed25519 signatures and the manifest digest check out.
+func fetchVerifiedRelease(version string) (verifiedReleaseAsset, error) {
+	asset := releaseAssetName()
+	base := releaseBaseURL(version)
+
+	tmpDir, err := os.MkdirTemp("", "sparkwing-update-")
+	if err != nil {
+		return verifiedReleaseAsset{}, fmt.Errorf("mkdir tmp: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	binPath := filepath.Join(tmpDir, asset)
+	if err := downloadFile(base+"/"+asset, binPath, maxAssetBytes); err != nil {
+		return verifiedReleaseAsset{}, fmt.Errorf("download %s: %w", asset, err)
+	}
+	assetSigPath := binPath + ".sig"
+	if err := downloadFile(base+"/"+asset+".sig", assetSigPath, maxMetadataBytes); err != nil {
+		return verifiedReleaseAsset{}, fmt.Errorf("download %s.sig: %w", asset, err)
+	}
+	sumsPath := filepath.Join(tmpDir, "SHA256SUMS")
+	if err := downloadFile(base+"/SHA256SUMS", sumsPath, maxMetadataBytes); err != nil {
+		return verifiedReleaseAsset{}, fmt.Errorf("download SHA256SUMS: %w", err)
+	}
+	sumsSigPath := sumsPath + ".sig"
+	if err := downloadFile(base+"/SHA256SUMS.sig", sumsSigPath, maxMetadataBytes); err != nil {
+		return verifiedReleaseAsset{}, fmt.Errorf("download SHA256SUMS.sig: %w", err)
+	}
+	assetBody, err := os.ReadFile(binPath)
+	if err != nil {
+		return verifiedReleaseAsset{}, err
+	}
+	assetSig, err := os.ReadFile(assetSigPath)
+	if err != nil {
+		return verifiedReleaseAsset{}, err
+	}
+	manifest, err := os.ReadFile(sumsPath)
+	if err != nil {
+		return verifiedReleaseAsset{}, err
+	}
+	manifestSig, err := os.ReadFile(sumsSigPath)
+	if err != nil {
+		return verifiedReleaseAsset{}, err
+	}
+	publicKeys, err := releasePublicKeys()
+	if err != nil {
+		return verifiedReleaseAsset{}, err
+	}
+	verified, err := verifyReleaseAssetWithTrustSet(publicKeys, manifest, manifestSig, asset, assetBody, assetSig)
+	if err != nil {
+		return verifiedReleaseAsset{}, err
+	}
+	return verified, nil
 }
 
 func cleanupStaleUpdate() {

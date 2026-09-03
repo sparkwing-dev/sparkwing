@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -41,6 +42,20 @@ func PathsAt(root string) Paths { return Paths{Root: root} }
 func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 
 func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
+
+func (p Paths) ToolchainsDir() string { return filepath.Join(p.Root, "toolchains") }
+
+func (p Paths) ToolchainDir(version string) string {
+	return filepath.Join(p.ToolchainsDir(), version)
+}
+
+func (p Paths) ToolchainBinary(version string) string {
+	name := "sparkwing"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(p.ToolchainDir(version), name)
+}
 
 func (p Paths) VersionStampDir() string { return filepath.Join(p.Root, "last-version.d") }
 
