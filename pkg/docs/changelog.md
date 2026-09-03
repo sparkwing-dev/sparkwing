@@ -311,6 +311,15 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing runs logs --profile <name>` now reads the run and its
+  nodes from that profile's state store. It listed nodes from the default local
+  `state.db` instead, so a run held in a Postgres profile -- or a sqlite profile
+  at a non-default path -- printed nothing, or failed with `node "x" not found
+  in run ...` under `--node`. A profile that declares its own logs surface now
+  reads log bodies through that backend rather than the local run directories,
+  and `--tree`, which needs local state and on-disk logs both, says so when it
+  cannot run.
+
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
