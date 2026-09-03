@@ -59,12 +59,24 @@ concurrent runs in a browser without needing any remote service.
 
 The run does not open that store. It sends its run, node, event, and
 concurrency calls to the admission daemon over the daemon's `api.sock`,
-and hands each node subprocess the same socket, so the daemon's process is
-the only one on the machine holding the file open. That is what keeps the
-store's schema out of a pipeline binary's contract. A run that finds no
-daemon serving the socket opens the store itself instead, which is why a
-machine with no sparkwing installed still runs pipelines; it says which
-way it went on stderr when it takes the direct path.
+and hands each node subprocess the same socket; the child runs it
+dispatches and any node replayed from it choose the same way. No process
+in a hosted run holds the file open, so the store's schema is out of a
+pipeline binary's contract. The CLI verbs that read the file -- `sparkwing
+runs`, `sparkwing jobs`, `sparkwing doctor`, the dashboard -- are the
+installed build or a peer of it and still open it directly.
+
+A run that finds no daemon serving the socket opens the store itself
+instead, which is why a machine with no sparkwing installed still runs
+pipelines. It says so on stderr once, and only for a reason admission
+does not already report.
+
+The daemon is restartable under a run. A state write the daemon can be
+shown not to have applied -- one it answered `503`, or one on a
+connection it never accepted -- is retried for up to 20 seconds, which
+covers a supervisor restart and the successor rebinding the socket. A
+write whose fate the client cannot establish is not repeated, and a
+daemon still unreachable past that window fails the run naming it.
 
 Local pipelines share a small admission daemon named wingd. It starts on
 demand and normally needs no operator attention. `sparkwing daemon status`

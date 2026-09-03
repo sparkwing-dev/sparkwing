@@ -10,7 +10,7 @@ bash bin/gen-config-docs.sh
 bash bin/gen-sdk-docs.sh
 bash bin/gen-api-docs.sh
 bash bin/regen-api-snapshot.sh
-go test ./pkg/wingwire -run TestWireShapes -update >/dev/null
+GOWORK=off go test ./pkg/wingwire -run TestWireShapes -update >/dev/null
 
 # helm packs source file mtimes into the tarball, so re-vendoring a
 # chart that already matches its source rewrites bytes that carry no change.

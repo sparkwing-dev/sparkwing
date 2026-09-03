@@ -97,7 +97,10 @@ code change to unlock.
   `error: <reason>` without ever creating the file, so a machine that runs
   only object-store profiles probes healthy. With no `Authorization` header
   the same-uid peer is an admin principal, the authority it already had by
-  opening the store file directly. No client uses the socket yet.
+  opening the store file directly. A route this build does not register is
+  answered as unsupported before the store is consulted, so a client can tell a
+  route the daemon predates from a store that is momentarily unreadable. No
+  client uses the socket yet.
 
 - **wingd:** The daemon's wire surface is pinned by a snapshot, and the
   daemon now answers for what it cannot serve.
@@ -162,10 +165,16 @@ code change to unlock.
   artifacts are unchanged, still this machine's own files. A run that finds no
   daemon, a daemon that serves no API socket, or a socket that does not answer
   keeps today's path -- its own store handle plus an in-process loopback
-  controller -- and says on stderr which way it went and why. Once the run's
-  rows exist on the daemon it does not switch back: a daemon that cannot serve
-  its store answers 503, the controller client retries, and a store that stays
-  unusable fails the run naming the daemon rather than hanging.
+  controller -- and says so on stderr once, only for a reason admission does
+  not already report. A daemon whose own store handle is broken is one of those
+  reasons: the run opens the file that daemon could not, rather than binding to
+  it. The child runs a hosted run dispatches, and any node replayed from one,
+  choose the same way. Once the run's rows exist on the daemon it does not
+  switch back: a write the daemon can be shown not to have applied, because it
+  answered 503 or never accepted the connection, is retried for up to 20
+  seconds so a daemon restart does not fail the run, while a write whose fate
+  cannot be established is not repeated; past that window the run fails naming
+  the daemon rather than hanging.
 
 - **store:** The runs store opens by requirements set rather than by exact
   schema version. The database records the features its schema relies on in a

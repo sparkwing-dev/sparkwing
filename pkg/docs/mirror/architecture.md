@@ -220,13 +220,16 @@ These are set on every runner pod:
 
 A local run executes each node as its own process, so the same
 variables above are set on it. A run whose state lives behind the
-admission daemon gets `SPARKWING_API_SOCKET` and no
-`SPARKWING_AGENT_TOKEN`: the node dials that unix socket and the daemon
-takes its peer uid as the principal. A run that opens the store itself
-gets `SPARKWING_CONTROLLER_URL` pointing at a loopback controller the
-dispatcher mounts for the run, plus that controller's token. More
-variables describe the process boundary itself. Sparkwing sets all of
-them; they are not knobs.
+admission daemon also gets `SPARKWING_API_SOCKET` and no
+`SPARKWING_AGENT_TOKEN`: the node sends its state and concurrency calls
+down that unix socket and the daemon takes its peer uid as the
+principal. `SPARKWING_CONTROLLER_URL` is set either way, but on that
+path it is a placeholder host the socket transport ignores, so a step
+that dials it reaches nothing. A run that opens the store itself points
+that variable at a loopback controller the dispatcher mounts for the
+run and passes that controller's token. More variables describe the
+process boundary itself. Sparkwing sets all of them; they are not
+knobs.
 
 | Variable | Purpose |
 |----------|---------|
