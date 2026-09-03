@@ -477,7 +477,14 @@ func (d *Daemon) serveConn(c *conn) {
 	for {
 		msg, err := c.readMessage()
 		if err != nil {
-			return
+			var unknown *wingwire.UnknownTypeError
+			if !errors.As(err, &unknown) {
+				return
+			}
+			if err := c.send(&wingwire.Unsupported{Type: string(unknown.Type)}); err != nil {
+				return
+			}
+			continue
 		}
 		if d.dispatch(c, msg) {
 			return
@@ -514,7 +521,7 @@ func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 		d.handleDrain(c, m)
 		return true
 	default:
-		return true
+		return c.send(&wingwire.Unsupported{Type: string(wingwire.TypeOf(msg))}) != nil
 	}
 	return false
 }

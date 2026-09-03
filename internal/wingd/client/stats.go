@@ -34,6 +34,9 @@ func (cl *Client) readResetStats() (terminal, transient error) {
 	if err != nil {
 		return nil, err
 	}
+	if refusal := cl.lacksOperation(msg); refusal != nil {
+		return refusal, nil
+	}
 	if _, ok := msg.(*wingwire.StatsResetAck); !ok {
 		return fmt.Errorf("wingd/client: expected stats_reset_ack, got %T", msg), nil
 	}
