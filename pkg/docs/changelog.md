@@ -148,6 +148,9 @@ code change to unlock.
   require a live node claim. Because the compiled pipeline binary interprets
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
+- **s3state:** `WithReadCacheTTL` bounds how stale a read of a run this process
+  does not write may be, `DefaultCloseDrainTimeout` bounds the drain
+  `Backend.Close` attempts, and `DefaultOutboxMaxRows` caps the outbox queue.
 
 ### Changed
 
@@ -325,6 +328,35 @@ code change to unlock.
   path was right. The adapter now drops a leading `bin/`, because the route is
   that namespace, and the route accepts the sidecar key. `fs` and `s3` caches
   were never affected; they treat a key as opaque.
+- **s3state:** A failed child-trigger write no longer strands the spawn. The
+  trigger record is written before the `PutIfAbsent` index that names it, so a
+  transient failure between the two leaves nothing behind and the next attempt
+  mints a usable trigger, where before the index pointed at a record that never
+  existed and every retry returned that same phantom id. A caller that loses
+  the race for a spawn point drops the record it minted, so a spawn point still
+  ends with exactly one trigger.
+- **s3state:** An object-store outage no longer piles up redundant copies of a
+  run's state. Staging a write now replaces whatever was queued for the same
+  key, because each body is that key's whole blob and only the newest is worth
+  replaying, and the queue is capped at `DefaultOutboxMaxRows` (1024) distinct
+  keys. An hour-long outage used to leave thousands of rows, each holding the
+  entire run state, and replay them all in order before the newest one landed.
+- **s3state:** A run whose state reached only the local outbox no longer reports
+  success. `FinishRun` returns an error when the terminal state is queued on
+  this machine's disk rather than in the object store, `Close` returns the
+  errors from its final flush and gives the outbox a bounded chance to drain
+  first, and the outbox refuses to queue a kind it cannot replay instead of
+  deleting it unsent on the next drain. On an ephemeral CI runner the old
+  behaviour exited 0 with the run's only copy on a disk about to disappear.
+- **s3state:** A run another process writes is no longer read once and cached
+  forever. In S3-only shared state, the first read of a run id was kept for the
+  life of the process, including a read that found nothing, so a pipeline
+  awaiting a child it spawned polled a "not found" that could never change and
+  waited until something outside it gave up. Reads of a run this process does
+  not write now expire after `DefaultReadCacheTTL` (one second, tunable with
+  `WithReadCacheTTL`), a read that found no run is not cached at all, and
+  `GetLatestRun` reads each run envelope without retaining it, so scanning a
+  bucket no longer pins every run in it for the life of the process.
 
 ### Security
 
