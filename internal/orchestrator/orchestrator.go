@@ -389,7 +389,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		var outcome admitOutcome
 		var admitErr error
 		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, opts.Pipeline, runID, plan, opts.MaxParallel, cancelRun)
-		if admitErr != nil && opts.Admission.unhostedOutcome(admitErr) {
+		if admitErr != nil && opts.Admission.unhostedOutcome(admitErr, opts.standaloneReason) {
 			opts.Admission = nil
 			lease, outcome, admitErr = nil, admitProceed, nil
 		}

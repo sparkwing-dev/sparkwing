@@ -111,7 +111,7 @@ func TestUnhostedOutcome_DegradesOnEveryStandaloneSentinel(t *testing.T) {
 	}
 	for _, err := range degrading {
 		la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-		if !la.unhostedOutcome(err) {
+		if !la.unhostedOutcome(err, "") {
 			t.Errorf("unhostedOutcome(%v) refused a run the degradation rule covers", err)
 		}
 	}
@@ -128,17 +128,17 @@ func TestUnhostedOutcome_KeepsEveryOtherFailure(t *testing.T) {
 	}
 	for _, err := range other {
 		la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-		if la.unhostedOutcome(err) {
+		if la.unhostedOutcome(err, "") {
 			t.Errorf("unhostedOutcome(%v) degraded a failure that is not a version gap", err)
 		}
 	}
 
 	installed := &LocalAdmission{}
-	if installed.unhostedOutcome(fmt.Errorf("x: %w", wingdclient.ErrNoDaemonHost)) {
+	if installed.unhostedOutcome(fmt.Errorf("x: %w", wingdclient.ErrNoDaemonHost), "") {
 		t.Error("an installed-binary admission degraded")
 	}
 	var nilLA *LocalAdmission
-	if nilLA.unhostedOutcome(wingdclient.ErrNoDaemonHost) {
+	if nilLA.unhostedOutcome(wingdclient.ErrNoDaemonHost, "") {
 		t.Error("nil admission degraded")
 	}
 }
@@ -149,9 +149,28 @@ func TestUnhostedOutcome_APinnedRunDegradesLikeAnyOther(t *testing.T) {
 	for _, pipeline := range []string{"host-plan-resources", "host-node-resources", "host-implicit"} {
 		buildHostTestPlan(t, pipeline)
 		la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-		if !la.unhostedOutcome(noHost) {
+		if !la.unhostedOutcome(noHost, "") {
 			t.Errorf("%s: a .Resources() pin refused a run on an empty box", pipeline)
 		}
+	}
+}
+
+func TestUnhostedOutcome_DegradesADaemonThatCannotReadItsOwnStore(t *testing.T) {
+	t.Setenv(AllowUnadmittedEnv, "")
+	refusal := fmt.Errorf("local admission: %w", &wingdclient.AdmissionError{
+		Policy: wingwire.PolicyFail,
+		Key:    terminalCheckKey,
+		Reason: "daemon v0.38.2 could not read the runs store: this state database uses a-feature-from-the-future",
+	})
+	la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
+	if !la.unhostedOutcome(refusal, standaloneDaemonOlder) {
+		t.Error("a run already standalone for the daemon's age was failed by that same daemon's store")
+	}
+	if la.unhostedOutcome(refusal, "") {
+		t.Error("a hosted run swallowed a terminal-check refusal")
+	}
+	if la.unhostedOutcome(refusal, standaloneNoDaemon) {
+		t.Error("a run standalone for a missing daemon swallowed a refusal no daemon could have sent")
 	}
 }
 
@@ -163,7 +182,7 @@ func TestUnhostedOutcome_SaysNothingItself(t *testing.T) {
 		Logf:           func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) },
 	}
 	for range 3 {
-		if !la.unhostedOutcome(fmt.Errorf("local admission: %w", wingdclient.ErrNoDaemonHost)) {
+		if !la.unhostedOutcome(fmt.Errorf("local admission: %w", wingdclient.ErrNoDaemonHost), "") {
 			t.Fatal("implicit run did not degrade")
 		}
 	}
