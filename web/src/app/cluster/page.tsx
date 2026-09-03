@@ -10,6 +10,13 @@ import {
   getServiceHealth,
 } from "@/lib/api";
 import { HeartbeatLabel } from "@/components/HeartbeatDot";
+import {
+  fleetLocation,
+  fleetSlotTotals,
+  fleetSlots,
+  formatFleetResources,
+  sortFleetAgents,
+} from "@/lib/fleet";
 
 const POLL_MS = 5000;
 
@@ -64,6 +71,8 @@ function typeBadge(kind: string): { label: string; cls: string } {
   switch (kind) {
     case "agent":
       return { label: "agent", cls: "bg-indigo-400/15 text-indigo-300" };
+    case "gateway":
+      return { label: "gateway", cls: "bg-cyan-400/15 text-cyan-300" };
     case "pool":
       return { label: "pool", cls: "bg-emerald-400/15 text-emerald-300" };
     case "local":
@@ -71,17 +80,6 @@ function typeBadge(kind: string): { label: string; cls: string } {
     default:
       return { label: kind || "?", cls: "bg-gray-400/15 text-gray-300" };
   }
-}
-
-function sortAgents(a: Agent, b: Agent): number {
-  if (a.status !== b.status) return a.status === "busy" ? -1 : 1;
-  if (a.type !== b.type) {
-    const order = ["agent", "pool", "local"];
-    const ai = order.indexOf(a.type);
-    const bi = order.indexOf(b.type);
-    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
-  }
-  return a.name.localeCompare(b.name);
 }
 
 export default function ClusterPage() {
@@ -113,18 +111,24 @@ export default function ClusterPage() {
     };
   }, [refresh]);
 
-  const sortedAgents = useMemo(() => [...agents].sort(sortAgents), [agents]);
+  const sortedAgents = useMemo(
+    () => [...agents].sort(sortFleetAgents),
+    [agents],
+  );
 
   const fleetTotals = useMemo(() => {
     const byType: Record<string, number> = {};
     let busy = 0;
-    let claims = 0;
     for (const a of agents) {
       byType[a.type] = (byType[a.type] || 0) + 1;
       if (a.status === "busy") busy++;
-      claims += a.active_jobs?.length || 0;
     }
-    return { total: agents.length, byType, busy, claims };
+    return {
+      total: agents.length,
+      byType,
+      busy,
+      activeSlots: fleetSlotTotals(agents).active,
+    };
   }, [agents]);
 
   const maxLatency = Math.max(1, ...services.map((s) => s.latency_ms));
@@ -140,7 +144,7 @@ export default function ClusterPage() {
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
       <div className="flex items-baseline justify-between mb-4">
-        <h1 className="text-xl font-bold">Cluster</h1>
+        <h1 className="text-xl font-bold">Fleet</h1>
         <span className="text-[10px] font-mono text-[var(--muted)]">
           refresh every {POLL_MS / 1000}s
         </span>
@@ -171,7 +175,7 @@ export default function ClusterPage() {
         )}
       </div>
 
-      <SectionHeader title="Fleet" hint="/api/v1/agents - last hour" />
+      <SectionHeader title="Fleet" hint="/api/v1/agents" />
       <FleetCards totals={fleetTotals} />
       <div className="space-y-2 mb-6">
         {!loaded ? (
@@ -242,8 +246,8 @@ function OverallCard({
       </div>
       <div className="grid grid-cols-3 gap-3">
         <Stat label="Services probed" value={services} />
-        <Stat label="Runners (1h)" value={fleet} />
-        <Stat label="Busy runners" value={busy} />
+        <Stat label="Executors" value={fleet} />
+        <Stat label="Busy executors" value={busy} />
       </div>
     </div>
   );
@@ -342,15 +346,15 @@ function FleetCards({
     total: number;
     byType: Record<string, number>;
     busy: number;
-    claims: number;
+    activeSlots: number | null;
   };
 }) {
-  const cards: Array<{ label: string; value: number }> = [
+  const cards: Array<{ label: string; value: number | null }> = [
     { label: "total", value: totals.total },
     { label: "busy", value: totals.busy },
-    { label: "in-flight claims", value: totals.claims },
+    { label: "active slots", value: totals.activeSlots },
   ];
-  const typeOrder = ["agent", "pool", "local"];
+  const typeOrder = ["agent", "gateway", "pool", "local"];
   for (const k of typeOrder) {
     if (totals.byType[k]) cards.push({ label: k, value: totals.byType[k] });
   }
@@ -365,7 +369,7 @@ function FleetCards({
             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
               {c.label}
             </div>
-            <div className="text-lg font-mono mt-0.5">{c.value}</div>
+            <div className="text-lg font-mono mt-0.5">{c.value ?? "—"}</div>
           </div>
         ))}
       </div>
@@ -377,9 +381,8 @@ function FleetEmpty() {
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 text-xs text-[var(--muted)] space-y-2">
       <p>
-        No runners have claimed a node in the last hour. The controller derives
-        fleet state from claim activity, so idle runners show up only when they
-        take work.
+        No executors are registered and no legacy runners have claimed a node
+        recently.
       </p>
       <p>
         Start a laptop agent:{" "}
@@ -406,7 +409,7 @@ function AgentRow({
   onToggle: () => void;
 }) {
   const badge = typeBadge(agent.type);
-  const active = agent.active_jobs?.length || 0;
+  const activeRuns = agent.active_jobs?.length || 0;
   const labels = Object.entries(agent.labels || {});
 
   return (
@@ -426,11 +429,16 @@ function AgentRow({
         <span className="font-mono text-sm font-medium truncate flex-1">
           {agent.name || "(anonymous)"}
         </span>
+        <LocationPill location={fleetLocation(agent)} />
         <AgentStatusPill status={agent.status} />
-        <span className="text-xs text-[var(--muted)] font-mono w-32 text-right">
-          {active > 0
-            ? `${active} claim${active === 1 ? "" : "s"}`
-            : "no claims"}
+        <span className="hidden md:inline text-[10px] text-[var(--muted)] font-mono whitespace-nowrap">
+          slots {fleetSlots(agent)}
+        </span>
+        <span className="hidden lg:inline text-[10px] text-[var(--muted)] font-mono whitespace-nowrap">
+          headroom {formatFleetResources(agent.headroom)}
+        </span>
+        <span className="hidden xl:inline text-[10px] text-[var(--muted)] font-mono whitespace-nowrap">
+          budget {formatFleetResources(agent.budget, true)}
         </span>
         <HeartbeatLabel lastHeartbeat={agent.last_seen} />
       </button>
@@ -439,9 +447,29 @@ function AgentRow({
         <div className="border-t border-[var(--border)] px-3 py-3 space-y-3 text-xs">
           <div className="grid grid-cols-2 gap-3">
             <KV label="type" value={agent.type} />
-            <KV label="max concurrent" value={agent.max_concurrent || "-"} />
+            <KV label="location" value={fleetLocation(agent)} />
+            <KV label="slots" value={fleetSlots(agent)} />
             <KV label="last seen" value={relativeTime(agent.last_seen)} />
             <KV label="status" value={agent.status} />
+            <KV
+              label="priority"
+              value={
+                agent.base_priority == null
+                  ? "unknown"
+                  : `${agent.base_priority} (ceiling ${agent.priority_ceiling ?? "unknown"})`
+              }
+            />
+            <KV
+              label="budget"
+              value={formatFleetResources(agent.budget, true)}
+            />
+            <KV
+              label="live headroom"
+              value={formatFleetResources(agent.headroom)}
+            />
+            {agent.headroom && (
+              <KV label="admission queue" value={agent.headroom.queue_depth} />
+            )}
           </div>
           {labels.length > 0 && (
             <div>
@@ -460,10 +488,10 @@ function AgentRow({
               </div>
             </div>
           )}
-          {active > 0 && (
+          {activeRuns > 0 && (
             <div>
               <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
-                active claims
+                active runs
               </div>
               <div className="space-y-1">
                 {agent.active_jobs!.map((runID) => (
@@ -488,15 +516,38 @@ function AgentStatusPill({ status }: { status: string }) {
   const cls =
     status === "busy"
       ? "bg-indigo-400/15 text-indigo-300"
-      : "bg-slate-400/15 text-slate-300";
+      : status === "offline"
+        ? "bg-red-400/15 text-red-300"
+        : "bg-slate-400/15 text-slate-300";
   const dot =
-    status === "busy" ? "bg-indigo-400 animate-pulse" : "bg-slate-500";
+    status === "busy"
+      ? "bg-indigo-400 animate-pulse"
+      : status === "offline"
+        ? "bg-red-400"
+        : "bg-slate-500";
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${cls}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
       {status || "idle"}
+    </span>
+  );
+}
+
+function LocationPill({ location }: { location: string }) {
+  const cls =
+    location === "local"
+      ? "bg-emerald-400/15 text-emerald-300"
+      : location === "cloud"
+        ? "bg-sky-400/15 text-sky-300"
+        : "bg-slate-400/15 text-slate-300";
+  return (
+    <span
+      className={`rounded px-1.5 py-0.5 text-[10px] font-mono font-bold ${cls}`}
+      aria-label={`Display location: ${location}`}
+    >
+      {location}
     </span>
   );
 }

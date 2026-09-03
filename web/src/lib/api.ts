@@ -185,6 +185,12 @@ export interface Node {
   duration_ms: number;
   claimed_by?: string;
   lease_expires_at?: string;
+  coordinator_id?: string;
+  executor_kind?: string;
+  executor_id?: string;
+  executor_location?: "local" | "cloud" | "unknown";
+  execution_started_at?: string;
+  execution_attempts?: ExecutionAttempt[];
   status_detail?: string;
   last_heartbeat?: string;
   failure_reason?: string;
@@ -198,6 +204,19 @@ export interface Node {
   modifiers?: NodeModifiers;
   work?: NodeWork;
   spawned_pipelines?: SpawnedPipelineRef[];
+}
+
+export interface ExecutionAttempt {
+  attempt?: number;
+  coordinator_id?: string;
+  executor_kind?: string;
+  executor_id?: string;
+  location?: "local" | "cloud" | "unknown";
+  started_at?: string;
+  finished_at?: string;
+  outcome?: string;
+  failure_reason?: string;
+  retry_run_id?: string;
 }
 
 export interface SpawnedPipelineRef {
@@ -277,7 +296,13 @@ export interface RunDetail {
   nodes: Node[];
 }
 
-export type RunVenue = "local" | "pool" | "jobs" | "pool+jobs" | "cluster";
+export type RunVenue =
+  | "local"
+  | "pool"
+  | "jobs"
+  | "pool+jobs"
+  | "cluster"
+  | "unknown";
 
 export function computeVenue(nodes: Node[]): RunVenue {
   const prefixes = new Set<string>();
@@ -286,7 +311,7 @@ export function computeVenue(nodes: Node[]): RunVenue {
     const idx = n.claimed_by.indexOf(":");
     prefixes.add(idx >= 0 ? n.claimed_by.slice(0, idx) : n.claimed_by);
   }
-  if (prefixes.size === 0) return "local";
+  if (prefixes.size === 0) return "unknown";
   const hasRunner = prefixes.has("runner");
   const hasPod = prefixes.has("pod");
   if (prefixes.size === 1 && hasRunner) return "pool";
@@ -296,10 +321,10 @@ export function computeVenue(nodes: Node[]): RunVenue {
 }
 
 export function parseHolder(claimedBy?: string): {
-  kind: "local" | "pool" | "jobs" | "cluster";
+  kind: "local" | "pool" | "jobs" | "cluster" | "unknown";
   label: string;
 } {
-  if (!claimedBy) return { kind: "local", label: "local" };
+  if (!claimedBy) return { kind: "unknown", label: "unknown" };
   const parts = claimedBy.split(":");
   const prefix = parts[0];
   const second = parts[1] || claimedBy;
@@ -545,11 +570,18 @@ export async function deleteRun(runID: string): Promise<void> {
 export interface Agent {
   name: string;
   type: string;
+  location?: "local" | "cloud" | "unknown";
   labels: Record<string, string>;
+  capabilities?: string[];
   last_seen: string;
   status: string;
   active_jobs?: string[];
+  active_slots?: number;
   max_concurrent: number;
+  base_priority?: number;
+  priority_ceiling?: number;
+  budget?: { cores: number; memory_bytes: number };
+  headroom?: { cores: number; memory_bytes: number; queue_depth: number };
 }
 
 export async function getAgents(): Promise<Agent[]> {
