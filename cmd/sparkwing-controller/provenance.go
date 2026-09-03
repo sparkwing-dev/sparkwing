@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"runtime/debug"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -56,6 +57,17 @@ func emitStartupProvenance(w io.Writer) {
 }
 
 func skewRefusalMessage(e *store.SkewError) string {
+	if len(e.Requirements) > 0 {
+		return fmt.Sprintf(
+			"runs-store requirement skew -- the state database uses %s, which this "+
+				"controller does not understand (database schema version %d, this "+
+				"controller understands schema %d). The controller will not open a store "+
+				"whose records it cannot model. Roll the controller forward to a build "+
+				"that understands %s, or restore the database to a snapshot without it.",
+			strings.Join(e.Requirements, ", "), e.DBVersion, e.BinaryVersion,
+			strings.Join(e.Requirements, ", "),
+		)
+	}
 	return fmt.Sprintf(
 		"runs-store schema skew -- the state database is at schema version %d, "+
 			"but this controller understands schema %d. The controller will not "+

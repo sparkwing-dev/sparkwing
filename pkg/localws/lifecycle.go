@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,33 +37,38 @@ func versionHandler(version string) http.HandlerFunc {
 }
 
 type schemaGuard struct {
-	st       *store.Store
-	expected int
-	cancel   context.CancelFunc
-	once     sync.Once
+	st     *store.Store
+	cancel context.CancelFunc
+	once   sync.Once
 }
 
 func newSchemaGuard(st *store.Store, cancel context.CancelFunc) *schemaGuard {
-	return &schemaGuard{st: st, expected: store.ExpectedSchemaVersion(), cancel: cancel}
+	return &schemaGuard{st: st, cancel: cancel}
 }
 
+// check shuts the dashboard down when the database gains a requirement this
+// build cannot read. A schema number above this build's own is not enough: an
+// additive migration leaves every requirement known, and this dashboard keeps
+// serving the database a newer binary migrated.
 func (g *schemaGuard) check(ctx context.Context) {
 	if g == nil || g.st == nil {
 		return
 	}
-	current, err := g.st.CurrentSchemaVersion(ctx)
+	listed, err := g.st.Requirements(ctx)
 	if err != nil {
 		return
 	}
-	if current > g.expected {
-		g.once.Do(func() {
-			log.Printf(
-				"dashboard: state database advanced to schema %d; this dashboard understands %d. "+
-					"Shutting down cleanly -- restart with a matching sparkwing (sparkwing version update --cli).",
-				current, g.expected)
-			g.cancel()
-		})
+	unknown := store.UnknownRequirements(listed)
+	if len(unknown) == 0 {
+		return
 	}
+	g.once.Do(func() {
+		log.Printf(
+			"dashboard: state database uses %s, which this dashboard does not understand. "+
+				"Shutting down cleanly -- restart with a sparkwing that does (sparkwing update).",
+			strings.Join(unknown, ", "))
+		g.cancel()
+	})
 }
 
 func (g *schemaGuard) poll(ctx context.Context, interval time.Duration) {
