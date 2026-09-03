@@ -40,7 +40,7 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	}
 
 	pin := &capacity.Pin{Cores: 1}
-	recordRunProfile(ctx, st, "demo", "r1", pin, "", runCharge{}, false, start, start.Add(6*time.Second))
+	recordRunProfile(ctx, localState{st: st}, "demo", "r1", pin, "", runCharge{}, false, start, start.Add(6*time.Second))
 
 	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
@@ -86,7 +86,7 @@ func TestRecordRunProfile_ContendedCeilingHitEscalatesFloor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	recordRunProfile(ctx, st, "demo", "r1", nil, "A", runCharge{Cores: 4}, true, start, start.Add(time.Second))
+	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "A", runCharge{Cores: 4}, true, start, start.Add(time.Second))
 
 	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
@@ -124,7 +124,7 @@ func TestRecordRunProfile_ContendedBelowCeilingSetsFloorOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	recordRunProfile(ctx, st, "demo", "r1", nil, "A", runCharge{Cores: 8}, true, start, start.Add(time.Second))
+	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "A", runCharge{Cores: 8}, true, start, start.Add(time.Second))
 
 	rollup, _ := st.GetPipelineProfile(ctx, "demo", "")
 	if rollup.FloorCores != 1 {
@@ -155,7 +155,7 @@ func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	recordRunProfile(ctx, st, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
+	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
 
 	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
@@ -214,7 +214,7 @@ func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.
 		t.Fatal(err)
 	}
 
-	recordRunProfile(ctx, st, "fan", "r1", nil, "", runCharge{}, false, start, start.Add(4*time.Second))
+	recordRunProfile(ctx, localState{st: st}, "fan", "r1", nil, "", runCharge{}, false, start, start.Add(4*time.Second))
 
 	rollup, err := st.GetPipelineProfile(ctx, "fan", "")
 	if err != nil || rollup == nil {
@@ -268,9 +268,9 @@ func TestRecordRunProfile_ClearsStoredPinWhenPlanDeclaresNone(t *testing.T) {
 	}
 
 	createMeasuredRun("r1")
-	recordRunProfile(ctx, st, "demo", "r1", &capacity.Pin{Cores: 0.25}, "", runCharge{}, false, start, start.Add(time.Second))
+	recordRunProfile(ctx, localState{st: st}, "demo", "r1", &capacity.Pin{Cores: 0.25}, "", runCharge{}, false, start, start.Add(time.Second))
 	createMeasuredRun("r2")
-	recordRunProfile(ctx, st, "demo", "r2", nil, "", runCharge{}, false, start, start.Add(time.Second))
+	recordRunProfile(ctx, localState{st: st}, "demo", "r2", nil, "", runCharge{}, false, start, start.Add(time.Second))
 
 	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
@@ -305,7 +305,7 @@ func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
 	queueWait := 10 * time.Second
 	execTime := 10 * time.Second
 	execStart := submit.Add(queueWait)
-	recordRunProfile(ctx, st, "demo", "r1", nil, "", runCharge{}, false, execStart, execStart.Add(execTime))
+	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "", runCharge{}, false, execStart, execStart.Add(execTime))
 
 	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
@@ -339,7 +339,7 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 		}); err != nil {
 			t.Fatal(err)
 		}
-		recordRunProfile(ctx, st, "demo", runID, nil, "", runCharge{}, false, start, start.Add(30*time.Second))
+		recordRunProfile(ctx, localState{st: st}, "demo", runID, nil, "", runCharge{}, false, start, start.Add(30*time.Second))
 	}
 	cachedRun := func(runID string) {
 		t.Helper()
@@ -352,7 +352,7 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 		if err := st.FinishNode(ctx, runID, "build", string(sparkwing.Cached), "", nil); err != nil {
 			t.Fatal(err)
 		}
-		recordRunProfile(ctx, st, "demo", runID, nil, "", runCharge{}, false, start, start.Add(41*time.Millisecond))
+		recordRunProfile(ctx, localState{st: st}, "demo", runID, nil, "", runCharge{}, false, start, start.Add(41*time.Millisecond))
 	}
 
 	measured("r1")
@@ -426,7 +426,7 @@ func TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes(t *testing.
 		t.Fatal(err)
 	}
 
-	recordRunProfile(ctx, st, "gate", "land1", nil, "", runCharge{}, false, start, start.Add(20*time.Second))
+	recordRunProfile(ctx, localState{st: st}, "gate", "land1", nil, "", runCharge{}, false, start, start.Add(20*time.Second))
 
 	node, err := st.GetPipelineProfile(ctx, "gate", "build")
 	if err != nil {
@@ -477,7 +477,7 @@ func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	recordRunProfile(ctx, st, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(20*time.Second))
+	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(20*time.Second))
 
 	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
@@ -504,7 +504,7 @@ func TestRecordRunProfile_NoSamplesWritesNothing(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "quick", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	recordRunProfile(ctx, st, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
+	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
 
 	if rollup, _ := st.GetPipelineProfile(ctx, "demo", ""); rollup != nil {
 		t.Errorf("expected no profile for a run with no samples, got %+v", rollup)

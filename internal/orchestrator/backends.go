@@ -35,10 +35,41 @@ type Backends struct {
 	Concurrency ConcurrencyBackend
 
 	Artifact storage.ArtifactStore
+
+	// LocalCoordination marks state that is this machine's own runs store,
+	// so this process dispatches the run's child triggers itself and owns
+	// the host capacity profile. A hosted controller runs both of those on
+	// its own side, and an object-store backend has neither.
+	LocalCoordination bool
+}
+
+// RunCoordination is the store surface a run needs for its own
+// coordination rather than for node state: the child triggers it
+// dispatches, the capacity profile it measures and is priced from, and the
+// orphan sweep. A backend that cannot answer one of these returns an error
+// wrapping [storage.ErrNotSupported] rather than panicking.
+type RunCoordination interface {
+	ListNodes(ctx context.Context, runID string) ([]*store.Node, error)
+	ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error)
+	AddNodeUsage(ctx context.Context, runID, nodeID string, u store.NodeUsage) error
+
+	ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error)
+	ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error)
+	FinishTrigger(ctx context.Context, id string) error
+	GetTrigger(ctx context.Context, id string) (*store.Trigger, error)
+
+	GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error)
+	SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
+	RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error
+	RecordContention(ctx context.Context, pipeline string) error
+	RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
+
+	ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error)
 }
 
 type StateBackend interface {
 	storage.StateStore
+	RunCoordination
 
 	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 
@@ -71,10 +102,11 @@ type ConcurrencyBackend interface {
 
 func LocalBackends(paths Paths, st *store.Store, art storage.ArtifactStore) Backends {
 	return Backends{
-		State:       localState{st: st},
-		Logs:        localLogs{paths: paths},
-		Concurrency: localConcurrency{st: st},
-		Artifact:    art,
+		State:             localState{st: st},
+		Logs:              localLogs{paths: paths},
+		Concurrency:       localConcurrency{st: st},
+		Artifact:          art,
+		LocalCoordination: true,
 	}
 }
 
@@ -89,6 +121,58 @@ func S3Backends(log storage.LogStore, state *s3state.Backend, art storage.Artifa
 
 type s3StateAdapter struct {
 	*s3state.Backend
+}
+
+func s3Unsupported(op string) error {
+	return fmt.Errorf("%w: %s has no object-store state backing", storage.ErrNotSupported, op)
+}
+
+func (s3StateAdapter) ListNodes(context.Context, string) ([]*store.Node, error) {
+	return nil, s3Unsupported("ListNodes")
+}
+
+func (s3StateAdapter) ListNodeMetrics(context.Context, string, string) ([]store.MetricSample, error) {
+	return nil, s3Unsupported("ListNodeMetrics")
+}
+
+func (s3StateAdapter) AddNodeUsage(context.Context, string, string, store.NodeUsage) error {
+	return s3Unsupported("AddNodeUsage")
+}
+
+func (s3StateAdapter) ListPendingTriggersForParent(context.Context, string) ([]string, error) {
+	return nil, s3Unsupported("ListPendingTriggersForParent")
+}
+
+func (s3StateAdapter) ClaimSpecificTrigger(context.Context, string, time.Duration) (*store.Trigger, error) {
+	return nil, s3Unsupported("ClaimSpecificTrigger")
+}
+
+func (s3StateAdapter) FinishTrigger(context.Context, string) error {
+	return s3Unsupported("FinishTrigger")
+}
+
+func (s3StateAdapter) GetPipelineProfile(context.Context, string, string) (*store.PipelineProfile, error) {
+	return nil, s3Unsupported("GetPipelineProfile")
+}
+
+func (s3StateAdapter) SetPipelinePin(context.Context, string, string, float64, int64) error {
+	return s3Unsupported("SetPipelinePin")
+}
+
+func (s3StateAdapter) RecordProfileObservation(context.Context, string, string, store.ProfileObservation) error {
+	return s3Unsupported("RecordProfileObservation")
+}
+
+func (s3StateAdapter) RecordContention(context.Context, string) error {
+	return s3Unsupported("RecordContention")
+}
+
+func (s3StateAdapter) RecordWaitObservation(context.Context, string, time.Duration) error {
+	return s3Unsupported("RecordWaitObservation")
+}
+
+func (s3StateAdapter) ReconcileOrphanedLocalRuns(context.Context, time.Duration) (int, error) {
+	return 0, s3Unsupported("ReconcileOrphanedLocalRuns")
 }
 
 var _ StateBackend = (*client.Client)(nil)
@@ -120,16 +204,6 @@ func remoteLogsURL(c *client.Client) string {
 const logsDiscoveryTimeout = 3 * time.Second
 
 func defaultHTTPClient() *http.Client { return nil }
-
-func canonicalLocalStore(b StateBackend) *store.Store {
-	switch s := b.(type) {
-	case localState:
-		return s.st
-	case *mirrorStateBackend:
-		return canonicalLocalStore(s.canonical)
-	}
-	return nil
-}
 
 func localRunLogDir(b LogBackend, runID string) string {
 	switch l := b.(type) {
@@ -489,6 +563,63 @@ func firstNonEmptyStr(a, b string) string {
 func (l localState) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	_, err := l.st.AppendEvent(ctx, runID, nodeID, kind, payload)
 	return err
+}
+
+func (l localState) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
+	return l.st.ListNodes(ctx, runID)
+}
+
+func (l localState) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error) {
+	return l.st.ListNodeMetrics(ctx, runID, nodeID)
+}
+
+func (l localState) AddNodeUsage(ctx context.Context, runID, nodeID string, u store.NodeUsage) error {
+	return l.st.AddNodeUsage(ctx, runID, nodeID, u)
+}
+
+func (l localState) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
+	return l.st.ListPendingTriggersForParent(ctx, parentRunID)
+}
+
+func (l localState) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error) {
+	return l.st.ClaimSpecificTrigger(ctx, id, lease)
+}
+
+func (l localState) FinishTrigger(ctx context.Context, id string) error {
+	return l.st.FinishTrigger(ctx, id)
+}
+
+func (l localState) GetTrigger(ctx context.Context, id string) (*store.Trigger, error) {
+	return l.st.GetTrigger(ctx, id)
+}
+
+func (l localState) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error) {
+	return l.st.GetPipelineProfile(ctx, pipeline, nodeID)
+}
+
+func (l localState) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
+	// safety: mirrors the controller route, so a pin lands in the same row
+	// whether the run writes it here or over the wire.
+	if cores <= 0 && memoryBytes <= 0 {
+		return l.st.SetProfilePin(ctx, pipeline, nodeID, 0, 0)
+	}
+	return l.st.UpsertProfilePin(ctx, pipeline, nodeID, cores, memoryBytes)
+}
+
+func (l localState) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error {
+	return l.st.RecordProfileObservation(ctx, pipeline, nodeID, obs)
+}
+
+func (l localState) RecordContention(ctx context.Context, pipeline string) error {
+	return l.st.RecordContention(ctx, pipeline)
+}
+
+func (l localState) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error {
+	return l.st.RecordWaitObservation(ctx, pipeline, wait)
+}
+
+func (l localState) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
+	return ReconcileOrphanedLocalRuns(ctx, l.st, threshold)
 }
 
 type localLogs struct {

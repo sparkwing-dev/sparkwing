@@ -101,6 +101,8 @@ func newFakeBackends() *fakeBackends {
 }
 
 type fakeState struct {
+	orchestrator.RunCoordination
+
 	mu           sync.Mutex
 	createRuns   int
 	finishRuns   int

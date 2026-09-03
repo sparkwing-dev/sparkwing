@@ -23,7 +23,7 @@ import (
 
 var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
-func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileName, parentRepoDir string, logger *slog.Logger, wedgeBudget time.Duration) {
+func runLocalTriggerLoop(ctx context.Context, state StateBackend, runID, profileName, parentRepoDir string, logger *slog.Logger, wedgeBudget time.Duration) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -53,7 +53,7 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 			}
 		}
 
-		trig, err := claimChildTrigger(ctx, st, runID)
+		trig, err := claimChildTrigger(ctx, state, runID)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				wedge.success()
@@ -76,29 +76,29 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, st, t, profileName, parentRepoDir, cache, logger, nil); err != nil {
+			if err := dispatchLocalTrigger(ctx, t, profileName, parentRepoDir, cache, logger, nil); err != nil {
 				logger.Error("local trigger dispatch failed",
 					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
-				_ = st.CreateRun(ctx, store.Run{
+				_ = state.CreateRun(ctx, store.Run{
 					ID:        t.ID,
 					Pipeline:  t.Pipeline,
 					Status:    "failed",
 					StartedAt: time.Now(),
 				})
-				_ = st.FinishRun(ctx, t.ID, "failed", "local dispatch: "+err.Error())
-				_ = st.FinishTrigger(ctx, t.ID)
+				_ = state.FinishRun(ctx, t.ID, "failed", "local dispatch: "+err.Error())
+				_ = state.FinishTrigger(ctx, t.ID)
 			}
 		}(trig)
 	}
 }
 
-func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*store.Trigger, error) {
-	candidates, err := st.ListPendingTriggersForParent(ctx, runID)
+func claimChildTrigger(ctx context.Context, state RunCoordination, runID string) (*store.Trigger, error) {
+	candidates, err := state.ListPendingTriggersForParent(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
 	for _, id := range candidates {
-		t, err := st.ClaimSpecificTrigger(ctx, id, store.DefaultLeaseDuration)
+		t, err := state.ClaimSpecificTrigger(ctx, id, store.DefaultLeaseDuration)
 		if err == nil {
 			return t, nil
 		}
@@ -110,7 +110,7 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 	return nil, store.ErrNotFound
 }
 
-func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trigger,
+func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 	profileName, parentRepoDir string, cache *localCompileCache, logger *slog.Logger, env []string,
 ) error {
 	repoDir, cleanup, err := prepareTriggerRepo(ctx, trig, parentRepoDir)

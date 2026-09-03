@@ -172,7 +172,7 @@ func (r *NodeExecutor) executeNodeElsewhere(ctx context.Context, runID string, n
 		Node:     node,
 		Delegate: delegate,
 	})
-	recordNodeUsage(ctx, r.backends.State, runID, node.ID(), res.Usage)
+	recordNodeUsage(ctx, r.backends, runID, node.ID(), res.Usage)
 	switch res.Outcome {
 	case sparkwing.Success, sparkwing.Cached:
 		return res.Output, nil

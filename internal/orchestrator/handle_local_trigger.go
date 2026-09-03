@@ -30,7 +30,9 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	}
 	defer func() { _ = st.Close() }()
 
-	trigger, err := st.GetTrigger(ctx, triggerID)
+	backends := LocalBackends(paths, st, nil)
+
+	trigger, err := backends.State.GetTrigger(ctx, triggerID)
 	if err != nil {
 		return fmt.Errorf("get trigger %s: %w", triggerID, err)
 	}
@@ -41,10 +43,8 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		"parent_run_id", trigger.ParentRunID,
 	)
 
-	backends := LocalBackends(paths, st, nil)
-
 	defer func() {
-		if ferr := st.FinishTrigger(ctx, trigger.ID); ferr != nil {
+		if ferr := backends.State.FinishTrigger(ctx, trigger.ID); ferr != nil {
 			logger.Warn("finish trigger (local) failed",
 				"trigger_id", trigger.ID, "err", ferr)
 		}

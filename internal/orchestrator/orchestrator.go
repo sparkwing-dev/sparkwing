@@ -355,14 +355,14 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
-	if st := canonicalLocalStore(backends.State); st != nil {
+	if backends.LocalCoordination {
 		profileName := ""
 		if opts.Profile != nil {
 			profileName = opts.Profile.Name
 		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		defer cancelConsumer()
-		go runLocalTriggerLoop(consumerCtx, st, runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget)
+		go runLocalTriggerLoop(consumerCtx, backends.State, runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget)
 	}
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout
@@ -463,12 +463,12 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	contended := contentionNote != ""
 	if !skipDispatch {
-		if st := canonicalLocalStore(backends.State); st != nil {
+		if backends.LocalCoordination {
 			charge := runCharge{}
 			if lease != nil {
 				charge = lease.charge
 			}
-			recordRunProfile(finishCtx, st, currentProfileKey(opts.Pipeline), runID, planPin(plan), capacityFingerprint(plan), charge, contended, execStart, time.Now())
+			recordRunProfile(finishCtx, backends.State, currentProfileKey(opts.Pipeline), runID, planPin(plan), capacityFingerprint(plan), charge, contended, execStart, time.Now())
 		}
 	}
 	if lease != nil && lease.driftWarning != "" && opts.Delegate != nil {
@@ -480,8 +480,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		})
 	}
 	if contended {
-		if st := canonicalLocalStore(backends.State); st != nil && opts.Pipeline != "" {
-			_ = st.RecordContention(finishCtx, currentProfileKey(opts.Pipeline))
+		if backends.LocalCoordination && opts.Pipeline != "" {
+			_ = backends.State.RecordContention(finishCtx, currentProfileKey(opts.Pipeline))
 		}
 		if opts.Delegate != nil {
 			opts.Delegate.Emit(sparkwing.LogRecord{
@@ -2276,7 +2276,7 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 }
 
 func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
-	recordNodeUsage(s.ctx, s.backends.State, s.runID, nodeID, res.Usage)
+	recordNodeUsage(s.ctx, s.backends, s.runID, nodeID, res.Usage)
 	if res.Output != nil {
 		if err := s.setOutput(nodeID, res.Output); err != nil {
 			res.Outcome = sparkwing.Failed

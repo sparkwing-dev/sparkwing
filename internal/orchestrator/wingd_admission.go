@@ -212,8 +212,8 @@ func (la *LocalAdmission) admitRun(
 	if err != nil || outcome != admitProceed {
 		return nil, outcome, err
 	}
-	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
-		_ = st.RecordWaitObservation(ctx, currentProfileKey(pipeline), time.Since(submitted))
+	if backends.LocalCoordination && pipeline != "" {
+		_ = backends.State.RecordWaitObservation(ctx, currentProfileKey(pipeline), time.Since(submitted))
 	}
 	rl := &runLease{token: lease.Token, hostAdmitted: hostPinned, leases: []*wingdclient.Lease{lease}}
 	if hostPinned || len(req.Semaphores) > 0 {
@@ -306,8 +306,8 @@ func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Back
 	pin := nodePin(node)
 	key := currentProfileKey(pipeline)
 	var profile *store.PipelineProfile
-	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
-		if p, err := st.GetPipelineProfile(ctx, key, nodeID); err == nil {
+	if backends.LocalCoordination && pipeline != "" {
+		if p, err := backends.State.GetPipelineProfile(ctx, key, nodeID); err == nil {
 			profile = p
 		}
 	}
@@ -717,8 +717,8 @@ func (la *LocalAdmission) resolveHostCost(ctx context.Context, backends Backends
 	pin := planPin(plan)
 	key := currentProfileKey(pipeline)
 	var profile *store.PipelineProfile
-	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
-		if p, err := st.GetPipelineProfile(ctx, key, ""); err == nil {
+	if backends.LocalCoordination && pipeline != "" {
+		if p, err := backends.State.GetPipelineProfile(ctx, key, ""); err == nil {
 			profile = p
 		}
 	}

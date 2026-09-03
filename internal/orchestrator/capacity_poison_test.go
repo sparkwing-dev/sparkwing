@@ -33,7 +33,7 @@ func contendedRunPeaking(t *testing.T, st *store.Store, ctx context.Context, key
 	}); err != nil {
 		t.Fatal(err)
 	}
-	recordRunProfile(ctx, st, key, runID, nil, "B", charge, true, start, start.Add(time.Second))
+	recordRunProfile(ctx, localState{st: st}, key, runID, nil, "B", charge, true, start, start.Add(time.Second))
 }
 
 func gitRepoDir(t *testing.T, name string) string {

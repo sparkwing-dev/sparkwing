@@ -220,7 +220,7 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			st, start := seedUsageRun(t, "priced", tc.nodes)
 			ctx := context.Background()
 
-			recordRunProfile(ctx, st, "priced", "r1", nil, "", runCharge{}, false, start, start.Add(tc.runWall))
+			recordRunProfile(ctx, localState{st: st}, "priced", "r1", nil, "", runCharge{}, false, start, start.Add(tc.runWall))
 
 			for _, want := range tc.wantNodes {
 				prof, err := st.GetPipelineProfile(ctx, "priced", want.id)
@@ -356,7 +356,7 @@ func TestRecordRunProfile_SubTickNodesAreNoLongerInvisible(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	recordRunProfile(ctx, st, "brief", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
+	recordRunProfile(ctx, localState{st: st}, "brief", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))
 
 	for _, id := range []string{"a", "b"} {
 		prof, err := st.GetPipelineProfile(ctx, "brief", id)
@@ -392,7 +392,7 @@ func TestRecordRunProfile_RetriedNodeIsPricedOnEveryAttempt(t *testing.T) {
 		}
 	}
 
-	recordRunProfile(ctx, st, "retried", "r1", nil, "", runCharge{}, false, start, start.Add(2*time.Second))
+	recordRunProfile(ctx, localState{st: st}, "retried", "r1", nil, "", runCharge{}, false, start, start.Add(2*time.Second))
 
 	prof, err := st.GetPipelineProfile(ctx, "retried", "flaky")
 	if err != nil || prof == nil {

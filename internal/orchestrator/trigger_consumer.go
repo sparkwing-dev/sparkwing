@@ -373,7 +373,7 @@ func runClaimedTrigger(
 		return
 	}
 	env = submissionExecutionEnvironment(env, home)
-	err := dispatchLocalTrigger(dispatchCtx, st, trig, "", "", cache, logger, env)
+	err := dispatchLocalTrigger(dispatchCtx, trig, "", "", cache, logger, env)
 	if err == nil {
 		return
 	}

@@ -16,6 +16,8 @@ import (
 )
 
 type captureBackend struct {
+	RunCoordination
+
 	captured []store.NodeDispatch
 	writeErr error
 	gitSHA   string

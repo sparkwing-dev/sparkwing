@@ -46,7 +46,7 @@ func TestRecordRunProfile_SustainedIsThePlateauNotTheBurst(t *testing.T) {
 	st, start, end := sustainedFixture(t, "spiky", series)
 	ctx := context.Background()
 
-	recordRunProfile(ctx, st, "spiky", "r1", nil, "", runCharge{}, false, start, end)
+	recordRunProfile(ctx, localState{st: st}, "spiky", "r1", nil, "", runCharge{}, false, start, end)
 
 	rollup, err := st.GetPipelineProfile(ctx, "spiky", "")
 	if err != nil || rollup == nil {
@@ -85,7 +85,7 @@ func TestRecordRunProfile_ShortRunSustainedIsItsMaximum(t *testing.T) {
 			st, start, end := sustainedFixture(t, "short", tc.series)
 			ctx := context.Background()
 
-			recordRunProfile(ctx, st, "short", "r1", nil, "", runCharge{}, false, start, end)
+			recordRunProfile(ctx, localState{st: st}, "short", "r1", nil, "", runCharge{}, false, start, end)
 
 			rollup, err := st.GetPipelineProfile(ctx, "short", "")
 			if err != nil || rollup == nil {
@@ -135,7 +135,7 @@ func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	recordRunProfile(ctx, st, "fan", "r1", nil, "", runCharge{}, false, start, start.Add(10*time.Second))
+	recordRunProfile(ctx, localState{st: st}, "fan", "r1", nil, "", runCharge{}, false, start, start.Add(10*time.Second))
 
 	rollup, err := st.GetPipelineProfile(ctx, "fan", "")
 	if err != nil || rollup == nil {
@@ -157,7 +157,7 @@ func TestRecordRunProfile_ContendedFloorResistsContentionDeflation(t *testing.T)
 	st, start, end := sustainedFixture(t, "spiky", series)
 	ctx := context.Background()
 
-	recordRunProfile(ctx, st, "spiky", "r1", nil, "A", runCharge{Cores: 4}, true, start, end)
+	recordRunProfile(ctx, localState{st: st}, "spiky", "r1", nil, "A", runCharge{Cores: 4}, true, start, end)
 
 	rollup, err := st.GetPipelineProfile(ctx, "spiky", "")
 	if err != nil || rollup == nil {
@@ -177,7 +177,7 @@ func TestRecordRunProfile_ContendedBelowCeilingStillFloorsAtItsPeak(t *testing.T
 	st, start, end := sustainedFixture(t, "spiky", series)
 	ctx := context.Background()
 
-	recordRunProfile(ctx, st, "spiky", "r1", nil, "A", runCharge{Cores: 8}, true, start, end)
+	recordRunProfile(ctx, localState{st: st}, "spiky", "r1", nil, "A", runCharge{Cores: 8}, true, start, end)
 
 	rollup, err := st.GetPipelineProfile(ctx, "spiky", "")
 	if err != nil || rollup == nil {

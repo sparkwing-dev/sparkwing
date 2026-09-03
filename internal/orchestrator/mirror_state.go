@@ -300,3 +300,60 @@ func (m *mirrorStateBackend) EnqueueTriggerWithEnv(
 		retryOf, source, user, repo, branch, triggerEnv,
 	)
 }
+
+func (m *mirrorStateBackend) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
+	return m.canonical.ListNodes(ctx, runID)
+}
+
+func (m *mirrorStateBackend) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error) {
+	return m.canonical.ListNodeMetrics(ctx, runID, nodeID)
+}
+
+func (m *mirrorStateBackend) AddNodeUsage(ctx context.Context, runID, nodeID string, u store.NodeUsage) error {
+	return m.tee("AddNodeUsage", runID,
+		func() error { return m.canonical.AddNodeUsage(ctx, runID, nodeID, u) },
+		func() error { return m.local.AddNodeUsage(ctx, runID, nodeID, u) })
+}
+
+func (m *mirrorStateBackend) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
+	return m.canonical.ListPendingTriggersForParent(ctx, parentRunID)
+}
+
+func (m *mirrorStateBackend) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error) {
+	return m.canonical.ClaimSpecificTrigger(ctx, id, lease)
+}
+
+func (m *mirrorStateBackend) FinishTrigger(ctx context.Context, id string) error {
+	return m.canonical.FinishTrigger(ctx, id)
+}
+
+func (m *mirrorStateBackend) GetTrigger(ctx context.Context, id string) (*store.Trigger, error) {
+	return m.canonical.GetTrigger(ctx, id)
+}
+
+func (m *mirrorStateBackend) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error) {
+	return m.canonical.GetPipelineProfile(ctx, pipeline, nodeID)
+}
+
+// safety: the mirror is a per-run copy, and capacity rows are per-pipeline
+// machine state; teeing them would price local runs off a remote run's
+// measurements. Every write below therefore lands on the canonical only.
+func (m *mirrorStateBackend) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
+	return m.canonical.SetPipelinePin(ctx, pipeline, nodeID, cores, memoryBytes)
+}
+
+func (m *mirrorStateBackend) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error {
+	return m.canonical.RecordProfileObservation(ctx, pipeline, nodeID, obs)
+}
+
+func (m *mirrorStateBackend) RecordContention(ctx context.Context, pipeline string) error {
+	return m.canonical.RecordContention(ctx, pipeline)
+}
+
+func (m *mirrorStateBackend) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error {
+	return m.canonical.RecordWaitObservation(ctx, pipeline, wait)
+}
+
+func (m *mirrorStateBackend) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
+	return m.canonical.ReconcileOrphanedLocalRuns(ctx, threshold)
+}

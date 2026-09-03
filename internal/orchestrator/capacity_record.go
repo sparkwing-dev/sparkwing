@@ -13,15 +13,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func recordNodeUsage(ctx context.Context, backend StateBackend, runID, nodeID string, usage *runner.ResourceUsage) {
+func recordNodeUsage(ctx context.Context, backends Backends, runID, nodeID string, usage *runner.ResourceUsage) {
 	if usage == nil || (usage.CPUTime <= 0 && usage.MaxRSSBytes <= 0) {
 		return
 	}
-	st := canonicalLocalStore(backend)
-	if st == nil {
+	if !backends.LocalCoordination {
 		return
 	}
-	_ = st.AddNodeUsage(context.WithoutCancel(ctx), runID, nodeID, store.NodeUsage{
+	_ = backends.State.AddNodeUsage(context.WithoutCancel(ctx), runID, nodeID, store.NodeUsage{
 		CPUTime:     usage.CPUTime,
 		MaxRSSBytes: usage.MaxRSSBytes,
 		Wall:        usage.Wall,
@@ -33,7 +32,7 @@ type runCharge struct {
 	MemoryBytes int64
 }
 
-func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID string, pin *capacity.Pin, planHash string, charge runCharge, contended bool, execStart, execEnd time.Time) {
+func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID string, pin *capacity.Pin, planHash string, charge runCharge, contended bool, execStart, execEnd time.Time) {
 	if st == nil || pipeline == "" {
 		return
 	}
@@ -146,10 +145,10 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		PlanHash:        planHash,
 	})
 	if pin.Empty() {
-		_ = st.SetProfilePin(ctx, pipeline, "", 0, 0)
+		_ = st.SetPipelinePin(ctx, pipeline, "", 0, 0)
 		return
 	}
-	_ = st.SetProfilePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
+	_ = st.SetPipelinePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
 }
 
 type intervalTotal struct {
