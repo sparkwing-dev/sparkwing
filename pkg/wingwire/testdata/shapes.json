@@ -379,6 +379,16 @@
           "name": "store_requirements",
           "kind": "[]string",
           "omitempty": false
+        },
+        {
+          "name": "store_ready",
+          "kind": "*bool",
+          "omitempty": true
+        },
+        {
+          "name": "store_error",
+          "kind": "string",
+          "omitempty": true
         }
       ]
     },
