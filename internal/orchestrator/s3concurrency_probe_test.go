@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,5 +52,72 @@ func TestS3Concurrency_TransientProbeErrorLeavesReservationIntact(t *testing.T) 
 	b := acquire(t, c, req("B"))
 	if b.Kind != store.AcquireQueued {
 		t.Fatalf("B = %s, want Queued; one failed probe left the process with no reservation", b.Kind)
+	}
+}
+
+type blockingProbeStore struct {
+	storage.ArtifactStore
+	storage.ConditionalWriter
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+	probes  atomic.Int32
+}
+
+func (s *blockingProbeStore) ConditionalWritesSupported(ctx context.Context) (bool, error) {
+	s.probes.Add(1)
+	s.once.Do(func() { close(s.entered) })
+	select {
+	case <-s.release:
+		return s.ConditionalWriter.ConditionalWritesSupported(ctx)
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}
+
+func TestS3Concurrency_ProbeIsSharedAndDoesNotParkOtherCallers(t *testing.T) {
+	art, _ := openIntegrationS3(t)
+	cw, ok := storage.Conditional(art)
+	if !ok {
+		t.Fatal("integration S3 store does not implement ConditionalWriter")
+	}
+	store3 := &blockingProbeStore{
+		ArtifactStore:     art,
+		ConditionalWriter: cw,
+		entered:           make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+	c := orchestrator.NewS3Concurrency(store3)
+	req := func(runID string) store.AcquireSlotRequest {
+		return store.AcquireSlotRequest{
+			Key: "g:probe-shared", RunID: runID, NodeID: "n",
+			Capacity: 1, Policy: store.OnLimitQueue, Lease: time.Minute,
+		}
+	}
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := c.AcquireSlot(context.Background(), req("A"))
+		first <- err
+	}()
+	<-store3.entered
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := c.AcquireSlot(ctx, req("B"))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("acquire while a probe is in flight: err = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("acquire returned after %s, want near its 100ms deadline", elapsed)
+	}
+
+	close(store3.release)
+	if err := <-first; err != nil {
+		t.Fatalf("acquire that ran the probe: %v", err)
+	}
+	if n := store3.probes.Load(); n != 1 {
+		t.Fatalf("store was probed %d times, want 1 shared probe", n)
 	}
 }

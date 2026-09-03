@@ -29,13 +29,17 @@ const (
 
 const s3FinishedRetention = 5 * time.Minute
 
+const s3ProbeTimeout = 10 * time.Second
+
 type s3Concurrency struct {
 	cw storage.ConditionalWriter
 
-	probeMu sync.Mutex
-	probed  bool
-	useNoop bool
-	noop    *noopConcurrency
+	probeMu  sync.Mutex
+	probing  chan struct{}
+	probeErr error
+	probed   bool
+	useNoop  bool
+	noop     *noopConcurrency
 }
 
 func NewS3Concurrency(art storage.ArtifactStore) ConcurrencyBackend {
@@ -52,18 +56,59 @@ func NewS3Concurrency(art storage.ArtifactStore) ConcurrencyBackend {
 // reservation it would make afterwards.
 func (c *s3Concurrency) fallback(ctx context.Context) (ConcurrencyBackend, error) {
 	c.probeMu.Lock()
-	defer c.probeMu.Unlock()
-	if !c.probed {
-		ok, err := c.cw.ConditionalWritesSupported(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("conditional-write probe for cache concurrency: %w", err)
+	if c.probed {
+		useNoop := c.useNoop
+		c.probeMu.Unlock()
+		if useNoop {
+			return c.noop, nil
 		}
+		return nil, nil
+	}
+	// safety: one probe serves everyone waiting on it, the wait itself
+	// stays cancellable, and the round trip is bounded, so a store that
+	// stops answering cannot park every operation behind it.
+	if inFlight := c.probing; inFlight != nil {
+		c.probeMu.Unlock()
+		select {
+		case <-inFlight:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return c.probeResult()
+	}
+	done := make(chan struct{})
+	c.probing = done
+	c.probeMu.Unlock()
+
+	probeCtx, cancel := context.WithTimeout(ctx, s3ProbeTimeout)
+	ok, err := c.cw.ConditionalWritesSupported(probeCtx)
+	cancel()
+
+	c.probeMu.Lock()
+	c.probing = nil
+	c.probeErr = err
+	if err == nil {
 		c.probed = true
 		c.useNoop = !ok
 		if c.useNoop {
 			slog.Warn("object store ignores write preconditions; cache concurrency falls back to no-op " +
 				"(no cross-runner reservation in this state backend)")
 		}
+	}
+	c.probeMu.Unlock()
+	close(done)
+	return c.probeResult()
+}
+
+func (c *s3Concurrency) probeResult() (ConcurrencyBackend, error) {
+	c.probeMu.Lock()
+	defer c.probeMu.Unlock()
+	if !c.probed {
+		err := c.probeErr
+		if err == nil {
+			err = errors.New("probe did not complete")
+		}
+		return nil, fmt.Errorf("conditional-write probe for cache concurrency: %w", err)
 	}
 	if c.useNoop {
 		return c.noop, nil

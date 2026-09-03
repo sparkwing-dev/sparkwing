@@ -155,6 +155,19 @@ code change to unlock.
 
 ### Changed
 
+- **orchestrator:** A concurrency operation in S3-shared-state mode whose
+  conditional-write probe fails now returns that error instead of quietly
+  proceeding without a reservation, so a node that used to run unreserved can
+  now fail the run instead. The probe ran once per process and read any error
+  as "this store ignores preconditions", so one 500, DNS blip, expired
+  credential, or cancelled context during a long-lived process's first
+  concurrency operation left every group it dispatched afterwards unenforced,
+  behind a single log warning. Only the store's own answer settles the question
+  now, a failed probe is retried by the next operation, and one probe is shared
+  by everything waiting on it under a bounded timeout. `AcquireSlot` does not
+  retry internally -- the node is marked failed -- so a deployment that was
+  silently over-admitting will start surfacing the object-store errors it used
+  to swallow. Expect to see them; they were always there.
 - **orchestrator:** A local run now reaches this machine's runs store through
   the admission daemon instead of opening `state.db` itself. When the
   handshake reports the daemon serving `api.sock`, the run's state and
@@ -265,15 +278,6 @@ code change to unlock.
   still returns on its own context. A mount that keeps locks node-local -- NFS
   with `local_lock=flock` or `local_lock=all` -- still reports true and still
   enforces nothing between hosts; use `s3` for state shared across machines.
-- **orchestrator:** A transient object-store error no longer disables cross-runner
-  reservation for the life of a process. The one-time probe that asks whether
-  the store honors write preconditions treated any error as a "no" and routed
-  every later acquire and release to the unenforced fallback, so a single 500,
-  DNS blip, or cancelled context during a long-lived process's first
-  concurrency operation left every group it dispatched unenforced behind one
-  log warning. Only a store that answers that it ignores preconditions settles
-  the question now; a probe that fails returns its error to the caller and the
-  next operation probes again.
 - **orchestrator:** Runners that lose the same S3 concurrency CAS back off to
   different times. The jitter added to each retry came from a single hash byte
   of the key, so it was under a microsecond and identical for every contender:
