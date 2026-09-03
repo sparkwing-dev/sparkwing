@@ -58,10 +58,9 @@ func (c *collector) report(t *testing.T, kind string) {
 		at(0.99).Round(time.Microsecond), ds[len(ds)-1].Round(time.Microsecond))
 }
 
-// readStallCeiling is the read latency that separates a served read from one
-// that queued behind the foreign writer. The writer holds the lock for
-// foreignHold, so a read routed onto the writing handle lands near that and a
-// read on the WAL reader lands in the low milliseconds.
+// safety: the writer holds the lock for foreignHold, so a read routed onto
+// the writing handle lands near that while a read on the WAL reader lands in
+// the low milliseconds; the ceiling sits between the two.
 const readStallCeiling = 1500 * time.Millisecond
 
 const foreignHold = 3 * time.Second

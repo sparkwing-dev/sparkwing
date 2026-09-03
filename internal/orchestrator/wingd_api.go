@@ -32,9 +32,6 @@ const PeerPrincipalPrefix = "unix-peer:"
 
 type peerUIDKey struct{}
 
-// wingdAPI serves the controller HTTP API on the daemon's held store. The
-// store opens lazily and can be replaced under the daemon, so the router is
-// rebuilt whenever the handle it was built on changes.
 type wingdAPI struct {
 	runs     *HeldRunStore
 	artifact storage.ArtifactStore
@@ -45,13 +42,10 @@ type wingdAPI struct {
 	handler http.Handler
 }
 
-// apiReadRoutes are the routes served from the read-only handle. A SQLite
-// store is one connection, so a read behind a foreign writer's transaction
-// waits it out on the writing handle while a WAL reader does not: measured
-// against a four-second foreign write, trigger polls went from a 3.1s p99 on
-// the writing handle to the low milliseconds. The list is an allow-list
-// rather than "every GET" because several GET routes write, and a route
-// missing from it costs latency under contention, never correctness.
+// perf: a SQLite store is one connection, so a read waits out a foreign
+// writer on the writing handle and not on a WAL reader: against a four-second
+// foreign write, trigger polls fell from a 3.1s p99 to milliseconds. An
+// allow-list, not every GET, because several GET routes write.
 var apiReadRoutes = []string{
 	"GET /api/v1/health",
 	"GET /api/v1/runs",
@@ -139,6 +133,9 @@ func writeAPIUnavailable(w http.ResponseWriter, err error) {
 	fmt.Fprintf(w, "{%q:%q,%q:%q}\n", "error", "unavailable", "message", err.Error())
 }
 
+// safety: the held store opens lazily and is reopened when the file under it
+// is replaced, so the router is rebuilt whenever the handle changes rather
+// than pinned to the one the first request happened to find.
 func (a *wingdAPI) handlerFor(rw, ro *store.Store) http.Handler {
 	a.mu.Lock()
 	defer a.mu.Unlock()

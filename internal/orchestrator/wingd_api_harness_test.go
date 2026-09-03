@@ -12,8 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// apiBaseURL is the authority a unix-socket client sends; the dialer ignores
-// it and the daemon never reads it.
 const apiBaseURL = "http://sparkwing"
 
 func apiHTTPClient(sock string) *http.Client {
