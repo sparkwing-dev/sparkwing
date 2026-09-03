@@ -311,6 +311,21 @@ code change to unlock.
 
 ### Fixed
 
+- **store:** `node_metrics` now carries the `ON DELETE CASCADE` foreign key to
+  `runs` that every other child table has, so `sparkwing runs delete` and
+  `sparkwing runs prune` remove a run's per-node CPU and memory samples instead
+  of leaving them behind forever -- the largest child table was the one the
+  only pruning the system has never touched, and `ListNodeMetrics` still
+  returned a deleted run's samples. Schema v28 adds the constraint on both
+  SQLite and Postgres and deletes samples already orphaned. Additive: an older
+  binary keeps reading and writing the migrated database.
+- **store:** Orphan reconciliation now runs on Postgres. Its freshness test
+  called SQLite's variadic `max()` in a `WHERE` clause, which Postgres spells
+  `GREATEST` and where its own `max` is an aggregate no `WHERE` accepts, so
+  against a `postgres://` state spec the query errored and runs abandoned by a
+  dead orchestrator stayed `running` forever. `sparkwing jobs list` and
+  `sparkwing job status` also discarded that error; they now warn on stderr
+  instead of failing silently.
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
@@ -506,6 +521,15 @@ code change to unlock.
 
 ### Security
 
+- **store:** A SQLite state-database path containing `#` or `?` no longer opens
+  a different file. The path was interpolated into a `file:` URI without
+  escaping, so SQLite ended the filename at the first such character and opened
+  the truncated path instead -- a database it created with the process umask
+  rather than the 0600 the intended path was hardened to, holding secret values
+  and token hashes, and with every connection pragma (`busy_timeout`, WAL,
+  `synchronous`, `foreign_keys`, `_txlock=immediate`) silently dropped along
+  with the swallowed query string. Paths are now percent-escaped, so `#`, `?`
+  and `%` reach SQLite intact.
 - **cache:** A pipeline binary fetched from a shared artifact store must carry
   its `.sha256` sidecar. When the sidecar was missing the fetch accepted
   whatever bytes were there, computed a digest from those same bytes, wrote it

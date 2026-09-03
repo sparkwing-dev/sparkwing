@@ -743,7 +743,8 @@ CREATE TABLE IF NOT EXISTS node_metrics (
     ts              INTEGER NOT NULL,
     cpu_millicores  INTEGER NOT NULL,
     memory_bytes    INTEGER NOT NULL,
-    PRIMARY KEY (run_id, node_id, ts)
+    PRIMARY KEY (run_id, node_id, ts),
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_node_metrics_lookup
@@ -869,7 +870,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 27
+const expectedSchemaVersion = 28
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1347,6 +1348,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return uniqueTokenPrefixIndexTx(ctx, tx)
 	case 27:
 		return rewriteLegacyInheritedHolderMarkers(ctx, tx)
+	case 28:
+		return addNodeMetricsRunCascadeSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1450,6 +1453,13 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		// safety: Postgres refused every write of the NUL marker with
 		// SQLSTATE 22021, so no row here can carry it and the rewrite
 		// would only bind a NUL that Postgres rejects again.
+		return nil
+	case 28:
+		for _, stmt := range nodeMetricsRunCascadePostgres {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return err
+			}
+		}
 		return nil
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -1910,6 +1920,61 @@ func addTriggerWebhookReplayKey(ctx context.Context, tx *storeTx) error {
 	}
 	_, err = tx.ExecContext(ctx, triggerWebhookReplayKeyIndex)
 	return err
+}
+
+// safety: SQLite cannot add a constraint to an existing table, so the cascade
+// arrives by rebuild; the orphan filter on the copy is what keeps the new
+// foreign key satisfiable, since foreign_keys is on and cannot be turned off
+// inside the migration's transaction.
+var nodeMetricsRunCascadeRebuildSQLite = []string{
+	`CREATE TABLE node_metrics_cascade (
+    run_id          TEXT NOT NULL,
+    node_id         TEXT NOT NULL,
+    ts              INTEGER NOT NULL,
+    cpu_millicores  INTEGER NOT NULL,
+    memory_bytes    INTEGER NOT NULL,
+    cpu_time_nanos  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (run_id, node_id, ts),
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+)`,
+	`INSERT INTO node_metrics_cascade
+     (run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos)
+     SELECT m.run_id, m.node_id, m.ts, m.cpu_millicores, m.memory_bytes, m.cpu_time_nanos
+       FROM node_metrics m
+      WHERE EXISTS (SELECT 1 FROM runs r WHERE r.id = m.run_id)`,
+	`DROP TABLE node_metrics`,
+	`ALTER TABLE node_metrics_cascade RENAME TO node_metrics`,
+	`CREATE INDEX IF NOT EXISTS idx_node_metrics_lookup
+    ON node_metrics(run_id, node_id, ts)`,
+}
+
+var nodeMetricsRunCascadePostgres = []string{
+	`DELETE FROM node_metrics
+     WHERE NOT EXISTS (SELECT 1 FROM runs r WHERE r.id = node_metrics.run_id)`,
+	`ALTER TABLE node_metrics DROP CONSTRAINT IF EXISTS node_metrics_run_id_fkey`,
+	`ALTER TABLE node_metrics ADD CONSTRAINT node_metrics_run_id_fkey
+     FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE`,
+}
+
+func addNodeMetricsRunCascadeSQLite(ctx context.Context, tx *storeTx) error {
+	var referencesRuns int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_foreign_key_list('node_metrics') WHERE "table" = 'runs'`,
+	).Scan(&referencesRuns); err != nil {
+		return fmt.Errorf("read node_metrics foreign keys: %w", err)
+	}
+	if referencesRuns > 0 {
+		return nil
+	}
+	if err := ensureColumnsSQLite(ctx, tx, "node_metrics", nodeMetricsCPUTimeCols); err != nil {
+		return err
+	}
+	for _, stmt := range nodeMetricsRunCascadeRebuildSQLite {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func uniqueTokenPrefixIndexTx(ctx context.Context, q migrationQueryExecer) error {

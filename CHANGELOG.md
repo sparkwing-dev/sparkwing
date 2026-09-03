@@ -311,6 +311,14 @@ code change to unlock.
 
 ### Fixed
 
+- **store:** `node_metrics` now carries the `ON DELETE CASCADE` foreign key to
+  `runs` that every other child table has, so `sparkwing runs delete` and
+  `sparkwing runs prune` remove a run's per-node CPU and memory samples instead
+  of leaving them behind forever -- the largest child table was the one the
+  only pruning the system has never touched, and `ListNodeMetrics` still
+  returned a deleted run's samples. Schema v28 adds the constraint on both
+  SQLite and Postgres and deletes samples already orphaned. Additive: an older
+  binary keeps reading and writing the migrated database.
 - **store:** Orphan reconciliation now runs on Postgres. Its freshness test
   called SQLite's variadic `max()` in a `WHERE` clause, which Postgres spells
   `GREATEST` and where its own `max` is an aggregate no `WHERE` accepts, so
