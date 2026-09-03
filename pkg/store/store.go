@@ -538,6 +538,10 @@ CREATE TABLE IF NOT EXISTS nodes (
     -- artifact_manifest: content-addressed digest of the node's
     -- published-artifact manifest; empty when it produced none.
     artifact_manifest TEXT NOT NULL DEFAULT '',
+    -- seq: creation order within the run, assigned by CreateNode. The
+    -- physical row order is not this on Postgres, where an UPDATE moves
+    -- the tuple, so the order ListNodes promises needs its own column.
+    seq              INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (run_id, node_id),
     FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
@@ -854,7 +858,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 27
+const expectedSchemaVersion = 28
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1332,6 +1336,12 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return uniqueTokenPrefixIndexTx(ctx, tx)
 	case 27:
 		return rewriteLegacyInheritedHolderMarkers(ctx, tx)
+	case 28:
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesOrderCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, nodesOrderBackfillSQLite)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1436,6 +1446,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		// SQLSTATE 22021, so no row here can carry it and the rewrite
 		// would only bind a NUL that Postgres rejects again.
 		return nil
+	case 28:
+		return addColumnsTx(ctx, tx, "nodes", nodesOrderCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1632,6 +1644,15 @@ var nodesUsageCols = map[string]string{
 	"max_rss_bytes":      "INTEGER NOT NULL DEFAULT 0",
 	"process_wall_nanos": "INTEGER NOT NULL DEFAULT 0",
 }
+
+var nodesOrderCols = map[string]string{
+	"seq": "INTEGER NOT NULL DEFAULT 0",
+}
+
+// safety: rowid rises with every insert, so ordering by it within a run is the
+// insertion order the pre-v28 column-free query returned; Postgres has no such
+// value to recover, and its rows keep the default until CreateNode assigns one.
+const nodesOrderBackfillSQLite = `UPDATE nodes SET seq = rowid WHERE seq = 0`
 
 var nodeDispatchRedactionCols = map[string]string{
 	"redacted_keys": "BLOB",
@@ -2581,8 +2602,9 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		labelsJSON, _ = json.Marshal(n.NeedsLabels)
 	}
 	_, err := s.exec(ctx, `
-INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels)
-VALUES (?,?,?,?,?)`, n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON)
+INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels, seq)
+VALUES (?,?,?,?,?,(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE run_id = ?))`,
+		n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, n.RunID)
 	return err
 }
 
@@ -2701,7 +2723,10 @@ UPDATE nodes
 	return err
 }
 
-// ListNodes returns the nodes for a run in insertion order.
+// ListNodes returns the nodes for a run in insertion order, which the
+// nodes.seq column records because no physical row order survives an
+// update on Postgres. Rows a pre-v28 Postgres store wrote carry no
+// sequence and fall back to node id.
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	rows, err := s.query(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
@@ -2710,7 +2735,7 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
        cpu_nanos, max_rss_bytes, process_wall_nanos
   FROM nodes
  WHERE run_id = ?
- ORDER BY `+s.insertionOrderColumn(), runID)
+ ORDER BY seq, node_id`, runID)
 	if err != nil {
 		return nil, err
 	}

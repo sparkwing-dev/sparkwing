@@ -17,9 +17,6 @@ const (
 	seqAppendsExpected = seqAppenders * seqAppendsEach
 )
 
-// appendEventsConcurrently drives seqAppenders goroutines at one run and
-// returns every seq the store handed out, so the caller can check both that
-// no append failed and that no two of them collided.
 func appendEventsConcurrently(t *testing.T, st *store.Store, runID string) []int64 {
 	t.Helper()
 	ctx := context.Background()

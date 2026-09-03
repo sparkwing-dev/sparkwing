@@ -311,6 +311,18 @@ code change to unlock.
 
 ### Fixed
 
+- **store:** `ListNodes` returns nodes in creation order on Postgres again.
+  It ordered by `ctid`, the physical tuple location, which Postgres rewrites
+  on every update -- and a node row is updated on every start, status change,
+  heartbeat and usage report -- so `sparkwing job status`, `runs timeline`,
+  `runs summary`, the receipt writer and the dashboard node list rendered
+  whatever order the heap happened to be in. Runs-store schema 28 adds a
+  `nodes.seq` column that `CreateNode` fills, and both dialects order by it.
+  The migration is additive: an older binary keeps reading and writing the
+  store, and existing SQLite rows are backfilled from their rowid so their
+  order is unchanged. Rows an older Postgres store wrote carry no sequence
+  and order by node id.
+
 - **store:** Event appends no longer collide on Postgres. `AppendEvent` chose
   its sequence number with an unlocked `MAX(seq)+1` and then inserted it as
   half the primary key, so two nodes of one run emitting at the same moment

@@ -311,6 +311,28 @@ code change to unlock.
 
 ### Fixed
 
+- **store:** `ListNodes` returns nodes in creation order on Postgres again.
+  It ordered by `ctid`, the physical tuple location, which Postgres rewrites
+  on every update -- and a node row is updated on every start, status change,
+  heartbeat and usage report -- so `sparkwing job status`, `runs timeline`,
+  `runs summary`, the receipt writer and the dashboard node list rendered
+  whatever order the heap happened to be in. Runs-store schema 28 adds a
+  `nodes.seq` column that `CreateNode` fills, and both dialects order by it.
+  The migration is additive: an older binary keeps reading and writing the
+  store, and existing SQLite rows are backfilled from their rowid so their
+  order is unchanged. Rows an older Postgres store wrote carry no sequence
+  and order by node id.
+
+- **store:** Event appends no longer collide on Postgres. `AppendEvent` chose
+  its sequence number with an unlocked `MAX(seq)+1` and then inserted it as
+  half the primary key, so two nodes of one run emitting at the same moment
+  both picked the same number and one insert failed -- and because nearly
+  every caller discards the error, the run's event stream lost the record
+  silently. The run row is now held while the number is chosen.
+  `RequestNodeBounce` allocated its sequence the same way and holds the node
+  row for the same reason. SQLite was never affected: its immediate
+  transactions already serialized the pair.
+
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,

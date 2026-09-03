@@ -57,13 +57,6 @@ func (s *Store) forUpdateSkipLocked() string {
 	return ""
 }
 
-func (s *Store) insertionOrderColumn() string {
-	if s.dialect == DialectPostgres {
-		return "ctid"
-	}
-	return "rowid"
-}
-
 func (s *Store) forUpdate() string {
 	if s.dialect == DialectPostgres {
 		return " FOR UPDATE"
