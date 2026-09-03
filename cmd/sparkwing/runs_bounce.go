@@ -36,7 +36,7 @@ func runRunsBounce(ctx context.Context, args []string) error {
 		return fmt.Errorf("%s: --run RUN_ID and --node NODE_ID are required", cmdJobsBounce.Path)
 	}
 
-	bouncer, cleanup, err := resolveNodeBouncer(*on, *home)
+	bouncer, cleanup, err := resolveNodeBouncer(ctx, *on, *home, id)
 	if err != nil {
 		return err
 	}
@@ -48,11 +48,7 @@ func runRunsBounce(ctx context.Context, args []string) error {
 		// writers already say which id was missing or which status the
 		// node is in, and that sentence is the answer the operator came
 		// for.
-		passthrough := fmt.Errorf("%s: %w", cmdJobsBounce.Path, err)
-		if *on != "" {
-			return passthrough
-		}
-		return standaloneWriteErrorAtHome(ctx, *home, id, cmdJobsBounce.Path, passthrough)
+		return fmt.Errorf("%s: %w", cmdJobsBounce.Path, err)
 	}
 	fmt.Fprintf(os.Stdout, "bounce requested for %s/%s (request %d)\n", id, *nodeID, b.Seq)
 	fmt.Fprintln(os.Stdout,
@@ -60,7 +56,7 @@ func runRunsBounce(ctx context.Context, args []string) error {
 	return nil
 }
 
-func resolveNodeBouncer(on, home string) (nodeBouncer, func(), error) {
+func resolveNodeBouncer(ctx context.Context, on, home, runID string) (nodeBouncer, func(), error) {
 	noop := func() {}
 	if on != "" {
 		c, _, err := resolveRunsClient(on, cmdJobsBounce.Path)
@@ -79,11 +75,11 @@ func resolveNodeBouncer(on, home string) (nodeBouncer, func(), error) {
 		return nil, noop, fmt.Errorf("%s: no runs store at %s (is this the home the run is using?)",
 			cmdJobsBounce.Path, paths.StateDB())
 	}
-	st, err := store.Open(paths.StateDB())
+	st, _, done, err := orchestrator.OpenStoreForRunWrite(ctx, paths, runID, cmdJobsBounce.Path)
 	if err != nil {
 		return nil, noop, err
 	}
-	return storeBouncer{st}, func() { _ = st.Close() }, nil
+	return storeBouncer{st}, done, nil
 }
 
 type storeBouncer struct{ st *store.Store }

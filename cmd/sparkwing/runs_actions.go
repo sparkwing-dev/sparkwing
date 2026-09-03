@@ -145,19 +145,28 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	if len(ids) == 0 {
 		return fmt.Errorf("%s: at least one --run RUN_ID is required (use --run - to read ids from stdin)", cmdJobsRetry.Path)
 	}
+	failures := 0
+	if *on == "" {
+		var refused []runResult
+		refused, ids = standaloneLocalRuns(ctx, "", ids, cmdJobsRetry.Path,
+			orchestrator.StandaloneSubmitRefusal)
+		for _, r := range refused {
+			failures++
+			fmt.Fprintf(os.Stderr, "rerun of %s failed: %s\n", r.RunID, r.Error)
+		}
+		if len(ids) == 0 {
+			return fmt.Errorf("retry: %d of %d failed", failures, failures)
+		}
+	}
 	c, _, err := resolveRunsClient(*on, cmdJobsRetry.Path)
 	if err != nil {
 		return err
 	}
 
-	failures := 0
 	for _, srcID := range ids {
 		newID, err := c.RetryRun(ctx, srcID, full)
 		if err != nil {
 			failures++
-			if *on == "" {
-				err = standaloneWriteErrorAtHome(ctx, "", srcID, cmdJobsRetry.Path, err)
-			}
 			fmt.Fprintf(os.Stderr, "rerun of %s failed: %v\n", srcID, err)
 			continue
 		}
@@ -166,7 +175,7 @@ func runRunsRetry(ctx context.Context, args []string) error {
 			newID, profileSuffix(*on))
 	}
 	if failures > 0 {
-		return fmt.Errorf("retry: %d of %d failed", failures, len(ids))
+		return fmt.Errorf("retry: %d of %d failed", failures, failures+len(ids))
 	}
 	return nil
 }
@@ -210,7 +219,8 @@ func runRunsCancel(ctx context.Context, args []string) error {
 		results = append(results, queued...)
 
 		var standalone []runResult
-		standalone, remaining = standaloneLocalRuns(ctx, *home, remaining, cmdJobsCancel.Path)
+		standalone, remaining = standaloneLocalRuns(ctx, *home, remaining, cmdJobsCancel.Path,
+			orchestrator.StandaloneCancelRefusal)
 		results = append(results, standalone...)
 	}
 	if len(remaining) == 0 {
@@ -307,7 +317,13 @@ func cancelQueuedLocalRuns(ctx context.Context, home string, ids []string) (done
 	return done, remaining
 }
 
-func standaloneLocalRuns(ctx context.Context, home string, ids []string, verb string) (done []runResult, remaining []string) {
+func standaloneLocalRuns(
+	ctx context.Context,
+	home string,
+	ids []string,
+	verb string,
+	refuse func(context.Context, orchestrator.Paths, string, string) error,
+) (done []runResult, remaining []string) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -316,12 +332,13 @@ func standaloneLocalRuns(ctx context.Context, home string, ids []string, verb st
 		return nil, ids
 	}
 	stores := orchestrator.OpenStandaloneStores(ctx, paths)
-	defer func() { _ = stores.Close() }()
-	if stores.Empty() {
+	empty := stores.Empty()
+	_ = stores.Close()
+	if empty {
 		return nil, ids
 	}
 	for _, id := range ids {
-		if err := orchestrator.StandaloneRunError(ctx, paths, id, verb); err != nil {
+		if err := refuse(ctx, paths, id, verb); err != nil {
 			done = append(done, runResult{RunID: id, Error: err.Error()})
 			continue
 		}

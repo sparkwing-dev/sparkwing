@@ -83,16 +83,12 @@ func resolveLocalApproval(
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, _, done, err := orchestrator.OpenStoreForRunWrite(ctx, paths, runID, verb)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = st.Close() }()
-	got, err := st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
-	if err != nil {
-		return nil, standaloneWriteError(ctx, paths, runID, verb, err)
-	}
-	return got, nil
+	defer done()
+	return st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
 }
 
 func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []string) error {

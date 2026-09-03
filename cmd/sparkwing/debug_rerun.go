@@ -76,19 +76,18 @@ func runDebugRerunLocal(ctx context.Context, t rerunFlags) error {
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, _, done, err := orchestrator.OpenStoreForRunWrite(ctx, paths, t.run, cmdDebugRerun.Path)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer done()
 
 	snap, err := st.GetNodeDispatch(ctx, t.run, t.node, t.seq)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			missing := fmt.Errorf(
+			return fmt.Errorf(
 				"no dispatch snapshot for %s/%s (seq=%d) -- run may predate the dispatch-snapshot feature",
 				t.run, t.node, t.seq)
-			return standaloneWriteError(ctx, paths, t.run, cmdDebugRerun.Path, missing)
 		}
 		return fmt.Errorf("get dispatch: %w", err)
 	}

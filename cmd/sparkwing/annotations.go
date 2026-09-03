@@ -241,20 +241,20 @@ func addLocalAnnotation(ctx context.Context, paths orchestrator.Paths, runID, no
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, _, done, err := orchestrator.OpenStoreForRunWrite(ctx, paths, runID, cmdAnnotationsAdd.Path)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer done()
 	if stepID != "" {
 		if err := st.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg); err != nil {
-			return standaloneWriteError(ctx, paths, runID, cmdAnnotationsAdd.Path, err)
+			return err
 		}
 		fmt.Fprintf(os.Stdout, "annotated %s/%s/%s: %s\n", runID, nodeID, stepID, msg)
 		return nil
 	}
 	if err := st.AppendNodeAnnotation(ctx, runID, nodeID, msg); err != nil {
-		return standaloneWriteError(ctx, paths, runID, cmdAnnotationsAdd.Path, err)
+		return err
 	}
 	fmt.Fprintf(os.Stdout, "annotated %s/%s: %s\n", runID, nodeID, msg)
 	return nil
