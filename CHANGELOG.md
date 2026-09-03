@@ -272,6 +272,13 @@ code change to unlock.
   `git fetch --prune` could run concurrently with an `/archive` recovery reclone
   (which deletes and re-clones the mirror) or with a tarball being streamed,
   producing truncated archives and spurious 500s.
+- **orchestrator:** Ordinary environment variables stay in the retry snapshot.
+  The credential heuristics match `KEY`, `PASS`, `SECRET`, `TOKEN` and the rest
+  as whole name segments rather than substrings, so `MONKEY_MODE`,
+  `COMPASS_DIR`, `BYPASS_CHECKS` and a URL whose path contains one of those
+  words are no longer classified as credentials and dropped, and a retry runs
+  with the environment its original attempt had.
+
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads
@@ -331,6 +338,14 @@ code change to unlock.
   `SPARKWING_ARTIFACT_DIGEST_BACKFILL=1` to restore the old healing behaviour
   against a store you trust, for blobs published before sidecars existed. The
   downloaded file also stays non-executable until its digest is settled.
+- **orchestrator:** The retry snapshot no longer stores a credential hidden
+  inside a JSON array or a `KEY=VALUE` blob. The environment classifier now
+  walks arrays as well as objects when a value parses as JSON, and reads each
+  whitespace-separated `NAME=value` pair inside a value, so
+  `SERVICE_ACCOUNTS={"creds":[{"token":"..."}]}` and
+  `EXTRA_ENV=GITHUB_TOKEN=...` are dropped from the dispatch and submission
+  snapshots instead of persisted verbatim.
+
 - **store:** A trigger returned to the pending queue no longer keeps the
   principal that held it. A release, a generation-guarded release, and the
   expired-claim reaper all clear `claim_principal` and `claim_token_prefix`,

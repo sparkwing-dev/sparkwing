@@ -249,6 +249,36 @@ code change to unlock.
 
 ### Fixed
 
+- **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
+  every git subprocess the cache server spawns, which is what it always claimed
+  to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
+  sync-negotiate, workspace-checkout and git smart-HTTP paths -- forked git
+  without taking a slot, so a burst of clones or `POST /sync/negotiate` requests
+  could exhaust the pod's PIDs whatever the limit said. `/git/<name>/info/refs`
+  and `/git/<name>/git-upload-pack` wait up to 30 seconds for a slot and then
+  answer 503 with `Retry-After`, so a saturated cache sheds load instead of
+  forking without bound. `POST /sync/negotiate` now checks every candidate
+  commit with one `git cat-file --batch-check` process instead of one fork per
+  commit (up to 256 per request). Operators serving many concurrent clones
+  through the cache should raise the limit from its default of 4.
+- **cache:** Artifact uploads are capped and atomic. `POST /artifacts/<job>` now
+  refuses a body over 500 MiB with 413 and stages the upload beside its
+  destination, renaming it into place only once the whole body has landed. A
+  runner killed mid-upload used to leave a truncated file at the artifact's
+  permanent path, which the list and download routes then served as complete.
+- **cache:** The gitcache background fetch loop now takes the same per-repo lock
+  the request handlers take. It keyed the lock on the mirror's full path while
+  every handler keyed it on the repository hash, so a background
+  `git fetch --prune` could run concurrently with an `/archive` recovery reclone
+  (which deletes and re-clones the mirror) or with a tarball being streamed,
+  producing truncated archives and spurious 500s.
+- **orchestrator:** Ordinary environment variables stay in the retry snapshot.
+  The credential heuristics match `KEY`, `PASS`, `SECRET`, `TOKEN` and the rest
+  as whole name segments rather than substrings, so `MONKEY_MODE`,
+  `COMPASS_DIR`, `BYPASS_CHECKS` and a URL whose path contains one of those
+  words are no longer classified as credentials and dropped, and a retry runs
+  with the environment its original attempt had.
+
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads
@@ -308,6 +338,14 @@ code change to unlock.
   `SPARKWING_ARTIFACT_DIGEST_BACKFILL=1` to restore the old healing behaviour
   against a store you trust, for blobs published before sidecars existed. The
   downloaded file also stays non-executable until its digest is settled.
+- **orchestrator:** The retry snapshot no longer stores a credential hidden
+  inside a JSON array or a `KEY=VALUE` blob. The environment classifier now
+  walks arrays as well as objects when a value parses as JSON, and reads each
+  whitespace-separated `NAME=value` pair inside a value, so
+  `SERVICE_ACCOUNTS={"creds":[{"token":"..."}]}` and
+  `EXTRA_ENV=GITHUB_TOKEN=...` are dropped from the dispatch and submission
+  snapshots instead of persisted verbatim.
+
 - **store:** A trigger returned to the pending queue no longer keeps the
   principal that held it. A release, a generation-guarded release, and the
   expired-claim reaper all clear `claim_principal` and `claim_token_prefix`,

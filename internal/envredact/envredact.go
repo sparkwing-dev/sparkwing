@@ -13,26 +13,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-var credentialSubstrings = []string{
-	"TOKEN",
-	"SECRET",
-	"PASSWORD",
-	"PASS",
-	"KEY",
-	"CREDENTIAL",
-	"DSN",
-	"AUTH",
-	"PRIVATE",
-	"PEM",
-	"CERT",
-	"JWT",
-	"COOKIE",
-	"SIGNATURE",
-}
-
-var credentialSegments = map[string]bool{
-	"PAT": true,
-	"SIG": true,
+var credentialWords = map[string]bool{
+	"TOKEN":      true,
+	"SECRET":     true,
+	"PASSWORD":   true,
+	"PASS":       true,
+	"KEY":        true,
+	"CREDENTIAL": true,
+	"DSN":        true,
+	"AUTH":       true,
+	"PRIVATE":    true,
+	"PEM":        true,
+	"CERT":       true,
+	"JWT":        true,
+	"COOKIE":     true,
+	"SIGNATURE":  true,
+	"PAT":        true,
+	"SIG":        true,
 }
 
 var credentialExact = map[string]bool{
@@ -71,21 +68,23 @@ const redactedPlaceholder = "redacted"
 // credential-shaped. A short allow-list of well-known configuration
 // names wins over the substring rule.
 func CredentialName(name string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(name))
+	trimmed := strings.TrimSpace(name)
+	upper := strings.ToUpper(trimmed)
 	if credentialExact[upper] {
 		return true
 	}
 	if nonCredentialExact[upper] {
 		return false
 	}
-	return credentialShaped(upper)
+	return credentialShaped(trimmed)
 }
 
 // CredentialValue reports whether a value carries a credential that
 // cannot be rewritten in place: a bearer header, a PEM block, a JSON
-// document with a credential-shaped field, or a URL whose query or path
-// names one. Every line of a multi-line value is examined. Such values
-// must be dropped.
+// document or array with a credential-shaped field, a KEY=VALUE
+// assignment named like one, or a URL whose query or path names one.
+// Every line of a multi-line value is examined. Such values must be
+// dropped.
 func CredentialValue(value string) bool {
 	v := strings.TrimSpace(value)
 	if v == "" {
@@ -102,7 +101,7 @@ func CredentialValue(value string) bool {
 		if line == "" {
 			continue
 		}
-		if bearerIn(line) || credentialJSON(line) || credentialURL(line) {
+		if bearerIn(line) || credentialJSON(line) || credentialURL(line) || credentialAssignmentIn(line) {
 			return true
 		}
 	}
@@ -124,20 +123,43 @@ func RedactValue(value string) string {
 }
 
 func credentialShaped(name string) bool {
-	upper := strings.ToUpper(name)
-	for _, frag := range credentialSubstrings {
-		if strings.Contains(upper, frag) {
+	for _, seg := range nameSegments(name) {
+		if credentialWords[seg] {
 			return true
 		}
-	}
-	for _, seg := range strings.FieldsFunc(upper, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	}) {
-		if credentialSegments[seg] {
+		if strings.HasSuffix(seg, "S") && credentialWords[seg[:len(seg)-1]] {
 			return true
 		}
 	}
 	return false
+}
+
+func nameSegments(name string) []string {
+	var out []string
+	for _, run := range strings.FieldsFunc(name, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		out = appendCaseSegments(out, run)
+	}
+	return out
+}
+
+func appendCaseSegments(dst []string, run string) []string {
+	r := []rune(run)
+	start := 0
+	for i := 1; i < len(r); i++ {
+		if !unicode.IsUpper(r[i]) {
+			continue
+		}
+		lowerRunStart := !unicode.IsUpper(r[i-1])
+		acronymEnd := unicode.IsUpper(r[i-1]) && i+1 < len(r) && unicode.IsLower(r[i+1])
+		if !lowerRunStart && !acronymEnd {
+			continue
+		}
+		dst = append(dst, strings.ToUpper(string(r[start:i])))
+		start = i
+	}
+	return append(dst, strings.ToUpper(string(r[start:])))
 }
 
 func bearerIn(line string) bool {
@@ -161,10 +183,10 @@ func isNameByte(b byte) bool {
 }
 
 func credentialJSON(value string) bool {
-	if !strings.HasPrefix(value, "{") {
+	if !strings.HasPrefix(value, "{") && !strings.HasPrefix(value, "[") {
 		return false
 	}
-	var doc map[string]any
+	var doc any
 	if json.Unmarshal([]byte(value), &doc) != nil {
 		return false
 	}
@@ -234,17 +256,53 @@ func parseCredentialURL(value string) *url.URL {
 	return u
 }
 
-func credentialFieldIn(doc map[string]any, depth int) bool {
+func credentialFieldIn(doc any, depth int) bool {
 	if depth <= 0 {
 		return false
 	}
-	for k, v := range doc {
-		if credentialShaped(k) {
-			return true
+	switch node := doc.(type) {
+	case map[string]any:
+		for k, v := range node {
+			if credentialShaped(k) || credentialFieldIn(v, depth-1) {
+				return true
+			}
 		}
-		if nested, ok := v.(map[string]any); ok && credentialFieldIn(nested, depth-1) {
+	case []any:
+		for _, v := range node {
+			if credentialFieldIn(v, depth-1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func credentialAssignmentIn(line string) bool {
+	for _, field := range strings.Fields(line) {
+		name, value, ok := strings.Cut(field, "=")
+		if !ok || value == "" || !envNameShaped(name) {
+			continue
+		}
+		if credentialShaped(name) {
 			return true
 		}
 	}
 	return false
+}
+
+func envNameShaped(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		b := name[i]
+		switch {
+		case b == '_':
+		case b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z':
+		case b >= '0' && b <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
