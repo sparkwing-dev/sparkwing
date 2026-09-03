@@ -37,6 +37,9 @@ type verifiedReleaseAsset struct {
 	name   string
 	bytes  []byte
 	digest string
+
+	manifest    []byte
+	manifestSig []byte
 }
 
 func verifyReleaseAsset(publicKey ed25519.PublicKey, manifest, manifestSig []byte, assetName string, asset, assetSig []byte) (verifiedReleaseAsset, error) {
@@ -58,7 +61,24 @@ func verifyReleaseAsset(publicKey ed25519.PublicKey, manifest, manifestSig []byt
 	if digest != actualHex {
 		return verifiedReleaseAsset{}, fmt.Errorf("checksum mismatch for %s", assetName)
 	}
-	return verifiedReleaseAsset{name: assetName, bytes: asset, digest: digest}, nil
+	return verifiedReleaseAsset{
+		name:        assetName,
+		bytes:       asset,
+		digest:      digest,
+		manifest:    manifest,
+		manifestSig: manifestSig,
+	}, nil
+}
+
+// manifestSignedByTrustSet reports whether any release key signed this manifest.
+// It is the offline half of the release check: no asset signature, no network.
+func manifestSignedByTrustSet(publicKeys []ed25519.PublicKey, manifest, manifestSig []byte) bool {
+	for _, key := range publicKeys {
+		if len(key) == ed25519.PublicKeySize && ed25519.Verify(key, manifest, manifestSig) {
+			return true
+		}
+	}
+	return false
 }
 
 func verifyReleaseAssetWithTrustSet(publicKeys []ed25519.PublicKey, manifest, manifestSig []byte, assetName string, asset, assetSig []byte) (verifiedReleaseAsset, error) {

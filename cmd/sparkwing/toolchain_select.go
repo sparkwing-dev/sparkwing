@@ -1,15 +1,18 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
@@ -19,7 +22,22 @@ const (
 
 	toolchainModeAuto  = "auto"
 	toolchainModeLocal = "local"
+
+	releaseManifestName = "SHA256SUMS"
 )
+
+// toolchainActive carries the version this process was switched to, read once at
+// startup. main() clears the variable from the environment so the pipeline binary
+// and the daemon it spawns do not inherit a guard meant for this process.
+var toolchainActive string
+
+var toolchainExecFn = execToolchain
+
+func takeToolchainActive() string {
+	value := strings.TrimSpace(os.Getenv(toolchainActiveEnv))
+	_ = os.Unsetenv(toolchainActiveEnv)
+	return value
+}
 
 type toolchainAction int
 
@@ -44,6 +62,9 @@ type sdkPin struct {
 // is older than that pin. On unix a switch replaces this process and never
 // returns; on Windows it runs the pinned CLI as a child and exits with its code.
 func switchToolchain(sparkwingDir string) error {
+	if err := checkToolchainIdentity(); err != nil {
+		return err
+	}
 	mode, err := toolchainMode(os.Getenv(toolchainModeEnv))
 	if err != nil {
 		return err
@@ -52,7 +73,7 @@ func switchToolchain(sparkwingDir string) error {
 	if err != nil {
 		return nil
 	}
-	decision := planToolchainSwitch(installedVersion(), pin, mode, os.Getenv(toolchainActiveEnv))
+	decision := planToolchainSwitch(installedVersion(), pin, mode, toolchainActive)
 	switch decision.action {
 	case toolchainStay:
 		return nil
@@ -60,6 +81,24 @@ func switchToolchain(sparkwingDir string) error {
 		return toolchainLocalRefusal(decision)
 	}
 	return runToolchain(os.Stderr, decision)
+}
+
+// checkToolchainIdentity refuses to keep running when the release the parent
+// switched to does not identify as the version the parent announced, which is
+// the one way a poisoned store can put a mislabelled release behind the notice.
+// A build that is not a release did not come out of the store, so the value came
+// from somewhere else and the ordinary comparison decides.
+func checkToolchainIdentity() error {
+	if toolchainActive == "" {
+		return nil
+	}
+	if installed := installedVersion(); isReleaseTag(installed) && installed != toolchainActive {
+		return fmt.Errorf(
+			"switched to sparkwing %s but this binary reports %s; the toolchain store entry for %s holds another release. "+
+				"Delete $SPARKWING_HOME/toolchains/%s and re-run",
+			toolchainActive, installed, toolchainActive, toolchainActive)
+	}
+	return nil
 }
 
 func toolchainMode(raw string) (string, error) {
@@ -80,7 +119,7 @@ func toolchainMode(raw string) (string, error) {
 func planToolchainSwitch(installed string, pin sdkPin, mode, active string) toolchainDecision {
 	d := toolchainDecision{installed: installed, pin: pin.version}
 	switch {
-	case active != "":
+	case active != "" && active == pin.version:
 		return d
 	case pin.replace != "" || pin.version == "":
 		return d
@@ -137,11 +176,12 @@ func runToolchain(w io.Writer, d toolchainDecision) error {
 	}
 	fmt.Fprintf(w, "sparkwing: running %s from %s because this repo pins SDK %s and the installed sparkwing is %s\n",
 		d.pin, tildePath(binPath), d.pin, d.installed)
-	return execToolchain(binPath, os.Args[1:], setEnv(os.Environ(), toolchainActiveEnv, d.pin))
+	return toolchainExecFn(binPath, os.Args[1:], setEnv(os.Environ(), toolchainActiveEnv, d.pin))
 }
 
-// ensureToolchainBinary returns the store path of the pinned CLI, fetching and
-// verifying the release when the store has no binary matching its recorded digest.
+// ensureToolchainBinary returns the store path of the pinned CLI. A stored
+// release is used only when the signed release manifest beside it still vouches
+// for its bytes; anything else fetches the release again.
 func ensureToolchainBinary(w io.Writer, version string) (string, error) {
 	p, err := paths.DefaultPaths()
 	if err != nil {
@@ -149,20 +189,32 @@ func ensureToolchainBinary(w io.Writer, version string) (string, error) {
 	}
 	dir := p.ToolchainDir(version)
 	binPath := p.ToolchainBinary(version)
-	if toolchainCacheHit(binPath) {
+	if err := verifyStoredToolchain(dir, binPath); err == nil {
 		return binPath, nil
 	}
 	verified, err := fetchVerifiedRelease(version)
 	if err != nil {
 		return "", toolchainFetchError(version, err)
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("create toolchain store %s: %w", dir, err)
-	}
-	if err := writeToolchainFile(dir, binPath, verified.bytes, 0o755); err != nil {
+	if err := prepareToolchainStore(p, dir); err != nil {
 		return "", err
 	}
-	if err := writeToolchainFile(dir, toolchainDigestPath(binPath), []byte(verified.digest+"\n"), 0o644); err != nil {
+	stage, err := writeInstallTemp(dir, ".sparkwing-toolchain-*", verified.bytes, 0o700)
+	if err != nil {
+		return "", fmt.Errorf("stage %s: %w", binPath, err)
+	}
+	if err := assertToolchainVersion(stage, version); err != nil {
+		_ = os.Remove(stage)
+		return "", err
+	}
+	if err := os.Rename(stage, binPath); err != nil {
+		_ = os.Remove(stage)
+		return "", fmt.Errorf("install %s: %w", binPath, err)
+	}
+	if err := writeToolchainFile(dir, filepath.Join(dir, releaseManifestName), verified.manifest); err != nil {
+		return "", err
+	}
+	if err := writeToolchainFile(dir, filepath.Join(dir, releaseManifestName+".sig"), verified.manifestSig); err != nil {
 		return "", err
 	}
 	fmt.Fprintf(w, "sparkwing: fetched and verified sparkwing %s from %s (sha256 %s)\n",
@@ -170,24 +222,91 @@ func ensureToolchainBinary(w io.Writer, version string) (string, error) {
 	return binPath, nil
 }
 
-func toolchainCacheHit(binPath string) bool {
-	recorded, err := os.ReadFile(toolchainDigestPath(binPath))
-	if err != nil {
-		return false
+func prepareToolchainStore(p paths.Paths, dir string) error {
+	if err := p.EnsureRoot(); err != nil {
+		return fmt.Errorf("prepare sparkwing home %s: %w", p.Root, err)
 	}
-	actual, err := sha256OfFile(binPath)
-	if err != nil {
-		return false
+	if err := fssecure.EnsureDir(p.ToolchainsDir()); err != nil {
+		return fmt.Errorf("create toolchain store %s: %w", p.ToolchainsDir(), err)
 	}
-	return actual == strings.TrimSpace(string(recorded))
+	if err := fssecure.EnsureDir(dir); err != nil {
+		return fmt.Errorf("create toolchain store %s: %w", dir, err)
+	}
+	return nil
 }
 
-func toolchainDigestPath(binPath string) string { return binPath + ".sha256" }
+// verifyStoredToolchain re-runs the release check offline: a trust-set key must
+// have signed the manifest beside the binary, and the manifest must name the
+// binary's own digest. It repairs an executable bit a permission sweep clamped,
+// which is cheaper than refetching the release over it.
+func verifyStoredToolchain(dir, binPath string) error {
+	manifest, err := os.ReadFile(filepath.Join(dir, releaseManifestName))
+	if err != nil {
+		return err
+	}
+	manifestSig, err := os.ReadFile(filepath.Join(dir, releaseManifestName+".sig"))
+	if err != nil {
+		return err
+	}
+	publicKeys, err := releasePublicKeys()
+	if err != nil {
+		return err
+	}
+	if !manifestSignedByTrustSet(publicKeys, manifest, manifestSig) {
+		return fmt.Errorf("%s in %s does not carry a signature from the updater trust set", releaseManifestName, dir)
+	}
+	want, err := manifestDigest(manifest, releaseAssetName())
+	if err != nil {
+		return err
+	}
+	got, err := sha256OfFile(binPath)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("stored %s has digest %s, but %s records %s", binPath, got, releaseManifestName, want)
+	}
+	return ensureToolchainExecutable(binPath)
+}
+
+func ensureToolchainExecutable(binPath string) error {
+	info, err := os.Stat(binPath)
+	if err != nil {
+		return err
+	}
+	if info.Mode().Perm()&0o100 != 0 {
+		return nil
+	}
+	if err := os.Chmod(binPath, 0o700); err != nil {
+		return fmt.Errorf("restore the execute bit on %s: %w", binPath, err)
+	}
+	return nil
+}
+
+// assertToolchainVersion refuses to cache a release that does not identify as the
+// pin, so a retagged manifest or a poisoned mirror cannot hide behind the notice.
+func assertToolchainVersion(binPath, version string) error {
+	// #nosec G702 -- the release binary this process just verified against its signed manifest, asked only for its version
+	out, err := exec.Command(binPath, "version", "-o", "json", "--offline").Output()
+	if err != nil {
+		return fmt.Errorf("ask the fetched sparkwing %s for its version: %w", version, err)
+	}
+	var report VersionReport
+	if err := json.Unmarshal(out, &report); err != nil {
+		return fmt.Errorf("parse the version the fetched sparkwing %s reports: %w", version, err)
+	}
+	if report.CLI.Installed != version {
+		return fmt.Errorf(
+			"the release published as %s reports itself as %s; refusing to cache it as %s",
+			version, report.CLI.Installed, version)
+	}
+	return nil
+}
 
 // writeToolchainFile stages beside the destination and renames, so a concurrent
 // reader either sees the previous file or the complete new one.
-func writeToolchainFile(dir, dest string, body []byte, mode os.FileMode) error {
-	tmp, err := writeInstallTemp(dir, ".sparkwing-toolchain-*", body, mode)
+func writeToolchainFile(dir, dest string, body []byte) error {
+	tmp, err := writeInstallTemp(dir, ".sparkwing-toolchain-*", body, fssecure.FileMode)
 	if err != nil {
 		return fmt.Errorf("stage %s: %w", dest, err)
 	}

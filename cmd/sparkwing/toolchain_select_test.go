@@ -10,11 +10,19 @@ import (
 
 func writeSparkwingModule(t *testing.T, body string) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), ".sparkwing")
+	return writeSparkwingModuleIn(t, t.TempDir(), body)
+}
+
+func writeSparkwingModuleIn(t *testing.T, repo, body string) string {
+	t.Helper()
+	dir := filepath.Join(repo, ".sparkwing")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -29,6 +37,16 @@ func withInstalledVersion(t *testing.T, v string) {
 	prev := Version
 	Version = v
 	t.Cleanup(func() { Version = prev })
+}
+
+// withToolchainActive sets the guard the way an exec'd child receives it, through
+// the environment, and then takes it the way main() does.
+func withToolchainActive(t *testing.T, v string) {
+	t.Helper()
+	t.Setenv(toolchainActiveEnv, v)
+	prev := toolchainActive
+	toolchainActive = takeToolchainActive()
+	t.Cleanup(func() { toolchainActive = prev })
 }
 
 func TestPlanToolchainSwitch(t *testing.T) {
@@ -46,6 +64,7 @@ func TestPlanToolchainSwitch(t *testing.T) {
 		{"replace stays", "v0.38.2", sdkPin{version: "v0.40.0", replace: ".."}, toolchainModeAuto, "", toolchainStay},
 		{"pseudo pin stays", "v0.38.2", sdkPin{version: "v0.0.0-20260101120000-abcdef123456"}, toolchainModeAuto, "", toolchainStay},
 		{"prerelease pin stays", "v0.38.2", sdkPin{version: "v0.40.0-rc1"}, toolchainModeAuto, "", toolchainStay},
+		{"incompatible pin stays", "v0.38.2", sdkPin{version: "v2.0.0+incompatible"}, toolchainModeAuto, "", toolchainStay},
 		{"missing pin stays", "v0.38.2", sdkPin{}, toolchainModeAuto, "", toolchainStay},
 		{"devel cli stays", "(devel)", sdkPin{version: "v0.40.0"}, toolchainModeAuto, "", toolchainStay},
 		{"unknown cli stays", "(unknown)", sdkPin{version: "v0.40.0"}, toolchainModeAuto, "", toolchainStay},
@@ -53,7 +72,8 @@ func TestPlanToolchainSwitch(t *testing.T) {
 		{"dirty cli stays", "v0.38.2-dev+abc123", sdkPin{version: "v0.40.0"}, toolchainModeAuto, "", toolchainStay},
 		{"local refuses", "v0.38.2", sdkPin{version: "v0.40.0"}, toolchainModeLocal, "", toolchainRefuse},
 		{"local stays when current", "v0.41.0", sdkPin{version: "v0.40.0"}, toolchainModeLocal, "", toolchainStay},
-		{"recursion guard stays", "v0.38.2", sdkPin{version: "v0.40.0"}, toolchainModeAuto, "v0.40.0", toolchainStay},
+		{"guard for this pin stays", "v0.38.2", sdkPin{version: "v0.40.0"}, toolchainModeAuto, "v0.40.0", toolchainStay},
+		{"guard for another pin still switches", "v0.38.2", sdkPin{version: "v0.40.0"}, toolchainModeAuto, "v0.39.0", toolchainSwitch},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,9 +126,18 @@ func TestReadSDKPin(t *testing.T) {
 	}
 }
 
+func TestSwitchToolchainStaysOnAnUnreadableModule(t *testing.T) {
+	withToolchainActive(t, "")
+	withInstalledVersion(t, "v0.38.2")
+	dir := writeSparkwingModule(t, "module example.com/pipes\n\nthis is not a go.mod\n")
+	if err := switchToolchain(dir); err != nil {
+		t.Fatalf("an unparsable go.mod should defer to the compiler, got %v", err)
+	}
+}
+
 func TestSwitchToolchainLocalRefusalNamesTheVersion(t *testing.T) {
 	t.Setenv(toolchainModeEnv, toolchainModeLocal)
-	t.Setenv(toolchainActiveEnv, "")
+	withToolchainActive(t, "")
 	withInstalledVersion(t, "v0.38.2")
 
 	err := switchToolchain(writeSparkwingModule(t, pinModule("v0.40.0")))
@@ -125,82 +154,46 @@ func TestSwitchToolchainLocalRefusalNamesTheVersion(t *testing.T) {
 
 func TestSwitchToolchainStaysUnderARecursionGuard(t *testing.T) {
 	t.Setenv(toolchainModeEnv, "")
-	t.Setenv(toolchainActiveEnv, "v0.40.0")
-	withInstalledVersion(t, "v0.38.2")
+	withToolchainActive(t, "v0.40.0")
+	withInstalledVersion(t, "v0.40.0")
 
 	if err := switchToolchain(writeSparkwingModule(t, pinModule("v0.40.0"))); err != nil {
 		t.Fatalf("guarded child tried to switch again: %v", err)
 	}
 }
 
-func TestEnsureToolchainBinaryFetchesVerifiesAndCaches(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	priv := withTestUpdateKey(t)
-	assetBytes := []byte("SPARKWING-TOOLCHAIN-v9.9.9\x00\x01")
-	newReleaseServer(t, "v9.9.9", assetBytes, priv, releaseServerOpts{})
-
-	var out bytes.Buffer
-	binPath, err := ensureToolchainBinary(&out, "v9.9.9")
-	if err != nil {
-		t.Fatalf("first fetch: %v", err)
+func TestTakeToolchainActiveClearsTheEnvironmentItRead(t *testing.T) {
+	withToolchainActive(t, "v0.40.0")
+	if toolchainActive != "v0.40.0" {
+		t.Fatalf("toolchainActive = %q, want v0.40.0", toolchainActive)
 	}
-	want := filepath.Join(home, "toolchains", "v9.9.9", "sparkwing")
-	if binPath != want {
-		t.Fatalf("store path = %q, want %q", binPath, want)
-	}
-	body, err := os.ReadFile(binPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(body, assetBytes) {
-		t.Fatal("stored binary does not match the verified release asset")
-	}
-	if !strings.Contains(out.String(), "fetched and verified sparkwing v9.9.9") {
-		t.Fatalf("fetch notice missing from %q", out.String())
-	}
-	if !strings.Contains(out.String(), mustSHA256(assetBytes)) {
-		t.Fatalf("fetch notice omits the verified digest: %q", out.String())
-	}
-
-	updateBaseURL = "http://127.0.0.1:1"
-	out.Reset()
-	if _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
-		t.Fatalf("cache hit reached the network: %v", err)
-	}
-	if out.Len() != 0 {
-		t.Fatalf("cache hit printed %q, want nothing", out.String())
+	if got := os.Getenv(toolchainActiveEnv); got != "" {
+		t.Fatalf("%s survived as %q, so the pipeline binary and the daemon would inherit it", toolchainActiveEnv, got)
 	}
 }
 
-func TestEnsureToolchainBinaryRefetchesOnDigestMismatch(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	priv := withTestUpdateKey(t)
-	assetBytes := []byte("SPARKWING-TOOLCHAIN-v9.9.9\x00\x01")
-	newReleaseServer(t, "v9.9.9", assetBytes, priv, releaseServerOpts{})
+func TestSwitchToolchainRefusesAMislabelledRelease(t *testing.T) {
+	withToolchainActive(t, "v0.40.0")
+	withInstalledVersion(t, "v0.39.0")
 
-	binPath, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
-	if err != nil {
-		t.Fatal(err)
+	err := switchToolchain(writeSparkwingModule(t, pinModule("v0.40.0")))
+	if err == nil {
+		t.Fatal("a child that is not the version it was switched to kept running")
 	}
-	if err := os.WriteFile(binPath, []byte("TAMPERED"), 0o755); err != nil {
-		t.Fatal(err)
+	for _, want := range []string{"v0.40.0", "v0.39.0", "toolchains/v0.40.0"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err.Error(), want)
+		}
 	}
+}
 
-	var out bytes.Buffer
-	if _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
-		t.Fatalf("re-fetch after tampering: %v", err)
-	}
-	body, err := os.ReadFile(binPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(body, assetBytes) {
-		t.Fatal("a tampered cached binary survived instead of being replaced")
-	}
-	if !strings.Contains(out.String(), "fetched and verified") {
-		t.Fatalf("tampered cache did not re-fetch: %q", out.String())
+func TestSwitchToolchainIgnoresAHandSetGuardOnASourceBuild(t *testing.T) {
+	t.Setenv(toolchainModeEnv, "")
+	withToolchainActive(t, "v0.40.0")
+	withInstalledVersion(t, "(devel)")
+
+	if err := switchToolchain(writeSparkwingModule(t, pinModule("v0.41.0"))); err != nil {
+		t.Fatalf("a source build with an exported guard should decide normally, got %v", err)
 	}
 }
 
@@ -227,7 +220,7 @@ func TestInfoSDKPinReportsBothVersions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv(toolchainModeEnv, "")
-	t.Setenv(toolchainActiveEnv, "")
+	withToolchainActive(t, "")
 
 	info := Info{
 		Version: parseInfoVersion("v0.38.2"),

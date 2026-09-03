@@ -280,3 +280,32 @@ func fileIdentity(t *testing.T, path string) os.FileInfo {
 	}
 	return info
 }
+
+func TestRepairTreeKeepsStoredToolchainsExecutable(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "home")
+	dir := filepath.Join(root, "toolchains", "v0.40.0")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "sparkwing")
+	if err := os.WriteFile(bin, []byte("release"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(dir, "SHA256SUMS")
+	if err := os.WriteFile(manifest, []byte("digest  sparkwing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := fssecure.RepairTree(root, fileIdentity(t, root), false); err != nil {
+		t.Fatal(err)
+	}
+	assertPerm(t, bin, fssecure.DirMode)
+	assertPerm(t, manifest, fssecure.FileMode)
+	assertPerm(t, dir, fssecure.DirMode)
+}

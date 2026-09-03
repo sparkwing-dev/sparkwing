@@ -511,7 +511,7 @@ func gatherSDKPin(info Info) *InfoSDKPin {
 	if err != nil {
 		return report
 	}
-	decision := planToolchainSwitch(info.Version.Installed, pin, mode, os.Getenv(toolchainActiveEnv))
+	decision := planToolchainSwitch(info.Version.Installed, pin, mode, toolchainActive)
 	if decision.action != toolchainSwitch {
 		return report
 	}

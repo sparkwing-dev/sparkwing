@@ -9,7 +9,7 @@ import (
 )
 
 func execToolchain(bin string, args, env []string) error {
-	// #nosec G702 -- a release binary this process just verified against its signed manifest digest
+	// #nosec G702 -- a release binary whose digest the caller matched against the signed release manifest stored beside it
 	cmd := exec.Command(bin, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = os.Stdin, os.Stdout, os.Stderr, env
 	if err := cmd.Run(); err != nil {
