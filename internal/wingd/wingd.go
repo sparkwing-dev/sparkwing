@@ -408,7 +408,15 @@ func reapSocketDir(sock string) {
 	if err != nil || !info.IsDir() || !socketDirReapable(info) {
 		return
 	}
-	if _, serr := os.Lstat(sock); errors.Is(serr, fs.ErrNotExist) && time.Since(info.ModTime()) < staleSocketDirAge {
+	before, serr := os.Lstat(sock)
+	switch {
+	case errors.Is(serr, fs.ErrNotExist):
+		if time.Since(info.ModTime()) < staleSocketDirAge {
+			return
+		}
+	case serr != nil:
+		return
+	case !socketStillDead(sock, before):
 		return
 	}
 	// safety: a killed daemon leaves both sockets behind, and the directory
@@ -416,6 +424,21 @@ func reapSocketDir(sock string) {
 	_ = os.Remove(sock)
 	_ = os.Remove(APISocketBeside(sock))
 	_ = os.Remove(dir)
+}
+
+// safety: this sweep holds no election lock, and a hashed socket path does
+// not name the home whose lock it would take. A successor binds by unlinking
+// the socket and listening on a fresh inode, so a path that answers again, or
+// that no longer carries the file the dial found dead, is a live daemon's.
+func socketStillDead(sock string, before fs.FileInfo) bool {
+	if _, dead := socketStatus(sock); !dead {
+		return false
+	}
+	after, err := os.Lstat(sock)
+	if err != nil {
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	return os.SameFile(before, after)
 }
 
 func socketBaseDir() string {
