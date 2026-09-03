@@ -219,11 +219,9 @@ func (a *wingdAPI) health(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// safety: a store this daemon is too old to open is a version gap a run
-// degrades around, while any other unreadable store is a file the operator
-// must fix; a caller cannot tell them apart from the message alone, and
-// treating the first as a fault would refuse exactly the runs this daemon's
-// age is not allowed to refuse.
+// safety: a store this daemon is too old to open is age, which a run degrades
+// around; any other unreadable store is a file the operator must fix. A
+// caller cannot tell them apart from the message alone.
 func storeHealthState(err error) string {
 	var skew *store.SkewError
 	if errors.As(err, &skew) {
