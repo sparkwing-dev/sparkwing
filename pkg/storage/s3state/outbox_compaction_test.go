@@ -91,9 +91,8 @@ func newHoldFirstPutArt(key string) *holdFirstPutArt {
 	}
 }
 
-// waitForCompletedPut gives a replay that is free to run a chance to finish
-// before the held one is released, bounded so a build that makes the two
-// serialize does not wait for something that will never happen.
+// safety: bounded, because a build that serializes replays never completes a
+// second PUT while the first is held, and this must not wait for it forever.
 func (h *holdFirstPutArt) waitForCompletedPut(d time.Duration) {
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
