@@ -68,6 +68,8 @@ func DefaultConfig() Config {
 	}
 }
 
+const serverReadTimeout = 30 * time.Second
+
 type Server struct {
 	cfg     Config
 	tel     *otelutil.Telemetry
@@ -204,7 +206,7 @@ func New(cfg Config) (*Server, error) {
 	s.http = &http.Server{
 		Addr:         cfg.Addr,
 		Handler:      otelhttp.NewHandler(s.handler, "sparkwing-cache"),
-		ReadTimeout:  30 * time.Second,
+		ReadTimeout:  serverReadTimeout,
 		WriteTimeout: 5 * time.Minute,
 		IdleTimeout:  120 * time.Second,
 	}

@@ -261,18 +261,25 @@ code change to unlock.
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
   sync-negotiate, workspace-checkout and git smart-HTTP paths -- forked git
   without taking a slot, so a burst of clones or `POST /sync/negotiate` requests
-  could exhaust the pod's PIDs whatever the limit said. `/git/<name>/info/refs`
-  and `/git/<name>/git-upload-pack` wait up to 30 seconds for a slot and then
-  answer 503 with `Retry-After`, so a saturated cache sheds load instead of
-  forking without bound. `POST /sync/negotiate` now checks every candidate
-  commit with one `git cat-file --batch-check` process instead of one fork per
-  commit (up to 256 per request). Operators serving many concurrent clones
-  through the cache should raise the limit from its default of 4.
+  could exhaust the pod's PIDs whatever the limit said. A request now waits a
+  bounded time for a slot -- a third of the server's read timeout, so a request
+  that wins one still has budget left to read its body -- and then answers 503
+  with `Retry-After` rather than queueing. That applies to `/archive`, `/file`,
+  `/tree-hash` and `/branch-contains`, which previously reported saturation as a
+  404 naming a branch, path or commit that was in fact present, as well as to
+  `/git/<name>/info/refs` and `/git/<name>/git-upload-pack`. `POST
+  /sync/negotiate` now checks every candidate commit with one `git cat-file
+  --batch-check` process instead of one fork per commit (up to 256 per request).
+  Operators serving many concurrent clones through the cache should raise the
+  limit from its default of 4.
 - **cache:** Artifact uploads are capped and atomic. `POST /artifacts/<job>` now
   refuses a body over 500 MiB with 413 and stages the upload beside its
   destination, renaming it into place only once the whole body has landed. A
   runner killed mid-upload used to leave a truncated file at the artifact's
   permanent path, which the list and download routes then served as complete.
+  An upload path whose base name starts with `.sparkwing-upload-` is refused
+  with 400, since that prefix now marks an upload in flight, and an empty
+  artifact listing answers `[]` rather than `null`.
 - **cache:** The gitcache background fetch loop now takes the same per-repo lock
   the request handlers take. It keyed the lock on the mirror's full path while
   every handler keyed it on the repository hash, so a background
