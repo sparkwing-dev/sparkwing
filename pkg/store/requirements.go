@@ -176,6 +176,23 @@ func requirementsToBackfill(listed []SchemaRequirement, version int) []string {
 	return missing
 }
 
+// RequirementSkew reports the requirements this database lists that this
+// binary does not understand, as the *SkewError [Open] would have returned,
+// or nil when it understands every one. A reader that came in through
+// [OpenReadOnly] runs no migration and so never raises that check itself;
+// this is how it asks the same question without writing.
+func (s *Store) RequirementSkew(ctx context.Context) (*SkewError, error) {
+	version, err := s.CurrentSchemaVersion(ctx)
+	if err != nil {
+		return nil, err
+	}
+	listed, err := s.RequirementStamps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return requirementSkew(version, listed), nil
+}
+
 // safety: name the highest stamp among the unknown requirements, because a build
 // new enough for that one carries all of them.
 func requirementSkew(dbVersion int, listed []SchemaRequirement) *SkewError {
