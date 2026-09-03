@@ -17,6 +17,7 @@ import (
 
 type runNodeConfig struct {
 	coordinated   bool
+	claimed       bool
 	gitcacheURL   string
 	gitcacheToken string
 }
@@ -25,6 +26,10 @@ type RunNodeOption func(*runNodeConfig)
 
 func Coordinated() RunNodeOption {
 	return func(c *runNodeConfig) { c.coordinated = true }
+}
+
+func ClaimedNode() RunNodeOption {
+	return func(c *runNodeConfig) { c.claimed = true }
 }
 
 // WithGitcache avoids process-global cache credentials when one agent executes concurrent nodes.

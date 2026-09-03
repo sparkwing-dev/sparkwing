@@ -98,6 +98,41 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 	}
 }
 
+func TestNodeClaim_ExecutionStartAcknowledgement(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+	c := client.New(srv.URL, nil)
+	ctx := context.Background()
+	seedRunNode(t, st, "run-start", "build")
+	if err := c.MarkNodeReady(ctx, "run-start", "build"); err != nil {
+		t.Fatal(err)
+	}
+	n, err := c.ClaimNodeAs(ctx, "gateway:edge-a:1", nil, time.Minute, nil, store.ExecutorIdentity{
+		Kind: "gateway", ID: "edge-a", ReservationID: "downstream-17",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AcknowledgeNodeExecutionStart(ctx, n.RunID, n.NodeID, n.ClaimedBy); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetNode(ctx, n.RunID, n.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ExecutionStartedAt == nil || got.ExecutorKind != "gateway" || got.ExecutorID != "edge-a" || got.ReservationID != "downstream-17" {
+		t.Fatalf("execution attempt = %+v", got)
+	}
+	if err := c.AcknowledgeNodeExecutionStart(ctx, n.RunID, n.NodeID, "gateway:edge-b:1"); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("wrong holder acknowledgement = %v, want ErrLockHeld", err)
+	}
+}
+
 func TestNodeClaim_RevokeAfterReadyNoPodClaimedYet(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

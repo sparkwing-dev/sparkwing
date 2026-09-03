@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+type acknowledgingState struct {
+	StateBackend
+	mu     sync.Mutex
+	starts int
+	holder string
+}
+
+func (s *acknowledgingState) AcknowledgeNodeExecutionStart(_ context.Context, _, _, holderID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.starts++
+	s.holder = holderID
+	return nil
+}
 
 func TestNodeExecutorMarkFailedPersistsAfterContextCancel(t *testing.T) {
 	home := t.TempDir()
@@ -55,6 +71,51 @@ func TestNodeExecutorMarkFailedPersistsAfterContextCancel(t *testing.T) {
 	}
 	if node.Error != "local admission failed" {
 		t.Fatalf("node error = %q, want local admission failed", node.Error)
+	}
+}
+
+func TestClaimedNodeAcknowledgesAtExecutionBoundary(t *testing.T) {
+	paths := PathsAt(t.TempDir())
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "test", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	backends := LocalBackends(paths, st, nil)
+	state := &acknowledgingState{StateBackend: backends.State}
+	backends.State = state
+	plan := sparkwing.NewPlan()
+	ran := false
+	node := sparkwing.Job(plan, "build", func(context.Context) error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		stored, err := st.GetNode(context.Background(), "run-1", "build")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.starts != 1 || stored.StartedAt == nil {
+			t.Fatalf("body saw execution acknowledgements=%d started_at=%v", state.starts, stored.StartedAt)
+		}
+		ran = true
+		return nil
+	})
+	exec := NewNodeExecutor(backends)
+	ctx = withNodeClaimHolder(ctx, "gateway:edge-a:1")
+	if _, err := exec.executeNodeInProcess(ctx, "run-1", node, nil); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !ran || state.holder != "gateway:edge-a:1" {
+		t.Fatalf("ran=%v holder=%q", ran, state.holder)
 	}
 }
 

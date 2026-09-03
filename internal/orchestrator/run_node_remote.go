@@ -107,6 +107,9 @@ func runNodeRemote(
 		"SPARKWING_AGENT_TOKEN="+token,
 		remoteChildMarker+"=1",
 	)
+	if holderID, ok := nodeClaimHolder(ctx); ok {
+		childEnv = append(childEnv, "SPARKWING_NODE_CLAIM_HOLDER="+holderID)
+	}
 
 	// #nosec G702 -- the node runner binary this process resolved, run as argv without a shell
 	cmd := exec.CommandContext(ctx, binary.path, "run-node", runID, nodeID)

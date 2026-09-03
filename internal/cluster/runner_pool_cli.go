@@ -50,6 +50,10 @@ type nodeClaimer interface {
 	ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error)
 }
 
+type executorNodeClaimer interface {
+	ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom, executor store.ExecutorIdentity) (*store.Node, error)
+}
+
 type poolExecFn func(ctx context.Context, n *store.Node, holderID string)
 
 func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) error {
@@ -147,7 +151,17 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		}
 
 		holderID := fmt.Sprintf("%s:%d", cfg.HolderPrefix, time.Now().UnixNano())
-		n, err := claimer.ClaimNode(ctx, holderID, cfg.Labels, cfg.Lease, currentHeadroom(ctx, provider))
+		headroom := currentHeadroom(ctx, provider)
+		var n *store.Node
+		var err error
+		if c, ok := claimer.(executorNodeClaimer); ok {
+			n, err = c.ClaimNodeAs(ctx, holderID, cfg.Labels, cfg.Lease, headroom, store.ExecutorIdentity{
+				Kind: executorKind(cfg.SourceName),
+				ID:   cfg.HolderPrefix,
+			})
+		} else {
+			n, err = claimer.ClaimNode(ctx, holderID, cfg.Labels, cfg.Lease, headroom)
+		}
 		if err != nil {
 			<-sem
 			if errors.Is(err, context.Canceled) {
@@ -178,6 +192,13 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			exec(ctx, n, holderID)
 		}(n, holderID)
 	}
+}
+
+func executorKind(source string) string {
+	if source == "agent" {
+		return "agent"
+	}
+	return "runner"
 }
 
 func runRunnerCLI(args []string) error {
@@ -397,7 +418,7 @@ func executePooledNode(
 	}()
 
 	res, err := orchestrator.RunNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
-		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken))
+		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken), orchestrator.ClaimedNode())
 	cancel()
 	hbWG.Wait()
 

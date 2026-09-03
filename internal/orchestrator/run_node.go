@@ -35,6 +35,9 @@ func RunNodeOnce(
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	if cfg.claimed {
+		ctx = withNodeClaimHolder(ctx, holderID)
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -503,6 +506,10 @@ func runNodeCLI(args []string) error {
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
 	var runOpts []RunNodeOption
+	if claimedHolder := os.Getenv("SPARKWING_NODE_CLAIM_HOLDER"); claimedHolder != "" {
+		holderID = claimedHolder
+		runOpts = append(runOpts, ClaimedNode())
+	}
 	if *coordinated {
 		holderID = fmt.Sprintf("node:%s:%s", runID, nodeID)
 		runOpts = append(runOpts, Coordinated())

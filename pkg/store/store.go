@@ -6,7 +6,9 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -482,6 +484,11 @@ CREATE TABLE IF NOT EXISTS runs (
     retried_as      TEXT NOT NULL DEFAULT '',
     -- retry_source: 'manual' (operator) or 'auto' (AutoRetry modifier).
     retry_source    TEXT NOT NULL DEFAULT '',
+    retry_cause_node_id TEXT NOT NULL DEFAULT '',
+    retry_avoid_coordinator_id TEXT NOT NULL DEFAULT '',
+    retry_avoid_executor_kind TEXT NOT NULL DEFAULT '',
+    retry_avoid_executor_id TEXT NOT NULL DEFAULT '',
+    retry_avoid_until INTEGER,
     -- replay_of_*: single-node replay lineage.
     replay_of_run_id  TEXT NOT NULL DEFAULT '',
     replay_of_node_id TEXT NOT NULL DEFAULT '',
@@ -525,6 +532,15 @@ CREATE TABLE IF NOT EXISTS nodes (
     -- per token, so this is what the ownership predicates match on.
     claim_token_prefix TEXT NOT NULL DEFAULT '',
     lease_expires_at INTEGER,
+    coordinator_id    TEXT NOT NULL DEFAULT '',
+    executor_kind     TEXT NOT NULL DEFAULT '',
+    executor_id       TEXT NOT NULL DEFAULT '',
+    execution_started_at INTEGER,
+    reservation_id   TEXT NOT NULL DEFAULT '',
+    avoid_coordinator_id TEXT NOT NULL DEFAULT '',
+    avoid_executor_kind TEXT NOT NULL DEFAULT '',
+    avoid_executor_id TEXT NOT NULL DEFAULT '',
+    avoid_until       INTEGER,
     -- needs_labels: JSON []string from RunsOn; AND semantics.
     needs_labels     BLOB,
     -- status_detail: phase string runners write for the dashboard.
@@ -597,11 +613,12 @@ CREATE TABLE IF NOT EXISTS triggers (
     claim_principal       TEXT NOT NULL DEFAULT '',
     claim_token_prefix    TEXT NOT NULL DEFAULT '',
     webhook_delivery      TEXT NOT NULL DEFAULT '',
-    webhook_replay_key    TEXT NOT NULL DEFAULT ''
+    webhook_replay_key    TEXT NOT NULL DEFAULT '',
+    available_at          INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_triggers_pending
-    ON triggers(status, created_at) WHERE status = 'pending';
+    ON triggers(status, available_at, created_at) WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS idx_triggers_claimed_lease
     ON triggers(status, lease_expires_at) WHERE status = 'claimed';
 CREATE INDEX IF NOT EXISTS idx_triggers_source_status_created
@@ -854,7 +871,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 27
+const expectedSchemaVersion = 28
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1273,6 +1290,18 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return uniqueTokenPrefixIndexTx(ctx, tx)
 	case 27:
 		return rewriteLegacyInheritedHolderMarkers(ctx, tx)
+	case 28:
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodeAgentAttemptCols); err != nil {
+			return err
+		}
+		if err := ensureColumnsSQLite(ctx, tx, "runs", runAgentRetryCols); err != nil {
+			return err
+		}
+		if err := ensureColumnsSQLite(ctx, tx, "triggers", triggerAvailableCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, triggerPendingIndexV28SQLite)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1377,6 +1406,18 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		// SQLSTATE 22021, so no row here can carry it and the rewrite
 		// would only bind a NUL that Postgres rejects again.
 		return nil
+	case 28:
+		if err := addColumnsTx(ctx, tx, "nodes", nodeAgentAttemptCols); err != nil {
+			return err
+		}
+		if err := addColumnsTx(ctx, tx, "runs", runAgentRetryCols); err != nil {
+			return err
+		}
+		if err := addColumnsTx(ctx, tx, "triggers", triggerAvailableCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, triggerPendingIndexV28Postgres)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1573,6 +1614,35 @@ var nodesUsageCols = map[string]string{
 	"max_rss_bytes":      "INTEGER NOT NULL DEFAULT 0",
 	"process_wall_nanos": "INTEGER NOT NULL DEFAULT 0",
 }
+
+var nodeAgentAttemptCols = map[string]string{
+	"coordinator_id":       "TEXT NOT NULL DEFAULT ''",
+	"executor_kind":        "TEXT NOT NULL DEFAULT ''",
+	"executor_id":          "TEXT NOT NULL DEFAULT ''",
+	"execution_started_at": "INTEGER",
+	"reservation_id":       "TEXT NOT NULL DEFAULT ''",
+	"avoid_coordinator_id": "TEXT NOT NULL DEFAULT ''",
+	"avoid_executor_kind":  "TEXT NOT NULL DEFAULT ''",
+	"avoid_executor_id":    "TEXT NOT NULL DEFAULT ''",
+	"avoid_until":          "INTEGER",
+}
+
+var runAgentRetryCols = map[string]string{
+	"retry_cause_node_id":        "TEXT NOT NULL DEFAULT ''",
+	"retry_avoid_coordinator_id": "TEXT NOT NULL DEFAULT ''",
+	"retry_avoid_executor_kind":  "TEXT NOT NULL DEFAULT ''",
+	"retry_avoid_executor_id":    "TEXT NOT NULL DEFAULT ''",
+	"retry_avoid_until":          "INTEGER",
+}
+
+var triggerAvailableCols = map[string]string{
+	"available_at": "INTEGER NOT NULL DEFAULT 0",
+}
+
+const triggerPendingIndexV28SQLite = `CREATE INDEX IF NOT EXISTS idx_triggers_pending_available
+    ON triggers(status, available_at, created_at) WHERE status = '` + triggerStatusPending + `'`
+
+const triggerPendingIndexV28Postgres = triggerPendingIndexV28SQLite
 
 var nodeDispatchRedactionCols = map[string]string{
 	"redacted_keys": "BLOB",
@@ -1949,7 +2019,12 @@ type Run struct {
 	RetryOf   string `json:"retry_of,omitempty"`
 	RetriedAs string `json:"retried_as,omitempty"`
 	// RetrySource is RetrySourceManual or RetrySourceAuto.
-	RetrySource string `json:"retry_source,omitempty"`
+	RetrySource             string     `json:"retry_source,omitempty"`
+	RetryCauseNodeID        string     `json:"retry_cause_node_id,omitempty"`
+	RetryAvoidCoordinatorID string     `json:"-"`
+	RetryAvoidExecutorKind  string     `json:"-"`
+	RetryAvoidExecutorID    string     `json:"-"`
+	RetryAvoidUntil         *time.Time `json:"-"`
 	// Replay lineage; independent of retry chain.
 	ReplayOfRunID  string `json:"replay_of_run_id,omitempty"`
 	ReplayOfNodeID string `json:"replay_of_node_id,omitempty"`
@@ -2005,8 +2080,8 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	}
 	_, err := s.exec(
 		ctx, `
-INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     pipeline        = excluded.pipeline,
     status          = excluded.status,
@@ -2024,6 +2099,11 @@ ON CONFLICT(id) DO UPDATE SET
     retry_of        = excluded.retry_of,
     retried_as      = excluded.retried_as,
     retry_source    = excluded.retry_source,
+    retry_cause_node_id = excluded.retry_cause_node_id,
+    retry_avoid_coordinator_id = excluded.retry_avoid_coordinator_id,
+    retry_avoid_executor_kind = excluded.retry_avoid_executor_kind,
+    retry_avoid_executor_id = excluded.retry_avoid_executor_id,
+    retry_avoid_until = excluded.retry_avoid_until,
     replay_of_run_id  = excluded.replay_of_run_id,
     replay_of_node_id = excluded.replay_of_node_id,
     invocation_json   = excluded.invocation_json,
@@ -2032,7 +2112,9 @@ WHERE runs.status = '`+runStatusPending+`'`,
 		r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), parent,
 		r.Repo, r.RepoURL, r.GithubOwner, r.GithubRepo,
-		r.RetryOf, r.RetriedAs, r.RetrySource, r.ReplayOfRunID, r.ReplayOfNodeID,
+		r.RetryOf, r.RetriedAs, r.RetrySource, r.RetryCauseNodeID,
+		r.RetryAvoidCoordinatorID, r.RetryAvoidExecutorKind, r.RetryAvoidExecutorID, nullableTimeNS(r.RetryAvoidUntil),
+		r.ReplayOfRunID, r.ReplayOfNodeID,
 		invocationJSON, heartbeat,
 	)
 	return err
@@ -2142,7 +2224,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 		next := frontier[:0:0]
 		for _, id := range frontier {
 			rows, err := s.query(ctx,
-				`SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+				`SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
 				   FROM runs WHERE retry_of = ?`, id)
 			if err != nil {
 				return nil, err
@@ -2176,7 +2258,7 @@ func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, err
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	row := s.queryRow(ctx, `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
   FROM runs WHERE id = ?`, runID)
 	return scanRun(row)
 }
@@ -2271,7 +2353,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
 	args = append(args, limit)
 
 	query := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
   FROM runs` + where + `
  ORDER BY started_at DESC
  LIMIT ?`
@@ -2326,7 +2408,7 @@ func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []st
 		args = append(args, time.Now().Add(-maxAge).UnixNano())
 	}
 	q := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
   FROM runs ` + where + `
  ORDER BY started_at DESC
  LIMIT 1`
@@ -2392,17 +2474,26 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+func nullableTimeNS(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.UnixNano()
+}
+
 func scanRun(rs rowScanner) (*Run, error) {
 	var r Run
 	var argsJSON, planJSON, invocationJSON, annotationsJSON []byte
 	var createdNS, startedNS int64
-	var finishedNS, heartbeatNS sql.NullInt64
+	var finishedNS, heartbeatNS, retryAvoidUntilNS sql.NullInt64
 	var parent sql.NullString
 	err := rs.Scan(&r.ID, &r.Pipeline, &r.Status, &r.TriggerSource,
 		&r.GitBranch, &r.GitSHA, &argsJSON, &planJSON, &r.Error,
 		&createdNS, &startedNS, &finishedNS, &parent,
 		&r.Repo, &r.RepoURL, &r.GithubOwner, &r.GithubRepo,
 		&r.RetryOf, &r.RetriedAs, &r.RetrySource,
+		&r.RetryCauseNodeID, &r.RetryAvoidCoordinatorID, &r.RetryAvoidExecutorKind,
+		&r.RetryAvoidExecutorID, &retryAvoidUntilNS,
 		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
 		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON,
 		&heartbeatNS)
@@ -2423,6 +2514,10 @@ func scanRun(rs rowScanner) (*Run, error) {
 	if heartbeatNS.Valid {
 		t := time.Unix(0, heartbeatNS.Int64)
 		r.LastHeartbeatAt = &t
+	}
+	if retryAvoidUntilNS.Valid {
+		t := time.Unix(0, retryAvoidUntilNS.Int64)
+		r.RetryAvoidUntil = &t
 	}
 	if parent.Valid {
 		r.ParentRunID = parent.String
@@ -2453,9 +2548,18 @@ type Node struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
 	// Warm-pool dispatch; zero on laptop / K8sRunner paths.
-	ReadyAt        *time.Time `json:"ready_at,omitempty"`
-	ClaimedBy      string     `json:"claimed_by,omitempty"`
-	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
+	ReadyAt            *time.Time `json:"ready_at,omitempty"`
+	ClaimedBy          string     `json:"claimed_by,omitempty"`
+	LeaseExpiresAt     *time.Time `json:"lease_expires_at,omitempty"`
+	CoordinatorID      string     `json:"coordinator_id,omitempty"`
+	ExecutorKind       string     `json:"executor_kind,omitempty"`
+	ExecutorID         string     `json:"executor_id,omitempty"`
+	ExecutionStartedAt *time.Time `json:"execution_started_at,omitempty"`
+	ReservationID      string     `json:"reservation_id,omitempty"`
+	AvoidCoordinatorID string     `json:"-"`
+	AvoidExecutorKind  string     `json:"-"`
+	AvoidExecutorID    string     `json:"-"`
+	AvoidUntil         *time.Time `json:"-"`
 
 	// NeedsLabels: runner labels required (AND semantics). Empty = any.
 	NeedsLabels []string `json:"needs_labels,omitempty"`
@@ -2522,8 +2626,15 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		labelsJSON, _ = json.Marshal(n.NeedsLabels)
 	}
 	_, err := s.exec(ctx, `
-INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels)
-VALUES (?,?,?,?,?)`, n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON)
+INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels,
+                   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until)
+VALUES (?, ?, ?, ?, ?,
+        COALESCE((SELECT retry_avoid_coordinator_id FROM runs WHERE id = ?), ''),
+        COALESCE((SELECT retry_avoid_executor_kind FROM runs WHERE id = ?), ''),
+        COALESCE((SELECT retry_avoid_executor_id FROM runs WHERE id = ?), ''),
+        (SELECT retry_avoid_until FROM runs WHERE id = ?))`,
+		n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON,
+		n.RunID, n.RunID, n.RunID, n.RunID)
 	return err
 }
 
@@ -2648,7 +2759,9 @@ func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
        failure_reason, exit_code, annotations_json, summary, artifact_manifest,
-       cpu_nanos, max_rss_bytes, process_wall_nanos
+       cpu_nanos, max_rss_bytes, process_wall_nanos,
+       coordinator_id, executor_kind, executor_id, execution_started_at, reservation_id,
+       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until
   FROM nodes
  WHERE run_id = ?
  ORDER BY `+s.insertionOrderColumn(), runID)
@@ -2673,7 +2786,9 @@ func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
        failure_reason, exit_code, annotations_json, summary, artifact_manifest,
-       cpu_nanos, max_rss_bytes, process_wall_nanos
+       cpu_nanos, max_rss_bytes, process_wall_nanos,
+       coordinator_id, executor_kind, executor_id, execution_started_at, reservation_id,
+       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until
   FROM nodes
  WHERE run_id = ? AND node_id = ?`, runID, nodeID)
 	n := &Node{}
@@ -2685,7 +2800,7 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 
 func scanNodeRow(rs rowScanner, n *Node) error {
 	var depsJSON, outputJSON, labelsJSON, annotationsJSON []byte
-	var startedNS, finishedNS, readyNS, leaseNS, heartbeatNS sql.NullInt64
+	var startedNS, finishedNS, readyNS, leaseNS, heartbeatNS, executionStartedNS, avoidUntilNS sql.NullInt64
 	var claimedBy sql.NullString
 	var exitCode sql.NullInt64
 	err := rs.Scan(&n.RunID, &n.NodeID, &n.Status, &n.Outcome,
@@ -2693,7 +2808,9 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&readyNS, &claimedBy, &leaseNS, &labelsJSON,
 		&n.StatusDetail, &heartbeatNS,
 		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary, &n.ArtifactManifest,
-		&n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos)
+		&n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos,
+		&n.CoordinatorID, &n.ExecutorKind, &n.ExecutorID, &executionStartedNS, &n.ReservationID,
+		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -2723,6 +2840,14 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 	if leaseNS.Valid {
 		t := time.Unix(0, leaseNS.Int64)
 		n.LeaseExpiresAt = &t
+	}
+	if executionStartedNS.Valid {
+		t := time.Unix(0, executionStartedNS.Int64)
+		n.ExecutionStartedAt = &t
+	}
+	if avoidUntilNS.Valid {
+		t := time.Unix(0, avoidUntilNS.Int64)
+		n.AvoidUntil = &t
 	}
 	if heartbeatNS.Valid {
 		t := time.Unix(0, heartbeatNS.Int64)
@@ -3053,7 +3178,16 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 // unauthenticated, which leaves the claim unbound. lease is clamped to
 // [MaxLeaseDuration].
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
+	return s.ClaimNextReadyNodeAs(ctx, claimant, holderID, lease, runnerLabels, ExecutorIdentity{})
+}
+
+func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string, executor ExecutorIdentity) (*Node, error) {
 	lease = clampNodeLease(lease)
+	coordinatorID, err := s.CoordinatorID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	executor = normalizeExecutorIdentity(holderID, executor)
 	labelSet := make(map[string]struct{}, len(runnerLabels))
 	for _, l := range runnerLabels {
 		if l != "" {
@@ -3072,11 +3206,16 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, 
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
        failure_reason, exit_code, annotations_json, summary, artifact_manifest,
-       cpu_nanos, max_rss_bytes, process_wall_nanos
+       cpu_nanos, max_rss_bytes, process_wall_nanos,
+       coordinator_id, executor_kind, executor_id, execution_started_at, reservation_id,
+       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until
   FROM nodes
  WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
+   AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
+            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)
  ORDER BY ready_at ASC
- LIMIT 1`+s.forUpdateSkipLocked()), n)
+	 LIMIT 1`+s.forUpdateSkipLocked(),
+			time.Now().UnixNano(), coordinatorID, executor.Kind, executor.ID), n)
 		if err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -3108,9 +3247,10 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 		if _, err := tx.ExecContext(
 			ctx,
 			`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
-			        lease_expires_at = ?
+			        lease_expires_at = ?, coordinator_id = ?, executor_kind = ?, executor_id = ?, reservation_id = ?
 			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
-			holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(), n.RunID, n.NodeID,
+			holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
+			coordinatorID, executor.Kind, executor.ID, executor.ReservationID, n.RunID, n.NodeID,
 		); err != nil {
 			_ = tx.Rollback()
 			return nil, err
@@ -3120,9 +3260,31 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 		}
 		n.ClaimedBy = holderID
 		n.LeaseExpiresAt = &expires
+		n.CoordinatorID = coordinatorID
+		n.ExecutorKind = executor.Kind
+		n.ExecutorID = executor.ID
+		n.ReservationID = executor.ReservationID
 		return n, nil
 	}
 	return nil, ErrNotFound
+}
+
+func normalizeExecutorIdentity(holderID string, executor ExecutorIdentity) ExecutorIdentity {
+	if executor.ID == "" {
+		executor.ID = holderID
+		if i := strings.LastIndexByte(executor.ID, ':'); i > 0 {
+			if _, err := strconv.ParseInt(executor.ID[i+1:], 10, 64); err == nil {
+				executor.ID = executor.ID[:i]
+			}
+		}
+	}
+	if executor.Kind == "" {
+		executor.Kind = "runner"
+		if i := strings.IndexByte(executor.ID, ':'); i > 0 {
+			executor.Kind = executor.ID[:i]
+		}
+	}
+	return executor
 }
 
 func labelsSatisfied(needed []string, have map[string]struct{}) bool {
@@ -3182,9 +3344,33 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, cl
 		`UPDATE nodes SET lease_expires_at = ?
 		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
 		    AND COALESCE(claim_principal, '') = ?
-		    AND COALESCE(claim_token_prefix, '') = ?`,
-		expires, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
+		    AND COALESCE(claim_token_prefix, '') = ?
+		    AND `+nodeClaimLiveSQL,
+		expires, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix, time.Now().UnixNano(),
 	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrLockHeld
+	}
+	return nil
+}
+
+func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string) error {
+	now := time.Now().UnixNano()
+	res, err := s.exec(ctx, `
+UPDATE nodes
+   SET execution_started_at = COALESCE(execution_started_at, ?)
+ WHERE run_id = ? AND node_id = ? AND claimed_by = ?
+   AND COALESCE(claim_principal, '') = ?
+	   AND COALESCE(claim_token_prefix, '') = ?
+	   AND `+nodeClaimLiveSQL+` AND `+nodeNotDone,
+		now, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix, now)
 	if err != nil {
 		return err
 	}
@@ -3799,6 +3985,36 @@ type ClaimIdentity struct {
 }
 
 func (c ClaimIdentity) bound() bool { return c.TokenPrefix != "" }
+
+type ExecutorIdentity struct {
+	Kind          string `json:"kind,omitempty"`
+	ID            string `json:"id,omitempty"`
+	ReservationID string `json:"reservation_id,omitempty"`
+}
+
+const metaKeyCoordinatorID = "coordinator_id"
+
+func (s *Store) CoordinatorID(ctx context.Context) (string, error) {
+	var id string
+	if err := s.queryRow(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCoordinatorID).Scan(&id); err == nil && id != "" {
+		return id, nil
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	var suffix [16]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", err
+	}
+	candidate := "coord-" + hex.EncodeToString(suffix[:])
+	if _, err := s.exec(ctx, `INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO NOTHING`,
+		metaKeyCoordinatorID, candidate, time.Now().UnixNano()); err != nil {
+		return "", err
+	}
+	if err := s.queryRow(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCoordinatorID).Scan(&id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
 
 // CreateTrigger inserts a new trigger with status='pending'.
 func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {

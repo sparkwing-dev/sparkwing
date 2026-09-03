@@ -17,6 +17,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+type nodeClaimHolderKey struct{}
+
+func withNodeClaimHolder(ctx context.Context, holderID string) context.Context {
+	return context.WithValue(ctx, nodeClaimHolderKey{}, holderID)
+}
+
+func nodeClaimHolder(ctx context.Context) (string, bool) {
+	holder, ok := ctx.Value(nodeClaimHolderKey{}).(string)
+	return holder, ok && holder != ""
+}
+
+type executionStartAcknowledger interface {
+	AcknowledgeNodeExecutionStart(context.Context, string, string, string) error
+}
+
 type NodeExecutor struct {
 	backends Backends
 	labels   []string
@@ -196,6 +211,15 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
 	defer func() { _ = nlog.Close() }()
 
+	if holderID, ok := nodeClaimHolder(ctx); ok {
+		ack, supported := r.backends.State.(executionStartAcknowledger)
+		if !supported {
+			return nil, errors.New("claimed node backend does not support execution-start acknowledgement")
+		}
+		if err := ack.AcknowledgeNodeExecutionStart(ctx, runID, node.ID(), holderID); err != nil {
+			return nil, fmt.Errorf("acknowledge execution start: %w", err)
+		}
+	}
 	if err := r.backends.State.StartNode(ctx, runID, node.ID()); err != nil {
 		return nil, err
 	}

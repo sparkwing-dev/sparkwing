@@ -1064,10 +1064,11 @@ func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request
 }
 
 type claimNodeReq struct {
-	HolderID  string         `json:"holder_id"`
-	LeaseSecs int            `json:"lease_secs,omitempty"`
-	Labels    []string       `json:"labels,omitempty"`
-	Headroom  *claimHeadroom `json:"headroom,omitempty"`
+	HolderID  string                 `json:"holder_id"`
+	LeaseSecs int                    `json:"lease_secs,omitempty"`
+	Labels    []string               `json:"labels,omitempty"`
+	Headroom  *claimHeadroom         `json:"headroom,omitempty"`
+	Executor  store.ExecutorIdentity `json:"executor,omitempty"`
 }
 
 type claimHeadroom struct {
@@ -1101,7 +1102,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	n, err := s.store.ClaimNextReadyNode(r.Context(), claimIdentity(r), body.HolderID, lease, body.Labels)
+	n, err := s.store.ClaimNextReadyNodeAs(r.Context(), claimIdentity(r), body.HolderID, lease, body.Labels, body.Executor)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			w.WriteHeader(http.StatusNoContent)
@@ -1119,6 +1120,32 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		RunID: n.RunID, NodeID: n.NodeID, Pipeline: pipeline,
 	})
 	writeJSON(w, http.StatusOK, n)
+}
+
+type executionStartReq struct {
+	HolderID string `json:"holder_id"`
+}
+
+func (s *Server) handleAcknowledgeNodeExecutionStart(w http.ResponseWriter, r *http.Request) {
+	var body executionStartReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.HolderID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
+		return
+	}
+	err := s.store.AcknowledgeNodeExecutionStart(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), claimIdentity(r), body.HolderID)
+	if errors.Is(err, store.ErrLockHeld) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {

@@ -1024,6 +1024,10 @@ type Headroom struct {
 // The controller filters candidates so a returned node's needs_labels
 // is a subset of labels (AND semantics).
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error) {
+	return c.ClaimNodeAs(ctx, holderID, labels, lease, headroom, store.ExecutorIdentity{})
+}
+
+func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error) {
 	body := map[string]any{"holder_id": holderID}
 	if lease > 0 {
 		secs := int(lease.Seconds())
@@ -1037,6 +1041,9 @@ func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string
 	}
 	if headroom != nil {
 		body["headroom"] = headroom
+	}
+	if executor.Kind != "" || executor.ID != "" || executor.ReservationID != "" {
+		body["executor"] = executor
 	}
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -1061,6 +1068,30 @@ func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string
 		return nil, nil
 	default:
 		return nil, readHTTPError(resp)
+	}
+}
+
+func (c *Client) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID, holderID string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/execution-start",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	buf, _ := json.Marshal(map[string]string{"holder_id": holderID})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return nil
+	case http.StatusConflict:
+		return store.ErrLockHeld
+	default:
+		return readHTTPError(resp)
 	}
 }
 
