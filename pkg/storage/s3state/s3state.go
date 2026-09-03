@@ -47,10 +47,12 @@ const DefaultFlushInterval = 500 * time.Millisecond
 // envelopes since the last flush exceed this many bytes.
 const DefaultBufferThreshold = 16 * 1024
 
-// DefaultCloseDrainTimeout bounds the synchronous outbox drain Close
-// attempts, so a process exiting against an unreachable object store
-// still terminates.
-const DefaultCloseDrainTimeout = 5 * time.Second
+// DefaultDrainTimeout bounds a synchronous outbox drain: the one Close
+// attempts before it gives up, and the one that confirms a run's state
+// reached the object store. Without it an unreachable store, or another
+// run's undrainable write at the head of the queue, would hold up a
+// process that is only trying to finish.
+const DefaultDrainTimeout = 5 * time.Second
 
 // DefaultReadCacheTTL bounds how stale a snapshot of a run this
 // process does not write may be. Past it the next read re-parses the
@@ -178,6 +180,8 @@ type runState struct {
 	loaded        bool
 	loadedAt      time.Time
 	owned         bool
+
+	pins int
 }
 
 type stepKey struct {
@@ -212,7 +216,11 @@ func (b *Backend) getRunState(ctx context.Context, runID string, mode runAccess)
 		rs = newRunState()
 		b.runs[runID] = rs
 	}
+	// safety: pinned before b.mu is released, so the sweep cannot drop the entry
+	// out of the map while this caller is still deciding what to do with it.
+	rs.pins++
 	b.mu.Unlock()
+	defer b.unpinRunState(rs)
 
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
@@ -266,12 +274,25 @@ func (rs *runState) resetLocked() {
 	rs.metrics = map[string][]store.MetricSample{}
 }
 
+func (b *Backend) unpinRunState(rs *runState) {
+	b.mu.Lock()
+	rs.pins--
+	b.mu.Unlock()
+}
+
+// safety: only a finished snapshot of a run this process neither writes nor
+// holds is a pure cache. Dropping any other entry detaches it from b.runs,
+// where every flush path looks a run up, so its envelopes would never be
+// written.
 func (b *Backend) evictIdleReads(cutoff time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for id, rs := range b.runs {
+		if rs.pins > 0 {
+			continue
+		}
 		rs.mu.Lock()
-		idle := !rs.owned && !rs.dirty && rs.flushing == nil && rs.loadedAt.Before(cutoff)
+		idle := rs.loadAttempted && !rs.owned && !rs.dirty && rs.flushing == nil && rs.loadedAt.Before(cutoff)
 		rs.mu.Unlock()
 		if idle {
 			delete(b.runs, id)
@@ -438,7 +459,9 @@ func (b *Backend) confirmInStore(ctx context.Context, key string) error {
 	if !pending {
 		return nil
 	}
-	if derr := b.outbox.Drain(ctx); derr != nil {
+	drainCtx, cancel := context.WithTimeout(ctx, DefaultDrainTimeout)
+	defer cancel()
+	if derr := b.outbox.Drain(drainCtx); derr != nil {
 		return fmt.Errorf("s3state: %s is queued in the local outbox, not in the object store: %w", key, derr)
 	}
 	pending, err = b.outbox.HasPending(ctx, key)
@@ -511,7 +534,7 @@ func (b *Backend) flushAllDirty() {
 func (b *Backend) Close() error {
 	b.stopOnce.Do(func() { close(b.stopCh) })
 	b.wg.Wait()
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultCloseDrainTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultDrainTimeout)
 	defer cancel()
 	var errs []error
 	for _, id := range b.dirtyRunIDs() {

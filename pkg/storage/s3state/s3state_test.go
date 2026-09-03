@@ -454,7 +454,7 @@ func TestS3StateBackend_OutboxRouting_KeepsFIFOAfterRecovery(t *testing.T) {
 }
 
 func TestOutbox_Drain_AppliesQueuedWritesInOrder(t *testing.T) {
-	art := newMemArt()
+	art := newHoldFirstPutArt("held/by/nothing")
 	dir := t.TempDir()
 	outbox, err := s3state.OpenOutbox(filepath.Join(dir, "outbox.db"), art, time.Hour)
 	if err != nil {
@@ -463,26 +463,37 @@ func TestOutbox_Drain_AppliesQueuedWritesInOrder(t *testing.T) {
 	t.Cleanup(func() { _ = outbox.Close() })
 	ctx := context.Background()
 
-	key := "runs/r/state.ndjson"
-	older := []byte("older-snapshot")
-	newer := []byte("older-snapshot-plus-more-envelopes")
-	if err := outbox.Stage(ctx, s3state.OutboxKindState, key, older); err != nil {
-		t.Fatalf("Stage older: %v", err)
-	}
-	if err := outbox.Stage(ctx, s3state.OutboxKindState, key, newer); err != nil {
-		t.Fatalf("Stage newer: %v", err)
+	keys := []string{"runs/a/state.ndjson", "runs/b/state.ndjson", "runs/c/state.ndjson"}
+	for _, key := range keys {
+		if err := outbox.Stage(ctx, s3state.OutboxKindState, key, []byte(key)); err != nil {
+			t.Fatalf("Stage %s: %v", key, err)
+		}
 	}
 	if err := outbox.Drain(ctx); err != nil {
 		t.Fatalf("Drain: %v", err)
 	}
-	rc, err := art.Get(ctx, key)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
+
+	art.mu.Lock()
+	order := append([]string(nil), art.putOrder...)
+	art.mu.Unlock()
+	if len(order) != len(keys) {
+		t.Fatalf("replayed %v, want one PUT per queued key %v", order, keys)
 	}
-	got, _ := io.ReadAll(rc)
-	_ = rc.Close()
-	if string(got) != string(newer) {
-		t.Errorf("store = %q, want the later superset %q (older overwrote newer)", got, newer)
+	for i, key := range keys {
+		if order[i] != key {
+			t.Fatalf("replay order = %v, want %v", order, keys)
+		}
+	}
+	for _, key := range keys {
+		rc, err := art.Get(ctx, key)
+		if err != nil {
+			t.Fatalf("Get %s: %v", key, err)
+		}
+		got, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		if string(got) != key {
+			t.Errorf("store[%s] = %q, want %q", key, got, key)
+		}
 	}
 }
 

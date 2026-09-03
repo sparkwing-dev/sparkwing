@@ -153,8 +153,8 @@ code change to unlock.
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
 - **s3state:** `WithReadCacheTTL` bounds how stale a read of a run this process
-  does not write may be, `DefaultCloseDrainTimeout` bounds the drain
-  `Backend.Close` attempts, and `DefaultOutboxMaxRows` caps the outbox queue.
+  does not write may be, `DefaultDrainTimeout` bounds a synchronous outbox
+  drain, and `DefaultOutboxMaxRows` caps the outbox queue.
 
 ### Changed
 
@@ -438,13 +438,17 @@ code change to unlock.
   replaying, and the queue is capped at `DefaultOutboxMaxRows` (1024) distinct
   keys. An hour-long outage used to leave thousands of rows, each holding the
   entire run state, and replay them all in order before the newest one landed.
-- **s3state:** A run whose state reached only the local outbox no longer reports
-  success. `FinishRun` returns an error when the terminal state is queued on
-  this machine's disk rather than in the object store, `Close` returns the
-  errors from its final flush and gives the outbox a bounded chance to drain
-  first, and the outbox refuses to queue a kind it cannot replay instead of
-  deleting it unsent on the next drain. On an ephemeral CI runner the old
-  behaviour exited 0 with the run's only copy on a disk about to disappear.
+- **s3state + orchestrator:** A run whose state reached only the local outbox no
+  longer reports success. `FinishRun` returns an error when the terminal state
+  is queued on this machine's disk rather than in the object store, `Close`
+  returns the errors from its final flush and gives the outbox a bounded chance
+  to drain first, and the outbox refuses to queue a kind it cannot replay
+  instead of deleting it unsent on the next drain. A local run now carries that
+  error into its result, so `sparkwing run` prints it and exits non-zero where
+  it used to exit 0 with the run's only copy on a CI runner's disk about to
+  disappear. Replays of queued writes are serialized against each other, so a
+  blob superseded while it was being sent can no longer land after the newer
+  one.
 - **s3state:** A run another process writes is no longer read once and cached
   forever. In S3-only shared state, the first read of a run id was kept for the
   life of the process, including a read that found nothing, so a pipeline
