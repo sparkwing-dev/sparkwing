@@ -293,6 +293,11 @@ code change to unlock.
 - **logs:** Secrets are masked longest-first, so a registered secret that is a
   prefix of another registered secret no longer leaks the longer one's tail.
   Registering `abc` and then `abcdef` used to log `abcdef` as `***def`.
+- **logs:** Structured log attributes of every type are masked. `error` and
+  `[]byte` values used to pass through untouched, so an error string carrying a
+  resolved secret was logged in the clear beside a masked message. A masked
+  error keeps its unwrap chain; an attribute of any other type is masked by its
+  rendered form and only replaced when a secret was found in it.
 - **store:** A trigger returned to the pending queue no longer keeps the
   principal that held it. A release, a generation-guarded release, and the
   expired-claim reaper all clear `claim_principal` and `claim_token_prefix`,

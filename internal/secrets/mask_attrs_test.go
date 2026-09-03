@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -184,5 +185,43 @@ func TestMask_OverlappingSecretsLeaveNoTail(t *testing.T) {
 		if got := m.Mask("token=abc"); got != "token=***" {
 			t.Errorf("%s: Mask of the short secret = %q, want token=***", name, got)
 		}
+	}
+}
+
+type maskTestPayload struct{ Token string }
+
+func TestMaskAttrs_MasksErrorByteAndUnknownAttrs(t *testing.T) {
+	m := newTestMasker("s3cr3t")
+	wrapped := errors.New("failed with s3cr3t")
+	attrs := map[string]any{
+		"err":     fmt.Errorf("deploy: %w", wrapped),
+		"body":    []byte("token=s3cr3t"),
+		"payload": maskTestPayload{Token: "s3cr3t"},
+		"count":   3,
+	}
+
+	out := m.MaskAttrs(attrs)
+
+	gotErr, ok := out["err"].(error)
+	if !ok {
+		t.Fatalf("err attr is %T, want an error", out["err"])
+	}
+	if gotErr.Error() != "deploy: failed with ***" {
+		t.Errorf("err = %q", gotErr.Error())
+	}
+	if !errors.Is(gotErr, wrapped) {
+		t.Error("masking an error broke its unwrap chain")
+	}
+	if got := out["body"].([]byte); string(got) != "token=***" {
+		t.Errorf("body = %q", got)
+	}
+	if out["count"] != 3 {
+		t.Errorf("count = %#v, want the int back unchanged", out["count"])
+	}
+	if s := fmt.Sprint(out); strings.Contains(s, "s3cr3t") {
+		t.Errorf("masked attrs still carry the secret: %s", s)
+	}
+	if !strings.Contains(fmt.Sprint(attrs), "s3cr3t") {
+		t.Error("caller's attrs were mutated")
 	}
 }

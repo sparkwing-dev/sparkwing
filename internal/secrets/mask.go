@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -179,6 +180,12 @@ func (m *Masker) maskValue(v any, depth int) (any, bool) {
 		return out, true
 	case map[string]any:
 		return m.maskAttrs(t, depth)
+	case []byte:
+		masked := m.Mask(string(t))
+		if masked == string(t) {
+			return t, false
+		}
+		return []byte(masked), true
 	case map[string]string:
 		var out map[string]string
 		for k, s := range t {
@@ -195,10 +202,32 @@ func (m *Masker) maskValue(v any, depth int) (any, bool) {
 			return t, false
 		}
 		return out, true
+	case error:
+		masked := m.Mask(t.Error())
+		if masked == t.Error() {
+			return t, false
+		}
+		return maskedError{msg: masked, err: t}, true
 	default:
-		return v, false
+		// safety: an attribute of any other type still renders through fmt in a
+		// log sink, so it is masked by its rendering rather than passed through.
+		rendered := fmt.Sprint(v)
+		masked := m.Mask(rendered)
+		if masked == rendered {
+			return v, false
+		}
+		return masked, true
 	}
 }
+
+type maskedError struct {
+	msg string
+	err error
+}
+
+func (e maskedError) Error() string { return e.msg }
+
+func (e maskedError) Unwrap() error { return e.err }
 
 func (m *Masker) Values() []string {
 	m.mu.RLock()
