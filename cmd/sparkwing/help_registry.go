@@ -1839,6 +1839,13 @@ capacity profile poisoned by contention -- one whose learned demand floor
 prices every run at the whole machine, named with the exact
 runs stats --reset command that clears it.
 
+It also lists this home's standalone runs stores -- the ones pipeline
+binaries wrote when they could not reach the daemon -- with each store's
+run count and the age of its oldest run. Those runs are invisible to
+sparkwing runs and to the dashboard, which read this home's own state.db,
+and nothing prunes them: delete a directory when you no longer want the
+runs in it.
+
 Use --dry-run to report what it would repair without changing anything.`,
 	Flags: []FlagSpec{
 		{Name: "dry-run", Desc: "Report what would be repaired without changing anything", Group: "Input"},

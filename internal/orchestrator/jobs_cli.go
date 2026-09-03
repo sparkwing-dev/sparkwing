@@ -241,6 +241,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 		if p := runLogPath(run); p != "" {
 			payload["log_path"] = p
 		}
+		addRunStandalone(payload, run)
 		return writeJSON(out, payload)
 	}
 
@@ -324,6 +325,13 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 		}
 		fmt.Fprintf(out, "%s %s\n", label("log_path: "), line)
 	}
+	if on, reason := runStandalone(run); on {
+		line := "yes"
+		if reason != "" {
+			line = "yes (" + reason + ")"
+		}
+		fmt.Fprintf(out, "%s %s\n", label("standalone"), line)
+	}
 	if runCanDisplayAdmissionWait(run) {
 		if detail, ok := latestAdmissionWait(ctx, b, runID); ok {
 			fmt.Fprintf(out, "%s %s\n", label("admission:"), detail.statusLine())
@@ -356,6 +364,30 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 		}
 	}
 	return nil
+}
+
+// safety: a standalone run is written to a store `sparkwing runs` never
+// reads, so a row that does surface here came from that store being asked for
+// by path; saying so is what keeps its absence from the machine's own list
+// from reading as a lost run.
+func addRunStandalone(payload map[string]any, run *store.Run) {
+	on, reason := runStandalone(run)
+	if !on {
+		return
+	}
+	payload["standalone"] = true
+	if reason != "" {
+		payload["standalone_reason"] = reason
+	}
+}
+
+func runStandalone(run *store.Run) (bool, string) {
+	if run == nil {
+		return false, ""
+	}
+	on, _ := run.Invocation["standalone"].(bool)
+	reason, _ := run.Invocation["standalone_reason"].(string)
+	return on, reason
 }
 
 func runLogPath(run *store.Run) string {
@@ -1496,6 +1528,7 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out 
 	if p := runLogPath(run); p != "" {
 		payload["log_path"] = p
 	}
+	addRunStandalone(payload, run)
 	if approvals, err := st.ListApprovalsForRun(ctx, runID); err == nil && len(approvals) > 0 {
 		payload["approvals"] = approvals
 	}

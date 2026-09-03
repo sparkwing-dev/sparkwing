@@ -3,6 +3,7 @@ package opsview
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -82,6 +84,21 @@ type DoctorReport struct {
 	Daemon DoctorDaemon `json:"daemon"`
 
 	Toolchains []DoctorToolchain `json:"toolchains,omitempty"`
+
+	StandaloneStores []DoctorStandaloneStore `json:"standalone_stores,omitempty"`
+}
+
+// DoctorStandaloneStore is one runs store written by pipeline binaries that
+// could not reach the admission daemon. Its runs are invisible to
+// `sparkwing runs` and to the dashboard, which read the shared store.
+type DoctorStandaloneStore struct {
+	Path string `json:"path"`
+
+	Schema int `json:"schema"`
+
+	Runs int `json:"runs"`
+
+	OldestRunAt *time.Time `json:"oldest_run_at,omitempty"`
 }
 
 // DoctorToolchain is one CLI release in the version store that a repo's SDK pin
@@ -237,6 +254,7 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 	}
 	home = p.Root
 	diagnoseToolchains(p, &report)
+	diagnoseStandaloneStores(p, &report)
 	if err := validateDoctorMutationPaths(p, nil, false); err != nil {
 		return report, err
 	}
@@ -653,6 +671,70 @@ func diagnoseToolchains(p paths.Paths, report *DoctorReport) {
 	sort.Slice(report.Toolchains, func(i, j int) bool {
 		return report.Toolchains[i].Version < report.Toolchains[j].Version
 	})
+}
+
+func diagnoseStandaloneStores(p paths.Paths, report *DoctorReport) {
+	entries, err := os.ReadDir(p.StandaloneDir())
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		schema, ok := standaloneSchemaOf(entry)
+		if !ok {
+			continue
+		}
+		path := filepath.Join(p.StandaloneSchemaDir(schema), "state.db")
+		runs, oldest, ok := standaloneRunCount(path)
+		if !ok {
+			continue
+		}
+		report.StandaloneStores = append(report.StandaloneStores, DoctorStandaloneStore{
+			Path: path, Schema: schema, Runs: runs, OldestRunAt: oldest,
+		})
+	}
+	sort.Slice(report.StandaloneStores, func(i, j int) bool {
+		return report.StandaloneStores[i].Schema < report.StandaloneStores[j].Schema
+	})
+}
+
+func standaloneSchemaOf(entry os.DirEntry) (int, bool) {
+	if !entry.IsDir() {
+		return 0, false
+	}
+	rest, found := strings.CutPrefix(entry.Name(), "schema-")
+	if !found {
+		return 0, false
+	}
+	schema, err := strconv.Atoi(rest)
+	if err != nil || schema <= 0 {
+		return 0, false
+	}
+	return schema, true
+}
+
+// safety: read-only and without migration, because a store at another
+// schema belongs to a binary that must keep opening it; doctor reporting on
+// one must never be what ratchets it out of that binary's reach.
+func standaloneRunCount(path string) (int, *time.Time, bool) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return 0, nil, false
+	}
+	st, err := store.OpenReadOnly(path)
+	if err != nil {
+		return 0, nil, false
+	}
+	defer func() { _ = st.Close() }()
+	var runs int
+	var oldest sql.NullInt64
+	if err := st.DB().QueryRow(`SELECT COUNT(*), MIN(started_at) FROM runs`).Scan(&runs, &oldest); err != nil {
+		return 0, nil, false
+	}
+	if !oldest.Valid {
+		return runs, nil, true
+	}
+	at := time.Unix(0, oldest.Int64).UTC()
+	return runs, &at, true
 }
 
 func diagnoseInstallConflict(report *DoctorReport) {
@@ -1148,6 +1230,11 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	}
 	fmt.Fprintf(w, "competing_installs\t%d\n", competing)
 	fmt.Fprintf(w, "toolchains\t%d\n", len(r.Toolchains))
+	standaloneRuns := 0
+	for _, sa := range r.StandaloneStores {
+		standaloneRuns += sa.Runs
+	}
+	fmt.Fprintf(w, "standalone_stores\t%d\t%d\n", len(r.StandaloneStores), standaloneRuns)
 	return nil
 }
 
@@ -1161,6 +1248,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 		renderDaemonSection(w, r)
 		renderMachineBudget(w, r)
 		renderToolchains(w, r)
+		renderStandaloneStores(w, r)
 		renderUngatedRepos(w, r)
 		renderStrayDaemons(w, r)
 		return nil
@@ -1237,6 +1325,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	renderMachineBudget(w, r)
 	renderToolchains(w, r)
+	renderStandaloneStores(w, r)
 	renderStrayDaemons(w, r)
 	return nil
 }
@@ -1413,6 +1502,36 @@ func renderToolchains(w io.Writer, r DoctorReport) {
 		fmt.Fprintf(tw, "  %s\t%s\t%d bytes\n", t.Version, t.Path, t.Bytes)
 	}
 	_ = tw.Flush()
+}
+
+func renderStandaloneStores(w io.Writer, r DoctorReport) {
+	if len(r.StandaloneStores) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\nstandalone runs stores: %d, written by runs that could not reach the daemon\n"+
+		"  `sparkwing runs` and the dashboard read this home's own store and never these, which is what those runs said on stderr\n"+
+		"  nothing prunes them; delete a directory once you no longer want its runs\n", len(r.StandaloneStores))
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, sa := range r.StandaloneStores {
+		oldest := "-"
+		if sa.OldestRunAt != nil {
+			oldest = "oldest " + standaloneAge(*sa.OldestRunAt)
+		}
+		fmt.Fprintf(tw, "  %s\t%d run(s)\t%s\n", sa.Path, sa.Runs, oldest)
+	}
+	_ = tw.Flush()
+}
+
+func standaloneAge(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }
 
 func renderStrayDaemons(w io.Writer, r DoctorReport) {
