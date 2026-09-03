@@ -753,6 +753,13 @@ shared `~/.sparkwing/state.db` is not opened by a pipeline binary at all.
 the oldest run's age. Nothing prunes them: delete a directory once you no
 longer want the runs in it.
 
+A `schema-<N>` directory is itself a Sparkwing home, so the ordinary read
+verbs work against one:
+
+```sh
+SPARKWING_HOME=~/.sparkwing/standalone/schema-27 sparkwing runs list
+```
+
 The start record of a standalone run carries `standalone: true` and
 `standalone_reason` (`no-daemon`, `daemon-older`, or `floor`), and
 `sparkwing runs status` shows both for a run read out of a standalone
