@@ -159,6 +159,7 @@ type TrendPoint struct {
 	P95DurMs  int64
 	AvgWaitMs int64
 }
+const UnsupportedRouteError = "unsupported"
 
 # methods on un-declared receiver types (likely a bug)
 func (r *flushingStatusRecorder) Flush()

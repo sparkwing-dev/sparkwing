@@ -361,12 +361,21 @@ const TypeHello MessageType = "hello"
 const TypeHelloAck MessageType = "hello_ack"
 const TypeLivenessAck MessageType = "liveness_ack"
 const TypeLivenessProbe MessageType = "liveness_probe"
+func TypeOf(m Message) MessageType
 const TypeQueueState MessageType = "queue_state"
 const TypeQueued MessageType = "queued"
 const TypeReattach MessageType = "reattach"
 const TypeRelease MessageType = "release"
 const TypeStatsReset MessageType = "stats_reset"
 const TypeStatsResetAck MessageType = "stats_reset_ack"
+const TypeUnsupported MessageType = "unsupported"
+type UnknownTypeError struct {
+	Type MessageType
+}
+func (e *UnknownTypeError) Error() string
+type Unsupported struct {
+	Type string
+}
 type Waiter struct {
 	RunID string
 
