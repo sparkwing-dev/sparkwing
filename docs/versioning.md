@@ -69,6 +69,74 @@ For v0 we accept this and rely on:
 - Coordinated release of sparkwing + sparks-core when sparkwing
   breaks plugin-facing APIs.
 
+## The SDK pin selects the CLI
+
+`.sparkwing/go.mod` pins the SDK a repo builds against. That pin also
+selects the CLI that runs the repo's pipelines, the way `go` honors a
+`toolchain` line under `GOTOOLCHAIN=auto`. Before compiling a pipeline,
+`sparkwing` compares its own version with the pin:
+
+| Pin | Installed CLI | What runs |
+|---|---|---|
+| release tag newer than the CLI | release build | the pinned release, from the version store |
+| release tag at or below the CLI | release build | the installed CLI |
+| pseudo-version, or a `replace` for the SDK | anything | the installed CLI |
+| anything | `(devel)` or a source build | the installed CLI |
+
+A newer CLI needs no switch, because the daemon protocol serves older
+pipelines. A source build on either side wins, because a checkout is
+what its author is testing.
+
+The version store is `$SPARKWING_HOME/toolchains/<version>/sparkwing`,
+`~/.sparkwing/toolchains/<version>/sparkwing` by default. A fetch pulls
+the release asset for this OS and architecture, verifies the Ed25519
+signatures over the manifest and the asset plus the manifest's sha256
+digest, and installs it by rename, so two concurrent hooks cannot exec a
+half-written binary. Later runs rehash the stored binary against the
+recorded digest and touch no network on a match; a mismatch re-fetches.
+
+A switch is never silent. It prints one line to stderr and nothing to
+stdout:
+
+```text
+sparkwing: running v0.40.0 from ~/.sparkwing/toolchains/v0.40.0/sparkwing because this repo pins SDK v0.40.0 and the installed sparkwing is v0.38.2
+```
+
+A fetch adds one line naming the release URL and the verified digest.
+`sparkwing info` reports both versions whenever they differ, and
+`sparkwing doctor` lists the version, path, and size of every release the
+store holds.
+
+### Running without the switch
+
+`SPARKWING_TOOLCHAIN=local` forbids the fetch and the exec. A repo whose
+pin outranks the installed CLI then fails, naming the version to install
+by hand:
+
+```text
+this repo pins SDK v0.40.0 but the installed sparkwing is v0.38.2 and SPARKWING_TOOLCHAIN=local forbids fetching one. Install v0.40.0 with `sparkwing update --version v0.40.0`, or unset SPARKWING_TOOLCHAIN
+```
+
+A fetch that cannot reach the release host fails the same way, naming the
+URL it tried. Neither case falls through to the installed CLI, because
+that is the build the pin already ruled out.
+
+`SPARKWING_TOOLCHAIN=auto` is the default and the only other accepted
+value. The CLI a switch starts runs with `SPARKWING_TOOLCHAIN_ACTIVE` set
+to its own version, so it never switches again.
+
+### How this relates to the update commands
+
+- `sparkwing update` replaces the CLI on your PATH. Run it to move this
+  machine's default forward.
+- `sparkwing repos update --apply` moves the pins: it bumps every tracked
+  repo's `.sparkwing/go.mod` to a target release and commits the result,
+  so the fleet lands on one version.
+- The version store is neither. It holds the releases individual repos
+  ask for while their pins sit ahead of your PATH. Fetches stop once
+  `sparkwing update` raises the installed CLI to the highest pin, or
+  `sparkwing repos update --apply` lowers the pins onto it.
+
 ## Compatibility coordinate (post-v1)
 
 When sparkwing reaches v1, we plan to lean on Go's path-encoded

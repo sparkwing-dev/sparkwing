@@ -457,6 +457,20 @@ code change to unlock.
 
 ### Added
 
+- **cli:** A repo's SDK pin now selects the CLI that runs its pipelines. Before
+  compiling a pipeline, `sparkwing` compares its own version with the
+  `github.com/sparkwing-dev/sparkwing` requirement in `.sparkwing/go.mod`; when
+  the pin is a release tag newer than the installed release, it fetches that
+  release into `$SPARKWING_HOME/toolchains/<version>/sparkwing`, verifies the
+  Ed25519 signatures and the sha256 digest, and execs it with the original
+  arguments. One stderr line names the version, the path, and why. A cached
+  binary is rehashed against its recorded digest instead of refetched, and a
+  mismatch refetches. A pseudo-version pin, a `replace` for the SDK, or a
+  source-built CLI on either side switches nothing, and a CLI at or above the
+  pin already serves it. `SPARKWING_TOOLCHAIN=local` refuses to fetch and fails
+  with the version to install by hand; `sparkwing info` reports both versions
+  when they differ and `sparkwing doctor` lists the store.
+  See [docs/versioning.md](docs/versioning.md).
 - **runner + charts:** `--trigger-runner=warm` and
   `runner.triggerRunner.kind: warm` offer nodes to outbound-only remote
   Windows, macOS, and Linux agents before using Kubernetes Jobs for unlabeled
