@@ -210,16 +210,23 @@ Notes:
 - **Provider support and capability detection**: S3 is the object
   store that enforces these preconditions today (`If-None-Match: *`
   for create-once, `If-Match: <etag>` for compare-and-swap); the
-  filesystem backend enforces them locally for single-host runs. The
+  filesystem backend enforces them for single-host runs by holding a
+  file lock per key, which serializes the processes sharing that path
+  and not only the writers inside one of them. A mount whose kernel
+  refuses that lock answers the probe below with false. The
   `ConditionalWriter` contract is provider-agnostic and names the GCS
   generation-match and Azure ETag equivalents, but those backends are
   not yet implemented -- declaring `gcs` or `azure-blob` surfaces an
   unimplemented error at run start. Two checks gate every coordinated
   operation: a static type check that the backend exposes
-  `ConditionalWriter`, and a one-time live probe
+  `ConditionalWriter`, and a live probe
   (`ConditionalWritesSupported`) that catches S3-compatible gateways
-  which accept precondition headers and silently ignore them. Either
-  check failing routes the operation to the last-write-wins fallback.
+  which accept precondition headers and silently ignore them. A
+  backend that fails the type check, and a probe that answers that
+  preconditions are ignored, route every later operation to the
+  last-write-wins fallback. A probe that cannot reach the store has
+  not answered: that operation returns the error and the next one
+  probes again.
 - **Dashboard live updates**: `S3Backend` polls
   `runs/<id>/state.ndjson` for changes. Refresh latency = poll
   interval (default 2-5s), with cache invalidation on a per-run

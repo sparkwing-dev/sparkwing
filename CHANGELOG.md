@@ -51,6 +51,10 @@ code change to unlock.
 
 ### Added
 
+- **storage/conformance:** `TestConditionalWriterAcrossHandles`, which races two
+  handles onto one store so a backend has to prove its conditional writes
+  exclude writers that arrived independently, not only goroutines sharing one
+  handle. The filesystem and S3 backends run it.
 - **controller + sdk:** Routes for the store operations a run makes around its
   own state, so a run served by a controller can do them over the wire.
   `GET /api/v1/runs/{id}/pending-triggers` and
@@ -309,6 +313,38 @@ code change to unlock.
   decoded on read, and the `filesystem` secrets backend decodes the same way.
   Files written by hand still read as before; a value that an earlier write
   already mangled has to be set again.
+- **cache:** Filesystem `PutIfAbsent` and `PutIfMatch` hold across processes.
+  They were a check followed by a write, serialized only by a lock inside one
+  `ArtifactStore` value, so two `sparkwing run` processes sharing a
+  `type: filesystem` cache both won the same conditional write and both entered
+  a capacity-1 concurrency group. Each key is now held under a file lock for
+  the length of the compare-and-swap, and a filesystem whose kernel refuses
+  that lock reports `ConditionalWritesSupported` false so callers fall back to
+  last-write-wins instead of trusting a reservation nothing enforces.
+- **orchestrator:** A transient object-store error no longer disables cross-runner
+  reservation for the life of a process. The one-time probe that asks whether
+  the store honors write preconditions treated any error as a "no" and routed
+  every later acquire and release to the unenforced fallback, so a single 500,
+  DNS blip, or cancelled context during a long-lived process's first
+  concurrency operation left every group it dispatched unenforced behind one
+  log warning. Only a store that answers that it ignores preconditions settles
+  the question now; a probe that fails returns its error to the caller and the
+  next operation probes again.
+- **orchestrator:** Runners that lose the same S3 concurrency CAS back off to
+  different times. The jitter added to each retry came from a single hash byte
+  of the key, so it was under a microsecond and identical for every contender:
+  N runners on one hot key retried in lockstep, burning retries against each
+  other until one exhausted its 200 attempts and failed the acquire. Each
+  attempt now draws its own wait.
+- **orchestrator:** S3-shared-state concurrency again recognizes the
+  inherited-holder marker earlier releases wrote. The marker inside a
+  `concurrency/` slot object changed shape and nothing rewrites those objects,
+  so a child run that had joined its parent's slot before the upgrade read back
+  as an ordinary holder: the parent's cost was never handed to it on release,
+  leaving the key admitting past its capacity; `OnLimit: CancelOthers` left it
+  running; and its marker surfaced as a node id in `sparkwing concurrency
+  status`. Readers now accept either form, and writers keep emitting the
+  current one so a runner still on the old release reads what it wrote.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads
