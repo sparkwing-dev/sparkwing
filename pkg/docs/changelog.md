@@ -287,9 +287,27 @@ code change to unlock.
   `daemon_schema_version` against `store_schema_version`, marks a diverged pair
   unhealthy, says when a restart will not help, and reports a store that exists
   but cannot be read as `store_schema_error` instead of as an absent store.
+- **cache:** A `type: controller` cache backend can read and write artifacts
+  again. The adapter prepended `/bin/` to keys that the binary cache had
+  already prefixed with `bin/`, so every request addressed `/bin/bin/<key>` and
+  the cache answered 400; the `/bin/` route's key pattern also rejected the
+  `.sha256` digest sidecar, so a digest could never be stored even once the
+  path was right. The adapter now drops a leading `bin/`, because the route is
+  that namespace, and the route accepts the sidecar key. `fs` and `s3` caches
+  were never affected; they treat a key as opaque.
 
 ### Security
 
+- **cache:** A pipeline binary fetched from a shared artifact store must carry
+  its `.sha256` sidecar. When the sidecar was missing the fetch accepted
+  whatever bytes were there, computed a digest from those same bytes, wrote it
+  as the sidecar, and installed the binary executable, so anyone with write
+  access to the store could turn the integrity check off by deleting one small
+  object and replacing the blob, and the next runner would execute it. The
+  fetch now fails and the run compiles from source instead. Set
+  `SPARKWING_ARTIFACT_DIGEST_BACKFILL=1` to restore the old healing behaviour
+  against a store you trust, for blobs published before sidecars existed. The
+  downloaded file also stays non-executable until its digest is settled.
 - **store:** A trigger returned to the pending queue no longer keeps the
   principal that held it. A release, a generation-guarded release, and the
   expired-claim reaper all clear `claim_principal` and `claim_token_prefix`,

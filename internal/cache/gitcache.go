@@ -888,7 +888,7 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "commit %s is on branch %s", commit, branch)
 }
 
-var validBinHash = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}$`)
+var validBinHash = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}(\.sha256)?$`)
 
 type binMeta struct {
 	SHA256    string `json:"sha256"`
