@@ -31,6 +31,10 @@ type Daemon struct {
 	lockFile *os.File
 	ln       net.Listener
 
+	apiLn    net.Listener
+	apiDone  chan struct{}
+	apiConns int
+
 	connSeq atomic.Uint64
 
 	ready       chan struct{}
@@ -169,6 +173,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	defer d.releaseLock()
 	defer func() {
 		_ = os.Remove(d.layout.sock)
+		_ = os.Remove(d.layout.apiSock)
 		_ = os.Remove(filepath.Dir(d.layout.sock))
 	}()
 
@@ -184,6 +189,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 	d.ln = ln
+	d.startAPI(ctx)
 	d.startGrace()
 	close(d.ready)
 	d.cfg.logf("elected; serving %s (version %q)", d.layout.sock, d.cfg.Version)
@@ -236,6 +242,7 @@ func (d *Daemon) shutdown() {
 		d.shuttingDown = true
 		d.mu.Unlock()
 		close(d.quit)
+		d.closeAPIListener()
 		if d.ln != nil {
 			_ = d.ln.Close()
 		}
@@ -259,6 +266,7 @@ func (d *Daemon) finalShutdown() {
 	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("final persist: %v", err)
 	}
+	d.awaitAPI(APIDrainWindow)
 	d.awaitFinalizers(FinalizeDrainWindow)
 }
 
@@ -505,6 +513,10 @@ func (d *Daemon) serveConn(c *conn) {
 		Draining:            draining,
 		StoreSchemaVersion:  d.cfg.StoreSchemaVersion,
 		StoreRequirements:   d.cfg.StoreRequirements,
+	}
+	if d.cfg.ServeAPI != nil {
+		apiReady := d.apiReady()
+		ack.APIReady = &apiReady
 	}
 	if d.cfg.Runs != nil {
 		storeErr := d.cfg.Runs.Ready()
@@ -1333,6 +1345,7 @@ func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
+	d.closeAPIListener()
 	d.cfg.logf("draining for successor %s", req.SuccessorVersion)
 	_ = c.send(&wingwire.DrainAck{HoldersRemaining: remaining})
 	d.shutdown()

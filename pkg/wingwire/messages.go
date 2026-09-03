@@ -81,6 +81,12 @@ type HelloAck struct {
 	// StoreError is why the daemon's store handle is unusable, empty when
 	// StoreReady is true and from daemons that predate the field.
 	StoreError string `json:"store_error,omitempty"`
+	// APIReady reports whether the daemon serves the controller HTTP API on
+	// its api.sock. False while the socket is unbound or a takeover has
+	// closed it. Nil from daemons that predate the field and from a daemon
+	// built without an API server, which is how a client tells "not serving"
+	// from "cannot say".
+	APIReady *bool `json:"api_ready,omitempty"`
 }
 
 // HostResources is an amount of machine capacity: CPU cores and

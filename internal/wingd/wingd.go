@@ -1,6 +1,7 @@
 package wingd
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -103,6 +104,14 @@ type Config struct {
 	// Runs is the daemon's handle on the runs store. Nil leaves every
 	// store-backed behaviour off: no terminal check, no finalize.
 	Runs RunStore
+
+	// ServeAPI serves the controller HTTP API on ln until ctx ends, and
+	// returns once in-flight requests have drained. The daemon binds ln
+	// after it wins the election and closes it before a successor is
+	// spawned, so only the election holder ever serves the API; every
+	// connection ln yields has passed the peer-uid check and satisfies
+	// [APIConn]. Nil leaves api.sock unbound.
+	ServeAPI func(ctx context.Context, ln net.Listener)
 
 	// StoreSchemaVersion is the runs-store schema version this daemon's
 	// binary understands. It is advertised in the handshake so a newer
@@ -219,12 +228,13 @@ func (c Config) logf(format string, args ...any) {
 }
 
 type layout struct {
-	home  string
-	dir   string
-	lock  string
-	sock  string
-	state string
-	log   string
+	home    string
+	dir     string
+	lock    string
+	sock    string
+	apiSock string
+	state   string
+	log     string
 }
 
 func resolveLayout(home string) (layout, error) {
@@ -236,13 +246,15 @@ func resolveLayout(home string) (layout, error) {
 		home = p.Root
 	}
 	dir := filepath.Join(home, "wingd")
+	sock := socketPathForHome(home)
 	return layout{
-		home:  home,
-		dir:   dir,
-		lock:  filepath.Join(dir, "d.lock"),
-		sock:  socketPathForHome(home),
-		state: filepath.Join(dir, "state.json"),
-		log:   filepath.Join(dir, "d.log"),
+		home:    home,
+		dir:     dir,
+		lock:    filepath.Join(dir, "d.lock"),
+		sock:    sock,
+		apiSock: apiSocketBeside(sock),
+		state:   filepath.Join(dir, "state.json"),
+		log:     filepath.Join(dir, "d.log"),
 	}, nil
 }
 
@@ -428,6 +440,24 @@ func SocketPath(home string) (string, error) {
 		return "", err
 	}
 	return l.sock, nil
+}
+
+// safety: the admission socket is hashed into a short shared base because a
+// home-relative path overruns the OS sun_path limit, and the API socket has
+// to obey the same limit and the same directory privacy checks.
+func apiSocketBeside(sock string) string {
+	return filepath.Join(filepath.Dir(sock), "api.sock")
+}
+
+// APISocketPath reports where the daemon for home serves the controller HTTP
+// API. It sits beside the admission socket, in the directory the daemon owns
+// and whose privacy every caller checks with ValidateSocketDir.
+func APISocketPath(home string) (string, error) {
+	l, err := resolveLayout(home)
+	if err != nil {
+		return "", err
+	}
+	return l.apiSock, nil
 }
 
 // HomeDir reports the daemon home that a caller's home argument resolves to,

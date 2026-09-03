@@ -32,6 +32,12 @@ func (d *Daemon) idleLoop(ctx context.Context) {
 func (d *Daemon) idleElapsed() time.Duration {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	// safety: a hosted run reaches its state over api.sock and may hold no
+	// wingwire connection between admission and finish, so an open API
+	// connection is activity or the daemon idles out from under the run.
+	if d.apiConns > 0 {
+		return 0
+	}
 	for c := range d.conns {
 		if !c.healthProbe {
 			return 0

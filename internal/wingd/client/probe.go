@@ -36,6 +36,10 @@ type DaemonInfo struct {
 	// when it is usable and from a daemon that predates the field.
 	StoreError string
 
+	// APIReady reports whether the daemon serves the controller HTTP API on
+	// its api.sock. Nil from a daemon that predates the field.
+	APIReady *bool
+
 	Draining bool
 }
 
@@ -68,6 +72,7 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 		StoreRequirements:  ack.StoreRequirements,
 		StoreReady:         ack.StoreReady,
 		StoreError:         ack.StoreError,
+		APIReady:           ack.APIReady,
 		Draining:           ack.Draining,
 	}, nil
 }

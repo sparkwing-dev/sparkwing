@@ -389,6 +389,11 @@
           "name": "store_error",
           "kind": "string",
           "omitempty": true
+        },
+        {
+          "name": "api_ready",
+          "kind": "*bool",
+          "omitempty": true
         }
       ]
     },
