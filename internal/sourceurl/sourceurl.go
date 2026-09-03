@@ -11,6 +11,8 @@ import (
 
 var scpLikeRE = regexp.MustCompile(`^[A-Za-z0-9._-]+@([^:]+):(.+)$`)
 
+var hostnameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
 func ValidateCloneURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -28,6 +30,11 @@ func ValidateCloneURL(raw string) (string, error) {
 		return "", fmt.Errorf("repo URL must not begin with '-'")
 	}
 	if match := scpLikeRE.FindStringSubmatch(raw); match != nil {
+		// safety: ssh splits the destination at the last '@', so a capture that still holds
+		// one names a different machine than the guard below inspects.
+		if !hostnameRE.MatchString(match[1]) {
+			return "", fmt.Errorf("repo URL host %q is not a hostname", match[1])
+		}
 		if err := validateHost(match[1]); err != nil {
 			return "", err
 		}

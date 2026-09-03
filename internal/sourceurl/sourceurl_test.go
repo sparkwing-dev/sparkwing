@@ -131,3 +131,20 @@ func TestValidateCloneURLRejectsControlCharacters(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCloneURLRejectsAnScpHostThatHidesASecondAt(t *testing.T) {
+	cases := map[string]string{
+		"loopback":     "git@a@127.0.0.1:repo.git",
+		"localhost":    "git@a@localhost:repo.git",
+		"metadata ip":  "git@x@169.254.169.254:repo.git",
+		"rfc1918":      "git@u@10.0.0.5:repo.git",
+		"metadata dns": "git@u@metadata.google.internal:repo.git",
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got, err := ValidateCloneURL(tc); err == nil {
+				t.Fatalf("ValidateCloneURL(%q) = %q, want rejection", tc, got)
+			}
+		})
+	}
+}

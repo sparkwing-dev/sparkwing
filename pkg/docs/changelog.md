@@ -634,6 +634,17 @@ code change to unlock.
   covers those paths. Each release also carries a signed `image-digests.json`
   asset listing every published image, its tag, and its digest, so operators
   can pin and diff them.
+- **cache + controller:** An scp-like clone URL that hides a second `@`, such as
+  `git@a@127.0.0.1:repo.git`, is refused. The scp host pattern captured
+  everything between the first `@` and the `:`, so the loopback, private,
+  link-local, and metadata checks were handed `a@127.0.0.1`, which parses as no
+  address at all and so passed every one of them, while ssh splits the
+  destination at the last `@` and dialled `127.0.0.1`. A clone host must now
+  read as a hostname, with no `@`, `:`, or other stowaway character left in it.
+  Before this a principal holding only run-submission scope could aim a clone
+  at the cloud metadata endpoint, loopback, or any RFC1918 address through
+  `POST /api/v1/triggers` and the gitcache proxy, or through `/git/register`,
+  `/archive`, and `/sync/seed` on `sparkwing-cache`.
 
 ### Docs
 
