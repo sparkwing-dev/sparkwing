@@ -55,6 +55,7 @@ type Outbox struct {
 	logger   *slog.Logger
 
 	mu       sync.Mutex
+	drainSem chan struct{}
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
@@ -125,6 +126,7 @@ CREATE TABLE IF NOT EXISTS outbox_writes (
 		interval: interval,
 		maxRows:  DefaultOutboxMaxRows,
 		logger:   logger,
+		drainSem: make(chan struct{}, 1),
 		stopCh:   make(chan struct{}),
 	}
 	if o.interval <= 0 {
@@ -211,7 +213,16 @@ func (o *Outbox) Drain(ctx context.Context) error {
 	return err
 }
 
+// safety: one replay at a time. Stage may collapse a row while its blob is
+// being sent, so a second replay running alongside could deliver the newer
+// blob first and leave the superseded one as the last write to land.
 func (o *Outbox) drain(ctx context.Context) (outboxHead, error) {
+	select {
+	case o.drainSem <- struct{}{}:
+	case <-ctx.Done():
+		return outboxHead{}, ctx.Err()
+	}
+	defer func() { <-o.drainSem }()
 	for {
 		o.mu.Lock()
 		row := o.db.QueryRowContext(ctx, `

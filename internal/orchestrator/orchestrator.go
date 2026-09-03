@@ -455,7 +455,13 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		errMsg = runErr.Error()
 	}
 	finishCtx := context.WithoutCancel(ctx)
-	_ = backends.State.FinishRun(finishCtx, runID, finalStatus, errMsg)
+	if ferr := backends.State.FinishRun(finishCtx, runID, finalStatus, errMsg); ferr != nil && runErr == nil {
+		// safety: a terminal state the store never took is a run nobody can read
+		// back, so it must not leave here as a success.
+		runErr = fmt.Errorf("persist run state: %w", ferr)
+		finalStatus = statusForRunError(runErr)
+		errMsg = runErr.Error()
+	}
 
 	contentionNote := ""
 	if lease != nil && !skipDispatch && opts.Admission != nil {
@@ -584,7 +590,7 @@ func statusForRunError(err error) string {
 	return "failed"
 }
 
-func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
+func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err error) {
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, fmt.Errorf("ensure sparkwing root: %w", err)
 	}
@@ -627,7 +633,16 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 				return nil, fmt.Errorf("state backend: S3-only mode requires LogStore to be configured")
 			}
 			if ownsState {
-				defer func() { _ = s.Close() }()
+				defer func() {
+					cerr := s.Close()
+					if cerr == nil || err != nil || res == nil || res.Error != nil {
+						return
+					}
+					// safety: in S3-only mode the bucket is the run's only copy, so
+					// state left on this machine's disk is not a finished run.
+					res.Error = fmt.Errorf("persist run state: %w", cerr)
+					res.Status = "failed"
+				}()
 			}
 			backends = S3Backends(opts.LogStore, s, opts.ArtifactStore)
 		case *client.Client:

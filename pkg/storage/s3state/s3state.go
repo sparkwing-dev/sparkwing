@@ -47,10 +47,12 @@ const DefaultFlushInterval = 500 * time.Millisecond
 // envelopes since the last flush exceed this many bytes.
 const DefaultBufferThreshold = 16 * 1024
 
-// DefaultCloseDrainTimeout bounds the synchronous outbox drain Close
-// attempts, so a process exiting against an unreachable object store
-// still terminates.
-const DefaultCloseDrainTimeout = 5 * time.Second
+// DefaultDrainTimeout bounds a synchronous outbox drain: the one Close
+// attempts before it gives up, and the one that confirms a run's state
+// reached the object store. Without it an unreachable store, or another
+// run's undrainable write at the head of the queue, would hold up a
+// process that is only trying to finish.
+const DefaultDrainTimeout = 5 * time.Second
 
 // DefaultReadCacheTTL bounds how stale a snapshot of a run this
 // process does not write may be. Past it the next read re-parses the
@@ -457,7 +459,9 @@ func (b *Backend) confirmInStore(ctx context.Context, key string) error {
 	if !pending {
 		return nil
 	}
-	if derr := b.outbox.Drain(ctx); derr != nil {
+	drainCtx, cancel := context.WithTimeout(ctx, DefaultDrainTimeout)
+	defer cancel()
+	if derr := b.outbox.Drain(drainCtx); derr != nil {
 		return fmt.Errorf("s3state: %s is queued in the local outbox, not in the object store: %w", key, derr)
 	}
 	pending, err = b.outbox.HasPending(ctx, key)
@@ -530,7 +534,7 @@ func (b *Backend) flushAllDirty() {
 func (b *Backend) Close() error {
 	b.stopOnce.Do(func() { close(b.stopCh) })
 	b.wg.Wait()
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultCloseDrainTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultDrainTimeout)
 	defer cancel()
 	var errs []error
 	for _, id := range b.dirtyRunIDs() {
