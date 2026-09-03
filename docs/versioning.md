@@ -85,7 +85,9 @@ selects the CLI that runs the repo's pipelines, the way `go` honors a
 
 A newer CLI needs no switch, because the daemon protocol serves older
 pipelines. A source build on either side wins, because a checkout is
-what its author is testing.
+what its author is testing. Under `--sw-ref` the decision reads the
+working tree's pin, not the ref's, because it is made before the ref's
+worktree exists.
 
 The version store is `$SPARKWING_HOME/toolchains/<version>/sparkwing`,
 `~/.sparkwing/toolchains/<version>/sparkwing` by default. A fetch pulls
@@ -102,7 +104,8 @@ does not check out is fetched again.
 
 The pinned release hosts the admission daemon and migrates the shared
 runs store in `$SPARKWING_HOME` exactly as the pipeline binary compiled
-at that pin already does on every run; the schema requirements rule
+at that pin already does on every run; the
+[schema requirements rule](deployment-modes.md#schema-versioning)
 decides whether binaries at older pins keep opening it, which is why
 `sparkwing repos update` moves the fleet together.
 
