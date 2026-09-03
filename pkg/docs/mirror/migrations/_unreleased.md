@@ -5,6 +5,68 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## (Breaking) Two refusals became warnings, and those runs leave `sparkwing runs`
+
+- **Before:** two conditions failed a run outright. A pipeline with a
+  plan-level or node-level `.Resources()` pin refused to start when no
+  admission daemon was running and none could be started, naming
+  `SPARKWING_ALLOW_UNADMITTED=1` as the override. A daemon whose protocol was
+  older than the pipeline binary refused every run, pinned or not. Runs that
+  did proceed uncoordinated, including every `SPARKWING_ALLOW_UNADMITTED=1`
+  run, wrote to `~/.sparkwing/state.db` and stayed visible to `sparkwing runs`,
+  `sparkwing jobs`, and the dashboard.
+- **After:** neither condition refuses. Both run standalone against
+  `~/.sparkwing/standalone/state.db`, print one block on stderr naming the
+  remedy, and exit as they would have. `SPARKWING_ALLOW_UNADMITTED=1` keeps its
+  meaning and takes the same path, with its own block. Because those runs are
+  in a different store, none of them appears in `sparkwing runs`,
+  `sparkwing jobs`, or the dashboard.
+- **Migration:** a script that relied on either refusal as a gate -- treating a
+  non-zero exit as "no daemon, do not proceed" -- no longer gets one. Check for
+  a daemon explicitly instead:
+
+  ```bash
+  sparkwing daemon status -o json | jq -e '.running and .healthy'
+  ```
+
+  A script that reads a run back by id after launching it should read it from
+  the store the run actually used. `standalone/` is itself a Sparkwing home:
+
+  ```bash
+  SPARKWING_HOME=~/.sparkwing/standalone sparkwing runs status --run "$RUN_ID"
+  ```
+
+  The run's own start record says which it was: `standalone` and
+  `standalone_reason` are on the invocation and on `sparkwing runs status`
+  output. `sparkwing doctor` lists every standalone store on the machine with
+  its run count, so an operator who did not expect any can see that runs went
+  there.
+
+## Pipeline binaries built before the daemon owned the runs store
+
+- **Before:** every pipeline binary opened `~/.sparkwing/state.db` itself, at
+  whatever runs-store schema its own SDK pin was built with. The first binary
+  built against a newer schema migrated that shared file, and every older
+  binary on the machine stopped opening it.
+- **After:** a pipeline binary built at this release or later never opens the
+  shared file. It reaches this machine's runs store through the admission
+  daemon, and when the daemon cannot serve it, it opens
+  `~/.sparkwing/standalone/schema-<N>/state.db` instead. The installed
+  sparkwing owns the shared file and is the only thing that migrates it.
+- **Migration:** a pipeline binary already built on this machine, from a repo
+  whose `.sparkwing/go.mod` pins an SDK older than this release, still opens
+  the shared file directly. The next breaking schema migration strands it once,
+  with `database is at schema version <new>; this binary expects <old>` on
+  every run out of that repo. Raise the pins and rebuild:
+
+  ```bash
+  sparkwing repos update --apply
+  ```
+
+  Without `--apply` that is a dry run listing the repos it would move. After a
+  repo's pin is at this release or later, its runs stop depending on the shared
+  file's schema entirely, and this is the last time that skew can strand them.
+
 ## (Breaking) Submitted runs carry an allow-listed environment
 
 - **Before:** `sparkwing runs submit` snapshotted the whole submitting shell to

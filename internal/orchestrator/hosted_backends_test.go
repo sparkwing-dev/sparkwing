@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -55,16 +56,49 @@ func registerHostedPipelines(t *testing.T) {
 	})
 }
 
-func countStoreOpens(t *testing.T) *atomic.Int32 {
-	t.Helper()
-	var opens atomic.Int32
-	previous := openStateStoreFromSpec
-	openStateStoreFromSpec = func(ctx context.Context, spec backends.Spec, lookup storeurl.ProfileLookup) (storage.StateStore, error) {
-		opens.Add(1)
-		return previous(ctx, spec, lookup)
+type storeOpenLog struct {
+	mu    sync.Mutex
+	paths []string
+}
+
+func (l *storeOpenLog) record(path string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.paths = append(l.paths, path)
+}
+
+func (l *storeOpenLog) Load() int32 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return int32(len(l.paths))
+}
+
+func (l *storeOpenLog) opened(path string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, p := range l.paths {
+		if p == path {
+			n++
+		}
 	}
-	t.Cleanup(func() { openStateStoreFromSpec = previous })
-	return &opens
+	return n
+}
+
+func countStoreOpens(t *testing.T) *storeOpenLog {
+	t.Helper()
+	log := &storeOpenLog{}
+	previousSpec, previousOpen := openStateStoreFromSpec, storeOpen
+	openStateStoreFromSpec = func(ctx context.Context, spec backends.Spec, lookup storeurl.ProfileLookup) (storage.StateStore, error) {
+		log.record(spec.Path)
+		return previousSpec(ctx, spec, lookup)
+	}
+	storeOpen = func(path string) (*store.Store, error) {
+		log.record(path)
+		return previousOpen(path)
+	}
+	t.Cleanup(func() { openStateStoreFromSpec, storeOpen = previousSpec, previousOpen })
+	return log
 }
 
 func TestHostedRun_OpensNoStoreAndMintsNoToken(t *testing.T) {
@@ -168,12 +202,13 @@ func TestHostedRun_MemoSlotIsArbitratedByTheDaemon(t *testing.T) {
 	}
 }
 
-func TestHostedSelection_FallsBackWhenTheDaemonServesNoAPI(t *testing.T) {
+func TestHostedSelection_StandaloneWhenTheDaemonServesNoAPI(t *testing.T) {
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
 	startWingd(t, home, 8)
 	paths := PathsAt(home)
 	opens := countStoreOpens(t)
+	warnings := captureStandaloneWarnings(t)
 
 	var lines []string
 	var mu sync.Mutex
@@ -193,14 +228,14 @@ func TestHostedSelection_FallsBackWhenTheDaemonServesNoAPI(t *testing.T) {
 	if res.Status != "success" {
 		t.Fatalf("status = %q, want success (%v)", res.Status, res.Error)
 	}
-	if got := opens.Load(); got != 1 {
-		t.Fatalf("the run opened the store %d times, want 1 on the direct path", got)
+	if got := opens.opened(paths.StateDB()); got != 0 {
+		t.Fatalf("the run opened this machine's shared store %d times, want 0", got)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "does not serve this run's state") {
-		t.Fatalf("no fallback line naming the reason; got %q", joined)
+	if got := opens.opened(paths.StandaloneStateDB()); got != 1 {
+		t.Fatalf("the run opened %s %d times, want 1", paths.StandaloneStateDB(), got)
+	}
+	if got := warnings.String(); !strings.Contains(got, "predates this pipeline's SDK") {
+		t.Fatalf("stderr block = %q, want the daemon-older branch", got)
 	}
 }
 
@@ -212,31 +247,54 @@ func TestHostedSelection_FallsBackWhenTheSocketIsGone(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	got, reason := selectHostedAPI(ctx, testWingdAdmission(home, nil))
-	if got != "" {
-		t.Fatalf("socket = %q, want the direct path", got)
+	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil))
+	if err != nil {
+		t.Fatalf("selectHostedAPI: %v", err)
 	}
-	if !strings.Contains(reason.Error(), "api.sock") {
-		t.Fatalf("reason = %v, want it to name the socket", reason)
+	if sel.sock != "" {
+		t.Fatalf("socket = %q, want the standalone path", sel.sock)
+	}
+	if sel.standalone != standaloneDaemonFault {
+		t.Fatalf("reason = %q, want %q", sel.standalone, standaloneDaemonFault)
+	}
+	if !strings.Contains(sel.fault, "api.sock") {
+		t.Fatalf("fault = %q, want it to name the socket that would not answer", sel.fault)
 	}
 }
 
-func TestHostedSelection_SkippedWhenUnadmittedIsAllowed(t *testing.T) {
+func TestHostedSelection_ForcedWhileADaemonAnswers(t *testing.T) {
 	home := wingdTestHome(t)
 	startAPIDaemon(t, home, nil)
 	t.Setenv(AllowUnadmittedEnv, "1")
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	got, reason := selectHostedAPI(ctx, testWingdAdmission(home, nil))
-	if got != "" {
-		t.Fatalf("socket = %q, want the direct path", got)
+	sel, err := selectHostedAPI(ctx, testWingdAdmission(home, nil))
+	if err != nil {
+		t.Fatalf("selectHostedAPI: %v", err)
 	}
-	if !strings.Contains(reason.Error(), AllowUnadmittedEnv) {
-		t.Fatalf("reason = %v, want it to name %s", reason, AllowUnadmittedEnv)
+	if sel.sock != "" {
+		t.Fatalf("socket = %q, want the standalone path", sel.sock)
+	}
+	if sel.standalone != standaloneForced {
+		t.Fatalf("reason = %q, want %q while a daemon answers", sel.standalone, standaloneForced)
 	}
 }
 
-func TestHostedRun_BrokenDaemonStoreTakesTheDirectPath(t *testing.T) {
+func TestHostedSelection_ForcedStillSaysNoDaemonWhenThereIsNone(t *testing.T) {
+	home := wingdTestHome(t)
+	t.Setenv(AllowUnadmittedEnv, "1")
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	sel, err := selectHostedAPI(ctx, unhostedAdmission(home, io.Discard))
+	if err != nil {
+		t.Fatalf("selectHostedAPI: %v", err)
+	}
+	if sel.standalone != standaloneNoDaemon {
+		t.Fatalf("reason = %q, want %q on a box with no daemon", sel.standalone, standaloneNoDaemon)
+	}
+}
+
+func TestHostedRun_SkewedDaemonStoreRunsStandalone(t *testing.T) {
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
 	paths := PathsAt(home)
@@ -245,56 +303,89 @@ func TestHostedRun_BrokenDaemonStoreTakesTheDirectPath(t *testing.T) {
 	}
 
 	// safety: the daemon holds a store that records a requirement its binary
-	// does not understand, which is the skew the fallback exists for, while
-	// this run's own store is a file it opens fine. Two homes because one
-	// process cannot be both binaries at once.
+	// does not understand, which is the daemon being older than the pin that
+	// migrated it. Two homes because one process cannot be both binaries at
+	// once.
 	brokenHome := wingdTestHome(t)
 	requireUnknownFeature(t, PathsAt(brokenHome).StateDB())
-	brokenRuns, err := NewHeldRunStore(brokenHome)
+	startAPIDaemonOnFaultedStore(t, home, brokenHome)
+
+	opens := countStoreOpens(t)
+	warnings := captureStandaloneWarnings(t)
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	res, err := RunLocal(ctx, paths, Options{Pipeline: "hosted-memo", Admission: testWingdAdmission(home, nil)})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("status = %q (%v), want success", res.Status, res.Error)
+	}
+	if got := opens.opened(paths.StateDB()); got != 0 {
+		t.Fatalf("the run opened this machine's shared store %d times, want 0", got)
+	}
+	if got := opens.opened(paths.StandaloneStateDB()); got != 1 {
+		t.Fatalf("the run opened %s %d times, want 1", paths.StandaloneStateDB(), got)
+	}
+	block := warnings.String()
+	if !strings.Contains(block, "predates this pipeline's SDK") {
+		t.Fatalf("stderr block = %q, want the daemon-older branch", block)
+	}
+	if !strings.Contains(block, "(test)") {
+		t.Fatalf("stderr block = %q, want it to name the daemon's version", block)
+	}
+}
+
+func TestHostedRun_UnreadableDaemonStoreRefusesTheRun(t *testing.T) {
+	registerHostedPipelines(t)
+	home := wingdTestHome(t)
+	paths := PathsAt(home)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+
+	// safety: a file that is not a database is unreadable for a reason age
+	// cannot explain, so it is the fault a run is still refused for.
+	brokenHome := wingdTestHome(t)
+	if err := PathsAt(brokenHome).EnsureRoot(); err != nil {
+		t.Fatalf("ensure broken root: %v", err)
+	}
+	if err := os.WriteFile(PathsAt(brokenHome).StateDB(), []byte("this is not a database"), 0o600); err != nil {
+		t.Fatalf("write a non-database: %v", err)
+	}
+	startAPIDaemonOnFaultedStore(t, home, brokenHome)
+
+	opens := countStoreOpens(t)
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	_, err := RunLocal(ctx, paths, Options{Pipeline: "hosted-memo", Admission: testWingdAdmission(home, nil)})
+	if err == nil {
+		t.Fatal("a daemon reporting an unreadable runs store was accepted")
+	}
+	if !strings.Contains(err.Error(), "runs store") {
+		t.Fatalf("err = %v, want it to name the daemon's store", err)
+	}
+	if got := opens.Load(); got != 0 {
+		t.Fatalf("a refused run opened %d store(s), want 0", got)
+	}
+}
+
+// safety: admission answers from this home while the API socket answers from a
+// store the daemon cannot open, which is the split a real skew produces
+// between a daemon that still admits and one that cannot serve state.
+func startAPIDaemonOnFaultedStore(t *testing.T, home, faultedHome string) {
+	t.Helper()
+	faulted, err := NewHeldRunStore(faultedHome)
 	if err != nil {
 		t.Fatalf("held run store: %v", err)
 	}
-	t.Cleanup(func() { _ = brokenRuns.Close() })
+	t.Cleanup(func() { _ = faulted.Close() })
 	admissionRuns, err := NewHeldRunStore(home)
 	if err != nil {
 		t.Fatalf("held run store: %v", err)
 	}
 	t.Cleanup(func() { _ = admissionRuns.Close() })
-	startAPIDaemonSplit(t, home, admissionRuns, brokenRuns, nil, nil)
-
-	opens := countStoreOpens(t)
-	var lines []string
-	var mu sync.Mutex
-	adm := testWingdAdmission(home, nil)
-	adm.Logf = func(format string, args ...any) {
-		mu.Lock()
-		defer mu.Unlock()
-		lines = append(lines, fmt.Sprintf(format, args...))
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
-	defer cancel()
-	res, err := RunLocal(ctx, paths, Options{Pipeline: "hosted-memo", Admission: adm})
-	if err != nil {
-		t.Fatalf("RunLocal: %v", err)
-	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q, want success (%v)", res.Status, res.Error)
-	}
-	if got := opens.Load(); got != 1 {
-		t.Fatalf("the run opened the store %d times, want 1 on the direct path", got)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(lines) != 1 {
-		t.Fatalf("the run printed %d selection line(s), want exactly 1: %v", len(lines), lines)
-	}
-	if !strings.Contains(lines[0], "a-feature-from-the-future") {
-		t.Fatalf("the fallback line does not name the daemon's store error: %q", lines[0])
-	}
-	if !strings.Contains(lines[0], paths.StateDB()) {
-		t.Fatalf("the fallback line does not name the store this run opened: %q", lines[0])
-	}
+	startAPIDaemonSplit(t, home, admissionRuns, faulted, nil, nil)
 }
 
 func TestHostedAPIReachable_RefusesADegradedDaemon(t *testing.T) {
@@ -310,23 +401,65 @@ func TestHostedAPIReachable_RefusesADegradedDaemon(t *testing.T) {
 	if !strings.Contains(err.Error(), "503") {
 		t.Fatalf("err = %v, want it to name the answer", err)
 	}
+	if !errors.Is(err, errHostedStoreFault) {
+		t.Fatalf("err = %v, want the fault that still refuses a run", err)
+	}
+	if standaloneReasonFor(err) != "" {
+		t.Fatalf("an unreadable store degraded to %q", standaloneReasonFor(err))
+	}
 }
 
-func TestHostedAPIReachable_RefusesANonJSONAnswer(t *testing.T) {
+func TestHostedAPIReachable_ASkewedStoreDegradesRatherThanRefuses(t *testing.T) {
+	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"degraded","auth":"enabled",` +
+			`"store":"skew: sparkwing: this state database uses a-feature-from-the-future, which needs sparkwing >= v99.0.0"}`))
+	}))
+	err := hostedAPIReachable(context.Background(), sock)
+	if err == nil {
+		t.Fatal("a daemon too old for this home's store was accepted as this run's host")
+	}
+	if errors.Is(err, errHostedStoreFault) {
+		t.Fatalf("err = %v, want age rather than a fault", err)
+	}
+	if got := standaloneReasonFor(err); got != standaloneDaemonOlder {
+		t.Fatalf("standaloneReasonFor(%v) = %q, want %q", err, got, standaloneDaemonOlder)
+	}
+	if !strings.Contains(err.Error(), "a-feature-from-the-future") {
+		t.Fatalf("err = %v, want it to carry the daemon's own message", err)
+	}
+}
+
+func TestStoreHealthState_SplitsSkewFromFault(t *testing.T) {
+	skew := &store.SkewError{DBVersion: 99, BinaryVersion: 27, Requirements: []string{"a-feature-from-the-future"}}
+	if got := storeHealthState(fmt.Errorf("open: %w", skew)); !strings.HasPrefix(got, "skew: ") {
+		t.Errorf("storeHealthState(skew) = %q, want a skew: prefix", got)
+	}
+	if got := storeHealthState(errors.New("disk is on fire")); !strings.HasPrefix(got, "error: ") {
+		t.Errorf("storeHealthState(fault) = %q, want an error: prefix", got)
+	}
+}
+
+func TestHostedAPIReachable_DegradesOnANonJSONAnswer(t *testing.T) {
 	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("nope"))
 	}))
-	if err := hostedAPIReachable(context.Background(), sock); err == nil {
+	err := hostedAPIReachable(context.Background(), sock)
+	if err == nil {
 		t.Fatal("a 500 was accepted as this run's host")
+	}
+	if errors.Is(err, errHostedStoreFault) || standaloneReasonFor(err) != "" {
+		t.Fatalf("err = %v, want a daemon fault the run degrades around while naming it", err)
 	}
 }
 
-func TestHostedSelection_LeavesTheNoDaemonLineToAdmission(t *testing.T) {
+func TestHostedSelection_SaysNothingBeyondTheStandaloneBlock(t *testing.T) {
 	home := wingdTestHome(t)
 	var lines []string
 	var mu sync.Mutex
-	adm := testWingdAdmission(home, nil)
+	adm := unhostedAdmission(home, io.Discard)
 	adm.Logf = func(format string, args ...any) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -336,17 +469,22 @@ func TestHostedSelection_LeavesTheNoDaemonLineToAdmission(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
 	opts := Options{DefaultStateDB: PathsAt(home).StateDB(), Admission: adm}
-	if hosted, release := hostedBackendsForRun(ctx, PathsAt(home), &opts); hosted.APISocket != "" {
-		release()
+	hosted, sel, release, err := hostedBackendsForRun(ctx, PathsAt(home), &opts)
+	release()
+	if err != nil {
+		t.Fatalf("hostedBackendsForRun: %v", err)
+	}
+	if hosted.APISocket != "" {
 		t.Fatal("selection found a daemon where none runs")
-	} else {
-		release()
+	}
+	if sel.standalone != standaloneNoDaemon {
+		t.Fatalf("reason = %q, want %q", sel.standalone, standaloneNoDaemon)
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
 	if len(lines) != 0 {
-		t.Fatalf("selection printed %d line(s) for a condition admission reports itself: %v", len(lines), lines)
+		t.Fatalf("selection printed %d line(s) beside the standalone block: %v", len(lines), lines)
 	}
 }
 
@@ -440,7 +578,7 @@ func TestLocalTriggerBackends_HostChildRunsAndReplays(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	backends, release, err := localTriggerBackends(ctx, paths, "")
+	backends, _, release, err := localTriggerBackends(ctx, paths, "")
 	if err != nil {
 		t.Fatalf("localTriggerBackends: %v", err)
 	}
@@ -467,7 +605,7 @@ func TestLocalTriggerBackends_ANamedProfileKeepsItsOwnStore(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	if _, release, err := localTriggerBackends(ctx, paths, "does-not-exist"); err == nil {
+	if _, _, release, err := localTriggerBackends(ctx, paths, "does-not-exist"); err == nil {
 		release()
 		t.Fatal("a named profile resolved to the daemon's socket")
 	}
@@ -591,5 +729,71 @@ func TestWingdAPI_ArtifactRouteFollowsTheConfiguredStore(t *testing.T) {
 	without := newWingdAPI(runs, nil, nil)
 	if got := probe(without, "/api/v1/artifacts/some-key"); got != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 from a daemon with no artifact store", got)
+	}
+}
+
+// safety: a refusal must not read like a success. The block promises
+// "everything else works" and the store it opens is what doctor reports as
+// runs that went standalone, so neither may survive a run that is refused.
+func TestHostedRun_ARefusedRunLeavesNoBlockAndNoStore(t *testing.T) {
+	registerHostedPipelines(t)
+	home := wingdTestHome(t)
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv(AllowUnadmittedEnv, "")
+	paths := PathsAt(home)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+
+	// safety: a daemon that serves no api.sock, so selection cannot ask its
+	// health which kind of store fault this is, holding a file that is not a
+	// database. Admission is the first thing that answers.
+	brokenHome := wingdTestHome(t)
+	if err := PathsAt(brokenHome).EnsureRoot(); err != nil {
+		t.Fatalf("ensure broken root: %v", err)
+	}
+	if err := os.WriteFile(PathsAt(brokenHome).StateDB(), []byte("this is not a database"), 0o600); err != nil {
+		t.Fatalf("write a non-database: %v", err)
+	}
+	runs, err := NewHeldRunStore(brokenHome)
+	if err != nil {
+		t.Fatalf("held run store: %v", err)
+	}
+	t.Cleanup(func() { _ = runs.Close() })
+	startWingdCfg(t, wingd.Config{
+		Home:    home,
+		Version: "test",
+		Runs:    runs,
+		Sampler: stubSampler{wingd.HostStat{
+			TotalCores: 8, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30,
+			LoadMeasured: true, MemoryMeasured: true,
+		}},
+		HeadroomFraction: -1,
+	})
+
+	warnings := captureStandaloneWarnings(t)
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	res, err := RunLocal(ctx, paths, Options{Pipeline: "hosted-memo", Admission: testWingdAdmission(home, nil)})
+	if err == nil && res != nil && res.Status == "success" {
+		t.Fatal("a daemon that cannot read its runs store admitted this run")
+	}
+	if got := warnings.String(); got != "" {
+		t.Fatalf("a refused run printed a standalone block:\n%s", got)
+	}
+	if _, err := os.Stat(paths.StandaloneStateDB()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat %s = %v, want no standalone store after a refusal", paths.StandaloneStateDB(), err)
+	}
+	// safety: the lock file every standalone opener holds stays, so the
+	// directory does. What must not survive is a store, which is what doctor
+	// reads and what would report runs that went standalone when none did.
+	entries, rerr := os.ReadDir(paths.StandaloneDir())
+	if rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+		t.Fatalf("read %s: %v", paths.StandaloneDir(), rerr)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "state.db") {
+			t.Fatalf("a refused run left %s behind", entry.Name())
+		}
 	}
 }

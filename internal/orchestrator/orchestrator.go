@@ -97,6 +97,10 @@ type Options struct {
 
 	DefaultStateDB string
 
+	// safety: set only after a store is chosen, so a caller that builds its
+	// own Options cannot claim a run reached the standalone store.
+	standalone *standaloneRun
+
 	ProfileLookup storeurl.ProfileLookup
 
 	Profile *profile.Profile
@@ -362,7 +366,11 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		defer cancelConsumer()
-		go runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget)
+		child := childStoreEnv{}
+		if opts.standalone != nil {
+			child = childStoreEnv{path: opts.standalone.stateDB, reason: opts.standalone.reason}
+		}
+		go runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget, child)
 	}
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout
@@ -385,21 +393,20 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		var outcome admitOutcome
 		var admitErr error
 		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, opts.Pipeline, runID, plan, opts.MaxParallel, cancelRun)
-		if admitErr != nil {
-
-			degrade, refusal := opts.Admission.unhostedOutcome(admitErr, plan, opts.DryRun)
-			switch {
-			case refusal != nil:
-				admitErr = refusal
-			case degrade:
-
-				opts.Admission = nil
-				lease, outcome, admitErr = nil, admitProceed, nil
-			}
+		degradeState := opts.standalone.state(backends.APISocket != "")
+		if admitErr != nil && opts.Admission.unhostedOutcome(admitErr, degradeState) {
+			opts.Admission = nil
+			lease, outcome, admitErr = nil, admitProceed, nil
 		}
 		if admitErr != nil {
 			if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 				admitErr = cause
+			}
+			// safety: the one ending that never started, so it is the one that
+			// prints no block and gives back a store it created. Every other
+			// failure below wrote its run row and keeps both.
+			if opts.standalone != nil {
+				opts.standalone.refused = true
 			}
 			status := statusForRunError(admitErr)
 			_ = backends.State.FinishRun(context.WithoutCancel(ctx), runID, status, admitErr.Error())
@@ -427,6 +434,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		// safety: release only after FinishRun below, so the daemon's
 		// orphan finalizer can never observe a still-running row.
 		defer lease.release()
+		// safety: admission has answered, so the block cannot promise
+		// "everything else works" above a refusal, and a store this run made
+		// for a run that never started is discarded by the caller instead.
+		opts.standalone.announce()
 		if outcome == admitSkipped {
 			skipDispatch = true
 		} else if lease != nil {
@@ -601,15 +612,40 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 		opts.DefaultStateDB = paths.StateDB()
 	}
 	ownsState := opts.State == nil
-	hosted, closeHosted := hostedBackendsForRun(ctx, paths, &opts)
+	hosted, selection, closeHosted, selectErr := hostedBackendsForRun(ctx, paths, &opts)
+	if selectErr != nil {
+		return nil, selectErr
+	}
 	defer closeHosted()
 	if hosted.APISocket != "" {
 		// safety: profile resolution opens this machine's store only when no
 		// state backend is set yet, so the daemon's client goes in before it
 		// runs and the run opens nothing.
 		opts.State = hosted.State
+	} else if selection.standalone != "" {
+		st, sa, release, serr := openStandaloneStore(paths, opts.DryRun)
+		if serr != nil {
+			return nil, serr
+		}
+		sa.reason = selection.standalone
+		sa.warning = standaloneWarning(selection, sparkwingModuleVersion())
+		sa.skew = selection.storeSkew
+		opts.State = st
+		opts.DefaultStateDB = sa.stateDB
+		opts.standalone = sa
+		// safety: registered so they unwind handle first, then the decision
+		// this run's ending settles, then the lock: a discard must never run
+		// while this run's own handle still holds the file it is removing.
+		defer release()
+		defer sa.settle()
+		defer func() { _ = st.Close() }()
+		ownsState = false
 	}
-	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, hosted.APISocket != ""); err != nil {
+	// safety: a standalone run holds the store the fallback already chose, so
+	// profile resolution must not reopen or replace it the way it would for a
+	// run that arrived with none.
+	keepState := hosted.APISocket != "" || opts.standalone != nil
+	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, keepState); err != nil {
 		return nil, fmt.Errorf("profile backends: %w", err)
 	}
 	if opts.State == nil {
@@ -1017,6 +1053,10 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 
 	if len(secretArgs) > 0 {
 		inv[store.InvocationSecretArgsKey] = secretArgs
+	}
+	if opts.standalone != nil && opts.standalone.reason != "" {
+		inv["standalone"] = true
+		inv["standalone_reason"] = opts.standalone.reason
 	}
 	if opts.RetryRepoDir != "" || opts.RetryRepoIdentity != "" || opts.RetryRevision != "" || opts.RetryPlanHash != "" {
 		inv["retry_provenance"] = map[string]string{

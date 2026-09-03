@@ -172,6 +172,49 @@ code change to unlock.
   retry internally -- the node is marked failed -- so a deployment that was
   silently over-admitting will start surfacing the object-store errors it used
   to swallow. Expect to see them; they were always there.
+- **orchestrator (Breaking):** A run the admission daemon cannot serve now runs
+  standalone against `~/.sparkwing/standalone/state.db` instead of the shared
+  `state.db`, and says so once on stderr before its first node. Five cases
+  reach it: no daemon is running and none can be started; the daemon predates
+  something the run needs, such as an `api.sock` it never advertised, a route
+  it answers 404 on, or a runs store its own binary is too old to open; the
+  daemon's protocol floor is above this pipeline's SDK; the daemon advertised
+  `api.sock` and cannot serve it, which carries the daemon's own reason and
+  points at `sparkwing daemon status`; and `SPARKWING_ALLOW_UNADMITTED=1`.
+  Each prints its own block naming the remedy, and the exit code is unchanged.
+  Two refusals are gone: a plan-level or node-level `.Resources()` pin no
+  longer fails a run on a box with no daemon, and neither does a daemon older
+  than the pipeline; both degrade with the warning. Standalone runs, including
+  the ones `SPARKWING_ALLOW_UNADMITTED=1` produces, are invisible to
+  `sparkwing runs`, `sparkwing jobs`, and the dashboard, which is what the
+  block says; see the
+  [migration guide](docs/migrations/_unreleased.md#two-refusals-became-warnings-and-those-runs-leave-sparkwing-runs).
+  Their start record and `sparkwing runs status` carry `standalone` and
+  `standalone_reason` (`no-daemon`, `daemon-older`, `daemon-fault`, `floor`,
+  `forced`), and `sparkwing doctor` lists each standalone store with its run
+  count and the oldest run's age. Nothing prunes them. Binaries share that one
+  standalone file under the store's requirements rule; one the file refuses
+  falls back to `~/.sparkwing/standalone/schema-<N>/state.db`. A child run a
+  standalone run dispatches lands in the store its parent chose, named through
+  `SPARKWING_STATE_DB` and `SPARKWING_STANDALONE_REASON`; a child that reaches
+  the daemon ignores both, and both are denied from a submitted run's captured
+  environment and from what the trigger consumer hands a child, so a stale
+  shell value cannot redirect an unrelated run. The block prints only once
+  admission has answered, and a run refused by admission removes a standalone
+  store it created rather than leaving one for `sparkwing doctor` to report; a
+  run that fails later keeps its row and its block. Standalone runs share a
+  lock on `standalone/state.lock` so concurrent runs cannot discard each
+  other's store. A daemon whose runs
+  store is unreadable for a reason that is not age still fails the run, as do a
+  daemon that never answers, a build mismatch, and an unsettled version
+  conflict; the daemon now reports a store it is merely too old to open as
+  `store: skew: ...` on its health endpoint and `daemon_store_skew` in
+  `sparkwing daemon status`, distinct from the `store: error: ...` of a store
+  no upgrade fixes. Dry runs write to a throwaway store and leave none behind.
+  Pipeline binaries built before this release still open the shared store
+  directly; see the
+  [migration note](docs/migrations/_unreleased.md#pipeline-binaries-built-before-the-daemon-owned-the-runs-store).
+
 - **orchestrator:** A local run now reaches this machine's runs store through
   the admission daemon instead of opening `state.db` itself. When the
   handshake reports the daemon serving `api.sock`, the run's state and
@@ -185,12 +228,10 @@ code change to unlock.
   faster path, because a bearer is looked up on the writing handle. Logs and
   artifacts are unchanged, still this machine's own files. A run that finds no
   daemon, a daemon that serves no API socket, or a socket that does not answer
-  keeps today's path -- its own store handle plus an in-process loopback
-  controller -- and says so on stderr once, only for a reason admission does
-  not already report. A daemon whose own store handle is broken is one of those
-  reasons: the run opens the file that daemon could not, rather than binding to
-  it. The child runs a hosted run dispatches, and any node replayed from one,
-  choose the same way. Once the run's rows exist on the daemon it does not
+  runs standalone against a store of its own, and says so once on stderr; the
+  entry above says where those runs live and what they lose. A daemon whose own
+  store handle is broken is not one of those reasons. The child runs a hosted run dispatches, and any node replayed from
+  one, choose the same way. Once the run's rows exist on the daemon it does not
   switch back: a write the daemon can be shown not to have applied, because it
   answered 503 or never accepted the connection, is retried for up to 20
   seconds so a daemon restart does not fail the run, while a write whose fate

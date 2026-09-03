@@ -42,6 +42,7 @@ type daemonReport struct {
 	StoreSchemaError    string   `json:"store_schema_error,omitempty"`
 	DaemonStoreReady    *bool    `json:"daemon_store_ready,omitempty"`
 	DaemonStoreError    string   `json:"daemon_store_error,omitempty"`
+	DaemonStoreSkew     bool     `json:"daemon_store_skew,omitempty"`
 	StorePath           string   `json:"store_path,omitempty"`
 	SchemaDiverged      bool     `json:"schema_diverged,omitempty"`
 	MissingRequirements []string `json:"missing_requirements,omitempty"`
@@ -152,6 +153,7 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	report.ArtifactStoreError = info.ArtifactStoreError
 	report.MissingRequirements = store.MissingRequirements(info.StoreRequirements, storeRequirements)
 	report.SchemaDiverged = daemonCannotReadStore(report, info.StoreRequirements)
+	report.DaemonStoreSkew = daemonStoreSkewed(report)
 	if report.SchemaDiverged || report.StoreSchemaError != "" || daemonStoreUnusable(report) || daemonAPIUnusable(report) {
 		report.Healthy = false
 	}
@@ -174,6 +176,13 @@ func daemonStoreUnusable(report daemonReport) bool {
 		return false
 	}
 	return report.StoreSchemaVersion > 0 || report.StoreSchemaError != ""
+}
+
+// safety: a store the daemon is merely too old to open is age, and age moves a
+// run to the standalone store rather than failing it, so an operator reading
+// this must not be sent looking for a corrupt file.
+func daemonStoreSkewed(report daemonReport) bool {
+	return report.DaemonStoreError != "" && len(report.MissingRequirements) > 0
 }
 
 // safety: a store schema above the daemon's own no longer proves the daemon cannot
@@ -361,7 +370,11 @@ func emitDaemonReport(report daemonReport, output string) error {
 			fmt.Fprintf(os.Stdout, "runs store unreadable: %s\n", report.StoreSchemaError)
 		}
 		if daemonStoreUnusable(report) {
-			fmt.Fprintf(os.Stdout, "the daemon cannot use the runs store: %s\n", report.DaemonStoreError)
+			verb := "cannot use"
+			if report.DaemonStoreSkew {
+				verb = "is behind"
+			}
+			fmt.Fprintf(os.Stdout, "the daemon %s the runs store: %s\n", verb, report.DaemonStoreError)
 			if !report.SchemaDiverged {
 				fmt.Fprintln(os.Stdout, storeRemedy(report))
 			}
@@ -369,11 +382,11 @@ func emitDaemonReport(report daemonReport, output string) error {
 		if report.SchemaDiverged {
 			if len(report.MissingRequirements) > 0 {
 				fmt.Fprintf(os.Stdout,
-					"runs-store mismatch: the store uses %s, which the daemon does not understand, so it refuses every run\n",
+					"runs-store mismatch: the store uses %s, which the daemon does not understand, so every run goes standalone\n",
 					strings.Join(report.MissingRequirements, ", "))
 			} else {
 				fmt.Fprintf(os.Stdout,
-					"runs-store schema mismatch: the daemon understands %d, the store is at %d, so it refuses every run\n",
+					"runs-store schema mismatch: the daemon understands %d, the store is at %d, so every run goes standalone\n",
 					report.DaemonSchemaVersion, report.StoreSchemaVersion)
 			}
 			fmt.Fprintln(os.Stdout, schemaRemedy(report))

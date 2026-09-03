@@ -18,6 +18,13 @@ func flockTry(f *os.File) (ok bool, err error) {
 	return false, err
 }
 
+// safety: blocking on purpose. A shared holder that failed instead would open
+// the store anyway, and the discard that is waiting on the exclusive lock is
+// two unlink calls.
+func flockShared(f *os.File) error {
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_SH)
+}
+
 func flockUnlock(f *os.File) error {
 	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }

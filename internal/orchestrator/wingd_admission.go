@@ -43,8 +43,6 @@ type LocalAdmission struct {
 	DialTimeout time.Duration
 	Backoff     time.Duration
 
-	unadmittedOnce sync.Once
-
 	loggedMu sync.Mutex
 	logged   map[string]bool
 
@@ -648,6 +646,8 @@ func nodeAdmissionFailure(claim wingwire.SemaphoreClaim, admErr *wingdclient.Adm
 	return daemonRefusal(admErr)
 }
 
+const terminalCheckKey = "terminal-check"
+
 func daemonRefusal(admErr *wingdclient.AdmissionError) error {
 	switch admErr.Key {
 	case "never_admissible":
@@ -655,7 +655,7 @@ func daemonRefusal(admErr *wingdclient.AdmissionError) error {
 			return fmt.Errorf("local admission: this request can never be admitted on this box: %s", admErr.Reason)
 		}
 		return errors.New("local admission: a concurrency group's cost exceeds its own capacity; lower the cost or raise the group's limit")
-	case "terminal-check":
+	case terminalCheckKey:
 		return fmt.Errorf("local admission: %w; the daemon refused before any capacity decision, so run `sparkwing daemon status` to compare the daemon's runs-store schema with the store's", admErr)
 	default:
 		return fmt.Errorf("local admission: %w", admErr)

@@ -99,168 +99,135 @@ func buildHostTestPlan(t *testing.T, name string) *sparkwing.Plan {
 	return plan
 }
 
-func TestPlanPinsHostResources(t *testing.T) {
-	cases := []struct {
-		pipeline  string
-		pinned    bool
-		wantWhere string
-	}{
-		{"host-implicit", false, ""},
-		{"host-plan-resources", true, "a plan-level .Resources() pin"},
-		{"host-node-resources", true, `node-level .Resources() pin on "heavy"`},
-		{"host-plan-concurrency", false, ""},
-		{"host-node-concurrency", false, ""},
-		{"host-global-concurrency", false, ""},
+func TestUnhostedOutcome_DegradesOnEveryStandaloneSentinel(t *testing.T) {
+	t.Setenv(AllowUnadmittedEnv, "")
+	degrading := []error{
+		fmt.Errorf("x: %w", wingdclient.ErrNoDaemonHost),
+		fmt.Errorf("x: %w", wingdclient.ErrDaemonHostUnusable),
+		fmt.Errorf("x: %w", wingdclient.ErrDaemonHostFailed),
+		fmt.Errorf("x: %w", wingdclient.ErrDaemonTooOld),
+		fmt.Errorf("x: %w", wingdclient.ErrDaemonLacksOperation),
+		fmt.Errorf("x: %w", wingdclient.ErrProtocolTooOld),
 	}
-	for _, tc := range cases {
-		pinned, where := planPinsHostResources(buildHostTestPlan(t, tc.pipeline))
-		if pinned != tc.pinned {
-			t.Errorf("%s: pinned = %v, want %v (where=%q)", tc.pipeline, pinned, tc.pinned, where)
-			continue
+	for _, err := range degrading {
+		la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
+		if !la.unhostedOutcome(err, unhosted{}) {
+			t.Errorf("unhostedOutcome(%v) refused a run the degradation rule covers", err)
 		}
-		if tc.wantWhere != "" && !strings.Contains(where, tc.wantWhere) {
-			t.Errorf("%s: where = %q, want it to name %q", tc.pipeline, where, tc.wantWhere)
-		}
-	}
-	if pinned, _ := planPinsHostResources(nil); pinned {
-		t.Error("a nil plan pins nothing")
 	}
 }
 
-func TestUnhostedOutcome_OnlyTheTwoUnusableBoxSentinels(t *testing.T) {
-	implicit := buildHostTestPlan(t, "host-implicit")
+func TestUnhostedOutcome_KeepsEveryOtherFailure(t *testing.T) {
+	t.Setenv(AllowUnadmittedEnv, "")
 	other := []error{
 		fmt.Errorf("x: %w", wingdclient.ErrDaemonUnreachable),
 		fmt.Errorf("x: %w", wingdclient.ErrTakeoverExhausted),
-		fmt.Errorf("x: %w", wingdclient.ErrProtocolTooOld),
-		fmt.Errorf("x: %w", wingdclient.ErrDaemonHostUnusable),
+		fmt.Errorf("x: %w", wingdclient.ErrBuildMismatch),
 		errors.New(`wingd: fail on "key"`),
 		nil,
 	}
 	for _, err := range other {
 		la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-		degrade, refusal := la.unhostedOutcome(err, implicit, false)
-		if degrade || refusal != nil {
-			t.Errorf("unhostedOutcome(%v) = (%v, %v), want the caller's own error kept", err, degrade, refusal)
+		if la.unhostedOutcome(err, unhosted{}) {
+			t.Errorf("unhostedOutcome(%v) degraded a failure that is not a version gap", err)
 		}
 	}
 
 	installed := &LocalAdmission{}
-	if degrade, refusal := installed.unhostedOutcome(fmt.Errorf("x: %w", wingdclient.ErrNoDaemonHost), implicit, false); degrade || refusal != nil {
-		t.Errorf("an installed-binary admission degraded: (%v, %v)", degrade, refusal)
+	if installed.unhostedOutcome(fmt.Errorf("x: %w", wingdclient.ErrNoDaemonHost), unhosted{}) {
+		t.Error("an installed-binary admission degraded")
 	}
 	var nilLA *LocalAdmission
-	if degrade, refusal := nilLA.unhostedOutcome(wingdclient.ErrNoDaemonHost, implicit, false); degrade || refusal != nil {
-		t.Errorf("nil admission returned (%v, %v)", degrade, refusal)
+	if nilLA.unhostedOutcome(wingdclient.ErrNoDaemonHost, unhosted{}) {
+		t.Error("nil admission degraded")
 	}
 }
 
-func TestUnhostedOutcome_OnlyAHostPinFailsClosedOnAnEmptyBox(t *testing.T) {
+func TestUnhostedOutcome_APinnedRunDegradesLikeAnyOther(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
 	noHost := fmt.Errorf("local admission: %w", wingdclient.ErrNoDaemonHost)
-
-	for _, pipeline := range []string{"host-plan-resources", "host-node-resources"} {
+	for _, pipeline := range []string{"host-plan-resources", "host-node-resources", "host-implicit"} {
+		buildHostTestPlan(t, pipeline)
 		la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-		degrade, refusal := la.unhostedOutcome(noHost, buildHostTestPlan(t, pipeline), false)
-		if degrade || refusal == nil {
-			t.Fatalf("%s: pinned run was not refused: (%v, %v)", pipeline, degrade, refusal)
-		}
-		msg := refusal.Error()
-		for _, want := range []string{".Resources()", "install or update the sparkwing CLI", wingdclient.HostBinEnv, AllowUnadmittedEnv + "=1"} {
-			if !strings.Contains(msg, want) {
-				t.Errorf("%s: refusal %q omits %q", pipeline, msg, want)
-			}
-		}
-	}
-
-	for _, pipeline := range []string{"host-plan-concurrency", "host-node-concurrency", "host-global-concurrency", "host-implicit"} {
-		la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-		degrade, refusal := la.unhostedOutcome(noHost, buildHostTestPlan(t, pipeline), false)
-		if !degrade || refusal != nil {
-			t.Fatalf("%s: run without a host pin was refused: (%v, %v)", pipeline, degrade, refusal)
+		if !la.unhostedOutcome(noHost, unhosted{}) {
+			t.Errorf("%s: a .Resources() pin refused a run on an empty box", pipeline)
 		}
 	}
 }
 
-func TestUnhostedOutcome_ALiveTooOldDaemonRefusesEveryRun(t *testing.T) {
+func TestUnhostedOutcome_DegradesADaemonThatCannotReadItsOwnStore(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
-	tooOld := fmt.Errorf("local admission: %w: daemon speaks protocol 2 (sparkwing v0.23.0), "+
-		"this pipeline binary speaks protocol 3 (sparkwing v0.27.0). Install sparkwing v0.27.0 or newer",
-		wingdclient.ErrDaemonTooOld)
+	refusal := fmt.Errorf("local admission: %w", &wingdclient.AdmissionError{
+		Policy: wingwire.PolicyFail,
+		Key:    terminalCheckKey,
+		Reason: "daemon v0.38.2 could not read the runs store: this state database uses a-feature-from-the-future",
+	})
+	la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
+	if !la.unhostedOutcome(refusal, unhosted{reason: standaloneDaemonOlder, skew: true}) {
+		t.Error("a run already standalone for the daemon's own store skew was failed by that same store")
+	}
+	if la.unhostedOutcome(refusal, unhosted{reason: standaloneDaemonOlder}) {
+		t.Error("a corrupt store on a daemon serving no api.sock degraded; that refusal is the one the design keeps")
+	}
+	if la.unhostedOutcome(refusal, unhosted{}) {
+		t.Error("a hosted run swallowed a terminal-check refusal")
+	}
+	if la.unhostedOutcome(refusal, unhosted{reason: standaloneNoDaemon, skew: true}) {
+		t.Error("a run standalone for a missing daemon swallowed a refusal no daemon could have sent")
+	}
+}
 
-	for _, pipeline := range []string{"host-implicit", "host-plan-concurrency", "host-plan-resources"} {
-		la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-		degrade, refusal := la.unhostedOutcome(tooOld, buildHostTestPlan(t, pipeline), false)
-		if degrade || refusal == nil {
-			t.Fatalf("%s: a live too-old daemon did not refuse: (%v, %v)", pipeline, degrade, refusal)
+func TestUnhostedOutcome_AnnouncesADegradeNoBlockCovered(t *testing.T) {
+	t.Setenv(AllowUnadmittedEnv, "")
+	var lines []string
+	la := &LocalAdmission{
+		PipelineClient: true,
+		Logf:           func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) },
+	}
+	err := fmt.Errorf("lease: %w", wingdclient.ErrDaemonLacksOperation)
+	for range 3 {
+		if !la.unhostedOutcome(err, unhosted{hosted: true}) {
+			t.Fatal("a hosted run did not degrade on an operation the daemon does not serve")
 		}
-		msg := refusal.Error()
-		for _, want := range []string{"v0.23.0", "v0.27.0", "arbitrating this box", AllowUnadmittedEnv} {
-			if !strings.Contains(msg, want) {
-				t.Errorf("%s: refusal %q omits %q", pipeline, msg, want)
-			}
-		}
-		if !errors.Is(refusal, wingdclient.ErrDaemonTooOld) {
-			t.Errorf("%s: refusal dropped the ErrDaemonTooOld sentinel", pipeline)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("degrade announced %d times, want exactly 1: %v", len(lines), lines)
+	}
+	for _, want := range []string{"without local coordination", "stays with the daemon"} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("line %q omits %q", lines[0], want)
 		}
 	}
 }
 
-func TestUnhostedOutcome_DegradeWarnsOnceAndNamesWhatIsLost(t *testing.T) {
+func TestUnhostedOutcome_SaysNothingWhenABlockAlreadyDid(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
-	plan := buildHostTestPlan(t, "host-implicit")
 	var lines []string
 	la := &LocalAdmission{
 		PipelineClient: true,
 		Logf:           func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) },
 	}
 	for range 3 {
-		degrade, refusal := la.unhostedOutcome(fmt.Errorf("local admission: %w", wingdclient.ErrNoDaemonHost), plan, false)
-		if !degrade || refusal != nil {
-			t.Fatalf("implicit run did not degrade: (%v, %v)", degrade, refusal)
+		if !la.unhostedOutcome(fmt.Errorf("local admission: %w", wingdclient.ErrNoDaemonHost),
+			unhosted{reason: standaloneNoDaemon}) {
+			t.Fatal("implicit run did not degrade")
 		}
 	}
-	if len(lines) != 1 {
-		t.Fatalf("degrade announced %d times, want exactly 1: %v", len(lines), lines)
-	}
-	for _, want := range []string{"CPU and memory are not arbitrated", "still enforced", "sparkwing doctor"} {
-		if !strings.Contains(lines[0], want) {
-			t.Errorf("warning %q omits %q", lines[0], want)
-		}
+	if len(lines) != 0 {
+		t.Fatalf("degrade printed %d line(s) beside the run's own standalone block: %v", len(lines), lines)
 	}
 }
 
 func TestAllowUnadmitted_OnlyExactlyOne(t *testing.T) {
-	plan := buildHostTestPlan(t, "host-plan-resources")
-	noHost := fmt.Errorf("x: %w", wingdclient.ErrNoDaemonHost)
-
-	t.Setenv(AllowUnadmittedEnv, "1")
-	la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-	if degrade, refusal := la.unhostedOutcome(noHost, plan, false); !degrade || refusal != nil {
-		t.Fatalf(`%s=1 did not degrade a pinned run: (%v, %v)`, AllowUnadmittedEnv, degrade, refusal)
-	}
-
 	for _, value := range []string{"", "0", "off", "no", "false", "true", "yes", "TRUE", " 1", "1 ", "2"} {
 		t.Setenv(AllowUnadmittedEnv, value)
-		la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-		if degrade, _ := la.unhostedOutcome(noHost, plan, false); degrade {
-			t.Errorf("%s=%q was read as authorization; only \"1\" may disable the gate", AllowUnadmittedEnv, value)
+		if allowUnadmitted() {
+			t.Errorf("%s=%q was read as authorization; only exactly 1 turns the check off", AllowUnadmittedEnv, value)
 		}
 	}
-}
-
-func TestUnhostedOutcome_DryRunIsExempt(t *testing.T) {
-	t.Setenv(AllowUnadmittedEnv, "")
-	pinned := buildHostTestPlan(t, "host-plan-resources")
-	for _, err := range []error{
-		fmt.Errorf("x: %w", wingdclient.ErrNoDaemonHost),
-		fmt.Errorf("x: %w", wingdclient.ErrDaemonTooOld),
-	} {
-		la := &LocalAdmission{PipelineClient: true, Logf: func(string, ...any) {}}
-		degrade, refusal := la.unhostedOutcome(err, pinned, true)
-		if !degrade || refusal != nil {
-			t.Fatalf("dry run of a pinned pipeline was refused on %v: (%v, %v)", err, degrade, refusal)
-		}
+	t.Setenv(AllowUnadmittedEnv, "1")
+	if !allowUnadmitted() {
+		t.Errorf("%s=1 did not turn the check off", AllowUnadmittedEnv)
 	}
 }
 
@@ -343,34 +310,26 @@ func unhostedAdmission(home string, warnings io.Writer) *LocalAdmission {
 	}
 }
 
-func TestRun_EmptyBoxSplitsOnTheHostPin(t *testing.T) {
+func TestRun_EmptyBoxRunsAPinnedPipelineAnyway(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
-
-	res, _ := runHostTest(t, "host-plan-resources")
-	if res.Status != "failed" {
-		t.Fatalf("pinned run status = %q, want failed", res.Status)
-	}
-	if res.Error == nil || !strings.Contains(res.Error.Error(), AllowUnadmittedEnv) {
-		t.Fatalf("pinned run error = %v, want the actionable refusal", res.Error)
-	}
-
-	res, warnings := runHostTest(t, "host-implicit")
-	if res.Status != "success" {
-		t.Fatalf("implicit run status = %q (%v), want success", res.Status, res.Error)
-	}
-	if got := strings.Count(warnings, "running without local coordination"); got != 1 {
-		t.Fatalf("implicit run warned %d times, want 1: %q", got, warnings)
+	for _, pipeline := range []string{"host-plan-resources", "host-implicit"} {
+		res, warnings := runHostTest(t, pipeline)
+		if res.Status != "success" {
+			t.Fatalf("%s status = %q (%v), want success", pipeline, res.Status, res.Error)
+		}
+		// safety: Run is entered directly here, so no store choice printed a
+		// block and the degrade announces itself instead.
+		if got := strings.Count(warnings, "without local coordination"); got != 1 {
+			t.Fatalf("%s announced the degrade %d times, want 1: %q", pipeline, got, warnings)
+		}
 	}
 }
 
 func TestRun_EscapeHatchLetsAPinnedRunProceedUnadmitted(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "1")
-	res, warnings := runHostTest(t, "host-plan-resources")
+	res, _ := runHostTest(t, "host-plan-resources")
 	if res.Status != "success" {
 		t.Fatalf("pinned run under the escape hatch = %q (%v), want success", res.Status, res.Error)
-	}
-	if !strings.Contains(warnings, "running without local coordination") {
-		t.Fatalf("escape-hatch run said nothing about being uncoordinated: %q", warnings)
 	}
 }
 
@@ -455,9 +414,6 @@ func TestRun_DegradedConcurrencyGroupsStillSerialize(t *testing.T) {
 			}
 			if peak := gate.peak.Load(); peak != 1 {
 				t.Fatalf("peak concurrency = %d, want 1 -- the shared store did not enforce the box group", peak)
-			}
-			if !strings.Contains(warnings.String(), "still enforced") {
-				t.Errorf("degrade warning did not tell the operator groups are still enforced: %q", warnings.String())
 			}
 		})
 	}

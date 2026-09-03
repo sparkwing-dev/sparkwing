@@ -77,8 +77,12 @@ func applyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 	return nil
 }
 
-// hack: an indirection so a test can count what a run opens.
-var openStateStoreFromSpec = storeurl.OpenStateStoreFromSpec
+// hack: indirections so a test can count every store a run opens, whichever
+// path opened it.
+var (
+	openStateStoreFromSpec = storeurl.OpenStateStoreFromSpec
+	storeOpen              = store.Open
+)
 
 func ApplyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths) error {
 	return applyProfileBackendsWithMirror(ctx, opts, p, paths, false)
@@ -99,7 +103,7 @@ func applyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profi
 	if isLocalState(state) {
 		return nil
 	}
-	local, err := store.Open(paths.StateDB())
+	local, err := storeOpen(paths.StateDB())
 	if err != nil {
 		return fmt.Errorf("mirror: open local state %s: %w", paths.StateDB(), err)
 	}

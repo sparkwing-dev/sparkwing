@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
@@ -24,7 +26,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		return fmt.Errorf("ensure sparkwing root: %w", err)
 	}
 
-	backends, releaseBackends, err := localTriggerBackends(ctx, paths, profileName)
+	backends, selection, releaseBackends, err := localTriggerBackends(ctx, paths, profileName)
 	if err != nil {
 		return err
 	}
@@ -51,6 +53,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	var r runner.Runner
 	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)
 	opts := Options{
+		standalone:        childStandalone(backends, selection),
 		Pipeline:          trigger.Pipeline,
 		RunID:             trigger.ID,
 		Args:              args,
@@ -95,30 +98,62 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 }
 
 // safety: a child run picks its backend the way its parent did, so a hosted
-// run dispatches children that open nothing either. A named profile is
+// run dispatches children that open nothing either and an unhosted one hands
+// its child the very store its trigger row lives in. A named profile is
 // excluded because the daemon stands in front of this machine's store alone.
-func localTriggerBackends(ctx context.Context, paths Paths, profileName string) (Backends, func(), error) {
+func localTriggerBackends(ctx context.Context, paths Paths, profileName string) (Backends, hostedSelection, func(), error) {
+	var sel hostedSelection
 	if profileName == "" {
 		opts := Options{
 			DefaultStateDB: paths.StateDB(),
 			Admission:      pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal),
 		}
-		if hosted, release := hostedBackendsForRun(ctx, paths, &opts); hosted.APISocket != "" {
-			return hosted, release, nil
+		hosted, selection, release, err := hostedBackendsForRun(ctx, paths, &opts)
+		if err != nil {
+			return Backends{}, sel, func() {}, err
 		}
+		if hosted.APISocket != "" {
+			return hosted, selection, release, nil
+		}
+		sel = selection
 	}
 	st, err := openLocalTriggerStore(ctx, paths, profileName)
 	if err != nil {
-		return Backends{}, func() {}, err
+		return Backends{}, sel, func() {}, err
 	}
-	return LocalBackends(paths, st, nil), func() { _ = st.Close() }, nil
+	return LocalBackends(paths, st, nil), sel, func() { _ = st.Close() }, nil
+}
+
+// safety: the parent names the file, and a child never derives a standalone
+// path of its own: the trigger row it is about to read lives in whatever store
+// the process that claimed it was using.
+func parentStateDB() string { return strings.TrimSpace(os.Getenv(StandaloneStateDBEnv)) }
+
+func parentStandaloneReason() string { return strings.TrimSpace(os.Getenv(StandaloneReasonEnv)) }
+
+// safety: only a child that did not reach the daemon inherits the parent's
+// answer. A hosted child that read these would record a store it never opened
+// and re-export that path to its own children.
+func childStandalone(backends Backends, sel hostedSelection) *standaloneRun {
+	if backends.APISocket != "" {
+		return nil
+	}
+	path, reason := parentStateDB(), parentStandaloneReason()
+	if path == "" && reason == "" {
+		return nil
+	}
+	return &standaloneRun{reason: reason, stateDB: path, skew: sel.storeSkew, announced: true}
 }
 
 func openLocalTriggerStore(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {
 	if profileName == "" {
-		st, err := store.Open(paths.StateDB())
+		path := parentStateDB()
+		if path == "" {
+			path = paths.StateDB()
+		}
+		st, err := storeOpen(path)
 		if err != nil {
-			return nil, fmt.Errorf("open local store: %w", err)
+			return nil, fmt.Errorf("open local store %s: %w", path, err)
 		}
 		return st, nil
 	}

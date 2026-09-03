@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type Paths struct {
@@ -42,6 +43,48 @@ func PathsAt(root string) Paths { return Paths{Root: root} }
 func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 
 func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
+
+// StandaloneDir holds the runs stores written by pipeline binaries that could
+// not reach the admission daemon. The CLI's own verbs read [Paths.StateDB] and
+// never look here.
+func (p Paths) StandaloneDir() string { return filepath.Join(p.Root, "standalone") }
+
+// StandaloneStateDB is the store standalone runs share. Binaries at
+// neighboring schemas share it under the store's requirements rule: the
+// newest migrates it, an older one opens it while it knows every requirement
+// the file records.
+func (p Paths) StandaloneStateDB() string {
+	return filepath.Join(p.StandaloneDir(), "state.db")
+}
+
+// StandaloneSchemaDir is where a binary the shared standalone store refuses
+// keeps its own, one directory per store schema version.
+func (p Paths) StandaloneSchemaDir(version int) string {
+	return filepath.Join(p.StandaloneDir(), fmt.Sprintf("schema-%d", version))
+}
+
+// StandaloneSchemaStateDB is [Paths.StandaloneSchemaDir] for this binary's own
+// expected schema.
+func (p Paths) StandaloneSchemaStateDB() string {
+	return filepath.Join(p.StandaloneSchemaDir(store.ExpectedSchemaVersion()), "state.db")
+}
+
+// EnsureStandaloneDir prepares [Paths.StandaloneDir] under the home's own mode.
+func (p Paths) EnsureStandaloneDir() error {
+	if err := p.EnsureRoot(); err != nil {
+		return err
+	}
+	return fssecure.EnsureDir(p.StandaloneDir())
+}
+
+// EnsureStandaloneSchemaDir prepares the directory holding
+// [Paths.StandaloneSchemaStateDB].
+func (p Paths) EnsureStandaloneSchemaDir() error {
+	if err := p.EnsureStandaloneDir(); err != nil {
+		return err
+	}
+	return fssecure.EnsureDir(p.StandaloneSchemaDir(store.ExpectedSchemaVersion()))
+}
 
 func (p Paths) ToolchainsDir() string { return filepath.Join(p.Root, "toolchains") }
 

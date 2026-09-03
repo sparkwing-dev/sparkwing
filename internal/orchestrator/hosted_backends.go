@@ -8,7 +8,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -31,9 +34,14 @@ const hostedAPITimeout = APIRequestTimeout + 15*time.Second
 
 const hostedAPIProbeTimeout = 3 * time.Second
 
-// safety: marks the reasons admission does not report for itself. A daemon
-// this pipeline could not reach at all is admission's own subject.
-var errNoHostedAPI = errors.New("the admission daemon does not serve this run's state")
+// safety: the two ways a daemon's store answer ends a hosted run. Skew is the
+// daemon being too old for a store a newer pin migrated, which is age and so
+// degrades; a fault is a file the operator must fix, and is the only reason
+// left to refuse a run outright.
+var (
+	errHostedStoreSkew  = errors.New("the admission daemon is too old for this machine's runs store")
+	errHostedStoreFault = errors.New("the admission daemon cannot read this machine's runs store")
+)
 
 // NewAPISocketClient returns an HTTP client that reaches the daemon's
 // controller API over the unix socket at sock. Requests carry no bearer
@@ -84,34 +92,102 @@ func HostedBackends(paths Paths, sock string, art storage.ArtifactStore) (Backen
 	}, httpClient.CloseIdleConnections
 }
 
+type hostedSelection struct {
+	sock       string
+	daemon     string
+	standalone string
+	fault      string
+	storeSkew  bool
+}
+
 // safety: the handshake is the only place the daemon's own answer about
 // api.sock is available, so selection happens before anything opens a store
 // and never mid-run: once a run row exists on the daemon, an API failure is
 // a run failure through the client's retry policy.
-func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (string, error) {
+func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (hostedSelection, error) {
+	// safety: a run with no admission configured is an embedder driving the
+	// orchestrator, not a pipeline binary answering to this machine's daemon,
+	// so it keeps the store it was pointed at.
 	if adm == nil {
-		return "", fmt.Errorf("%w: this run does not use the admission daemon", errNoHostedAPI)
-	}
-	if allowUnadmitted() {
-		return "", fmt.Errorf("%w: %s=1 skips the daemon", errNoHostedAPI, AllowUnadmittedEnv)
+		return hostedSelection{}, nil
 	}
 	cl, err := wingdclient.EnsureDaemon(ctx, adm.clientOptions())
 	if err != nil {
-		return "", err
+		if reason := standaloneReasonFor(err); reason != "" {
+			return hostedSelection{daemon: wingdclient.DaemonVersionOf(err), standalone: reason}, nil
+		}
+		return hostedSelection{}, err
 	}
 	defer func() { _ = cl.Close() }()
+	sel := hostedSelection{daemon: cl.DaemonVersion()}
+	// safety: the operator asked for the direct path with a daemon answering,
+	// so the run says that rather than a sentence about a daemon that is not
+	// there. Asked after the handshake because only it proves which is true.
+	if allowUnadmitted() {
+		sel.standalone = standaloneForced
+		return sel, nil
+	}
 	if !cl.APIReady() {
-		reason := cl.APIError()
-		if reason == "" {
-			reason = fmt.Sprintf("the daemon (%s) advertises no controller API socket", cl.DaemonVersion())
-		}
-		return "", fmt.Errorf("%w: %s", errNoHostedAPI, reason)
+		sel.standalone, sel.fault = daemonAPIRefusal(cl)
+		return sel, nil
 	}
 	sock := cl.APISocket()
 	if err := hostedAPIReachable(ctx, sock); err != nil {
-		return "", fmt.Errorf("%w: %w", errNoHostedAPI, err)
+		if errors.Is(err, errHostedStoreFault) {
+			return hostedSelection{}, err
+		}
+		if reason := standaloneReasonFor(err); reason != "" {
+			sel.standalone = reason
+			sel.storeSkew = errors.Is(err, errHostedStoreSkew)
+			return sel, nil
+		}
+		sel.standalone, sel.fault = standaloneDaemonFault, err.Error()
+		return sel, nil
 	}
-	return sock, nil
+	sel.sock = sock
+	return sel, nil
+}
+
+// safety: a daemon that never advertised api_ready predates the field, which
+// is age; one that advertises it false bound no socket, which is a fault of
+// this machine's daemon and whose own reason the operator needs verbatim.
+func daemonAPIRefusal(cl *wingdclient.Client) (reason, fault string) {
+	if !cl.APIAdvertised() {
+		return standaloneDaemonOlder, ""
+	}
+	detail := cl.APIError()
+	if detail == "" {
+		detail = "it advertises no controller API socket"
+	}
+	if supersedesSDK(sparkwingModuleVersion(), cl.DaemonVersion()) {
+		return standaloneDaemonOlder, detail
+	}
+	return standaloneDaemonFault, detail
+}
+
+// safety: only a comparable pair proves age, and only across releases: a local
+// build of the same release carries a describe or prerelease suffix that sorts
+// below the tag, which is not the daemon being behind. Two builds that cannot
+// be ordered read as a fault and keep the daemon's own reason.
+func supersedesSDK(sdk, daemon string) bool {
+	sdkBase, daemonBase := releaseBase(sdk), releaseBase(daemon)
+	if sdkBase == "" || daemonBase == "" || sdkBase == daemonBase {
+		return false
+	}
+	return semver.Compare(daemonBase, sdkBase) < 0
+}
+
+func releaseBase(v string) string {
+	v = bareVersion(v)
+	if !semver.IsValid(v) {
+		return ""
+	}
+	base, _, _ := strings.Cut(v, "+")
+	base, _, _ = strings.Cut(base, "-")
+	if !semver.IsValid(base) {
+		return ""
+	}
+	return semver.Canonical(base)
 }
 
 type hostedHealth struct {
@@ -140,10 +216,15 @@ func hostedAPIReachable(ctx context.Context, sock string) error {
 	}()
 	var health hostedHealth
 	decodeErr := json.NewDecoder(resp.Body).Decode(&health)
+	if decodeErr == nil {
+		if reason, skewed := strings.CutPrefix(health.Store, "skew: "); skewed {
+			return fmt.Errorf("%w: %s reports %s", errHostedStoreSkew, sock, reason)
+		}
+	}
 	if resp.StatusCode != http.StatusOK {
 		if decodeErr == nil && health.Store != "" {
-			return fmt.Errorf("%s answered %s for GET /api/v1/health with its runs store %q",
-				sock, resp.Status, health.Store)
+			return fmt.Errorf("%w: %s answered %s for GET /api/v1/health with its runs store %q",
+				errHostedStoreFault, sock, resp.Status, health.Store)
 		}
 		return fmt.Errorf("%s answered %s for GET /api/v1/health", sock, resp.Status)
 	}
@@ -153,7 +234,7 @@ func hostedAPIReachable(ctx context.Context, sock string) error {
 	switch health.Store {
 	case "ready", "absent":
 	default:
-		return fmt.Errorf("the daemon on %s reports its runs store %q", sock, health.Store)
+		return fmt.Errorf("%w: the daemon on %s reports its runs store %q", errHostedStoreFault, sock, health.Store)
 	}
 	return hostedAPIServesCoordination(ctx, sock)
 }
@@ -199,23 +280,20 @@ func hostedAPIServesCoordination(ctx context.Context, sock string) error {
 	return nil
 }
 
-func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) (Backends, func()) {
+func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) (Backends, hostedSelection, func(), error) {
 	noop := func() {}
 	if opts.State != nil || !runsOnMachineStore(opts, paths) {
-		return Backends{}, noop
+		return Backends{}, hostedSelection{}, noop, nil
 	}
-	sock, err := selectHostedAPI(ctx, opts.Admission)
+	sel, err := selectHostedAPI(ctx, opts.Admission)
 	if err != nil {
-		// safety: a daemon this run could not reach at all is admission's own
-		// subject and it prints its own line, so only a reason admission never
-		// sees is announced here. Two lines for one condition is the thing
-		// the design's single stderr warning replaces.
-		if opts.Admission != nil && errors.Is(err, errNoHostedAPI) && !allowUnadmitted() {
-			opts.Admission.logf("%s, so it opens %s directly", err, paths.StateDB())
-		}
-		return Backends{}, noop
+		return Backends{}, hostedSelection{}, noop, err
 	}
-	return HostedBackends(paths, sock, nil)
+	if sel.sock == "" {
+		return Backends{}, sel, noop, nil
+	}
+	hosted, release := HostedBackends(paths, sel.sock, nil)
+	return hosted, sel, release, nil
 }
 
 // safety: the daemon stands in front of this machine's own runs store and

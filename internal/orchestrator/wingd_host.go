@@ -2,21 +2,15 @@ package orchestrator
 
 import (
 	"errors"
-	"fmt"
 	"os"
-	"sort"
-	"strconv"
-	"strings"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const AllowUnadmittedEnv = "SPARKWING_ALLOW_UNADMITTED"
 
-const installAdvice = "install or update the sparkwing CLI on this host, " +
-	"or set " + wingdclient.HostBinEnv + " to an installed sparkwing binary"
+const installAdvice = "curl -fsSL https://sparkwing.dev/install.sh | sh"
 
 func pipelineAdmission(parentLeaseToken string, origin wingwire.Origin) *LocalAdmission {
 	spawn, ok := wingdclient.HostSpawn()
@@ -32,82 +26,51 @@ func pipelineAdmission(parentLeaseToken string, origin wingwire.Origin) *LocalAd
 	}
 }
 
-func planPinsHostResources(plan *sparkwing.Plan) (pinned bool, where string) {
-	if plan == nil {
-		return false, ""
-	}
-	planLevel := false
-	if h := plan.ResourceHints(); h != nil && (h.Cores > 0 || h.MemoryBytes > 0) {
-		planLevel = true
-	}
-	var nodes []string
-	for _, n := range plan.Nodes() {
-		if h := n.ResourceHints(); h != nil && (h.Cores > 0 || h.MemoryBytes > 0) {
-			nodes = append(nodes, strconv.Quote(n.ID()))
-		}
-	}
-	switch {
-	case planLevel && len(nodes) > 0:
-		sort.Strings(nodes)
-		return true, "a plan-level .Resources() pin, and node-level pins on " + strings.Join(nodes, ", ")
-	case planLevel:
-		return true, "a plan-level .Resources() pin"
-	case len(nodes) > 0:
-		sort.Strings(nodes)
-		noun := "a node-level .Resources() pin on "
-		if len(nodes) > 1 {
-			noun = "node-level .Resources() pins on "
-		}
-		return true, noun + strings.Join(nodes, ", ")
-	}
-	return false, ""
-}
-
 func allowUnadmitted() bool {
 	return os.Getenv(AllowUnadmittedEnv) == "1"
 }
 
-func (la *LocalAdmission) unhostedOutcome(err error, plan *sparkwing.Plan, dryRun bool) (degrade bool, failure error) {
-	if la == nil || !la.PipelineClient || err == nil {
-		return false, nil
-	}
-	noHost := errors.Is(err, wingdclient.ErrNoDaemonHost)
-	tooOld := errors.Is(err, wingdclient.ErrDaemonTooOld)
-	if !noHost && !tooOld {
-		return false, nil
-	}
-	if !dryRun && !allowUnadmitted() {
-		if tooOld {
-			return false, staleDaemonRefusal(err)
-		}
-		if pinned, where := planPinsHostResources(plan); pinned {
-			return false, unpinnedHostRefusal(where)
-		}
-	}
-	la.unadmittedOnce.Do(func() {
-		if tooOld {
-			la.logf("%v; running without local coordination", err)
-			return
-		}
-		la.logf("no admission daemon is running and no sparkwing is installed to host one; "+
-			"running without local coordination -- host CPU and memory are not arbitrated, so concurrent runs on this box "+
-			"can oversubscribe it. Box- and run-scoped .Concurrency() groups are still enforced, through the shared store "+
-			"rather than the daemon, which releases a killed run's slot only when `sparkwing doctor` reclaims it. "+
-			"To coordinate the rest, %s", installAdvice)
-	})
-	return true, nil
+type unhosted struct {
+	reason string
+	skew   bool
+	hosted bool
 }
 
-func unpinnedHostRefusal(where string) error {
-	return fmt.Errorf("local admission: this pipeline reserves host capacity with %s, but no admission daemon is running "+
-		"and no sparkwing is installed to host one, so nothing can hold that reservation. "+
-		"To honor it, %s. "+
-		"To run without it -- host CPU and memory unarbitrated, so concurrent runs on this box can oversubscribe it -- set %s=1",
-		where, installAdvice, AllowUnadmittedEnv)
+// safety: age never refuses a run, and the reasons here are the same set the
+// store choice degrades on. A run whose store choice already printed a block
+// stays quiet; one reaching a gap the block never covered says so once,
+// because otherwise coordination disappears with nothing on stderr.
+func (la *LocalAdmission) unhostedOutcome(err error, state unhosted) bool {
+	if la == nil || !la.PipelineClient {
+		return false
+	}
+	reason := standaloneReasonFor(err)
+	if reason == "" && !la.storeSkewRefusal(err, state) {
+		return false
+	}
+	if state.reason == "" {
+		la.announceUnadmitted(err, state.hosted)
+	}
+	return true
 }
 
-func staleDaemonRefusal(err error) error {
-	return fmt.Errorf("local admission: %w. That daemon is arbitrating this box now, so running without it would "+
-		"oversubscribe the machine rather than merely go uncoordinated. "+
-		"To run anyway, set %s=1", err, AllowUnadmittedEnv)
+// safety: the daemon whose store skew sent this run standalone answers
+// admission with that same store error. Gated on the skew rather than on the
+// whole branch so a corrupt store on a daemon serving no api.sock still
+// refuses, which is the one refusal the design reserves.
+func (la *LocalAdmission) storeSkewRefusal(err error, state unhosted) bool {
+	if !state.skew || state.reason != standaloneDaemonOlder {
+		return false
+	}
+	var admErr *wingdclient.AdmissionError
+	return errors.As(err, &admErr) && admErr.Key == terminalCheckKey
+}
+
+func (la *LocalAdmission) announceUnadmitted(err error, hosted bool) {
+	where := "this run keeps the store it already opened"
+	if hosted {
+		where = "this run's state stays with the daemon it already reached"
+	}
+	la.logf("%v; running without local coordination -- host CPU and memory are not arbitrated, "+
+		"so concurrent runs on this box can oversubscribe it, and %s", err, where)
 }

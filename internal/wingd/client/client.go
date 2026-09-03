@@ -36,10 +36,33 @@ func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	if raiseTo == "" {
 		pinAdvice = fmt.Sprintf("Raise this repo's .sparkwing/go.mod pin to a release speaking protocol %d", ack.ProtocolMajor)
 	}
-	return fmt.Errorf("%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
-		"%s and re-run, or set SPARKWING_HOME to run against a daemon of your own; "+
-		"upgrading the sparkwing CLI does not affect this handshake",
-		ErrProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)
+	return &skewError{daemon: ack.BinaryVersion, err: fmt.Errorf(
+		"%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
+			"%s and re-run, or set SPARKWING_HOME to run against a daemon of your own; "+
+			"upgrading the sparkwing CLI does not affect this handshake",
+		ErrProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)}
+}
+
+// safety: the ack is gone by the time a caller sees the error, and the
+// degradation warning names the daemon's release rather than re-deriving it
+// from prose.
+type skewError struct {
+	daemon string
+	err    error
+}
+
+func (e *skewError) Error() string { return e.err.Error() }
+
+func (e *skewError) Unwrap() error { return e.err }
+
+// DaemonVersionOf reports the version of the daemon a handshake error names,
+// empty for an error that names none.
+func DaemonVersionOf(err error) string {
+	var skew *skewError
+	if errors.As(err, &skew) {
+		return skew.daemon
+	}
+	return ""
 }
 
 var ErrDaemonTooOld = errors.New("wingd/client: daemon protocol is older than this client")
@@ -84,9 +107,10 @@ func daemonTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	if daemon == "" {
 		daemon = "(unknown)"
 	}
-	return fmt.Errorf("%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
-		"Install sparkwing %s or newer on this host, then run `sparkwing daemon restart`",
-		ErrDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minHostingRelease())
+	return &skewError{daemon: ack.BinaryVersion, err: fmt.Errorf(
+		"%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
+			"Install sparkwing %s or newer on this host, then run `sparkwing daemon restart`",
+		ErrDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minHostingRelease())}
 }
 
 func servedDownLevel(ack wingwire.HelloAck) bool {
@@ -539,6 +563,11 @@ func (cl *Client) DaemonStoreRequirements() []string { return cl.ack.StoreRequir
 // API on its api.sock. A daemon that predates the field advertises nothing,
 // which reads as false.
 func (cl *Client) APIReady() bool { return cl.ack.APIReady != nil && *cl.ack.APIReady }
+
+// APIAdvertised reports whether the connected daemon answered about its
+// controller API socket at all. A daemon that predates the field advertises
+// nothing, which is not the same as advertising that the socket is unbound.
+func (cl *Client) APIAdvertised() bool { return cl.ack.APIReady != nil }
 
 // APIError reports why the connected daemon's API socket is unbound, empty
 // when it is bound or when the daemon predates the field.
