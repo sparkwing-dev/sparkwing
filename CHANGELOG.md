@@ -205,6 +205,16 @@ code change to unlock.
 
 ### Security
 
+- **store:** A trigger returned to the pending queue no longer keeps the
+  principal that held it. A release, a generation-guarded release, and the
+  expired-claim reaper all clear `claim_principal` and `claim_token_prefix`,
+  and an unattributed in-process claim overwrites them rather than reviving
+  whatever the last holder left. Without this, the next consumer's claim made
+  the previous holder the recorded owner of a claim it did not take, and that
+  principal could read the trigger, write nodes, and finish a run another
+  process was executing.
+
+
 - **controller + cache:** Code scanning's open findings are triaged. A clone URL
   is refused when any component begins with `-` -- the whole string, the
   scp-like host or path, the ssh userinfo, or the parsed host -- where git would
