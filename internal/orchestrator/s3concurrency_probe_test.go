@@ -121,3 +121,58 @@ func TestS3Concurrency_ProbeIsSharedAndDoesNotParkOtherCallers(t *testing.T) {
 		t.Fatalf("store was probed %d times, want 1 shared probe", n)
 	}
 }
+
+func TestS3Concurrency_ProbeOutlivesTheCallerThatStartedIt(t *testing.T) {
+	art, _ := openIntegrationS3(t)
+	cw, ok := storage.Conditional(art)
+	if !ok {
+		t.Fatal("integration S3 store does not implement ConditionalWriter")
+	}
+	blocking := &blockingProbeStore{
+		ArtifactStore:     art,
+		ConditionalWriter: cw,
+		entered:           make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+	c := orchestrator.NewS3Concurrency(blocking)
+	req := func(runID string) store.AcquireSlotRequest {
+		return store.AcquireSlotRequest{
+			Key: "g:probe-outlives", RunID: runID, NodeID: "n",
+			Capacity: 2, Policy: store.OnLimitQueue, Lease: time.Minute,
+		}
+	}
+
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, err := c.AcquireSlot(leaderCtx, req("A"))
+		leaderErr <- err
+	}()
+	<-blocking.entered
+	cancelLeader()
+	if err := <-leaderErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("acquire whose context was cancelled mid-probe: err = %v, want context.Canceled", err)
+	}
+
+	type acquired struct {
+		resp store.AcquireSlotResponse
+		err  error
+	}
+	follower := make(chan acquired, 1)
+	go func() {
+		resp, err := c.AcquireSlot(context.Background(), req("B"))
+		follower <- acquired{resp, err}
+	}()
+	close(blocking.release)
+
+	got := <-follower
+	if got.err != nil {
+		t.Fatalf("acquire after the probe's starter was cancelled: %v", got.err)
+	}
+	if got.resp.Kind != store.AcquireGranted {
+		t.Fatalf("follower = %s, want Granted from a real reservation", got.resp.Kind)
+	}
+	if n := blocking.probes.Load(); n != 1 {
+		t.Fatalf("store was probed %d times, want the one probe the cancelled caller started", n)
+	}
+}
