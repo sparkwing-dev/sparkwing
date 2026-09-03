@@ -27,7 +27,7 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 			return resp, err
 		}
 		wait, ok := retryAfter(resp)
-		if !ok || attempt >= UnavailableRetries || !replayable(req) {
+		if !ok || attempt >= UnavailableRetries || !repeatable(req) {
 			return resp, nil
 		}
 		next, rewindErr := rewind(req)
@@ -44,8 +44,18 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	}
 }
 
-func replayable(req *http.Request) bool {
-	return req.Body == nil || req.GetBody != nil
+// safety: this client also talks to a controller behind an ingress, which can
+// answer 503 after a handler ran, so only a method the server is required to
+// treat as repeatable is sent twice. No route this client posts to accepts an
+// idempotency key, so no POST qualifies; a replayed submission would be a
+// second run.
+func repeatable(req *http.Request) bool {
+	switch req.Method {
+	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete:
+		return req.Body == nil || req.GetBody != nil
+	default:
+		return false
+	}
 }
 
 func retryAfter(resp *http.Response) (time.Duration, bool) {
