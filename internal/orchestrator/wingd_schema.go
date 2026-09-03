@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -19,26 +20,47 @@ func (la *LocalAdmission) ensureDaemon(ctx context.Context) (*wingdclient.Client
 	if err != nil {
 		return nil, err
 	}
-	if skew := daemonStoreSchemaSkew(cl.DaemonVersion(), la.Version, cl.DaemonStoreSchema(), store.ExpectedSchemaVersion()); skew != nil {
+	skew := daemonStoreSchemaSkew(
+		cl.DaemonVersion(), la.Version,
+		cl.DaemonStoreSchema(), cl.DaemonStoreRequirements(),
+		store.ExpectedSchemaVersion())
+	if skew != nil {
 		cl.Close()
 		return nil, skew
 	}
 	return cl, nil
 }
 
-func daemonStoreSchemaSkew(daemonVersion, selfVersion string, daemonSchema, selfSchema int) error {
-	if daemonSchema == 0 || daemonSchema >= selfSchema {
+func daemonStoreSchemaSkew(daemonVersion, selfVersion string, daemonSchema int, daemonRequirements []string, selfSchema int) error {
+	if daemonSchema == 0 {
 		return nil
 	}
-	// safety: `sparkwing daemon restart` respawns the installed build and a
-	// fresh SPARKWING_HOME still spawns the sparkwing on PATH, so neither of
-	// the usual remedies moves a source-built client off a released daemon.
-	return fmt.Errorf("%w: daemon %s understands runs-store schema %d, this binary is %s at schema %d, "+
-		"and the store both share is migrated to the newer one. "+
+	if daemonRequirements != nil {
+		missing := store.MissingRequirements(daemonRequirements, store.KnownRequirements())
+		if len(missing) == 0 {
+			return nil
+		}
+		return storeSchemaRemedy(fmt.Sprintf(
+			"daemon %s does not understand runs-store requirement(s) %s, which this binary is %s stamps into the store both share",
+			describeVersion(daemonVersion), strings.Join(missing, ", "), describeVersion(selfVersion)), selfSchema)
+	}
+	if daemonSchema >= selfSchema {
+		return nil
+	}
+	return storeSchemaRemedy(fmt.Sprintf(
+		"daemon %s understands runs-store schema %d, this binary is %s at schema %d, "+
+			"and the store both share is migrated to the newer one",
+		describeVersion(daemonVersion), daemonSchema, describeVersion(selfVersion), selfSchema), selfSchema)
+}
+
+// safety: `sparkwing daemon restart` respawns the installed build and a fresh
+// SPARKWING_HOME still spawns the sparkwing on PATH, so neither of the usual
+// remedies moves a source-built client off a released daemon.
+func storeSchemaRemedy(diagnosis string, selfSchema int) error {
+	return fmt.Errorf("%w: %s. "+
 		"Install a sparkwing that understands schema %d, or set %s to a binary that does and stop the daemon so the next run brings it up. "+
 		"`sparkwing daemon restart` respawns the same build, and a fresh SPARKWING_HOME still hosts the daemon from the sparkwing on PATH",
-		ErrDaemonStoreSchemaTooOld, describeVersion(daemonVersion), daemonSchema, describeVersion(selfVersion), selfSchema,
-		selfSchema, wingdclient.HostBinEnv)
+		ErrDaemonStoreSchemaTooOld, diagnosis, selfSchema, wingdclient.HostBinEnv)
 }
 
 func describeVersion(v string) string {

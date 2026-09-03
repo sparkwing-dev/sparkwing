@@ -531,6 +531,10 @@ func (cl *Client) DaemonVersion() string { return cl.ack.BinaryVersion }
 // the skew cannot be detected before it reads the store.
 func (cl *Client) DaemonStoreSchema() int { return cl.ack.StoreSchemaVersion }
 
+// DaemonStoreRequirements returns the runs-store schema requirements the
+// daemon advertised, or nil from a daemon that predates the field.
+func (cl *Client) DaemonStoreRequirements() []string { return cl.ack.StoreRequirements }
+
 func (cl *Client) write(msg wingwire.Message) error {
 	line, err := wingwire.Encode(msg)
 	if err != nil {

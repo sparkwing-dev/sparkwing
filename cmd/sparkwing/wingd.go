@@ -66,6 +66,7 @@ func runWingdRun(args []string) error {
 		FinalizeCancelledRuns: orchestrator.NewCancelledRunsFinalizer(*home),
 		IsRunTerminal:         orchestrator.NewTerminalRunChecker(*home),
 		StoreSchemaVersion:    store.ExpectedSchemaVersion(),
+		StoreRequirements:     store.KnownRequirements(),
 		Logf:                  func(format string, args ...any) { logger.Printf(format, args...) },
 	})
 	if err != nil {

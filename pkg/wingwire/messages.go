@@ -58,11 +58,19 @@ type HelloAck struct {
 	BuildIdentity       string `json:"build_identity,omitempty"`
 	Draining            bool   `json:"draining,omitempty"`
 	// StoreSchemaVersion is the runs-store schema version the daemon binary
-	// understands. A client whose own schema is newer knows the daemon cannot
-	// read the store they share and refuses before requesting admission. Zero
-	// from daemons that predate the field, where the skew stays undetectable
-	// until the daemon reads the store.
+	// understands. It is the fallback signal for daemons that predate
+	// StoreRequirements, where a client whose own schema is newer assumes the
+	// daemon cannot read the store they share. Zero from daemons that predate
+	// the field too, where the skew stays undetectable until the daemon reads
+	// the store.
 	StoreSchemaVersion int `json:"store_schema_version,omitempty"`
+	// StoreRequirements names the runs-store schema requirements the daemon
+	// binary understands. A client refuses the daemon only when the store
+	// carries a requirement absent from this list, so a daemon behind by
+	// additive migrations alone keeps serving. Nil from daemons that predate
+	// the field; the list is never empty otherwise, because the schema has
+	// carried requirements since they shipped.
+	StoreRequirements []string `json:"store_requirements"`
 }
 
 // HostResources is an amount of machine capacity: CPU cores and

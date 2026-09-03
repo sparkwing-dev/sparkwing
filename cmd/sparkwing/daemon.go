@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -31,6 +32,9 @@ type daemonReport struct {
 	StoreSchemaVersion  int    `json:"store_schema_version,omitempty"`
 	StoreSchemaError    string `json:"store_schema_error,omitempty"`
 	SchemaDiverged      bool   `json:"schema_diverged,omitempty"`
+	// MissingRequirements names the runs-store schema requirements the store
+	// holds and the daemon's binary does not understand.
+	MissingRequirements []string `json:"missing_requirements,omitempty"`
 }
 
 func runDaemon(args []string) error {
@@ -104,7 +108,7 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 		return daemonReport{}, err
 	}
 	report := daemonReport{Socket: socket, InstalledVersion: installedVersion()}
-	version, schemaErr := storeSchemaVersion(ctx, home)
+	version, storeRequirements, schemaErr := storeSchemaState(ctx, home)
 	report.StoreSchemaVersion = version
 	if schemaErr != nil {
 		report.StoreSchemaError = schemaErr.Error()
@@ -122,42 +126,61 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	report.BinaryVersion = info.BinaryVersion
 	report.RunningRevision = versionRevision(info.BinaryVersion)
 	report.DaemonSchemaVersion = info.StoreSchemaVersion
-	report.SchemaDiverged = report.DaemonSchemaVersion > 0 &&
-		report.StoreSchemaVersion > report.DaemonSchemaVersion
+	report.MissingRequirements = store.MissingRequirements(info.StoreRequirements, storeRequirements)
+	report.SchemaDiverged = daemonCannotReadStore(report, info.StoreRequirements)
 	if report.SchemaDiverged || report.StoreSchemaError != "" {
 		report.Healthy = false
 	}
 	return report, nil
 }
 
+// daemonCannotReadStore reports whether the store holds something the daemon's
+// binary cannot read. A store schema above the daemon's own no longer says so
+// by itself: an additive migration leaves every requirement known. A daemon
+// that predates the requirements handshake advertises none, and the version
+// comparison stays its only signal.
+func daemonCannotReadStore(report daemonReport, daemonRequirements []string) bool {
+	if report.DaemonSchemaVersion == 0 {
+		return false
+	}
+	if daemonRequirements != nil {
+		return len(report.MissingRequirements) > 0
+	}
+	return report.StoreSchemaVersion > report.DaemonSchemaVersion
+}
+
 // safety: an absent store is 0 with no error, but a store that exists and
 // cannot be read must be an error. Folding the two together reported an
 // unreadable store as a healthy daemon.
-func storeSchemaVersion(ctx context.Context, home string) (int, error) {
+func storeSchemaState(ctx context.Context, home string) (int, []string, error) {
 	root, err := wingd.HomeDir(home)
 	if err != nil {
-		return 0, fmt.Errorf("resolve the sparkwing home: %w", err)
+		return 0, nil, fmt.Errorf("resolve the sparkwing home: %w", err)
 	}
 	if root == "" {
-		return 0, errors.New("the sparkwing home did not resolve to a directory")
+		return 0, nil, errors.New("the sparkwing home did not resolve to a directory")
 	}
 	db := paths.PathsAt(root).StateDB()
 	if _, err := os.Stat(db); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return 0, nil
+			return 0, nil, nil
 		}
-		return 0, fmt.Errorf("stat the runs store: %w", err)
+		return 0, nil, fmt.Errorf("stat the runs store: %w", err)
 	}
 	st, err := store.OpenReadOnly(db)
 	if err != nil {
-		return 0, fmt.Errorf("open the runs store: %w", err)
+		return 0, nil, fmt.Errorf("open the runs store: %w", err)
 	}
 	defer func() { _ = st.Close() }()
 	version, err := st.CurrentSchemaVersion(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("read the runs-store schema: %w", err)
+		return 0, nil, fmt.Errorf("read the runs-store schema: %w", err)
 	}
-	return version, nil
+	requirements, err := st.Requirements(ctx)
+	if err != nil {
+		return 0, nil, fmt.Errorf("read the runs-store requirements: %w", err)
+	}
+	return version, requirements, nil
 }
 
 func runDaemonRestart(args []string) error {
@@ -259,9 +282,15 @@ func emitDaemonReport(report daemonReport, output string) error {
 			fmt.Fprintf(os.Stdout, "runs store unreadable: %s\n", report.StoreSchemaError)
 		}
 		if report.SchemaDiverged {
-			fmt.Fprintf(os.Stdout,
-				"runs-store schema mismatch: the daemon understands %d, the store is at %d, so it refuses every run\n",
-				report.DaemonSchemaVersion, report.StoreSchemaVersion)
+			if len(report.MissingRequirements) > 0 {
+				fmt.Fprintf(os.Stdout,
+					"runs-store mismatch: the store uses %s, which the daemon does not understand, so it refuses every run\n",
+					strings.Join(report.MissingRequirements, ", "))
+			} else {
+				fmt.Fprintf(os.Stdout,
+					"runs-store schema mismatch: the daemon understands %d, the store is at %d, so it refuses every run\n",
+					report.DaemonSchemaVersion, report.StoreSchemaVersion)
+			}
 			fmt.Fprintln(os.Stdout, schemaRemedy(report))
 		}
 		return nil

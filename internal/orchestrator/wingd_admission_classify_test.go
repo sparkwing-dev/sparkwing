@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -75,7 +76,7 @@ func TestAdmissionFailureNeverCallsAnUnclaimedKeyExhaustedCapacity(t *testing.T)
 }
 
 func TestDaemonStoreSchemaSkewRefusesADaemonBehindTheStore(t *testing.T) {
-	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 17, 26)
+	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 17, nil, 26)
 	if !errors.Is(err, ErrDaemonStoreSchemaTooOld) {
 		t.Fatalf("skew error = %v, want ErrDaemonStoreSchemaTooOld", err)
 	}
@@ -110,10 +111,31 @@ func TestDaemonStoreSchemaSkewAcceptsMatchingAndUnknownDaemons(t *testing.T) {
 		{"daemon is ahead", 27},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := daemonStoreSchemaSkew("v0.39.0", "v0.39.0", tc.daemonSchema, 26); err != nil {
+			if err := daemonStoreSchemaSkew("v0.39.0", "v0.39.0", tc.daemonSchema, nil, 26); err != nil {
 				t.Fatalf("skew error = %v, want none", err)
 			}
 		})
+	}
+}
+
+func TestDaemonStoreSchemaSkewAcceptsADaemonBehindByAdditiveMigrationsOnly(t *testing.T) {
+	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 17, store.KnownRequirements(), 26)
+	if err != nil {
+		t.Fatalf("skew error = %v, want none: the daemon knows every requirement this binary stamps", err)
+	}
+}
+
+func TestDaemonStoreSchemaSkewNamesTheRequirementTheDaemonLacks(t *testing.T) {
+	known := store.KnownRequirements()
+	behind := known[1:]
+	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 26, behind, 27)
+	if !errors.Is(err, ErrDaemonStoreSchemaTooOld) {
+		t.Fatalf("skew error = %v, want ErrDaemonStoreSchemaTooOld", err)
+	}
+	for _, want := range []string{known[0], "v0.38.2", "v0.39.0", wingdclient.HostBinEnv} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("skew error = %q, want it to name %q", err, want)
+		}
 	}
 }
 
