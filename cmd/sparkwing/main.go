@@ -132,7 +132,7 @@ func dispatchRun(args []string) error {
 		return err
 	}
 
-	// safety: the pin decides which CLI runs, so it must be settled before any daemon, worktree, store row, or stdout line this command would otherwise leave behind twice.
+	// safety: the exec replays this command, so the pin must settle before any daemon, worktree, run, or output.
 	if err := switchToolchain(dir); err != nil {
 		return err
 	}

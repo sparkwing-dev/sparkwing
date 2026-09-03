@@ -70,8 +70,6 @@ func verifyReleaseAsset(publicKey ed25519.PublicKey, manifest, manifestSig []byt
 	}, nil
 }
 
-// manifestSignedByTrustSet reports whether any release key signed this manifest.
-// It is the offline half of the release check: no asset signature, no network.
 func manifestSignedByTrustSet(publicKeys []ed25519.PublicKey, manifest, manifestSig []byte) bool {
 	for _, key := range publicKeys {
 		if len(key) == ed25519.PublicKeySize && ed25519.Verify(key, manifest, manifestSig) {

@@ -480,8 +480,6 @@ func gatherInfo() Info {
 	return info
 }
 
-// sdkPinLine states which CLI a pipeline run uses when the pin and the installed
-// version disagree.
 func sdkPinLine(pin *InfoSDKPin) string {
 	if pin == nil {
 		return ""

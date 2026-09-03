@@ -243,7 +243,6 @@ func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 	return installedRelease{path: currentBin, version: version, digest: verified.digest}, nil
 }
 
-// releaseAssetName is the release asset this OS/arch installs.
 func releaseAssetName() string {
 	ext := ""
 	if runtime.GOOS == "windows" {
@@ -254,8 +253,6 @@ func releaseAssetName() string {
 
 func releaseBaseURL(version string) string { return updateBaseURL + "/" + version }
 
-// fetchVerifiedRelease downloads a release asset and its signatures and returns
-// the asset only after the Ed25519 signatures and the manifest digest check out.
 func fetchVerifiedRelease(version string) (verifiedReleaseAsset, error) {
 	asset := releaseAssetName()
 	base := releaseBaseURL(version)

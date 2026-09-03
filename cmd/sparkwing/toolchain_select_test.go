@@ -39,8 +39,6 @@ func withInstalledVersion(t *testing.T, v string) {
 	t.Cleanup(func() { Version = prev })
 }
 
-// withToolchainActive sets the guard the way an exec'd child receives it, through
-// the environment, and then takes it the way main() does.
 func withToolchainActive(t *testing.T, v string) {
 	t.Helper()
 	t.Setenv(toolchainActiveEnv, v)

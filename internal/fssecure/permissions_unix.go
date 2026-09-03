@@ -195,7 +195,7 @@ func preserveExecutable(rel string) bool {
 	if strings.HasPrefix(slash, "node-runner/") || strings.HasPrefix(slash, "trigger-loop/") {
 		return true
 	}
-	// safety: the toolchain store holds CLI releases a pinned repo execs; clamping them to 0600 leaves every such repo failing with a bare permission error.
+	// safety: the store holds CLI releases a pinned repo execs; 0600 breaks every such repo.
 	if strings.HasPrefix(slash, "toolchains/") {
 		return true
 	}
