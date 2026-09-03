@@ -506,6 +506,15 @@ code change to unlock.
 
 ### Security
 
+- **store:** A SQLite state-database path containing `#` or `?` no longer opens
+  a different file. The path was interpolated into a `file:` URI without
+  escaping, so SQLite ended the filename at the first such character and opened
+  the truncated path instead -- a database it created with the process umask
+  rather than the 0600 the intended path was hardened to, holding secret values
+  and token hashes, and with every connection pragma (`busy_timeout`, WAL,
+  `synchronous`, `foreign_keys`, `_txlock=immediate`) silently dropped along
+  with the swallowed query string. Paths are now percent-escaped, so `#`, `?`
+  and `%` reach SQLite intact.
 - **cache:** A pipeline binary fetched from a shared artifact store must carry
   its `.sha256` sidecar. When the sidecar was missing the fetch accepted
   whatever bytes were there, computed a digest from those same bytes, wrote it

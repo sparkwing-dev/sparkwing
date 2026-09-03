@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -179,7 +180,21 @@ func sqliteDSN(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", path, ms), nil
+	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", sqliteURI(path), ms), nil
+}
+
+// safety: SQLite ends a file: URI path at the first unescaped `?` or `#` and
+// percent-decodes what precedes it, so an unescaped path carrying one of those
+// or a literal `%` names a different file than the caller stat'd and hardened,
+// and swallows the query string that carries every connection pragma.
+func sqliteURI(path string) string {
+	escaped := (&url.URL{Path: path}).EscapedPath()
+	if strings.HasPrefix(escaped, "//") {
+		// safety: an explicit empty authority keeps a leading `//` in the
+		// path from being parsed as a host name.
+		return "file://" + escaped
+	}
+	return "file:" + escaped
 }
 
 func sqliteReadOnlyDSN(path string) (string, error) {
@@ -199,7 +214,7 @@ func sqliteReadOnlyDSNWithMode(path string, immutable bool) (string, error) {
 	if immutable {
 		mode += "&immutable=1"
 	}
-	return fmt.Sprintf("file:%s?%s&_pragma=busy_timeout(%d)&_pragma=query_only(true)", path, mode, ms), nil
+	return fmt.Sprintf("%s?%s&_pragma=busy_timeout(%d)&_pragma=query_only(true)", sqliteURI(path), mode, ms), nil
 }
 
 // OpenReadOnly opens an existing SQLite state database for reads only.
@@ -376,7 +391,7 @@ func sameSnapshotSource(a, b snapshotSource) bool {
 }
 
 func checkpointSQLiteCopy(path string) error {
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(30000)")
+	db, err := sql.Open("sqlite", sqliteURI(path)+"?_pragma=busy_timeout(30000)")
 	if err != nil {
 		return err
 	}
