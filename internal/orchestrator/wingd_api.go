@@ -50,6 +50,7 @@ type wingdAPI struct {
 // every GET, because several GET routes write.
 var apiReadRoutes = []string{
 	"GET /api/v1/runs",
+	"GET /api/v1/runs/{id}/pending-triggers",
 	"GET /api/v1/runs/{id}",
 	"GET /api/v1/runs/{id}/nodes",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}",

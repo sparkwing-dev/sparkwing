@@ -18,6 +18,12 @@ import (
 // weight; it exists to make the classification exhaustive, so a new
 // controller route fails the gate below instead of defaulting silently.
 var apiWriteRoutes = []string{
+	"POST /api/v1/maintenance/reconcile-orphans",
+	"POST /api/v1/pipelines/{name}/profile/contention",
+	"POST /api/v1/pipelines/{name}/profile/observations",
+	"POST /api/v1/pipelines/{name}/profile/waits",
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/usage",
+	"POST /api/v1/triggers/{id}/claim",
 	"GET /api/v1/agents",
 	"GET /api/v1/auth/bootstrap-needed",
 	"POST /api/v1/auth/login",
