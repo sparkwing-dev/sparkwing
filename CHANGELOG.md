@@ -281,10 +281,14 @@ code change to unlock.
   producing truncated archives and spurious 500s.
 - **orchestrator:** Ordinary environment variables stay in the retry snapshot.
   The credential heuristics match `KEY`, `PASS`, `SECRET`, `TOKEN` and the rest
-  as whole name segments rather than substrings, so `MONKEY_MODE`,
+  against whole name segments rather than raw substrings, so `MONKEY_MODE`,
   `COMPASS_DIR`, `BYPASS_CHECKS` and a URL whose path contains one of those
   words are no longer classified as credentials and dropped, and a retry runs
-  with the environment its original attempt had.
+  with the environment its original attempt had. Names that run the words
+  together keep their old classification: a segment ending in `KEY`, `SECRET`,
+  `TOKEN`, `PASSWORD`, `PASSWD` or `PWD` still matches, so `APIKEY`,
+  `CLIENTSECRET`, `MYSQL_PASSWD` and `SSH_PRIVATEKEY` are still credentials
+  while `PWD` and `OLDPWD` are not.
 
 - **cli:** `sparkwing doctor` no longer deletes run directories whose run row
   lives in a remote state backend. The dangling-run sweep now unlinks a
@@ -436,10 +440,11 @@ code change to unlock.
 - **orchestrator:** The retry snapshot no longer stores a credential hidden
   inside a JSON array or a `KEY=VALUE` blob. The environment classifier now
   walks arrays as well as objects when a value parses as JSON, and reads each
-  whitespace-separated `NAME=value` pair inside a value, so
-  `SERVICE_ACCOUNTS={"creds":[{"token":"..."}]}` and
-  `EXTRA_ENV=GITHUB_TOKEN=...` are dropped from the dispatch and submission
-  snapshots instead of persisted verbatim.
+  whitespace-separated `NAME=value` pair inside a value whose name is
+  environment-variable shaped, so `SERVICE_ACCOUNTS={"creds":[{"token":"..."}]}`
+  and `EXTRA_ENV=GITHUB_TOKEN=...` are dropped from the dispatch and submission
+  snapshots instead of persisted verbatim, while a lower-case command-line
+  fragment such as `--extra-vars key=1` inside a value is left alone.
 
 - **logs:** Secrets are masked longest-first, so a registered secret that is a
   prefix of another registered secret no longer leaks the longer one's tail.
