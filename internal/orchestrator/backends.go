@@ -49,9 +49,13 @@ type Backends struct {
 // orphan sweep. A backend that cannot answer one of these returns an error
 // wrapping [storage.ErrNotSupported] rather than panicking.
 //
-// ReconcileOrphanedLocalRuns takes the idle age a run must exceed before it
-// counts as orphaned, and every implementation refuses a non-positive one:
-// zero would sweep every run that is still going.
+// ReconcileOrphanedLocalRuns takes the idle age a run must exceed before
+// it counts as orphaned and refuses a non-positive one with
+// [ErrOrphanThresholdRequired], because zero would sweep every run that
+// is still going. The package-level [ReconcileOrphanedLocalRuns], which
+// the CLI and the daemon call against a store they opened themselves,
+// substitutes a default instead; this method is the wire contract, where
+// the caller names the age.
 type RunCoordination interface {
 	ListNodes(ctx context.Context, runID string) ([]*store.Node, error)
 	ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error)
@@ -208,6 +212,14 @@ func remoteLogsURL(c *client.Client) string {
 const logsDiscoveryTimeout = 3 * time.Second
 
 func defaultHTTPClient() *http.Client { return nil }
+
+// safety: a child run's rows belong in the canonical store, never in this run's mirror copy.
+func canonicalState(b StateBackend) StateBackend {
+	if m, ok := b.(*mirrorStateBackend); ok {
+		return canonicalState(m.canonical)
+	}
+	return b
+}
 
 func localRunLogDir(b LogBackend, runID string) string {
 	switch l := b.(type) {
@@ -624,7 +636,7 @@ func (l localState) RecordWaitObservation(ctx context.Context, pipeline string, 
 
 func (l localState) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
 	if threshold <= 0 {
-		return 0, errors.New("ReconcileOrphanedLocalRuns: threshold must be > 0")
+		return 0, fmt.Errorf("%w: got %s", ErrOrphanThresholdRequired, threshold)
 	}
 	return ReconcileOrphanedLocalRuns(ctx, l.st, threshold)
 }

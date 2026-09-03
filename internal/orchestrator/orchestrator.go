@@ -362,7 +362,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		defer cancelConsumer()
-		go runLocalTriggerLoop(consumerCtx, backends.State, runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget)
+		go runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget)
 	}
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout

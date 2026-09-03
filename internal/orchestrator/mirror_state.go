@@ -310,9 +310,7 @@ func (m *mirrorStateBackend) ListNodeMetrics(ctx context.Context, runID, nodeID 
 }
 
 func (m *mirrorStateBackend) AddNodeUsage(ctx context.Context, runID, nodeID string, u store.NodeUsage) error {
-	return m.tee("AddNodeUsage", runID,
-		func() error { return m.canonical.AddNodeUsage(ctx, runID, nodeID, u) },
-		func() error { return m.local.AddNodeUsage(ctx, runID, nodeID, u) })
+	return m.canonical.AddNodeUsage(ctx, runID, nodeID, u)
 }
 
 func (m *mirrorStateBackend) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
@@ -337,7 +335,7 @@ func (m *mirrorStateBackend) GetPipelineProfile(ctx context.Context, pipeline, n
 
 // safety: the mirror is a per-run copy, and capacity rows are per-pipeline
 // machine state; teeing them would price local runs off a remote run's
-// measurements. Every write below therefore lands on the canonical only.
+// measurements. Every capacity write therefore lands on the canonical only.
 func (m *mirrorStateBackend) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error {
 	return m.canonical.SetPipelinePin(ctx, pipeline, nodeID, cores, memoryBytes)
 }

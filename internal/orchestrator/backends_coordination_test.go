@@ -114,8 +114,8 @@ func TestLocalStateServesEveryRunCoordinationMethod(t *testing.T) {
 	if _, err := state.ReconcileOrphanedLocalRuns(ctx, time.Hour); err != nil {
 		t.Fatalf("ReconcileOrphanedLocalRuns: %v", err)
 	}
-	if _, err := state.ReconcileOrphanedLocalRuns(ctx, 0); err == nil {
-		t.Error("a zero threshold was accepted; it means every running run is orphaned")
+	if _, err := state.ReconcileOrphanedLocalRuns(ctx, 0); !errors.Is(err, ErrOrphanThresholdRequired) {
+		t.Errorf("zero-threshold err = %v, want ErrOrphanThresholdRequired", err)
 	}
 }
 
@@ -190,26 +190,67 @@ func TestMirrorStateBackendKeepsCapacityWritesOnTheCanonical(t *testing.T) {
 	if err := m.AddNodeUsage(ctx, "r1", "build", store.NodeUsage{CPUTime: time.Second, MaxRSSBytes: 2048}); err != nil {
 		t.Fatalf("AddNodeUsage: %v", err)
 	}
-	for name, st := range map[string]*store.Store{"canonical": canonical, "mirror": mirror} {
-		n, err := st.GetNode(ctx, "r1", "build")
-		if err != nil {
-			t.Fatalf("%s get node: %v", name, err)
-		}
-		if n.MaxRSSBytes != 2048 {
-			t.Errorf("%s node max rss = %d, want 2048", name, n.MaxRSSBytes)
-		}
+	canonicalNode, err := canonical.GetNode(ctx, "r1", "build")
+	if err != nil {
+		t.Fatalf("canonical get node: %v", err)
 	}
+	if canonicalNode.MaxRSSBytes != 2048 {
+		t.Errorf("canonical node max rss = %d, want 2048", canonicalNode.MaxRSSBytes)
+	}
+	mirrorNode, err := mirror.GetNode(ctx, "r1", "build")
+	if err != nil {
+		t.Fatalf("mirror get node: %v", err)
+	}
+	if mirrorNode.MaxRSSBytes != 0 {
+		t.Errorf("mirror node max rss = %d, want 0: usage is machine capacity accounting", mirrorNode.MaxRSSBytes)
+	}
+}
+
+func TestCanonicalStateUnwrapsTheMirrorSoAChildStaysOutOfIt(t *testing.T) {
+	canonical := coordinationStore(t)
+	mirror := coordinationStore(t)
+	ctx := context.Background()
+
+	m := newMirrorStateBackend(localState{st: canonical}, mirror, quietTestLogger())
+	child := store.Run{ID: "child-1", Pipeline: "child", Status: "failed", StartedAt: time.Now()}
+
+	if err := m.CreateRun(ctx, child); err != nil {
+		t.Fatalf("CreateRun through the mirror: %v", err)
+	}
+	if _, err := mirror.GetRun(ctx, "child-1"); err != nil {
+		t.Fatalf("the mirror tees run rows, so this one should be there: %v", err)
+	}
+
+	other := coordinationStore(t)
+	m2 := newMirrorStateBackend(localState{st: canonical}, other, quietTestLogger())
+	if err := canonicalState(m2).CreateRun(ctx, store.Run{
+		ID: "child-2", Pipeline: "child", Status: "failed", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun through the canonical backend: %v", err)
+	}
+	if _, err := canonical.GetRun(ctx, "child-2"); err != nil {
+		t.Fatalf("canonical missing the child run: %v", err)
+	}
+	if _, err := other.GetRun(ctx, "child-2"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("mirror GetRun err = %v, want ErrNotFound: a child run belongs to no run's mirror", err)
+	}
+}
+
+const loopbackTestToken = "swl_coordination"
+
+func newCoordinationLoopback(t *testing.T, st *store.Store) *client.Client {
+	t.Helper()
+	lb := controller.NewLoopback(localState{st: st}, "r1", loopbackTestToken, quietTestLogger())
+	srv := httptest.NewServer(lb.Handler())
+	t.Cleanup(srv.Close)
+	return client.NewWithToken(srv.URL, srv.Client(), loopbackTestToken)
 }
 
 func TestLoopbackServesCoordinationOverAStateBackend(t *testing.T) {
 	st := coordinationStore(t)
 	seedCoordinationRun(t, st)
 	ctx := context.Background()
-
-	lb := controller.NewLoopback(localState{st: st}, "r1", "", quietTestLogger())
-	srv := httptest.NewServer(lb.Handler())
-	t.Cleanup(srv.Close)
-	c := client.NewWithToken(srv.URL, srv.Client(), "")
+	c := newCoordinationLoopback(t, st)
 
 	childID, err := localState{st: st}.EnqueueTrigger(ctx, "child", nil, "r1", "build", "", "await-pipeline", "", "", "")
 	if err != nil {
@@ -218,6 +259,9 @@ func TestLoopbackServesCoordinationOverAStateBackend(t *testing.T) {
 	pending, err := c.ListPendingTriggersForParent(ctx, "r1")
 	if err != nil || len(pending) != 1 || pending[0] != childID {
 		t.Fatalf("ListPendingTriggersForParent = %v, %v; want [%s], nil", pending, err, childID)
+	}
+	if _, err := c.ClaimSpecificTrigger(ctx, childID, store.DefaultLeaseDuration); err != nil {
+		t.Fatalf("ClaimSpecificTrigger on a child this run spawned: %v", err)
 	}
 	if err := c.RecordWaitObservation(ctx, "demo", time.Second); err != nil {
 		t.Fatalf("RecordWaitObservation: %v", err)
@@ -231,5 +275,76 @@ func TestLoopbackServesCoordinationOverAStateBackend(t *testing.T) {
 	}
 	if n.MaxRSSBytes != 512 {
 		t.Errorf("node max rss = %d, want 512", n.MaxRSSBytes)
+	}
+}
+
+func TestLoopbackRefusesWorkBelongingToAnotherRun(t *testing.T) {
+	st := coordinationStore(t)
+	seedCoordinationRun(t, st)
+	ctx := context.Background()
+	c := newCoordinationLoopback(t, st)
+
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "r2", Pipeline: "other", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("create the stranger run: %v", err)
+	}
+	strangerID, err := localState{st: st}.EnqueueTrigger(ctx, "elsewhere", nil, "r2", "build", "", "await-pipeline", "", "", "")
+	if err != nil {
+		t.Fatalf("enqueue the stranger trigger: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{"claim another run's child trigger", func() error {
+			_, err := c.ClaimSpecificTrigger(ctx, strangerID, store.DefaultLeaseDuration)
+			return err
+		}},
+		{"finish another run's child trigger", func() error {
+			return c.FinishTrigger(ctx, strangerID)
+		}},
+		{"list another run's pending triggers", func() error {
+			_, err := c.ListPendingTriggersForParent(ctx, "r2")
+			return err
+		}},
+		{"record an observation against another pipeline", func() error {
+			return c.RecordProfileObservation(ctx, "other", "", store.ProfileObservation{
+				Duration: time.Second, PeakCores: 1, CPUMeasured: true,
+			})
+		}},
+		{"record contention against another pipeline", func() error {
+			return c.RecordContention(ctx, "other")
+		}},
+		{"record a wait against another pipeline", func() error {
+			return c.RecordWaitObservation(ctx, "other", time.Second)
+		}},
+		{"pin another pipeline", func() error {
+			return c.SetPipelinePin(ctx, "other", "", 4, 1<<30)
+		}},
+	} {
+		if err := tc.call(); err == nil {
+			t.Errorf("%s: succeeded, want a refusal", tc.name)
+		}
+	}
+
+	if tg, err := st.GetTrigger(ctx, strangerID); err != nil || tg.Status != "pending" {
+		t.Errorf("stranger trigger status = %v (err %v), want it untouched and pending", tg, err)
+	}
+	if prof, err := st.GetPipelineProfile(ctx, "other", ""); err != nil || prof != nil {
+		t.Errorf("stranger profile = %v (err %v), want none written", prof, err)
+	}
+}
+
+func TestLoopbackRefusesAnAbsurdProfileObservation(t *testing.T) {
+	st := coordinationStore(t)
+	seedCoordinationRun(t, st)
+	c := newCoordinationLoopback(t, st)
+
+	if err := c.RecordProfileObservation(context.Background(), "demo", "", store.ProfileObservation{
+		PeakCores: -5, Duration: time.Second,
+	}); err == nil {
+		t.Error("a negative peak core count was accepted into the pricing model")
 	}
 }
