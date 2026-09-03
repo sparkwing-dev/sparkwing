@@ -160,7 +160,7 @@ func TestRunReplayNode_CodeDrift(t *testing.T) {
 		t.Fatalf("MintReplayRun: %v", err)
 	}
 
-	if _, err := RunReplayNode(ctx, paths, st, newRunID, "build", nil); err == nil {
+	if _, err := RunReplayNode(ctx, paths, LocalBackends(paths, st, nil), newRunID, "build", nil); err == nil {
 		t.Fatalf("expected failure when pipeline isn't registered")
 	}
 }
@@ -181,7 +181,7 @@ func TestRunReplayNode_NotAReplayRun(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := RunReplayNode(ctx, paths, st, "regular", "build", nil); err == nil {
+	if _, err := RunReplayNode(ctx, paths, LocalBackends(paths, st, nil), "regular", "build", nil); err == nil {
 		t.Fatalf("expected failure on non-replay run")
 	}
 }

@@ -24,13 +24,11 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		return fmt.Errorf("ensure sparkwing root: %w", err)
 	}
 
-	st, err := openLocalTriggerStore(ctx, paths, profileName)
+	backends, releaseBackends, err := localTriggerBackends(ctx, paths, profileName)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
-
-	backends := LocalBackends(paths, st, nil)
+	defer releaseBackends()
 
 	trigger, err := backends.State.GetTrigger(ctx, triggerID)
 	if err != nil {
@@ -94,6 +92,27 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		"status", res.Status,
 	)
 	return nil
+}
+
+// localTriggerBackends gives a child run the same state backend its parent
+// chose: the admission daemon's API socket when the daemon serves it, and
+// this machine's store otherwise. A child on a named profile keeps that
+// profile's store, which the daemon does not stand in front of.
+func localTriggerBackends(ctx context.Context, paths Paths, profileName string) (Backends, func(), error) {
+	if profileName == "" {
+		opts := Options{
+			DefaultStateDB: paths.StateDB(),
+			Admission:      pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal),
+		}
+		if hosted, release := hostedBackendsForRun(ctx, paths, &opts); hosted.APISocket != "" {
+			return hosted, release, nil
+		}
+	}
+	st, err := openLocalTriggerStore(ctx, paths, profileName)
+	if err != nil {
+		return Backends{}, func() {}, err
+	}
+	return LocalBackends(paths, st, nil), func() { _ = st.Close() }, nil
 }
 
 func openLocalTriggerStore(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {

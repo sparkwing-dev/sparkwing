@@ -35,13 +35,14 @@ func runReplayNodeCLI(args []string) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return fmt.Errorf("ensure root: %w", err)
 	}
-	st, err := store.Open(paths.StateDB())
+	ctx := context.Background()
+	backends, releaseBackends, err := localTriggerBackends(ctx, paths, "")
 	if err != nil {
-		return fmt.Errorf("open state db: %w", err)
+		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer releaseBackends()
 
-	res, err := RunReplayNode(context.Background(), paths, st, runID, nodeID, selectLocalRenderer())
+	res, err := RunReplayNode(ctx, paths, backends, runID, nodeID, selectLocalRenderer())
 	if err != nil {
 		return err
 	}
@@ -53,7 +54,8 @@ func runReplayNodeCLI(args []string) error {
 	return nil
 }
 
-func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nodeID string, delegate sparkwing.Logger) (runner.Result, error) {
+func RunReplayNode(ctx context.Context, paths Paths, backends Backends, runID, nodeID string, delegate sparkwing.Logger) (runner.Result, error) {
+	st := backends.State
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("get replay run %s: %w", runID, err)
@@ -128,8 +130,6 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 			return runner.Result{}, fmt.Errorf("unmarshal scalar fields onto %s: %w", currentType, err)
 		}
 	}
-
-	backends := LocalBackends(paths, st, nil)
 
 	originalRunID := run.ReplayOfRunID
 	ctx = sparkwingruntime.WithJSONResolver(ctx, func(id string) ([]byte, bool) {

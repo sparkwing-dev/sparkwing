@@ -595,7 +595,8 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		opts.DefaultStateDB = paths.StateDB()
 	}
 	ownsState := opts.State == nil
-	hosted := hostedBackendsForRun(ctx, paths, &opts)
+	hosted, closeHosted := hostedBackendsForRun(ctx, paths, &opts)
+	defer closeHosted()
 	if hosted.APISocket != "" {
 		// safety: profile resolution opens this machine's store only when no
 		// state backend is set yet, so the daemon's client goes in before it
