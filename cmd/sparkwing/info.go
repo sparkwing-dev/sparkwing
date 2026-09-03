@@ -34,6 +34,18 @@ type Info struct {
 	UpgradeNotice   string         `json:"upgrade_notice,omitempty"`
 
 	Executable InfoExecutable `json:"executable"`
+
+	SDKPin *InfoSDKPin `json:"sdk_pin,omitempty"`
+}
+
+// InfoSDKPin reports the repo's SDK pin when it names a different CLI version
+// than the installed one, and which of the two a pipeline run would use.
+type InfoSDKPin struct {
+	Pin       string `json:"pin"`
+	Installed string `json:"installed"`
+	Runs      string `json:"runs"`
+	RunsFrom  string `json:"runs_from,omitempty"`
+	Switches  bool   `json:"switches"`
 }
 
 type InfoExecutable struct {
@@ -297,6 +309,9 @@ func printAgentBlock() {
 	}
 	fmt.Printf("- CLI %s, running from %s. Docs shipped in this binary match it exactly.\n",
 		info.Version.Installed, info.Executable.Path)
+	if line := sdkPinLine(info.SDKPin); line != "" {
+		fmt.Println("- " + line)
+	}
 	if n := len(info.Executable.OtherInstalls); n > 0 {
 		fmt.Printf("- %d other sparkwing install(s) on this machine: %s. A process with a different PATH may run one of those instead; use absolute paths in automation, and `sparkwing doctor` for the full picture.\n",
 			n, strings.Join(info.Executable.OtherInstalls, ", "))
@@ -459,9 +474,55 @@ func gatherInfo() Info {
 
 	info.UpgradeNotice = pendingUpgradeNotice
 	info.Executable = gatherExecutable()
+	info.SDKPin = gatherSDKPin(info)
 	info.NextSteps = nextStepsFor(info)
 	info.Tips = gatherTips(info)
 	return info
+}
+
+// sdkPinLine states which CLI a pipeline run uses when the pin and the installed
+// version disagree.
+func sdkPinLine(pin *InfoSDKPin) string {
+	if pin == nil {
+		return ""
+	}
+	if pin.Switches {
+		return fmt.Sprintf("this repo pins SDK %s, so a pipeline run switches to %s at %s",
+			pin.Pin, pin.Runs, tildePath(pin.RunsFrom))
+	}
+	return fmt.Sprintf("this repo pins SDK %s, and the installed %s runs it", pin.Pin, pin.Installed)
+}
+
+func gatherSDKPin(info Info) *InfoSDKPin {
+	if !info.Project.Found {
+		return nil
+	}
+	pin, err := readSDKPin(info.Project.SparkwingDir)
+	if err != nil || pin.version == "" || pin.version == info.Version.Installed {
+		return nil
+	}
+	report := &InfoSDKPin{
+		Pin:       pin.version,
+		Installed: info.Version.Installed,
+		Runs:      info.Version.Installed,
+		RunsFrom:  info.Binary,
+	}
+	mode, err := toolchainMode(os.Getenv(toolchainModeEnv))
+	if err != nil {
+		return report
+	}
+	decision := planToolchainSwitch(info.Version.Installed, pin, mode, os.Getenv(toolchainActiveEnv))
+	if decision.action != toolchainSwitch {
+		return report
+	}
+	p, err := paths.DefaultPaths()
+	if err != nil {
+		return report
+	}
+	report.Switches = true
+	report.Runs = pin.version
+	report.RunsFrom = p.ToolchainBinary(pin.version)
+	return report
 }
 
 func gatherExecutable() InfoExecutable {
@@ -746,6 +807,10 @@ func printInfoTable(info Info) {
 
 	if info.Binary != "" {
 		row("binary", info.Binary, "")
+	}
+
+	if info.SDKPin != nil {
+		row("sdk pin", info.SDKPin.Pin, "("+sdkPinLine(info.SDKPin)+")")
 	}
 
 	if info.Toolchain.Go.Found {
