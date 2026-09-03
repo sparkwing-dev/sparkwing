@@ -59,14 +59,16 @@ code change to unlock.
   or retyped separately from what was added. The release pipeline diffs that
   snapshot, `api/openapi.yaml`, and the protocol constants against the
   previous tag and refuses a tag whose changelog does not declare a cut it
-  finds. A daemon sent a message type it does not serve now replies
-  `unsupported`, naming the type, and keeps the connection open instead of
-  hanging up; an unregistered controller route answers 404 with
-  `{"error":"unsupported","route":"<method> <path>"}`. Both clients turn
-  those answers into an error a caller can match on, so an operation an
-  older daemon lacks is no longer a hang or a missing row. The rule the
-  checks enforce is in
-  [docs/versioning.md](docs/versioning.md).
+  finds, and it holds the entry to the cut: the declaration has to sit under
+  a `wingd`, `wingwire`, or `api` scope and name every entry the diff found.
+  A daemon sent a message type it does not serve now replies `unsupported`,
+  naming the type, and keeps serving the connection instead of hanging up,
+  up to eight refusals per connection; an unregistered controller route
+  answers 404 with `{"error":"unsupported","route":"<method> <path>"}`.
+  Every read path in both clients turns those answers into an error a caller
+  can match on, so an operation an older daemon lacks is no longer a hang, a
+  missing row, or a delete that reports success. The rule the checks enforce
+  is in [docs/versioning.md](docs/versioning.md).
 
 ### Changed
 
