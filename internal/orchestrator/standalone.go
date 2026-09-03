@@ -33,7 +33,8 @@ func standaloneReasonFor(err error) string {
 		return standaloneFloor
 	case errors.Is(err, wingdclient.ErrDaemonTooOld),
 		errors.Is(err, wingdclient.ErrDaemonLacksOperation),
-		errors.Is(err, client.ErrControllerLacksRoute):
+		errors.Is(err, client.ErrControllerLacksRoute),
+		errors.Is(err, errHostedStoreSkew):
 		return standaloneDaemonOlder
 	case errors.Is(err, wingdclient.ErrNoDaemonHost),
 		errors.Is(err, wingdclient.ErrDaemonHostUnusable),

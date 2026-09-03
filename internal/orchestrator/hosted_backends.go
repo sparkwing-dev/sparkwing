@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -31,10 +32,14 @@ const hostedAPITimeout = APIRequestTimeout + 15*time.Second
 
 const hostedAPIProbeTimeout = 3 * time.Second
 
-// safety: a daemon that answers but serves no state is a version gap the run
-// degrades around; a daemon reporting a store it cannot read is the one fault
-// a run is still refused for, because the file is what the operator must fix.
-var errHostedStoreFault = errors.New("the admission daemon cannot read this machine's runs store")
+// safety: the two ways a daemon's store answer ends a hosted run. Skew is the
+// daemon being too old for a store a newer pin migrated, which is age and so
+// degrades; a fault is a file the operator must fix, and is the only reason
+// left to refuse a run outright.
+var (
+	errHostedStoreSkew  = errors.New("the admission daemon is too old for this machine's runs store")
+	errHostedStoreFault = errors.New("the admission daemon cannot read this machine's runs store")
+)
 
 // NewAPISocketClient returns an HTTP client that reaches the daemon's
 // controller API over the unix socket at sock. Requests carry no bearer
@@ -156,6 +161,11 @@ func hostedAPIReachable(ctx context.Context, sock string) error {
 	}()
 	var health hostedHealth
 	decodeErr := json.NewDecoder(resp.Body).Decode(&health)
+	if decodeErr == nil {
+		if reason, skewed := strings.CutPrefix(health.Store, "skew: "); skewed {
+			return fmt.Errorf("%w: %s reports %s", errHostedStoreSkew, sock, reason)
+		}
+	}
 	if resp.StatusCode != http.StatusOK {
 		if decodeErr == nil && health.Store != "" {
 			return fmt.Errorf("%w: %s answered %s for GET /api/v1/health with its runs store %q",

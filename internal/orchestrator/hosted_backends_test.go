@@ -273,7 +273,7 @@ func TestHostedSelection_SkippedWhenUnadmittedIsAllowed(t *testing.T) {
 	}
 }
 
-func TestHostedRun_BrokenDaemonStoreRefusesTheRun(t *testing.T) {
+func TestHostedRun_SkewedDaemonStoreRunsStandalone(t *testing.T) {
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
 	paths := PathsAt(home)
@@ -282,35 +282,89 @@ func TestHostedRun_BrokenDaemonStoreRefusesTheRun(t *testing.T) {
 	}
 
 	// safety: the daemon holds a store that records a requirement its binary
-	// does not understand, which is the one fault a run is still refused for.
-	// Two homes because one process cannot be both binaries at once.
+	// does not understand, which is the daemon being older than the pin that
+	// migrated it. Two homes because one process cannot be both binaries at
+	// once.
 	brokenHome := wingdTestHome(t)
 	requireUnknownFeature(t, PathsAt(brokenHome).StateDB())
-	brokenRuns, err := NewHeldRunStore(brokenHome)
+	startAPIDaemonOnFaultedStore(t, home, brokenHome)
+
+	opens := countStoreOpens(t)
+	warnings := captureStandaloneWarnings(t)
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	res, err := RunLocal(ctx, paths, Options{Pipeline: "hosted-memo", Admission: testWingdAdmission(home, nil)})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("status = %q (%v), want success", res.Status, res.Error)
+	}
+	if got := opens.opened(paths.StateDB()); got != 0 {
+		t.Fatalf("the run opened this machine's shared store %d times, want 0", got)
+	}
+	if got := opens.opened(paths.StandaloneStateDB()); got != 1 {
+		t.Fatalf("the run opened %s %d times, want 1", paths.StandaloneStateDB(), got)
+	}
+	block := warnings.String()
+	if !strings.Contains(block, "predates this pipeline's SDK") {
+		t.Fatalf("stderr block = %q, want the daemon-older branch", block)
+	}
+	if !strings.Contains(block, "(test)") {
+		t.Fatalf("stderr block = %q, want it to name the daemon's version", block)
+	}
+}
+
+func TestHostedRun_UnreadableDaemonStoreRefusesTheRun(t *testing.T) {
+	registerHostedPipelines(t)
+	home := wingdTestHome(t)
+	paths := PathsAt(home)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+
+	// safety: a file that is not a database is unreadable for a reason age
+	// cannot explain, so it is the fault a run is still refused for.
+	brokenHome := wingdTestHome(t)
+	if err := PathsAt(brokenHome).EnsureRoot(); err != nil {
+		t.Fatalf("ensure broken root: %v", err)
+	}
+	if err := os.WriteFile(PathsAt(brokenHome).StateDB(), []byte("this is not a database"), 0o600); err != nil {
+		t.Fatalf("write a non-database: %v", err)
+	}
+	startAPIDaemonOnFaultedStore(t, home, brokenHome)
+
+	opens := countStoreOpens(t)
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	_, err := RunLocal(ctx, paths, Options{Pipeline: "hosted-memo", Admission: testWingdAdmission(home, nil)})
+	if err == nil {
+		t.Fatal("a daemon reporting an unreadable runs store was accepted")
+	}
+	if !strings.Contains(err.Error(), "runs store") {
+		t.Fatalf("err = %v, want it to name the daemon's store", err)
+	}
+	if got := opens.Load(); got != 0 {
+		t.Fatalf("a refused run opened %d store(s), want 0", got)
+	}
+}
+
+// safety: admission answers from this home while the API socket answers from a
+// store the daemon cannot open, which is the split a real skew produces
+// between a daemon that still admits and one that cannot serve state.
+func startAPIDaemonOnFaultedStore(t *testing.T, home, faultedHome string) {
+	t.Helper()
+	faulted, err := NewHeldRunStore(faultedHome)
 	if err != nil {
 		t.Fatalf("held run store: %v", err)
 	}
-	t.Cleanup(func() { _ = brokenRuns.Close() })
+	t.Cleanup(func() { _ = faulted.Close() })
 	admissionRuns, err := NewHeldRunStore(home)
 	if err != nil {
 		t.Fatalf("held run store: %v", err)
 	}
 	t.Cleanup(func() { _ = admissionRuns.Close() })
-	startAPIDaemonSplit(t, home, admissionRuns, brokenRuns, nil, nil)
-
-	opens := countStoreOpens(t)
-	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
-	defer cancel()
-	_, err = RunLocal(ctx, paths, Options{Pipeline: "hosted-memo", Admission: testWingdAdmission(home, nil)})
-	if err == nil {
-		t.Fatal("a daemon reporting an unreadable runs store was accepted")
-	}
-	if !strings.Contains(err.Error(), "a-feature-from-the-future") {
-		t.Fatalf("err = %v, want it to name the daemon's store error", err)
-	}
-	if got := opens.Load(); got != 0 {
-		t.Fatalf("a refused run opened %d store(s), want 0", got)
-	}
+	startAPIDaemonSplit(t, home, admissionRuns, faulted, nil, nil)
 }
 
 func TestHostedAPIReachable_RefusesADegradedDaemon(t *testing.T) {
@@ -325,6 +379,44 @@ func TestHostedAPIReachable_RefusesADegradedDaemon(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "503") {
 		t.Fatalf("err = %v, want it to name the answer", err)
+	}
+	if !errors.Is(err, errHostedStoreFault) {
+		t.Fatalf("err = %v, want the fault that still refuses a run", err)
+	}
+	if standaloneReasonFor(err) != "" {
+		t.Fatalf("an unreadable store degraded to %q", standaloneReasonFor(err))
+	}
+}
+
+func TestHostedAPIReachable_ASkewedStoreDegradesRatherThanRefuses(t *testing.T) {
+	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"degraded","auth":"enabled",` +
+			`"store":"skew: sparkwing: this state database uses a-feature-from-the-future, which needs sparkwing >= v99.0.0"}`))
+	}))
+	err := hostedAPIReachable(context.Background(), sock)
+	if err == nil {
+		t.Fatal("a daemon too old for this home's store was accepted as this run's host")
+	}
+	if errors.Is(err, errHostedStoreFault) {
+		t.Fatalf("err = %v, want age rather than a fault", err)
+	}
+	if got := standaloneReasonFor(err); got != standaloneDaemonOlder {
+		t.Fatalf("standaloneReasonFor(%v) = %q, want %q", err, got, standaloneDaemonOlder)
+	}
+	if !strings.Contains(err.Error(), "a-feature-from-the-future") {
+		t.Fatalf("err = %v, want it to carry the daemon's own message", err)
+	}
+}
+
+func TestStoreHealthState_SplitsSkewFromFault(t *testing.T) {
+	skew := &store.SkewError{DBVersion: 99, BinaryVersion: 27, Requirements: []string{"a-feature-from-the-future"}}
+	if got := storeHealthState(fmt.Errorf("open: %w", skew)); !strings.HasPrefix(got, "skew: ") {
+		t.Errorf("storeHealthState(skew) = %q, want a skew: prefix", got)
+	}
+	if got := storeHealthState(errors.New("disk is on fire")); !strings.HasPrefix(got, "error: ") {
+		t.Errorf("storeHealthState(fault) = %q, want an error: prefix", got)
 	}
 }
 

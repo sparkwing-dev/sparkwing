@@ -708,9 +708,11 @@ sparkwing: no admission daemon is running and no sparkwing is installed to host 
 ```
 
 **The daemon predates something the run needs** -- it serves no
-`api.sock`, or answers 404 on a route this pipeline's SDK uses. Pipeline
-binaries never replace a daemon, so the remedy is to update the daemon,
-and the block names `sparkwing update`.
+`api.sock`, answers 404 on a route this pipeline's SDK uses, or reports a
+runs store its own binary is too old to open, which is what an installed
+daemon behind a newer pin that already migrated the file looks like.
+Pipeline binaries never replace a daemon, so the remedy is to update the
+daemon, and the block names `sparkwing update`.
 
 **The daemon's protocol floor is above this pipeline** -- a release
 declared a cut and this repo's pin predates it. The block names
@@ -730,9 +732,15 @@ variable rather than a flag because the runs that need it are the ones no
 CLI launched, and it is read strictly: only the exact value `1` turns the
 check off.
 
-One fault still fails a run outright: a daemon that answers with a runs
-store it cannot read. The file is what the operator must fix, and running
-standalone would hide it behind a run that looked like it worked.
+One fault still fails a run outright: a daemon whose runs store is
+unreadable for a reason that is not age -- a disk error, a file that is
+not a database, permissions. The file is what the operator must fix, and
+running standalone would hide it behind a run that looked like it worked.
+A daemon merely too old for that store is the case above, not this one:
+the daemon reports the two apart (`store: skew: ...` against `store:
+error: ...` on its health endpoint, `daemon_store_skew` in `sparkwing
+daemon status`), because a message an operator reads cannot be told
+apart by a program.
 
 One in-body feature changes shape on the standalone path.
 `sparkwing.ToolSlot(ctx, group)` -- the budget a job body takes out

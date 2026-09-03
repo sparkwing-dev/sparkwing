@@ -209,7 +209,7 @@ func (a *wingdAPI) health(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errRunStoreAbsent):
 		writeAPIHealth(w, http.StatusOK, "ok", "absent", "")
 	case err != nil:
-		writeAPIHealth(w, http.StatusServiceUnavailable, "degraded", "error: "+err.Error(), "store: "+err.Error())
+		writeAPIHealth(w, http.StatusServiceUnavailable, "degraded", storeHealthState(err), "store: "+err.Error())
 	default:
 		if _, listErr := ro.ListRuns(ctx, store.RunFilter{Limit: 1}); listErr != nil {
 			writeAPIHealth(w, http.StatusServiceUnavailable, "degraded", "error: "+listErr.Error(), "db: "+listErr.Error())
@@ -217,6 +217,19 @@ func (a *wingdAPI) health(w http.ResponseWriter, r *http.Request) {
 		}
 		writeAPIHealth(w, http.StatusOK, "ok", "ready", "")
 	}
+}
+
+// safety: a store this daemon is too old to open is a version gap a run
+// degrades around, while any other unreadable store is a file the operator
+// must fix; a caller cannot tell them apart from the message alone, and
+// treating the first as a fault would refuse exactly the runs this daemon's
+// age is not allowed to refuse.
+func storeHealthState(err error) string {
+	var skew *store.SkewError
+	if errors.As(err, &skew) {
+		return "skew: " + err.Error()
+	}
+	return "error: " + err.Error()
 }
 
 func writeAPIHealth(w http.ResponseWriter, status int, state, storeState, problem string) {

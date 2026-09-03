@@ -162,8 +162,12 @@ code change to unlock.
   code is unchanged. A plan-level or node-level `.Resources()` pin no longer
   fails a run on a box with no daemon, and neither does a daemon older than the
   pipeline; both degrade with the warning, and `SPARKWING_ALLOW_UNADMITTED=1`
-  takes the same path on purpose. A daemon reporting a runs store it cannot
-  read is the one fault that still fails the run outright. Standalone runs are
+  takes the same path on purpose. A daemon whose runs store its own binary is
+  too old to open is the second case, not a failure: the daemon now reports
+  that as `store: skew: ...` on its health endpoint and `daemon_store_skew` in
+  `sparkwing daemon status`, distinct from the `store: error: ...` of a store
+  that is unreadable for a reason age cannot explain, which is the one fault
+  that still fails the run outright. Standalone runs are
   invisible to `sparkwing runs` and to the dashboard, which is
   what the block says; their start record and `sparkwing runs status` carry
   `standalone` and `standalone_reason` (`no-daemon`, `daemon-older`, `floor`),
