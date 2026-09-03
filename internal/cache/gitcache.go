@@ -1233,6 +1233,10 @@ const (
 
 var validJobID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
+const artifactTempPrefix = ".sparkwing-upload-"
+
+var maxArtifactBytes int64 = 500 << 20
+
 func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/artifacts/")
 	parts := strings.SplitN(path, "/", 2)
@@ -1298,16 +1302,39 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// #nosec G703 -- the destination is contained under the artifacts root
-	f, err := os.Create(dest)
+
+	// safety: an unbounded or half-written body must never reach the path a download serves.
+	r.Body = http.MaxBytesReader(w, r.Body, maxArtifactBytes)
+
+	// #nosec G703 -- the staging file sits beside a destination contained under the artifacts root
+	tmp, err := os.CreateTemp(destDir, artifactTempPrefix+"*")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer f.Close()
+	tmpPath := tmp.Name()
 
-	n, err := io.Copy(f, r.Body)
+	n, err := io.Copy(tmp, r.Body)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
+		// #nosec G703 -- a staging name this handler created beside the destination
+		_ = os.Remove(tmpPath)
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, fmt.Sprintf("artifact exceeds the %d byte upload limit", maxArtifactBytes),
+				http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// #nosec G703 -- both names are contained under the artifacts root
+	if err := os.Rename(tmpPath, dest); err != nil {
+		// #nosec G703 -- a staging name this handler created beside the destination
+		_ = os.Remove(tmpPath)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1333,6 +1360,9 @@ func artifactDownload(w http.ResponseWriter, r *http.Request, jobID string) {
 	collect := func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return err
+		}
+		if strings.HasPrefix(filepath.Base(path), artifactTempPrefix) {
+			return nil
 		}
 		rel, _ := filepath.Rel(jobDir, path)
 		if matched, _ := filepath.Match(glob, filepath.Base(rel)); matched {
@@ -1393,6 +1423,9 @@ func artifactList(w http.ResponseWriter, r *http.Request, jobID string) {
 	collect := func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return err
+		}
+		if strings.HasPrefix(filepath.Base(path), artifactTempPrefix) {
+			return nil
 		}
 		rel, _ := filepath.Rel(jobDir, path)
 		files = append(files, rel)

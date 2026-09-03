@@ -249,6 +249,11 @@ code change to unlock.
 
 ### Fixed
 
+- **cache:** Artifact uploads are capped and atomic. `POST /artifacts/<job>` now
+  refuses a body over 500 MiB with 413 and stages the upload beside its
+  destination, renaming it into place only once the whole body has landed. A
+  runner killed mid-upload used to leave a truncated file at the artifact's
+  permanent path, which the list and download routes then served as complete.
 - **cache:** The gitcache background fetch loop now takes the same per-repo lock
   the request handlers take. It keyed the lock on the mirror's full path while
   every handler keyed it on the repository hash, so a background
