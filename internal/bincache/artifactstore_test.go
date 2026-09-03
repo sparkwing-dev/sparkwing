@@ -99,8 +99,33 @@ func TestArtifactStoreFetchRejectsTamperedBlob(t *testing.T) {
 	}
 }
 
-func TestArtifactStoreFetchHealsABlobPublishedWithoutADigest(t *testing.T) {
+func TestArtifactStoreFetchRefusesABlobWithNoStoredDigest(t *testing.T) {
 	t.Parallel()
+	store, err := fs.NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
+	const key = "abcd1234-ef567890"
+	ctx := context.Background()
+	if err := store.Put(ctx, "bin/"+key, strings.NewReader("substituted binary")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "downloaded")
+	err = bincache.FetchFromArtifactStore(ctx, store, key, dest)
+	if !errors.Is(err, bincache.ErrDigest) {
+		t.Fatalf("err = %v, want ErrDigest", err)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("unattested binary was installed: %v", err)
+	}
+	if _, err := store.Get(ctx, "bin/"+key+".sha256"); !errors.Is(err, storage.ErrNotFound) {
+		t.Errorf("a refused fetch attested the bytes it refused: %v", err)
+	}
+}
+
+func TestArtifactStoreFetchHealsABlobPublishedWithoutADigestWhenOptedIn(t *testing.T) {
+	t.Setenv(bincache.DigestBackfillEnv, "1")
 	store, err := fs.NewArtifactStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewArtifactStore: %v", err)
