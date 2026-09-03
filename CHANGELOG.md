@@ -249,6 +249,15 @@ code change to unlock.
 
 ### Fixed
 
+- **orchestrator:** A transient object-store error no longer disables cross-runner
+  reservation for the life of a process. The one-time probe that asks whether
+  the store honors write preconditions treated any error as a "no" and routed
+  every later acquire and release to the unenforced fallback, so a single 500,
+  DNS blip, or cancelled context during a long-lived process's first
+  concurrency operation left every group it dispatched unenforced behind one
+  log warning. Only a store that answers that it ignores preconditions settles
+  the question now; a probe that fails returns its error to the caller and the
+  next operation probes again.
 - **orchestrator:** Runners that lose the same S3 concurrency CAS back off to
   different times. The jitter added to each retry came from a single hash byte
   of the key, so it was under a microsecond and identical for every contender:

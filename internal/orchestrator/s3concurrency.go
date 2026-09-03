@@ -32,9 +32,10 @@ const s3FinishedRetention = 5 * time.Minute
 type s3Concurrency struct {
 	cw storage.ConditionalWriter
 
-	probeOnce sync.Once
-	useNoop   bool
-	noop      *noopConcurrency
+	probeMu sync.Mutex
+	probed  bool
+	useNoop bool
+	noop    *noopConcurrency
 }
 
 func NewS3Concurrency(art storage.ArtifactStore) ConcurrencyBackend {
@@ -45,24 +46,29 @@ func NewS3Concurrency(art storage.ArtifactStore) ConcurrencyBackend {
 	return &s3Concurrency{cw: cw, noop: &noopConcurrency{}}
 }
 
-func (c *s3Concurrency) fallback(ctx context.Context) ConcurrencyBackend {
-	c.probeOnce.Do(func() {
+// safety: only an answer from the store settles this. A probe that
+// failed has not answered, so it reaches the caller as an error and the
+// next call probes again rather than costing the process every
+// reservation it would make afterwards.
+func (c *s3Concurrency) fallback(ctx context.Context) (ConcurrencyBackend, error) {
+	c.probeMu.Lock()
+	defer c.probeMu.Unlock()
+	if !c.probed {
 		ok, err := c.cw.ConditionalWritesSupported(ctx)
-		switch {
-		case err != nil:
-			c.useNoop = true
-			slog.Warn("conditional-write probe failed; cache concurrency falls back to no-op "+
-				"(no cross-runner reservation in this state backend)", "err", err)
-		case !ok:
-			c.useNoop = true
+		if err != nil {
+			return nil, fmt.Errorf("conditional-write probe for cache concurrency: %w", err)
+		}
+		c.probed = true
+		c.useNoop = !ok
+		if c.useNoop {
 			slog.Warn("object store ignores write preconditions; cache concurrency falls back to no-op " +
 				"(no cross-runner reservation in this state backend)")
 		}
-	})
-	if c.useNoop {
-		return c.noop
 	}
-	return nil
+	if c.useNoop {
+		return c.noop, nil
+	}
+	return nil, nil
 }
 
 type s3SlotDoc struct {
@@ -429,7 +435,11 @@ func liveHolders(doc *s3SlotDoc, nowNS int64) []store.ConcurrencyHolder {
 }
 
 func (c *s3Concurrency) State(ctx context.Context, key string) (*store.ConcurrencyState, error) {
-	if fb := c.fallback(ctx); fb != nil {
+	fb, err := c.fallback(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if fb != nil {
 		return fb.State(ctx, key)
 	}
 	doc, _, exists, err := c.load(ctx, s3SlotKey(key))
@@ -660,7 +670,11 @@ func promoteCoalesceWaiter(doc *s3SlotDoc, runID, nodeID string, now time.Time, 
 }
 
 func (c *s3Concurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
-	if fb := c.fallback(ctx); fb != nil {
+	fb, err := c.fallback(ctx)
+	if err != nil {
+		return store.AcquireSlotResponse{}, err
+	}
+	if fb != nil {
 		return fb.AcquireSlot(ctx, req)
 	}
 
@@ -696,7 +710,7 @@ func (c *s3Concurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRe
 	}
 
 	var resp store.AcquireSlotResponse
-	err := c.mutate(ctx, req.Key, func(doc *s3SlotDoc, _ bool, now time.Time) (bool, error) {
+	err = c.mutate(ctx, req.Key, func(doc *s3SlotDoc, _ bool, now time.Time) (bool, error) {
 		nowNS := now.UnixNano()
 		resp = store.AcquireSlotResponse{}
 		doc.Key = req.Key
@@ -904,7 +918,11 @@ func (c *s3Concurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRe
 }
 
 func (c *s3Concurrency) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (time.Time, bool, error) {
-	if fb := c.fallback(ctx); fb != nil {
+	fb, err := c.fallback(ctx)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if fb != nil {
 		return fb.HeartbeatSlot(ctx, key, holderID, lease)
 	}
 	if lease <= 0 {
@@ -912,7 +930,7 @@ func (c *s3Concurrency) HeartbeatSlot(ctx context.Context, key, holderID string,
 	}
 	var expires time.Time
 	var superseded bool
-	err := c.mutate(ctx, key, func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error) {
+	err = c.mutate(ctx, key, func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error) {
 		if !exists {
 			return false, store.ErrLockHeld
 		}
@@ -933,7 +951,11 @@ func (c *s3Concurrency) HeartbeatSlot(ctx context.Context, key, holderID string,
 }
 
 func (c *s3Concurrency) ObserveSlot(ctx context.Context, key, holderID string) (*store.ConcurrencyHolder, error) {
-	if fb := c.fallback(ctx); fb != nil {
+	fb, err := c.fallback(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if fb != nil {
 		return fb.ObserveSlot(ctx, key, holderID)
 	}
 	doc, _, exists, err := c.load(ctx, s3SlotKey(key))
@@ -953,7 +975,11 @@ func (c *s3Concurrency) ObserveSlot(ctx context.Context, key, holderID string) (
 }
 
 func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error {
-	if fb := c.fallback(ctx); fb != nil {
+	fb, err := c.fallback(ctx)
+	if err != nil {
+		return err
+	}
+	if fb != nil {
 		return fb.ReleaseSlot(ctx, key, holderID, outcome, outputRef, cacheKeyHash, ttl)
 	}
 	return c.mutate(ctx, key, func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error) {
@@ -1044,11 +1070,15 @@ func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome,
 }
 
 func (c *s3Concurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (store.WaiterResolution, error) {
-	if fb := c.fallback(ctx); fb != nil {
+	fb, err := c.fallback(ctx)
+	if err != nil {
+		return store.WaiterResolution{}, err
+	}
+	if fb != nil {
 		return fb.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
 	}
 	var resolution store.WaiterResolution
-	err := c.mutate(ctx, key, func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error) {
+	err = c.mutate(ctx, key, func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error) {
 		if !exists {
 			if leaderRunID != "" {
 				resolution = store.WaiterResolution{Status: store.WaiterLeaderFinished, LeaderRunID: leaderRunID, LeaderNodeID: leaderNodeID}
@@ -1143,11 +1173,15 @@ func (c *s3Concurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, c
 }
 
 func (c *s3Concurrency) ForceReleaseSuperseded(ctx context.Context, key string) ([]store.ConcurrencyHolder, error) {
-	if fb := c.fallback(ctx); fb != nil {
+	fb, err := c.fallback(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if fb != nil {
 		return fb.ForceReleaseSuperseded(ctx, key)
 	}
 	var dropped []store.ConcurrencyHolder
-	err := c.mutate(ctx, key, func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error) {
+	err = c.mutate(ctx, key, func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error) {
 		dropped = nil
 		if !exists {
 			return false, nil
@@ -1176,11 +1210,15 @@ func (c *s3Concurrency) ForceReleaseSuperseded(ctx context.Context, key string) 
 }
 
 func (c *s3Concurrency) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error) {
-	if fb := c.fallback(ctx); fb != nil {
+	fb, err := c.fallback(ctx)
+	if err != nil {
+		return false, err
+	}
+	if fb != nil {
 		return fb.CancelWaiter(ctx, key, runID, nodeID)
 	}
 	var removed bool
-	err := c.mutate(ctx, key, func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error) {
+	err = c.mutate(ctx, key, func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error) {
 		removed = false
 		if !exists {
 			return false, nil

@@ -212,10 +212,14 @@ Notes:
   not yet implemented -- declaring `gcs` or `azure-blob` surfaces an
   unimplemented error at run start. Two checks gate every coordinated
   operation: a static type check that the backend exposes
-  `ConditionalWriter`, and a one-time live probe
+  `ConditionalWriter`, and a live probe
   (`ConditionalWritesSupported`) that catches S3-compatible gateways
-  which accept precondition headers and silently ignore them. Either
-  check failing routes the operation to the last-write-wins fallback.
+  which accept precondition headers and silently ignore them. A
+  backend that fails the type check, and a probe that answers that
+  preconditions are ignored, route every later operation to the
+  last-write-wins fallback. A probe that cannot reach the store has
+  not answered: that operation returns the error and the next one
+  probes again.
 - **Dashboard live updates**: `S3Backend` polls
   `runs/<id>/state.ndjson` for changes. Refresh latency = poll
   interval (default 2-5s), with cache invalidation on a per-run
