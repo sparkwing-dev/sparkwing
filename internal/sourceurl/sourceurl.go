@@ -7,9 +7,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 var scpLikeRE = regexp.MustCompile(`^[A-Za-z0-9._-]+@([^:]+):(.+)$`)
+
+var hostnameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 func ValidateCloneURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
@@ -28,6 +31,11 @@ func ValidateCloneURL(raw string) (string, error) {
 		return "", fmt.Errorf("repo URL must not begin with '-'")
 	}
 	if match := scpLikeRE.FindStringSubmatch(raw); match != nil {
+		// safety: ssh splits the destination at the last '@', so a capture that still holds
+		// one names a different machine than the guard below inspects.
+		if !hostnameRE.MatchString(match[1]) {
+			return "", fmt.Errorf("repo URL host %q is not a hostname", match[1])
+		}
 		if err := validateHost(match[1]); err != nil {
 			return "", err
 		}
@@ -101,19 +109,65 @@ func validateHost(host string) error {
 	if host == "" {
 		return fmt.Errorf("repo URL host required")
 	}
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") || metadataHosts[host] {
+	if isInternalName(host) {
 		return fmt.Errorf("repo URL host %q is not allowed", host)
 	}
 	// safety: 127.1, 0x7f000001, and 017700000001 all resolve to loopback, so canonicalize first.
 	if ip := parseHostIP(host); ip != nil && !routableIP(ip) {
 		return fmt.Errorf("repo URL host %q is not allowed", host)
 	}
+	if pol := hostPolicy.Load(); pol != nil {
+		return (*pol)(host)
+	}
 	return nil
 }
 
-var metadataHosts = map[string]bool{
+// HostPolicy is a deployment's own answer to whether a clone may go to host. It
+// sees the lowercased host with any trailing dot removed, only after the
+// built-in checks have passed, and its error reaches the caller unchanged.
+type HostPolicy func(host string) error
+
+var hostPolicy atomic.Pointer[HostPolicy]
+
+// SetHostPolicy installs pol for every clone URL this process validates from
+// here on, and a nil pol leaves only the built-in checks. It exists because a
+// name is never resolved during validation: git resolves it again when it
+// connects, so an address checked here says nothing about the address reached
+// then, and a deployment that must bound where clones go states that boundary
+// by name -- an allowlist of forges it clones from, or a denylist of names it
+// knows point inward -- rather than by an address that will not hold still.
+func SetHostPolicy(pol HostPolicy) {
+	if pol == nil {
+		hostPolicy.Store(nil)
+		return
+	}
+	hostPolicy.Store(&pol)
+}
+
+// safety: no name in these ever denotes a host outside the local network or the
+// instance itself, whatever it happens to resolve to on the day git dials it.
+var internalHostNames = map[string]bool{
+	"localhost":                true,
+	"local":                    true,
+	"internal":                 true,
+	"localdomain":              true,
+	"home.arpa":                true,
 	"metadata":                 true,
 	"metadata.google.internal": true,
+}
+
+var internalHostSuffixes = []string{".localhost", ".local", ".internal", ".localdomain", ".home.arpa"}
+
+func isInternalName(host string) bool {
+	if internalHostNames[host] {
+		return true
+	}
+	for _, suffix := range internalHostSuffixes {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func routableIP(ip net.IP) bool {
