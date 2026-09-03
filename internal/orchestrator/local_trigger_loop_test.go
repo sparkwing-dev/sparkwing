@@ -106,7 +106,7 @@ func TestRunLocalTriggerLoopClaimsPendingTriggerImmediately(t *testing.T) {
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		runLocalTriggerLoop(ctx, localState{st: st}, "parent", "", t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)), time.Second)
+		runLocalTriggerLoop(ctx, localState{st: st}, "parent", "", t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)), time.Second, childStoreEnv{})
 	}()
 	t.Cleanup(func() {
 		cancel()

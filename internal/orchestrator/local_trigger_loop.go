@@ -23,7 +23,27 @@ import (
 
 var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
-func runLocalTriggerLoop(ctx context.Context, state StateBackend, runID, profileName, parentRepoDir string, logger *slog.Logger, wedgeBudget time.Duration) {
+// childStoreEnv is the store a parent already chose, handed to the children it
+// dispatches so they land in it rather than deriving one of their own.
+type childStoreEnv struct {
+	path   string
+	reason string
+}
+
+// safety: an empty path is the pre-design default on purpose: the dashboard's
+// trigger consumer claims from the shared store, so a child it dispatches must
+// open that same file when it cannot be hosted.
+func (c childStoreEnv) apply(env []string) []string {
+	if c.path == "" {
+		return env
+	}
+	if env == nil {
+		env = os.Environ()
+	}
+	return append(env, StandaloneStateDBEnv+"="+c.path, StandaloneReasonEnv+"="+c.reason)
+}
+
+func runLocalTriggerLoop(ctx context.Context, state StateBackend, runID, profileName, parentRepoDir string, logger *slog.Logger, wedgeBudget time.Duration, childStore childStoreEnv) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -76,7 +96,7 @@ func runLocalTriggerLoop(ctx context.Context, state StateBackend, runID, profile
 		wg.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, t, profileName, parentRepoDir, cache, logger, nil); err != nil {
+			if err := dispatchLocalTrigger(ctx, t, profileName, parentRepoDir, cache, logger, childStore.apply(nil)); err != nil {
 				logger.Error("local trigger dispatch failed",
 					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
 				_ = state.CreateRun(ctx, store.Run{

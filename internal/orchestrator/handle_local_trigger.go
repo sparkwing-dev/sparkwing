@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
@@ -24,7 +26,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		return fmt.Errorf("ensure sparkwing root: %w", err)
 	}
 
-	backends, releaseBackends, err := localTriggerBackends(ctx, paths, profileName)
+	backends, selection, releaseBackends, err := localTriggerBackends(ctx, paths, profileName)
 	if err != nil {
 		return err
 	}
@@ -56,6 +58,9 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		Args:              args,
 		ParentRunID:       trigger.ParentRunID,
 		Admission:         pipelineAdmission(childAttachTokenFromEnv(trigger.TriggerEnv), wingwire.OriginLocal),
+		standaloneReason:  parentStandaloneReason(),
+		standaloneStateDB: parentStateDB(),
+		standaloneSkew:    selection.storeSkew,
 		RetryOf:           trigger.RetryOf,
 		RetrySource:       trigger.RetrySource,
 		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],
@@ -95,11 +100,11 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 }
 
 // safety: a child run picks its backend the way its parent did, so a hosted
-// run dispatches children that open nothing either and an unhosted one lands
-// its child in the same standalone store. A named profile is excluded because
-// the daemon stands in front of this machine's store alone.
-func localTriggerBackends(ctx context.Context, paths Paths, profileName string) (Backends, func(), error) {
-	standalone := false
+// run dispatches children that open nothing either and an unhosted one hands
+// its child the very store its trigger row lives in. A named profile is
+// excluded because the daemon stands in front of this machine's store alone.
+func localTriggerBackends(ctx context.Context, paths Paths, profileName string) (Backends, hostedSelection, func(), error) {
+	var sel hostedSelection
 	if profileName == "" {
 		opts := Options{
 			DefaultStateDB: paths.StateDB(),
@@ -107,32 +112,36 @@ func localTriggerBackends(ctx context.Context, paths Paths, profileName string) 
 		}
 		hosted, selection, release, err := hostedBackendsForRun(ctx, paths, &opts)
 		if err != nil {
-			return Backends{}, func() {}, err
+			return Backends{}, sel, func() {}, err
 		}
 		if hosted.APISocket != "" {
-			return hosted, release, nil
+			return hosted, selection, release, nil
 		}
-		standalone = selection.standalone != ""
+		sel = selection
 	}
-	st, err := openLocalTriggerStore(ctx, paths, profileName, standalone)
+	st, err := openLocalTriggerStore(ctx, paths, profileName)
 	if err != nil {
-		return Backends{}, func() {}, err
+		return Backends{}, sel, func() {}, err
 	}
-	return LocalBackends(paths, st, nil), func() { _ = st.Close() }, nil
+	return LocalBackends(paths, st, nil), sel, func() { _ = st.Close() }, nil
 }
 
-func openLocalTriggerStore(ctx context.Context, paths Paths, profileName string, standalone bool) (*store.Store, error) {
+// safety: the parent names the file, and a child never derives a standalone
+// path of its own: the trigger row it is about to read lives in whatever store
+// the process that claimed it was using.
+func parentStateDB() string { return strings.TrimSpace(os.Getenv(StandaloneStateDBEnv)) }
+
+func parentStandaloneReason() string { return strings.TrimSpace(os.Getenv(StandaloneReasonEnv)) }
+
+func openLocalTriggerStore(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {
 	if profileName == "" {
-		path := paths.StateDB()
-		if standalone {
-			if err := paths.EnsureStandaloneDir(); err != nil {
-				return nil, fmt.Errorf("standalone store: %w", err)
-			}
-			path = paths.StandaloneStateDB()
+		path := parentStateDB()
+		if path == "" {
+			path = paths.StateDB()
 		}
-		st, err := store.Open(path)
+		st, err := storeOpen(path)
 		if err != nil {
-			return nil, fmt.Errorf("open local store: %w", err)
+			return nil, fmt.Errorf("open local store %s: %w", path, err)
 		}
 		return st, nil
 	}
