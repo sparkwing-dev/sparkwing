@@ -99,7 +99,6 @@ type Principal struct {
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
-func RegisteredRoute(r *http.Request) bool
 type RunRequest struct {
 	RunID       string
 	Pipeline    string
@@ -128,6 +127,7 @@ func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
+func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) Shutdown(ctx context.Context) error
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server

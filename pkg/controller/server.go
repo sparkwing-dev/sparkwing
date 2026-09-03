@@ -64,6 +64,10 @@ type Server struct {
 	reconcileHook func(context.Context) error
 
 	runnerHeadroom *runnerHeadroomRegistry
+
+	routeProbeOnce sync.Once
+	routeProbeMux  *http.ServeMux
+	routeProbePub  *http.ServeMux
 }
 
 // New constructs a Server bound to the given store. A nil dispatcher
@@ -611,19 +615,23 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	return mux, router
 }
 
-// safety: registering a route only takes a method value, so no handler runs
-// and the zero Server behind these muxes never reaches a store. They exist to
-// answer "does this build serve that route" for a caller with no store open.
-var routeProbeMuxes = sync.OnceValues(func() (*http.ServeMux, *http.ServeMux) {
-	return (&Server{}).routers()
-})
+// safety: several routes are registered only when this server was given the
+// surface behind them, so the answer is this server's, not the build's. It
+// runs registration a second time rather than reading the serving muxes,
+// because the caller asks before the store that server needs is open.
+func (s *Server) routeProbe() (*http.ServeMux, *http.ServeMux) {
+	s.routeProbeOnce.Do(func() {
+		s.routeProbeMux, s.routeProbePub = s.routers()
+	})
+	return s.routeProbeMux, s.routeProbePub
+}
 
-// RegisteredRoute reports whether a controller of this build registers a
-// handler for the request's method and path. A caller that answers requests
-// in front of a controller uses it to tell a route this build does not serve,
-// which is a permanent answer, from a condition that may clear.
-func RegisteredRoute(r *http.Request) bool {
-	mux, router := routeProbeMuxes()
+// RegisteredRoute reports whether this server registers a handler for the
+// request's method and path. A caller that answers requests in front of a
+// controller uses it to tell a route this server does not serve, which is a
+// permanent answer, from a condition that may clear.
+func (s *Server) RegisteredRoute(r *http.Request) bool {
+	mux, router := s.routeProbe()
 	return routeRegistered(router, r) || routeRegistered(mux, r)
 }
 

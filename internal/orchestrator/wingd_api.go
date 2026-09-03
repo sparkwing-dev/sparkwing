@@ -39,6 +39,11 @@ type wingdAPI struct {
 	logger         *slog.Logger
 	requestTimeout time.Duration
 
+	// safety: the route table depends on the surfaces this daemon was given,
+	// and the question is asked before the store those handlers need is open,
+	// so the probe is a server with the same configuration and no store.
+	probe *controller.Server
+
 	mu      sync.Mutex
 	builtOn *store.Store
 	handler http.Handler
@@ -115,7 +120,13 @@ func newWingdAPI(runs *HeldRunStore, artifact storage.ArtifactStore, logger *slo
 	if logger == nil {
 		logger = loopbackLogger()
 	}
-	return &wingdAPI{runs: runs, artifact: artifact, logger: logger, requestTimeout: APIRequestTimeout}
+	return &wingdAPI{
+		runs:           runs,
+		artifact:       artifact,
+		logger:         logger,
+		requestTimeout: APIRequestTimeout,
+		probe:          controller.New(nil, logger).WithArtifactStore(artifact),
+	}
 }
 
 func (a *wingdAPI) serve(ctx context.Context, ln net.Listener) {
@@ -176,7 +187,7 @@ func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
 	// is given before the store is consulted. Behind the store guard it would
 	// reach a client as the 503 that means "come back", and a pipeline older
 	// or newer than this daemon could never tell the two apart.
-	if !controller.RegisteredRoute(r) {
+	if !a.probe.RegisteredRoute(r) {
 		controller.WriteUnsupportedRoute(w, r)
 		return
 	}
