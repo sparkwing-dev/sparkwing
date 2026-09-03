@@ -697,6 +697,12 @@ A run the admission daemon cannot serve runs **standalone**: against its
 own runs store, saying so once on stderr before its first node, with the
 exit code it would have had. Five cases reach it.
 
+The block prints once admission has answered, not when the store is
+chosen, so a run that is refused never reads a paragraph ending
+"everything else works" immediately above its own failure. A refused run
+also leaves no standalone store behind: if it was the run that created the
+file, the file is removed again.
+
 **No daemon is running and none can be started** -- no sparkwing
 installed to host one. The run says:
 
@@ -712,7 +718,13 @@ sparkwing: no admission daemon is running and no sparkwing is installed to host 
 it reports a runs store its own binary is too old to open, which is what
 an installed daemon behind a newer pin that already migrated the file
 looks like. Pipeline binaries never replace a daemon, so the remedy is to
-update the daemon, and the block names `sparkwing update`.
+update the daemon, and the block names `sparkwing update`. A daemon that
+is behind *and* reported a reason of its own -- an `api.sock` it could not
+bind, say -- carries that reason on its own line in the block, because
+updating is not what fixes a socket path over the OS limit. Only a
+release-to-release gap counts as behind: a local build of the same release
+carries a describe suffix that sorts below the tag and is not treated as
+older.
 
 **The daemon's protocol floor is above this pipeline** -- a release
 declared a cut and this repo's pin predates it. The block names
@@ -789,10 +801,16 @@ serialize against each other.
 A child run a standalone run dispatches, and a node replayed from one,
 land in the store their parent chose rather than deriving one of their
 own: the parent names the file in `SPARKWING_STATE_DB` and its reason in
-`SPARKWING_STANDALONE_REASON`, and the child prints no second block. The
-dashboard's trigger consumer claims from the shared store and passes
-neither, so a child it dispatches opens the shared store, which is where
-its trigger row lives.
+`SPARKWING_STANDALONE_REASON`, and the child prints no second block. A
+child that does reach the daemon ignores both and records nothing about
+being standalone.
+
+Only a parent may set those two. They are denied from a submitted run's
+captured environment and stripped from what the dashboard's trigger
+consumer hands a child, so a value left in a submitting or dashboard shell
+cannot send an unrelated run into someone else's store. The consumer
+claims from the shared store and passes neither, so a child it dispatches
+opens the shared store, which is where its trigger row lives.
 
 `sparkwing doctor` lists each standalone store that exists with its run
 count and the oldest run's age. Nothing prunes them: delete a file once

@@ -165,15 +165,29 @@ func daemonAPIRefusal(cl *wingdclient.Client) (reason, fault string) {
 	return standaloneDaemonFault, detail
 }
 
-// safety: only a comparable pair proves age. Two builds whose versions cannot
-// be ordered are not evidence the daemon is behind, so they read as a fault
-// and keep the daemon's own reason.
+// safety: only a comparable pair proves age, and only across releases: a local
+// build of the same release carries a describe or prerelease suffix that sorts
+// below the tag, which is not the daemon being behind. Two builds that cannot
+// be ordered read as a fault and keep the daemon's own reason.
 func supersedesSDK(sdk, daemon string) bool {
-	sdk, daemon = bareVersion(sdk), bareVersion(daemon)
-	if !semver.IsValid(sdk) || !semver.IsValid(daemon) {
+	sdkBase, daemonBase := releaseBase(sdk), releaseBase(daemon)
+	if sdkBase == "" || daemonBase == "" || sdkBase == daemonBase {
 		return false
 	}
-	return semver.Compare(daemon, sdk) < 0
+	return semver.Compare(daemonBase, sdkBase) < 0
+}
+
+func releaseBase(v string) string {
+	v = bareVersion(v)
+	if !semver.IsValid(v) {
+		return ""
+	}
+	base, _, _ := strings.Cut(v, "+")
+	base, _, _ = strings.Cut(base, "-")
+	if !semver.IsValid(base) {
+		return ""
+	}
+	return semver.Canonical(base)
 }
 
 type hostedHealth struct {

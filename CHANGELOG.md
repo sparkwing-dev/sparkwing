@@ -175,7 +175,12 @@ code change to unlock.
   standalone file under the store's requirements rule; one the file refuses
   falls back to `~/.sparkwing/standalone/schema-<N>/state.db`. A child run a
   standalone run dispatches lands in the store its parent chose, named through
-  `SPARKWING_STATE_DB` and `SPARKWING_STANDALONE_REASON`. A daemon whose runs
+  `SPARKWING_STATE_DB` and `SPARKWING_STANDALONE_REASON`; a child that reaches
+  the daemon ignores both, and both are denied from a submitted run's captured
+  environment and from what the trigger consumer hands a child, so a stale
+  shell value cannot redirect an unrelated run. The block prints only once
+  admission has answered, and a refused run removes a standalone store it
+  created rather than leaving one for `sparkwing doctor` to report. A daemon whose runs
   store is unreadable for a reason that is not age still fails the run, as do a
   daemon that never answers, a build mismatch, and an unsettled version
   conflict; the daemon now reports a store it is merely too old to open as

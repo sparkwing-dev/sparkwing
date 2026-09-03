@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -205,7 +206,7 @@ func TestOpenStandaloneStore_SharesOneFileUntilItIsRefused(t *testing.T) {
 	home := wingdTestHome(t)
 	paths := PathsAt(home)
 
-	st, path, discard, err := openStandaloneStore(paths, false)
+	st, path, _, discard, err := openStandaloneStore(paths, false)
 	if err != nil {
 		t.Fatalf("openStandaloneStore: %v", err)
 	}
@@ -221,7 +222,7 @@ func TestOpenStandaloneStore_SharesOneFileUntilItIsRefused(t *testing.T) {
 	// know, which is the only thing that may send it to a store of its own.
 	requireUnknownFeature(t, paths.StandaloneStateDB())
 
-	st, path, discard, err = openStandaloneStore(paths, false)
+	st, path, _, discard, err = openStandaloneStore(paths, false)
 	if err != nil {
 		t.Fatalf("openStandaloneStore after a refusal: %v", err)
 	}
@@ -236,7 +237,7 @@ func TestOpenStandaloneStore_ADryRunLeavesNothingBehind(t *testing.T) {
 	home := wingdTestHome(t)
 	paths := PathsAt(home)
 
-	st, path, discard, err := openStandaloneStore(paths, true)
+	st, path, _, discard, err := openStandaloneStore(paths, true)
 	if err != nil {
 		t.Fatalf("openStandaloneStore: %v", err)
 	}
@@ -346,5 +347,105 @@ func TestLocalTriggerBackends_DefaultsToTheSharedStore(t *testing.T) {
 	}
 	if _, err := os.Stat(paths.StandaloneStateDB()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the child derived %s instead of the store it was dispatched from", paths.StandaloneStateDB())
+	}
+}
+
+func TestSupersedesSDK_OnlyOrdersAcrossReleases(t *testing.T) {
+	cases := []struct {
+		sdk, daemon string
+		want        bool
+	}{
+		{"v0.41.0", "v0.38.2", true},
+		{"v0.41.0", "v0.41.0", false},
+		{"v0.41.0", "v0.41.0-3-gabcdef", false},
+		{"v0.41.0-3-gabcdef", "v0.41.0", false},
+		{"v0.41.0", "v0.41.0+build.7", false},
+		{"v0.41.0", "v0.0.0-20240102030405-abcdef123456", true},
+		{"v0.0.0-20240102030405-abcdef123456", "v0.41.0", false},
+		{"(devel)", "v0.38.2", false},
+		{"v0.41.0", "(devel)", false},
+		{"v0.41.0", "test", false},
+		{"", "v0.38.2", false},
+		{"v0.41.0", "", false},
+	}
+	for _, tc := range cases {
+		if got := supersedesSDK(tc.sdk, tc.daemon); got != tc.want {
+			t.Errorf("supersedesSDK(sdk=%q, daemon=%q) = %v, want %v", tc.sdk, tc.daemon, got, tc.want)
+		}
+	}
+}
+
+func TestStandaloneWarning_AnOlderDaemonKeepsItsOwnFault(t *testing.T) {
+	sel := hostedSelection{standalone: standaloneDaemonOlder, daemon: "v0.38.2", fault: "bind api.sock: path too long"}
+	got := standaloneWarning(sel, "v0.41.0")
+	if !strings.Contains(got, "The daemon also reported: bind api.sock: path too long.\n") {
+		t.Fatalf("block dropped the daemon's own reason: %q", got)
+	}
+	if !strings.Contains(got, "predates this pipeline's SDK (v0.41.0)") {
+		t.Fatalf("block lost the versions sentence: %q", got)
+	}
+	sel.fault = ""
+	if got := standaloneWarning(sel, "v0.41.0"); got != standaloneDaemonOlderBlock {
+		t.Fatalf("a daemon with no fault no longer prints the fixed text:\ngot  %q\nwant %q", got, standaloneDaemonOlderBlock)
+	}
+}
+
+// safety: a hosted child that read the parent's variables would record a store
+// it never opened and hand that path to its own children.
+func TestChildStandalone_OnlyAnUnhostedChildInheritsTheParent(t *testing.T) {
+	t.Setenv(StandaloneStateDBEnv, "/tmp/stale/state.db")
+	t.Setenv(StandaloneReasonEnv, standaloneNoDaemon)
+
+	if sa := childStandalone(Backends{APISocket: "/tmp/sparkwing-1/api.sock"}, hostedSelection{}); sa != nil {
+		t.Fatalf("a hosted child inherited %+v", sa)
+	}
+	sa := childStandalone(Backends{}, hostedSelection{})
+	if sa == nil || sa.reason != standaloneNoDaemon || sa.stateDB != "/tmp/stale/state.db" {
+		t.Fatalf("an unhosted child did not inherit the parent's answer: %+v", sa)
+	}
+
+	t.Setenv(StandaloneStateDBEnv, "")
+	t.Setenv(StandaloneReasonEnv, "")
+	if sa := childStandalone(Backends{}, hostedSelection{}); sa != nil {
+		t.Fatalf("a child the consumer dispatched invented %+v", sa)
+	}
+}
+
+func TestBuildRunInvocation_AHostedChildIsNotStandalone(t *testing.T) {
+	t.Setenv(StandaloneStateDBEnv, "/tmp/stale/state.db")
+	t.Setenv(StandaloneReasonEnv, standaloneNoDaemon)
+
+	hosted := Options{Pipeline: "p", standalone: childStandalone(Backends{APISocket: "/tmp/s/api.sock"}, hostedSelection{})}
+	if inv := buildRunInvocation(hosted, "r1", "", nil); inv["standalone"] != nil {
+		t.Fatalf("a hosted child's start record says standalone=%v", inv["standalone"])
+	}
+	unhostedChild := Options{Pipeline: "p", standalone: childStandalone(Backends{}, hostedSelection{})}
+	inv := buildRunInvocation(unhostedChild, "r2", "", nil)
+	if inv["standalone"] != true || inv["standalone_reason"] != standaloneNoDaemon {
+		t.Fatalf("an unhosted child's start record = %v/%v", inv["standalone"], inv["standalone_reason"])
+	}
+}
+
+// safety: a store path names where one parent put its runs, so a value that
+// arrived through a submitting or consumer shell must never steer a run.
+func TestSubmissionEnvironment_DeniesTheChildStoreVariables(t *testing.T) {
+	captured := []string{
+		StandaloneStateDBEnv + "=/tmp/stale/state.db",
+		StandaloneReasonEnv + "=" + standaloneNoDaemon,
+		"SPARKWING_PROFILE=prod",
+	}
+	got := submissionExecutionEnvironment(captured, "/home")
+	for _, entry := range got {
+		if strings.HasPrefix(entry, StandaloneStateDBEnv+"=") || strings.HasPrefix(entry, StandaloneReasonEnv+"=") {
+			t.Fatalf("the consumer passed %q to its child", entry)
+		}
+	}
+	if !slices.Contains(got, "SPARKWING_PROFILE=prod") {
+		t.Fatalf("the filter dropped an entry it should keep: %v", got)
+	}
+	for _, name := range []string{StandaloneStateDBEnv, StandaloneReasonEnv} {
+		if envAllowed(name) {
+			t.Errorf("%s is captured into the submission snapshot", name)
+		}
 	}
 }
