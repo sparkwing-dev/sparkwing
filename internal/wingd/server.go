@@ -470,6 +470,13 @@ func (d *Daemon) serveConn(c *conn) {
 		StoreSchemaVersion:  d.cfg.StoreSchemaVersion,
 		StoreRequirements:   d.cfg.StoreRequirements,
 	}
+	if d.cfg.Runs != nil {
+		if err := d.cfg.Runs.Ready(); err != nil {
+			ack.StoreError = err.Error()
+		} else {
+			ack.StoreReady = true
+		}
+	}
 	if err := c.send(ack); err != nil {
 		return
 	}
@@ -677,9 +684,9 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	d.mu.Lock()
 	_, cancelled := d.cancelledRuns[req.RunID]
 	d.mu.Unlock()
-	if !cancelled && d.cfg.IsRunTerminal != nil {
+	if !cancelled && d.cfg.Runs != nil {
 		var err error
-		cancelled, err = d.cfg.IsRunTerminal(req.RunID)
+		cancelled, err = d.cfg.Runs.IsRunTerminal(req.RunID)
 		if err != nil {
 			d.cfg.logf("admission: terminal check for %s: %v", req.RunID, err)
 			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "terminal-check", Policy: wingwire.PolicyFail, Reason: d.terminalCheckReason(err)})
@@ -1193,10 +1200,10 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	}
 	d.mu.Unlock()
 	for _, member := range members {
-		if d.cfg.IsRunTerminal == nil {
+		if d.cfg.Runs == nil {
 			continue
 		}
-		terminal, checkErr := d.cfg.IsRunTerminal(member)
+		terminal, checkErr := d.cfg.Runs.IsRunTerminal(member)
 		if checkErr != nil {
 			d.cfg.logf("reattach: terminal check for %s: %v", member, checkErr)
 			_ = c.send(&wingwire.Evicted{RunID: member, Key: "terminal-check", Policy: wingwire.PolicyFail, Reason: d.terminalCheckReason(checkErr)})
@@ -1332,8 +1339,8 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	}
 	d.mu.Unlock()
 
-	if d.cfg.FinalizeCancelledRuns != nil {
-		if err := d.cfg.FinalizeCancelledRuns(append([]string(nil), affected...), reason); err != nil {
+	if d.cfg.Runs != nil {
+		if err := d.cfg.Runs.FinalizeCancelledRuns(append([]string(nil), affected...), reason); err != nil {
 			d.cfg.logf("cancel: finalize runs %s: %v", strings.Join(affected, ","), err)
 			var orphaned []string
 			d.mu.Lock()
@@ -1346,16 +1353,10 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			}
 			d.mu.Unlock()
 			for _, runID := range orphaned {
-				if d.cfg.FinalizeRun != nil {
-					go d.cfg.FinalizeRun(runID)
-				}
+				go d.cfg.Runs.FinalizeRun(runID)
 			}
 			c.close()
 			return
-		}
-	} else if d.cfg.FinalizeRun != nil {
-		for _, runID := range affected {
-			d.cfg.FinalizeRun(runID)
 		}
 	}
 
@@ -1467,7 +1468,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 			}
 		}
 		var orphaned []string
-		if c.finalizable && d.cfg.FinalizeRun != nil {
+		if c.finalizable && d.cfg.Runs != nil {
 			switch c.role {
 			case roleHolder:
 				for _, runID := range c.members {
@@ -1502,7 +1503,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		d.logDisconnect(c, role, runID)
 		for _, orphan := range orphaned {
 			d.cfg.logf("orphan: conn %d lost run %s without release; finalizing", c.id, orphan)
-			go d.cfg.FinalizeRun(orphan)
+			go d.cfg.Runs.FinalizeRun(orphan)
 		}
 		d.flush(deliveries, snap)
 	})

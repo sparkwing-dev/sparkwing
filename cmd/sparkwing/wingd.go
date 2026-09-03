@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/supervise"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runWingd(args []string) error {
@@ -55,29 +54,15 @@ func runWingdRun(args []string) error {
 	}
 
 	logger := log.New(os.Stderr, "", log.LstdFlags|log.LUTC)
-	d, err := wingd.New(wingd.Config{
-		Home:                  *home,
-		Version:               v,
-		HeadroomFraction:      *headroom,
-		Budget:                resolvedBudget.Budget,
-		BudgetSource:          resolvedBudget.Source,
-		BudgetOrigin:          resolvedBudget.Origin,
-		FinalizeRun:           orchestrator.NewOrphanRunFinalizer(*home),
-		FinalizeCancelledRuns: orchestrator.NewCancelledRunsFinalizer(*home),
-		IsRunTerminal:         orchestrator.NewTerminalRunChecker(*home),
-		StoreSchemaVersion:    store.ExpectedSchemaVersion(),
-		StoreRequirements:     store.KnownRequirements(),
-		Logf:                  func(format string, args ...any) { logger.Printf(format, args...) },
-	})
-	if err != nil {
-		return err
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	if err := d.Run(ctx); err != nil && !errors.Is(err, wingd.ErrNotElected) {
-		return err
-	}
-	return nil
+	return orchestrator.RunWingdDaemon(ctx, orchestrator.WingdOptions{
+		Home:             *home,
+		Version:          v,
+		HeadroomFraction: *headroom,
+		Budget:           resolvedBudget.Budget,
+		BudgetSource:     resolvedBudget.Source,
+		BudgetOrigin:     resolvedBudget.Origin,
+		Logf:             func(format string, args ...any) { logger.Printf(format, args...) },
+	})
 }

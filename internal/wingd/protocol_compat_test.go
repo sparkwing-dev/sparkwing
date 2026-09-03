@@ -96,8 +96,8 @@ func TestOlderProtocolSemaphoresOnlyLeaseDoesNotFinalizeRun(t *testing.T) {
 	home := shortHome(t)
 	finalized := make(chan string, 1)
 	startDaemon(t, wingd.Config{
-		Home:        home,
-		FinalizeRun: func(runID string) { finalized <- runID },
+		Home: home,
+		Runs: &wingd.FuncRunStore{Finalize: func(runID string) { finalized <- runID }},
 	})
 
 	nc, ack := dialAtMajor(t, home, wingd.MinProtocolMajor)

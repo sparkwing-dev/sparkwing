@@ -51,10 +51,10 @@ func TestAdmissionChecksDurableTerminalStateAfterTombstoneEviction(t *testing.T)
 	checked := false
 	d, err := New(Config{
 		Home: t.TempDir(),
-		IsRunTerminal: func(runID string) (bool, error) {
+		Runs: &FuncRunStore{IsTerminal: func(runID string) (bool, error) {
 			checked = true
 			return runID == "evicted-cancel", nil
-		},
+		}},
 	})
 	if err != nil {
 		t.Fatal(err)

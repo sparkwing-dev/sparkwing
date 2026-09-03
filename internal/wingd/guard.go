@@ -146,8 +146,8 @@ func (d *Daemon) completeEmptyGuard(guard guardReconcileState) {
 	if guard.completion != nil {
 		_ = guard.completion.send(&wingwire.GuardCompleteAck{})
 	}
-	if guard.finalize && d.cfg.FinalizeRun != nil {
-		go d.cfg.FinalizeRun(guard.RunID)
+	if guard.finalize && d.cfg.Runs != nil {
+		go d.cfg.Runs.FinalizeRun(guard.RunID)
 	}
 }
 
@@ -169,8 +169,8 @@ func (d *Daemon) cancelDisconnectedGuard(c *conn, guard persistedGuard, affected
 		c.close()
 		return
 	}
-	if d.cfg.FinalizeCancelledRuns != nil {
-		if err := d.cfg.FinalizeCancelledRuns(append([]string(nil), affected...), reason); err != nil {
+	if d.cfg.Runs != nil {
+		if err := d.cfg.Runs.FinalizeCancelledRuns(append([]string(nil), affected...), reason); err != nil {
 			d.cfg.logf("cancel: finalize runs %s: %v", strings.Join(affected, ","), err)
 			d.mu.Lock()
 			for _, runID := range affected {
@@ -179,10 +179,6 @@ func (d *Daemon) cancelDisconnectedGuard(c *conn, guard persistedGuard, affected
 			d.mu.Unlock()
 			c.close()
 			return
-		}
-	} else if d.cfg.FinalizeRun != nil {
-		for _, runID := range affected {
-			d.cfg.FinalizeRun(runID)
 		}
 	}
 

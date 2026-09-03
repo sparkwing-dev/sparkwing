@@ -71,6 +71,14 @@ type HelloAck struct {
 	// the field; the list is never empty otherwise, because the schema has
 	// carried requirements since they shipped.
 	StoreRequirements []string `json:"store_requirements"`
+	// StoreReady reports that the daemon holds an open, usable handle on the
+	// runs store. False from a daemon whose store is missing, skewed or
+	// corrupt, and from daemons that predate the field, where readiness is
+	// only discoverable by admitting a run.
+	StoreReady bool `json:"store_ready,omitempty"`
+	// StoreError is why the daemon's store handle is unusable, empty when
+	// StoreReady is true and from daemons that predate the field.
+	StoreError string `json:"store_error,omitempty"`
 }
 
 // HostResources is an amount of machine capacity: CPU cores and

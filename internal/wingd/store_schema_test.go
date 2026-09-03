@@ -15,9 +15,9 @@ func TestTerminalCheckEvictionCarriesTheStoreFailureVerbatim(t *testing.T) {
 	startDaemon(t, wingd.Config{
 		Home:    home,
 		Version: "v0.38.2",
-		IsRunTerminal: func(string) (bool, error) {
+		Runs: &wingd.FuncRunStore{IsTerminal: func(string) (bool, error) {
 			return false, errors.New("database is at schema version 26; this binary expects 17")
-		},
+		}},
 	})
 	cl := ensure(t, home, "v0.38.2")
 

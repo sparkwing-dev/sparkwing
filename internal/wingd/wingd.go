@@ -88,11 +88,9 @@ type Config struct {
 
 	StallProbeTimeout time.Duration
 
-	FinalizeRun func(runID string)
-
-	FinalizeCancelledRuns func(runIDs []string, reason string) error
-
-	IsRunTerminal func(runID string) (bool, error)
+	// Runs is the daemon's handle on the runs store. Nil leaves every
+	// store-backed behaviour off: no terminal check, no finalize.
+	Runs RunStore
 
 	// StoreSchemaVersion is the runs-store schema version this daemon's
 	// binary understands. It is advertised in the handshake so a newer

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/supervise"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func RunWingd(args []string) error {
@@ -42,132 +40,17 @@ func runWingdCLI(args []string) error {
 	if err != nil {
 		return err
 	}
-	d, err := wingd.New(wingd.Config{
-		Home:                  *home,
-		Version:               v,
-		Budget:                resolvedBudget.Budget,
-		BudgetSource:          resolvedBudget.Source,
-		BudgetOrigin:          resolvedBudget.Origin,
-		FinalizeRun:           NewOrphanRunFinalizer(*home),
-		FinalizeCancelledRuns: NewCancelledRunsFinalizer(*home),
-		IsRunTerminal:         NewTerminalRunChecker(*home),
-		StoreSchemaVersion:    store.ExpectedSchemaVersion(),
-		StoreRequirements:     store.KnownRequirements(),
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return RunWingdDaemon(ctx, WingdOptions{
+		Home:         *home,
+		Version:      v,
+		Budget:       resolvedBudget.Budget,
+		BudgetSource: resolvedBudget.Source,
+		BudgetOrigin: resolvedBudget.Origin,
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
 				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))
 		},
 	})
-	if err != nil {
-		return err
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := d.Run(ctx); err != nil && !errors.Is(err, wingd.ErrNotElected) {
-		return err
-	}
-	return nil
-}
-
-func NewOrphanRunFinalizer(home string) func(runID string) {
-	return func(runID string) {
-		if err := finalizeRun(home, runID, "interrupted: run process exited without finalizing (admission connection lost)"); err != nil {
-			slog.Warn("wingd: finalize orphaned run", "run_id", runID, "err", err)
-		}
-	}
-}
-
-func NewCancelledRunsFinalizer(home string) func([]string, string) error {
-	return func(runIDs []string, reason string) error {
-		return finalizeRuns(home, runIDs, reason)
-	}
-}
-
-func NewTerminalRunChecker(home string) func(string) (bool, error) {
-	return func(runID string) (bool, error) {
-		p := PathsAt(home)
-		if home == "" {
-			var err error
-			p, err = DefaultPaths()
-			if err != nil {
-				return false, err
-			}
-		}
-		if _, err := os.Stat(p.StateDB()); err != nil {
-			if os.IsNotExist(err) {
-				return false, nil
-			}
-			return false, err
-		}
-		st, err := store.Open(p.StateDB())
-		if err != nil {
-			return false, err
-		}
-		defer func() { _ = st.Close() }()
-		run, err := st.GetRun(context.Background(), runID)
-		if errors.Is(err, store.ErrNotFound) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		return isTerminalStatus(run.Status), nil
-	}
-}
-
-func finalizeRuns(home string, runIDs []string, reason string) error {
-	p := PathsAt(home)
-	if home == "" {
-		var err error
-		p, err = DefaultPaths()
-		if err != nil {
-			return err
-		}
-	}
-	if _, err := os.Stat(p.StateDB()); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	st, err := store.Open(p.StateDB())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = st.Close() }()
-	return st.FinishRunsIfActive(context.Background(), runIDs, "cancelled", reason)
-}
-
-func finalizeRun(home, runID, reason string) error {
-	p := PathsAt(home)
-	if home == "" {
-		var err error
-		p, err = DefaultPaths()
-		if err != nil {
-			return err
-		}
-	}
-	if _, err := os.Stat(p.StateDB()); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	st, err := store.Open(p.StateDB())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = st.Close() }()
-	ctx := context.Background()
-	run, err := st.GetRun(ctx, runID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil
-		}
-		return err
-	}
-	if isTerminalStatus(run.Status) {
-		return nil
-	}
-	return st.FinishRun(ctx, runID, "cancelled", reason)
 }

@@ -183,6 +183,10 @@ type HelloAck struct {
 	StoreSchemaVersion int
 
 	StoreRequirements []string
+
+	StoreReady bool
+
+	StoreError string
 }
 type Holder struct {
 	RunID string

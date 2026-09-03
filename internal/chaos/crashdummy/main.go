@@ -65,7 +65,7 @@ func runDaemon(args []string) {
 		IdleTimeout:      time.Duration(*idleMS) * time.Millisecond,
 		HeadroomFraction: -1,
 		Sampler:          fixedSampler{cores: *totalCores, mem: uint64(*totalMemMB) << 20},
-		FinalizeRun:      finalizeLogger(*home),
+		Runs:             &wingd.FuncRunStore{Finalize: finalizeLogger(*home)},
 	})
 	if err != nil {
 		fail("new daemon: %v", err)

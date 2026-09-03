@@ -54,17 +54,18 @@ func startWingd(t *testing.T, home string, cores float64) {
 		}},
 		HeadroomFraction: -1,
 		GraceWindow:      -1,
-		FinalizeRun:      NewOrphanRunFinalizer(home),
 	})
 }
 
 func startWingdCfg(t *testing.T, cfg wingd.Config) {
 	t.Helper()
-	if cfg.FinalizeRun == nil {
-		cfg.FinalizeRun = NewOrphanRunFinalizer(cfg.Home)
-	}
-	if cfg.FinalizeCancelledRuns == nil {
-		cfg.FinalizeCancelledRuns = NewCancelledRunsFinalizer(cfg.Home)
+	if cfg.Runs == nil {
+		runs, err := NewHeldRunStore(cfg.Home)
+		if err != nil {
+			t.Fatalf("held run store: %v", err)
+		}
+		t.Cleanup(func() { _ = runs.Close() })
+		cfg.Runs = runs
 	}
 	d, err := wingd.New(cfg)
 	if err != nil {

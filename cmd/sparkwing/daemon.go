@@ -31,6 +31,8 @@ type daemonReport struct {
 	DaemonSchemaVersion int      `json:"daemon_schema_version,omitempty"`
 	StoreSchemaVersion  int      `json:"store_schema_version,omitempty"`
 	StoreSchemaError    string   `json:"store_schema_error,omitempty"`
+	DaemonStoreReady    bool     `json:"daemon_store_ready,omitempty"`
+	DaemonStoreError    string   `json:"daemon_store_error,omitempty"`
 	SchemaDiverged      bool     `json:"schema_diverged,omitempty"`
 	MissingRequirements []string `json:"missing_requirements,omitempty"`
 }
@@ -124,12 +126,24 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	report.BinaryVersion = info.BinaryVersion
 	report.RunningRevision = versionRevision(info.BinaryVersion)
 	report.DaemonSchemaVersion = info.StoreSchemaVersion
+	report.DaemonStoreReady = info.StoreReady
+	report.DaemonStoreError = info.StoreError
 	report.MissingRequirements = store.MissingRequirements(info.StoreRequirements, storeRequirements)
 	report.SchemaDiverged = daemonCannotReadStore(report, info.StoreRequirements)
-	if report.SchemaDiverged || report.StoreSchemaError != "" {
+	if report.SchemaDiverged || report.StoreSchemaError != "" || daemonStoreUnusable(report) {
 		report.Healthy = false
 	}
 	return report, nil
+}
+
+// safety: a daemon that has not met the store yet reports the same "not ready" as
+// one that cannot open it, so the daemon's own reason is a fault only when this
+// home has a store to open.
+func daemonStoreUnusable(report daemonReport) bool {
+	if report.DaemonStoreError == "" {
+		return false
+	}
+	return report.StoreSchemaVersion > 0 || report.StoreSchemaError != ""
 }
 
 // safety: a store schema above the daemon's own no longer proves the daemon cannot
@@ -283,6 +297,9 @@ func emitDaemonReport(report daemonReport, output string) error {
 		fmt.Fprintf(os.Stdout, "wingd %s %s\n", action, report.BinaryVersion)
 		if report.StoreSchemaError != "" {
 			fmt.Fprintf(os.Stdout, "runs store unreadable: %s\n", report.StoreSchemaError)
+		}
+		if daemonStoreUnusable(report) {
+			fmt.Fprintf(os.Stdout, "the daemon cannot use the runs store: %s\n", report.DaemonStoreError)
 		}
 		if report.SchemaDiverged {
 			if len(report.MissingRequirements) > 0 {

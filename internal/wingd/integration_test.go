@@ -614,9 +614,9 @@ func TestSemaphoresOnlyRunLeaseFinalizesOnDisconnect(t *testing.T) {
 	finalized := make(chan string, 1)
 	startDaemon(t, wingd.Config{
 		Home: home,
-		FinalizeRun: func(runID string) {
+		Runs: &wingd.FuncRunStore{Finalize: func(runID string) {
 			finalized <- runID
-		},
+		}},
 	})
 
 	cl := ensure(t, home, "")
@@ -644,9 +644,9 @@ func TestExplicitCancelRetainsLegacyFinalizerCompatibility(t *testing.T) {
 	finalized := make(chan string, 1)
 	startDaemon(t, wingd.Config{
 		Home: home,
-		FinalizeRun: func(runID string) {
+		Runs: &wingd.FuncRunStore{Finalize: func(runID string) {
 			finalized <- runID
-		},
+		}},
 	})
 
 	holder := ensure(t, home, "")
@@ -678,11 +678,13 @@ func TestExplicitCancelPersistenceFailureIsNotAcknowledged(t *testing.T) {
 	legacyFinalized := make(chan string, 1)
 	startDaemon(t, wingd.Config{
 		Home: home,
-		FinalizeRun: func(runID string) {
-			legacyFinalized <- runID
-		},
-		FinalizeCancelledRuns: func([]string, string) error {
-			return errors.New("store unavailable")
+		Runs: &wingd.FuncRunStore{
+			Finalize: func(runID string) {
+				legacyFinalized <- runID
+			},
+			FinalizeCancelled: func([]string, string) error {
+				return errors.New("store unavailable")
+			},
 		},
 	})
 
@@ -711,8 +713,8 @@ func TestExplicitCancelPersistenceFailureIsNotAcknowledged(t *testing.T) {
 func TestExplicitCancelStateWriteFailureStillSignalsOwnerWithoutAcknowledging(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
-		Home:                  home,
-		FinalizeCancelledRuns: func([]string, string) error { return nil },
+		Home: home,
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error { return nil }},
 	})
 	holder := ensure(t, home, "")
 	lease := mustAcquire(t, holder, coreReq("cancel-state-write-failure", 1))
@@ -763,8 +765,8 @@ func TestExplicitCancelStateWriteFailureStillSignalsOwnerWithoutAcknowledging(t 
 func TestCancelledLeaseCannotReattachAfterStateWriteFailureAndRestart(t *testing.T) {
 	home := shortHome(t)
 	cfg := wingd.Config{
-		Home:                  home,
-		FinalizeCancelledRuns: func([]string, string) error { return nil },
+		Home: home,
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error { return nil }},
 	}
 	first := startDaemon(t, cfg)
 	holder := ensure(t, home, "")
@@ -806,9 +808,9 @@ func TestCancelledLeaseCannotReattachAfterStateWriteFailureAndRestart(t *testing
 	if err := os.Rename(moved, home); err != nil {
 		t.Fatal(err)
 	}
-	cfg.IsRunTerminal = func(runID string) (bool, error) {
+	cfg.Runs = &wingd.FuncRunStore{IsTerminal: func(runID string) (bool, error) {
 		return runID == "cancelled-token-after-restart", nil
-	}
+	}}
 	startDaemon(t, cfg)
 	reconnector := ensure(t, home, "")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -824,12 +826,12 @@ func TestExplicitCancelFinalizerDoesNotHoldDaemonMutex(t *testing.T) {
 	var query *client.Client
 	startDaemon(t, wingd.Config{
 		Home: home,
-		FinalizeCancelledRuns: func([]string, string) error {
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			_, err := query.QueueState(ctx)
 			return err
-		},
+		}},
 	})
 	holder := ensure(t, home, "")
 	mustAcquire(t, holder, coreReq("cancel-lock-liveness", 1))
@@ -847,11 +849,11 @@ func TestExplicitCancelSignalsConnectionThatReattachedDuringPersistence(t *testi
 	resume := make(chan struct{})
 	startDaemon(t, wingd.Config{
 		Home: home,
-		FinalizeCancelledRuns: func([]string, string) error {
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error {
 			close(entered)
 			<-resume
 			return nil
-		},
+		}},
 	})
 	req := coreReq("cancel-current-connection", 1)
 	old := ensure(t, home, "")
@@ -891,9 +893,9 @@ func TestExplicitCancelRejectsReplacementAfterResolution(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
 		Home: home,
-		FinalizeCancelledRuns: func([]string, string) error {
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error {
 			return nil
-		},
+		}},
 	})
 	req := coreReq("cancel-no-replacement", 1)
 	holder := ensure(t, home, "")
@@ -919,11 +921,11 @@ func TestChildAttachRejectsLeaseWhileCancellationPersistenceIsPending(t *testing
 	resume := make(chan struct{})
 	startDaemon(t, wingd.Config{
 		Home: home,
-		FinalizeCancelledRuns: func([]string, string) error {
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error {
 			close(entered)
 			<-resume
 			return nil
-		},
+		}},
 	})
 	parent := ensure(t, home, "")
 	parentLease := mustAcquire(t, parent, coreReq("cancel-parent-pending", 1))
@@ -953,8 +955,8 @@ func TestChildAttachRejectsLeaseWhileCancellationPersistenceIsPending(t *testing
 func TestChildAttachRejectsPreviouslyCancelledRunID(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
-		Home:                  home,
-		FinalizeCancelledRuns: func([]string, string) error { return nil },
+		Home: home,
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error { return nil }},
 	})
 	cancelled := ensure(t, home, "")
 	mustAcquire(t, cancelled, coreReq("cancelled-child-id", 1))
@@ -979,7 +981,7 @@ func TestChildAttachRejectsPreviouslyCancelledRunID(t *testing.T) {
 
 func TestExplicitCancelRejectsTopLevelResurrectionAfterRestart(t *testing.T) {
 	home := shortHome(t)
-	cfg := wingd.Config{Home: home, FinalizeCancelledRuns: func([]string, string) error { return nil }}
+	cfg := wingd.Config{Home: home, Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error { return nil }}}
 	first := startDaemon(t, cfg)
 	holder := ensure(t, home, "")
 	mustAcquire(t, holder, coreReq("cancelled-before-restart", 1))
@@ -1005,7 +1007,7 @@ func TestExplicitCancelRejectsTopLevelResurrectionAfterRestart(t *testing.T) {
 
 func TestExplicitCancelRejectsChildResurrectionAfterRestart(t *testing.T) {
 	home := shortHome(t)
-	cfg := wingd.Config{Home: home, FinalizeCancelledRuns: func([]string, string) error { return nil }}
+	cfg := wingd.Config{Home: home, Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error { return nil }}}
 	first := startDaemon(t, cfg)
 	holder := ensure(t, home, "")
 	mustAcquire(t, holder, coreReq("cancelled-child-before-restart", 1))
@@ -1046,11 +1048,11 @@ func TestConcurrentReattachClaimsRestoredLeaseOnlyOnce(t *testing.T) {
 	release := make(chan struct{})
 	startDaemon(t, wingd.Config{
 		Home: home,
-		IsRunTerminal: func(string) (bool, error) {
+		Runs: &wingd.FuncRunStore{IsTerminal: func(string) (bool, error) {
 			entered <- struct{}{}
 			<-release
 			return false, nil
-		},
+		}},
 	})
 	results := make(chan error, 2)
 	clients := []*client.Client{ensure(t, home, ""), ensure(t, home, "")}
@@ -1079,10 +1081,10 @@ func TestExplicitCancelFinalizesEverySharedLeaseMemberInOneBatch(t *testing.T) {
 	finalized := make(chan []string, 1)
 	startDaemon(t, wingd.Config{
 		Home: home,
-		FinalizeCancelledRuns: func(runIDs []string, _ string) error {
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func(runIDs []string, _ string) error {
 			finalized <- append([]string(nil), runIDs...)
 			return nil
-		},
+		}},
 	})
 	parent := ensure(t, home, "")
 	parentLease := mustAcquire(t, parent, coreReq("shared-parent", 1))
@@ -1129,14 +1131,15 @@ func TestSharedCancelPersistenceFailureFallsBackWithoutSuppression(t *testing.T)
 	home := shortHome(t)
 	legacy := make(chan string, 2)
 	startDaemon(t, wingd.Config{
-		Home:        home,
-		FinalizeRun: func(runID string) { legacy <- runID },
-		FinalizeCancelledRuns: func(runIDs []string, _ string) error {
-			if len(runIDs) != 2 {
-				return fmt.Errorf("batch members = %v", runIDs)
-			}
-			return errors.New("second member failed")
-		},
+		Home: home,
+		Runs: &wingd.FuncRunStore{
+			Finalize: func(runID string) { legacy <- runID },
+			FinalizeCancelled: func(runIDs []string, _ string) error {
+				if len(runIDs) != 2 {
+					return fmt.Errorf("batch members = %v", runIDs)
+				}
+				return errors.New("second member failed")
+			}},
 	})
 	parent := ensure(t, home, "")
 	parentLease := mustAcquire(t, parent, coreReq("failed-parent", 1))
@@ -1163,13 +1166,14 @@ func TestDisconnectDuringFailedCancelPersistenceGetsOrphanFallback(t *testing.T)
 	resume := make(chan struct{})
 	legacy := make(chan string, 1)
 	startDaemon(t, wingd.Config{
-		Home:        home,
-		FinalizeRun: func(runID string) { legacy <- runID },
-		FinalizeCancelledRuns: func([]string, string) error {
-			close(entered)
-			<-resume
-			return errors.New("store unavailable")
-		},
+		Home: home,
+		Runs: &wingd.FuncRunStore{
+			Finalize: func(runID string) { legacy <- runID },
+			FinalizeCancelled: func([]string, string) error {
+				close(entered)
+				<-resume
+				return errors.New("store unavailable")
+			}},
 	})
 	holder := ensure(t, home, "")
 	mustAcquire(t, holder, coreReq("disconnect-during-persist", 1))
@@ -1197,9 +1201,9 @@ func TestSubLeaseDoesNotFinalizeOnDisconnect(t *testing.T) {
 	finalized := make(chan string, 1)
 	startDaemon(t, wingd.Config{
 		Home: home,
-		FinalizeRun: func(runID string) {
+		Runs: &wingd.FuncRunStore{Finalize: func(runID string) {
 			finalized <- runID
-		},
+		}},
 	})
 
 	cl := ensure(t, home, "")
@@ -1222,9 +1226,9 @@ func TestRunRegistrationFinalizesWhileNodeSubLeaseDoesNot(t *testing.T) {
 	finalized := make(chan string, 2)
 	startDaemon(t, wingd.Config{
 		Home: home,
-		FinalizeRun: func(runID string) {
+		Runs: &wingd.FuncRunStore{Finalize: func(runID string) {
 			finalized <- runID
-		},
+		}},
 	})
 
 	runClient := ensure(t, home, "")

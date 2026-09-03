@@ -27,6 +27,15 @@ type DaemonInfo struct {
 	// field.
 	StoreRequirements []string
 
+	// StoreReady reports that the daemon holds an open, usable handle on
+	// the runs store. False from a daemon that predates the field, where
+	// StoreError is empty too.
+	StoreReady bool
+
+	// StoreError is why the daemon's own store handle is unusable, empty
+	// when it is usable and from a daemon that predates the field.
+	StoreError string
+
 	Draining bool
 }
 
@@ -57,6 +66,8 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 		BinaryVersion:      ack.BinaryVersion,
 		StoreSchemaVersion: ack.StoreSchemaVersion,
 		StoreRequirements:  ack.StoreRequirements,
+		StoreReady:         ack.StoreReady,
+		StoreError:         ack.StoreError,
 		Draining:           ack.Draining,
 	}, nil
 }
