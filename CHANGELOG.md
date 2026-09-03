@@ -311,6 +311,14 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing runs list --by-pipeline` now honours `--limit`. A
+  client-side filter -- `--started-after`, `--search`, `--error`, a
+  `!`-prefixed `--status` or `--pipeline` -- switches the query to a 1000-run
+  over-fetch, and the rollup counted the whole over-fetch, so the RUNS and FAIL
+  columns and the JSON changed fiftyfold depending on whether an unrelated flag
+  was present. The over-fetch is now trimmed back to `--limit` before the
+  rollup, in local and controller mode both.
+
 - **cli:** `sparkwing runs logs --profile <name>` now reads the run and its
   nodes from that profile's state store. It listed nodes from the default local
   `state.db` instead, so a run held in a Postgres profile -- or a sqlite profile
