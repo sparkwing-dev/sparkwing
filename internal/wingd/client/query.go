@@ -54,6 +54,9 @@ func (cl *Client) readQueueState() (qs wingwire.QueueState, terminal, transient 
 	if err != nil {
 		return wingwire.QueueState{}, nil, err
 	}
+	if refusal := cl.lacksOperation(msg); refusal != nil {
+		return wingwire.QueueState{}, refusal, nil
+	}
 	got, ok := msg.(*wingwire.QueueState)
 	if !ok {
 		return wingwire.QueueState{}, fmt.Errorf("wingd/client: expected queue_state, got %T", msg), nil

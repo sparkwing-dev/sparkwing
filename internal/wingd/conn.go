@@ -95,6 +95,32 @@ type conn struct {
 	contentionReason string
 
 	finalizable bool
+
+	unsupported int
+}
+
+const maxUnsupportedReplies = 8
+
+const maxRefusedTypeName = 64
+
+// safety: a refusal echoes a type name the peer chose, and a connection that
+// only sends unknown frames both amplifies and holds the daemon past its idle
+// window, so the reply is truncated and the exchange is capped.
+func (c *conn) refuse(t wingwire.MessageType) (closeConn bool) {
+	name := string(t)
+	if len(name) > maxRefusedTypeName {
+		name = name[:maxRefusedTypeName]
+	}
+	c.unsupported++
+	where := ""
+	if c.healthProbe {
+		where = " on a health probe"
+	}
+	c.logf("conn %d: message type %q is not served%s (%d/%d)", c.id, name, where, c.unsupported, maxUnsupportedReplies)
+	if err := c.send(&wingwire.Unsupported{Type: name}); err != nil {
+		return true
+	}
+	return c.unsupported >= maxUnsupportedReplies
 }
 
 func newConn(d *Daemon, nc net.Conn) *conn {

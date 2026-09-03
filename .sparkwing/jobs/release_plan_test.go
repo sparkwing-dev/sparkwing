@@ -27,6 +27,7 @@ var releaseGateNodes = []string{
 	"gate-template-verify",
 	"gate-release-lineage",
 	"gate-schema-changelog",
+	"gate-wire-changelog",
 }
 
 func releasePlan(t *testing.T) *sparkwing.Plan {

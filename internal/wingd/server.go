@@ -474,10 +474,15 @@ func (d *Daemon) serveConn(c *conn) {
 
 	msg, err := c.readMessage()
 	if err != nil {
+		var unknown *wingwire.UnknownTypeError
+		if errors.As(err, &unknown) {
+			c.refuse(unknown.Type)
+		}
 		return
 	}
 	hello, ok := msg.(*wingwire.Hello)
 	if !ok {
+		c.refuse(wingwire.TypeOf(msg))
 		return
 	}
 	d.mu.Lock()
@@ -516,7 +521,11 @@ func (d *Daemon) serveConn(c *conn) {
 	for {
 		msg, err := c.readMessage()
 		if err != nil {
-			return
+			var unknown *wingwire.UnknownTypeError
+			if !errors.As(err, &unknown) || c.refuse(unknown.Type) {
+				return
+			}
+			continue
 		}
 		if d.dispatch(c, msg) {
 			return
@@ -527,7 +536,7 @@ func (d *Daemon) serveConn(c *conn) {
 func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 	if c.healthProbe {
 		if _, ok := msg.(*wingwire.QueueState); !ok {
-			return true
+			return c.refuse(wingwire.TypeOf(msg))
 		}
 		d.handleQueueState(c)
 		return false
@@ -553,7 +562,7 @@ func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 		d.handleDrain(c, m)
 		return true
 	default:
-		return true
+		return c.refuse(wingwire.TypeOf(msg))
 	}
 	return false
 }

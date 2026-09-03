@@ -135,7 +135,7 @@ func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*Waiter
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, readHTTPError(resp)
@@ -240,7 +240,7 @@ func (c *Client) ConcurrencyState(ctx context.Context, key string) (*Concurrency
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}

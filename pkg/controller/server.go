@@ -564,7 +564,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret)))
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret)))
 
-	authed := s.authMiddleware().Middleware(mux)
+	authed := s.authMiddleware().Middleware(unsupportedRouteFallback(mux))
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
@@ -579,6 +579,51 @@ func (s *Server) Handler() http.Handler {
 	router.Handle("/", authed)
 
 	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
+}
+
+// UnsupportedRouteError is the `error` member of the 404 body a controller
+// returns for a method and path it does not register. It names the surface
+// rather than the resource, so a client can tell a route this controller
+// predates from a row that does not exist and degrade instead of reporting
+// the run missing.
+const UnsupportedRouteError = "unsupported"
+
+var routeProbeMethods = []string{
+	http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+	http.MethodPatch, http.MethodDelete, http.MethodOptions,
+}
+
+func unsupportedRouteFallback(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if routeRegistered(mux, r) {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": UnsupportedRouteError,
+			"route": r.Method + " " + r.URL.Path,
+		})
+	})
+}
+
+// safety: a path registered for another method must keep answering 405 with
+// its Allow header, which the mux only produces while no pattern matches, so
+// the probe asks the mux rather than claiming the path is unserved.
+func routeRegistered(mux *http.ServeMux, r *http.Request) bool {
+	if _, pattern := mux.Handler(r); pattern != "" {
+		return true
+	}
+	for _, method := range routeProbeMethods {
+		if method == r.Method {
+			continue
+		}
+		probe := r.Clone(r.Context())
+		probe.Method = method
+		if _, pattern := mux.Handler(probe); pattern != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Serve starts the HTTP listener and blocks until ctx is done. On

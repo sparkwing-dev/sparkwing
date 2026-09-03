@@ -41,14 +41,7 @@ func CheckChangelogLint(ctx context.Context, repoRoot string) error {
 		}
 		return fmt.Errorf("read CHANGELOG.md: %w", err)
 	}
-	migrationsDir := filepath.Join(repoRoot, "docs", "migrations")
-	var migrations fs.FS
-	if info, statErr := os.Stat(migrationsDir); statErr == nil && info.IsDir() {
-		migrations = os.DirFS(migrationsDir)
-	} else {
-		migrations = emptyFS{}
-	}
-	issues := LintChangelog(string(body), migrations)
+	issues := LintChangelog(string(body), migrationsFS(repoRoot))
 	if len(issues) == 0 {
 		return nil
 	}
@@ -124,6 +117,293 @@ func LintSchemaBreak(body, version string, prevSchema, curSchema int, addedRequi
 			"%s and adds no requirement, so older binaries keep opening the database, but [%s] has no `**store:**` entry describing it; add one",
 			describeSchemaDelta(prevSchema, curSchema), label),
 	}}
+}
+
+const (
+	wireBreakCategory     = "unmarked-wire-break"
+	wireMigrationCategory = "missing-wire-migration"
+	wireCoverageCategory  = "undeclared-wire-cut"
+)
+
+// safety: the scope narrows the search for a declaration; the identifier check
+// is what proves the entry covers this cut, so the list can hold every scope a
+// wire cut has actually shipped under without reopening that hole.
+var wireScopes = []string{"wingd", "wingwire", "wire", "api", "controller", "cache"}
+
+var wireScopeRe = regexp.MustCompile(`(?i)\b(wingd|wingwire|wire|api|controller|cache)\b`)
+
+// safety: a declared identifier stands for itself and the entries beneath it,
+// never for a sibling that merely shares its spelling as a prefix, so "hello"
+// does not declare "hello_ack" and a named field does not declare its type.
+func declaresIdentifier(text, identifier string) bool {
+	if identifier == "" {
+		return false
+	}
+	for at := 0; at+len(identifier) <= len(text); {
+		found := strings.Index(text[at:], identifier)
+		if found < 0 {
+			return false
+		}
+		start := at + found
+		end := start + len(identifier)
+		if (start == 0 || !identifierByte(text[start-1])) && boundaryAfter(text, end) && !methodQualified(text, start, identifier) {
+			return true
+		}
+		at = start + 1
+	}
+	return false
+}
+
+// safety: "GET /api/v1/runs" names one operation, not the path, so an
+// occurrence a method qualifies does not declare the bare route and its other
+// methods with it.
+func methodQualified(text string, start int, identifier string) bool {
+	if !strings.HasPrefix(identifier, "/") || start == 0 || text[start-1] != ' ' {
+		return false
+	}
+	word := start - 1
+	for word > 0 && text[word-1] >= 'A' && text[word-1] <= 'Z' {
+		word--
+	}
+	return specMethods[strings.ToLower(text[word:start-1])]
+}
+
+// safety: a separator only continues an identifier when something follows it,
+// so a sentence ending "drops stats_reset." still declares stats_reset while
+// "grant.lease_token" still does not declare grant.
+func boundaryAfter(text string, end int) bool {
+	if end == len(text) {
+		return true
+	}
+	if strings.IndexByte("./-:", text[end]) >= 0 {
+		return end+1 == len(text) || !identifierByte(text[end+1])
+	}
+	return !identifierByte(text[end])
+}
+
+func identifierByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	}
+	return strings.IndexByte("_./-:{}", b) >= 0
+}
+
+func cutDeclared(text string, c wireCut) bool {
+	for _, identifier := range c.covering() {
+		if declaresIdentifier(text, identifier) {
+			return true
+		}
+	}
+	return false
+}
+
+// LintWireBreak checks that every cut in the daemon's wire surface is declared
+// in the changelog section being cut. A cut needs a `(Breaking)` entry under a
+// wire scope, a migration section its link resolves to, and its identifier
+// spelled verbatim in one of the two, because a pinned pipeline binary meets
+// the cut at run time and its operator has only the release notes to go on.
+func LintWireBreak(body, version string, cuts []wireCut, migrations fs.FS) []ChangelogIssue {
+	if len(cuts) == 0 {
+		return nil
+	}
+	section := changelogSectionFor(body, version)
+	if section == nil {
+		return []ChangelogIssue{{
+			Line:     1,
+			Category: wireBreakCategory,
+			Message: fmt.Sprintf("%s, but the changelog has no [%s] or [Unreleased] section to declare it in",
+				describeWireCuts(cuts), version),
+		}}
+	}
+	isUnreleased := strings.EqualFold(section.version, "Unreleased")
+	var declarations []changelogEntry
+	for _, e := range section.entries {
+		if scope := breakingScopeRe.FindStringSubmatch(e.body); scope != nil && wireScopeRe.MatchString(scope[1]) {
+			declarations = append(declarations, e)
+		}
+	}
+	if len(declarations) == 0 {
+		return []ChangelogIssue{{
+			Line:     section.startLine,
+			Category: wireBreakCategory,
+			Message: fmt.Sprintf("%s, but [%s] has no `(Breaking)` entry under a wire scope (%s); mark the cut and link a section in docs/migrations/%s",
+				describeWireCuts(cuts), section.version, strings.Join(wireScopes, ", "), expectedMigrationPath(section.version, isUnreleased)),
+		}}
+	}
+	// safety: only an entry that names a cut is treated as the declaration, so a
+	// breaking entry about something else under the same scope is neither the
+	// answer nor asked to carry a wire migration link it has no use for.
+	declaring := declaringEntries(*section, declarations, cuts, migrations, isUnreleased)
+	if len(declaring) == 0 {
+		return []ChangelogIssue{{
+			Line:     section.startLine,
+			Category: wireCoverageCategory,
+			Message: fmt.Sprintf("%s, and no `(Breaking)` entry in [%s] names any of it; name each cut in the entry or in the migration section it links, or name the route, operation, or message type it sits under",
+				describeWireCuts(cuts), section.version),
+		}}
+	}
+	declared := ""
+	var issues []ChangelogIssue
+	for _, e := range declaring {
+		links := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
+		if len(links) == 0 {
+			issues = append(issues, ChangelogIssue{
+				Line:     e.titleLine,
+				Category: wireMigrationCategory,
+				Message: fmt.Sprintf("`(Breaking)` entry in [%s] links no migration section; link docs/migrations/%s",
+					section.version, expectedMigrationPath(section.version, isUnreleased)),
+			})
+			continue
+		}
+		sections, linkIssues := migrationSections(*section, e, links, migrations, isUnreleased)
+		issues = append(issues, linkIssues...)
+		if len(linkIssues) > 0 {
+			continue
+		}
+		declared += e.body + "\n" + strings.Join(sections, "\n") + "\n"
+	}
+	if declared == "" {
+		return issues
+	}
+	var missing []string
+	for _, c := range cuts {
+		if !cutDeclared(declared, c) {
+			missing = append(missing, c.describe())
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return append(issues, ChangelogIssue{
+		Line:     declaring[0].titleLine,
+		Category: wireCoverageCategory,
+		Message: fmt.Sprintf("the `(Breaking)` entry in [%s] and its migration section do not name %d of %d cut(s): %s; name each one verbatim in the entry or the section it links, or name the route, operation, or message type it sits under",
+			section.version, len(missing), len(cuts), strings.Join(missing, "; ")),
+	})
+}
+
+func declaringEntries(section changelogSection, candidates []changelogEntry, cuts []wireCut, migrations fs.FS, isUnreleased bool) []changelogEntry {
+	var declaring []changelogEntry
+	for _, e := range candidates {
+		text := e.body
+		links := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
+		if len(links) > 0 {
+			sections, _ := migrationSections(section, e, links, migrations, isUnreleased)
+			text += "\n" + strings.Join(sections, "\n")
+		}
+		for _, c := range cuts {
+			if cutDeclared(text, c) {
+				declaring = append(declaring, e)
+				break
+			}
+		}
+	}
+	return declaring
+}
+
+func migrationSections(s changelogSection, e changelogEntry, links [][]string, migrations fs.FS, isUnreleased bool) (bodies []string, issues []ChangelogIssue) {
+	for _, link := range links {
+		path, anchor, _ := strings.Cut(link[1], "#")
+		path, anchor = strings.TrimSpace(path), strings.TrimSpace(anchor)
+		if want := expectedMigrationPath(s.version, isUnreleased); path != want {
+			issues = append(issues, ChangelogIssue{
+				Line:     e.titleLine,
+				Category: "version-mismatch",
+				Message:  fmt.Sprintf("(Breaking) entry in [%s] links to docs/migrations/%s but should link to docs/migrations/%s", s.version, path, want),
+			})
+			continue
+		}
+		headings, exists := readMigrationHeadings(migrations, path)
+		if !exists {
+			issues = append(issues, ChangelogIssue{
+				Line:     e.titleLine,
+				Category: "missing-migration-file",
+				Message:  fmt.Sprintf("(Breaking) entry links to docs/migrations/%s but the file does not exist", path),
+			})
+			continue
+		}
+		body, found := migrationSectionBody(migrations, path, anchor)
+		if !found {
+			issues = append(issues, ChangelogIssue{
+				Line:     e.titleLine,
+				Category: "missing-migration-anchor",
+				Message: fmt.Sprintf("(Breaking) entry links to docs/migrations/%s#%s but that anchor matches no H2 in the file; available headings: %s",
+					path, anchor, formatAnchorList(headings)),
+			})
+			continue
+		}
+		bodies = append(bodies, body)
+	}
+	return bodies, issues
+}
+
+func migrationSectionBody(migrations fs.FS, path, anchor string) (body string, found bool) {
+	if anchor == "" || migrations == nil {
+		return "", false
+	}
+	f, err := migrations.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = f.Close() }()
+	var b strings.Builder
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "## ") {
+			if found {
+				break
+			}
+			found = slugifyHeading(strings.TrimSpace(strings.TrimPrefix(line, "## "))) == anchor
+			continue
+		}
+		if found {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String(), found
+}
+
+func expectedMigrationPath(version string, isUnreleased bool) string {
+	if isUnreleased {
+		return "_unreleased.md"
+	}
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
+	return version + ".md"
+}
+
+func changelogSectionFor(body, version string) *changelogSection {
+	sections := parseChangelogSections(body)
+	var versionSec, unreleasedSec *changelogSection
+	for i := range sections {
+		switch {
+		case strings.EqualFold(sections[i].version, version):
+			versionSec = &sections[i]
+		case strings.EqualFold(sections[i].version, "Unreleased"):
+			unreleasedSec = &sections[i]
+		}
+	}
+	if versionSec != nil {
+		return versionSec
+	}
+	return unreleasedSec
+}
+
+func describeWireCuts(cuts []wireCut) string {
+	described := describeCuts(cuts)
+	if len(described) == 1 {
+		return "the daemon's wire surface cuts " + described[0]
+	}
+	if len(described) > 6 {
+		return fmt.Sprintf("the daemon's wire surface cuts %d entries (%s, and %d more)",
+			len(described), strings.Join(described[:6], "; "), len(described)-6)
+	}
+	return fmt.Sprintf("the daemon's wire surface cuts %d entries (%s)", len(described), strings.Join(described, "; "))
 }
 
 func describeSchemaDelta(prevSchema, curSchema int) string {
@@ -397,6 +677,14 @@ func sortIssues(issues []ChangelogIssue) {
 		}
 		return issues[i].Category < issues[j].Category
 	})
+}
+
+func migrationsFS(repoRoot string) fs.FS {
+	dir := filepath.Join(repoRoot, "docs", "migrations")
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		return os.DirFS(dir)
+	}
+	return emptyFS{}
 }
 
 type emptyFS struct{}

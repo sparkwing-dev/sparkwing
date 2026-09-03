@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // Secret mirrors the wire shape of one secret row. Value is populated
@@ -83,7 +81,7 @@ func (c *Client) getSecret(ctx context.Context, name, query string) (*Secret, er
 		}
 		return &sec, nil
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -137,7 +135,7 @@ func (c *Client) DeleteSecretForRepo(ctx context.Context, name, repo string) err
 	case http.StatusNoContent:
 		return nil
 	case http.StatusNotFound:
-		return store.ErrNotFound
+		return notFound(resp)
 	default:
 		return readHTTPError(resp)
 	}

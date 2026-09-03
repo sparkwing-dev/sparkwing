@@ -48,7 +48,7 @@ func (c *Client) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq 
 		}
 		return &d, nil
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -76,7 +76,7 @@ func (c *Client) ListNodeDispatches(ctx context.Context, runID, nodeID string) (
 		}
 		return out, nil
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}

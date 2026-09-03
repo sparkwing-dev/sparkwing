@@ -150,6 +150,7 @@ type ConcurrencyState struct {
 	Holders           []WaiterHolder
 	Waiters           []StateWaiter
 }
+var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 type GitMeta struct {
 	Branch      string
 	SHA         string

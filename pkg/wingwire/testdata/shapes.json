@@ -1,0 +1,1008 @@
+{
+  "types": [
+    {
+      "type": "admission_request",
+      "fields": [
+        {
+          "name": "run_id",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "owner_run_id",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "owner_lease_token",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "display_run_id",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "pipeline",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "repo",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "pid",
+          "kind": "int",
+          "omitempty": true
+        },
+        {
+          "name": "guard",
+          "kind": "*struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "leader_pid",
+              "kind": "int",
+              "omitempty": false
+            },
+            {
+              "name": "session_id",
+              "kind": "int",
+              "omitempty": false
+            },
+            {
+              "name": "birth_token",
+              "kind": "string",
+              "omitempty": false
+            }
+          ]
+        },
+        {
+          "name": "resources",
+          "kind": "struct",
+          "omitempty": false,
+          "fields": [
+            {
+              "name": "cores",
+              "kind": "float64",
+              "omitempty": true
+            },
+            {
+              "name": "memory_bytes",
+              "kind": "int64",
+              "omitempty": true
+            }
+          ]
+        },
+        {
+          "name": "semaphores",
+          "kind": "[]struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "name",
+              "kind": "string",
+              "omitempty": false
+            },
+            {
+              "name": "cost",
+              "kind": "int",
+              "omitempty": false
+            },
+            {
+              "name": "capacity",
+              "kind": "int",
+              "omitempty": false
+            },
+            {
+              "name": "policy",
+              "kind": "string",
+              "omitempty": false
+            },
+            {
+              "name": "queue_timeout_ms",
+              "kind": "int64",
+              "omitempty": true
+            },
+            {
+              "name": "cancel_timeout_ms",
+              "kind": "int64",
+              "omitempty": true
+            }
+          ]
+        },
+        {
+          "name": "parent_lease_token",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "semaphores_only",
+          "kind": "bool",
+          "omitempty": true
+        },
+        {
+          "name": "sub_lease",
+          "kind": "bool",
+          "omitempty": true
+        },
+        {
+          "name": "cost_source",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "expected_duration_ms",
+          "kind": "int64",
+          "omitempty": true
+        },
+        {
+          "name": "expected_p99_ms",
+          "kind": "int64",
+          "omitempty": true
+        },
+        {
+          "name": "sample_count",
+          "kind": "int",
+          "omitempty": true
+        },
+        {
+          "name": "drift_warning",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "origin",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "priority",
+          "kind": "int",
+          "omitempty": true
+        }
+      ]
+    },
+    {
+      "type": "cancel",
+      "fields": [
+        {
+          "name": "run_id",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "reason",
+          "kind": "string",
+          "omitempty": true
+        }
+      ]
+    },
+    {
+      "type": "cancel_lease",
+      "fields": [
+        {
+          "name": "run_id",
+          "kind": "string",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "cancel_lease_ack",
+      "fields": [
+        {
+          "name": "found",
+          "kind": "bool",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "drain_ack",
+      "fields": [
+        {
+          "name": "holders_remaining",
+          "kind": "int",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "drain_request",
+      "fields": [
+        {
+          "name": "successor_version",
+          "kind": "string",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "evicted",
+      "fields": [
+        {
+          "name": "run_id",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "key",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "superseded_by",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "policy",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "reason",
+          "kind": "string",
+          "omitempty": true
+        }
+      ]
+    },
+    {
+      "type": "grant",
+      "fields": [
+        {
+          "name": "run_id",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "lease_token",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "resources",
+          "kind": "struct",
+          "omitempty": false,
+          "fields": [
+            {
+              "name": "cores",
+              "kind": "float64",
+              "omitempty": true
+            },
+            {
+              "name": "memory_bytes",
+              "kind": "int64",
+              "omitempty": true
+            }
+          ]
+        },
+        {
+          "name": "semaphores",
+          "kind": "[]string",
+          "omitempty": true
+        },
+        {
+          "name": "sole_run_under_load",
+          "kind": "bool",
+          "omitempty": true
+        },
+        {
+          "name": "external_cores",
+          "kind": "float64",
+          "omitempty": true
+        }
+      ]
+    },
+    {
+      "type": "guard_complete",
+      "fields": [
+        {
+          "name": "lease_token",
+          "kind": "string",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "guard_complete_ack",
+      "fields": null
+    },
+    {
+      "type": "hello",
+      "fields": [
+        {
+          "name": "protocol_major",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "binary_version",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "build_identity",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "health_probe",
+          "kind": "bool",
+          "omitempty": true
+        },
+        {
+          "name": "holder_liveness",
+          "kind": "bool",
+          "omitempty": true
+        }
+      ]
+    },
+    {
+      "type": "hello_ack",
+      "fields": [
+        {
+          "name": "protocol_major",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "native_protocol_major",
+          "kind": "int",
+          "omitempty": true
+        },
+        {
+          "name": "binary_version",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "build_identity",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "draining",
+          "kind": "bool",
+          "omitempty": true
+        },
+        {
+          "name": "store_schema_version",
+          "kind": "int",
+          "omitempty": true
+        },
+        {
+          "name": "store_requirements",
+          "kind": "[]string",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "liveness_ack",
+      "fields": [
+        {
+          "name": "nonce",
+          "kind": "uint64",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "liveness_probe",
+      "fields": [
+        {
+          "name": "nonce",
+          "kind": "uint64",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "queue_state",
+      "fields": [
+        {
+          "name": "resources",
+          "kind": "[]struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "key",
+              "kind": "string",
+              "omitempty": false
+            },
+            {
+              "name": "capacity",
+              "kind": "float64",
+              "omitempty": false
+            },
+            {
+              "name": "held",
+              "kind": "float64",
+              "omitempty": false
+            },
+            {
+              "name": "reserved",
+              "kind": "float64",
+              "omitempty": true
+            },
+            {
+              "name": "external",
+              "kind": "float64",
+              "omitempty": true
+            },
+            {
+              "name": "external_source",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "available",
+              "kind": "float64",
+              "omitempty": true
+            }
+          ]
+        },
+        {
+          "name": "holders",
+          "kind": "[]struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "run_id",
+              "kind": "string",
+              "omitempty": false
+            },
+            {
+              "name": "participant_id",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "display_run_id",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "pipeline",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "repo",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "parent",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "parent_participant_id",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "elapsed_ms",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
+              "name": "resources",
+              "kind": "struct",
+              "omitempty": false,
+              "fields": [
+                {
+                  "name": "cores",
+                  "kind": "float64",
+                  "omitempty": true
+                },
+                {
+                  "name": "memory_bytes",
+                  "kind": "int64",
+                  "omitempty": true
+                }
+              ]
+            },
+            {
+              "name": "semaphores",
+              "kind": "[]string",
+              "omitempty": true
+            },
+            {
+              "name": "connection_only",
+              "kind": "bool",
+              "omitempty": true
+            },
+            {
+              "name": "cost_source",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "cost_rationale",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "expected_duration_ms",
+              "kind": "int64",
+              "omitempty": true
+            },
+            {
+              "name": "drift_warning",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "stalled",
+              "kind": "bool",
+              "omitempty": true
+            },
+            {
+              "name": "recovery",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "admission_waiting",
+              "kind": "bool",
+              "omitempty": true
+            },
+            {
+              "name": "active_waiter_participant_ids",
+              "kind": "[]string",
+              "omitempty": true
+            },
+            {
+              "name": "contended",
+              "kind": "bool",
+              "omitempty": true
+            },
+            {
+              "name": "contention_reason",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "saturated_share",
+              "kind": "float64",
+              "omitempty": true
+            },
+            {
+              "name": "origin",
+              "kind": "string",
+              "omitempty": true
+            }
+          ]
+        },
+        {
+          "name": "waiters",
+          "kind": "[]struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "run_id",
+              "kind": "string",
+              "omitempty": false
+            },
+            {
+              "name": "participant_id",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "display_run_id",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "pipeline",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "repo",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "position",
+              "kind": "int",
+              "omitempty": false
+            },
+            {
+              "name": "priority",
+              "kind": "int",
+              "omitempty": true
+            },
+            {
+              "name": "backfill_count",
+              "kind": "uint64",
+              "omitempty": true
+            },
+            {
+              "name": "resources",
+              "kind": "struct",
+              "omitempty": false,
+              "fields": [
+                {
+                  "name": "cores",
+                  "kind": "float64",
+                  "omitempty": true
+                },
+                {
+                  "name": "memory_bytes",
+                  "kind": "int64",
+                  "omitempty": true
+                }
+              ]
+            },
+            {
+              "name": "semaphores",
+              "kind": "[]string",
+              "omitempty": true
+            },
+            {
+              "name": "waiting_on",
+              "kind": "[]string",
+              "omitempty": true
+            },
+            {
+              "name": "blocking_reason",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "waiting_ms",
+              "kind": "int64",
+              "omitempty": true
+            },
+            {
+              "name": "cost_source",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "cost_rationale",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "expected_duration_ms",
+              "kind": "int64",
+              "omitempty": true
+            },
+            {
+              "name": "drift_warning",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "expected_start_ms",
+              "kind": "*int64",
+              "omitempty": true
+            },
+            {
+              "name": "origin",
+              "kind": "string",
+              "omitempty": true
+            }
+          ]
+        },
+        {
+          "name": "expected_clear_ms",
+          "kind": "*int64",
+          "omitempty": true
+        },
+        {
+          "name": "daemon_version",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "daemon_uptime_ms",
+          "kind": "int64",
+          "omitempty": true
+        },
+        {
+          "name": "events",
+          "kind": "*struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "window_ms",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
+              "name": "runs",
+              "kind": "int",
+              "omitempty": false
+            },
+            {
+              "name": "median_wait_ms",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
+              "name": "evictions",
+              "kind": "[]struct",
+              "omitempty": true,
+              "fields": [
+                {
+                  "name": "key",
+                  "kind": "string",
+                  "omitempty": false
+                },
+                {
+                  "name": "count",
+                  "kind": "int",
+                  "omitempty": false
+                }
+              ]
+            },
+            {
+              "name": "queue_timeouts",
+              "kind": "int",
+              "omitempty": true
+            },
+            {
+              "name": "cancellations",
+              "kind": "int",
+              "omitempty": true
+            },
+            {
+              "name": "contended",
+              "kind": "int",
+              "omitempty": true
+            },
+            {
+              "name": "backfills",
+              "kind": "int",
+              "omitempty": true
+            },
+            {
+              "name": "backfill_protections",
+              "kind": "int",
+              "omitempty": true
+            },
+            {
+              "name": "rejections",
+              "kind": "[]struct",
+              "omitempty": true,
+              "fields": [
+                {
+                  "name": "cause",
+                  "kind": "string",
+                  "omitempty": false
+                },
+                {
+                  "name": "count",
+                  "kind": "int",
+                  "omitempty": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "budget",
+          "kind": "*struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "cores",
+              "kind": "float64",
+              "omitempty": false
+            },
+            {
+              "name": "machine_cores",
+              "kind": "float64",
+              "omitempty": false
+            },
+            {
+              "name": "memory_bytes",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
+              "name": "machine_memory_bytes",
+              "kind": "int64",
+              "omitempty": false
+            },
+            {
+              "name": "enforce",
+              "kind": "bool",
+              "omitempty": true
+            },
+            {
+              "name": "ignore_external",
+              "kind": "bool",
+              "omitempty": true
+            },
+            {
+              "name": "source",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "origin",
+              "kind": "string",
+              "omitempty": true
+            },
+            {
+              "name": "raw",
+              "kind": "string",
+              "omitempty": true
+            }
+          ]
+        },
+        {
+          "name": "container",
+          "kind": "*struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "cores",
+              "kind": "float64",
+              "omitempty": true
+            },
+            {
+              "name": "memory_bytes",
+              "kind": "int64",
+              "omitempty": true
+            },
+            {
+              "name": "host_cores",
+              "kind": "float64",
+              "omitempty": true
+            },
+            {
+              "name": "host_memory_bytes",
+              "kind": "int64",
+              "omitempty": true
+            }
+          ]
+        },
+        {
+          "name": "ignore_external",
+          "kind": "bool",
+          "omitempty": true
+        },
+        {
+          "name": "external_sample_age_ms",
+          "kind": "int64",
+          "omitempty": true
+        },
+        {
+          "name": "external_measurement_age_ms",
+          "kind": "int64",
+          "omitempty": true
+        },
+        {
+          "name": "capacity_change",
+          "kind": "*struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "from_cores",
+              "kind": "float64",
+              "omitempty": false
+            },
+            {
+              "name": "to_cores",
+              "kind": "float64",
+              "omitempty": false
+            },
+            {
+              "name": "at_ms",
+              "kind": "int64",
+              "omitempty": true
+            }
+          ]
+        },
+        {
+          "name": "runners",
+          "kind": "[]struct",
+          "omitempty": true,
+          "fields": [
+            {
+              "name": "name",
+              "kind": "string",
+              "omitempty": false
+            },
+            {
+              "name": "cores",
+              "kind": "float64",
+              "omitempty": false
+            },
+            {
+              "name": "memory_bytes",
+              "kind": "int64",
+              "omitempty": true
+            },
+            {
+              "name": "queue_depth",
+              "kind": "int",
+              "omitempty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "queued",
+      "fields": [
+        {
+          "name": "run_id",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "key",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "position",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "queue_length",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "blocking_reason",
+          "kind": "string",
+          "omitempty": true
+        }
+      ]
+    },
+    {
+      "type": "reattach",
+      "fields": [
+        {
+          "name": "lease_token",
+          "kind": "string",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "release",
+      "fields": [
+        {
+          "name": "lease_token",
+          "kind": "string",
+          "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "stats_reset",
+      "fields": null
+    },
+    {
+      "type": "stats_reset_ack",
+      "fields": null
+    },
+    {
+      "type": "unsupported",
+      "fields": [
+        {
+          "name": "type",
+          "kind": "string",
+          "omitempty": false
+        }
+      ]
+    }
+  ]
+}

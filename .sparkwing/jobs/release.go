@@ -117,11 +117,17 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	})
 	schemaGate.Needs(discover, changelog)
 
+	wireGate := sparkwing.Job(plan, "gate-wire-changelog", &checkWireBreakJob{
+		RepoDir: repoDir,
+		Version: versionRef,
+	})
+	wireGate.Needs(discover, changelog)
+
 	pushTag := sparkwing.Job(plan, "push-tag", &pushTagJob{
 		Version: versionRef,
 		RepoDir: repoDir,
 	})
-	pushTag.Needs(validate, clean, changelog, schemaGate, gateTemplates, gateLineage)
+	pushTag.Needs(validate, clean, changelog, schemaGate, wireGate, gateTemplates, gateLineage)
 
 	bumpSelf := sparkwing.Job(plan, "bump-self-replace", &prepareSelfReplaceJob{
 		RepoDir: repoDir,
@@ -1315,6 +1321,89 @@ func requirementsAdded(prevSrc string, curRegistry map[int][]string, prevSchema,
 		return nil, err
 	}
 	return requirementsAddedSince(prevRegistry, curRegistry), nil
+}
+
+type checkWireBreakJob struct {
+	sparkwing.Base
+	RepoDir string
+	Version sparkwing.Ref[string]
+}
+
+func (j *checkWireBreakJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+	return nil, nil
+}
+
+func (j *checkWireBreakJob) run(ctx context.Context) error {
+	version := j.Version.Get(ctx)
+	prevTag, err := latestSemverTagIn(ctx, j.RepoDir)
+	if err != nil {
+		return fmt.Errorf("release: resolve previous tag for wire gate: %w", err)
+	}
+	if prevTag == "" {
+		sparkwing.Info(ctx, "no previous release tag; skipping wire-surface changelog gate")
+		return nil
+	}
+	cuts, err := wireCutsSince(ctx, j.RepoDir, prevTag)
+	if err != nil {
+		return fmt.Errorf("release: diff the wire surface against %s: %w", prevTag, err)
+	}
+	if len(cuts) == 0 {
+		sparkwing.Info(ctx, "wire surface added to or unchanged since %s; gate passes", prevTag)
+		return nil
+	}
+	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
+	if err != nil {
+		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
+	}
+	issues := LintWireBreak(string(body), version, cuts, migrationsFS(j.RepoDir))
+	if len(issues) > 0 {
+		var b strings.Builder
+		for _, i := range issues {
+			b.WriteString(i.Format())
+			b.WriteByte('\n')
+		}
+		return fmt.Errorf("release: undeclared wire-surface cut blocks %s:\n%s", version, b.String())
+	}
+	sparkwing.Info(ctx, "wire surface cuts %s since %s and the changelog declares it; gate passes",
+		strings.Join(describeCuts(cuts), ", "), prevTag)
+	return nil
+}
+
+func wireCutsSince(ctx context.Context, repoDir, prevTag string) ([]wireCut, error) {
+	states := make([]wireSurfaceState, 0, len(wireSurfaces))
+	for _, surface := range wireSurfaces {
+		prev, present, err := fileAtTag(ctx, repoDir, prevTag, surface.path)
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			sparkwing.Info(ctx, "%s does not exist at %s; nothing to diff", surface.path, prevTag)
+			states = append(states, wireSurfaceState{surface: surface})
+			continue
+		}
+		cur, err := os.ReadFile(filepath.Join(repoDir, filepath.FromSlash(surface.path)))
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", surface.path, err)
+		}
+		states = append(states, wireSurfaceState{surface: surface, present: true, prev: prev, cur: string(cur)})
+	}
+	return wireCuts(states)
+}
+
+func fileAtTag(ctx context.Context, repoDir, tag, path string) (body string, present bool, err error) {
+	listed, err := runGitIn(ctx, repoDir, "ls-tree", "--name-only", tag, "--", path)
+	if err != nil {
+		return "", false, err
+	}
+	if strings.TrimSpace(listed) == "" {
+		return "", false, nil
+	}
+	body, err = runGitIn(ctx, repoDir, "show", tag+":"+path)
+	if err != nil {
+		return "", false, err
+	}
+	return body, true, nil
 }
 
 func init() {

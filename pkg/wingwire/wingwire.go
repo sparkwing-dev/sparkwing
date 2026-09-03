@@ -32,6 +32,7 @@ package wingwire
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 )
 
 // BuildIdentity changes whenever same-major wire behavior changes. It lets
@@ -50,7 +51,10 @@ const ProtocolMajor = 3
 // admission grants instead of being locked out the moment the daemon
 // upgrades. Raising it is what turns a stale pin into a hard failure, so
 // raise it only for a change that genuinely cannot be served in the old
-// major's terms, and document the cut as a break.
+// major's terms, and document the cut as a break. That cut is declared, not
+// discovered: the release gate refuses a raised floor without a `(Breaking)`
+// changelog entry and a migration section, the same way it refuses an
+// undeclared removal from the message set.
 const MinProtocolMajor = 1
 
 // ServedMajor reports the protocol major a daemon of this build answers a
@@ -168,6 +172,7 @@ const (
 	TypeStatsResetAck    MessageType = "stats_reset_ack"
 	TypeLivenessProbe    MessageType = "liveness_probe"
 	TypeLivenessAck      MessageType = "liveness_ack"
+	TypeUnsupported      MessageType = "unsupported"
 )
 
 // Message is implemented by every concrete wire message. The
@@ -176,6 +181,15 @@ const (
 // [MessageType] to concrete type.
 type Message interface {
 	wireType() MessageType
+}
+
+// TypeOf reports the wire type m serializes as, for a receiver that holds a
+// decoded message and needs to name its type back to the sender.
+func TypeOf(m Message) MessageType {
+	if m == nil {
+		return ""
+	}
+	return m.wireType()
 }
 
 // Envelope is the framing wrapper around every message: the type
@@ -212,6 +226,11 @@ func Decode(line []byte) (Message, error) {
 	if err := json.Unmarshal(line, &env); err != nil {
 		return nil, fmt.Errorf("wingwire: Decode envelope: %w", err)
 	}
+	// safety: a frame with no type is malformed rather than a type from another
+	// generation, so it must not be answerable as an unknown type.
+	if env.Type == "" {
+		return nil, fmt.Errorf("wingwire: Decode envelope: no message type")
+	}
 	m, err := emptyMessage(env.Type)
 	if err != nil {
 		return nil, err
@@ -224,49 +243,56 @@ func Decode(line []byte) (Message, error) {
 	return m, nil
 }
 
-func emptyMessage(t MessageType) (Message, error) {
-	switch t {
-	case TypeHello:
-		return &Hello{}, nil
-	case TypeHelloAck:
-		return &HelloAck{}, nil
-	case TypeAdmissionRequest:
-		return &AdmissionRequest{}, nil
-	case TypeGrant:
-		return &Grant{}, nil
-	case TypeQueued:
-		return &Queued{}, nil
-	case TypeEvicted:
-		return &Evicted{}, nil
-	case TypeRelease:
-		return &Release{}, nil
-	case TypeGuardComplete:
-		return &GuardComplete{}, nil
-	case TypeGuardCompleteAck:
-		return &GuardCompleteAck{}, nil
-	case TypeReattach:
-		return &Reattach{}, nil
-	case TypeDrainRequest:
-		return &DrainRequest{}, nil
-	case TypeDrainAck:
-		return &DrainAck{}, nil
-	case TypeQueueState:
-		return &QueueState{}, nil
-	case TypeCancelLease:
-		return &CancelLease{}, nil
-	case TypeCancelLeaseAck:
-		return &CancelLeaseAck{}, nil
-	case TypeCancel:
-		return &Cancel{}, nil
-	case TypeStatsReset:
-		return &StatsReset{}, nil
-	case TypeStatsResetAck:
-		return &StatsResetAck{}, nil
-	case TypeLivenessProbe:
-		return &LivenessProbe{}, nil
-	case TypeLivenessAck:
-		return &LivenessAck{}, nil
-	default:
-		return nil, fmt.Errorf("wingwire: unknown message type %q (peer speaks a different protocol major than %d)", t, ProtocolMajor)
+// UnknownTypeError reports a frame carrying a message type this build does
+// not know. A daemon distinguishes it from a malformed frame so it can answer
+// [Unsupported] and keep serving the connection.
+type UnknownTypeError struct {
+	Type MessageType
+}
+
+func (e *UnknownTypeError) Error() string {
+	return fmt.Sprintf("wingwire: unknown message type %q (peer speaks a different protocol major than %d)", e.Type, ProtocolMajor)
+}
+
+// safety: the wire shape snapshot is generated from this map, so a type reaches
+// the wire only by being registered here and cannot escape the snapshot.
+var messageRegistry = map[MessageType]func() Message{
+	TypeHello:            func() Message { return &Hello{} },
+	TypeHelloAck:         func() Message { return &HelloAck{} },
+	TypeAdmissionRequest: func() Message { return &AdmissionRequest{} },
+	TypeGrant:            func() Message { return &Grant{} },
+	TypeQueued:           func() Message { return &Queued{} },
+	TypeEvicted:          func() Message { return &Evicted{} },
+	TypeRelease:          func() Message { return &Release{} },
+	TypeGuardComplete:    func() Message { return &GuardComplete{} },
+	TypeGuardCompleteAck: func() Message { return &GuardCompleteAck{} },
+	TypeReattach:         func() Message { return &Reattach{} },
+	TypeDrainRequest:     func() Message { return &DrainRequest{} },
+	TypeDrainAck:         func() Message { return &DrainAck{} },
+	TypeQueueState:       func() Message { return &QueueState{} },
+	TypeCancelLease:      func() Message { return &CancelLease{} },
+	TypeCancelLeaseAck:   func() Message { return &CancelLeaseAck{} },
+	TypeCancel:           func() Message { return &Cancel{} },
+	TypeStatsReset:       func() Message { return &StatsReset{} },
+	TypeStatsResetAck:    func() Message { return &StatsResetAck{} },
+	TypeLivenessProbe:    func() Message { return &LivenessProbe{} },
+	TypeLivenessAck:      func() Message { return &LivenessAck{} },
+	TypeUnsupported:      func() Message { return &Unsupported{} },
+}
+
+func registeredTypes() []MessageType {
+	out := make([]MessageType, 0, len(messageRegistry))
+	for t := range messageRegistry {
+		out = append(out, t)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func emptyMessage(t MessageType) (Message, error) {
+	build, ok := messageRegistry[t]
+	if !ok {
+		return nil, &UnknownTypeError{Type: t}
+	}
+	return build(), nil
 }

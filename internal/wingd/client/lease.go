@@ -78,6 +78,8 @@ func (cl *Client) readGrant(req wingwire.AdmissionRequest, onQueued func(wingwir
 			return nil, cl.admissionError(m), nil
 		case *wingwire.Cancel:
 			return nil, &CancelledError{Reason: m.Reason}, nil
+		case *wingwire.Unsupported:
+			return nil, daemonLacksOperation(m.Type, cl.ack.BinaryVersion), nil
 		default:
 			return nil, fmt.Errorf("wingd/client: unexpected %T while acquiring", msg), nil
 		}
@@ -115,6 +117,8 @@ func (cl *Client) readReattach(token string) (lease *Lease, terminal, transient 
 		return &Lease{cl: cl, RunID: m.RunID, Token: m.LeaseToken, Resources: m.Resources}, nil, nil
 	case *wingwire.Evicted:
 		return nil, ErrReattachRejected, nil
+	case *wingwire.Unsupported:
+		return nil, daemonLacksOperation(m.Type, cl.ack.BinaryVersion), nil
 	default:
 		return nil, fmt.Errorf("wingd/client: unexpected %T while re-attaching", msg), nil
 	}
@@ -203,6 +207,8 @@ func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingw
 				onComplete()
 			}
 			return nil
+		case *wingwire.Unsupported:
+			return daemonLacksOperation(m.Type, l.cl.ack.BinaryVersion)
 		case *wingwire.LivenessProbe:
 			if err := l.cl.write(&wingwire.LivenessAck{Nonce: m.Nonce}); err != nil {
 				continue
@@ -263,6 +269,9 @@ func (cl *Client) readCancelLease(runID string) (found bool, terminal, transient
 	msg, err := cl.dec.read()
 	if err != nil {
 		return false, nil, err
+	}
+	if refusal := cl.lacksOperation(msg); refusal != nil {
+		return false, refusal, nil
 	}
 	ack, ok := msg.(*wingwire.CancelLeaseAck)
 	if !ok {
