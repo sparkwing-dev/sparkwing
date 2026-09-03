@@ -97,9 +97,11 @@ type Options struct {
 
 	DefaultStateDB string
 
-	// safety: set only by [RunLocal] after selection, so a caller that builds
-	// its own Options cannot claim a run reached the standalone store.
-	standaloneReason string
+	// safety: set only after a store is chosen, so a caller that builds its
+	// own Options cannot claim a run reached the standalone store.
+	standaloneReason  string
+	standaloneStateDB string
+	standaloneSkew    bool
 
 	ProfileLookup storeurl.ProfileLookup
 
@@ -366,7 +368,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		defer cancelConsumer()
-		go runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget)
+		go runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget,
+			childStoreEnv{path: opts.standaloneStateDB, reason: opts.standaloneReason})
 	}
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout
@@ -389,7 +392,12 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		var outcome admitOutcome
 		var admitErr error
 		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, opts.Pipeline, runID, plan, opts.MaxParallel, cancelRun)
-		if admitErr != nil && opts.Admission.unhostedOutcome(admitErr, opts.standaloneReason) {
+		degradeState := unhosted{
+			reason: opts.standaloneReason,
+			skew:   opts.standaloneSkew,
+			hosted: backends.APISocket != "",
+		}
+		if admitErr != nil && opts.Admission.unhostedOutcome(admitErr, degradeState) {
 			opts.Admission = nil
 			lease, outcome, admitErr = nil, admitProceed, nil
 		}
@@ -602,14 +610,23 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		// runs and the run opens nothing.
 		opts.State = hosted.State
 	} else if selection.standalone != "" {
-		if err := paths.EnsureStandaloneDir(); err != nil {
-			return nil, fmt.Errorf("standalone store: %w", err)
+		st, path, discard, serr := openStandaloneStore(paths, opts.DryRun)
+		if serr != nil {
+			return nil, serr
 		}
-		opts.DefaultStateDB = paths.StandaloneStateDB()
+		defer discard()
+		opts.State = st
+		opts.DefaultStateDB = path
+		opts.standaloneStateDB = path
 		opts.standaloneReason = selection.standalone
-		fmt.Fprint(standaloneWarningOut, standaloneWarning(selection.standalone, selection.daemon, sparkwingModuleVersion()))
+		opts.standaloneSkew = selection.storeSkew
+		fmt.Fprint(standaloneWarningOut, standaloneWarning(selection, sparkwingModuleVersion()))
 	}
-	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, hosted.APISocket != ""); err != nil {
+	// safety: a standalone run holds the store the fallback already chose, so
+	// profile resolution must not reopen or replace it the way it would for a
+	// run that arrived with none.
+	keepState := hosted.APISocket != "" || opts.standaloneReason != ""
+	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, keepState); err != nil {
 		return nil, fmt.Errorf("profile backends: %w", err)
 	}
 	if opts.State == nil {
