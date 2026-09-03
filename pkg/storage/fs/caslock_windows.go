@@ -11,13 +11,19 @@ import (
 
 const casLockBytes = 1 << 30
 
-func lockExclusive(f *os.File) error {
+func tryLockExclusive(f *os.File) (bool, error) {
 	var overlapped windows.Overlapped
-	err := windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK, 0, casLockBytes, 0, &overlapped)
-	if errors.Is(err, windows.ERROR_INVALID_FUNCTION) || errors.Is(err, windows.ERROR_NOT_SUPPORTED) {
-		return errLockUnsupported
+	flags := uint32(windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY)
+	err := windows.LockFileEx(windows.Handle(f.Fd()), flags, 0, casLockBytes, 0, &overlapped)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, windows.ERROR_LOCK_VIOLATION):
+		return false, nil
+	case errors.Is(err, windows.ERROR_INVALID_FUNCTION), errors.Is(err, windows.ERROR_NOT_SUPPORTED):
+		return false, errLockUnsupported
 	}
-	return err
+	return false, err
 }
 
 func unlockFile(f *os.File) error {

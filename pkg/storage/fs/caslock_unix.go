@@ -8,14 +8,18 @@ import (
 	"syscall"
 )
 
-func lockExclusive(f *os.File) error {
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		if errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EINVAL) {
-			return errLockUnsupported
-		}
-		return err
+func tryLockExclusive(f *os.File) (bool, error) {
+	err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, syscall.EWOULDBLOCK), errors.Is(err, syscall.EAGAIN):
+		return false, nil
+	case errors.Is(err, syscall.ENOTSUP), errors.Is(err, syscall.EOPNOTSUPP),
+		errors.Is(err, syscall.EINVAL), errors.Is(err, syscall.ENOLCK):
+		return false, errLockUnsupported
 	}
-	return nil
+	return false, err
 }
 
 func unlockFile(f *os.File) error {

@@ -260,7 +260,11 @@ code change to unlock.
   a capacity-1 concurrency group. Each key is now held under a file lock for
   the length of the compare-and-swap, and a filesystem whose kernel refuses
   that lock reports `ConditionalWritesSupported` false so callers fall back to
-  last-write-wins instead of trusting a reservation nothing enforces.
+  last-write-wins instead of trusting a reservation nothing enforces. The lock
+  is taken without blocking and retried, so a caller waiting on a contended key
+  still returns on its own context. A mount that keeps locks node-local -- NFS
+  with `local_lock=flock` or `local_lock=all` -- still reports true and still
+  enforces nothing between hosts; use `s3` for state shared across machines.
 - **orchestrator:** A transient object-store error no longer disables cross-runner
   reservation for the life of a process. The one-time probe that asks whether
   the store honors write preconditions treated any error as a "no" and routed

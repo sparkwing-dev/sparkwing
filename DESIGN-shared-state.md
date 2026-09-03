@@ -208,8 +208,14 @@ Notes:
   for create-once, `If-Match: <etag>` for compare-and-swap); the
   filesystem backend enforces them for single-host runs by holding a
   file lock per key, which serializes the processes sharing that path
-  and not only the writers inside one of them. A mount whose kernel
-  refuses that lock answers the probe below with false. The
+  and not only the writers inside one of them. Single-host is the
+  limit, and the probe cannot raise it: a mount whose kernel refuses
+  the lock answers false, but a mount that keeps its locks node-local
+  answers true while enforcing nothing between hosts. NFS mounted
+  `local_lock=flock` or `local_lock=all` is the case to watch -- it is
+  indistinguishable from a local disk here, so two hosts pointed at
+  one NFS path both take the same slot. Use `s3` for state shared
+  across hosts. The
   `ConditionalWriter` contract is provider-agnostic and names the GCS
   generation-match and Azure ETag equivalents, but those backends are
   not yet implemented -- declaring `gcs` or `azure-blob` surfaces an
