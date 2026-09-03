@@ -58,6 +58,7 @@ func (b *Backend) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps
 func (b *Backend) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (b *Backend) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
 const DefaultBufferThreshold = 16 * 1024
+const DefaultCloseDrainTimeout = 5 * time.Second
 const DefaultFlushInterval = 500 * time.Millisecond
 const DefaultOutboxDrainInterval = 5 * time.Second
 const DefaultReadCacheTTL = time.Second

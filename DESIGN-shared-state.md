@@ -166,12 +166,16 @@ Notes:
   today, but appended throughout the run rather than dumped at
   the end. Each runner only writes its own run paths; no
   cross-runner contention on a single key.
-- **Offline buffering** is supported. When the object store is
-  unreachable, state writes, cache PUTs, and log appends stage to
-  a local SQLite buffer (`~/.sparkwing/outbox.db`) and replay
-  when connectivity returns. Safe because all keys are
-  per-runner (`runs/<runID>/...`) or content-addressed; no
-  conflicts on replay. No schema or API negotiation needed.
+- **Offline buffering** is supported for state writes. When the
+  object store is unreachable, they stage to a local SQLite buffer
+  (`~/.sparkwing/outbox.db`) and replay when connectivity returns.
+  Safe because all keys are per-runner (`runs/<runID>/...`); no
+  conflicts on replay, and no schema or API negotiation needed. Cache
+  PUTs and log appends do not stage: they fail to their own callers,
+  because the outbox replays a blob to a key and neither has that
+  shape. A run whose state reached only the buffer is reported as an
+  error by `FinishRun` and by `Backend.Close`, since the buffer lives
+  on a disk a CI runner discards at job end.
 - **`s3Concurrency`** coordinates cross-runner reservation over the
   object store's conditional-write CAS, no database. It holds each
   concurrency key's full state -- holders, waiters, memoized output --

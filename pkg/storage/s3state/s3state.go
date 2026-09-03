@@ -47,6 +47,11 @@ const DefaultFlushInterval = 500 * time.Millisecond
 // envelopes since the last flush exceed this many bytes.
 const DefaultBufferThreshold = 16 * 1024
 
+// DefaultCloseDrainTimeout bounds the synchronous outbox drain Close
+// attempts, so a process exiting against an unreachable object store
+// still terminates.
+const DefaultCloseDrainTimeout = 5 * time.Second
+
 // DefaultReadCacheTTL bounds how stale a snapshot of a run this
 // process does not write may be. Past it the next read re-parses the
 // object store's copy, so a run another runner has advanced since the
@@ -335,7 +340,9 @@ func (rs *runState) claimFlush() ([]envelope, <-chan struct{}) {
 	return envs, nil
 }
 
-func (b *Backend) flushRun(ctx context.Context, runID string) error {
+// safety: with durable set, a blob that got no further than the local outbox
+// is an error, because the object store is the run's only copy in Mode 2.
+func (b *Backend) flushRun(ctx context.Context, runID string, durable bool) error {
 	for {
 		rs := b.lookupRun(runID)
 		if rs == nil {
@@ -351,9 +358,12 @@ func (b *Backend) flushRun(ctx context.Context, runID string) error {
 			}
 		}
 		if envs == nil {
+			if durable {
+				return b.confirmInStore(ctx, stateKey(runID))
+			}
 			return nil
 		}
-		return b.putEnvelopes(ctx, runID, rs, envs)
+		return b.putEnvelopes(ctx, runID, rs, envs, durable)
 	}
 }
 
@@ -366,10 +376,10 @@ func (b *Backend) tryFlushRun(ctx context.Context, runID string) error {
 	if wait != nil || envs == nil {
 		return nil
 	}
-	return b.putEnvelopes(ctx, runID, rs, envs)
+	return b.putEnvelopes(ctx, runID, rs, envs, false)
 }
 
-func (b *Backend) putEnvelopes(ctx context.Context, runID string, rs *runState, envs []envelope) error {
+func (b *Backend) putEnvelopes(ctx context.Context, runID string, rs *runState, envs []envelope, durable bool) error {
 	body, err := encodeEnvelopes(envs)
 	if err != nil {
 		b.markFlushed(rs, false)
@@ -383,7 +393,13 @@ func (b *Backend) putEnvelopes(ctx context.Context, runID string, rs *runState, 
 		if pending, perr := b.outbox.HasPending(ctx, key); perr == nil && pending {
 			serr := b.outbox.Stage(ctx, OutboxKindState, key, body)
 			b.markFlushed(rs, serr == nil)
-			return serr
+			if serr != nil {
+				return serr
+			}
+			if durable {
+				return b.confirmInStore(ctx, key)
+			}
+			return nil
 		}
 	}
 
@@ -399,10 +415,40 @@ func (b *Backend) putEnvelopes(ctx context.Context, runID string, rs *runState, 
 			return serr
 		}
 		b.markFlushed(rs, true)
+		if durable {
+			return b.confirmInStore(ctx, key)
+		}
 		return nil
 	}
 	b.markFlushed(rs, false)
 	return putErr
+}
+
+// safety: the local outbox lives on a disk an ephemeral runner discards at job
+// end, so a caller promised the object store holds the run has to be told when
+// only that disk does.
+func (b *Backend) confirmInStore(ctx context.Context, key string) error {
+	if b.outbox == nil {
+		return nil
+	}
+	pending, err := b.outbox.HasPending(ctx, key)
+	if err != nil {
+		return err
+	}
+	if !pending {
+		return nil
+	}
+	if derr := b.outbox.Drain(ctx); derr != nil {
+		return fmt.Errorf("s3state: %s is queued in the local outbox, not in the object store: %w", key, derr)
+	}
+	pending, err = b.outbox.HasPending(ctx, key)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return fmt.Errorf("s3state: %s is queued in the local outbox, not in the object store", key)
+	}
+	return nil
 }
 
 func (b *Backend) markFlushed(rs *runState, delivered bool) {
@@ -458,17 +504,34 @@ func (b *Backend) flushAllDirty() {
 
 // Close stops the background flush goroutine and synchronously
 // flushes any runs still marked dirty, waiting out any flush still in
-// flight so nothing appended before Close is left unwritten.
+// flight so nothing appended before Close is left unwritten. It then
+// gives the outbox a bounded chance to drain. A non-nil return means
+// some of the state did not reach the object store, which in Mode 2
+// is its only copy, and dies with this process's disk.
 func (b *Backend) Close() error {
 	b.stopOnce.Do(func() { close(b.stopCh) })
 	b.wg.Wait()
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultCloseDrainTimeout)
+	defer cancel()
+	var errs []error
 	for _, id := range b.dirtyRunIDs() {
-		_ = b.flushRun(context.Background(), id)
+		if err := b.flushRun(ctx, id, true); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if b.outbox != nil {
-		_ = b.outbox.Close()
+		if err := b.outbox.Drain(ctx); err != nil {
+			errs = append(errs, err)
+		} else if n, perr := b.outbox.Pending(ctx); perr != nil {
+			errs = append(errs, perr)
+		} else if n > 0 {
+			errs = append(errs, fmt.Errorf("s3state: %d write(s) left in the local outbox, not in the object store", n))
+		}
+		if err := b.outbox.Close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func stateKey(runID string) string { return "runs/" + runID + "/state.ndjson" }
@@ -615,7 +678,7 @@ func (b *Backend) FinishRun(ctx context.Context, runID, status, errMsg string) e
 	if err := b.appendEnvelope(ctx, runID, env); err != nil {
 		return err
 	}
-	return b.flushRun(ctx, runID)
+	return b.flushRun(ctx, runID, true)
 }
 
 func (b *Backend) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {

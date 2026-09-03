@@ -28,8 +28,15 @@ type OutboxKind string
 const (
 	OutboxKindState    OutboxKind = "state"
 	OutboxKindArtifact OutboxKind = "artifact"
-	OutboxKindLog      OutboxKind = "log"
+
+	// OutboxKindLog is refused by Stage: a log append is not a
+	// whole-blob PUT, which is the only shape the drainer replays.
+	OutboxKindLog OutboxKind = "log"
 )
+
+func replayableKind(kind OutboxKind) bool {
+	return kind == OutboxKindState || kind == OutboxKindArtifact
+}
 
 // Outbox persists writes that failed transiently against the object
 // store and drains them in FIFO order when connectivity returns.
@@ -124,8 +131,12 @@ CREATE TABLE IF NOT EXISTS outbox_writes (
 // Stage enqueues a write. Idempotent only at the byte-identical level
 // (replay re-PUTs whatever bytes are in the row, so re-issuing a
 // state PUT is harmless because the contents include all prior
-// envelopes).
+// envelopes). Kinds the drainer cannot replay as a whole-blob PUT are
+// refused rather than queued.
 func (o *Outbox) Stage(ctx context.Context, kind OutboxKind, key string, body []byte) error {
+	if !replayableKind(kind) {
+		return fmt.Errorf("s3state: outbox cannot replay a %s write", kind)
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	_, err := o.db.ExecContext(ctx, `
@@ -155,7 +166,7 @@ func (o *Outbox) HasPending(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-// Pending returns the count of queued writes. Test helper.
+// Pending returns the count of queued writes.
 func (o *Outbox) Pending(ctx context.Context) (int, error) {
 	row := o.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_writes`)
 	var n int
@@ -190,14 +201,10 @@ SELECT id, kind, key, body FROM outbox_writes ORDER BY id ASC LIMIT 1`)
 			return outboxHead{}, err
 		}
 		head := outboxHead{id: id, kind: kind, key: key}
-		switch OutboxKind(kind) {
-		case OutboxKindState, OutboxKindArtifact:
-			perr := o.art.Put(ctx, key, byteReader(body))
-			if perr != nil {
+		if replayableKind(OutboxKind(kind)) {
+			if perr := o.art.Put(ctx, key, byteReader(body)); perr != nil {
 				return head, fmt.Errorf("s3state: drain %s %q: %w", kind, key, perr)
 			}
-		case OutboxKindLog:
-		default:
 		}
 		o.mu.Lock()
 		_, err = o.db.ExecContext(ctx, `DELETE FROM outbox_writes WHERE id = ?`, id)

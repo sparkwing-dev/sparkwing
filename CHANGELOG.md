@@ -289,6 +289,13 @@ code change to unlock.
   `daemon_schema_version` against `store_schema_version`, marks a diverged pair
   unhealthy, says when a restart will not help, and reports a store that exists
   but cannot be read as `store_schema_error` instead of as an absent store.
+- **s3state:** A run whose state reached only the local outbox no longer reports
+  success. `FinishRun` returns an error when the terminal state is queued on
+  this machine's disk rather than in the object store, `Close` returns the
+  errors from its final flush and gives the outbox a bounded chance to drain
+  first, and the outbox refuses to queue a kind it cannot replay instead of
+  deleting it unsent on the next drain. On an ephemeral CI runner the old
+  behaviour exited 0 with the run's only copy on a disk about to disappear.
 - **s3state:** A run another process writes is no longer read once and cached
   forever. In S3-only shared state, the first read of a run id was kept for the
   life of the process, including a read that found nothing, so a pipeline

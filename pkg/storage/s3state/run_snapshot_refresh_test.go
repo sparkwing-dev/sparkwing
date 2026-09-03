@@ -107,8 +107,6 @@ func TestBackend_GetLatestRunDoesNotPinTheRunsItScans(t *testing.T) {
 		t.Fatalf("seed Close: %v", err)
 	}
 
-	// A TTL long enough that only a scan that retains nothing lets the
-	// later read below observe the other process's write.
 	reader := s3state.New(art,
 		s3state.WithFlushInterval(time.Hour),
 		s3state.WithReadCacheTTL(time.Hour),
@@ -131,6 +129,6 @@ func TestBackend_GetLatestRunDoesNotPinTheRunsItScans(t *testing.T) {
 		t.Fatalf("GetRun after the scan: %v", err)
 	}
 	if got.Status != "failed" {
-		t.Errorf("status = %q, want failed; the scan retained the run it read", got.Status)
+		t.Errorf("status = %q, want failed; the hour-long read TTL means only a scan that retained nothing lets this read see the other process's write", got.Status)
 	}
 }
