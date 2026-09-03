@@ -266,8 +266,10 @@ code change to unlock.
   without rechecking, so a sweep that ran while a daemon for another
   `SPARKWING_HOME` was taking over deleted the successor's freshly bound
   socket, leaving clients spinning until they failed with "predecessor daemon
-  still holds the election lock". It now redials and confirms the path still
-  carries the same file before unlinking.
+  still holds the election lock". It now redials both the admission socket and
+  the API socket beside it, and unlinks nothing unless each still carries the
+  same file the dial found dead, so a path that answers again, or that has been
+  replaced or removed since, is left alone.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads
