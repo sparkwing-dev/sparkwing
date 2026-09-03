@@ -23,8 +23,6 @@ import (
 
 var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
-// childStoreEnv is the store a parent already chose, handed to the children it
-// dispatches so they land in it rather than deriving one of their own.
 type childStoreEnv struct {
 	path   string
 	reason string

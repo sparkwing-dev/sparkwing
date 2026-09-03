@@ -30,8 +30,6 @@ func allowUnadmitted() bool {
 	return os.Getenv(AllowUnadmittedEnv) == "1"
 }
 
-// unhosted describes what a run already decided about its store, so admission
-// can tell a gap the run answered from one it is meeting for the first time.
 type unhosted struct {
 	reason string
 	skew   bool
