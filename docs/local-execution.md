@@ -753,9 +753,14 @@ A pipeline that reserves host capacity with a plan-level or node-level
 `.Resources()` pin is not an exception. It runs standalone rather than
 failing, because a commit hook is not the place to fail for a reservation
 nothing else on the box is honoring either. What every standalone run
-loses is the same thing: host CPU and memory are not arbitrated, and
-`sparkwing runs` and the dashboard do not see the run, because they read
-this home's own `state.db` and a standalone run does not.
+loses is the same thing: host CPU and memory are not arbitrated, so a
+standalone run and a hosted one may oversubscribe the box. The read verbs
+still find it. `sparkwing runs list`, `jobs`, `runs find`, and
+`runs failures` merge this home's own `state.db` with every standalone
+store and mark each row with the store it came from; `runs status`,
+`runs get`, `runs receipt`, `runs summary`, and `runs timeline` look an id
+up in the shared store first and then in each standalone store. The
+dashboard reads `state.db` alone and does not see the run.
 
 Some failures are still failures. A daemon whose runs store is unreadable
 for a reason that is not age -- a disk error, a file that is not a
@@ -823,16 +828,28 @@ count and the oldest run's age. Nothing prunes them: delete a file once
 you no longer want the runs in it.
 
 A `standalone/` directory, and each `schema-<N>` under it, is itself a
-Sparkwing home, so the ordinary read verbs work against one:
+Sparkwing home. `sparkwing runs list` already merges them into one table,
+so pointing a home at one is what a verb that writes needs rather than a
+way to see the runs:
 
 ```sh
-SPARKWING_HOME=~/.sparkwing/standalone sparkwing runs list
+SPARKWING_HOME=~/.sparkwing/standalone sparkwing runs cancel --run "$RUN_ID"
 ```
+
+A write verb -- `runs cancel`, `runs retry`, `runs bounce`, `annotate`,
+`approvals approve` and `approvals reject`, `debug rerun`, `debug replay`
+-- writes to the store that holds the run, so asked for an id that lives
+only in a standalone store it answers with that store's path and the
+`SPARKWING_HOME` that reaches it, rather than reporting the run missing.
+
+A read verb opens every standalone store read-only, so reporting on one
+never migrates it. A store this sparkwing is too old to read is skipped
+and named on stderr after the table, with the release that can read it.
 
 The start record of a standalone run carries `standalone: true` and
 `standalone_reason` (`no-daemon`, `daemon-older`, `daemon-fault`,
-`floor`, or `forced`), and `sparkwing runs status` shows both for a run
-read out of a standalone store. To end the standalone state, fix what the
+`floor`, or `forced`), and `sparkwing runs status` shows both along with
+the store the run was read from. To end the standalone state, fix what the
 block names -- install or update sparkwing, raise the repo's pin, or
 unset the variable -- and the next run is hosted again. Runs already
 written to a standalone store stay there.
