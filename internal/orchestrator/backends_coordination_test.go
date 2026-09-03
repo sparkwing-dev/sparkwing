@@ -114,6 +114,9 @@ func TestLocalStateServesEveryRunCoordinationMethod(t *testing.T) {
 	if _, err := state.ReconcileOrphanedLocalRuns(ctx, time.Hour); err != nil {
 		t.Fatalf("ReconcileOrphanedLocalRuns: %v", err)
 	}
+	if _, err := state.ReconcileOrphanedLocalRuns(ctx, 0); err == nil {
+		t.Error("a zero threshold was accepted; it means every running run is orphaned")
+	}
 }
 
 func TestLocalStateSetPipelinePinClearsWithoutCreatingARow(t *testing.T) {

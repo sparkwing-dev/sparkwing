@@ -48,6 +48,10 @@ type Backends struct {
 // dispatches, the capacity profile it measures and is priced from, and the
 // orphan sweep. A backend that cannot answer one of these returns an error
 // wrapping [storage.ErrNotSupported] rather than panicking.
+//
+// ReconcileOrphanedLocalRuns takes the idle age a run must exceed before it
+// counts as orphaned, and every implementation refuses a non-positive one:
+// zero would sweep every run that is still going.
 type RunCoordination interface {
 	ListNodes(ctx context.Context, runID string) ([]*store.Node, error)
 	ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error)
@@ -619,6 +623,9 @@ func (l localState) RecordWaitObservation(ctx context.Context, pipeline string, 
 }
 
 func (l localState) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
+	if threshold <= 0 {
+		return 0, errors.New("ReconcileOrphanedLocalRuns: threshold must be > 0")
+	}
 	return ReconcileOrphanedLocalRuns(ctx, l.st, threshold)
 }
 
