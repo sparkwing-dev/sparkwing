@@ -689,38 +689,28 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if stale, err := store.Maintenance.ReapStaleConcurrencyHolders(s.store, ctx); err != nil {
-				s.logger.Error("concurrency stale-holder reap failed", "err", err)
-			} else {
-				for _, h := range stale {
-					s.logger.Warn("reaped stale concurrency holder",
-						"key", h.Key, "holder_id", h.HolderID,
-						"run_id", h.RunID, "node_id", h.NodeID)
-					if _, err := s.store.PromoteNextWaiters(ctx, h.Key, store.DefaultConcurrencyLease); err != nil {
-						s.logger.Error("promote after stale-holder reap failed",
-							"key", h.Key, "err", err)
-					}
-				}
+			concurrency, err := s.store.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{
+				CacheCap: s.concurrencyCacheCap,
+			})
+			if err != nil {
+				s.logger.Error("concurrency maintenance failed", "err", err)
 			}
-			if n, err := store.Maintenance.SweepExpiredConcurrencyCache(s.store, ctx); err != nil {
-				s.logger.Error("concurrency cache TTL sweep failed", "err", err)
-			} else if n > 0 {
-				s.logger.Info("swept expired concurrency cache entries", "count", n)
+			for _, h := range concurrency.StaleHolders {
+				s.logger.Warn("reaped stale concurrency holder",
+					"key", h.Key, "holder_id", h.HolderID,
+					"run_id", h.RunID, "node_id", h.NodeID)
 			}
-			if dropped, err := store.Maintenance.ReapStaleConcurrencyWaiters(s.store, ctx, 2*store.DefaultConcurrencyLease); err != nil {
-				s.logger.Error("concurrency waiter reap failed", "err", err)
-			} else {
-				for _, w := range dropped {
-					s.logger.Warn("reaped stale concurrency waiter",
-						"key", w.Key, "run_id", w.RunID,
-						"node_id", w.NodeID, "policy", w.Policy,
-						"arrived_at", w.ArrivedAt.Format(time.RFC3339))
-				}
+			for _, w := range concurrency.StaleWaiters {
+				s.logger.Warn("reaped stale concurrency waiter",
+					"key", w.Key, "run_id", w.RunID,
+					"node_id", w.NodeID, "policy", w.Policy,
+					"arrived_at", w.ArrivedAt.Format(time.RFC3339))
 			}
-			if n, err := store.Maintenance.SweepLRUConcurrencyCache(s.store, ctx, s.concurrencyCacheCap); err != nil {
-				s.logger.Error("concurrency cache LRU sweep failed", "err", err)
-			} else if n > 0 {
-				s.logger.Info("evicted LRU concurrency cache entries", "count", n)
+			if concurrency.CacheExpired > 0 {
+				s.logger.Info("swept expired concurrency cache entries", "count", concurrency.CacheExpired)
+			}
+			if concurrency.CacheEvicted > 0 {
+				s.logger.Info("evicted LRU concurrency cache entries", "count", concurrency.CacheEvicted)
 			}
 			if pairs, err := store.Maintenance.FailExpiredNodeClaims(s.store, ctx); err != nil {
 				s.logger.Error("node agent-lost sweep failed", "err", err)
