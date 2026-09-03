@@ -9,11 +9,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/supervise"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func TestShutdownWindowsNest(t *testing.T) {
+	if orchestrator.FinalizeTimeout >= wingd.FinalizeDrainWindow {
+		t.Errorf("one finalize may take %s but the drain waits %s, so the drain cannot outlast a finalize",
+			orchestrator.FinalizeTimeout, wingd.FinalizeDrainWindow)
+	}
+	if wingd.FinalizeDrainWindow > supervise.DefaultTermGrace {
+		t.Errorf("the drain waits %s but the supervisor kills after %s, so the drain is unreachable under supervision",
+			wingd.FinalizeDrainWindow, supervise.DefaultTermGrace)
+	}
+	if supervise.DefaultTermGrace >= daemonRestartTimeout {
+		t.Errorf("the supervisor takes up to %s to stop a daemon but a restart gives up after %s",
+			supervise.DefaultTermGrace, daemonRestartTimeout)
+	}
+}
 
 func TestInspectDaemonReportsExactSourceRevision(t *testing.T) {
 	home, err := os.MkdirTemp("/tmp", "sparkwing-daemon-status-")

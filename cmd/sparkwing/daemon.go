@@ -17,6 +17,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+// safety: the last of the nesting shutdown windows on wingd.FinalizeDrainWindow.
+// A restart outlasts the supervisor's termination grace, or it reports on a
+// daemon that is still stopping.
+const daemonRestartTimeout = 20 * time.Second
+
 type daemonReport struct {
 	Running             bool     `json:"running"`
 	Healthy             bool     `json:"healthy"`
@@ -229,7 +234,7 @@ func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
 		}
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), daemonRestartTimeout)
 	defer cancel()
 	format, err := resolveTTYAwareOutput(*output, cmdDaemonRestart.Path)
 	if err != nil {

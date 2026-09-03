@@ -96,14 +96,20 @@ code change to unlock.
   every 10 seconds, and closes its handles when it exits or idles out. A
   SQLite store is a single connection, so the terminal check on the admission
   path reads through a separate read-only handle that no reaper pass or
-  finalize can hold up, and every store call the daemon makes carries a
-  deadline. A store that will not open still does not stop the daemon serving:
-  it evicts the runs whose terminal state it cannot check, naming the reason,
-  and retries the open, immediately while no store file exists and every 30
-  seconds once one does. A store file deleted or replaced under the daemon is
-  noticed and reopened. `sparkwing daemon status` reports the daemon's own
-  view as `daemon_store_ready`, `daemon_store_error`, and `store_path`, with a
-  remedy when the store is unusable.
+  finalize can hold up. Every store call the daemon makes is bounded,
+  including the wait for a handle that is still opening, so a store whose
+  migration waits out another process's write lock evicts one run with that
+  reason instead of stalling every admission on the machine. A store that will
+  not open still does not stop the daemon serving: it evicts the runs whose
+  terminal state it cannot check, naming the reason, and retries the open,
+  immediately while no store file exists and every 30 seconds once one does. A
+  store file deleted or replaced under the daemon is noticed and reopened.
+  `sparkwing daemon status` reports the daemon's own view as
+  `daemon_store_ready`, `daemon_store_error`, and `store_path`, with a remedy
+  when the store is unusable. The daemon's shutdown drain, one finalize's
+  deadline, the supervisor's termination grace, and `sparkwing daemon
+  restart`'s budget now nest, so a finalize in flight when the daemon stops
+  either lands or says which run it gave up on.
 - **controller:** The controller reaper runs the store's own concurrency
   maintenance pass rather than its own sequence of sweeps, so keys with idle
   capacity and waiting work are reconciled on every pass instead of only at

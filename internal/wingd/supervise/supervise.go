@@ -20,8 +20,13 @@ const (
 	defaultProbeInterval = 2 * time.Second
 	defaultProbeTimeout  = time.Second
 	defaultFailureLimit  = 3
-	defaultTermGrace     = 3 * time.Second
 )
+
+// DefaultTermGrace is how long the supervisor lets a daemon it stopped exit
+// before killing it. It exceeds the daemon's own drain of in-flight run
+// finalizes, described on
+// [github.com/sparkwing-dev/sparkwing/internal/wingd.FinalizeDrainWindow].
+const DefaultTermGrace = 15 * time.Second
 
 type Child interface {
 	Wait() <-chan error
@@ -213,7 +218,7 @@ func Run(args []string) error {
 		ProbeInterval: defaultProbeInterval,
 		ProbeTimeout:  defaultProbeTimeout,
 		FailureLimit:  defaultFailureLimit,
-		TermGrace:     defaultTermGrace,
+		TermGrace:     DefaultTermGrace,
 	}, Deps{
 		Start: func() (Child, error) {
 			return startExecChild(self, childArgs)
