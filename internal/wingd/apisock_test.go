@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -288,5 +289,34 @@ func TestAnOpenAPIConnectionKeepsTheDaemonFromIdling(t *testing.T) {
 	case <-errc:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the daemon did not idle out after the API connection closed")
+	}
+}
+
+func TestReapingADeadSocketDirectoryRemovesBothSockets(t *testing.T) {
+	deadHome := t.TempDir()
+	sock, err := SocketPath(deadHome)
+	if err != nil {
+		t.Fatalf("socket path: %v", err)
+	}
+	dir := filepath.Dir(sock)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("make socket dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	apiSock, err := APISocketPath(deadHome)
+	if err != nil {
+		t.Fatalf("api socket path: %v", err)
+	}
+	for _, path := range []string{sock, apiSock} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	if _, err := PeerSockets(t.TempDir()); err != nil {
+		t.Fatalf("peer sockets: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("a killed daemon's socket directory survives the sweep because api.sock is still in it: %v", err)
 	}
 }

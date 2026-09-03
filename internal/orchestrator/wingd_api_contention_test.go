@@ -150,12 +150,34 @@ func TestWingdAPIReadsDoNotWaitOnAForeignWriter(t *testing.T) {
 	for _, kind := range []string{"triggerpoll", "nodebeat", "slotbeat", "admission"} {
 		col.report(t, kind)
 	}
+	for _, kind := range []string{"triggerpoll", "nodebeat", "slotbeat", "admission"} {
+		if n, errs := col.outcome(kind); n == 0 {
+			t.Errorf("%s produced no samples, so the ceiling below proves nothing", kind)
+		} else if errs > 0 {
+			t.Errorf("%s failed %d of %d requests; a refused answer is not a fast one", kind, errs, n)
+		}
+	}
 	for _, kind := range []string{"triggerpoll", "admission"} {
 		if worst := col.worst(kind); worst >= readStallCeiling {
 			t.Errorf("%s waited %s on the foreign writer, over the %s a served read may take",
 				kind, worst.Round(time.Millisecond), readStallCeiling)
 		}
 	}
+}
+
+func (c *collector) outcome(kind string) (n, errs int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, s := range c.s {
+		if s.kind != kind {
+			continue
+		}
+		n++
+		if s.err != nil {
+			errs++
+		}
+	}
+	return n, errs
 }
 
 func (c *collector) worst(kind string) time.Duration {

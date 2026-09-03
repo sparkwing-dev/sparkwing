@@ -28,12 +28,20 @@ func apiHTTPClient(sock string) *http.Client {
 
 func startAPIDaemon(t *testing.T, home string, tune func(*wingd.Config)) (string, *HeldRunStore) {
 	t.Helper()
+	return startAPIDaemonWith(t, home, tune, nil)
+}
+
+func startAPIDaemonWith(t *testing.T, home string, tune func(*wingd.Config), tuneAPI func(*wingdAPI)) (string, *HeldRunStore) {
+	t.Helper()
 	runs, err := NewHeldRunStore(home)
 	if err != nil {
 		t.Fatalf("held run store: %v", err)
 	}
 	t.Cleanup(func() { _ = runs.Close() })
 	api := newWingdAPI(runs, nil, nil)
+	if tuneAPI != nil {
+		tuneAPI(api)
+	}
 	cfg := wingd.Config{
 		Home:    home,
 		Version: "test",
