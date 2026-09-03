@@ -86,6 +86,24 @@ code change to unlock.
   and the release pipeline always runs the exhaustive proof. See DELIVERY.md
   for the input set and where proofs are stored.
 
+- **wingd:** The admission daemon holds one runs-store handle for its lifetime
+  and reaps the store while it serves. It used to open and close `state.db` on
+  every terminal check and every finalize, once per lease member on reattach,
+  and on a machine with no controller nothing reclaimed a store slot whose
+  holder was killed until `sparkwing doctor` ran. The daemon now opens the
+  store it finds at start (it never creates one), reconciles runs whose
+  process died without finishing them,
+  reaps lapsed concurrency holders and the waiters behind them every 10
+  seconds, and closes the handle when it exits or idles out. A store it cannot
+  open still does not stop admission: the run is evicted naming the store's own
+  reason, and the daemon retries the open every 30 seconds. `sparkwing daemon
+  status` reports the daemon's own view as `daemon_store_ready` and
+  `daemon_store_error`.
+- **controller:** The controller reaper runs the store's own concurrency
+  maintenance pass rather than its own sequence of sweeps, so keys with idle
+  capacity and waiting work are reconciled on every pass instead of only at
+  startup. The daemon and the controller now reclaim by the same code.
+
 - **release:** The release pipeline now runs a contract preflight before the
   root Go suite. It proves the embedded documentation mirror and a named set of
   documentation, help, registry, and environment-variable contract checks in

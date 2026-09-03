@@ -640,8 +640,11 @@ oversubscribe it. What they keep is `.Concurrency()`: box- and run-scoped
 groups are enforced through the shared store instead of the daemon, so
 "one deploy at a time on this box" still holds. The difference is crash
 cleanup -- the daemon frees a killed run's slot the instant the kernel
-closes its socket, while a store slot survives until `sparkwing doctor`
-reclaims it.
+closes its socket, while a store slot is held until its lease lapses and
+something reaps it. A daemon reaps lapsed store slots every 10 seconds
+while it serves, so on a box with a daemon the slot comes back on its own;
+with no daemon running, `sparkwing doctor` is the only thing that reclaims
+it.
 
 The exception is a pipeline that **reserves host capacity** with a
 plan-level or node-level `.Resources()` pin. That run fails, naming the
@@ -705,6 +708,19 @@ the file and the explicit recovery command. After verifying those
 commands have stopped, `sparkwing daemon recover-state --yes` preserves
 the bytes as `state.json.corrupt-<time>` for `sparkwing doctor` to report
 and allows the next daemon to start cleanly.
+
+While it serves, the daemon holds one open handle on the runs store
+instead of reopening `state.db` for every check, and it reaps that store
+through the same handle: lapsed concurrency holders and the waiters
+behind them every 10 seconds, and runs whose process died without
+finishing them once at start. It opens the store it finds and never
+creates one, so a machine whose runs all keep their state in an object
+store still has no local database. A store the daemon cannot open does
+not stop admission. The run is evicted naming the store's own reason, as
+before, `sparkwing daemon status` reports `daemon_store_ready` false with
+that reason, and the daemon retries the open every 30 seconds, so a store
+that appears or becomes readable is picked up without a restart. The
+handle closes when the daemon exits or idles out.
 
 ### Declare nothing; sparkwing measures
 
