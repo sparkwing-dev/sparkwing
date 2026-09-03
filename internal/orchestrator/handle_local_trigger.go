@@ -94,10 +94,9 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	return nil
 }
 
-// localTriggerBackends gives a child run the same state backend its parent
-// chose: the admission daemon's API socket when the daemon serves it, and
-// this machine's store otherwise. A child on a named profile keeps that
-// profile's store, which the daemon does not stand in front of.
+// safety: a child run picks its backend the way its parent did, so a hosted
+// run dispatches children that open nothing either. A named profile is
+// excluded because the daemon stands in front of this machine's store alone.
 func localTriggerBackends(ctx context.Context, paths Paths, profileName string) (Backends, func(), error) {
 	if profileName == "" {
 		opts := Options{

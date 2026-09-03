@@ -24,33 +24,22 @@ const (
 	hostedRetryMaxWait   = 2 * time.Second
 )
 
-// hostedRetryPolicy says what a request may do when the daemon does not
-// answer it.
 type hostedRetryPolicy int
 
+// safety: unsent is the default because repeating a request the daemon did
+// serve would append a second row; repeatable writes a value rather than an
+// increment; create names a row the caller identifies, so a conflict on a
+// later attempt means the first attempt landed.
 const (
-	// hostedRetryUnsent is the default: the request is repeated only when
-	// the transport proves it never reached the daemon, because repeating
-	// one the daemon did serve would append a second row.
 	hostedRetryUnsent hostedRetryPolicy = iota
-	// hostedRetryRepeatable writes a value rather than an increment, so
-	// sending it twice leaves the same row.
 	hostedRetryRepeatable
-	// hostedRetryCreate names a row the caller identifies, so a conflict on
-	// a later attempt means the first attempt landed.
 	hostedRetryCreate
 )
 
-// hostedRepeatableWrites are the last path segments of the POST routes whose
-// effect is a value, not an increment: the row they write is the same after
-// two calls as after one.
-//
-// safety: every route absent from this table falls to [hostedRetryUnsent],
-// so a route added later is repeated only when it provably never arrived.
-// Concurrency's acquire, heartbeat, release and resolve are here because the
-// store keys a holder on (key, holder_id) and a waiter on (key, run_id,
-// node_id) and upserts both, so a repeat by the same holder is the same
-// claim rather than a second one.
+// safety: the last path segment of every POST whose effect is a value, not
+// an increment. A route absent from it is repeated only when it provably
+// never arrived. Concurrency is here because the store upserts a holder on
+// (key, holder_id) and a waiter on (key, run_id, node_id).
 var hostedRepeatableWrites = map[string]bool{
 	"finish":            true,
 	"heartbeat":         true,
@@ -145,8 +134,6 @@ func hostedRetryAllowed(policy hostedRetryPolicy, err error) bool {
 	return policy == hostedRetryRepeatable || policy == hostedRetryCreate
 }
 
-// hostedNeverSent reports an error raised before the request left this
-// process: no socket to dial, or nothing listening on it.
 func hostedNeverSent(err error) bool {
 	var op *net.OpError
 	if errors.As(err, &op) && op.Op == "dial" {

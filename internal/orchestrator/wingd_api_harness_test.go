@@ -46,8 +46,8 @@ func startAPIDaemonOn(t *testing.T, home string, runs *HeldRunStore, tune func(*
 	return startAPIDaemonSplit(t, home, runs, runs, tune, tuneAPI)
 }
 
-// startAPIDaemonSplit gives admission and the API socket different runs
-// stores, so a test can fault one without the other.
+// safety: admission and the API socket get different runs stores, so a test
+// can fault one without the other.
 func startAPIDaemonSplit(t *testing.T, home string, runs, apiRuns *HeldRunStore, tune func(*wingd.Config), tuneAPI func(*wingdAPI)) (string, *HeldRunStore) {
 	t.Helper()
 	api := newWingdAPI(apiRuns, nil, nil)

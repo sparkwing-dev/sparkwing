@@ -56,8 +56,8 @@ func TestHostedRetryPolicy_ClassifiesEveryWriteTheRunMakes(t *testing.T) {
 	}
 }
 
-// restartableAPI serves a handler on a unix socket path a test can take away
-// and give back, which is what a daemon restart looks like to a hosted run.
+// safety: taking a unix socket away and giving it back is what a daemon
+// restart looks like to a hosted run.
 type restartableAPI struct {
 	t    *testing.T
 	sock string

@@ -438,10 +438,9 @@ func (s *Server) Handler() http.Handler {
 	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
 }
 
-// routers registers every route this controller serves and returns the
-// authenticated mux and the public one, neither wired to the other. It runs
-// without reaching the store, so a caller that only needs to know whether a
-// route exists can build it from a zero Server.
+// safety: neither mux is wired to the other and no handler runs, so a caller
+// that only needs to know whether a route exists can build these from a zero
+// Server without reaching a store.
 func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux := http.NewServeMux()
 

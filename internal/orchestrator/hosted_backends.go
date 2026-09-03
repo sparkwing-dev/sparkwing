@@ -30,9 +30,8 @@ const hostedAPITimeout = APIRequestTimeout + 15*time.Second
 
 const hostedAPIProbeTimeout = 3 * time.Second
 
-// errNoHostedAPI marks a reason the run took the direct path that admission
-// does not report for itself. A daemon this pipeline could not reach at all
-// is admission's own subject, and it says so.
+// safety: marks the reasons admission does not report for itself. A daemon
+// this pipeline could not reach at all is admission's own subject.
 var errNoHostedAPI = errors.New("the admission daemon does not serve this run's state")
 
 // NewAPISocketClient returns an HTTP client that reaches the daemon's
@@ -114,17 +113,13 @@ func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (string, error) {
 	return sock, nil
 }
 
-// hostedHealth is the part of the daemon's health answer that decides
-// whether it can hold this run's state.
 type hostedHealth struct {
 	Store string `json:"store"`
 }
 
 // safety: only a daemon answering 200 with a store it can open, or with none
-// yet, hosts a run. Every other answer -- a degraded 503 from a daemon whose
-// own handle failed, a 404 from one too old for the route, a body that is not
-// the health answer -- is a daemon this run must not bind to, because the
-// process that could still open that file itself is this one.
+// yet, hosts a run. Every other answer is a daemon this run must not bind
+// to, because the process that could still open that file is this one.
 func hostedAPIReachable(ctx context.Context, sock string) error {
 	ctx, cancel := context.WithTimeout(ctx, hostedAPIProbeTimeout)
 	defer cancel()
@@ -162,13 +157,10 @@ func hostedAPIReachable(ctx context.Context, sock string) error {
 	return hostedAPIServesCoordination(ctx, sock)
 }
 
-// hostedCoordinationProbes names one route per family a hosted run needs
-// beyond the run and node state every released daemon serving api.sock
-// already carries. They are GETs so the probe writes nothing.
-//
-// safety: no run and no pipeline carries these ids, so a daemon that serves
-// the route answers an empty result and one that does not answers the
-// unsupported body, whatever state its store is in.
+// safety: one GET per coordination route family, so the probe writes
+// nothing. No run and no pipeline carries these ids, so a daemon that serves
+// the route answers empty and one that does not answers the unsupported
+// body, whatever state its store is in.
 var hostedCoordinationProbes = []func(context.Context, *client.Client) error{
 	func(ctx context.Context, c *client.Client) error {
 		_, err := c.ListPendingTriggersForParent(ctx, hostedProbeID)
@@ -191,11 +183,9 @@ var hostedCoordinationProbes = []func(context.Context, *client.Client) error{
 const hostedProbeID = "sparkwing-route-probe"
 
 // safety: a daemon older than this pipeline serves api.sock but not every
-// route the run needs, and the trigger loop's failure is otherwise silent --
-// it retries every 500 ms and gives up on the wedge budget while the run
-// reports success. The probe asks before any state is written, because after
-// that a missing route is a run failure rather than a reason to change
-// backend.
+// route, and the trigger loop's failure is otherwise silent while the run
+// reports success. Asked before any state is written, because after that a
+// missing route is a run failure rather than a reason to change backend.
 func hostedAPIServesCoordination(ctx context.Context, sock string) error {
 	httpClient := newAPIProbeClient(sock)
 	defer httpClient.CloseIdleConnections()

@@ -555,9 +555,6 @@ func invokeGeneratorForPod(ctx context.Context, exp sparkwing.Expansion) (out []
 	return exp.Gen(ctx)
 }
 
-// nodeTransports separates the two networks a node process talks on. State
-// and concurrency may travel over the admission daemon's unix socket; the
-// logs service and a remote runner are named by URLs and reached over TCP.
 type nodeTransports struct {
 	stateURL   string
 	stateToken string
