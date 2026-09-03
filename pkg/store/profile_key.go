@@ -118,16 +118,23 @@ func RepoIdentityFromPath(repoPath string) string {
 
 // RepoIdentityMatches reports whether a profile key's repository scope
 // names the same repository as a run or trigger row. The key carries the
-// canonical identity ("host/owner/name"), while a row records the slug
-// it was triggered for ("owner/name") and, when it has one, the clone
-// URL the identity derives from; any of the three agreeing is a match.
-// A row with no repository at all matches no scoped key.
+// canonical identity ("host/owner/name"); a row records the slug it was
+// triggered for ("owner/name") and, when it has one, the clone URL the
+// identity derives from. The slug matches only under a bare host, so a
+// caller cannot reach "host/other/owner/name" by naming its own
+// "owner/name"; a deeper path is proved by the clone URL instead. A row
+// with no repository at all matches no scoped key.
 func RepoIdentityMatches(keyRepo, repo, repoURL string) bool {
 	if keyRepo == "" {
 		return true
 	}
-	if repo != "" && (keyRepo == repo || strings.HasSuffix(keyRepo, "/"+repo)) {
-		return true
+	if repo != "" {
+		if keyRepo == repo {
+			return true
+		}
+		if host, ok := strings.CutSuffix(keyRepo, "/"+repo); ok && host != "" && !strings.Contains(host, "/") {
+			return true
+		}
 	}
 	return repoURL != "" && keyRepo == RepoIdentityFromURL(repoURL)
 }
