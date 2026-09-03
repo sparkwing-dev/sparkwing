@@ -290,6 +290,13 @@ code change to unlock.
   `daemon_schema_version` against `store_schema_version`, marks a diverged pair
   unhealthy, says when a restart will not help, and reports a store that exists
   but cannot be read as `store_schema_error` instead of as an absent store.
+- **s3state:** A failed child-trigger write no longer strands the spawn. The
+  trigger record is written before the `PutIfAbsent` index that names it, so a
+  transient failure between the two leaves nothing behind and the next attempt
+  mints a usable trigger, where before the index pointed at a record that never
+  existed and every retry returned that same phantom id. A caller that loses
+  the race for a spawn point drops the record it minted, so a spawn point still
+  ends with exactly one trigger.
 - **s3state:** An object-store outage no longer piles up redundant copies of a
   run's state. Staging a write now replaces whatever was queued for the same
   key, because each body is that key's whole blob and only the newest is worth
