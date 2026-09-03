@@ -41,7 +41,7 @@ func daemonStoreSchemaSkew(daemonVersion, selfVersion string, daemonSchema int, 
 			return nil
 		}
 		return storeSchemaRemedy(fmt.Sprintf(
-			"daemon %s does not understand runs-store requirement(s) %s, which this binary is %s stamps into the store both share",
+			"daemon %s does not understand runs-store requirement(s) %s, which this binary (%s) stamps into the store they share",
 			describeVersion(daemonVersion), strings.Join(missing, ", "), describeVersion(selfVersion)), selfSchema)
 	}
 	if daemonSchema >= selfSchema {

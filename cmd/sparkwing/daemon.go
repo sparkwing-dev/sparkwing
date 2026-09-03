@@ -249,10 +249,20 @@ func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
 func schemaRemedy(report daemonReport) string {
 	if report.InstalledVersion != "" && report.InstalledVersion == report.BinaryVersion {
 		return fmt.Sprintf(
-			"the installed sparkwing is the same build (%s), so `sparkwing daemon restart` will not help; install a sparkwing that understands schema %d, or set %s to a binary that does and stop the daemon",
-			report.InstalledVersion, report.StoreSchemaVersion, wingdclient.HostBinEnv)
+			"the installed sparkwing is the same build (%s), so `sparkwing daemon restart` will not help; install a sparkwing that understands %s, or set %s to a binary that does and stop the daemon",
+			report.InstalledVersion, schemaShortfall(report), wingdclient.HostBinEnv)
 	}
 	return fmt.Sprintf("run `sparkwing daemon restart` to replace it with the installed %s", report.InstalledVersion)
+}
+
+// schemaShortfall names what the daemon's binary is missing: the requirements
+// when it advertised them, and otherwise the schema number the fallback
+// comparison used.
+func schemaShortfall(report daemonReport) string {
+	if len(report.MissingRequirements) > 0 {
+		return strings.Join(report.MissingRequirements, ", ")
+	}
+	return fmt.Sprintf("schema %d", report.StoreSchemaVersion)
 }
 
 func emitDaemonReport(report daemonReport, output string) error {

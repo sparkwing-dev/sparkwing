@@ -132,10 +132,20 @@ func TestDaemonStoreSchemaSkewNamesTheRequirementTheDaemonLacks(t *testing.T) {
 	if !errors.Is(err, ErrDaemonStoreSchemaTooOld) {
 		t.Fatalf("skew error = %v, want ErrDaemonStoreSchemaTooOld", err)
 	}
-	for _, want := range []string{known[0], "v0.38.2", "v0.39.0", wingdclient.HostBinEnv} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("skew error = %q, want it to name %q", err, want)
-		}
+	want := ErrDaemonStoreSchemaTooOld.Error() + ": daemon v0.38.2 does not understand runs-store requirement(s) " +
+		known[0] + ", which this binary (v0.39.0) stamps into the store they share. " +
+		"Install a sparkwing that understands schema 27, or set " + wingdclient.HostBinEnv +
+		" to a binary that does and stop the daemon so the next run brings it up. " +
+		"`sparkwing daemon restart` respawns the same build, and a fresh SPARKWING_HOME still hosts the daemon from the sparkwing on PATH"
+	if got := err.Error(); got != want {
+		t.Fatalf("skew error =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestDaemonStoreSchemaSkewRendersAnUnknownSelfVersion(t *testing.T) {
+	err := daemonStoreSchemaSkew("", "", 26, store.KnownRequirements()[1:], 27)
+	if !strings.Contains(err.Error(), "which this binary ((unknown)) stamps into the store they share") {
+		t.Fatalf("skew error = %q, want a readable clause for an unknown self version", err)
 	}
 }
 
