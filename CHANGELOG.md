@@ -645,6 +645,16 @@ code change to unlock.
   at the cloud metadata endpoint, loopback, or any RFC1918 address through
   `POST /api/v1/triggers` and the gitcache proxy, or through `/git/register`,
   `/archive`, and `/sync/seed` on `sparkwing-cache`.
+- **cache + controller:** A clone URL is also refused when its host sits in a
+  name space that only ever points inward: `internal`, `local`, `localdomain`,
+  and `home.arpa`, whether as the whole host or as a suffix, beside the
+  `localhost` and cloud metadata names already refused. The loopback, private,
+  and link-local checks fired only on an IP literal, so `db.internal` or a name
+  an attacker points at `169.254.169.254` walked past them. Names are still not
+  resolved while a URL is validated, because git resolves the name again when
+  it connects, so an address checked at validation time is not the address
+  reached; a deployment that has to bound clone targets beyond this states the
+  boundary by name through the host policy the validator now consults.
 
 ### Docs
 
