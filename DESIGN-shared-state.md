@@ -304,7 +304,8 @@ Tables: `runs`, `nodes`, `events`, `triggers`,
 `concurrency_waiters`, `concurrency_cache`, `node_steps`,
 `node_metrics`, `tokens`, `sessions`, `users`, `secrets`,
 `debug_pauses`, `approvals`, `node_dispatches`, plus
-`sparkwing_schema_version` (created separately on every Open):
+`sparkwing_schema_version` and `sparkwing_requirements` (both created
+separately on every Open):
 
 ```sql
 CREATE TABLE sparkwing_schema_version (
@@ -312,23 +313,45 @@ CREATE TABLE sparkwing_schema_version (
     applied_at BIGINT NOT NULL,
     PRIMARY KEY (version)
 );
+
+CREATE TABLE sparkwing_requirements (
+    name             TEXT NOT NULL,
+    added_at         BIGINT NOT NULL,
+    added_by_version TEXT NOT NULL,
+    PRIMARY KEY (name)
+);
 ```
 
-On `store.Open`, the highest row's `version` is compared against
-the binary's expected version. Skew handling:
+Neither table is a numbered migration, so neither leaves a row in
+`sparkwing_schema_version`. That is deliberate for the requirements
+table: a schema bump to introduce it would have stranded every older
+binary in order to ship the mechanism whose purpose is to stop
+stranding them.
+
+`sparkwing_schema_version` orders migrations. `sparkwing_requirements`
+decides who may open the database: each migration declares whether it is
+additive or adds a named requirement, and `store.Open` admits a runner
+that knows every requirement listed, whatever version number the schema
+table holds. Skew handling:
 
 - runner version > DB version: runner runs the missing migrations
-  inside a single transaction. (Same behavior as today's SQLite
-  `migrate()`.)
-- runner version < DB version: refuse to start with a clear error
-  ("DB is at schema v17; this runner expects v15. Upgrade
-  sparkwing or downgrade the DB."). Fail loud; don't try to
-  operate on a newer schema.
+  inside a single transaction, stamping the requirements each applied
+  version declares. A database migrated before requirements shipped is
+  backfilled with the requirements of its applied versions on first
+  open.
+- runner version < DB version, every listed requirement known: open
+  read/write, migrate nothing, stamp nothing. Every additive migration
+  lands here.
+- any listed requirement unknown: refuse to start, naming the
+  requirements and the release that introduced them ("this state
+  database uses unique-token-prefix, which needs sparkwing >= v0.40.0").
+  Fail loud; don't operate on a schema whose shape this binary cannot
+  model.
 
-This is the cost of direct-DB mode and the reason hosted-controller
-exists: the controller can run any version against any client
-version of the same major; direct-DB couples runner version to
-schema version.
+Only a breaking migration couples runner version to schema version, and
+the requirements table names exactly which one. Hosted-controller still
+decouples the two entirely: the controller can run any version against
+any client version of the same major.
 
 ### Locking semantics worth re-verifying
 

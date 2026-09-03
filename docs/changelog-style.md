@@ -171,9 +171,19 @@ A requirement name is a short kebab-case noun for the feature --
 and never a ticket id. The name reaches operators verbatim in the
 refusal message, so name the feature, not the change.
 
+The two tests worth knowing: `pkg/store` fails any non-declaring version
+that adds a `NOT NULL` column with no default, because an older binary's
+insert cannot satisfy it. Neither that test nor the gate catches a
+*semantic* break -- a defaulted column whose empty value the newer binary
+misreads when an older binary writes a row without it -- so ask that
+question by hand before declaring a migration additive.
+
 The release gate reads the registry out of the source, so a bump that
 declares a requirement and ships only a plain entry fails, and so does a
-bump that declares none and ships nothing.
+bump that declares none and ships nothing. It also diffs the registry
+against the previous tag, so declaring a requirement on an
+already-released version without bumping the schema needs the same
+`(Breaking)` entry.
 
 ## Pre-release manicuring (what the agent does)
 
