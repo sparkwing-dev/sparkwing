@@ -148,6 +148,25 @@ code change to unlock.
 
 ### Changed
 
+- **orchestrator:** A local run now reaches this machine's runs store through
+  the admission daemon instead of opening `state.db` itself. When the
+  handshake reports the daemon serving `api.sock`, the run's state and
+  concurrency backends are a controller client over that socket, and each
+  `run-node` subprocess is handed the socket in `SPARKWING_API_SOCKET` rather
+  than a loopback controller's URL and admin token. Nothing mints or revokes a
+  per-run token any more, and the run holds no file descriptor on the store, so
+  the store's schema is no longer part of a pipeline binary's contract. The
+  requests carry no bearer: the daemon takes the connection's peer uid as the
+  principal, which is both the authority a same-uid process already had and the
+  faster path, because a bearer is looked up on the writing handle. Logs and
+  artifacts are unchanged, still this machine's own files. A run that finds no
+  daemon, a daemon that serves no API socket, or a socket that does not answer
+  keeps today's path -- its own store handle plus an in-process loopback
+  controller -- and says on stderr which way it went and why. Once the run's
+  rows exist on the daemon it does not switch back: a daemon that cannot serve
+  its store answers 503, the controller client retries, and a store that stays
+  unusable fails the run naming the daemon rather than hanging.
+
 - **store:** The runs store opens by requirements set rather than by exact
   schema version. The database records the features its schema relies on in a
   new `sparkwing_requirements` table, each stamped with the binary version that

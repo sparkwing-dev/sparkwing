@@ -47,15 +47,24 @@ where its records land.
 Your laptop:
   1. sparkwing run compiles the pipeline from .sparkwing/
   2. Pipeline runs whatever its code says (test, build, deploy, etc.)
-  3. sparkwing run records the run to ~/.sparkwing/
-     (SQLite + per-run log files)
+  3. sparkwing run records the run through the admission daemon,
+     which owns ~/.sparkwing/state.db; log files stay per-run on disk
 ```
 
 Your laptop runs the pipeline directly. No sparkwing controller is
-involved. Each invocation writes its outcome to the local SQLite store
-under `~/.sparkwing/`, which is what `sparkwing dashboard start` reads.
+involved. Each invocation's outcome lands in the SQLite store under
+`~/.sparkwing/`, which is what `sparkwing dashboard start` reads.
 Run `sparkwing dashboard start` once and leave it up to watch
 concurrent runs in a browser without needing any remote service.
+
+The run does not open that store. It sends its run, node, event, and
+concurrency calls to the admission daemon over the daemon's `api.sock`,
+and hands each node subprocess the same socket, so the daemon's process is
+the only one on the machine holding the file open. That is what keeps the
+store's schema out of a pipeline binary's contract. A run that finds no
+daemon serving the socket opens the store itself instead, which is why a
+machine with no sparkwing installed still runs pipelines; it says which
+way it went on stderr when it takes the direct path.
 
 Local pipelines share a small admission daemon named wingd. It starts on
 demand and normally needs no operator attention. `sparkwing daemon status`

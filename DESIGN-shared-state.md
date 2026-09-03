@@ -120,9 +120,9 @@ The operator-facing view of all of this is
 sparkwing run (laptop)
    └─ orchestrator
        └─ Backends{
-            State:       localState{*store.Store(sqlite)}
+            State:       client.Client -> unix api.sock -> wingd's *store.Store(sqlite)
             Logs:        localLogs{paths}
-            Concurrency: localConcurrency{*store.Store(sqlite)}
+            Concurrency: HTTPConcurrency -> the same socket
           }
        └─ ArtifactStore: fs:///~/.cache/sparkwing
        └─ LogStore:      per-run files under ~/.sparkwing/runs/<runID>/
@@ -130,6 +130,17 @@ sparkwing run (laptop)
 
 Selected when: the resolved profile's `state:` surface is `sqlite` (or
 the profile declares no surfaces), or `--sw-local-only` is set.
+
+The admission daemon owns `~/.sparkwing/state.db`. A run that reaches it
+opens no store: its state and concurrency calls travel over the daemon's
+`api.sock` with no bearer token, and each `run-node` subprocess is handed
+that socket instead of a loopback controller's URL and token. Logs and
+artifacts stay on this machine's own files either way.
+
+A run that cannot reach a daemon serving that socket keeps the direct path
+instead -- `localState` and `localConcurrency` over its own
+`*store.Store`, plus an in-process loopback controller for its
+subprocesses -- so a machine with no daemon still runs pipelines.
 
 ### Mode 2: S3-only shared
 

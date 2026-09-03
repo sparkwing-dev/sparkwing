@@ -219,13 +219,18 @@ These are set on every runner pod:
 ### Environment variables set on a local node process
 
 A local run executes each node as its own process, so the same
-variables above are set on it, with `SPARKWING_CONTROLLER_URL` pointing
-at a loopback controller the dispatcher mounts for the run. Three more
-describe the process boundary itself. Sparkwing sets all of them; they
-are not knobs.
+variables above are set on it. A run whose state lives behind the
+admission daemon gets `SPARKWING_API_SOCKET` and no
+`SPARKWING_AGENT_TOKEN`: the node dials that unix socket and the daemon
+takes its peer uid as the principal. A run that opens the store itself
+gets `SPARKWING_CONTROLLER_URL` pointing at a loopback controller the
+dispatcher mounts for the run, plus that controller's token. More
+variables describe the process boundary itself. Sparkwing sets all of
+them; they are not knobs.
 
 | Variable | Purpose |
 |----------|---------|
+| `SPARKWING_API_SOCKET` | The admission daemon's controller API socket, when the run reaches its state through the daemon |
 | `SPARKWING_PARENT_LIVENESS_FD` | Descriptor the node reads to notice its dispatcher died, so an abandoned node stops rather than running on against a run nobody owns |
 | `SPARKWING_RUNNER_NAME` | `local` -- the runner name `Runtime().Runner` reports |
 | `SPARKWING_RUNNER_TYPE` | `local` -- the runner type `Runtime().Runner` reports |
