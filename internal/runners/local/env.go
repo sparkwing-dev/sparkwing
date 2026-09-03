@@ -9,11 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// APISocketEnv names the admission daemon's controller API socket for a node
-// process. A node that finds it dials that socket instead of the loopback
-// controller a run with its own store serves, and sends no bearer token.
-const APISocketEnv = "SPARKWING_API_SOCKET"
-
 // safety: the daemon authenticates an api.sock caller by its peer uid, and
 // a bearer inherited from this process would be looked up on the daemon's
 // writing handle instead, behind whatever it is doing.
@@ -25,7 +20,7 @@ func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request
 	// an inherited socket is dropped whichever way it decided. A pipeline run
 	// from inside another run's node inherits that run's socket otherwise, and
 	// dials a daemon that has never heard of it.
-	drop := []string{APISocketEnv}
+	drop := []string{wingwire.APISocketEnv}
 	if cfg.APISocket != "" {
 		drop = append(drop, tokenEnvNames...)
 	}
@@ -42,7 +37,7 @@ func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request
 	set("SPARKWING_HOME", cfg.Home)
 	set("SPARKWING_CONTROLLER_URL", cfg.ControllerURL)
 	set("SPARKWING_CACHE_URL", cfg.CacheURL)
-	set(APISocketEnv, cfg.APISocket)
+	set(wingwire.APISocketEnv, cfg.APISocket)
 	if cfg.APISocket == "" {
 		set("SPARKWING_AGENT_TOKEN", cfg.AgentToken)
 	}

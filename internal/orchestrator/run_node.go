@@ -15,12 +15,12 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	localrunner "github.com/sparkwing-dev/sparkwing/internal/runners/local"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -44,15 +44,11 @@ func RunNodeOnce(
 	defer span.End()
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{RunID: runID, NodeID: nodeID})
 
-	httpClient := &http.Client{
-		Timeout: 60 * time.Second,
-	}
-	if cfg.apiSocket != "" {
-		httpClient = NewAPISocketClient(cfg.apiSocket)
-		controllerURL = HostedAPIBaseURL
-		token = ""
-	}
-	stateClient := client.NewWithToken(controllerURL, httpClient, token)
+	transports := nodeTransportsFor(cfg, controllerURL, token)
+	defer transports.close()
+	httpClient := transports.plain
+	stateHTTP := transports.state
+	stateClient := client.NewWithToken(transports.stateURL, stateHTTP, transports.stateToken)
 
 	paths, err := DefaultPaths()
 	if err != nil {
@@ -79,6 +75,11 @@ func RunNodeOnce(
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
 
 	if shouldRunRemote(trigger) {
+		if controllerURL == "" {
+			return runner.Result{}, fmt.Errorf(
+				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
+				runID, nodeID)
+		}
 		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheToken,
 			runID, nodeID, token, logger)
 	}
@@ -103,7 +104,7 @@ func RunNodeOnce(
 			return runner.Result{}, fmt.Errorf("artifact store: %w", err)
 		}
 	}
-	backends := RemoteBackends(stateClient, logsBackend, art, httpClient, store.DefaultConcurrencyLease)
+	backends := RemoteBackends(stateClient, logsBackend, art, stateHTTP, store.DefaultConcurrencyLease)
 
 	reg, ok := sparkwing.Lookup(run.Pipeline)
 	if !ok {
@@ -491,12 +492,10 @@ func runNodeCLI(args []string) error {
 	if nodeID == "" {
 		nodeID = os.Getenv("SPARKWING_NODE_ID")
 	}
-	if os.Getenv(localrunner.APISocketEnv) != "" && *controllerURL == "" {
-		*controllerURL = HostedAPIBaseURL
-	}
-	if *controllerURL == "" || runID == "" || nodeID == "" {
+	apiSocket := os.Getenv(wingwire.APISocketEnv)
+	if (*controllerURL == "" && apiSocket == "") || runID == "" || nodeID == "" {
 		fs.Usage()
-		return errors.New("--controller + <runID> + <nodeID> are required (or SPARKWING_CONTROLLER_URL + SPARKWING_RUN_ID + SPARKWING_NODE_ID env)")
+		return errors.New("--controller (or " + wingwire.APISocketEnv + ") + <runID> + <nodeID> are required (or SPARKWING_CONTROLLER_URL + SPARKWING_RUN_ID + SPARKWING_NODE_ID env)")
 	}
 
 	// safety: leave SIGTERM unhandled; bounce, cancellation, and pod termination
@@ -512,8 +511,8 @@ func runNodeCLI(args []string) error {
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
 	var runOpts []RunNodeOption
-	if sock := os.Getenv(localrunner.APISocketEnv); sock != "" {
-		runOpts = append(runOpts, OverAPISocket(sock))
+	if apiSocket != "" {
+		runOpts = append(runOpts, OverAPISocket(apiSocket))
 		token = ""
 	}
 	if *coordinated {
@@ -554,4 +553,38 @@ func invokeGeneratorForPod(ctx context.Context, exp sparkwing.Expansion) (out []
 		}
 	}()
 	return exp.Gen(ctx)
+}
+
+// nodeTransports separates the two networks a node process talks on. State
+// and concurrency may travel over the admission daemon's unix socket; the
+// logs service and a remote runner are named by URLs and reached over TCP.
+type nodeTransports struct {
+	stateURL   string
+	stateToken string
+	state      *http.Client
+	plain      *http.Client
+	close      func()
+}
+
+// safety: handing the logs backend the socket transport would dial api.sock
+// for every record whatever host the logs URL names, and the daemon serves no
+// log route, so the records would 404 and be dropped.
+func nodeTransportsFor(cfg runNodeConfig, controllerURL, token string) nodeTransports {
+	plain := &http.Client{Timeout: 60 * time.Second}
+	out := nodeTransports{
+		stateURL:   controllerURL,
+		stateToken: token,
+		state:      plain,
+		plain:      plain,
+		close:      func() {},
+	}
+	if cfg.apiSocket == "" {
+		return out
+	}
+	socket := NewAPISocketClient(cfg.apiSocket)
+	out.state = socket
+	out.stateURL = HostedAPIBaseURL
+	out.stateToken = ""
+	out.close = socket.CloseIdleConnections
+	return out
 }

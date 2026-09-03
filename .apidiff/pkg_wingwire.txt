@@ -1,5 +1,6 @@
 # pkg/wingwire
 
+const APISocketEnv = "SPARKWING_API_SOCKET"
 type AdmissionRequest struct {
 	RunID string
 

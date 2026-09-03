@@ -10,6 +10,7 @@ import (
 	"os/signal"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func runNodeCommand(args []string) error {
@@ -28,9 +29,10 @@ func runNodeCommand(args []string) error {
 	if nodeID == "" {
 		nodeID = os.Getenv("SPARKWING_NODE_ID")
 	}
-	if *controllerURL == "" || runID == "" || nodeID == "" {
+	apiSocket := os.Getenv(wingwire.APISocketEnv)
+	if (*controllerURL == "" && apiSocket == "") || runID == "" || nodeID == "" {
 		fs.Usage()
-		return errors.New("--controller + <runID> + <nodeID> are required")
+		return errors.New("--controller (or " + wingwire.APISocketEnv + ") + <runID> + <nodeID> are required")
 	}
 
 	// safety: leave SIGTERM unhandled; bounce, cancellation, and pod termination
@@ -39,8 +41,13 @@ func runNodeCommand(args []string) error {
 	defer stop()
 
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
+	var runOpts []orchestrator.RunNodeOption
+	if apiSocket != "" {
+		runOpts = append(runOpts, orchestrator.OverAPISocket(apiSocket))
+		token = ""
+	}
 	res, err := orchestrator.RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID,
-		fmt.Sprintf("pod:%s:%s", runID, nodeID), token, orchestrator.NewJSONRenderer(), slog.Default(), nil)
+		fmt.Sprintf("pod:%s:%s", runID, nodeID), token, orchestrator.NewJSONRenderer(), slog.Default(), nil, runOpts...)
 	if err != nil {
 		return err
 	}

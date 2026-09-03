@@ -142,6 +142,12 @@ func (f ProtocolFloors) Newest() (floor ProtocolFloor, ok bool) {
 // unless [ChildLeaseTokenEnv] carries a more specific child-attach token.
 const LeaseTokenEnv = "SPARKWING_LEASE_TOKEN" // #nosec G101 -- the environment variable's name, not its value
 
+// APISocketEnv names the admission daemon's controller API socket for a node
+// process. A node that finds it sends its state and concurrency calls down
+// that unix socket, and no bearer token, because the daemon takes the
+// connection's peer uid as the principal.
+const APISocketEnv = "SPARKWING_API_SOCKET"
+
 // ChildLeaseTokenEnv is the token child Sparkwing runs attach to when it
 // differs from the current execution lease. A node can hold a short-lived host
 // lease while its children must attach to the run-scope semaphore lease.

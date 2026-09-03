@@ -127,8 +127,8 @@ func TestChildEnv_APISocketCarriesNoBearer(t *testing.T) {
 	env := childEnv(context.Background(), base, cfg,
 		runner.Request{RunID: "run-1", NodeID: "build"})
 
-	if got, ok := lastValue(env, APISocketEnv); !ok || got != cfg.APISocket {
-		t.Fatalf("%s = %q (found %v), want %q", APISocketEnv, got, ok, cfg.APISocket)
+	if got, ok := lastValue(env, wingwire.APISocketEnv); !ok || got != cfg.APISocket {
+		t.Fatalf("%s = %q (found %v), want %q", wingwire.APISocketEnv, got, ok, cfg.APISocket)
 	}
 	for _, name := range tokenEnvNames {
 		if got, ok := lastValue(env, name); ok {
@@ -147,18 +147,18 @@ func TestChildEnv_LoopbackKeepsItsBearer(t *testing.T) {
 	if got, ok := lastValue(env, "SPARKWING_AGENT_TOKEN"); !ok || got != "svc_tok" {
 		t.Fatalf("SPARKWING_AGENT_TOKEN = %q (found %v), want the loopback token", got, ok)
 	}
-	if got, ok := lastValue(env, APISocketEnv); ok {
-		t.Fatalf("%s = %q, want it unset without an API socket", APISocketEnv, got)
+	if got, ok := lastValue(env, wingwire.APISocketEnv); ok {
+		t.Fatalf("%s = %q, want it unset without an API socket", wingwire.APISocketEnv, got)
 	}
 }
 
 func TestChildEnv_DropsAnInheritedAPISocket(t *testing.T) {
-	base := []string{APISocketEnv + "=/tmp/another-run/api.sock"}
+	base := []string{wingwire.APISocketEnv + "=/tmp/another-run/api.sock"}
 
 	env := childEnv(context.Background(), base, testConfig(),
 		runner.Request{RunID: "run-1", NodeID: "build"})
 
-	if got, ok := lastValue(env, APISocketEnv); ok {
-		t.Fatalf("%s = %q, want the inherited socket dropped", APISocketEnv, got)
+	if got, ok := lastValue(env, wingwire.APISocketEnv); ok {
+		t.Fatalf("%s = %q, want the inherited socket dropped", wingwire.APISocketEnv, got)
 	}
 }
