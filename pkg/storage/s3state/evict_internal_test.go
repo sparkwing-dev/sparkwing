@@ -3,6 +3,7 @@ package s3state
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -13,8 +14,15 @@ import (
 )
 
 type stubArt struct {
-	mu   sync.Mutex
-	data map[string][]byte
+	mu     sync.Mutex
+	data   map[string][]byte
+	getErr error
+}
+
+func (s *stubArt) setGetErr(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.getErr = err
 }
 
 func newStubArt() *stubArt { return &stubArt{data: map[string][]byte{}} }
@@ -22,6 +30,9 @@ func newStubArt() *stubArt { return &stubArt{data: map[string][]byte{}} }
 func (s *stubArt) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
 	b, ok := s.data[key]
 	if !ok {
 		return nil, storage.ErrNotFound
@@ -133,5 +144,59 @@ func TestEvictIdleReadsKeepsARunThisProcessWrites(t *testing.T) {
 
 	if b.lookupRun("r") == nil {
 		t.Fatal("the sweep dropped a run this process writes")
+	}
+}
+
+func TestEvictIdleReadsSweepsASnapshotWhoseLoadFailed(t *testing.T) {
+	art := newStubArt()
+	art.setGetErr(errors.New("s3: 503 slow down"))
+	b := New(art, WithFlushInterval(time.Hour))
+	t.Cleanup(func() { _ = b.Close() })
+	ctx := context.Background()
+
+	if _, err := b.GetRun(ctx, "r"); err == nil {
+		t.Fatal("GetRun reported success while the object store was failing")
+	}
+	if b.lookupRun("r") == nil {
+		t.Fatal("no entry to sweep")
+	}
+
+	b.evictIdleReads(time.Now())
+
+	if b.lookupRun("r") != nil {
+		t.Fatal("an entry whose load failed is never swept, so a failing read pins one entry per run id")
+	}
+
+	art.setGetErr(nil)
+	if _, err := b.GetRun(ctx, "r"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetRun after recovery = %v, want ErrNotFound from a fresh read", err)
+	}
+}
+
+func TestGetRunRetriesAfterAFailedLoad(t *testing.T) {
+	art := newStubArt()
+	ctx := context.Background()
+	writer := New(art, WithFlushInterval(time.Hour))
+	if err := writer.CreateRun(ctx, store.Run{ID: "r", Pipeline: "p", Status: "running", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer Close: %v", err)
+	}
+
+	art.setGetErr(errors.New("s3: 503 slow down"))
+	b := New(art, WithFlushInterval(time.Hour), WithReadCacheTTL(time.Hour))
+	t.Cleanup(func() { _ = b.Close() })
+	if _, err := b.GetRun(ctx, "r"); err == nil {
+		t.Fatal("GetRun reported success while the object store was failing")
+	}
+
+	art.setGetErr(nil)
+	got, err := b.GetRun(ctx, "r")
+	if err != nil {
+		t.Fatalf("GetRun after recovery: %v", err)
+	}
+	if got.Pipeline != "p" {
+		t.Errorf("run = %+v, want the stored run", got)
 	}
 }

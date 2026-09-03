@@ -177,6 +177,7 @@ type runState struct {
 	metrics   map[string][]store.MetricSample
 
 	loadAttempted bool
+	loadErrored   bool
 	loaded        bool
 	loadedAt      time.Time
 	owned         bool
@@ -233,12 +234,14 @@ func (b *Backend) getRunState(ctx context.Context, runID string, mode runAccess)
 		return rs, nil
 	}
 	rs.resetLocked()
-	if err := b.loadLocked(ctx, runID, rs); err != nil {
+	err := b.loadLocked(ctx, runID, rs)
+	rs.loadAttempted = true
+	rs.loadErrored = err != nil
+	rs.loadedAt = time.Now()
+	rs.loaded = err == nil && (rs.run != nil || len(rs.envelopes) > 0)
+	if err != nil {
 		return nil, err
 	}
-	rs.loadAttempted = true
-	rs.loaded = rs.run != nil || len(rs.envelopes) > 0
-	rs.loadedAt = time.Now()
 	return rs, nil
 }
 
@@ -249,7 +252,7 @@ func (b *Backend) needsLoadLocked(rs *runState) bool {
 	if rs.dirty || rs.flushing != nil {
 		return false
 	}
-	if !rs.loadAttempted {
+	if !rs.loadAttempted || rs.loadErrored {
 		return true
 	}
 	if rs.owned {
