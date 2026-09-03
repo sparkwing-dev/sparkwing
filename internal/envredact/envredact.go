@@ -34,6 +34,17 @@ var credentialWords = map[string]bool{
 	"PWD":           true,
 	"AUTHORIZATION": true,
 	"BEARER":        true,
+	"PASSPHRASE":    true,
+}
+
+var credentialPrefixes = []string{
+	"PASSWORD",
+	"PASSWD",
+	"SECRET",
+	"TOKEN",
+	"CERT",
+	"PEM",
+	"AUTH",
 }
 
 var credentialSuffixes = []string{
@@ -43,6 +54,10 @@ var credentialSuffixes = []string{
 	"PASSWORD",
 	"PASSWD",
 	"PWD",
+}
+
+var credentialInfixes = []string{
+	"PASSPHRASE",
 }
 
 var nonCredentialSegments = map[string]bool{
@@ -93,9 +108,10 @@ const bearerScheme = "BEARER "
 const redactedPlaceholder = "redacted"
 
 // CredentialName reports whether an environment variable name is
-// credential-shaped: a name segment that is a credential word, or that
-// ends in one such as APIKEY. A short allow-list of well-known
-// configuration names wins over that rule.
+// credential-shaped: a name segment that is a credential word, that
+// begins or ends with one such as CERTFILE or APIKEY, or that carries
+// PASSPHRASE anywhere. A short allow-list of well-known configuration
+// names wins over that rule.
 func CredentialName(name string) bool {
 	trimmed := strings.TrimSpace(name)
 	upper := strings.ToUpper(trimmed)
@@ -170,8 +186,18 @@ func credentialSegment(seg string) bool {
 	if credentialWords[seg] {
 		return true
 	}
+	for _, prefix := range credentialPrefixes {
+		if len(seg) > len(prefix) && strings.HasPrefix(seg, prefix) {
+			return true
+		}
+	}
 	for _, suffix := range credentialSuffixes {
 		if len(seg) > len(suffix) && strings.HasSuffix(seg, suffix) {
+			return true
+		}
+	}
+	for _, infix := range credentialInfixes {
+		if strings.Contains(seg, infix) {
 			return true
 		}
 	}

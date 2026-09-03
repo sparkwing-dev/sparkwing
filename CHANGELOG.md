@@ -255,10 +255,13 @@ code change to unlock.
   `COMPASS_DIR`, `BYPASS_CHECKS` and a URL whose path contains one of those
   words are no longer classified as credentials and dropped, and a retry runs
   with the environment its original attempt had. Names that run the words
-  together keep their old classification: a segment ending in `KEY`, `SECRET`,
-  `TOKEN`, `PASSWORD`, `PASSWD` or `PWD` still matches, so `APIKEY`,
-  `CLIENTSECRET`, `MYSQL_PASSWD` and `SSH_PRIVATEKEY` are still credentials
-  while `PWD` and `OLDPWD` are not.
+  together keep their old classification: a segment still matches when it
+  begins with `PASSWORD`, `PASSWD`, `SECRET`, `TOKEN`, `CERT`, `PEM` or `AUTH`,
+  when it ends in `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD` or `PWD`, or
+  when it carries `PASSPHRASE` anywhere, so `APIKEY`, `CLIENTSECRET`,
+  `MYSQL_PASSWD`, `SSH_PRIVATEKEY`, `SSH_PASSPHRASE`, `CERTFILE` and
+  `AUTHHEADER` are all still credentials. `PWD` and `OLDPWD` name the working
+  directory and are not.
 
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
