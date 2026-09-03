@@ -628,6 +628,19 @@ A newer *installed* sparkwing transparently replaces a running older
 daemon. Pipeline binaries never do, so one repo bumping its `.sparkwing/`
 SDK pin cannot churn the daemon every other repo on the box shares.
 
+The daemon binds two sockets in the private directory it owns, both mode
+0600, and refuses any connection whose peer uid is not its own. `d.sock`
+carries admission. `api.sock` serves the controller HTTP API over the
+runs-store handle the daemon holds, so a run it hosts can read and write
+run, node, event, and concurrency state without opening the store file
+itself; that is what removes the store's schema from a pipeline binary's
+contract. The peer uid is the identity on `api.sock`, so no token is
+minted for a local run. `sparkwing daemon status` reports the path as
+`api_socket` and whether it is bound as `api_ready`. Only the process
+holding the election lock binds either socket, and a daemon being replaced
+closes `api.sock` before it acknowledges the drain, so the successor binds
+it with no overlap.
+
 ### Running with no daemon available
 
 Two situations look similar and are not.

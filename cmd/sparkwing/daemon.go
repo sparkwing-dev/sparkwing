@@ -32,6 +32,8 @@ type daemonReport struct {
 	PreviousVersion     string   `json:"previous_version,omitempty"`
 	PreviousRevision    string   `json:"previous_revision,omitempty"`
 	Socket              string   `json:"socket"`
+	APISocket           string   `json:"api_socket"`
+	APIReady            bool     `json:"api_ready"`
 	InstalledVersion    string   `json:"installed_version,omitempty"`
 	DaemonSchemaVersion int      `json:"daemon_schema_version,omitempty"`
 	StoreSchemaVersion  int      `json:"store_schema_version,omitempty"`
@@ -113,7 +115,16 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	if err != nil {
 		return daemonReport{}, err
 	}
-	report := daemonReport{Socket: socket, InstalledVersion: installedVersion(), StorePath: storeDBPath(home)}
+	apiSocket, err := wingd.APISocketPath(home)
+	if err != nil {
+		return daemonReport{}, err
+	}
+	report := daemonReport{
+		Socket:           socket,
+		APISocket:        apiSocket,
+		InstalledVersion: installedVersion(),
+		StorePath:        storeDBPath(home),
+	}
 	version, storeRequirements, schemaErr := storeSchemaState(ctx, home)
 	report.StoreSchemaVersion = version
 	if schemaErr != nil {
@@ -134,6 +145,7 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	report.DaemonSchemaVersion = info.StoreSchemaVersion
 	report.DaemonStoreReady = info.StoreReady
 	report.DaemonStoreError = info.StoreError
+	report.APIReady = info.APIReady != nil && *info.APIReady
 	report.MissingRequirements = store.MissingRequirements(info.StoreRequirements, storeRequirements)
 	report.SchemaDiverged = daemonCannotReadStore(report, info.StoreRequirements)
 	if report.SchemaDiverged || report.StoreSchemaError != "" || daemonStoreUnusable(report) {
@@ -316,6 +328,11 @@ func emitDaemonReport(report daemonReport, output string) error {
 			action = "restarted"
 		}
 		fmt.Fprintf(os.Stdout, "wingd %s %s\n", action, report.BinaryVersion)
+		if report.APIReady {
+			fmt.Fprintf(os.Stdout, "controller API on %s\n", report.APISocket)
+		} else {
+			fmt.Fprintf(os.Stdout, "controller API not served on %s\n", report.APISocket)
+		}
 		if report.StoreSchemaError != "" {
 			fmt.Fprintf(os.Stdout, "runs store unreadable: %s\n", report.StoreSchemaError)
 		}

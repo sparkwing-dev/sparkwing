@@ -51,6 +51,26 @@ code change to unlock.
 
 ### Added
 
+- **wingd:** The admission daemon serves the controller HTTP API on a second
+  socket, `api.sock`, beside `d.sock` in the private directory it already
+  owns. It carries the same route set a hosted controller serves, including
+  the concurrency routes, over the runs-store handle the daemon holds, so a
+  run the daemon hosts can reach run, node, event, and concurrency state
+  without opening `state.db` itself. Both sockets are mode 0600 and refuse
+  any connection whose peer uid is not the daemon's own; on `api.sock` that
+  uid is the identity, so a local run needs no token, and a request that does
+  carry a bearer token is still authenticated against the store. Only the
+  process holding the election lock binds either socket, and a daemon being
+  replaced closes `api.sock` before it acknowledges the drain, so its
+  successor binds it with no overlap. An open API connection counts as
+  activity, so a daemon does not idle out from under a run. Read routes are
+  served from the daemon's read-only handle: with another process holding a
+  write transaction for three seconds, trigger polls stayed under 10ms
+  instead of waiting the writer out. Every request is bounded, so a wedged
+  store answers 503 rather than hanging. `sparkwing daemon status` and
+  `sparkwing doctor` report the socket path and whether it is bound as
+  `api_socket` and `api_ready`. No client uses the socket yet.
+
 - **wingd:** The daemon's wire surface is pinned by a snapshot, and the
   daemon now answers for what it cannot serve.
   `pkg/wingwire/testdata/shapes.json` records every message type and field

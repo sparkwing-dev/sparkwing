@@ -101,6 +101,12 @@ type DoctorDaemon struct {
 
 	Socket string `json:"socket,omitempty"`
 
+	// APISocket is where the daemon serves the controller HTTP API.
+	APISocket string `json:"api_socket,omitempty"`
+
+	// APIReady reports whether that socket is bound and serving.
+	APIReady bool `json:"api_ready,omitempty"`
+
 	Version string `json:"version,omitempty"`
 
 	ProtocolMajor int `json:"protocol_major,omitempty"`
@@ -739,6 +745,10 @@ func probeDaemon(ctx context.Context, home string) DoctorDaemon {
 	if err != nil {
 		return DoctorDaemon{State: ReachUnreachable, Detail: "could not resolve the daemon socket path: " + err.Error()}
 	}
+	apiSock, apiErr := wingd.APISocketPath(home)
+	if apiErr != nil {
+		apiSock = ""
+	}
 	info, err := wingdclient.Probe(ctx, sock)
 	switch {
 	case err == nil:
@@ -746,17 +756,20 @@ func probeDaemon(ctx context.Context, home string) DoctorDaemon {
 			Reachable:     true,
 			State:         ReachServing,
 			Socket:        sock,
+			APISocket:     apiSock,
+			APIReady:      info.APIReady != nil && *info.APIReady,
 			Version:       info.BinaryVersion,
 			ProtocolMajor: info.ProtocolMajor,
 		}
 	case errors.Is(err, wingdclient.ErrNoDaemon):
 		return DoctorDaemon{
-			State:  ReachAbsent,
-			Socket: sock,
-			Detail: "nothing is listening; no admission is being arbitrated on this home",
+			State:     ReachAbsent,
+			Socket:    sock,
+			APISocket: apiSock,
+			Detail:    "nothing is listening; no admission is being arbitrated on this home",
 		}
 	default:
-		return DoctorDaemon{State: ReachUnreachable, Socket: sock, Detail: err.Error()}
+		return DoctorDaemon{State: ReachUnreachable, Socket: sock, APISocket: apiSock, Detail: err.Error()}
 	}
 }
 
@@ -1223,6 +1236,13 @@ func renderDaemonSection(w io.Writer, r DoctorReport) {
 			version = "version unreported"
 		}
 		fmt.Fprintf(w, "daemon: serving, %s, protocol %d (%s)\n", version, d.ProtocolMajor, d.Socket)
+		if d.APISocket != "" {
+			state := "not served"
+			if d.APIReady {
+				state = "serving"
+			}
+			fmt.Fprintf(w, "  controller API: %s (%s)\n", state, d.APISocket)
+		}
 	case ReachAbsent:
 		fmt.Fprintf(w, "daemon: none running -- %s\n", d.Detail)
 	default:
