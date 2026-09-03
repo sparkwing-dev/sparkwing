@@ -306,20 +306,20 @@ func TestAReadRouteDoesNotCreateTheRunsStore(t *testing.T) {
 	sock, _ := startAPIDaemon(t, home, nil)
 	httpClient := apiHTTPClient(sock)
 
-	resp, err := httpClient.Get(apiBaseURL + "/api/v1/health")
+	resp, err := httpClient.Get(apiBaseURL + "/api/v1/runs")
 	if err != nil {
-		t.Fatalf("health: %v", err)
+		t.Fatalf("list runs: %v", err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("health answered %d on a home with no store, want 503: %s", resp.StatusCode, body)
+		t.Fatalf("listing runs answered %d on a home with no store, want 503: %s", resp.StatusCode, body)
 	}
 	if resp.Header.Get("Retry-After") != "" {
 		t.Errorf("an absent store invited the caller back with Retry-After %q", resp.Header.Get("Retry-After"))
 	}
 	if _, err := os.Stat(PathsAt(home).StateDB()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("an unauthenticated health probe created the runs store")
+		t.Fatalf("a read created the runs store")
 	}
 
 	c := client.New(apiBaseURL, httpClient)
@@ -329,6 +329,84 @@ func TestAReadRouteDoesNotCreateTheRunsStore(t *testing.T) {
 	if _, err := os.Stat(PathsAt(home).StateDB()); err != nil {
 		t.Fatalf("a state request did not create the runs store: %v", err)
 	}
+}
+
+func TestHealthReportsTheStoreWithoutCreatingIt(t *testing.T) {
+	home := wingdTestHome(t)
+	sock, _ := startAPIDaemon(t, home, nil)
+	httpClient := apiHTTPClient(sock)
+
+	status, body := getHealth(t, httpClient)
+	if status != http.StatusOK {
+		t.Fatalf("health answered %d on a home with no store, want 200: %v", status, body)
+	}
+	if body["store"] != "absent" {
+		t.Fatalf("health reports store %v on a home with no store, want %q", body["store"], "absent")
+	}
+	if body["status"] != "ok" {
+		t.Fatalf("health reports status %v on a home with no store, want ok; a machine on an object-store profile is healthy", body["status"])
+	}
+	if _, err := os.Stat(PathsAt(home).StateDB()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an unauthenticated health probe created the runs store")
+	}
+
+	c := client.New(apiBaseURL, httpClient)
+	if err := c.CreateRun(context.Background(), store.Run{ID: "r1", Pipeline: "p", Status: "running", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	status, body = getHealth(t, httpClient)
+	if status != http.StatusOK || body["store"] != "ready" {
+		t.Fatalf("health answered %d store=%v once the store existed, want 200 ready", status, body["store"])
+	}
+	if _, present := body["problems"]; present {
+		t.Fatalf("health reports problems %v against a readable store", body["problems"])
+	}
+}
+
+func TestHealthIsDegradedWhenTheStoreWillNotOpen(t *testing.T) {
+	home := wingdTestHome(t)
+	if err := os.WriteFile(PathsAt(home).StateDB(), []byte("not a database"), 0o600); err != nil {
+		t.Fatalf("write a corrupt store: %v", err)
+	}
+	sock, _ := startAPIDaemon(t, home, nil)
+
+	status, body := getHealth(t, apiHTTPClient(sock))
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("health answered %d against a store that will not open, want 503: %v", status, body)
+	}
+	if body["status"] != "degraded" {
+		t.Fatalf("health reports status %v against a store that will not open, want degraded", body["status"])
+	}
+	reported, _ := body["store"].(string)
+	if !strings.HasPrefix(reported, "error: ") {
+		t.Fatalf("health reports store %q, want the reason behind an error: prefix", reported)
+	}
+	if _, present := body["problems"]; !present {
+		t.Fatalf("health names no problem against a store that will not open: %v", body)
+	}
+}
+
+func getHealth(t *testing.T, httpClient *http.Client) (int, map[string]any) {
+	t.Helper()
+	resp, err := httpClient.Get(apiBaseURL + "/api/v1/health")
+	if err != nil {
+		t.Fatalf("health: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read the health body: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode the health body %s: %v", raw, err)
+	}
+	for _, member := range []string{"status", "auth", "store"} {
+		if _, present := body[member]; !present {
+			t.Fatalf("the health body %s omits %q", raw, member)
+		}
+	}
+	return resp.StatusCode, body
 }
 
 func TestDaemonServesWhenTheCacheURLWillNotResolve(t *testing.T) {

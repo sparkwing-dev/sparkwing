@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -43,12 +44,13 @@ type wingdAPI struct {
 	handler http.Handler
 }
 
-// perf: a SQLite store is one connection, so a read waits out a foreign
-// writer on the writing handle and not on a WAL reader: against a four-second
-// foreign write, trigger polls fell from a 3.1s p99 to milliseconds. An
-// allow-list, not every GET, because several GET routes write.
+// perf: a SQLite store is one connection, so a read waits out a foreign writer
+// on the writing handle and not on a WAL reader: against a four-second foreign
+// write, a tokenless trigger poll fell from a 3.1s p99 to milliseconds. Only
+// tokenless: a bearer token is looked up on the writing handle, so a caller
+// that sends one waits there anyway. An allow-list, not every GET, because
+// several GET routes write.
 var apiReadRoutes = []string{
-	"GET /api/v1/health",
 	"GET /api/v1/runs",
 	"GET /api/v1/runs/{id}",
 	"GET /api/v1/runs/{id}/nodes",
@@ -74,20 +76,32 @@ var apiReadRoutes = []string{
 	"GET /api/v1/pipelines/{name}/profile",
 }
 
-// safety: these routes hold a response open far longer than a request bound
-// would allow, and each sets its own deadline through http.ResponseController,
-// so a context deadline here truncates them into a clean EOF the client reads
-// as completion.
+// safety: these routes hold a response open past any request bound: the event
+// stream, the gitcache handlers that reset their own deadline through
+// http.ResponseController, and an artifact body. A context deadline here
+// truncates each into a clean EOF the client reads as completion.
 var apiStreamRoutes = []string{
 	"GET /api/v1/concurrency/{key}/notify",
 	"GET /api/v1/artifacts/{key}",
+	"POST /api/v1/gitcache/seed",
+	"POST /api/v1/gitcache/git/register",
 	"GET /api/v1/gitcache/git/{path...}",
 	"POST /api/v1/gitcache/git/{path...}",
+	"POST /api/v1/runs/{id}/gitcache/git/register",
 	"GET /api/v1/runs/{id}/gitcache/git/{path...}",
 	"POST /api/v1/runs/{id}/gitcache/git/{path...}",
 }
 
-var apiStreamMux = routeSet(apiStreamRoutes)
+// APIHealthRoute is answered by the daemon itself rather than by a controller,
+// so it reports on a home whose runs store does not exist.
+const APIHealthRoute = "GET /api/v1/health"
+
+var apiLocalRoutes = []string{APIHealthRoute}
+
+var (
+	apiStreamMux = routeSet(apiStreamRoutes)
+	apiLocalMux  = routeSet(apiLocalRoutes)
+)
 
 func routeSet(routes []string) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -155,12 +169,48 @@ func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel = context.WithTimeout(ctx, a.requestTimeout)
 		defer cancel()
 	}
+	if localRoute(r) {
+		a.health(w, r.WithContext(ctx))
+		return
+	}
 	rw, ro, err := a.handles(ctx, r)
 	if err != nil {
 		writeAPIUnavailable(w, err)
 		return
 	}
 	a.handlerFor(rw, ro).ServeHTTP(w, r.WithContext(ctx))
+}
+
+// safety: the daemon answers this itself because a controller needs a store
+// and a machine running object-store profiles has none; a probe must report
+// that state rather than create the file or read as broken.
+func (a *wingdAPI) health(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	_, ro, err := a.runs.Handles(ctx)
+	switch {
+	case errors.Is(err, errRunStoreAbsent):
+		writeAPIHealth(w, http.StatusOK, "ok", "absent", "")
+	case err != nil:
+		writeAPIHealth(w, http.StatusServiceUnavailable, "degraded", "error: "+err.Error(), "store: "+err.Error())
+	default:
+		if _, listErr := ro.ListRuns(ctx, store.RunFilter{Limit: 1}); listErr != nil {
+			writeAPIHealth(w, http.StatusServiceUnavailable, "degraded", "error: "+listErr.Error(), "db: "+listErr.Error())
+			return
+		}
+		writeAPIHealth(w, http.StatusOK, "ok", "ready", "")
+	}
+}
+
+func writeAPIHealth(w http.ResponseWriter, status int, state, storeState, problem string) {
+	// safety: this server always installs an authenticator, so the auth member
+	// a controller derives from its own configuration is constant here.
+	body := map[string]any{"status": state, "auth": "enabled", "store": storeState}
+	if problem != "" {
+		body["problems"] = []string{problem}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // safety: a run against an object-store profile must leave no local state
@@ -175,6 +225,11 @@ func (a *wingdAPI) handles(ctx context.Context, r *http.Request) (*store.Store, 
 
 func streamingRoute(r *http.Request) bool {
 	_, pattern := apiStreamMux.Handler(r)
+	return pattern != ""
+}
+
+func localRoute(r *http.Request) bool {
+	_, pattern := apiLocalMux.Handler(r)
 	return pattern != ""
 }
 

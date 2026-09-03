@@ -30,9 +30,7 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/concurrency/{key}/heartbeat",
 	"POST /api/v1/concurrency/{key}/release",
 	"GET /api/v1/concurrency/{key}/resolve",
-	"POST /api/v1/gitcache/git/register",
 	"POST /api/v1/gitcache/refresh",
-	"POST /api/v1/gitcache/seed",
 	"POST /api/v1/nodes/claim",
 	"PUT /api/v1/pipelines/{name}/profile/pin",
 	"GET /api/v1/pool",
@@ -49,7 +47,6 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/runs/{id}/debug-pauses",
 	"POST /api/v1/runs/{id}/events",
 	"POST /api/v1/runs/{id}/finish",
-	"POST /api/v1/runs/{id}/gitcache/git/register",
 	"POST /api/v1/runs/{id}/heartbeat",
 	"POST /api/v1/runs/{id}/nodes",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/activity",
@@ -120,15 +117,31 @@ func TestEveryControllerRouteIsClassified(t *testing.T) {
 	}
 	add("read", apiReadRoutes)
 	add("stream", apiStreamRoutes)
+	add("local", apiLocalRoutes)
 	add("write", apiWriteRoutes)
 
 	for _, r := range registered {
 		route := r.Method + " " + r.Path
-		if _, ok := classified[route]; !ok {
-			t.Errorf("the controller registers %s and the daemon's API classifies it nowhere; add it to apiReadRoutes, apiStreamRoutes, or apiWriteRoutes", route)
+		kind, ok := classified[route]
+		if !ok {
+			t.Errorf("the controller registers %s and the daemon's API classifies it nowhere; add it to apiReadRoutes, apiStreamRoutes, apiLocalRoutes, or apiWriteRoutes", route)
 			continue
 		}
 		delete(classified, route)
+		// safety: the lists are documentation until the runtime classifiers
+		// answer the same question, and a wildcard pattern can classify a
+		// literal route the lists file under something else.
+		req, err := http.NewRequest(r.Method, fillRoutePattern(r.Path), nil)
+		if err != nil {
+			t.Errorf("build a request for %s: %v", route, err)
+			continue
+		}
+		if got, want := streamingRoute(req), kind == "stream"; got != want {
+			t.Errorf("%s is classified %s and streamingRoute reports %v; the runtime classifier and the lists disagree", route, kind, got)
+		}
+		if got, want := localRoute(req), kind == "local"; got != want {
+			t.Errorf("%s is classified %s and localRoute reports %v", route, kind, got)
+		}
 	}
 	for route, kind := range classified {
 		t.Errorf("the daemon's API classifies %s as %s and the controller registers no such route", route, kind)
@@ -178,11 +191,13 @@ func TestReadRoutesAnswerFromTheReadOnlyHandle(t *testing.T) {
 
 func fillRoutePattern(pattern string) string {
 	values := map[string]string{
-		"{id}":     "r1",
-		"{nodeID}": "n1",
-		"{key}":    url.PathEscape("memo:m1"),
-		"{name}":   "p",
-		"{prefix}": "sws_none",
+		"{id}":       "r1",
+		"{nodeID}":   "n1",
+		"{key}":      url.PathEscape("memo:m1"),
+		"{name}":     "p",
+		"{prefix}":   "sws_none",
+		"{path...}":  "repo/info/refs",
+		"{pipeline}": "p",
 	}
 	parts := strings.Split(pattern, "/")
 	for i, part := range parts {
