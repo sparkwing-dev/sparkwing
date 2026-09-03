@@ -85,8 +85,6 @@ func HostedBackends(paths Paths, sock string, art storage.ArtifactStore) (Backen
 	}, httpClient.CloseIdleConnections
 }
 
-// hostedSelection is how a run reaches this machine's runs store: over the
-// daemon's socket, or standalone with the reason it says on stderr.
 type hostedSelection struct {
 	sock       string
 	daemon     string
