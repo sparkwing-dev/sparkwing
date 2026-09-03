@@ -9,7 +9,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// APISocketEnv names the daemon's controller API socket for a node process.
+// APISocketEnv names the admission daemon's controller API socket for a node
+// process. A node that finds it dials that socket instead of the loopback
+// controller a run with its own store serves, and sends no bearer token.
 const APISocketEnv = "SPARKWING_API_SOCKET"
 
 // safety: the daemon authenticates an api.sock caller by its peer uid, and

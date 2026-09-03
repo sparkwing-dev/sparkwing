@@ -18,11 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// APISocketEnvVar names the daemon's controller API socket for a node
-// subprocess. A subprocess that finds it dials that socket instead of the
-// loopback controller a standalone run serves, and sends no bearer token.
-const APISocketEnvVar = "SPARKWING_API_SOCKET"
-
 // HostedAPIBaseURL is the host every hosted request is addressed to. The
 // transport dials a unix socket and ignores it, but net/http still needs a
 // syntactically whole URL.

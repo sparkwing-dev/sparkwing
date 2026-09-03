@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	localrunner "github.com/sparkwing-dev/sparkwing/internal/runners/local"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -490,7 +491,7 @@ func runNodeCLI(args []string) error {
 	if nodeID == "" {
 		nodeID = os.Getenv("SPARKWING_NODE_ID")
 	}
-	if os.Getenv(APISocketEnvVar) != "" && *controllerURL == "" {
+	if os.Getenv(localrunner.APISocketEnv) != "" && *controllerURL == "" {
 		*controllerURL = HostedAPIBaseURL
 	}
 	if *controllerURL == "" || runID == "" || nodeID == "" {
@@ -511,7 +512,7 @@ func runNodeCLI(args []string) error {
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
 	var runOpts []RunNodeOption
-	if sock := os.Getenv(APISocketEnvVar); sock != "" {
+	if sock := os.Getenv(localrunner.APISocketEnv); sock != "" {
 		runOpts = append(runOpts, OverAPISocket(sock))
 		token = ""
 	}
