@@ -276,15 +276,16 @@ code change to unlock.
   N runners on one hot key retried in lockstep, burning retries against each
   other until one exhausted its 200 attempts and failed the acquire. Each
   attempt now draws its own wait.
-- **orchestrator:** S3-shared-state concurrency again recognizes the
-  inherited-holder marker earlier releases wrote. The marker inside a
-  `concurrency/` slot object changed shape and nothing rewrites those objects,
-  so a child run that had joined its parent's slot before the upgrade read back
-  as an ordinary holder: the parent's cost was never handed to it on release,
-  leaving the key admitting past its capacity; `OnLimit: CancelOthers` left it
-  running; and its marker surfaced as a node id in `sparkwing concurrency
-  status`. Readers now accept either form, and writers keep emitting the
-  current one so a runner still on the old release reads what it wrote.
+- **orchestrator:** S3-shared-state concurrency survives a rolling upgrade. The
+  marker that tags an inherited holder inside a `concurrency/` slot object had
+  changed shape, and nothing rewrites those objects, so an upgraded runner and a
+  v0.15.0-v0.40.0 runner each read the other's inherited children as ordinary
+  holders: the parent's cost was never handed over on release, so the key
+  admitted past its capacity; `OnLimit: CancelOthers` superseded the parent and
+  left the child running; and the marker surfaced as a node id in `sparkwing
+  concurrency status`, which also cost the run its child-admission status.
+  Runners now read both shapes and write the one every released runner reads,
+  so a mixed fleet is safe in both directions.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads

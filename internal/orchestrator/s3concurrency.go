@@ -94,13 +94,14 @@ type s3Holder struct {
 
 const (
 	inheritedS3HolderDeclaredCapacity = -1
-	// safety: the marker shares the store's shape so the two backends
-	// stay comparable, and node ids can never hold a backslash.
-	inheritedS3HolderNodePrefix = `\inherited:`
-	// safety: every release from v0.15.0 to v0.40.0 wrote this form into
-	// slot documents that no migration rewrites, so readers still have to
-	// match it.
-	legacyInheritedS3HolderNodePrefix = "\x00inherited:"
+	// safety: every runner from v0.15.0 to v0.40.0 reads only this form
+	// and nothing rewrites a slot object, so a mixed fleet stays legible
+	// only while this is what gets written. The Postgres column that
+	// forced the other shape does not reach a JSON object.
+	inheritedS3HolderNodePrefix = "\x00inherited:"
+	// safety: an unreleased build wrote the shape the SQL store uses, so
+	// a document can still carry it.
+	altInheritedS3HolderNodePrefix = `\inherited:`
 )
 
 func inheritedS3HolderNodeID(holderID string) string {
@@ -109,13 +110,13 @@ func inheritedS3HolderNodeID(holderID string) string {
 
 func isInheritedS3HolderNodeID(nodeID string) bool {
 	return strings.HasPrefix(nodeID, inheritedS3HolderNodePrefix) ||
-		strings.HasPrefix(nodeID, legacyInheritedS3HolderNodePrefix)
+		strings.HasPrefix(nodeID, altInheritedS3HolderNodePrefix)
 }
 
-// safety: a holder written before the marker changed shape has to keep
+// safety: a holder written in the other marker shape has to keep
 // comparing equal to one this binary writes for the same parent.
 func canonicalInheritedS3HolderNodeID(nodeID string) string {
-	if parentID, ok := strings.CutPrefix(nodeID, legacyInheritedS3HolderNodePrefix); ok {
+	if parentID, ok := strings.CutPrefix(nodeID, altInheritedS3HolderNodePrefix); ok {
 		return inheritedS3HolderNodePrefix + parentID
 	}
 	return nodeID
