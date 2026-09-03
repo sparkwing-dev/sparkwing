@@ -158,6 +158,19 @@ code change to unlock.
 
 ### Changed
 
+- **orchestrator:** A concurrency operation in S3-shared-state mode whose
+  conditional-write probe fails now returns that error instead of quietly
+  proceeding without a reservation, so a node that used to run unreserved can
+  now fail the run instead. The probe ran once per process and read any error
+  as "this store ignores preconditions", so one 500, DNS blip, expired
+  credential, or cancelled context during a long-lived process's first
+  concurrency operation left every group it dispatched afterwards unenforced,
+  behind a single log warning. Only the store's own answer settles the question
+  now, a failed probe is retried by the next operation, and one probe is shared
+  by everything waiting on it under a bounded timeout. `AcquireSlot` does not
+  retry internally -- the node is marked failed -- so a deployment that was
+  silently over-admitting will start surfacing the object-store errors it used
+  to swallow. Expect to see them; they were always there.
 - **orchestrator:** A local run now reaches this machine's runs store through
   the admission daemon instead of opening `state.db` itself. When the
   handshake reports the daemon serving `api.sock`, the run's state and
@@ -332,16 +345,11 @@ code change to unlock.
   a capacity-1 concurrency group. Each key is now held under a file lock for
   the length of the compare-and-swap, and a filesystem whose kernel refuses
   that lock reports `ConditionalWritesSupported` false so callers fall back to
-  last-write-wins instead of trusting a reservation nothing enforces.
-- **orchestrator:** A transient object-store error no longer disables cross-runner
-  reservation for the life of a process. The one-time probe that asks whether
-  the store honors write preconditions treated any error as a "no" and routed
-  every later acquire and release to the unenforced fallback, so a single 500,
-  DNS blip, or cancelled context during a long-lived process's first
-  concurrency operation left every group it dispatched unenforced behind one
-  log warning. Only a store that answers that it ignores preconditions settles
-  the question now; a probe that fails returns its error to the caller and the
-  next operation probes again.
+  last-write-wins instead of trusting a reservation nothing enforces. The lock
+  is taken without blocking and retried, so a caller waiting on a contended key
+  still returns on its own context. A mount that keeps locks node-local -- NFS
+  with `local_lock=flock` or `local_lock=all` -- still reports true and still
+  enforces nothing between hosts; use `s3` for state shared across machines.
 - **orchestrator:** Runners that lose the same S3 concurrency CAS back off to
   different times. The jitter added to each retry came from a single hash byte
   of the key, so it was under a microsecond and identical for every contender:
@@ -361,6 +369,16 @@ code change to unlock.
   the API socket beside it, and unlinks nothing unless each still carries the
   same file the dial found dead, so a path that answers again, or that has been
   replaced or removed since, is left alone.
+- **orchestrator:** S3-shared-state concurrency survives a rolling upgrade. The
+  marker that tags an inherited holder inside a `concurrency/` slot object had
+  changed shape, and nothing rewrites those objects, so an upgraded runner and a
+  v0.15.0-v0.40.0 runner each read the other's inherited children as ordinary
+  holders: the parent's cost was never handed over on release, so the key
+  admitted past its capacity; `OnLimit: CancelOthers` superseded the parent and
+  left the child running; and the marker surfaced as a node id in `sparkwing
+  concurrency status`, which also cost the run its child-admission status.
+  Runners now read both shapes and write the one every released runner reads,
+  so a mixed fleet is safe in both directions.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads

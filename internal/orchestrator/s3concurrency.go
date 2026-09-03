@@ -29,13 +29,17 @@ const (
 
 const s3FinishedRetention = 5 * time.Minute
 
+const s3ProbeTimeout = 10 * time.Second
+
 type s3Concurrency struct {
 	cw storage.ConditionalWriter
 
-	probeMu sync.Mutex
-	probed  bool
-	useNoop bool
-	noop    *noopConcurrency
+	probeMu  sync.Mutex
+	probing  chan struct{}
+	probeErr error
+	probed   bool
+	useNoop  bool
+	noop     *noopConcurrency
 }
 
 func NewS3Concurrency(art storage.ArtifactStore) ConcurrencyBackend {
@@ -52,18 +56,59 @@ func NewS3Concurrency(art storage.ArtifactStore) ConcurrencyBackend {
 // reservation it would make afterwards.
 func (c *s3Concurrency) fallback(ctx context.Context) (ConcurrencyBackend, error) {
 	c.probeMu.Lock()
-	defer c.probeMu.Unlock()
-	if !c.probed {
-		ok, err := c.cw.ConditionalWritesSupported(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("conditional-write probe for cache concurrency: %w", err)
+	if c.probed {
+		useNoop := c.useNoop
+		c.probeMu.Unlock()
+		if useNoop {
+			return c.noop, nil
 		}
+		return nil, nil
+	}
+	// safety: one probe serves everyone waiting on it, the wait itself
+	// stays cancellable, and the round trip is bounded, so a store that
+	// stops answering cannot park every operation behind it.
+	if inFlight := c.probing; inFlight != nil {
+		c.probeMu.Unlock()
+		select {
+		case <-inFlight:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return c.probeResult()
+	}
+	done := make(chan struct{})
+	c.probing = done
+	c.probeMu.Unlock()
+
+	probeCtx, cancel := context.WithTimeout(ctx, s3ProbeTimeout)
+	ok, err := c.cw.ConditionalWritesSupported(probeCtx)
+	cancel()
+
+	c.probeMu.Lock()
+	c.probing = nil
+	c.probeErr = err
+	if err == nil {
 		c.probed = true
 		c.useNoop = !ok
 		if c.useNoop {
 			slog.Warn("object store ignores write preconditions; cache concurrency falls back to no-op " +
 				"(no cross-runner reservation in this state backend)")
 		}
+	}
+	c.probeMu.Unlock()
+	close(done)
+	return c.probeResult()
+}
+
+func (c *s3Concurrency) probeResult() (ConcurrencyBackend, error) {
+	c.probeMu.Lock()
+	defer c.probeMu.Unlock()
+	if !c.probed {
+		err := c.probeErr
+		if err == nil {
+			err = errors.New("probe did not complete")
+		}
+		return nil, fmt.Errorf("conditional-write probe for cache concurrency: %w", err)
 	}
 	if c.useNoop {
 		return c.noop, nil
@@ -94,13 +139,14 @@ type s3Holder struct {
 
 const (
 	inheritedS3HolderDeclaredCapacity = -1
-	// safety: the marker shares the store's shape so the two backends
-	// stay comparable, and node ids can never hold a backslash.
-	inheritedS3HolderNodePrefix = `\inherited:`
-	// safety: every release from v0.15.0 to v0.40.0 wrote this form into
-	// slot documents that no migration rewrites, so readers still have to
-	// match it.
-	legacyInheritedS3HolderNodePrefix = "\x00inherited:"
+	// safety: every runner from v0.15.0 to v0.40.0 reads only this form
+	// and nothing rewrites a slot object, so a mixed fleet stays legible
+	// only while this is what gets written. The Postgres column that
+	// forced the other shape does not reach a JSON object.
+	inheritedS3HolderNodePrefix = "\x00inherited:"
+	// safety: an unreleased build wrote the shape the SQL store uses, so
+	// a document can still carry it.
+	altInheritedS3HolderNodePrefix = `\inherited:`
 )
 
 func inheritedS3HolderNodeID(holderID string) string {
@@ -109,13 +155,13 @@ func inheritedS3HolderNodeID(holderID string) string {
 
 func isInheritedS3HolderNodeID(nodeID string) bool {
 	return strings.HasPrefix(nodeID, inheritedS3HolderNodePrefix) ||
-		strings.HasPrefix(nodeID, legacyInheritedS3HolderNodePrefix)
+		strings.HasPrefix(nodeID, altInheritedS3HolderNodePrefix)
 }
 
-// safety: a holder written before the marker changed shape has to keep
+// safety: a holder written in the other marker shape has to keep
 // comparing equal to one this binary writes for the same parent.
 func canonicalInheritedS3HolderNodeID(nodeID string) string {
-	if parentID, ok := strings.CutPrefix(nodeID, legacyInheritedS3HolderNodePrefix); ok {
+	if parentID, ok := strings.CutPrefix(nodeID, altInheritedS3HolderNodePrefix); ok {
 		return inheritedS3HolderNodePrefix + parentID
 	}
 	return nodeID
