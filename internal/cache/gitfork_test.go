@@ -319,8 +319,8 @@ func TestBackgroundFetchSkipsARepoALockedHandlerHolds(t *testing.T) {
 	t.Cleanup(func() { repoDir = oldRepoDir })
 	resetFetchState(t)
 
-	// The loop walks the directory in name order, so the locked repo must come first
-	// for the skip to be what lets the second one through.
+	// safety: the loop walks in name order, so the locked repo must come first for the
+	// skip to be what lets the second one through.
 	const locked, other = "aaa", "zzz"
 	for _, name := range []string{locked, other} {
 		if err := os.MkdirAll(filepath.Join(repoDir, name+".git"), 0o755); err != nil {
