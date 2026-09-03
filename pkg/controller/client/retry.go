@@ -44,11 +44,10 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	}
 }
 
-// safety: this client also talks to a controller behind an ingress, which can
-// answer 503 after a handler ran, so only a method the server is required to
-// treat as repeatable is sent twice. No route this client posts to accepts an
-// idempotency key, so no POST qualifies; a replayed submission would be a
-// second run.
+// safety: an ingress can answer 503 after the handler ran, so only a method
+// the server must treat as repeatable is sent twice. No route this client
+// posts to accepts an idempotency key, so no POST qualifies: a replayed
+// submission would be a second run.
 func repeatable(req *http.Request) bool {
 	switch req.Method {
 	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete:

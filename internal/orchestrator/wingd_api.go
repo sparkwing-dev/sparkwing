@@ -44,12 +44,10 @@ type wingdAPI struct {
 	handler http.Handler
 }
 
-// perf: a SQLite store is one connection, so a read waits out a foreign writer
-// on the writing handle and not on a WAL reader: against a four-second foreign
-// write, a tokenless trigger poll fell from a 3.1s p99 to milliseconds. Only
-// tokenless: a bearer token is looked up on the writing handle, so a caller
-// that sends one waits there anyway. An allow-list, not every GET, because
-// several GET routes write.
+// perf: a WAL reader does not wait out a foreign writer and the single
+// writing connection does, so a tokenless trigger poll fell from a 3.1s p99
+// to milliseconds against a four-second foreign write. An allow-list, not
+// every GET, because several GET routes write.
 var apiReadRoutes = []string{
 	"GET /api/v1/runs",
 	"GET /api/v1/runs/{id}",
