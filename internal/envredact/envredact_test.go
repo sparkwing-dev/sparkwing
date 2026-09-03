@@ -126,3 +126,56 @@ func TestRedactValue(t *testing.T) {
 		}
 	}
 }
+
+func TestCredentialTokenBoundaries(t *testing.T) {
+	t.Run("names", func(t *testing.T) {
+		cases := []struct {
+			name string
+			want bool
+		}{
+			{"MONKEY_MODE", false},
+			{"BYPASS_CHECKS", false},
+			{"COMPASS_DIR", false},
+			{"PASSENGER_COUNT", false},
+			{"KEYBOARD_LAYOUT", false},
+			{"CERTAINTY", false},
+			{"AUTHORITY_NAME", false},
+			{"TOKENIZER_PATH", false},
+			{"GOOGLE_APPLICATION_CREDENTIALS", true},
+			{"AWS_SECRET_ACCESS_KEY", true},
+			{"apiKey", true},
+			{"serviceAPIKey", true},
+			{"registry-auth", true},
+		}
+		for _, c := range cases {
+			if got := CredentialName(c.name); got != c.want {
+				t.Errorf("CredentialName(%q) = %v, want %v", c.name, got, c.want)
+			}
+		}
+	})
+
+	t.Run("values", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			value string
+			want  bool
+		}{
+			{"array under a field", `{"creds":[{"token":"ghp_secret"}]}`, true},
+			{"top-level array", `[{"api_key":"secret"}]`, true},
+			{"array of arrays", `[[{"password":"hunter2"}]]`, true},
+			{"array of plain scalars", `["us-east-1","us-west-2"]`, false},
+			{"dotenv blob", "GITHUB_TOKEN=ghp_secret\nOTHER=1", true},
+			{"single assignment", "AWS_SECRET_ACCESS_KEY=abc123", true},
+			{"assignment beside others", "LANG=C GITHUB_TOKEN=ghp_secret", true},
+			{"plain assignment blob", "MONKEY_MODE=1\nCOMPASS_DIR=/tmp", false},
+			{"url path monkey", "https://x/api/v1/monkey", false},
+			{"url path bypass", "https://api.example.com/v1/bypass", false},
+			{"empty assignment value", "TOKEN=", false},
+		}
+		for _, c := range cases {
+			if got := CredentialValue(c.value); got != c.want {
+				t.Errorf("%s: CredentialValue(%q) = %v, want %v", c.name, c.value, got, c.want)
+			}
+		}
+	})
+}
