@@ -163,8 +163,9 @@ func TestDiagnose_RemovesDeadLocalConcurrencyRows(t *testing.T) {
 }
 
 func TestDiagnose_RemovesDanglingRunDirKeepsKnown(t *testing.T) {
-	t.Setenv("SPARKWING_PROFILES", filepath.Join(t.TempDir(), "profiles.yaml"))
 	p := doctorHome(t)
+	t.Setenv("SPARKWING_HOME", p.Root)
+	t.Setenv("SPARKWING_PROFILES", filepath.Join(t.TempDir(), "profiles.yaml"))
 	ctx := context.Background()
 	withStore(t, p, func(st *store.Store) {
 		if err := st.CreateRun(ctx, store.Run{ID: "run-known", Pipeline: "demo", Status: "success", StartedAt: time.Now()}); err != nil {

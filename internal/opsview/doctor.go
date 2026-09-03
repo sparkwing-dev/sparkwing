@@ -333,7 +333,7 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 		if err := diagnoseDeadConcurrency(ctx, st, dryRun, &report); err != nil {
 			return report, err
 		}
-		if err := diagnoseDanglingRunDirs(ctx, st, runsRoot, localStoreOwnsRunRows(ctx, st), dryRun, &report); err != nil {
+		if err := diagnoseDanglingRunDirs(ctx, st, runsRoot, localStoreOwnsRunRows(ctx, p, st), dryRun, &report); err != nil {
 			return report, err
 		}
 		if err := diagnosePoisonedProfiles(ctx, st, queueState, queueRead, &report); err != nil {
@@ -1046,38 +1046,57 @@ func diagnoseDeadConcurrency(ctx context.Context, st *store.Store, dryRun bool, 
 // gone only when this store is where the row would have been written. A
 // profile that keeps run state off this machine, and a store that has never
 // recorded a run, both leave that absence proving nothing.
-func localStoreOwnsRunRows(ctx context.Context, st *store.Store) bool {
-	if !profilesKeepRunRowsLocal() {
+func localStoreOwnsRunRows(ctx context.Context, p paths.Paths, st *store.Store) bool {
+	if !profilesKeepRunRowsLocal(p) {
 		return false
 	}
 	runs, err := st.ListRuns(ctx, store.RunFilter{Limit: 1})
 	return err == nil && len(runs) > 0
 }
 
-func profilesKeepRunRowsLocal() bool {
-	path, err := profile.DefaultPath()
-	if err != nil {
+func profilesKeepRunRowsLocal(p paths.Paths) bool {
+	path, ok := doctorProfilesPath(p)
+	if !ok {
 		return false
 	}
 	cfg, err := profile.Load(path)
 	if err != nil {
 		return false
 	}
-	for _, p := range cfg.Profiles {
-		if p == nil {
+	for _, prof := range cfg.Profiles {
+		if prof == nil {
 			continue
 		}
-		if p.State != nil {
-			if p.State.Type != backends.TypeSQLite {
+		if prof.State != nil {
+			if prof.State.Type != backends.TypeSQLite {
+				return false
+			}
+			// safety: profileSurfaceSpecs redirects a sqlite spec to this home
+			// only when its path is empty, so a spec naming another database
+			// records runs somewhere this doctor never reads.
+			if prof.State.Path != "" && filepath.Clean(prof.State.Path) != filepath.Clean(p.StateDB()) {
 				return false
 			}
 			continue
 		}
-		if p.HasController() {
+		if prof.HasController() {
 			return false
 		}
 	}
 	return true
+}
+
+// safety: profiles are per-user config, not part of a home, so they describe
+// the home this user runs from and no other. Inspecting someone else's home
+// with --home leaves the sweep without evidence rather than judging it by the
+// wrong file.
+func doctorProfilesPath(p paths.Paths) (string, bool) {
+	def, err := paths.DefaultPaths()
+	if err != nil || filepath.Clean(def.Root) != filepath.Clean(p.Root) {
+		return "", false
+	}
+	path, err := profile.DefaultPath()
+	return path, err == nil
 }
 
 // safety: a run writes its envelope log as it goes, so the newest mtime in

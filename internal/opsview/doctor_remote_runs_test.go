@@ -14,7 +14,11 @@ import (
 
 func seedRunDirHome(t *testing.T, ghostAge time.Duration) (paths.Paths, string) {
 	t.Helper()
-	home := shortHome(t)
+	return seedRunDirHomeAt(t, shortHome(t), ghostAge)
+}
+
+func seedRunDirHomeAt(t *testing.T, home string, ghostAge time.Duration) (paths.Paths, string) {
+	t.Helper()
 	p := paths.PathsAt(home)
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
@@ -47,11 +51,12 @@ func seedRunDirHome(t *testing.T, ghostAge time.Duration) (paths.Paths, string) 
 	return p, ghost
 }
 
-func writeProfiles(t *testing.T, body string) {
+func ownHome(t *testing.T, home, profiles string) {
 	t.Helper()
+	t.Setenv("SPARKWING_HOME", home)
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
-	if body != "" {
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if profiles != "" {
+		if err := os.WriteFile(path, []byte(profiles), 0o600); err != nil {
 			t.Fatalf("write profiles: %v", err)
 		}
 	}
@@ -59,7 +64,8 @@ func writeProfiles(t *testing.T, body string) {
 }
 
 func TestDiagnose_KeepsRunDirWhenAProfileRecordsRunsElsewhere(t *testing.T) {
-	writeProfiles(t, `profiles:
+	home := shortHome(t)
+	ownHome(t, home, `profiles:
   fleet:
     state:
       type: s3
@@ -71,7 +77,7 @@ func TestDiagnose_KeepsRunDirWhenAProfileRecordsRunsElsewhere(t *testing.T) {
       prefix: logs
     mirror_local: false
 `)
-	p, ghost := seedRunDirHome(t, time.Hour)
+	p, ghost := seedRunDirHomeAt(t, home, time.Hour)
 
 	report, err := opsview.Diagnose(context.Background(), p, p.Root, "v1.0.0", false)
 	if err != nil {
@@ -89,8 +95,8 @@ func TestDiagnose_KeepsRunDirWhenAProfileRecordsRunsElsewhere(t *testing.T) {
 }
 
 func TestDiagnose_KeepsRunDirWhenLocalStoreHasNoRuns(t *testing.T) {
-	writeProfiles(t, "")
 	home := shortHome(t)
+	ownHome(t, home, "")
 	p := paths.PathsAt(home)
 	if err := p.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
@@ -122,8 +128,9 @@ func TestDiagnose_KeepsRunDirWhenLocalStoreHasNoRuns(t *testing.T) {
 }
 
 func TestDiagnose_KeepsARunDirStillInsideTheStartGrace(t *testing.T) {
-	writeProfiles(t, "")
-	p, ghost := seedRunDirHome(t, 0)
+	home := shortHome(t)
+	ownHome(t, home, "")
+	p, ghost := seedRunDirHomeAt(t, home, 0)
 
 	report, err := opsview.Diagnose(context.Background(), p, p.Root, "v1.0.0", false)
 	if err != nil {
@@ -139,8 +146,9 @@ func TestDiagnose_KeepsARunDirStillInsideTheStartGrace(t *testing.T) {
 }
 
 func TestDiagnose_RemovesAnIdleRunDirTheLocalStoreOwns(t *testing.T) {
-	writeProfiles(t, "")
-	p, ghost := seedRunDirHome(t, time.Hour)
+	home := shortHome(t)
+	ownHome(t, home, "")
+	p, ghost := seedRunDirHomeAt(t, home, time.Hour)
 
 	report, err := opsview.Diagnose(context.Background(), p, p.Root, "v1.0.0", false)
 	if err != nil {
@@ -154,5 +162,66 @@ func TestDiagnose_RemovesAnIdleRunDirTheLocalStoreOwns(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(p.RunsDir(), "run-known")); err == nil {
 		t.Fatal("test setup created a directory for the recorded run")
+	}
+}
+
+func TestDiagnose_KeepsRunDirWhenAProfilePointsSqliteElsewhere(t *testing.T) {
+	home := shortHome(t)
+	shared := filepath.Join(t.TempDir(), "shared.db")
+	ownHome(t, home, `profiles:
+  fleet:
+    state:
+      type: sqlite
+      path: `+shared+`
+`)
+	p, ghost := seedRunDirHomeAt(t, home, time.Hour)
+
+	report, err := opsview.Diagnose(context.Background(), p, p.Root, "v1.0.0", false)
+	if err != nil {
+		t.Fatalf("diagnose: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ghost, "_envelope.ndjson")); err != nil {
+		t.Fatalf("doctor deleted a run directory whose row lives in another sqlite database: %v", err)
+	}
+	if len(report.UnknownRunDirs) != 1 || report.UnknownRunDirs[0] != "run-elsewhere" {
+		t.Errorf("unknown run dirs = %v, want [run-elsewhere]", report.UnknownRunDirs)
+	}
+}
+
+func TestDiagnose_SweepsWhenAProfilePointsSqliteAtThisHome(t *testing.T) {
+	home := shortHome(t)
+	ownHome(t, home, `profiles:
+  local:
+    state:
+      type: sqlite
+      path: `+paths.PathsAt(home).StateDB()+`
+`)
+	p, ghost := seedRunDirHomeAt(t, home, time.Hour)
+
+	report, err := opsview.Diagnose(context.Background(), p, p.Root, "v1.0.0", false)
+	if err != nil {
+		t.Fatalf("diagnose: %v", err)
+	}
+	if len(report.DanglingRunDirs) != 1 || report.DanglingRunDirs[0] != "run-elsewhere" {
+		t.Fatalf("dangling run dirs = %v, want [run-elsewhere]", report.DanglingRunDirs)
+	}
+	if _, err := os.Stat(ghost); !os.IsNotExist(err) {
+		t.Fatalf("a profile naming this home's own state database blocked the sweep: %v", err)
+	}
+}
+
+func TestDiagnose_KeepsRunDirWhenInspectingAnotherHome(t *testing.T) {
+	ownHome(t, shortHome(t), "")
+	p, ghost := seedRunDirHome(t, time.Hour)
+
+	report, err := opsview.Diagnose(context.Background(), p, p.Root, "v1.0.0", false)
+	if err != nil {
+		t.Fatalf("diagnose: %v", err)
+	}
+	if _, err := os.Stat(ghost); err != nil {
+		t.Fatalf("doctor swept a home this user's profile config does not describe: %v", err)
+	}
+	if len(report.UnknownRunDirs) != 1 || report.UnknownRunDirs[0] != "run-elsewhere" {
+		t.Errorf("unknown run dirs = %v, want [run-elsewhere]", report.UnknownRunDirs)
 	}
 }

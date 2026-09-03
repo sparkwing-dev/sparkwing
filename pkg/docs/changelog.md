@@ -261,18 +261,25 @@ code change to unlock.
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
   sync-negotiate, workspace-checkout and git smart-HTTP paths -- forked git
   without taking a slot, so a burst of clones or `POST /sync/negotiate` requests
-  could exhaust the pod's PIDs whatever the limit said. `/git/<name>/info/refs`
-  and `/git/<name>/git-upload-pack` wait up to 30 seconds for a slot and then
-  answer 503 with `Retry-After`, so a saturated cache sheds load instead of
-  forking without bound. `POST /sync/negotiate` now checks every candidate
-  commit with one `git cat-file --batch-check` process instead of one fork per
-  commit (up to 256 per request). Operators serving many concurrent clones
-  through the cache should raise the limit from its default of 4.
+  could exhaust the pod's PIDs whatever the limit said. A request now waits a
+  bounded time for a slot -- a third of the server's read timeout, so a request
+  that wins one still has budget left to read its body -- and then answers 503
+  with `Retry-After` rather than queueing. That applies to `/archive`, `/file`,
+  `/tree-hash` and `/branch-contains`, which previously reported saturation as a
+  404 naming a branch, path or commit that was in fact present, as well as to
+  `/git/<name>/info/refs` and `/git/<name>/git-upload-pack`. `POST
+  /sync/negotiate` now checks every candidate commit with one `git cat-file
+  --batch-check` process instead of one fork per commit (up to 256 per request).
+  Operators serving many concurrent clones through the cache should raise the
+  limit from its default of 4.
 - **cache:** Artifact uploads are capped and atomic. `POST /artifacts/<job>` now
   refuses a body over 500 MiB with 413 and stages the upload beside its
   destination, renaming it into place only once the whole body has landed. A
   runner killed mid-upload used to leave a truncated file at the artifact's
   permanent path, which the list and download routes then served as complete.
+  An upload path whose base name starts with `.sparkwing-upload-` is refused
+  with 400, since that prefix now marks an upload in flight, and an empty
+  artifact listing answers `[]` rather than `null`.
 - **cache:** The gitcache background fetch loop now takes the same per-repo lock
   the request handlers take. It keyed the lock on the mirror's full path while
   every handler keyed it on the repository hash, so a background
@@ -281,22 +288,27 @@ code change to unlock.
   producing truncated archives and spurious 500s.
 - **orchestrator:** Ordinary environment variables stay in the retry snapshot.
   The credential heuristics match `KEY`, `PASS`, `SECRET`, `TOKEN` and the rest
-  as whole name segments rather than substrings, so `MONKEY_MODE`,
+  against whole name segments rather than raw substrings, so `MONKEY_MODE`,
   `COMPASS_DIR`, `BYPASS_CHECKS` and a URL whose path contains one of those
   words are no longer classified as credentials and dropped, and a retry runs
-  with the environment its original attempt had.
+  with the environment its original attempt had. Names that run the words
+  together keep their old classification: a segment ending in `KEY`, `SECRET`,
+  `TOKEN`, `PASSWORD`, `PASSWD` or `PWD` still matches, so `APIKEY`,
+  `CLIENTSECRET`, `MYSQL_PASSWD` and `SSH_PRIVATEKEY` are still credentials
+  while `PWD` and `OLDPWD` are not.
 
 - **cli:** `sparkwing doctor` no longer deletes run directories whose run row
   lives in a remote state backend. The dangling-run sweep now unlinks a
   directory only when the local SQLite store is where that run would have been
-  recorded -- no profile keeps run state in S3, Postgres, or a controller, and
-  the store has recorded at least one run -- and only once nothing has written
-  to the directory for ten minutes, which also closes the window between a
-  starting run creating its directory and its row landing. Directories it
-  cannot account for are reported as `unknown_run_dirs` and left in place.
-  Under `mirror_local: false`, the setting the docs recommend for automated
-  workers, a plain `sparkwing doctor` previously removed every run directory in
-  the home, taking `_envelope.ndjson` and the node logs with it.
+  recorded: this user's profiles describe the home being inspected, every one
+  of them keeps run state in that home's own SQLite file, and that store has
+  recorded at least one run. It also leaves a directory alone for ten minutes
+  after anything last wrote to it, which closes the window between a starting
+  run creating its directory and its row landing. Directories it cannot
+  account for are reported as `unknown_run_dirs` and left in place. Under
+  `mirror_local: false`, the setting the docs recommend for automated workers,
+  a plain `sparkwing doctor` previously removed every run directory in the
+  home, taking `_envelope.ndjson` and the node logs with it.
 - **daemon:** The stale-socket sweep no longer unlinks a live daemon's socket.
   It classified a socket dead by dialing it once and then removed the file
   without rechecking, so a sweep that ran while a daemon for another
@@ -345,6 +357,10 @@ code change to unlock.
   running; and its marker surfaced as a node id in `sparkwing concurrency
   status`. Readers now accept either form, and writers keep emitting the
   current one so a runner still on the old release reads what it wrote.
+  still holds the election lock". It now redials both the admission socket and
+  the API socket beside it, and unlinks nothing unless each still carries the
+  same file the dial found dead, so a path that answers again, or that has been
+  replaced or removed since, is left alone.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads
@@ -436,10 +452,11 @@ code change to unlock.
 - **orchestrator:** The retry snapshot no longer stores a credential hidden
   inside a JSON array or a `KEY=VALUE` blob. The environment classifier now
   walks arrays as well as objects when a value parses as JSON, and reads each
-  whitespace-separated `NAME=value` pair inside a value, so
-  `SERVICE_ACCOUNTS={"creds":[{"token":"..."}]}` and
-  `EXTRA_ENV=GITHUB_TOKEN=...` are dropped from the dispatch and submission
-  snapshots instead of persisted verbatim.
+  whitespace-separated `NAME=value` pair inside a value whose name is
+  environment-variable shaped, so `SERVICE_ACCOUNTS={"creds":[{"token":"..."}]}`
+  and `EXTRA_ENV=GITHUB_TOKEN=...` are dropped from the dispatch and submission
+  snapshots instead of persisted verbatim, while a lower-case command-line
+  fragment such as `--extra-vars key=1` inside a value is left alone.
 
 - **logs:** Secrets are masked longest-first, so a registered secret that is a
   prefix of another registered secret no longer leaks the longer one's tail.
