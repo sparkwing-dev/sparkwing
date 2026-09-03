@@ -68,6 +68,19 @@ type loopbackExecutionRunGetter interface {
 	GetRunForExecution(ctx context.Context, runID string) (*store.Run, error)
 }
 
+type loopbackCoordination interface {
+	ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error)
+	ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error)
+	FinishTrigger(ctx context.Context, id string) error
+	GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error)
+	SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
+	RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error
+	RecordContention(ctx context.Context, pipeline string) error
+	RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
+	AddNodeUsage(ctx context.Context, runID, nodeID string, u store.NodeUsage) error
+	ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error)
+}
+
 // Loopback is the controller a run mounts for its own node processes
 // when its state does not live in a SQLite database.
 //
@@ -193,7 +206,20 @@ func (l *Loopback) Handler() http.Handler {
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(l.handleTrigger)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(l.handleFindSpawnedChildTrigger)))
+	// hack: static segment prevents {id} from consuming "pending-for-parent" as a trigger ID.
+	mux.Handle("GET /api/v1/triggers/pending-for-parent", requireScope(ScopeTriggersRead, http.HandlerFunc(l.handleListPendingTriggersForParent)))
+	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(l.handleClaimSpecificTrigger)))
+	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, http.HandlerFunc(l.handleFinishTrigger)))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, http.HandlerFunc(l.handleGetTrigger), ScopeNodesClaim, ScopeTriggersClaim))
+
+	mux.Handle("GET /api/v1/pipelines/{name}/profile", requireScope(ScopeNodesClaim, http.HandlerFunc(l.handleGetPipelineProfile)))
+	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeRunsState, http.HandlerFunc(l.handleSetPipelinePin)))
+	mux.Handle("POST /api/v1/pipelines/{name}/profile/observations", requireScope(ScopeRunsState, http.HandlerFunc(l.handleRecordProfileObservation)))
+	mux.Handle("POST /api/v1/pipelines/{name}/profile/contention", requireScope(ScopeRunsState, http.HandlerFunc(l.handleRecordContention)))
+	mux.Handle("POST /api/v1/pipelines/{name}/profile/waits", requireScope(ScopeRunsState, http.HandlerFunc(l.handleRecordWaitObservation)))
+
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleGetNodeMetrics)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/usage", requireScope(ScopeNodesClaim, l.ownRun(l.handleAddNodeUsage)))
 
 	mux.Handle("GET /api/v1/concurrency/{key}/state", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleConcurrencyState)))
 
@@ -1050,4 +1076,197 @@ func writeStateError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusInternalServerError, err)
 	}
+}
+
+func (l *Loopback) coordination(w http.ResponseWriter) (loopbackCoordination, bool) {
+	c, ok := l.state.(loopbackCoordination)
+	// safety: 501, not the router's 404, which a client reads as a controller too old to serve the route.
+	if !ok {
+		writeError(w, http.StatusNotImplemented,
+			fmt.Errorf("%w: this run's state backend has no trigger or capacity surface", storage.ErrNotSupported))
+		return nil, false
+	}
+	return c, true
+}
+
+func (l *Loopback) handleListPendingTriggersForParent(w http.ResponseWriter, r *http.Request) {
+	c, ok := l.coordination(w)
+	if !ok {
+		return
+	}
+	parent := r.URL.Query().Get("parent_run_id")
+	if parent == "" {
+		writeError(w, http.StatusBadRequest, errors.New("parent_run_id is required"))
+		return
+	}
+	ids, err := c.ListPendingTriggersForParent(r.Context(), parent)
+	if err != nil {
+		writeStateError(w, err)
+		return
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trigger_ids": ids})
+}
+
+func (l *Loopback) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Request) {
+	c, ok := l.coordination(w)
+	if !ok {
+		return
+	}
+	var body claimSpecificTriggerReq
+	if r.ContentLength > 0 {
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	lease := time.Duration(body.LeaseNanos)
+	if lease <= 0 {
+		lease = store.DefaultLeaseDuration
+	}
+	t, err := c.ClaimSpecificTrigger(r.Context(), r.PathValue("id"), lease)
+	if err != nil {
+		writeStateError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (l *Loopback) handleFinishTrigger(w http.ResponseWriter, r *http.Request) {
+	c, ok := l.coordination(w)
+	if !ok {
+		return
+	}
+	if err := c.FinishTrigger(r.Context(), r.PathValue("id")); err != nil {
+		writeStateError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (l *Loopback) handleGetPipelineProfile(w http.ResponseWriter, r *http.Request) {
+	c, ok := l.coordination(w)
+	if !ok {
+		return
+	}
+	prof, err := c.GetPipelineProfile(r.Context(), r.PathValue("name"), r.URL.Query().Get("node"))
+	if err != nil {
+		writeStateError(w, err)
+		return
+	}
+	if prof == nil {
+		writeError(w, http.StatusNotFound, store.ErrNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, prof)
+}
+
+func (l *Loopback) handleSetPipelinePin(w http.ResponseWriter, r *http.Request) {
+	c, ok := l.coordination(w)
+	if !ok {
+		return
+	}
+	var body setPinReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := c.SetPipelinePin(r.Context(), r.PathValue("name"),
+		r.URL.Query().Get("node"), body.Cores, body.MemoryBytes); err != nil {
+		writeStateError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (l *Loopback) handleRecordProfileObservation(w http.ResponseWriter, r *http.Request) {
+	c, ok := l.coordination(w)
+	if !ok {
+		return
+	}
+	var body profileObservationReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := c.RecordProfileObservation(r.Context(), r.PathValue("name"),
+		r.URL.Query().Get("node"), body.observation()); err != nil {
+		writeStateError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (l *Loopback) handleRecordContention(w http.ResponseWriter, r *http.Request) {
+	c, ok := l.coordination(w)
+	if !ok {
+		return
+	}
+	if err := c.RecordContention(r.Context(), r.PathValue("name")); err != nil {
+		writeStateError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (l *Loopback) handleRecordWaitObservation(w http.ResponseWriter, r *http.Request) {
+	c, ok := l.coordination(w)
+	if !ok {
+		return
+	}
+	var body waitObservationReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := c.RecordWaitObservation(r.Context(), r.PathValue("name"), time.Duration(body.WaitNanos)); err != nil {
+		writeStateError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (l *Loopback) handleAddNodeUsage(w http.ResponseWriter, r *http.Request) {
+	c, ok := l.coordination(w)
+	if !ok {
+		return
+	}
+	var body nodeUsageReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := c.AddNodeUsage(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), store.NodeUsage{
+		CPUTime:     time.Duration(body.CPUTimeNanos),
+		MaxRSSBytes: body.MaxRSSBytes,
+		Wall:        time.Duration(body.WallNanos),
+	}); err != nil {
+		writeStateError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (l *Loopback) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) {
+	c, ok := l.coordination(w)
+	if !ok {
+		return
+	}
+	samples, err := c.ListNodeMetrics(r.Context(), r.PathValue("id"), r.PathValue("nodeID"))
+	if err != nil {
+		writeStateError(w, err)
+		return
+	}
+	points := make([]metricSample, 0, len(samples))
+	for _, s := range samples {
+		points = append(points, metricSample{
+			TS:            s.TS.UTC().Format(time.RFC3339Nano),
+			CPUMillicores: s.CPUMillicores,
+			MemoryBytes:   s.MemoryBytes,
+			CPUTimeNanos:  s.CPUTime.Nanoseconds(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"points": points})
 }

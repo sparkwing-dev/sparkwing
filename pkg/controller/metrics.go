@@ -61,8 +61,36 @@ func (s *Server) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) {
 			TS:            s.TS.UTC().Format(time.RFC3339Nano),
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,
+			CPUTimeNanos:  s.CPUTime.Nanoseconds(),
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"points": points})
+}
+
+type nodeUsageReq struct {
+	CPUTimeNanos int64 `json:"cpu_time_nanos,omitempty"`
+	MaxRSSBytes  int64 `json:"max_rss_bytes,omitempty"`
+	WallNanos    int64 `json:"wall_nanos,omitempty"`
+}
+
+func (s *Server) handleAddNodeUsage(w http.ResponseWriter, r *http.Request) {
+	var body nodeUsageReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.AddNodeUsage(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), store.NodeUsage{
+		CPUTime:     time.Duration(body.CPUTimeNanos),
+		MaxRSSBytes: body.MaxRSSBytes,
+		Wall:        time.Duration(body.WallNanos),
+	}); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

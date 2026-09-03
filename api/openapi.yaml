@@ -2449,6 +2449,203 @@ paths:
       responses:
         default: {description: Undescribed.}
 
+  /api/v1/maintenance/reconcile-orphans:
+    post:
+      x-sparkwing-scope: admin
+      tags: [runs]
+      summary: Close runs whose orchestrator process died.
+      description: |
+        Finishes every run still marked running whose run and node heartbeats
+        are all older than `threshold_nanos`, cascading its pending nodes to
+        cancelled, and answers how many runs it closed. The threshold must be
+        positive: zero would treat every running run as orphaned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [threshold_nanos]
+              properties:
+                threshold_nanos: {type: integer, format: int64}
+      responses:
+        "200":
+          description: Sweep complete.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reconciled: {type: integer}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/pipelines/{name}/profile/contention:
+    parameters: [{$ref: "#/components/parameters/PipelineName"}]
+    post:
+      x-sparkwing-scope: runs.state
+      tags: [pipelines]
+      summary: Count one contended run against a pipeline.
+      description: |
+        Records that a run of this pipeline was throttled by host contention,
+        which admission reads when deciding how much headroom to leave. Takes
+        no body.
+      responses:
+        "204": {description: Contention counted. Empty body.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/pipelines/{name}/profile/observations:
+    parameters: [{$ref: "#/components/parameters/PipelineName"}]
+    post:
+      x-sparkwing-scope: runs.state
+      tags: [pipelines]
+      summary: Fold one run's measurement into a pipeline's profile.
+      description: |
+        The measured cost of a finished run, which becomes what later runs of
+        this pipeline are charged. An empty `node` targets the pipeline
+        rollup. A `contended` observation feeds the demand floor only, and
+        carries `floor_cores` and `floor_memory_bytes` rather than peaks.
+      parameters:
+        - in: query
+          name: node
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                duration_nanos: {type: integer, format: int64}
+                peak_cores: {type: number}
+                peak_memory_bytes: {type: integer, format: int64}
+                sustained_cores: {type: number}
+                cpu_measured: {type: boolean}
+                plan_hash: {type: string}
+                contended: {type: boolean}
+                floor_cores: {type: number}
+                floor_memory_bytes: {type: integer, format: int64}
+      responses:
+        "204": {description: Observation folded. Empty body.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/pipelines/{name}/profile/waits:
+    parameters: [{$ref: "#/components/parameters/PipelineName"}]
+    post:
+      x-sparkwing-scope: runs.state
+      tags: [pipelines]
+      summary: Record how long a run queued for admission.
+      description: |
+        The wall time between submitting a run for admission and being
+        admitted, which the queue view reports as this pipeline's typical
+        wait.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [wait_nanos]
+              properties:
+                wait_nanos: {type: integer, format: int64}
+      responses:
+        "204": {description: Wait recorded. Empty body.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/usage:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [nodes]
+      summary: Fold a finished process's accounting into a node row.
+      description: |
+        Exact CPU time, peak RSS, and wall time read from a node process after
+        it was reaped. Separate from finishing the node because the figures do
+        not exist until the process exits, and the process that wrote the
+        node's outcome is not the one that can read them.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cpu_time_nanos: {type: integer, format: int64}
+                max_rss_bytes: {type: integer, format: int64}
+                wall_nanos: {type: integer, format: int64}
+      responses:
+        "204": {description: Usage folded. Empty body.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/triggers/pending-for-parent:
+    get:
+      x-sparkwing-scope: triggers.read
+      summary: List a parent run's unclaimed child triggers.
+      description: |
+        Trigger ids spawned by `parent_run_id` that no consumer holds, oldest
+        first. The parent filter is what keeps two runs on one machine from
+        dispatching each other's children.
+      parameters:
+        - in: query
+          name: parent_run_id
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Candidate trigger ids.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trigger_ids: {type: array, items: {type: string}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/triggers/{id}/claim:
+    parameters: [{$ref: "#/components/parameters/TriggerID"}]
+    post:
+      x-sparkwing-scope: triggers.claim
+      summary: Claim one named trigger.
+      description: |
+        Takes the lease on a trigger the caller already chose, unlike
+        `/api/v1/triggers/claim` which picks the next queued one. 404 means
+        the trigger is gone or another consumer holds it, so the caller moves
+        on to its next candidate.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lease_nanos: {type: integer, format: int64}
+      responses:
+        "200":
+          description: The claimed trigger.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Trigger"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
 components:
   securitySchemes:
     bearerToken:

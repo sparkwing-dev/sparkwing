@@ -34,6 +34,20 @@ Logs live in a separate service keyed by run and node
 stream for live tail. The routes and their scopes are in
 [api-reference.md](api-reference.md).
 
+## Run coordination
+
+A pipeline binary needs more than node state from whatever holds its
+runs: it dispatches its own child triggers, and it measures what the run
+cost so the next run of the same pipeline is priced from evidence. Those
+reach the controller as routes too -- `/api/v1/triggers/pending-for-parent`
+and `/api/v1/triggers/{id}/claim` for the child-trigger loop,
+`/api/v1/pipelines/{name}/profile/observations`, `/contention`, and
+`/waits` for the capacity profile, `/api/v1/runs/{id}/nodes/{nodeID}/usage`
+for a reaped process's accounting, and
+`/api/v1/maintenance/reconcile-orphans` for the sweep that closes runs
+whose orchestrator died. A run that talks to a controller therefore needs
+no database handle of its own.
+
 ## Concurrency
 
 The `.Memoize()` and `.Concurrency()` coordination primitives are backed

@@ -849,6 +849,51 @@ func (s *Server) handleFindSpawnedChildTrigger(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]string{"run_id": id})
 }
 
+func (s *Server) handleListPendingTriggersForParent(w http.ResponseWriter, r *http.Request) {
+	parent := r.URL.Query().Get("parent_run_id")
+	if parent == "" {
+		writeError(w, http.StatusBadRequest, errors.New("parent_run_id is required"))
+		return
+	}
+	ids, err := s.store.ListPendingTriggersForParent(r.Context(), parent)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trigger_ids": ids})
+}
+
+type claimSpecificTriggerReq struct {
+	LeaseNanos int64 `json:"lease_nanos,omitempty"`
+}
+
+func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Request) {
+	var body claimSpecificTriggerReq
+	if r.ContentLength > 0 {
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	lease := time.Duration(body.LeaseNanos)
+	if lease <= 0 {
+		lease = store.DefaultLeaseDuration
+	}
+	t, err := s.store.ClaimSpecificTrigger(r.Context(), r.PathValue("id"), lease)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
 func (s *Server) handleGetTrigger(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	tr, err := s.store.GetTrigger(r.Context(), id)

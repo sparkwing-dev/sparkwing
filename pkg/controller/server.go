@@ -448,6 +448,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
+	// hack: static segment prevents {id} from consuming "pending-for-parent" as a trigger ID.
+	mux.Handle("GET /api/v1/triggers/pending-for-parent", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListPendingTriggersForParent)))
+	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleClaimSpecificTrigger)))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
@@ -474,11 +477,19 @@ func (s *Server) Handler() http.Handler {
 	// safety: a pin becomes a hard Kubernetes limit for every later run of that pipeline,
 	// so it is bound to a live claim on a run of that pipeline, not to the scope alone.
 	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleSetPipelinePin))))
+	// safety: an observation moves the same measured price the pin does, so it
+	// carries the pin's claim gate rather than the scope alone.
+	mux.Handle("POST /api/v1/pipelines/{name}/profile/observations", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleRecordProfileObservation))))
+	mux.Handle("POST /api/v1/pipelines/{name}/profile/contention", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleRecordContention))))
+	mux.Handle("POST /api/v1/pipelines/{name}/profile/waits", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleRecordWaitObservation))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAddNodeMetric))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeMetrics)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/usage", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAddNodeUsage))))
 
 	mux.Handle("DELETE /api/v1/runs/{id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteRun)))
+
+	mux.Handle("POST /api/v1/maintenance/reconcile-orphans", requireScope(ScopeAdmin, http.HandlerFunc(s.handleReconcileOrphans)))
 
 	mux.Handle("POST /api/v1/concurrency/{key}/acquire", requireScope(ScopeAdmin, http.HandlerFunc(s.handleAcquireSlot)))
 	mux.Handle("POST /api/v1/concurrency/{key}/heartbeat", requireScope(ScopeAdmin, http.HandlerFunc(s.handleHeartbeatSlot)))

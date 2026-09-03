@@ -148,3 +148,69 @@ func maxF(a, b float64) float64 {
 	}
 	return b
 }
+
+type profileObservationReq struct {
+	DurationNanos    int64   `json:"duration_nanos,omitempty"`
+	PeakCores        float64 `json:"peak_cores,omitempty"`
+	PeakMemoryBytes  int64   `json:"peak_memory_bytes,omitempty"`
+	SustainedCores   float64 `json:"sustained_cores,omitempty"`
+	CPUMeasured      bool    `json:"cpu_measured,omitempty"`
+	PlanHash         string  `json:"plan_hash,omitempty"`
+	Contended        bool    `json:"contended,omitempty"`
+	FloorCores       float64 `json:"floor_cores,omitempty"`
+	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
+}
+
+func (b profileObservationReq) observation() store.ProfileObservation {
+	return store.ProfileObservation{
+		Duration:         time.Duration(b.DurationNanos),
+		PeakCores:        b.PeakCores,
+		PeakMemoryBytes:  b.PeakMemoryBytes,
+		SustainedCores:   b.SustainedCores,
+		CPUMeasured:      b.CPUMeasured,
+		PlanHash:         b.PlanHash,
+		Contended:        b.Contended,
+		FloorCores:       b.FloorCores,
+		FloorMemoryBytes: b.FloorMemoryBytes,
+	}
+}
+
+func (s *Server) handleRecordProfileObservation(w http.ResponseWriter, r *http.Request) {
+	var body profileObservationReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.RecordProfileObservation(r.Context(), r.PathValue("name"),
+		r.URL.Query().Get("node"), body.observation()); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleRecordContention(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.RecordContention(r.Context(), r.PathValue("name")); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type waitObservationReq struct {
+	WaitNanos int64 `json:"wait_nanos"`
+}
+
+func (s *Server) handleRecordWaitObservation(w http.ResponseWriter, r *http.Request) {
+	var body waitObservationReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.store.RecordWaitObservation(r.Context(), r.PathValue("name"),
+		time.Duration(body.WaitNanos)); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

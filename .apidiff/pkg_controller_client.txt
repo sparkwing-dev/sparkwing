@@ -36,6 +36,7 @@ type Client struct {
 }
 func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotRequest) (*AcquireSlotResponse, error)
 func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error
+func (c *Client) AddNodeUsage(ctx context.Context, runID, nodeID string, u store.NodeUsage) error
 func (c *Client) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
 func (c *Client) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
@@ -43,6 +44,7 @@ func (c *Client) BaseURL() string
 func (c *Client) CancelRun(ctx context.Context, runID string) error
 func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error)
+func (c *Client) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error)
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
 func (c *Client) Close() error
@@ -111,15 +113,21 @@ func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*stor
 func (c *Client) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
 func (c *Client) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error)
 func (c *Client) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error)
+func (c *Client) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error)
 func (c *Client) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error)
 func (c *Client) ListNodes(ctx context.Context, runID string) ([]*store.Node, error)
 func (c *Client) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error)
+func (c *Client) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error)
 func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run, error)
 func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
 func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
+func (c *Client) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error)
+func (c *Client) RecordContention(ctx context.Context, pipeline string) error
+func (c *Client) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error
+func (c *Client) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 func (c *Client) RequestNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)

@@ -30,10 +30,14 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/gitcache/refresh` | `runs.write` |
 | `POST` | `/api/v1/gitcache/seed` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
+| `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
+| `POST` | `/api/v1/pipelines/{name}/profile/contention` | `runs.state` |
+| `POST` | `/api/v1/pipelines/{name}/profile/observations` | `runs.state` |
 | `PUT` | `/api/v1/pipelines/{name}/profile/pin` | `runs.state` |
+| `POST` | `/api/v1/pipelines/{name}/profile/waits` | `runs.state` |
 | `GET` | `/api/v1/pool` | `runs.read` |
 | `POST` | `/api/v1/pool/checkout` | `admin` |
 | `POST` | `/api/v1/pool/heartbeat` | `admin` |
@@ -89,6 +93,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/summary` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/summary` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/touch` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/plan` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
@@ -108,8 +113,10 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/triggers` | `triggers.read` |
 | `POST` | `/api/v1/triggers` | `runs.write` |
 | `POST` | `/api/v1/triggers/claim` | `triggers.claim` |
+| `GET` | `/api/v1/triggers/pending-for-parent` | `triggers.read` |
 | `GET` | `/api/v1/triggers/spawned-child` | `triggers.read` |
 | `GET` | `/api/v1/triggers/{id}` | `triggers.read` or `nodes.claim` or `triggers.claim` |
+| `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
 | `GET` | `/api/v1/users` | `admin` |
