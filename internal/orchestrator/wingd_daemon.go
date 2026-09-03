@@ -82,9 +82,6 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 	return nil
 }
 
-// maintainRunStore reaps the runs store while the elected daemon serves.
-// The first pass also reconciles runs whose process died without finishing
-// them, the way a CLI run does on start.
 func maintainRunStore(ctx context.Context, runs *HeldRunStore, ready <-chan struct{}, logf func(string, ...any)) {
 	select {
 	case <-ready:
