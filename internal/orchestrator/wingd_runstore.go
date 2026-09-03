@@ -59,6 +59,7 @@ type HeldRunStore struct {
 	retry time.Duration
 	now   func() time.Time
 
+	createMu  sync.Mutex
 	mu        sync.Mutex
 	rw        *store.Store
 	ro        *store.Store
@@ -91,6 +92,42 @@ func NewHeldRunStore(home string) (*HeldRunStore, error) {
 func (h *HeldRunStore) Store(ctx context.Context, force bool) (*store.Store, error) {
 	rw, _, err := h.handles(ctx, force)
 	return rw, err
+}
+
+// Create returns both handles, creating this home's runs store when it has
+// none. The daemon opens the file it finds and never creates one at start,
+// because a run against an object-store profile must leave no local state
+// behind; a state request over the API is the first proof that a local run
+// wants one.
+func (h *HeldRunStore) Create(ctx context.Context) (*store.Store, *store.Store, error) {
+	rw, ro, err := h.handles(ctx, false)
+	if !errors.Is(err, errRunStoreAbsent) {
+		return rw, ro, err
+	}
+	if err := h.createStore(); err != nil {
+		return nil, nil, err
+	}
+	return h.handles(ctx, true)
+}
+
+// safety: two concurrent requests would otherwise each migrate a store they
+// both just created, and store.Open answers the loser with a locked file
+// rather than the handle.
+func (h *HeldRunStore) createStore() error {
+	h.createMu.Lock()
+	defer h.createMu.Unlock()
+	db := h.paths.StateDB()
+	if _, err := os.Stat(db); err == nil {
+		return nil
+	}
+	if err := h.paths.EnsureRoot(); err != nil {
+		return err
+	}
+	st, err := store.Open(db)
+	if err != nil {
+		return err
+	}
+	return st.Close()
 }
 
 // Reader returns the read-only handle, opened alongside the writing one,

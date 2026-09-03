@@ -42,12 +42,17 @@ func runWingdCLI(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	art, err := resolveArtifactStoreFromEnv(ctx)
+	if err != nil {
+		return fmt.Errorf("wingd run: cache backend: %w", err)
+	}
 	return RunWingdDaemon(ctx, WingdOptions{
-		Home:         *home,
-		Version:      v,
-		Budget:       resolvedBudget.Budget,
-		BudgetSource: resolvedBudget.Source,
-		BudgetOrigin: resolvedBudget.Origin,
+		Home:          *home,
+		Version:       v,
+		Budget:        resolvedBudget.Budget,
+		BudgetSource:  resolvedBudget.Source,
+		BudgetOrigin:  resolvedBudget.Origin,
+		ArtifactStore: art,
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
 				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))
