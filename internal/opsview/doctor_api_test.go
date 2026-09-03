@@ -9,8 +9,10 @@ import (
 func apiReady(v bool) *bool { return &v }
 
 func TestDoctorJSONCarriesAPIReadyWhenFalse(t *testing.T) {
-	d := DoctorDaemon{State: ReachServing, Reachable: true, Socket: "/tmp/d.sock",
-		APISocket: "/tmp/api.sock", APIReady: apiReady(false), APIError: "permission denied"}
+	d := DoctorDaemon{
+		State: ReachServing, Reachable: true, Socket: "/tmp/d.sock",
+		APISocket: "/tmp/api.sock", APIReady: apiReady(false), APIError: "permission denied",
+	}
 	raw, err := json.Marshal(d)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -25,8 +27,10 @@ func TestDoctorJSONCarriesAPIReadyWhenFalse(t *testing.T) {
 }
 
 func TestDoctorReportIsNotCleanWithAnUnboundAPISocket(t *testing.T) {
-	report := DoctorReport{Daemon: DoctorDaemon{State: ReachServing, Reachable: true,
-		APISocket: "/tmp/api.sock", APIReady: apiReady(false), APIError: "permission denied"}}
+	report := DoctorReport{Daemon: DoctorDaemon{
+		State: ReachServing, Reachable: true,
+		APISocket: "/tmp/api.sock", APIReady: apiReady(false), APIError: "permission denied",
+	}}
 	if report.Clean() {
 		t.Fatal("a daemon serving admission with no controller API reports a clean machine")
 	}

@@ -205,8 +205,9 @@ func (a *wingdAPI) handlerFor(rw, ro *store.Store) http.Handler {
 
 func (a *wingdAPI) split(rw, ro *store.Store) http.Handler {
 	// safety: one authenticator for both servers, because each holds its own
-	// token cache and its own revocation generation, and a revoke reaches only
-	// the server that served it.
+	// token cache and revocation generation, so a second one would keep
+	// serving a token the first revoked. It keeps the writing handle because
+	// a bearer token's own bookkeeping is a write.
 	auth := controller.NewAuthenticator(rw, apiAuthCacheTTL).WithLogger(a.logger)
 	mux := http.NewServeMux()
 	mux.Handle("/", a.controllerOn(rw, auth))
@@ -220,11 +221,9 @@ func (a *wingdAPI) split(rw, ro *store.Store) http.Handler {
 	return mux
 }
 
-// safety: the read server must never be given a reconcile hook. The two
-// busiest read routes run it before answering, it writes, and the controller
-// discards its error, so a hook here would fail silently on a read-only
-// handle. The authenticator keeps the writing handle because a bearer token's
-// own bookkeeping is a write.
+// safety: never give this server a reconcile hook. The two busiest read
+// routes run one before answering, it writes, and the controller discards its
+// error, so on the read-only handle it would fail silently.
 func (a *wingdAPI) controllerOn(st *store.Store, auth *controller.Authenticator) http.Handler {
 	return controller.New(st, a.logger).
 		WithArtifactStore(a.artifact).

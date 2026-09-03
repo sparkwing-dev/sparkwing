@@ -17,9 +17,9 @@ const UnavailableRetries = 3
 // does not park the caller for one.
 const MaxUnavailableWait = 5 * time.Second
 
-// do sends req, repeating it while the server answers 503 with a Retry-After
-// header it can honour. A 503 without that header is returned as it arrived,
-// which is how a server says the condition is not going to clear.
+// safety: a 503 without Retry-After is returned as it arrived, which is how a
+// server says the condition will not clear; only a server that invites the
+// caller back gets another attempt.
 func (c *Client) do(req *http.Request) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
 		resp, err := c.http.Do(req)

@@ -14,10 +14,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// apiWriteRoutes is every controller route the daemon serves from the writing
-// handle. It exists so the classification is exhaustive: a route added to the
-// controller and to none of the three lists fails
-// TestEveryControllerRouteIsClassified rather than silently defaulting.
+// safety: the writing handle is the default, so this list carries no runtime
+// weight; it exists to make the classification exhaustive, so a new
+// controller route fails the gate below instead of defaulting silently.
 var apiWriteRoutes = []string{
 	"GET /api/v1/agents",
 	"GET /api/v1/auth/bootstrap-needed",
