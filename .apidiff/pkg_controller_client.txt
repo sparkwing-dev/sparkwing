@@ -104,6 +104,7 @@ func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error)
 func (c *Client) GetSecretForRepo(ctx context.Context, name, repo string) (*Secret, error)
 func (c *Client) GetSecretForRun(ctx context.Context, name, runID string) (*Secret, error)
 func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)
+func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom Headroom) error
 func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error)
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error)

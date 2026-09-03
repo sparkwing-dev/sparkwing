@@ -1,13 +1,19 @@
 # pkg/controller
 
 type Agent struct {
-	Name          string
-	Type          string
-	Labels        map[string]string
-	LastSeen      string
-	Status        string
-	ActiveJobs    []string
-	MaxConcurrent int
+	Name            string
+	Type            string
+	Location        string
+	Labels          map[string]string
+	Capabilities    []string
+	LastSeen        string
+	Status          string
+	ActiveJobs      []string
+	ActiveSlots     *int
+	MaxConcurrent   int
+	BasePriority    int
+	PriorityCeiling int
+	Budget          AgentResources
 
 	Headroom *AgentHeadroom
 }
@@ -15,6 +21,10 @@ type AgentHeadroom struct {
 	Cores       float64
 	MemoryBytes int64
 	QueueDepth  int
+}
+type AgentResources struct {
+	Cores       float64
+	MemoryBytes int64
 }
 func AuditFields(ctx context.Context) []slog.Attr
 type Authenticator struct {

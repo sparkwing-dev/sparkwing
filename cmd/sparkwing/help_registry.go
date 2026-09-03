@@ -141,7 +141,7 @@ address; set them up with 'sparkwing configure profiles'.`,
 	SubcommandOrder: []string{"status", "agents", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
-		{"List fleet agents", "sparkwing cluster agents --profile prod"},
+		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
 	},
 }
 
@@ -3384,12 +3384,42 @@ var cmdAgents = Command{
 	Path:     "sparkwing cluster agents",
 	Synopsis: "Inspect the controller's fleet view",
 	Description: `Hits GET /api/v1/agents on the selected profile's controller.
-Prints one row per agent seen claiming work in the last hour
-(the controller infers agents from recent node claims; there
-is no explicit registration table yet).`,
-	SubcommandOrder: []string{"list"},
+Prints persisted executor registrations, including idle and
+offline agents and gateways, plus recent legacy claim-only runners.`,
+	SubcommandOrder: []string{"list", "enroll"},
 	Examples: []Example{
 		{"List prod agents", "sparkwing cluster agents list --profile prod"},
+	},
+}
+
+var cmdAgentsEnroll = Command{
+	Path:     "sparkwing cluster agents enroll",
+	Synopsis: "Enroll or update a trusted executor",
+	Description: `Binds one exact runner or service token prefix to an
+operator-owned executor envelope. The token must be live and carry
+nodes.claim; its stored principal becomes audit metadata. Re-enrollment
+with the same credential updates trusted scheduling fields without changing
+live headroom. Changing the prefix requires a new heartbeat.
+
+Use a distinct revocable token for every coordinator membership. The
+prefix is accepted as input but is never returned by the agents API.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "NAME", Desc: "Executor name", Required: true, Group: "Identity"},
+		{Name: "token-prefix", Argument: "PREFIX", Desc: "Exact runner or service token prefix", Required: true, Group: "Identity"},
+		{Name: "kind", Argument: "KIND", Desc: "Executor kind (agent|gateway)", Default: "agent", Group: "Identity"},
+		{Name: "location", Argument: "WHERE", Desc: "Display location (local|cloud|unknown)", Default: "unknown", Group: "Identity"},
+		{Name: "capability", Argument: "LABEL", Desc: "Trusted capability (repeatable)", Group: "Trust"},
+		{Name: "base-priority", Argument: "N", Desc: "Base scheduling priority (0-100)", Default: "0", Group: "Trust"},
+		{Name: "priority-ceiling", Argument: "N", Desc: "Highest effective priority (0-100)", Default: "100", Group: "Trust"},
+		{Name: "max-concurrent", Argument: "N", Desc: "Trusted concurrent slot ceiling", Default: "1", Group: "Limits"},
+		{Name: "budget-cores", Argument: "N", Desc: "CPU contribution ceiling (0 = uncapped)", Default: "0", Group: "Limits"},
+		{Name: "budget-memory-bytes", Argument: "N", Desc: "Memory contribution ceiling in bytes (0 = uncapped)", Default: "0", Group: "Limits"},
+		{Name: "profile", Argument: "NAME", Desc: "Admin controller profile", Required: true, Group: "System"},
+	},
+	GroupOrder: []string{"Identity", "Trust", "Limits", "System", "Other"},
+	Examples: []Example{
+		{"Enroll a workstation agent", "sparkwing cluster agents enroll --profile prod --name desk --token-prefix swr_01234567 --kind agent --location local --capability linux --max-concurrent 2 --budget-cores 4 --budget-memory-bytes 8589934592"},
+		{"Enroll a capacity gateway", "sparkwing cluster agents enroll --profile prod --name build-gateway --token-prefix sws_01234567 --kind gateway --location cloud --capability linux-amd64 --max-concurrent 8"},
 	},
 }
 
@@ -3397,9 +3427,10 @@ var cmdAgentsList = Command{
 	Path:     "sparkwing cluster agents list",
 	Synopsis: "Print the controller's known agents",
 	Description: `Fetches /api/v1/agents and renders a table of fleet members.
-The controller infers agents from node claims over the last
-hour, so idle agents without any recent claim activity won't
-show up -- a known limitation until we add explicit heartbeats.
+Registered executors report their operator-assigned identity,
+kind, display location, capabilities, concurrency limit, and
+measured resource headroom. A stale registration remains visible
+as offline; recent legacy claim-only runners remain visible too.
 
 Use -q to print just names, one per line, for shell piping
 (e.g. looping over agents with xargs).`,

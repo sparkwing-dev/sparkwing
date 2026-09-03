@@ -1005,12 +1005,7 @@ func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byt
 	}
 }
 
-// Headroom is a registered runner's live free capacity, advertised to
-// the controller on each node claim and heartbeat so the scheduler can
-// see whose box has room. It is the local admission daemon's grantable
-// cores and memory after subtracting the operator's local reserve, plus
-// the daemon's current queue depth. A nil *Headroom means the runner is
-// not advertising (it engages no local daemon).
+// Headroom is a runner's live free capacity after its local reserve.
 type Headroom struct {
 	Cores       float64 `json:"cores"`
 	MemoryBytes int64   `json:"memory_bytes"`
@@ -1062,6 +1057,13 @@ func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string
 	default:
 		return nil, readHTTPError(resp)
 	}
+}
+
+// HeartbeatExecutor reports live capacity for an administrator-enrolled
+// executor. The controller authenticates the exact enrollment credential.
+func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom Headroom) error {
+	path := fmt.Sprintf("/api/v1/agents/%s/heartbeat", url.PathEscape(name))
+	return c.post(ctx, path, map[string]any{"headroom": headroom}, http.StatusNoContent, nil)
 }
 
 // MarkNodeReady sets ready_at on a node so pool runners can claim it.

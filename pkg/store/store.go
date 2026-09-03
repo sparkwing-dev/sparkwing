@@ -524,6 +524,11 @@ CREATE TABLE IF NOT EXISTS nodes (
     -- claim_token_prefix: the claiming token's prefix segment. Unique
     -- per token, so this is what the ownership predicates match on.
     claim_token_prefix TEXT NOT NULL DEFAULT '',
+    claim_executor   TEXT NOT NULL DEFAULT '',
+    claim_cores      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    claim_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    claim_reservation TEXT NOT NULL DEFAULT '',
+    claim_slot       INTEGER NOT NULL DEFAULT -1,
     lease_expires_at INTEGER,
     -- needs_labels: JSON []string from RunsOn; AND semantics.
     needs_labels     BLOB,
@@ -548,6 +553,25 @@ CREATE INDEX IF NOT EXISTS idx_nodes_claimable
 CREATE INDEX IF NOT EXISTS idx_nodes_claimed_lease
     ON nodes(lease_expires_at)
     WHERE claimed_by IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS executors (
+    name                  TEXT PRIMARY KEY,
+    token_prefix          TEXT NOT NULL UNIQUE,
+    kind                  TEXT NOT NULL,
+    location              TEXT NOT NULL,
+    capabilities_json     BLOB,
+    base_priority         INTEGER NOT NULL DEFAULT 0,
+    priority_ceiling      INTEGER NOT NULL DEFAULT 0,
+    max_concurrent        INTEGER NOT NULL,
+    budget_cores          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    budget_memory_bytes   INTEGER NOT NULL DEFAULT 0,
+    principal             TEXT NOT NULL,
+    last_seen             INTEGER NOT NULL,
+    headroom_reported     INTEGER NOT NULL DEFAULT 0,
+    headroom_cores        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    headroom_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    queue_depth           INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS events (
     run_id   TEXT NOT NULL,
@@ -854,7 +878,31 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 27
+const expectedSchemaVersion = 28
+
+const executorsTableSQLite = `CREATE TABLE IF NOT EXISTS executors (
+    name                  TEXT PRIMARY KEY,
+    token_prefix          TEXT NOT NULL UNIQUE,
+    kind                  TEXT NOT NULL,
+    location              TEXT NOT NULL,
+    capabilities_json     BLOB,
+    base_priority         INTEGER NOT NULL DEFAULT 0,
+    priority_ceiling      INTEGER NOT NULL DEFAULT 0,
+    max_concurrent        INTEGER NOT NULL,
+    budget_cores          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    budget_memory_bytes   INTEGER NOT NULL DEFAULT 0,
+    principal             TEXT NOT NULL,
+    last_seen             INTEGER NOT NULL,
+    headroom_reported     INTEGER NOT NULL DEFAULT 0,
+    headroom_cores        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    headroom_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    queue_depth           INTEGER NOT NULL DEFAULT 0
+);`
+
+var executorsTablePostgres = strings.NewReplacer(
+	"INTEGER", "BIGINT",
+	"BLOB", "BYTEA",
+).Replace(executorsTableSQLite)
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1273,6 +1321,12 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return uniqueTokenPrefixIndexTx(ctx, tx)
 	case 27:
 		return rewriteLegacyInheritedHolderMarkers(ctx, tx)
+	case 28:
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodeExecutorClaimCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, executorsTableSQLite)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1377,6 +1431,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		// SQLSTATE 22021, so no row here can carry it and the rewrite
 		// would only bind a NUL that Postgres rejects again.
 		return nil
+	case 28:
+		if err := addColumnsTx(ctx, tx, "nodes", nodeExecutorClaimColsPostgres); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, executorsTablePostgres)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1473,6 +1533,11 @@ var columnMigrations = []columnSpec{
 		"claimed_by":         "TEXT",
 		"claim_principal":    "TEXT NOT NULL DEFAULT ''",
 		"claim_token_prefix": "TEXT NOT NULL DEFAULT ''",
+		"claim_executor":     "TEXT NOT NULL DEFAULT ''",
+		"claim_cores":        "DOUBLE PRECISION NOT NULL DEFAULT 0",
+		"claim_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
+		"claim_reservation":  "TEXT NOT NULL DEFAULT ''",
+		"claim_slot":         "INTEGER NOT NULL DEFAULT -1",
 		"lease_expires_at":   "INTEGER",
 		"needs_labels":       "BLOB",
 		"status_detail":      "TEXT NOT NULL DEFAULT ''",
@@ -1572,6 +1637,22 @@ var nodesUsageCols = map[string]string{
 	"cpu_nanos":          "INTEGER NOT NULL DEFAULT 0",
 	"max_rss_bytes":      "INTEGER NOT NULL DEFAULT 0",
 	"process_wall_nanos": "INTEGER NOT NULL DEFAULT 0",
+}
+
+var nodeExecutorClaimCols = map[string]string{
+	"claim_executor":     "TEXT NOT NULL DEFAULT ''",
+	"claim_cores":        "DOUBLE PRECISION NOT NULL DEFAULT 0",
+	"claim_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
+	"claim_reservation":  "TEXT NOT NULL DEFAULT ''",
+	"claim_slot":         "INTEGER NOT NULL DEFAULT -1",
+}
+
+var nodeExecutorClaimColsPostgres = map[string]string{
+	"claim_executor":     "TEXT NOT NULL DEFAULT ''",
+	"claim_cores":        "DOUBLE PRECISION NOT NULL DEFAULT 0",
+	"claim_memory_bytes": "BIGINT NOT NULL DEFAULT 0",
+	"claim_reservation":  "TEXT NOT NULL DEFAULT ''",
+	"claim_slot":         "BIGINT NOT NULL DEFAULT -1",
 }
 
 var nodeDispatchRedactionCols = map[string]string{
@@ -3321,7 +3402,8 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-		        lease_expires_at = NULL
+		        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
+		        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {
@@ -3372,7 +3454,8 @@ UPDATE nodes
        error = 'runner heartbeat expired',
        failure_reason = ?, finished_at = ?,
        claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-       lease_expires_at = NULL
+       claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
+       claim_reservation = '', claim_slot = -1, lease_expires_at = NULL
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			FailureAgentLost, now, p[0], p[1]); err != nil {
 			return nil, err

@@ -1076,6 +1076,22 @@ type claimHeadroom struct {
 	QueueDepth  int     `json:"queue_depth"`
 }
 
+func (s *Server) rejectEnrolledLegacyClaim(r *http.Request) error {
+	claimant := claimIdentity(r)
+	if claimant.TokenPrefix == "" {
+		return nil
+	}
+	name, err := s.store.ExecutorNameForTokenPrefix(r.Context(), claimant.TokenPrefix)
+	switch {
+	case err == nil:
+		return fmt.Errorf("credential is enrolled for executor %q; assisted offer protocol is required", name)
+	case errors.Is(err, store.ErrNotFound):
+		return nil
+	default:
+		return err
+	}
+}
+
 func (s *Server) recordAdvertisedHeadroom(holderID string, h *claimHeadroom) {
 	if h == nil {
 		return
@@ -1097,6 +1113,10 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.HolderID == "" {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
+		return
+	}
+	if err := s.rejectEnrolledLegacyClaim(r); err != nil {
+		writeError(w, http.StatusForbidden, err)
 		return
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
@@ -1160,6 +1180,10 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 	}
 	if body.HolderID == "" {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
+		return
+	}
+	if err := s.rejectEnrolledLegacyClaim(r); err != nil {
+		writeError(w, http.StatusForbidden, err)
 		return
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)

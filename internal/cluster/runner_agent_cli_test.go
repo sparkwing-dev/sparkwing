@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
 func TestAgentConfig_RoundTripFromYAML(t *testing.T) {
@@ -89,6 +91,130 @@ func TestAgentConfig_DefaultsSpawnPolicy(t *testing.T) {
 	}
 	if norm.Gitcache != "http://x/api/v1/gitcache" {
 		t.Fatalf("gitcache default = %q, want controller proxy", norm.Gitcache)
+	}
+	if norm.LocalAdmission == nil || *norm.LocalAdmission {
+		t.Fatal("legacy singular config did not preserve disabled local admission")
+	}
+}
+
+func TestAgentConfig_RequiresLocalAdmissionOnlyForEnrolledMode(t *testing.T) {
+	disabled := false
+	legacy, err := ValidateAgentConfig(AgentConfig{Controller: "http://x", LocalAdmission: &disabled})
+	if err != nil || legacy.LocalAdmission == nil || *legacy.LocalAdmission {
+		t.Fatalf("legacy local_admission:false = %+v, %v", legacy.LocalAdmission, err)
+	}
+	if _, err := ValidateAgentConfig(AgentConfig{Name: "desk", Controller: "http://x", Token: "swr_x", LocalAdmission: &disabled}); err == nil {
+		t.Fatal("enrolled local_admission:false was accepted")
+	}
+	enrolled, err := ValidateAgentConfig(AgentConfig{Name: "desk", Controller: "http://x", Token: "swr_x"})
+	if err != nil || enrolled.LocalAdmission == nil || !*enrolled.LocalAdmission {
+		t.Fatalf("enrolled local admission default = %+v, %v", enrolled.LocalAdmission, err)
+	}
+}
+
+func TestAgentConfig_MultipleMembershipsRequireDistinctCredentialsAndShareCeilings(t *testing.T) {
+	cfg := AgentConfig{
+		Name: "desk", MaxConcurrent: 3, Contribution: "4,8gb",
+		Coordinators: []AgentCoordinatorConfig{
+			{Controller: "https://personal.example", Token: "swr_personal", MaxConcurrent: 2},
+			{Controller: "https://team.example", Token: "swr_team", MaxConcurrent: 9, Contribution: "2,4gb"},
+		},
+	}
+	norm, err := ValidateAgentConfig(cfg)
+	if err != nil {
+		t.Fatalf("ValidateAgentConfig: %v", err)
+	}
+	if norm.Coordinators[0].Name != "desk" || norm.Coordinators[1].Name != "desk" ||
+		norm.Coordinators[0].Contribution != "4,8gb" || norm.Coordinators[1].MaxConcurrent != 3 {
+		t.Fatalf("membership ceilings = %+v", norm.Coordinators)
+	}
+	cfg.Coordinators[1].Token = "swr_personal"
+	if _, err := ValidateAgentConfig(cfg); err == nil {
+		t.Fatal("duplicate membership credential was accepted")
+	}
+}
+
+func TestAgentMembership_HeartbeatsOnlyAndFailsClosedWithoutWingd(t *testing.T) {
+	var heartbeats atomic.Int64
+	var claims atomic.Int64
+	heartbeatSeen := make(chan struct{}, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/agents/desk/heartbeat", func(w http.ResponseWriter, r *http.Request) {
+		heartbeats.Add(1)
+		if got := r.Header.Get("Authorization"); got != "Bearer swr_member" {
+			t.Errorf("Authorization = %q", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+		select {
+		case heartbeatSeen <- struct{}{}:
+		default:
+		}
+	})
+	mux.HandleFunc("POST /api/v1/nodes/claim", func(w http.ResponseWriter, _ *http.Request) {
+		claims.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cfg := AgentConfig{Heartbeat: time.Millisecond}
+	member := AgentCoordinatorConfig{Name: "desk", Controller: srv.URL, Token: "swr_member"}
+	ctrl := client.NewWithToken(srv.URL, srv.Client(), member.Token)
+	provider := func(context.Context) capacityReport {
+		return capacityReport{headroom: &client.Headroom{Cores: 2, MemoryBytes: 4 << 30}}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runAgentMembershipLoop(ctx, cfg, member, provider, ctrl, discardSlog()) }()
+	select {
+	case <-heartbeatSeen:
+		cancel()
+	case <-time.After(time.Second):
+		t.Fatal("executor heartbeat was not sent")
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("membership loop: %v", err)
+	}
+	before := heartbeats.Load()
+	err := runAgentMembershipLoop(context.Background(), cfg, member,
+		func(context.Context) capacityReport { return capacityReport{} }, ctrl, discardSlog())
+	if err == nil || !strings.Contains(err.Error(), "heartbeat withheld") {
+		t.Fatalf("unavailable wingd error = %v", err)
+	}
+	if got := heartbeats.Load(); got != before {
+		t.Fatalf("heartbeats after failed probe = %d, want %d", got, before)
+	}
+	if got := claims.Load(); got != 0 {
+		t.Fatalf("legacy claims = %d, want 0", got)
+	}
+}
+
+func TestAgentMembershipSupervisors_IsolateTerminalFailures(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	healthyStarted := make(chan struct{})
+	done := make(chan error, 2)
+	go func() {
+		done <- superviseAgentMembership(ctx, func(context.Context) error {
+			return errors.New("coordinator unavailable")
+		}, discardSlog())
+	}()
+	go func() {
+		done <- superviseAgentMembership(ctx, func(runCtx context.Context) error {
+			close(healthyStarted)
+			<-runCtx.Done()
+			return runCtx.Err()
+		}, discardSlog())
+	}()
+	select {
+	case <-healthyStarted:
+	case <-time.After(time.Second):
+		t.Fatal("healthy membership was cancelled by peer failure")
+	}
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatalf("supervisor exit = %v", err)
+		}
 	}
 }
 

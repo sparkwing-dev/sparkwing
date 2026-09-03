@@ -374,19 +374,67 @@ when testing deterministic placement.
 
 ### Remote machine capacity
 
-`sparkwing-runner agent` lets eligible Windows, macOS, and Linux computers
-contribute node capacity through the same controller claim protocol. Developer
-laptops, desktops, office workstations, home or build servers, and cloud
-servers are peers in this pool. Windows is an initial proof target, not a
-scheduling boundary.
+`sparkwing-runner agent` has separate legacy and enrolled modes.
 
-The agent opens no listener. It polls the controller and sends claim,
-heartbeat, log, and result traffic over outbound HTTP(S). Tailscale is not
-required; a private network may instead expose a direct cache while the
-controller proxy remains the portable path. Every claim attempt carries the
-agent's labels. Local admission also reports available CPU and memory with
-claims and heartbeats. The controller's agent view derives from completed or
-active claims; an idle agent that has never claimed a node is not registered.
+The name-less singular configuration uses the existing outbound FIFO
+`/api/v1/nodes/claim` loop. Its `labels` are self-asserted placement terms,
+not administrator-trusted capabilities. The bundled service installer writes
+this format. Existing files keep their `local_admission` setting, including an
+explicit `false`; when enabled, legacy local admission happens after a claim.
+
+Named or plural configuration selects enrolled liveness-only mode. Before
+starting it, a controller administrator binds the executor to the exact prefix
+of a live runner or service token:
+
+```bash
+sparkwing cluster agents enroll --profile prod \
+  --name desk --token-prefix swr_01234567 \
+  --kind agent --location local --capability linux-amd64 \
+  --base-priority 10 --priority-ceiling 30 \
+  --max-concurrent 2 --budget-cores 4 --budget-memory-bytes 8589934592
+```
+
+The controller-owned enrollment is the trust envelope. Kind identifies an
+`agent` or `gateway` execution boundary; location is display-only and never
+affects placement. Capabilities, priority range, concurrency ceiling, and
+resource budget come only from enrollment. Worker traffic cannot add or widen
+them, and the agents API never returns the credential prefix or principal.
+
+Set `name` for one enrolled coordinator, or use `coordinators` for several.
+Every membership needs a distinct revocable token and its enrolled name;
+network discovery never grants trust. The top-level concurrency and
+contribution settings are machine-wide local ceilings. A membership may narrow
+them, never widen them:
+
+```yaml
+name: desk
+max_concurrent: 2
+contribution: 4,8gb
+local_admission: true
+local_reserve: 1,2gb
+coordinators:
+  - controller: https://personal.example.com
+    token: <personal-agent-token>
+    max_concurrent: 1
+    contribution: 2,4gb
+  - name: desk-at-work
+    controller: https://team.example.com
+    token: <team-agent-token>
+```
+
+Enrolled mode requires local admission. It probes wingd for finite nonnegative
+headroom and reports liveness to each coordinator; a failed probe sends no
+heartbeat and does not clear the coordinator's last report. Coordinator loops
+restart independently. Idle enrollments remain visible, and stale ones appear
+offline.
+
+This release does not yet offer or execute nodes through enrolled mode: it
+sends no legacy claim request. Schema 28 provides the authenticated scheduling
+summary, membership resolution, exact resource digest, and nonblocking
+reservation lifecycle for the later assisted-offer path. A physical slot can
+back only one coordinator reservation at a time, and a winning execution must
+consume that same wingd lease. `Prefers` and run priority affect only the
+unwired membership-resolution seam. Legacy direct claims remain FIFO.
 
 With the Helm values `runner.triggerRunner.kind: warm` and
 `runner.automountServiceAccountToken: true`, a trigger worker offers each node

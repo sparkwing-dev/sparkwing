@@ -124,17 +124,30 @@ which claims nodes.
 
 ## Agent-first execution with Kubernetes overflow
 
-The `warm` trigger runner offers nodes to remote agents first. An agent is the
-same `sparkwing-runner agent` process on a Windows, macOS, or Linux developer
-machine, workstation, home server, build server, or cloud server. It polls the
-controller over outbound HTTP(S), so the machine needs no inbound listener or
-mandatory private-network product. A LAN, VPN, or tailnet may still provide a
-direct cache path.
+The `warm` trigger runner still sends nodes through the legacy name-less
+`sparkwing-runner agent` FIFO claim loop. That process opens no listener and
+polls the controller over outbound HTTP(S). A LAN, VPN, or tailnet may provide
+a direct cache path, but discovery grants no execution trust. Legacy `labels`
+are self-asserted placement terms. `Prefers` does not affect claim order, and
+local admission may happen after a claim.
 
-Every claim attempt carries the agent's labels. Local admission also reports
-available CPU and memory with claims and heartbeats. The controller's agent
-view derives from active or completed claims; an idle agent that has never
-claimed a node is not registered. Saturated and offline agents stop claiming.
+Schema 28 adds a separate administrator-owned executor enrollment for the
+assisted scheduler. Enrollment binds an exact runner or service token prefix
+to trusted capabilities, a priority range, concurrency and resource ceilings,
+and a display-only location. Authenticated worker heartbeats can update only
+liveness and finite nonnegative headroom. Idle enrollments remain visible;
+stale ones appear offline. Each enrollment also reports the exact number of
+live node claims as `active_slots`; legacy inferred rows omit that field because
+their slot count is unknown. Rotating an enrollment to a different credential
+marks it offline until that exact credential sends a heartbeat. The
+scheduling-summary and membership primitives
+apply hard capability, slot, headroom, and resource filters before bounded
+priority.
+
+This release does not send enrolled executors an offer or let them claim
+through the legacy route. A named or plural agent configuration therefore
+reports liveness only. The nonblocking reservation and exact-node claim
+primitives are the seam for later offer persistence and arbitration.
 After a short internal window, an unclaimed unlabeled node is
 atomically removed from the agent queue and sent to the configured Kubernetes
 runner. A claim that wins that handoff owns the node, so the Kubernetes

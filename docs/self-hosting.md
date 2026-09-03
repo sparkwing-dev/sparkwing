@@ -64,7 +64,9 @@ bash install/install.sh
 ```
 
 The installer asks for the controller URL, logs URL, API token, runner name,
-and maximum concurrent jobs. On macOS it installs a LaunchAgent under
+and maximum concurrent jobs. It writes the existing unenrolled agent format,
+which uses legacy FIFO claims with local admission enabled. Its default CPU
+and memory contribution ceiling is 50%. On macOS it installs a LaunchAgent under
 `~/Library/LaunchAgents/`. On Linux it installs a systemd user unit under
 `~/.config/systemd/user/`.
 
@@ -81,12 +83,21 @@ SPARKWING_LOGS=https://logs-sparkwing.example.com \
 SPARKWING_API_TOKEN="$MY_TOKEN" \
 RUNNER_NAME=dev-laptop \
 MAX_CONCURRENT=2 \
+SPARKWING_CONTRIBUTION='4,8gb' \
+SPARKWING_LOCAL_RESERVE='1,2gb' \
 bash install/install.sh --yes
 ```
 
+`SPARKWING_CONTRIBUTION` and `SPARKWING_LOCAL_RESERVE` use the same machine
+budget grammar as local admission. The contribution defaults to `50%,50%`;
+the reserve defaults to empty because the contribution already retains half
+the machine for other work.
+
 The installer writes the token to `~/.config/sparkwing/agent.yaml` with mode
 `0600`. The service uses that file rather than embedding the token in its
-launchd plist or systemd unit.
+launchd plist or systemd unit. The contribution caps reported capacity; the
+reserve constrains local admission. Neither enables the reservation-backed
+assisted offer protocol.
 
 The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
 --config <path>` command, but the bundled installer does not create a Windows

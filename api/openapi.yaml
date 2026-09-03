@@ -73,7 +73,7 @@ tags:
   - name: secrets
     description: Named secret material.
   - name: agents
-    description: Active runner heartbeats.
+    description: Administrator-enrolled executors and recent legacy claims.
   - name: pipelines
     description: Cross-pipeline / cross-repo reads.
   - name: gitcache
@@ -2087,7 +2087,10 @@ paths:
     get:
       x-sparkwing-scope: runs.read
       tags: [agents]
-      summary: List recently-heartbeating runners.
+      summary: List enrolled executors and recent legacy runners.
+      description: |
+        Includes idle and offline enrollments. Credential prefixes and
+        principals are never returned.
       responses:
         "200":
           description: Agents.
@@ -2448,6 +2451,71 @@ paths:
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
         default: {description: Undescribed.}
+
+  /api/v1/agents/{name}:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: {type: string}
+        description: Stable executor name within this coordinator.
+    put:
+      x-sparkwing-scope: admin
+      tags: [agents]
+      summary: Enroll or update an executor trust envelope.
+      description: |
+        Binds the name to the exact prefix of a live execution-capable runner
+        or service token. The token's stored principal becomes audit
+        metadata. The request owns trusted capabilities and ceilings; it does
+        not accept worker-reported trust fields. Re-enrollment with the same
+        credential preserves liveness; changing credentials requires a new
+        heartbeat before the executor becomes active.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AgentEnrollment"}
+      responses:
+        "204": {description: Enrolled or updated.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409":
+          description: The name or exact credential prefix conflicts with another enrollment.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/v1/agents/{name}/heartbeat:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: {type: string}
+        description: Enrolled executor name.
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [agents]
+      summary: Report liveness and current executor headroom.
+      description: |
+        Requires the exact bearer token bound by enrollment. Updates only
+        last-seen, finite nonnegative headroom, and queue depth; it cannot
+        create an enrollment or modify trusted capabilities and ceilings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AgentHeartbeat"}
+      responses:
+        "204": {description: Liveness recorded.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409":
+          description: The bearer token does not match this enrollment.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
 
 components:
   securitySchemes:
@@ -2875,18 +2943,87 @@ components:
           nullable: true
     Agent:
       type: object
-      description: Heartbeating runner.
+      description: An enrolled executor or a recent legacy claim-only runner.
+      required: [name, type, location, labels, last_seen, status, active_jobs, max_concurrent, base_priority, priority_ceiling, budget]
       properties:
-        id: {type: string}
+        name: {type: string}
+        type: {type: string}
+        location:
+          type: string
+          enum: [local, cloud, unknown]
+          description: Display metadata only; never a placement capability.
         labels:
+          type: object
+          additionalProperties: {type: string}
+        capabilities:
           type: array
           items: {type: string}
-        last_heartbeat: {type: string, format: date-time}
-        in_flight_node:
-          type: object
+          description: Administrator-assigned capabilities; absent on legacy rows.
+        last_seen:
+          type: string
+          description: RFC3339 timestamp, or an empty string before the first heartbeat.
+        status:
+          type: string
+          enum: [busy, idle, offline]
+        active_jobs:
+          type: array
+          nullable: true
+          items: {type: string}
+        active_slots:
+          type: integer
+          minimum: 0
+          description: Exact live node-claim count for an enrollment; absent when unknown for a legacy row.
+        max_concurrent:
+          type: integer
+          description: Administrator ceiling; zero means unknown for a legacy row.
+        base_priority: {type: integer, minimum: 0, maximum: 100}
+        priority_ceiling: {type: integer, minimum: 0, maximum: 100}
+        budget: {$ref: "#/components/schemas/AgentResources"}
+        headroom: {$ref: "#/components/schemas/AgentHeadroom"}
+    AgentResources:
+      type: object
+      required: [cores, memory_bytes]
+      properties:
+        cores: {type: number, format: double, minimum: 0}
+        memory_bytes: {type: integer, format: int64, minimum: 0}
+    AgentHeadroom:
+      allOf:
+        - {$ref: "#/components/schemas/AgentResources"}
+        - type: object
+          required: [queue_depth]
           properties:
-            run_id: {type: string}
-            node_id: {type: string}
+            queue_depth: {type: integer, minimum: 0}
+    AgentEnrollment:
+      type: object
+      required: [token_prefix, kind, max_concurrent]
+      properties:
+        token_prefix:
+          type: string
+          description: Exact non-secret prefix of a live runner or service token.
+        kind: {type: string, enum: [agent, gateway]}
+        location:
+          type: string
+          enum: [local, cloud, unknown]
+          default: unknown
+          description: Display metadata only.
+        capabilities:
+          type: array
+          items: {type: string}
+        base_priority: {type: integer, minimum: 0, maximum: 100, default: 0}
+        priority_ceiling: {type: integer, minimum: 0, maximum: 100, default: 0}
+        max_concurrent: {type: integer, minimum: 1}
+        budget: {$ref: "#/components/schemas/AgentResources"}
+    AgentHeartbeat:
+      type: object
+      required: [headroom]
+      properties:
+        headroom:
+          type: object
+          required: [cores, memory_bytes, queue_depth]
+          properties:
+            cores: {type: number, format: double, minimum: 0}
+            memory_bytes: {type: integer, format: int64, minimum: 0}
+            queue_depth: {type: integer, minimum: 0}
     TrendPoint:
       type: object
       description: |
