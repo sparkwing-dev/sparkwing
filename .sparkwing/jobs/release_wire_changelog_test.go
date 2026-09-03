@@ -56,8 +56,11 @@ func TestWireShapeCuts_RemovalAndRetypeAreCuts(t *testing.T) {
 		"wingwire grant.resources.cores retyped float64,omitempty -> int64,omitempty",
 		"wingwire stats_reset removed",
 	}
-	if !reflect.DeepEqual(cuts, want) {
-		t.Errorf("cuts = %v, want %v", cuts, want)
+	if !reflect.DeepEqual(describeCuts(cuts), want) {
+		t.Errorf("cuts = %v, want %v", describeCuts(cuts), want)
+	}
+	if cuts[0].Identifier != "grant.resources.cores" {
+		t.Errorf("identifier = %q, want the field path the changelog has to name", cuts[0].Identifier)
 	}
 }
 
@@ -66,9 +69,22 @@ paths:
   /api/v1/runs:
     get:
       summary: List runs.
+      parameters:
+        - {name: pipeline, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer}}
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {properties: {runs: {type: array}}}
+                  - {properties: {error: {type: string}}}
     post:
       summary: Create a run.
   /api/v1/runs/{id}:
+    parameters:
+      - {name: id, in: path, schema: {type: string}}
     get:
       summary: Get a run.
 components:
@@ -99,6 +115,17 @@ paths:
   /api/v1/runs:
     get:
       summary: List runs.
+      parameters:
+        - {name: pipeline, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer}}
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {properties: {runs: {type: array}}}
+                  - {properties: {error: {type: string}}}
 components:
   schemas:
     Run:
@@ -110,13 +137,66 @@ components:
 		t.Fatalf("apiSurfaceCuts: %v", err)
 	}
 	want := []string{
+		"api /api/v1/runs/{id} parameter path:id removed",
 		"api /api/v1/runs/{id} removed",
 		"api GET /api/v1/runs/{id} removed",
 		"api POST /api/v1/runs removed",
 		"api components.schemas.Run.properties.status removed",
 	}
-	if !reflect.DeepEqual(cuts, want) {
-		t.Errorf("cuts = %v, want %v", cuts, want)
+	if !reflect.DeepEqual(describeCuts(cuts), want) {
+		t.Errorf("cuts = %v, want %v", describeCuts(cuts), want)
+	}
+}
+
+func TestAPISurfaceCuts_ParameterRenamesAreCuts(t *testing.T) {
+	renamed := strings.Replace(specBefore, "{name: pipeline, in: query", "{name: pipeline_name, in: query", 1)
+	cuts, err := apiSurfaceCuts(specBefore, renamed)
+	if err != nil {
+		t.Fatalf("apiSurfaceCuts: %v", err)
+	}
+	if want := []string{"api GET /api/v1/runs parameter query:pipeline removed"}; !reflect.DeepEqual(describeCuts(cuts), want) {
+		t.Errorf("cuts = %v, want %v", describeCuts(cuts), want)
+	}
+
+	renamedPath := strings.Replace(specBefore, "{name: id, in: path", "{name: runID, in: path", 1)
+	pathCuts, err := apiSurfaceCuts(specBefore, renamedPath)
+	if err != nil {
+		t.Fatalf("apiSurfaceCuts: %v", err)
+	}
+	if len(pathCuts) == 0 {
+		t.Error("renaming a path parameter read as growth")
+	}
+}
+
+func TestAPISurfaceCuts_ReorderingIsNotACut(t *testing.T) {
+	reorderedParams := strings.Replace(specBefore,
+		"        - {name: pipeline, in: query, schema: {type: string}}\n        - {name: limit, in: query, schema: {type: integer}}",
+		"        - {name: limit, in: query, schema: {type: integer}}\n        - {name: pipeline, in: query, schema: {type: string}}", 1)
+	cuts, err := apiSurfaceCuts(specBefore, reorderedParams)
+	if err != nil {
+		t.Fatalf("apiSurfaceCuts: %v", err)
+	}
+	if len(cuts) != 0 {
+		t.Errorf("reordered parameters read as cuts: %v", describeCuts(cuts))
+	}
+
+	reorderedOneOf := strings.Replace(specBefore,
+		"                  - {properties: {runs: {type: array}}}\n                  - {properties: {error: {type: string}}}",
+		"                  - {properties: {error: {type: string}}}\n                  - {properties: {runs: {type: array}}}", 1)
+	oneOfCuts, err := apiSurfaceCuts(specBefore, reorderedOneOf)
+	if err != nil {
+		t.Fatalf("apiSurfaceCuts: %v", err)
+	}
+	if len(oneOfCuts) != 0 {
+		t.Errorf("a reordered oneOf read as cuts: %v", describeCuts(oneOfCuts))
+	}
+}
+
+func TestAPISurfaceCuts_ASpecWithoutPathsFailsTheGate(t *testing.T) {
+	for _, spec := range []string{"openapi: 3.0.3\ncomponents: {}\n", "openapi: 3.0.3\npaths: {}\n"} {
+		if _, err := apiSurfaceCuts(spec, specBefore); err == nil {
+			t.Errorf("a previous spec with no routes passed silently: %q", spec)
+		}
 	}
 }
 
@@ -155,9 +235,12 @@ func TestParseProtocolMajors(t *testing.T) {
 }
 
 var wireMigrations = fstest.MapFS{
-	"_unreleased.md": {Data: []byte("# Unreleased\n\n## Protocol floor raised to 2\n\nWhat to do.\n")},
-	"v0.41.0.md":     {Data: []byte("# v0.41.0\n\n## Protocol floor raised to 2\n\nWhat to do.\n")},
+	"_unreleased.md": {Data: []byte("# Unreleased\n\n## The wire drops stats_reset\n\nThe daemon no longer serves stats_reset.\n" +
+		"grant.lease_token is gone with it, and the protocol floor rises.\n\n## Something else\n\nUnrelated.\n")},
+	"v0.41.0.md": {Data: []byte("# v0.41.0\n\n## The wire drops stats_reset\n\nstats_reset and POST /api/v1/runs are gone.\n")},
 }
+
+var statsResetCut = wireCut{Surface: "wingwire", Identifier: "stats_reset", Detail: "removed"}
 
 func TestLintWireBreak_GrowthPasses(t *testing.T) {
 	body := "## [Unreleased]\n\n### Added\n\n- **wingd:** A new message.\n"
@@ -168,25 +251,40 @@ func TestLintWireBreak_GrowthPasses(t *testing.T) {
 
 func TestLintWireBreak_DeclaredCutPasses(t *testing.T) {
 	body := "## [Unreleased]\n\n### Removed\n\n" +
-		"- **wingd (Breaking):** The protocol floor rises to 2 and the wire drops `stats_reset`. " +
-		"See [migration](docs/migrations/_unreleased.md#protocol-floor-raised-to-2).\n"
-	if issues := LintWireBreak(body, "v0.41.0", []string{"wingwire stats_reset removed"}, wireMigrations); len(issues) != 0 {
+		"- **wingd (Breaking):** The wire drops `stats_reset`. " +
+		"See [migration](docs/migrations/_unreleased.md#the-wire-drops-stats_reset).\n"
+	if issues := LintWireBreak(body, "v0.41.0", []wireCut{statsResetCut}, wireMigrations); len(issues) != 0 {
 		t.Fatalf("declared cut should pass, got %v", formatAllIssues(issues))
+	}
+}
+
+func TestLintWireBreak_MigrationSectionMayCarryTheIdentifiers(t *testing.T) {
+	body := "## [Unreleased]\n\n### Removed\n\n" +
+		"- **wingd (Breaking):** The daemon cuts a message and raises its floor. " +
+		"See [migration](docs/migrations/_unreleased.md#the-wire-drops-stats_reset).\n"
+	cuts := []wireCut{
+		statsResetCut,
+		{Surface: "wingwire", Identifier: "grant.lease_token", Detail: "removed"},
+		{Identifier: "protocol floor", Detail: "raised 1 -> 2 (newest major 3)"},
+	}
+	if issues := LintWireBreak(body, "v0.41.0", cuts, wireMigrations); len(issues) != 0 {
+		t.Fatalf("cuts named in the linked migration section should pass, got %v", formatAllIssues(issues))
 	}
 }
 
 func TestLintWireBreak_DeclaredCutInAVersionSectionPasses(t *testing.T) {
 	body := "## [v0.41.0] - 2026-09-02\n\n### Removed\n\n" +
-		"- **wingd (Breaking):** The wire drops the `stats_reset` route. " +
-		"See [migration](docs/migrations/v0.41.0.md#protocol-floor-raised-to-2).\n"
-	if issues := LintWireBreak(body, "v0.41.0", []string{"api POST /api/v1/runs removed"}, wireMigrations); len(issues) != 0 {
+		"- **api (Breaking):** The controller drops a route. " +
+		"See [migration](docs/migrations/v0.41.0.md#the-wire-drops-stats_reset).\n"
+	cuts := []wireCut{{Surface: "api", Identifier: "POST /api/v1/runs", Detail: "removed"}}
+	if issues := LintWireBreak(body, "v0.41.0", cuts, wireMigrations); len(issues) != 0 {
 		t.Fatalf("declared cut should pass, got %v", formatAllIssues(issues))
 	}
 }
 
 func TestLintWireBreak_UndeclaredCutFails(t *testing.T) {
 	body := "## [Unreleased]\n\n### Changed\n\n- **wingd:** The wire drops `stats_reset`.\n"
-	issues := LintWireBreak(body, "v0.41.0", []string{"wingwire stats_reset removed"}, wireMigrations)
+	issues := LintWireBreak(body, "v0.41.0", []wireCut{statsResetCut}, wireMigrations)
 	if len(issues) != 1 {
 		t.Fatalf("issues = %v, want one unmarked-wire-break", formatAllIssues(issues))
 	}
@@ -198,19 +296,48 @@ func TestLintWireBreak_UndeclaredCutFails(t *testing.T) {
 	}
 }
 
-func TestLintWireBreak_BreakingEntryAboutSomethingElseFails(t *testing.T) {
-	body := "## [Unreleased]\n\n### Removed\n\n" +
-		"- **store (Breaking):** The runs table drops a column. " +
-		"See [migration](docs/migrations/_unreleased.md#protocol-floor-raised-to-2).\n"
-	issues := LintWireBreak(body, "v0.41.0", []string{"wingwire stats_reset removed"}, wireMigrations)
+func TestLintWireBreak_AnUnrelatedBreakingEntryDoesNotCoverACut(t *testing.T) {
+	body := "## [Unreleased]\n\n### Changed\n\n" +
+		"- **controller (Breaking):** Four controller limits, and a way to take /metrics off the ingress. " +
+		"The API server restarts after this. " +
+		"See [migration](docs/migrations/_unreleased.md#the-wire-drops-stats_reset).\n"
+	cuts := []wireCut{
+		{Surface: "wingwire", Identifier: "grant.lease_token", Detail: "removed"},
+		{Surface: "api", Identifier: "DELETE /api/v1/runs/{id}", Detail: "removed"},
+		{Identifier: "protocol floor", Detail: "raised 1 -> 2 (newest major 3)"},
+	}
+	issues := LintWireBreak(body, "v0.41.0", cuts, wireMigrations)
 	if len(issues) != 1 || issues[0].Category != wireBreakCategory {
-		t.Fatalf("issues = %v, want one unmarked-wire-break", formatAllIssues(issues))
+		t.Fatalf("issues = %v, want one unmarked-wire-break: an entry about ingress limits declares no wire cut", formatAllIssues(issues))
+	}
+}
+
+func TestLintWireBreak_AnEntryNamingSomeCutsFailsOnTheRest(t *testing.T) {
+	body := "## [Unreleased]\n\n### Removed\n\n" +
+		"- **wingd (Breaking):** The wire drops `stats_reset` and `grant.lease_token`. " +
+		"See [migration](docs/migrations/_unreleased.md#something-else).\n"
+	cuts := []wireCut{
+		statsResetCut,
+		{Surface: "wingwire", Identifier: "grant.lease_token", Detail: "removed"},
+		{Surface: "api", Identifier: "DELETE /api/v1/runs/{id}", Detail: "removed"},
+	}
+	issues := LintWireBreak(body, "v0.41.0", cuts, wireMigrations)
+	if len(issues) != 1 || issues[0].Category != wireCoverageCategory {
+		t.Fatalf("issues = %v, want one undeclared-wire-cut", formatAllIssues(issues))
+	}
+	if !strings.Contains(issues[0].Message, "DELETE /api/v1/runs/{id}") {
+		t.Errorf("message does not name the undeclared cut: %s", issues[0].Message)
+	}
+	for _, named := range []string{"stats_reset removed;", "grant.lease_token"} {
+		if strings.Contains(issues[0].Message, named) {
+			t.Errorf("message reports a cut the entry does name: %s", issues[0].Message)
+		}
 	}
 }
 
 func TestLintWireBreak_CutWithoutAMigrationLinkFails(t *testing.T) {
 	body := "## [Unreleased]\n\n### Removed\n\n- **wingd (Breaking):** The wire drops `stats_reset`.\n"
-	issues := LintWireBreak(body, "v0.41.0", []string{"wingwire stats_reset removed"}, wireMigrations)
+	issues := LintWireBreak(body, "v0.41.0", []wireCut{statsResetCut}, wireMigrations)
 	if len(issues) != 1 || issues[0].Category != wireMigrationCategory {
 		t.Fatalf("issues = %v, want one missing-wire-migration", formatAllIssues(issues))
 	}
@@ -220,7 +347,7 @@ func TestLintWireBreak_CutLinkingAnAbsentSectionFails(t *testing.T) {
 	body := "## [Unreleased]\n\n### Removed\n\n" +
 		"- **wingd (Breaking):** The wire drops `stats_reset`. " +
 		"See [migration](docs/migrations/_unreleased.md#no-such-heading).\n"
-	issues := LintWireBreak(body, "v0.41.0", []string{"wingwire stats_reset removed"}, wireMigrations)
+	issues := LintWireBreak(body, "v0.41.0", []wireCut{statsResetCut}, wireMigrations)
 	if len(issues) != 1 || issues[0].Category != "missing-migration-anchor" {
 		t.Fatalf("issues = %v, want one missing-migration-anchor", formatAllIssues(issues))
 	}
@@ -241,7 +368,7 @@ func TestWireCuts_SkipsASurfaceThePreviousTagLacks(t *testing.T) {
 		t.Fatalf("wireCuts: %v", err)
 	}
 	if len(cuts) != 0 {
-		t.Errorf("a tag predating the snapshot produced cuts: %v", cuts)
+		t.Errorf("a tag predating the snapshot produced cuts: %v", describeCuts(cuts))
 	}
 }
 
@@ -259,10 +386,10 @@ func TestWireCuts_ReportsEverySurfaceItCanDiff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wireCuts: %v", err)
 	}
-	joined := strings.Join(cuts, "\n")
+	joined := strings.Join(describeCuts(cuts), "\n")
 	for _, want := range []string{"wingwire grant.run_id removed", "wingwire stats_reset removed", "protocol floor raised 1 -> 2"} {
 		if !strings.Contains(joined, want) {
-			t.Errorf("cuts %v omit %q", cuts, want)
+			t.Errorf("cuts %v omit %q", describeCuts(cuts), want)
 		}
 	}
 }

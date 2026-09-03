@@ -1366,11 +1366,11 @@ func (j *checkWireBreakJob) run(ctx context.Context) error {
 		return fmt.Errorf("release: undeclared wire-surface cut blocks %s:\n%s", version, b.String())
 	}
 	sparkwing.Info(ctx, "wire surface cuts %s since %s and the changelog declares it; gate passes",
-		strings.Join(cuts, ", "), prevTag)
+		strings.Join(describeCuts(cuts), ", "), prevTag)
 	return nil
 }
 
-func wireCutsSince(ctx context.Context, repoDir, prevTag string) ([]string, error) {
+func wireCutsSince(ctx context.Context, repoDir, prevTag string) ([]wireCut, error) {
 	states := make([]wireSurfaceState, 0, len(wireSurfaces))
 	for _, surface := range wireSurfaces {
 		prev, present, err := fileAtTag(ctx, repoDir, prevTag, surface.path)
