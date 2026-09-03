@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -159,6 +161,111 @@ func TestConditionalWriter(t *testing.T, factory func() storage.ArtifactStore) {
 			t.Fatalf("counter = %q, want 1", got)
 		}
 	})
+}
+
+// TestConditionalWriterAcrossHandles runs the part of the
+// [storage.ConditionalWriter] contract that one handle cannot show:
+// writers that reached the store independently -- two processes, or one
+// process that opened the store twice -- must not both win the same
+// precondition. pair returns two such handles onto one fresh, empty
+// store.
+//
+// Like [TestConditionalWriter], the suite is skipped rather than failed
+// when the store does not implement [storage.ConditionalWriter] or its
+// probe reports false: a backend that declines the capability declines
+// this with it.
+func TestConditionalWriterAcrossHandles(t *testing.T, pair func() (storage.ArtifactStore, storage.ArtifactStore)) {
+	t.Helper()
+	ctx := context.Background()
+
+	probe, _ := pair()
+	cw, ok := storage.Conditional(probe)
+	if !ok {
+		t.Skip("store does not implement storage.ConditionalWriter")
+	}
+	supported, err := cw.ConditionalWritesSupported(ctx)
+	if err != nil {
+		t.Fatalf("ConditionalWritesSupported: %v", err)
+	}
+	if !supported {
+		t.Skip("endpoint does not enforce write preconditions")
+	}
+
+	const trials = 50
+
+	race := func(t *testing.T, writes ...func() (storage.ETag, error)) int {
+		t.Helper()
+		errs := make([]error, len(writes))
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i, write := range writes {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, errs[i] = write()
+			}()
+		}
+		close(start)
+		wg.Wait()
+		won := 0
+		for _, err := range errs {
+			switch {
+			case err == nil:
+				won++
+			case errors.Is(err, storage.ErrPreconditionFailed):
+			default:
+				t.Fatalf("conditional write: err = %v, want nil or ErrPreconditionFailed", err)
+			}
+		}
+		return won
+	}
+
+	t.Run("PutIfAbsentAdmitsOneHandle", func(t *testing.T) {
+		a, b := conditionalPair(t, pair)
+		for i := range trials {
+			key := fmt.Sprintf("absent-%d", i)
+			won := race(t,
+				func() (storage.ETag, error) { return a.PutIfAbsent(ctx, key, bytes.NewReader([]byte("a"))) },
+				func() (storage.ETag, error) { return b.PutIfAbsent(ctx, key, bytes.NewReader([]byte("b"))) },
+			)
+			if won != 1 {
+				t.Fatalf("trial %d: %d handles created %q, want 1", i, won, key)
+			}
+		}
+	})
+
+	t.Run("PutIfMatchAdmitsOneHandle", func(t *testing.T) {
+		a, b := conditionalPair(t, pair)
+		for i := range trials {
+			key := fmt.Sprintf("match-%d", i)
+			etag, err := a.PutIfAbsent(ctx, key, bytes.NewReader([]byte("seed")))
+			if err != nil {
+				t.Fatalf("seed %q: %v", key, err)
+			}
+			won := race(t,
+				func() (storage.ETag, error) { return a.PutIfMatch(ctx, key, bytes.NewReader([]byte("a")), etag) },
+				func() (storage.ETag, error) { return b.PutIfMatch(ctx, key, bytes.NewReader([]byte("b")), etag) },
+			)
+			if won != 1 {
+				t.Fatalf("trial %d: %d handles swapped %q from one ETag, want 1", i, won, key)
+			}
+		}
+	})
+}
+
+func conditionalPair(t *testing.T, pair func() (storage.ArtifactStore, storage.ArtifactStore)) (storage.ConditionalWriter, storage.ConditionalWriter) {
+	t.Helper()
+	first, second := pair()
+	a, ok := storage.Conditional(first)
+	if !ok {
+		t.Fatalf("first handle does not implement ConditionalWriter")
+	}
+	b, ok := storage.Conditional(second)
+	if !ok {
+		t.Fatalf("second handle does not implement ConditionalWriter")
+	}
+	return a, b
 }
 
 func readCond(t *testing.T, c storage.ConditionalWriter, ctx context.Context, key string) []byte {

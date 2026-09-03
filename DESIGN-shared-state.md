@@ -206,7 +206,10 @@ Notes:
 - **Provider support and capability detection**: S3 is the object
   store that enforces these preconditions today (`If-None-Match: *`
   for create-once, `If-Match: <etag>` for compare-and-swap); the
-  filesystem backend enforces them locally for single-host runs. The
+  filesystem backend enforces them for single-host runs by holding a
+  file lock per key, which serializes the processes sharing that path
+  and not only the writers inside one of them. A mount whose kernel
+  refuses that lock answers the probe below with false. The
   `ConditionalWriter` contract is provider-agnostic and names the GCS
   generation-match and Azure ETag equivalents, but those backends are
   not yet implemented -- declaring `gcs` or `azure-blob` surfaces an

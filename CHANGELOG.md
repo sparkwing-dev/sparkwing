@@ -51,6 +51,10 @@ code change to unlock.
 
 ### Added
 
+- **storage/conformance:** `TestConditionalWriterAcrossHandles`, which races two
+  handles onto one store so a backend has to prove its conditional writes
+  exclude writers that arrived independently, not only goroutines sharing one
+  handle. The filesystem and S3 backends run it.
 - **controller + sdk:** Routes for the store operations a run makes around its
   own state, so a run served by a controller can do them over the wire.
   `GET /api/v1/runs/{id}/pending-triggers` and
@@ -249,6 +253,14 @@ code change to unlock.
 
 ### Fixed
 
+- **cache:** Filesystem `PutIfAbsent` and `PutIfMatch` hold across processes.
+  They were a check followed by a write, serialized only by a lock inside one
+  `ArtifactStore` value, so two `sparkwing run` processes sharing a
+  `type: filesystem` cache both won the same conditional write and both entered
+  a capacity-1 concurrency group. Each key is now held under a file lock for
+  the length of the compare-and-swap, and a filesystem whose kernel refuses
+  that lock reports `ConditionalWritesSupported` false so callers fall back to
+  last-write-wins instead of trusting a reservation nothing enforces.
 - **orchestrator:** A transient object-store error no longer disables cross-runner
   reservation for the life of a process. The one-time probe that asks whether
   the store honors write preconditions treated any error as a "no" and routed
