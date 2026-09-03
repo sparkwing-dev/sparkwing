@@ -5,6 +5,31 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## Pipeline binaries built before the daemon owned the runs store
+
+- **Before:** every pipeline binary opened `~/.sparkwing/state.db` itself, at
+  whatever runs-store schema its own SDK pin was built with. The first binary
+  built against a newer schema migrated that shared file, and every older
+  binary on the machine stopped opening it.
+- **After:** a pipeline binary built at this release or later never opens the
+  shared file. It reaches this machine's runs store through the admission
+  daemon, and when the daemon cannot serve it, it opens
+  `~/.sparkwing/standalone/schema-<N>/state.db` instead. The installed
+  sparkwing owns the shared file and is the only thing that migrates it.
+- **Migration:** a pipeline binary already built on this machine, from a repo
+  whose `.sparkwing/go.mod` pins an SDK older than this release, still opens
+  the shared file directly. The next breaking schema migration strands it once,
+  with `database is at schema version <new>; this binary expects <old>` on
+  every run out of that repo. Raise the pins and rebuild:
+
+  ```bash
+  sparkwing repos update --apply
+  ```
+
+  Without `--apply` that is a dry run listing the repos it would move. After a
+  repo's pin is at this release or later, its runs stop depending on the shared
+  file's schema entirely, and this is the last time that skew can strand them.
+
 ## (Breaking) Submitted runs carry an allow-listed environment
 
 - **Before:** `sparkwing runs submit` snapshotted the whole submitting shell to

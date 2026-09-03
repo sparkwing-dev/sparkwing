@@ -151,6 +151,27 @@ code change to unlock.
 
 ### Changed
 
+- **orchestrator:** A run the admission daemon cannot serve now runs standalone
+  against `~/.sparkwing/standalone/schema-<N>/state.db`, where `N` is the
+  runs-store schema the pipeline binary was built with, and says so once on
+  stderr before its first node. Three cases reach it and nothing else does: no
+  daemon is running and no sparkwing is installed to host one; the daemon
+  predates something the run needs, such as an `api.sock` it does not serve or
+  a route it answers 404 on; or the daemon's protocol floor is above this
+  pipeline's SDK. Each prints its own block naming the remedy, and the exit
+  code is unchanged. A plan-level or node-level `.Resources()` pin no longer
+  fails a run on a box with no daemon, and neither does a daemon older than the
+  pipeline; both degrade with the warning, and `SPARKWING_ALLOW_UNADMITTED=1`
+  takes the same path on purpose. A daemon reporting a runs store it cannot
+  read is the one fault that still fails the run outright. Standalone runs are
+  invisible to `sparkwing runs` and to the dashboard, which is
+  what the block says; their start record and `sparkwing runs status` carry
+  `standalone` and `standalone_reason` (`no-daemon`, `daemon-older`, `floor`),
+  and `sparkwing doctor` lists each standalone store with its run count and the
+  oldest run's age. Nothing prunes them. Pipeline binaries built before this
+  release still open the shared store directly; see the
+  [migration note](docs/migrations/_unreleased.md#pipeline-binaries-built-before-the-daemon-owned-the-runs-store).
+
 - **orchestrator:** A local run now reaches this machine's runs store through
   the admission daemon instead of opening `state.db` itself. When the
   handshake reports the daemon serving `api.sock`, the run's state and
@@ -164,12 +185,10 @@ code change to unlock.
   faster path, because a bearer is looked up on the writing handle. Logs and
   artifacts are unchanged, still this machine's own files. A run that finds no
   daemon, a daemon that serves no API socket, or a socket that does not answer
-  keeps today's path -- its own store handle plus an in-process loopback
-  controller -- and says so on stderr once, only for a reason admission does
-  not already report. A daemon whose own store handle is broken is one of those
-  reasons: the run opens the file that daemon could not, rather than binding to
-  it. The child runs a hosted run dispatches, and any node replayed from one,
-  choose the same way. Once the run's rows exist on the daemon it does not
+  runs standalone against a store of its own, and says so once on stderr; the
+  entry below says where those runs live and what they lose. A daemon whose own
+  store handle is broken is not one of those reasons. The child runs a hosted run dispatches, and any node replayed from
+  one, choose the same way. Once the run's rows exist on the daemon it does not
   switch back: a write the daemon can be shown not to have applied, because it
   answered 503 or never accepted the connection, is retried for up to 20
   seconds so a daemon restart does not fail the run, while a write whose fate

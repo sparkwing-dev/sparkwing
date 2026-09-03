@@ -66,10 +66,10 @@ pipeline binary's contract. The CLI verbs that read the file -- `sparkwing
 runs`, `sparkwing jobs`, `sparkwing doctor`, the dashboard -- are the
 installed build or a peer of it and still open it directly.
 
-A run that finds no daemon serving the socket opens the store itself
-instead, which is why a machine with no sparkwing installed still runs
-pipelines. It says so on stderr once, and only for a reason admission
-does not already report.
+A run the daemon cannot serve opens a store of its own instead, which is
+why a machine with no sparkwing installed still runs pipelines. It is not
+the shared file: see [running with no daemon
+available](#running-with-no-daemon-available).
 
 The daemon is restartable under a run. A state write the daemon can be
 shown not to have applied -- one it answered `503`, or one on a
@@ -693,52 +693,72 @@ exists will not open.
 
 ### Running with no daemon available
 
-Two situations look similar and are not.
+A run the admission daemon cannot serve runs **standalone**: against its
+own runs store, saying so once on stderr before its first node, with the
+exit code it would have had. Three cases reach it, and nothing else does.
 
-**Nothing is arbitrating the box** -- no daemon running, no sparkwing
-installed to start one. Most runs proceed uncoordinated, saying so once
-on stderr. What they lose is host arbitration: CPU and memory charges are
-not held against anything, so concurrent runs on that box can
-oversubscribe it. What they keep is `.Concurrency()`: box- and run-scoped
-groups are enforced through the shared store instead of the daemon, so
-"one deploy at a time on this box" still holds. The difference is crash
-cleanup -- the daemon frees a killed run's slot the instant the kernel
-closes its socket, while a store slot is held until its lease lapses,
-three minutes after the holder's last heartbeat, and something reaps it.
-A daemon reaps lapsed store slots every 10 seconds while it serves, so on
-a box with a daemon the slot comes back about three minutes after the kill;
-with no daemon running, `sparkwing doctor` is the only thing that reclaims
-it.
+**No daemon is running and none can be started** -- no sparkwing
+installed to host one. The run says:
 
-The exception is a pipeline that **reserves host capacity** with a
-plan-level or node-level `.Resources()` pin. That run fails, naming the
-fix. CPU and memory have no fallback arbiter, so there is no weaker
-version of the reservation to fall back to -- there is only quietly not
-making it, while other work on the box does the same.
+```
+sparkwing: no admission daemon is running and no sparkwing is installed to host one, so this run is standalone. It cannot see other runs on this machine and they cannot see it, so together they may oversubscribe it. Everything else works.
 
-**A daemon is running but this binary cannot speak to it** -- its
-protocol is older than the pipeline binary's SDK pin, and pipeline
-binaries never replace a daemon. Every run fails here, pinned or not.
-Something is actively holding capacity for other work, and joining it
-unadmitted oversubscribes the machine rather than merely going
-uncoordinated. The error names both versions and the release to install.
+  to host one
+    curl -fsSL https://sparkwing.dev/install.sh | sh
+```
 
-`SPARKWING_ALLOW_UNADMITTED=1` forces the uncoordinated path in either
-case, for an operator who knows what else runs on the box. It is an
-environment variable rather than a flag because the runs that need it are
-the ones no CLI launched, and it is read strictly: only the exact value
-`1` turns the check off. Dry runs (`--sw-dry-run`) are exempt from both
-refusals -- they mutate nothing and finish in seconds.
+**The daemon predates something the run needs** -- it serves no
+`api.sock`, or answers 404 on a route this pipeline's SDK uses. Pipeline
+binaries never replace a daemon, so the remedy is to update the daemon,
+and the block names `sparkwing update`.
 
-The fix in every case is the same: install or update the sparkwing CLI on
-the host, or point `SPARKWING_WINGD_BIN` at an installed one.
+**The daemon's protocol floor is above this pipeline** -- a release
+declared a cut and this repo's pin predates it. The block names
+`sparkwing repos update --apply`, which ends the warning period.
 
-One in-body feature does change shape without a daemon.
+A pipeline that reserves host capacity with a plan-level or node-level
+`.Resources()` pin is not an exception. It runs standalone rather than
+failing, because a commit hook is not the place to fail for a reservation
+nothing else on the box is honoring either. What every standalone run
+loses is the same thing: host CPU and memory are not arbitrated, and
+`sparkwing runs` and the dashboard do not see the run, because they read
+this home's own `state.db` and a standalone run does not.
+
+`SPARKWING_ALLOW_UNADMITTED=1` takes the standalone path on purpose, for
+an operator who knows what else runs on the box. It is an environment
+variable rather than a flag because the runs that need it are the ones no
+CLI launched, and it is read strictly: only the exact value `1` turns the
+check off.
+
+One fault still fails a run outright: a daemon that answers with a runs
+store it cannot read. The file is what the operator must fix, and running
+standalone would hide it behind a run that looked like it worked.
+
+One in-body feature changes shape on the standalone path.
 `sparkwing.ToolSlot(ctx, group)` -- the budget a job body takes out
 around a tool that manages its own parallelism -- returns
 `granted=false`, its documented fallback, and the body uses whatever
 private serialization the tool ships with. Job bodies already have to
 handle that return.
+
+#### Where standalone runs live
+
+`~/.sparkwing/standalone/schema-<N>/state.db`, where `N` is the runs-store
+schema the pipeline binary was built with. Binaries at the same schema
+share one file; binaries at different schemas keep separate ones, so a
+newer binary can never migrate a file an older one is still reading. The
+shared `~/.sparkwing/state.db` is not opened by a pipeline binary at all.
+
+`sparkwing doctor` lists each of those directories with its run count and
+the oldest run's age. Nothing prunes them: delete a directory once you no
+longer want the runs in it.
+
+The start record of a standalone run carries `standalone: true` and
+`standalone_reason` (`no-daemon`, `daemon-older`, or `floor`), and
+`sparkwing runs status` shows both for a run read out of a standalone
+store. To end the standalone state, fix what the block names -- install
+or update sparkwing, or raise the repo's pin -- and the next run is
+hosted again. Runs already written to a standalone store stay there.
 
 These rules are evaluated once, at run start. A daemon that dies
 *during* a run is a different path: the run's client reconnects and
