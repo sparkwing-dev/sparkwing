@@ -458,7 +458,7 @@ func TestHeldRunStoreBoundsAnOpenThatCannotMigrate(t *testing.T) {
 					waited, terminalCheckTimeout)
 			}
 		case <-time.After(3 * terminalCheckTimeout):
-			t.Fatal("a terminal check stacked behind the blocked open instead of honouring its deadline")
+			t.Fatal("a terminal check stacked behind the blocked open instead of honoring its deadline")
 		}
 	}
 

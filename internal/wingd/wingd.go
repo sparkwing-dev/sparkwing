@@ -102,7 +102,7 @@ type Config struct {
 	StallProbeTimeout time.Duration
 
 	// Runs is the daemon's handle on the runs store. Nil leaves every
-	// store-backed behaviour off: no terminal check, no finalize.
+	// store-backed behavior off: no terminal check, no finalize.
 	Runs RunStore
 
 	// ArtifactStoreError is why the host resolved no artifact store for the
