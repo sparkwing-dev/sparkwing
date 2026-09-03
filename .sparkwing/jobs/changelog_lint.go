@@ -125,12 +125,78 @@ const (
 	wireCoverageCategory  = "undeclared-wire-cut"
 )
 
-// safety: the scope is what ties an entry to this surface. Prose keywords do
-// not: "api" and "protocol" are ordinary words in entries about other things,
-// and 16 of this repo's 85 released breaking entries carry one.
-var wireScopes = []string{"wingd", "wingwire", "api"}
+// safety: the scope narrows the search for a declaration; the identifier check
+// is what proves the entry covers this cut, so the list can hold every scope a
+// wire cut has actually shipped under without reopening that hole.
+var wireScopes = []string{"wingd", "wingwire", "wire", "api", "controller", "cache"}
 
-var wireScopeRe = regexp.MustCompile(`(?i)\b(wingd|wingwire|api)\b`)
+var wireScopeRe = regexp.MustCompile(`(?i)\b(wingd|wingwire|wire|api|controller|cache)\b`)
+
+// safety: a declared identifier stands for itself and the entries beneath it,
+// never for a sibling that merely shares its spelling as a prefix, so "hello"
+// does not declare "hello_ack" and a named field does not declare its type.
+func declaresIdentifier(text, identifier string) bool {
+	if identifier == "" {
+		return false
+	}
+	for at := 0; at+len(identifier) <= len(text); {
+		found := strings.Index(text[at:], identifier)
+		if found < 0 {
+			return false
+		}
+		start := at + found
+		end := start + len(identifier)
+		if (start == 0 || !identifierByte(text[start-1])) && boundaryAfter(text, end) && !methodQualified(text, start, identifier) {
+			return true
+		}
+		at = start + 1
+	}
+	return false
+}
+
+// safety: "GET /api/v1/runs" names one operation, not the path, so an
+// occurrence a method qualifies does not declare the bare route and its other
+// methods with it.
+func methodQualified(text string, start int, identifier string) bool {
+	if !strings.HasPrefix(identifier, "/") || start == 0 || text[start-1] != ' ' {
+		return false
+	}
+	word := start - 1
+	for word > 0 && text[word-1] >= 'A' && text[word-1] <= 'Z' {
+		word--
+	}
+	return specMethods[strings.ToLower(text[word:start-1])]
+}
+
+// safety: a separator only continues an identifier when something follows it,
+// so a sentence ending "drops stats_reset." still declares stats_reset while
+// "grant.lease_token" still does not declare grant.
+func boundaryAfter(text string, end int) bool {
+	if end == len(text) {
+		return true
+	}
+	if strings.IndexByte("./-:", text[end]) >= 0 {
+		return end+1 == len(text) || !identifierByte(text[end+1])
+	}
+	return !identifierByte(text[end])
+}
+
+func identifierByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	}
+	return strings.IndexByte("_./-:{}", b) >= 0
+}
+
+func cutDeclared(text string, c wireCut) bool {
+	for _, identifier := range c.covering() {
+		if declaresIdentifier(text, identifier) {
+			return true
+		}
+	}
+	return false
+}
 
 // LintWireBreak checks that every cut in the daemon's wire surface is declared
 // in the changelog section being cut. A cut needs a `(Breaking)` entry under a
@@ -165,9 +231,21 @@ func LintWireBreak(body, version string, cuts []wireCut, migrations fs.FS) []Cha
 				describeWireCuts(cuts), section.version, strings.Join(wireScopes, ", "), expectedMigrationPath(section.version, isUnreleased)),
 		}}
 	}
+	// safety: only an entry that names a cut is treated as the declaration, so a
+	// breaking entry about something else under the same scope is neither the
+	// answer nor asked to carry a wire migration link it has no use for.
+	declaring := declaringEntries(*section, declarations, cuts, migrations, isUnreleased)
+	if len(declaring) == 0 {
+		return []ChangelogIssue{{
+			Line:     section.startLine,
+			Category: wireCoverageCategory,
+			Message: fmt.Sprintf("%s, and no `(Breaking)` entry in [%s] names any of it; name each cut in the entry or in the migration section it links, or name the route, operation, or message type it sits under",
+				describeWireCuts(cuts), section.version),
+		}}
+	}
 	declared := ""
 	var issues []ChangelogIssue
-	for _, e := range declarations {
+	for _, e := range declaring {
 		links := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
 		if len(links) == 0 {
 			issues = append(issues, ChangelogIssue{
@@ -190,7 +268,7 @@ func LintWireBreak(body, version string, cuts []wireCut, migrations fs.FS) []Cha
 	}
 	var missing []string
 	for _, c := range cuts {
-		if !strings.Contains(declared, c.Identifier) {
+		if !cutDeclared(declared, c) {
 			missing = append(missing, c.describe())
 		}
 	}
@@ -198,11 +276,30 @@ func LintWireBreak(body, version string, cuts []wireCut, migrations fs.FS) []Cha
 		return nil
 	}
 	return append(issues, ChangelogIssue{
-		Line:     declarations[0].titleLine,
+		Line:     declaring[0].titleLine,
 		Category: wireCoverageCategory,
-		Message: fmt.Sprintf("the `(Breaking)` entry in [%s] and its migration section do not name %d of %d cut(s): %s; name each one verbatim in the entry or the section it links",
+		Message: fmt.Sprintf("the `(Breaking)` entry in [%s] and its migration section do not name %d of %d cut(s): %s; name each one verbatim in the entry or the section it links, or name the route, operation, or message type it sits under",
 			section.version, len(missing), len(cuts), strings.Join(missing, "; ")),
 	})
+}
+
+func declaringEntries(section changelogSection, candidates []changelogEntry, cuts []wireCut, migrations fs.FS, isUnreleased bool) []changelogEntry {
+	var declaring []changelogEntry
+	for _, e := range candidates {
+		text := e.body
+		links := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
+		if len(links) > 0 {
+			sections, _ := migrationSections(section, e, links, migrations, isUnreleased)
+			text += "\n" + strings.Join(sections, "\n")
+		}
+		for _, c := range cuts {
+			if cutDeclared(text, c) {
+				declaring = append(declaring, e)
+				break
+			}
+		}
+	}
+	return declaring
 }
 
 func migrationSections(s changelogSection, e changelogEntry, links [][]string, migrations fs.FS, isUnreleased bool) (bodies []string, issues []ChangelogIssue) {

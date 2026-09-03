@@ -40,6 +40,17 @@ type wireCut struct {
 	Surface    string
 	Identifier string
 	Detail     string
+	Covers     []string
+}
+
+// safety: one removed route produces a cut for the path, its methods, their
+// parameters and every nested response member, so a declaration that names the
+// route has to stand for all of them or the gate demands machine strings.
+func (c wireCut) covering() []string {
+	if len(c.Covers) == 0 {
+		return []string{c.Identifier}
+	}
+	return c.Covers
 }
 
 func (c wireCut) describe() string {
@@ -74,13 +85,25 @@ func wireShapeCuts(prevJSON, curJSON string) ([]wireCut, error) {
 		now, ok := cur[path]
 		switch {
 		case !ok:
-			cuts = append(cuts, wireCut{Surface: "wingwire", Identifier: path, Detail: "removed"})
+			cuts = append(cuts, wireCut{Surface: "wingwire", Identifier: path, Detail: "removed", Covers: wireFieldAncestors(path)})
 		case now != kind:
-			cuts = append(cuts, wireCut{Surface: "wingwire", Identifier: path, Detail: "retyped " + kind + " -> " + now})
+			cuts = append(cuts, wireCut{Surface: "wingwire", Identifier: path, Detail: "retyped " + kind + " -> " + now, Covers: wireFieldAncestors(path)})
 		}
 	}
 	sortCuts(cuts)
 	return cuts, nil
+}
+
+func wireFieldAncestors(path string) []string {
+	covers := []string{path}
+	for {
+		cut := strings.LastIndex(path, ".")
+		if cut < 0 {
+			return covers
+		}
+		path = path[:cut]
+		covers = append(covers, path)
+	}
 }
 
 func flattenWireShapes(body string) (map[string]string, error) {
@@ -126,16 +149,22 @@ func apiSurfaceCuts(prevSpec, curSpec string) ([]wireCut, error) {
 		return nil, fmt.Errorf("current %s: %w", apiSpecSourcePath, err)
 	}
 	var cuts []wireCut
-	for entry := range prev {
-		if !cur[entry] {
-			cuts = append(cuts, wireCut{Surface: "api", Identifier: entry, Detail: "removed"})
+	for entry, parents := range prev {
+		if _, ok := cur[entry]; ok {
+			continue
 		}
+		cuts = append(cuts, wireCut{
+			Surface:    "api",
+			Identifier: entry,
+			Detail:     "removed",
+			Covers:     append([]string{entry}, parents...),
+		})
 	}
 	sortCuts(cuts)
 	return cuts, nil
 }
 
-func apiSurface(spec string) (map[string]bool, error) {
+func apiSurface(spec string) (map[string][]string, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(stripSpecHeader(spec)), &doc); err != nil {
 		return nil, err
@@ -150,41 +179,67 @@ func apiSurface(spec string) (map[string]bool, error) {
 	if paths == nil || paths.Kind != yaml.MappingNode || len(paths.Content) == 0 {
 		return nil, fmt.Errorf("no paths mapping")
 	}
-	out := map[string]bool{}
+	out := map[string][]string{}
 	for j := 0; j+1 < len(paths.Content); j += 2 {
 		path, item := paths.Content[j].Value, paths.Content[j+1]
-		out[path] = true
+		out[path] = nil
 		if item.Kind != yaml.MappingNode {
 			continue
 		}
-		collectSpecParameters(out, path, item)
+		collectSpecParameters(out, path, item, []string{path})
 		for k := 0; k+1 < len(item.Content); k += 2 {
 			method := strings.ToLower(item.Content[k].Value)
 			if !specMethods[method] {
 				continue
 			}
 			operation := strings.ToUpper(method) + " " + path
-			out[operation] = true
-			collectSpecParameters(out, operation, item.Content[k+1])
+			out[operation] = []string{path}
+			under := []string{operation, path}
+			collectSpecParameters(out, operation, item.Content[k+1], under)
+			collectSpecProperties(out, "paths."+path+"."+method, under, item.Content[k+1])
 		}
 	}
-	collectSpecProperties(out, "", root)
+	collectSpecComponents(out, root)
 	return out, nil
 }
 
-func collectSpecParameters(out map[string]bool, prefix string, node *yaml.Node) {
+func collectSpecComponents(out map[string][]string, root *yaml.Node) {
+	components := specMapValue(root, "components")
+	if components == nil || components.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(components.Content); i += 2 {
+		group, members := components.Content[i].Value, components.Content[i+1]
+		if members.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(members.Content); j += 2 {
+			name, member := members.Content[j].Value, members.Content[j+1]
+			owner := "components." + group + "." + name
+			out[owner] = nil
+			if group == "parameters" {
+				if identity := specNodeIdentity(member); identity != "" {
+					out[owner+" parameter "+identity] = []string{owner}
+				}
+			}
+			collectSpecProperties(out, owner, []string{owner}, member)
+		}
+	}
+}
+
+func collectSpecParameters(out map[string][]string, prefix string, node *yaml.Node, parents []string) {
 	params := specMapValue(node, "parameters")
 	if params == nil || params.Kind != yaml.SequenceNode {
 		return
 	}
 	for _, p := range params.Content {
 		if key := specNodeIdentity(p); key != "" {
-			out[prefix+" parameter "+key] = true
+			out[prefix+" parameter "+key] = parents
 		}
 	}
 }
 
-func collectSpecProperties(out map[string]bool, path string, node *yaml.Node) {
+func collectSpecProperties(out map[string][]string, path string, parents []string, node *yaml.Node) {
 	switch node.Kind {
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(node.Content); i += 2 {
@@ -192,14 +247,15 @@ func collectSpecProperties(out map[string]bool, path string, node *yaml.Node) {
 			child := path + "." + key
 			if key == "properties" && value.Kind == yaml.MappingNode {
 				for j := 0; j+1 < len(value.Content); j += 2 {
-					out[strings.TrimPrefix(child+"."+value.Content[j].Value, ".")] = true
+					member := strings.TrimPrefix(child+"."+value.Content[j].Value, ".")
+					out[member] = append([]string{strings.TrimPrefix(path, ".")}, parents...)
 				}
 			}
-			collectSpecProperties(out, child, value)
+			collectSpecProperties(out, child, parents, value)
 		}
 	case yaml.SequenceNode:
 		for i, child := range node.Content {
-			collectSpecProperties(out, path+"["+specSequenceKey(child, i)+"]", child)
+			collectSpecProperties(out, path+"["+specSequenceKey(child, i)+"]", parents, child)
 		}
 	}
 }

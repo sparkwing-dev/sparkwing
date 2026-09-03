@@ -300,15 +300,20 @@ func TestLintWireBreak_AnUnrelatedBreakingEntryDoesNotCoverACut(t *testing.T) {
 	body := "## [Unreleased]\n\n### Changed\n\n" +
 		"- **controller (Breaking):** Four controller limits, and a way to take /metrics off the ingress. " +
 		"The API server restarts after this. " +
-		"See [migration](docs/migrations/_unreleased.md#the-wire-drops-stats_reset).\n"
+		"See [migration](docs/migrations/_unreleased.md#something-else).\n"
 	cuts := []wireCut{
 		{Surface: "wingwire", Identifier: "grant.lease_token", Detail: "removed"},
 		{Surface: "api", Identifier: "DELETE /api/v1/runs/{id}", Detail: "removed"},
 		{Identifier: "protocol floor", Detail: "raised 1 -> 2 (newest major 3)"},
 	}
 	issues := LintWireBreak(body, "v0.41.0", cuts, wireMigrations)
-	if len(issues) != 1 || issues[0].Category != wireBreakCategory {
-		t.Fatalf("issues = %v, want one unmarked-wire-break: an entry about ingress limits declares no wire cut", formatAllIssues(issues))
+	if len(issues) != 1 || issues[0].Category != wireCoverageCategory {
+		t.Fatalf("issues = %v, want one undeclared-wire-cut: an entry about ingress limits declares no wire cut", formatAllIssues(issues))
+	}
+	for _, cut := range cuts {
+		if !strings.Contains(issues[0].Message, cut.Identifier) {
+			t.Errorf("message does not report %q as undeclared: %s", cut.Identifier, issues[0].Message)
+		}
 	}
 }
 
@@ -391,5 +396,148 @@ func TestWireCuts_ReportsEverySurfaceItCanDiff(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("cuts %v omit %q", describeCuts(cuts), want)
 		}
+	}
+}
+
+func TestLintWireBreak_NamingTheRouteCoversEverythingUnderIt(t *testing.T) {
+	removed := removeSpecPath(specBefore, "  /api/v1/runs:")
+	cuts, err := apiSurfaceCuts(specBefore, removed)
+	if err != nil {
+		t.Fatalf("apiSurfaceCuts: %v", err)
+	}
+	if len(cuts) < 5 {
+		t.Fatalf("removing one route produced %d cuts, want the route, its methods, parameters and members", len(cuts))
+	}
+	honest := "## [Unreleased]\n\n### Removed\n\n" +
+		"- **api (Breaking):** The controller no longer serves `/api/v1/runs`. " +
+		"See [migration](docs/migrations/_unreleased.md#something-else).\n"
+	if issues := LintWireBreak(honest, "v0.41.0", cuts, wireMigrations); len(issues) != 0 {
+		t.Errorf("a note naming the removed route should declare every cut under it, got %v", formatAllIssues(issues))
+	}
+
+	byMethodOnly := "## [Unreleased]\n\n### Removed\n\n" +
+		"- **api (Breaking):** `GET /api/v1/runs` is gone. " +
+		"See [migration](docs/migrations/_unreleased.md#something-else).\n"
+	issues := LintWireBreak(byMethodOnly, "v0.41.0", cuts, wireMigrations)
+	if len(issues) != 1 || issues[0].Category != wireCoverageCategory {
+		t.Fatalf("issues = %v, want one undeclared-wire-cut for the route and the other method", formatAllIssues(issues))
+	}
+	for _, want := range []string{"/api/v1/runs removed", "POST /api/v1/runs removed"} {
+		if !strings.Contains(issues[0].Message, want) {
+			t.Errorf("message does not report %q: %s", want, issues[0].Message)
+		}
+	}
+}
+
+func removeSpecPath(spec, header string) string {
+	var out []string
+	skip := false
+	for _, line := range strings.Split(spec, "\n") {
+		if line == header {
+			skip = true
+			continue
+		}
+		if skip && strings.HasPrefix(line, "  /") {
+			skip = false
+		}
+		if skip && !strings.HasPrefix(line, "    ") && !strings.HasPrefix(line, "      ") && !strings.HasPrefix(line, "        ") {
+			skip = false
+		}
+		if !skip {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func TestDeclaresIdentifierMatchesOnBoundaries(t *testing.T) {
+	cases := []struct {
+		text       string
+		identifier string
+		want       bool
+	}{
+		{"the wire drops `hello`", "hello", true},
+		{"the wire drops `hello_ack`", "hello", false},
+		{"the wire drops `hello`", "hello_ack", false},
+		{"the wire drops `cancel_lease`", "cancel", false},
+		{"the daemon no longer serves stats_reset.", "stats_reset", true},
+		{"grant.lease_token is gone", "grant", false},
+		{"the `grant` message is gone", "grant.lease_token", false},
+		{"`DELETE /api/v1/runs/{id}` is gone", "DELETE /api/v1/runs", false},
+		{"`/api/v1/runs` is gone", "/api/v1/runs/{id}", false},
+		{"`/api/v1/runs` is gone.", "/api/v1/runs", true},
+		{"the protocol floor rises to 2", "protocol floor", true},
+	}
+	for _, tc := range cases {
+		if got := declaresIdentifier(tc.text, tc.identifier); got != tc.want {
+			t.Errorf("declaresIdentifier(%q, %q) = %v, want %v", tc.text, tc.identifier, got, tc.want)
+		}
+	}
+}
+
+func TestLintWireBreak_ANamedFieldDoesNotDeclareItsType(t *testing.T) {
+	body := "## [Unreleased]\n\n### Removed\n\n" +
+		"- **wingwire (Breaking):** `grant.lease_token` is gone. " +
+		"See [migration](docs/migrations/_unreleased.md#something-else).\n"
+	cuts := []wireCut{{
+		Surface:    "wingwire",
+		Identifier: "grant",
+		Detail:     "removed",
+		Covers:     wireFieldAncestors("grant"),
+	}}
+	issues := LintWireBreak(body, "v0.41.0", cuts, wireMigrations)
+	if len(issues) != 1 || issues[0].Category != wireCoverageCategory {
+		t.Fatalf("issues = %v, want one undeclared-wire-cut: naming a field does not declare its whole type", formatAllIssues(issues))
+	}
+}
+
+func TestLintWireBreak_ANamedTypeDeclaresItsFields(t *testing.T) {
+	body := "## [Unreleased]\n\n### Removed\n\n" +
+		"- **wingwire (Breaking):** The `grant` message is gone. " +
+		"See [migration](docs/migrations/_unreleased.md#something-else).\n"
+	cuts := []wireCut{
+		{Surface: "wingwire", Identifier: "grant", Detail: "removed", Covers: wireFieldAncestors("grant")},
+		{Surface: "wingwire", Identifier: "grant.resources.cores", Detail: "removed", Covers: wireFieldAncestors("grant.resources.cores")},
+	}
+	if issues := LintWireBreak(body, "v0.41.0", cuts, wireMigrations); len(issues) != 0 {
+		t.Fatalf("naming the type should declare its fields, got %v", formatAllIssues(issues))
+	}
+}
+
+func TestLintWireBreak_AcceptsEveryScopeAWireCutShipsUnder(t *testing.T) {
+	for _, scope := range wireScopes {
+		body := "## [Unreleased]\n\n### Removed\n\n" +
+			"- **" + scope + " (Breaking):** `stats_reset` is gone. " +
+			"See [migration](docs/migrations/_unreleased.md#something-else).\n"
+		if issues := LintWireBreak(body, "v0.41.0", []wireCut{statsResetCut}, wireMigrations); len(issues) != 0 {
+			t.Errorf("scope %q should declare a wire cut, got %v", scope, formatAllIssues(issues))
+		}
+	}
+	body := "## [Unreleased]\n\n### Removed\n\n" +
+		"- **store (Breaking):** `stats_reset` is gone. " +
+		"See [migration](docs/migrations/_unreleased.md#something-else).\n"
+	if issues := LintWireBreak(body, "v0.41.0", []wireCut{statsResetCut}, wireMigrations); len(issues) != 1 {
+		t.Errorf("a store-scoped entry should not declare a wire cut, got %v", formatAllIssues(issues))
+	}
+}
+
+func TestAPISurfaceCuts_ComponentParameterRenamesAreCuts(t *testing.T) {
+	spec := specBefore + `  parameters:
+    RunID:
+      name: id
+      in: path
+      schema: {type: string}
+`
+	renamed := strings.Replace(spec, "      name: id\n", "      name: runID\n", 1)
+	cuts, err := apiSurfaceCuts(spec, renamed)
+	if err != nil {
+		t.Fatalf("apiSurfaceCuts: %v", err)
+	}
+	want := []string{"api components.parameters.RunID parameter path:id removed"}
+	if !reflect.DeepEqual(describeCuts(cuts), want) {
+		t.Errorf("cuts = %v, want %v", describeCuts(cuts), want)
+	}
+	if len(cuts) == 1 && !strings.Contains(strings.Join(cuts[0].covering(), " "), "components.parameters.RunID") {
+		t.Errorf("covering = %v, want the component name to declare it", cuts[0].covering())
 	}
 }
