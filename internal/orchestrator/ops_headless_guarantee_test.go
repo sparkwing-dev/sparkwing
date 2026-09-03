@@ -12,9 +12,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+const headlessStandaloneBlock = `sparkwing: no admission daemon is running and no sparkwing is installed to host one, so this run is standalone. It cannot see other runs on this machine and they cannot see it, so together they may oversubscribe it. Everything else works.
+
+  to host one
+    curl -fsSL https://sparkwing.dev/install.sh | sh
+`
 
 func TestHeadless_ScaffoldedModuleServesOpsAndRuns(t *testing.T) {
 	if testing.Short() {
@@ -58,16 +65,19 @@ func TestHeadless_ScaffoldedModuleServesOpsAndRuns(t *testing.T) {
 	}
 
 	runOut := runBin(t, mod, runEnv, bin, "noop")
-	const warning = "running without local coordination"
-	if got := strings.Count(runOut, warning); got != 1 {
-		t.Fatalf("headless run announced %q %d times, want exactly 1:\n%s", warning, got, runOut)
-	}
-	if !strings.Contains(runOut, "no sparkwing is installed to host one") {
-		t.Fatalf("uncoordinated-run warning does not name the missing host:\n%s", runOut)
+	if got := strings.Count(runOut, headlessStandaloneBlock); got != 1 {
+		t.Fatalf("headless run printed the standalone block %d times, want exactly 1:\n%s", got, runOut)
 	}
 
 	if _, err := os.Stat(filepath.Join(home, "wingd", "d.log")); err == nil {
 		t.Fatal("a pipeline binary with no host available started a daemon anyway")
+	}
+	p := orchestrator.PathsAt(home)
+	if _, err := os.Stat(p.StandaloneStateDB()); err != nil {
+		t.Fatalf("stat %s: %v; the headless run wrote its state somewhere else", p.StandaloneStateDB(), err)
+	}
+	if _, err := os.Stat(p.StateDB()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat %s = %v; a pipeline binary opened the shared store", p.StateDB(), err)
 	}
 
 	var qs wingwire.QueueState
