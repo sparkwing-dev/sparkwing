@@ -443,6 +443,13 @@ code change to unlock.
   backend uses the same shape. Run-store schema 27 rewrites the marker in an
   existing SQLite database, so no row is left in a form the new code cannot
   match; a Postgres database needs no rewrite because it never accepted one.
+- **store:** Deleting a run now drops the memo entries it produced. A cache
+  entry written by `on_limit: coalesce` outlived the run whose output it
+  pointed at, so after `sparkwing runs delete`, `sparkwing runs prune` or
+  `DELETE /api/v1/runs/{id}`, the next node with the same cache key was handed
+  a hit whose output no longer existed and failed with `cache hit: fetch
+  output: not found` for the rest of the entry's TTL. Such a node now executes
+  instead.
 - **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
   it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
   of printing a skip and exiting 0, so the comment and `#nosec` annotation

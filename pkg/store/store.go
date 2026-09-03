@@ -2392,7 +2392,8 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 	return scanRun(s.queryRow(ctx, q, args...))
 }
 
-// DeleteRun removes the run + its trigger; CASCADE handles children.
+// DeleteRun removes the run, its trigger and its memo entries;
+// CASCADE handles children.
 //
 // Triggers carrying parent_node_id are the cross-pipeline spawn
 // linkage from their PARENT run -- they double as the dispatch row
@@ -2413,6 +2414,13 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM triggers WHERE id = ? AND parent_node_id = ''`, runID); err != nil {
+		return err
+	}
+	// safety: concurrency_cache carries no foreign key, so a memo
+	// entry left here keeps pointing at output this delete removes,
+	// and every later hit on that key fails to fetch it.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM concurrency_cache WHERE origin_run_id = ?`, runID); err != nil {
 		return err
 	}
 	return tx.Commit()
