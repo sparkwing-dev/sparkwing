@@ -450,6 +450,13 @@ code change to unlock.
   a hit whose output no longer existed and failed with `cache hit: fetch
   output: not found` for the rest of the entry's TTL. Such a node now executes
   instead.
+- **store + cli:** `sparkwing triggers list --repo` and
+  `GET /api/v1/triggers?repo=` now find matches that are not on the newest
+  page. The repository is read out of each trigger's environment, which ran
+  after the SQL limit, so a caller asking for 20 triggers of one repository got
+  only those among the newest 20 overall -- commonly none. The store now reads
+  pages until the limit is filled, over the newest 5,000 triggers matching the
+  other filters.
 - **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
   it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
   of printing a skip and exiting 0, so the comment and `#nosec` annotation
