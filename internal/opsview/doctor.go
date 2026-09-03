@@ -94,6 +94,8 @@ type DoctorReport struct {
 type DoctorStandaloneStore struct {
 	Path string `json:"path"`
 
+	// Schema is 0 for the store binaries share under the requirements rule,
+	// and the schema version of the binaries that keep their own otherwise.
 	Schema int `json:"schema"`
 
 	Runs int `json:"runs"`
@@ -674,6 +676,7 @@ func diagnoseToolchains(p paths.Paths, report *DoctorReport) {
 }
 
 func diagnoseStandaloneStores(p paths.Paths, report *DoctorReport) {
+	addStandaloneStore(report, filepath.Join(p.StandaloneDir(), "state.db"), 0)
 	entries, err := os.ReadDir(p.StandaloneDir())
 	if err != nil {
 		return
@@ -683,17 +686,20 @@ func diagnoseStandaloneStores(p paths.Paths, report *DoctorReport) {
 		if !ok {
 			continue
 		}
-		path := filepath.Join(p.StandaloneSchemaDir(schema), "state.db")
-		runs, oldest, ok := standaloneRunCount(path)
-		if !ok {
-			continue
-		}
-		report.StandaloneStores = append(report.StandaloneStores, DoctorStandaloneStore{
-			Path: path, Schema: schema, Runs: runs, OldestRunAt: oldest,
-		})
+		addStandaloneStore(report, filepath.Join(p.StandaloneSchemaDir(schema), "state.db"), schema)
 	}
 	sort.Slice(report.StandaloneStores, func(i, j int) bool {
 		return report.StandaloneStores[i].Schema < report.StandaloneStores[j].Schema
+	})
+}
+
+func addStandaloneStore(report *DoctorReport, path string, schema int) {
+	runs, oldest, ok := standaloneRunCount(path)
+	if !ok {
+		return
+	}
+	report.StandaloneStores = append(report.StandaloneStores, DoctorStandaloneStore{
+		Path: path, Schema: schema, Runs: runs, OldestRunAt: oldest,
 	})
 }
 
@@ -722,13 +728,13 @@ func standaloneRunCount(path string) (int, *time.Time, bool) {
 	}
 	st, err := store.OpenReadOnly(path)
 	if err != nil {
-		return 0, nil, false
+		return -1, nil, true
 	}
 	defer func() { _ = st.Close() }()
 	var runs int
 	var oldest sql.NullInt64
 	if err := st.DB().QueryRow(`SELECT COUNT(*), MIN(started_at) FROM runs`).Scan(&runs, &oldest); err != nil {
-		return 0, nil, false
+		return -1, nil, true
 	}
 	if !oldest.Valid {
 		return runs, nil, true
@@ -1232,7 +1238,9 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "toolchains\t%d\n", len(r.Toolchains))
 	standaloneRuns := 0
 	for _, sa := range r.StandaloneStores {
-		standaloneRuns += sa.Runs
+		if sa.Runs > 0 {
+			standaloneRuns += sa.Runs
+		}
 	}
 	fmt.Fprintf(w, "standalone_stores\t%d\t%d\n", len(r.StandaloneStores), standaloneRuns)
 	return nil
@@ -1513,6 +1521,10 @@ func renderStandaloneStores(w io.Writer, r DoctorReport) {
 		"  nothing prunes them; delete a directory once you no longer want its runs\n", len(r.StandaloneStores))
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, sa := range r.StandaloneStores {
+		if sa.Runs < 0 {
+			fmt.Fprintf(tw, "  %s\tunreadable\t-\n", sa.Path)
+			continue
+		}
 		oldest := "-"
 		if sa.OldestRunAt != nil {
 			oldest = "oldest " + standaloneAge(*sa.OldestRunAt)

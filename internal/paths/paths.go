@@ -44,31 +44,43 @@ func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 
 func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
 
-// StandaloneDir holds one runs store per store schema, each written by
-// pipeline binaries that could not reach the admission daemon. The CLI's
-// own verbs read [Paths.StateDB] and never look here.
+// StandaloneDir holds the runs stores written by pipeline binaries that could
+// not reach the admission daemon. The CLI's own verbs read [Paths.StateDB] and
+// never look here.
 func (p Paths) StandaloneDir() string { return filepath.Join(p.Root, "standalone") }
 
-// StandaloneSchemaDir names the directory a binary expecting store schema
-// version writes to. Binaries at neighboring schemas keep separate files,
-// so one never migrates the file another is reading.
+// StandaloneStateDB is the store standalone runs share. Binaries at
+// neighboring schemas share it under the store's requirements rule: the
+// newest migrates it, an older one opens it while it knows every requirement
+// the file records.
+func (p Paths) StandaloneStateDB() string {
+	return filepath.Join(p.StandaloneDir(), "state.db")
+}
+
+// StandaloneSchemaDir is where a binary the shared standalone store refuses
+// keeps its own, one directory per store schema version.
 func (p Paths) StandaloneSchemaDir(version int) string {
 	return filepath.Join(p.StandaloneDir(), fmt.Sprintf("schema-%d", version))
 }
 
-// StandaloneStateDB is the runs store this binary opens when a run cannot be
-// hosted.
-func (p Paths) StandaloneStateDB() string {
+// StandaloneSchemaStateDB is [Paths.StandaloneSchemaDir] for this binary's own
+// expected schema.
+func (p Paths) StandaloneSchemaStateDB() string {
 	return filepath.Join(p.StandaloneSchemaDir(store.ExpectedSchemaVersion()), "state.db")
 }
 
-// EnsureStandaloneDir prepares the directory holding [Paths.StandaloneStateDB]
-// under the home's own mode.
+// EnsureStandaloneDir prepares [Paths.StandaloneDir] under the home's own mode.
 func (p Paths) EnsureStandaloneDir() error {
 	if err := p.EnsureRoot(); err != nil {
 		return err
 	}
-	if err := fssecure.EnsureDir(p.StandaloneDir()); err != nil {
+	return fssecure.EnsureDir(p.StandaloneDir())
+}
+
+// EnsureStandaloneSchemaDir prepares the directory holding
+// [Paths.StandaloneSchemaStateDB].
+func (p Paths) EnsureStandaloneSchemaDir() error {
+	if err := p.EnsureStandaloneDir(); err != nil {
 		return err
 	}
 	return fssecure.EnsureDir(p.StandaloneSchemaDir(store.ExpectedSchemaVersion()))
