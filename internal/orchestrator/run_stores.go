@@ -87,11 +87,8 @@ func OpenStandaloneStores(ctx context.Context, paths Paths) *StandaloneStores {
 }
 
 // safety: the requirements rule governs whether a store may be opened, not
-// whether this binary's SELECT matches its columns. A store written at an
-// older store schema passes that rule and still has no column a later
-// migration added, so the reader asks it for one row before trusting it and
-// falls back to the count doctor uses; the driver's own text names a column,
-// which is not something to hand an operator.
+// whether this build's SELECT matches its columns, so a store at an older
+// store schema passes it and still lacks a column a later migration added.
 func unreadableNote(ctx context.Context, st *store.Store, label string) (string, bool) {
 	if _, err := st.ListRuns(ctx, store.RunFilter{Limit: 1}); err == nil {
 		return "", false

@@ -94,7 +94,6 @@ func TestRunsRetry_StandaloneRunReachesTheRefusalWithNoDashboard(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected retry to fail for a standalone run")
 	}
-	// The refusal itself goes to stderr; the returned error only counts.
 	if !strings.Contains(err.Error(), "retry: 1 of 1 failed") {
 		t.Fatalf("retry did not count the standalone run as its own failure: %v", err)
 	}
