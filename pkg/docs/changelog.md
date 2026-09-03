@@ -249,6 +249,15 @@ code change to unlock.
 
 ### Fixed
 
+- **orchestrator:** S3-shared-state concurrency again recognizes the
+  inherited-holder marker earlier releases wrote. The marker inside a
+  `concurrency/` slot object changed shape and nothing rewrites those objects,
+  so a child run that had joined its parent's slot before the upgrade read back
+  as an ordinary holder: the parent's cost was never handed to it on release,
+  leaving the key admitting past its capacity; `OnLimit: CancelOthers` left it
+  running; and its marker surfaced as a node id in `sparkwing concurrency
+  status`. Readers now accept either form, and writers keep emitting the
+  current one so a runner still on the old release reads what it wrote.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads

@@ -90,6 +90,10 @@ const (
 	// safety: the marker shares the store's shape so the two backends
 	// stay comparable, and node ids can never hold a backslash.
 	inheritedS3HolderNodePrefix = `\inherited:`
+	// safety: every release from v0.15.0 to v0.40.0 wrote this form into
+	// slot documents that no migration rewrites, so readers still have to
+	// match it.
+	legacyInheritedS3HolderNodePrefix = "\x00inherited:"
 )
 
 func inheritedS3HolderNodeID(holderID string) string {
@@ -97,7 +101,17 @@ func inheritedS3HolderNodeID(holderID string) string {
 }
 
 func isInheritedS3HolderNodeID(nodeID string) bool {
-	return strings.HasPrefix(nodeID, inheritedS3HolderNodePrefix)
+	return strings.HasPrefix(nodeID, inheritedS3HolderNodePrefix) ||
+		strings.HasPrefix(nodeID, legacyInheritedS3HolderNodePrefix)
+}
+
+// safety: a holder written before the marker changed shape has to keep
+// comparing equal to one this binary writes for the same parent.
+func canonicalInheritedS3HolderNodeID(nodeID string) string {
+	if parentID, ok := strings.CutPrefix(nodeID, legacyInheritedS3HolderNodePrefix); ok {
+		return inheritedS3HolderNodePrefix + parentID
+	}
+	return nodeID
 }
 
 func (h s3Holder) budgetCost() int {
@@ -330,12 +344,13 @@ func supersedeS3HolderAndInherited(doc *s3SlotDoc, holderID string) []string {
 	inheritedMarker := inheritedS3HolderNodeID(holderID)
 	originalMarker := inheritedMarker
 	if isInheritedS3HolderNodeID(h.NodeID) {
-		originalMarker = h.NodeID
+		originalMarker = canonicalInheritedS3HolderNodeID(h.NodeID)
 	}
 	h.Superseded = true
 	ids := []string{holderID}
 	for i := range doc.Holders {
-		if doc.Holders[i].Superseded || (doc.Holders[i].NodeID != inheritedMarker && doc.Holders[i].NodeID != originalMarker) {
+		marker := canonicalInheritedS3HolderNodeID(doc.Holders[i].NodeID)
+		if doc.Holders[i].Superseded || (marker != inheritedMarker && marker != originalMarker) {
 			continue
 		}
 		ids = append(ids, supersedeS3HolderAndInherited(doc, doc.Holders[i].HolderID)...)
@@ -952,7 +967,7 @@ func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome,
 					inheritedMarker := inheritedS3HolderNodeID(releasedHolder.HolderID)
 					originalMarker := inheritedMarker
 					if isInheritedS3HolderNodeID(releasedHolder.NodeID) {
-						originalMarker = releasedHolder.NodeID
+						originalMarker = canonicalInheritedS3HolderNodeID(releasedHolder.NodeID)
 					}
 					for j := range doc.Holders {
 						if i == j {
@@ -961,9 +976,10 @@ func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome,
 						if doc.Holders[j].Superseded || doc.Holders[j].LeaseExpiresNS <= nowNS {
 							continue
 						}
+						marker := canonicalInheritedS3HolderNodeID(doc.Holders[j].NodeID)
 						if doc.Holders[j].Cost == 0 &&
 							doc.Holders[j].DeclaredCapacity == inheritedS3HolderDeclaredCapacity &&
-							(doc.Holders[j].NodeID == inheritedMarker || doc.Holders[j].NodeID == originalMarker) {
+							(marker == inheritedMarker || marker == originalMarker) {
 							doc.Holders[j].Cost = releasedHolder.Cost
 							doc.Holders[j].DeclaredCapacity = releasedHolder.DeclaredCapacity
 							break
