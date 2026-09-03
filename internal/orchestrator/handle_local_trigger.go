@@ -95,28 +95,42 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 }
 
 // safety: a child run picks its backend the way its parent did, so a hosted
-// run dispatches children that open nothing either. A named profile is
-// excluded because the daemon stands in front of this machine's store alone.
+// run dispatches children that open nothing either and an unhosted one lands
+// its child in the same standalone store. A named profile is excluded because
+// the daemon stands in front of this machine's store alone.
 func localTriggerBackends(ctx context.Context, paths Paths, profileName string) (Backends, func(), error) {
+	standalone := false
 	if profileName == "" {
 		opts := Options{
 			DefaultStateDB: paths.StateDB(),
 			Admission:      pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal),
 		}
-		if hosted, release := hostedBackendsForRun(ctx, paths, &opts); hosted.APISocket != "" {
+		hosted, selection, release, err := hostedBackendsForRun(ctx, paths, &opts)
+		if err != nil {
+			return Backends{}, func() {}, err
+		}
+		if hosted.APISocket != "" {
 			return hosted, release, nil
 		}
+		standalone = selection.standalone != ""
 	}
-	st, err := openLocalTriggerStore(ctx, paths, profileName)
+	st, err := openLocalTriggerStore(ctx, paths, profileName, standalone)
 	if err != nil {
 		return Backends{}, func() {}, err
 	}
 	return LocalBackends(paths, st, nil), func() { _ = st.Close() }, nil
 }
 
-func openLocalTriggerStore(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {
+func openLocalTriggerStore(ctx context.Context, paths Paths, profileName string, standalone bool) (*store.Store, error) {
 	if profileName == "" {
-		st, err := store.Open(paths.StateDB())
+		path := paths.StateDB()
+		if standalone {
+			if err := paths.EnsureStandaloneDir(); err != nil {
+				return nil, fmt.Errorf("standalone store: %w", err)
+			}
+			path = paths.StandaloneStateDB()
+		}
+		st, err := store.Open(path)
 		if err != nil {
 			return nil, fmt.Errorf("open local store: %w", err)
 		}

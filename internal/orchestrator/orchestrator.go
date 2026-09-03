@@ -97,6 +97,10 @@ type Options struct {
 
 	DefaultStateDB string
 
+	// safety: set only by [RunLocal] after selection, so a caller that builds
+	// its own Options cannot claim a run reached the standalone store.
+	standaloneReason string
+
 	ProfileLookup storeurl.ProfileLookup
 
 	Profile *profile.Profile
@@ -385,17 +389,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		var outcome admitOutcome
 		var admitErr error
 		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, opts.Pipeline, runID, plan, opts.MaxParallel, cancelRun)
-		if admitErr != nil {
-
-			degrade, refusal := opts.Admission.unhostedOutcome(admitErr, plan, opts.DryRun)
-			switch {
-			case refusal != nil:
-				admitErr = refusal
-			case degrade:
-
-				opts.Admission = nil
-				lease, outcome, admitErr = nil, admitProceed, nil
-			}
+		if admitErr != nil && opts.Admission.unhostedOutcome(admitErr) {
+			opts.Admission = nil
+			lease, outcome, admitErr = nil, admitProceed, nil
 		}
 		if admitErr != nil {
 			if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
@@ -595,13 +591,23 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		opts.DefaultStateDB = paths.StateDB()
 	}
 	ownsState := opts.State == nil
-	hosted, closeHosted := hostedBackendsForRun(ctx, paths, &opts)
+	hosted, selection, closeHosted, selectErr := hostedBackendsForRun(ctx, paths, &opts)
+	if selectErr != nil {
+		return nil, selectErr
+	}
 	defer closeHosted()
 	if hosted.APISocket != "" {
 		// safety: profile resolution opens this machine's store only when no
 		// state backend is set yet, so the daemon's client goes in before it
 		// runs and the run opens nothing.
 		opts.State = hosted.State
+	} else if selection.standalone != "" {
+		if err := paths.EnsureStandaloneDir(); err != nil {
+			return nil, fmt.Errorf("standalone store: %w", err)
+		}
+		opts.DefaultStateDB = paths.StandaloneStateDB()
+		opts.standaloneReason = selection.standalone
+		fmt.Fprint(standaloneWarningOut, standaloneWarning(selection.standalone, selection.daemon, sparkwingModuleVersion()))
 	}
 	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, hosted.APISocket != ""); err != nil {
 		return nil, fmt.Errorf("profile backends: %w", err)
@@ -1002,6 +1008,10 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 
 	if len(secretArgs) > 0 {
 		inv[store.InvocationSecretArgsKey] = secretArgs
+	}
+	if opts.standaloneReason != "" {
+		inv["standalone"] = true
+		inv["standalone_reason"] = opts.standaloneReason
 	}
 	if opts.RetryRepoDir != "" || opts.RetryRepoIdentity != "" || opts.RetryRevision != "" || opts.RetryPlanHash != "" {
 		inv["retry_provenance"] = map[string]string{

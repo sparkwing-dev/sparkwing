@@ -43,8 +43,6 @@ type LocalAdmission struct {
 	DialTimeout time.Duration
 	Backoff     time.Duration
 
-	unadmittedOnce sync.Once
-
 	loggedMu sync.Mutex
 	logged   map[string]bool
 

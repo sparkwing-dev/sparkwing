@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type Paths struct {
@@ -42,6 +43,36 @@ func PathsAt(root string) Paths { return Paths{Root: root} }
 func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 
 func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
+
+// StandaloneDir holds one runs store per store schema, each written by
+// pipeline binaries that could not reach the admission daemon. The CLI's
+// own verbs read [Paths.StateDB] and never look here.
+func (p Paths) StandaloneDir() string { return filepath.Join(p.Root, "standalone") }
+
+// StandaloneSchemaDir names the directory a binary expecting store schema
+// version writes to. Binaries at neighboring schemas keep separate files,
+// so one never migrates the file another is reading.
+func (p Paths) StandaloneSchemaDir(version int) string {
+	return filepath.Join(p.StandaloneDir(), fmt.Sprintf("schema-%d", version))
+}
+
+// StandaloneStateDB is the runs store this binary opens when a run cannot be
+// hosted.
+func (p Paths) StandaloneStateDB() string {
+	return filepath.Join(p.StandaloneSchemaDir(store.ExpectedSchemaVersion()), "state.db")
+}
+
+// EnsureStandaloneDir prepares the directory holding [Paths.StandaloneStateDB]
+// under the home's own mode.
+func (p Paths) EnsureStandaloneDir() error {
+	if err := p.EnsureRoot(); err != nil {
+		return err
+	}
+	if err := fssecure.EnsureDir(p.StandaloneDir()); err != nil {
+		return err
+	}
+	return fssecure.EnsureDir(p.StandaloneSchemaDir(store.ExpectedSchemaVersion()))
+}
 
 func (p Paths) ToolchainsDir() string { return filepath.Join(p.Root, "toolchains") }
 
