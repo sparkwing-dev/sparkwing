@@ -108,8 +108,11 @@ func (t *hostedRetryTransport) RoundTrip(req *http.Request) (*http.Response, err
 		if err == nil && resp.StatusCode != http.StatusServiceUnavailable {
 			return hostedSettleCreate(policy, attempt, resp), nil
 		}
-		if !hostedRetryAllowed(policy, err) || !t.now().Before(deadline) {
+		if !hostedRetryAllowed(policy, err) {
 			return resp, err
+		}
+		if !t.now().Before(deadline) {
+			return hostedFinalAnswer(resp), err
 		}
 		if resp != nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
@@ -122,6 +125,16 @@ func (t *hostedRetryTransport) RoundTrip(req *http.Request) (*http.Response, err
 			wait = hostedRetryMaxWait
 		}
 	}
+}
+
+// safety: this transport owns the 503 policy for a hosted request, so the
+// answer it gives up on carries no invitation back; otherwise the client's
+// own retry loop would spend a second budget on the same wedged daemon.
+func hostedFinalAnswer(resp *http.Response) *http.Response {
+	if resp != nil && resp.StatusCode == http.StatusServiceUnavailable {
+		resp.Header.Del("Retry-After")
+	}
+	return resp
 }
 
 // safety: the daemon writes its 503 before any handler runs, so an answered

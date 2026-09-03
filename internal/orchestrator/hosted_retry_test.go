@@ -277,3 +277,32 @@ func TestNodeTransports_LogsLeaveTheAPISocketAlone(t *testing.T) {
 		t.Fatalf("%d log record(s) went down the API socket", got)
 	}
 }
+
+func TestHostedRetry_AWedgedDaemonDoesNotInviteASecondBudget(t *testing.T) {
+	var attempts atomic.Int32
+	api := newRestartableAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Retry-After", "1")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"admission daemon: the runs store does not exist yet"}`))
+	}))
+
+	transport := newHostedRetryTransport(apiSocketTransport(api.sock))
+	transport.budget = 300 * time.Millisecond
+	c := client.New(HostedAPIBaseURL, &http.Client{Timeout: wingdTestWait, Transport: transport})
+
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	_, err := c.GetRun(ctx, "r1")
+	if err == nil {
+		t.Fatal("GetRun succeeded against a daemon answering 503")
+	}
+	settled := attempts.Load()
+	if settled == 0 {
+		t.Fatal("no attempt reached the daemon")
+	}
+	if !strings.Contains(err.Error(), "admission daemon") {
+		t.Fatalf("err = %v, want it to name the daemon", err)
+	}
+}
