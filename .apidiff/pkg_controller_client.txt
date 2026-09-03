@@ -171,6 +171,7 @@ type HeartbeatSlotResponse struct {
 type HeartbeatStatus struct {
 	CancelRequested bool
 }
+const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
 type Secret struct {
@@ -218,6 +219,7 @@ type TriggerResponse struct {
 	RunID  string
 	Status string
 }
+const UnavailableRetries = 3
 type WaiterHolder struct {
 	HolderID       string
 	RunID          string

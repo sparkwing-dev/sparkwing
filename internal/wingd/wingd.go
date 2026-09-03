@@ -105,6 +105,12 @@ type Config struct {
 	// store-backed behaviour off: no terminal check, no finalize.
 	Runs RunStore
 
+	// ArtifactStoreError is why the host resolved no artifact store for the
+	// controller API, empty when it resolved one or none is configured. The
+	// daemon serves without artifact routes either way and reports this in
+	// the handshake so an operator can see why they are missing.
+	ArtifactStoreError string
+
 	// ServeAPI serves the controller HTTP API on ln until ctx ends, and
 	// returns once in-flight requests have drained. The daemon binds ln
 	// after it wins the election and closes it before a successor is
@@ -405,7 +411,10 @@ func reapSocketDir(sock string) {
 	if _, serr := os.Lstat(sock); errors.Is(serr, fs.ErrNotExist) && time.Since(info.ModTime()) < staleSocketDirAge {
 		return
 	}
+	// safety: a killed daemon leaves both sockets behind, and the directory
+	// removal fails silently while either is still there.
 	_ = os.Remove(sock)
+	_ = os.Remove(apiSocketBeside(sock))
 	_ = os.Remove(dir)
 }
 

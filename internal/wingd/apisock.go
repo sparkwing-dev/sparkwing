@@ -30,6 +30,9 @@ func (d *Daemon) startAPI(ctx context.Context) {
 		// safety: admission is the daemon's reason to exist, so a socket the
 		// API cannot bind is reported through api_ready rather than taken as
 		// a reason to leave the machine without a daemon.
+		d.mu.Lock()
+		d.apiErr = err.Error()
+		d.mu.Unlock()
 		d.cfg.logf("controller API unavailable: %v", err)
 		return
 	}
@@ -45,10 +48,16 @@ func (d *Daemon) startAPI(ctx context.Context) {
 	d.cfg.logf("serving the controller API on %s", d.layout.apiSock)
 }
 
-func (d *Daemon) apiReady() bool {
+func (d *Daemon) apiState() (bool, string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.apiLn != nil
+	if d.apiLn != nil {
+		return true, ""
+	}
+	if d.apiErr != "" {
+		return false, d.apiErr
+	}
+	return false, "the daemon is draining, so it no longer serves the controller API"
 }
 
 // safety: a successor binds api.sock as soon as it is elected, so the

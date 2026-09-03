@@ -35,7 +35,7 @@ func (c *Client) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq 
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (c *Client) ListNodeDispatches(ctx context.Context, runID, nodeID string) (
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -87,6 +87,16 @@ type HelloAck struct {
 	// built without an API server, which is how a client tells "not serving"
 	// from "cannot say".
 	APIReady *bool `json:"api_ready,omitempty"`
+	// APIError is why the API socket is unbound, empty when APIReady is true
+	// and from daemons that predate the field. A daemon whose API socket
+	// will not bind keeps arbitrating admission, so this is the only place
+	// the reason surfaces.
+	APIError string `json:"api_error,omitempty"`
+	// ArtifactStoreError is why the daemon serves no artifact routes, empty
+	// when the cache resolved or none is configured. A cache URL the daemon
+	// cannot open does not stop it serving, so this is the only place the
+	// reason surfaces.
+	ArtifactStoreError string `json:"artifact_store_error,omitempty"`
 }
 
 // HostResources is an amount of machine capacity: CPU cores and

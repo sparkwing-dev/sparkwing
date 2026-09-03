@@ -35,8 +35,11 @@ type WingdOptions struct {
 	// them unregistered, which is what a machine with no cache configured
 	// gets from a run's own controller today.
 	ArtifactStore storage.ArtifactStore
-	Logger        *slog.Logger
-	Logf          func(format string, args ...any)
+	// ArtifactStoreError is why no artifact store resolved. The daemon serves
+	// without artifact routes and reports the reason in its handshake.
+	ArtifactStoreError string
+	Logger             *slog.Logger
+	Logf               func(format string, args ...any)
 }
 
 // RunWingdDaemon runs the admission daemon until ctx ends or it idles out.
@@ -71,7 +74,11 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 		StoreSchemaVersion: store.ExpectedSchemaVersion(),
 		StoreRequirements:  store.KnownRequirements(),
 		ServeAPI:           api.serve,
+		ArtifactStoreError: opts.ArtifactStoreError,
 		Logf:               logf,
+	}
+	if opts.ArtifactStoreError != "" {
+		logf("cache backend unavailable, serving no artifact routes: %s", opts.ArtifactStoreError)
 	}
 	if tune != nil {
 		tune(&cfg, runs)

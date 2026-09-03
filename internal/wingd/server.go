@@ -34,6 +34,7 @@ type Daemon struct {
 	apiLn    net.Listener
 	apiDone  chan struct{}
 	apiConns int
+	apiErr   string
 
 	connSeq atomic.Uint64
 
@@ -515,8 +516,10 @@ func (d *Daemon) serveConn(c *conn) {
 		StoreRequirements:   d.cfg.StoreRequirements,
 	}
 	if d.cfg.ServeAPI != nil {
-		apiReady := d.apiReady()
+		apiReady, apiErr := d.apiState()
 		ack.APIReady = &apiReady
+		ack.APIError = apiErr
+		ack.ArtifactStoreError = d.cfg.ArtifactStoreError
 	}
 	if d.cfg.Runs != nil {
 		storeErr := d.cfg.Runs.Ready()
