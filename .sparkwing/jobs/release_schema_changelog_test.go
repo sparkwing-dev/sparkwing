@@ -246,9 +246,6 @@ func TestRequirementsAddedSince_DiffsByName(t *testing.T) {
 
 func TestRequirementsAdded_PreRegistryTagCountsOnlyNewVersions(t *testing.T) {
 	cur := map[int][]string{21: {"session-token-digest"}, 27: {"inherited-holder-marker"}}
-	// A tag cut before requirements shipped carries no registry, so the
-	// initial population of already-released versions is not a
-	// reclassification and must not demand a (Breaking) entry.
 	got, err := requirementsAdded("package store\n\nconst expectedSchemaVersion = 27\n", cur, 27, 27)
 	if err != nil {
 		t.Fatalf("requirementsAdded: %v", err)

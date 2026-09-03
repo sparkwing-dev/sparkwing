@@ -52,15 +52,12 @@ type repoWorktree struct {
 }
 
 type repoSchema struct {
-	DBVersion  int    `json:"db_version"`
-	MinVersion string `json:"min_version,omitempty"`
-	// Requirements names the schema features the state database records.
+	DBVersion    int      `json:"db_version"`
+	MinVersion   string   `json:"min_version,omitempty"`
 	Requirements []string `json:"requirements,omitempty"`
-	// NeedsVersion is the release the pin must reach to know every
-	// requirement the database lists, empty when the pin already does.
-	NeedsVersion string `json:"needs_version,omitempty"`
-	PinOpensDB   bool   `json:"pin_opens_db"`
-	Note         string `json:"note,omitempty"`
+	NeedsVersion string   `json:"needs_version,omitempty"`
+	PinOpensDB   bool     `json:"pin_opens_db"`
+	Note         string   `json:"note,omitempty"`
 }
 
 type repoPipeline struct {
@@ -208,12 +205,9 @@ func schemaCompat(ctx context.Context, repo repos.Repo) repoSchema {
 	return sc
 }
 
-// schemaVerdict reports whether a repo pinned to an SDK release could open the
-// state database. The pinned binary is not running, so the only evidence about
-// what it knows is the release stamped on each requirement: a requirement
-// added by a release newer than the pin is one the pin cannot have. A stamp
-// from a development build carries no ordering, so it yields a note rather than
-// a verdict either way.
+// safety: the pinned binary is not running, so the release stamped on each
+// requirement is the only evidence of what it knows, and a development-build stamp
+// carries no ordering to compare a pin against.
 func schemaVerdict(pin, replace string, listed []store.SchemaRequirement) (opensDB bool, needs, note string) {
 	switch {
 	case replace != "":

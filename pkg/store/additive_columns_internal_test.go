@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// additiveColumnSources names, for every schema version that declares no
-// requirement, the column definitions that version adds. A version that adds
-// none maps to nil, and every non-declaring version must appear, so a new
-// migration fails this test until its author has classified it.
+// safety: every schema version that declares no requirement must appear here, and a
+// version adding no column maps to nil, so a new migration fails the test below until
+// its author has classified it.
 var additiveColumnSources = map[int][]map[string]string{
 	1:  columnSpecMaps(),
 	2:  columnSpecMaps(),
@@ -43,8 +42,6 @@ func columnSpecMaps() []map[string]string {
 	return out
 }
 
-// unwritableColumns returns the columns in cols that an older binary's insert
-// cannot satisfy: NOT NULL with no DEFAULT.
 func unwritableColumns(cols map[string]string) map[string]string {
 	bad := map[string]string{}
 	for name, def := range cols {

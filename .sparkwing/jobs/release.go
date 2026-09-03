@@ -1164,16 +1164,12 @@ var (
 	migrationRequirementNameRe   = regexp.MustCompile(`"([^"]+)"`)
 )
 
-// errNoRequirementRegistry reports that the source carries no requirement
-// registry at all, which is what a release tag cut before requirements shipped
-// looks like. It is distinct from a registry the parser cannot read, which
-// fails the gate.
+// safety: distinct from a registry the parser cannot read, which fails the gate;
+// a tag cut before requirements shipped carries none at all.
 var errNoRequirementRegistry = errors.New("no `var migrationRequirements = map[int][]string{...}`")
 
-// parseMigrationRequirements reads the per-version requirement registry out of
-// the store source. The release gate reads the source rather than importing
-// the package so it can compare the registry at a released tag with the one on
-// the branch being cut.
+// safety: parses the source rather than importing the package, so the gate can read
+// the registry at a released tag as well as the one being cut.
 func parseMigrationRequirements(goSource string) (map[int][]string, error) {
 	loc := migrationRequirementsDeclRe.FindStringIndex(goSource)
 	if loc == nil {
@@ -1196,8 +1192,6 @@ func parseMigrationRequirements(goSource string) (map[int][]string, error) {
 	return out, nil
 }
 
-// requirementsAddedBetween returns the requirements the versions in
-// (prevSchema, curSchema] declare, sorted.
 func requirementsAddedBetween(registry map[int][]string, prevSchema, curSchema int) []string {
 	var added []string
 	for v := prevSchema + 1; v <= curSchema; v++ {
@@ -1207,11 +1201,6 @@ func requirementsAddedBetween(registry map[int][]string, prevSchema, curSchema i
 	return added
 }
 
-// requirementsAddedSince returns every requirement name the current registry
-// declares that the previous one did not, sorted. It catches the correction a
-// maintainer is most likely to make: reclassifying an already-released
-// migration as breaking without bumping the schema number, which strands every
-// released binary the moment a store is backfilled.
 func requirementsAddedSince(prev, cur map[int][]string) []string {
 	had := map[string]bool{}
 	for _, names := range prev {
@@ -1314,11 +1303,9 @@ func (j *checkSchemaBreakJob) run(ctx context.Context) error {
 	return nil
 }
 
-// requirementsAdded names the requirements this release introduces. Against a
-// tag that already carries a registry it is the full name diff, so a
-// reclassification without a schema bump is caught. Against a tag cut before
-// requirements shipped there is no prior classification to diff, so only the
-// versions this release actually adds count.
+// safety: a tag cut before the registry existed has no prior classification to diff,
+// so only the versions this release adds count; diffing against it would demand a
+// (Breaking) entry for the initial population.
 func requirementsAdded(prevSrc string, curRegistry map[int][]string, prevSchema, curSchema int) ([]string, error) {
 	prevRegistry, err := parseMigrationRequirements(prevSrc)
 	if errors.Is(err, errNoRequirementRegistry) {

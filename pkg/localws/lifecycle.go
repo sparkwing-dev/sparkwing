@@ -46,10 +46,8 @@ func newSchemaGuard(st *store.Store, cancel context.CancelFunc) *schemaGuard {
 	return &schemaGuard{st: st, cancel: cancel}
 }
 
-// check shuts the dashboard down when the database gains a requirement this
-// build cannot read. A schema number above this build's own is not enough: an
-// additive migration leaves every requirement known, and this dashboard keeps
-// serving the database a newer binary migrated.
+// safety: a schema number above this build's own is not a reason to stop; an
+// additive migration leaves every requirement known and this dashboard keeps serving.
 func (g *schemaGuard) check(ctx context.Context) {
 	if g == nil || g.st == nil {
 		return

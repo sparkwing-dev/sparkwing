@@ -1238,30 +1238,10 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	return backfillRunAnnotationRollup(ctx, storeExecer{s: s})
 }
 
-// migrationRequirements names, per schema version, the features that
-// version makes the database depend on. A version absent from this map is
-// additive: it adds a table, a column with a default, or an index that an
-// older binary's writes cannot violate, so an older binary keeps reading
-// and writing the migrated database. A version present here changes
-// something an older binary reads or writes, and its names are stamped
-// into sparkwing_requirements so that binary refuses the database instead
-// of corrupting it.
-//
-// Versions below 21 declare nothing: no binary that understands
-// requirements at all understands fewer than 27 versions, so no such
-// binary can be the older side of those changes.
-//
-// The four listed here:
-//
-//   - 21 deletes every session row and drops sessions.csrf_token, which an
-//     older binary selects by name.
-//   - 22 repoints the secrets primary key from (name) to (name, repo), so
-//     an older binary's upsert on (name) has no constraint to conflict on.
-//   - 26 makes tokens.prefix unique, turning an older minter's prefix
-//     collision from a stored row into a hard error.
-//   - 27 rewrites the inherited-holder marker in concurrency_holders.node_id
-//     to a prefix an older binary does not recognize, so it miscounts
-//     inherited holders.
+// safety: a version absent from this map must leave an older binary reading and
+// writing the migrated database; a version present here does not, so its names are
+// stamped and that binary refuses the store rather than corrupting it. Nothing below
+// 21 needs an entry: no binary that reads requirements knows fewer than 27 versions.
 var migrationRequirements = map[int][]string{
 	21: {"session-token-digest"},
 	22: {"repo-scoped-secrets"},

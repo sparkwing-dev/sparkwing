@@ -18,22 +18,20 @@ import (
 )
 
 type daemonReport struct {
-	Running             bool   `json:"running"`
-	Healthy             bool   `json:"healthy"`
-	Draining            bool   `json:"draining"`
-	Restarted           bool   `json:"restarted"`
-	BinaryVersion       string `json:"binary_version,omitempty"`
-	RunningRevision     string `json:"running_revision,omitempty"`
-	PreviousVersion     string `json:"previous_version,omitempty"`
-	PreviousRevision    string `json:"previous_revision,omitempty"`
-	Socket              string `json:"socket"`
-	InstalledVersion    string `json:"installed_version,omitempty"`
-	DaemonSchemaVersion int    `json:"daemon_schema_version,omitempty"`
-	StoreSchemaVersion  int    `json:"store_schema_version,omitempty"`
-	StoreSchemaError    string `json:"store_schema_error,omitempty"`
-	SchemaDiverged      bool   `json:"schema_diverged,omitempty"`
-	// MissingRequirements names the runs-store schema requirements the store
-	// holds and the daemon's binary does not understand.
+	Running             bool     `json:"running"`
+	Healthy             bool     `json:"healthy"`
+	Draining            bool     `json:"draining"`
+	Restarted           bool     `json:"restarted"`
+	BinaryVersion       string   `json:"binary_version,omitempty"`
+	RunningRevision     string   `json:"running_revision,omitempty"`
+	PreviousVersion     string   `json:"previous_version,omitempty"`
+	PreviousRevision    string   `json:"previous_revision,omitempty"`
+	Socket              string   `json:"socket"`
+	InstalledVersion    string   `json:"installed_version,omitempty"`
+	DaemonSchemaVersion int      `json:"daemon_schema_version,omitempty"`
+	StoreSchemaVersion  int      `json:"store_schema_version,omitempty"`
+	StoreSchemaError    string   `json:"store_schema_error,omitempty"`
+	SchemaDiverged      bool     `json:"schema_diverged,omitempty"`
 	MissingRequirements []string `json:"missing_requirements,omitempty"`
 }
 
@@ -134,11 +132,9 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	return report, nil
 }
 
-// daemonCannotReadStore reports whether the store holds something the daemon's
-// binary cannot read. A store schema above the daemon's own no longer says so
-// by itself: an additive migration leaves every requirement known. A daemon
-// that predates the requirements handshake advertises none, and the version
-// comparison stays its only signal.
+// safety: a store schema above the daemon's own no longer proves the daemon cannot
+// read it, so the version comparison holds only for a daemon too old to advertise
+// requirements.
 func daemonCannotReadStore(report daemonReport, daemonRequirements []string) bool {
 	if report.DaemonSchemaVersion == 0 {
 		return false
@@ -255,9 +251,6 @@ func schemaRemedy(report daemonReport) string {
 	return fmt.Sprintf("run `sparkwing daemon restart` to replace it with the installed %s", report.InstalledVersion)
 }
 
-// schemaShortfall names what the daemon's binary is missing: the requirements
-// when it advertised them, and otherwise the schema number the fallback
-// comparison used.
 func schemaShortfall(report daemonReport) string {
 	if len(report.MissingRequirements) > 0 {
 		return strings.Join(report.MissingRequirements, ", ")

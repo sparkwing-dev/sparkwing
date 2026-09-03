@@ -151,8 +151,6 @@ func insertRequirements(ctx context.Context, q migrationQueryExecer, names []str
 	return nil
 }
 
-// requirementsThrough returns every requirement the registry declares for
-// schema versions at or below version, sorted.
 func requirementsThrough(version int) []string {
 	var names []string
 	for v, declared := range migrationRequirements {
@@ -164,10 +162,6 @@ func requirementsThrough(version int) []string {
 	return names
 }
 
-// requirementsToBackfill returns the declared requirements for versions
-// already applied that the database does not list yet. A database migrated
-// before requirements shipped lists none of them, so the first
-// requirements-aware binary to open it stamps its whole history.
 func requirementsToBackfill(listed []SchemaRequirement, version int) []string {
 	have := make(map[string]bool, len(listed))
 	for _, r := range listed {
@@ -182,11 +176,8 @@ func requirementsToBackfill(listed []SchemaRequirement, version int) []string {
 	return missing
 }
 
-// requirementSkew returns the error to refuse an open with when the database
-// lists a requirement this binary does not know, and nil otherwise. The
-// version it names is the highest binary version that stamped one of the
-// unknown requirements: every one of them is present in a build at least
-// that new.
+// safety: name the highest stamp among the unknown requirements, because a build
+// new enough for that one carries all of them.
 func requirementSkew(dbVersion int, listed []SchemaRequirement) *SkewError {
 	var unknown []string
 	need := ""
