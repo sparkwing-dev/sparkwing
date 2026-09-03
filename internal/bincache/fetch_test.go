@@ -159,7 +159,7 @@ func TestFetchPipelineSource_PinsToExactSHA(t *testing.T) {
 	defer srv.Close()
 
 	parentDir := t.TempDir()
-	sparkwingDir, err := FetchPipelineSource(srv.URL, "git@github.com:sparkwing-dev/sparkwing.git",
+	sparkwingDir, err := FetchPipelineSource(context.Background(), srv.URL, "git@github.com:sparkwing-dev/sparkwing.git",
 		"main", oldSHA, parentDir)
 	if err != nil {
 		t.Fatalf("FetchPipelineSource: %v", err)
@@ -186,7 +186,7 @@ func TestFetchPipelineSource_BranchTipFallback_WhenNoSHA(t *testing.T) {
 	defer srv.Close()
 
 	parentDir := t.TempDir()
-	sparkwingDir, err := FetchPipelineSource(srv.URL, "git@github.com:sparkwing-dev/sparkwing.git",
+	sparkwingDir, err := FetchPipelineSource(context.Background(), srv.URL, "git@github.com:sparkwing-dev/sparkwing.git",
 		"main", "", parentDir)
 	if err != nil {
 		t.Fatalf("FetchPipelineSource: %v", err)
@@ -208,7 +208,7 @@ func TestFetchPipelineSource_BadSHA(t *testing.T) {
 
 	parentDir := t.TempDir()
 	bogus := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-	_, err := FetchPipelineSource(srv.URL, "git@github.com:sparkwing-dev/sparkwing.git",
+	_, err := FetchPipelineSource(context.Background(), srv.URL, "git@github.com:sparkwing-dev/sparkwing.git",
 		"main", bogus, parentDir)
 	if err == nil {
 		t.Fatal("expected error for nonexistent SHA, got nil")
@@ -221,12 +221,12 @@ func TestFetchPipelineSource_BadSHA(t *testing.T) {
 func TestFetchExactSHARejectsARevisionThatIsNotAnObjectID(t *testing.T) {
 	for _, sha := range []string{"--upload-pack=evil", "main", "abc1234", "HEAD", ""} {
 		dest := t.TempDir()
-		err := fetchExactSHA("https://cache.example", "https://cache.example/git/widgets", "", sha, dest)
+		err := fetchExactSHA(context.Background(), "https://cache.example", "https://cache.example/git/widgets", "", sha, dest)
 		if err == nil || !strings.Contains(err.Error(), "hex object id") {
-			t.Errorf("fetchExactSHA(%q) error = %v, want a rejected object id", sha, err)
+			t.Errorf("fetchExactSHA(context.Background(), %q) error = %v, want a rejected object id", sha, err)
 		}
 		if _, statErr := os.Stat(filepath.Join(dest, ".git")); statErr == nil {
-			t.Errorf("fetchExactSHA(%q) ran git before validating the revision", sha)
+			t.Errorf("fetchExactSHA(context.Background(), %q) ran git before validating the revision", sha)
 		}
 	}
 }
@@ -267,7 +267,7 @@ func TestFetchPipelineSource_NoSparkwingDir(t *testing.T) {
 	defer srv.Close()
 
 	parentDir := t.TempDir()
-	_, err := FetchPipelineSource(srv.URL, "git@github.com:your-org/noSparkwing.git",
+	_, err := FetchPipelineSource(context.Background(), srv.URL, "git@github.com:your-org/noSparkwing.git",
 		"main", "", parentDir)
 	if err == nil {
 		t.Fatal("expected error for missing .sparkwing, got nil")
@@ -302,7 +302,7 @@ func TestFetchPipelineSource_RegistersWithCache(t *testing.T) {
 	defer srv.Close()
 
 	parentDir := t.TempDir()
-	if _, err := FetchPipelineSource(srv.URL, "git@github.com:sparkwing-dev/sparkwing.git",
+	if _, err := FetchPipelineSource(context.Background(), srv.URL, "git@github.com:sparkwing-dev/sparkwing.git",
 		"main", "", parentDir); err != nil {
 		t.Fatalf("FetchPipelineSource: %v", err)
 	}
@@ -567,7 +567,7 @@ func TestFetchPipelineSourceWithCredentials_UsesOnlyTheDirectCacheToken(t *testi
 	}))
 	defer srv.Close()
 
-	if _, err := FetchPipelineSourceWithCredentials(srv.URL, "https://controller.example",
+	if _, err := FetchPipelineSourceWithCredentials(context.Background(), srv.URL, "https://controller.example",
 		"controller-token", "cache-token", "git@github.com:sparkwing-dev/sparkwing.git",
 		"main", tipSHA, t.TempDir()); err != nil {
 		t.Fatal(err)
@@ -620,7 +620,7 @@ func TestUploadBinary_DoesNotFollowRedirectWithToken(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	err := UploadBinary(source.URL, "cache-token", "deadbeef-cafebabe", binary)
+	err := UploadBinary(context.Background(), source.URL, "cache-token", "deadbeef-cafebabe", binary)
 	if err == nil || !strings.Contains(err.Error(), "307") {
 		t.Fatalf("error = %v, want redirect rejection", err)
 	}
@@ -641,7 +641,7 @@ func TestTryBinary_DoesNotInstallRedirectedContent(t *testing.T) {
 	}))
 	defer source.Close()
 	dest := filepath.Join(t.TempDir(), "pipeline")
-	err := TryBinary(source.URL, "", "deadbeef-cafebabe", dest)
+	err := TryBinary(context.Background(), source.URL, "", "deadbeef-cafebabe", dest)
 	if err == nil || !strings.Contains(err.Error(), "307") {
 		t.Fatalf("error = %v, want redirect rejection", err)
 	}
@@ -685,7 +685,7 @@ func TestTryBinary_VerifiesAdvertisedDigest(t *testing.T) {
 			defer srv.Close()
 
 			dest := filepath.Join(t.TempDir(), "pipeline")
-			err := TryBinary(srv.URL, "cache-token", "deadbeef-cafebabe", dest)
+			err := TryBinary(context.Background(), srv.URL, "cache-token", "deadbeef-cafebabe", dest)
 			if tc.wantErr {
 				if !errors.Is(err, ErrDigest) {
 					t.Fatalf("err = %v, want ErrDigest", err)
@@ -724,7 +724,7 @@ func TestUploadBinary_RejectsDifferentStoredDigest(t *testing.T) {
 	if err := os.WriteFile(src, []byte("compiled pipeline bytes"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	err := UploadBinary(srv.URL, "cache-token", "deadbeef-cafebabe", src)
+	err := UploadBinary(context.Background(), srv.URL, "cache-token", "deadbeef-cafebabe", src)
 	if !errors.Is(err, ErrDigest) {
 		t.Fatalf("err = %v, want ErrDigest", err)
 	}
@@ -748,7 +748,7 @@ func TestTryBinary_SendsTokenAsBearer(t *testing.T) {
 			defer srv.Close()
 
 			dest := filepath.Join(t.TempDir(), "pipeline")
-			if err := TryBinary(srv.URL, tc.token, "deadbeef-cafebabe", dest); !errors.Is(err, ErrMiss) {
+			if err := TryBinary(context.Background(), srv.URL, tc.token, "deadbeef-cafebabe", dest); !errors.Is(err, ErrMiss) {
 				t.Fatalf("error = %v, want ErrMiss", err)
 			}
 			if authz != tc.want {

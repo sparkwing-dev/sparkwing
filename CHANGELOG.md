@@ -511,6 +511,12 @@ code change to unlock.
   log store's do: the run records a `logs_drop` event, the node fails with
   reason `logs_dropped`, and `SPARKWING_LOGS_DROP_POLICY=warn` still keeps such
   a run green.
+- **orchestrator:** A node timeout or a cancelled run now interrupts the remote
+  fetch and compile a node does when its pipeline is not in the runner image.
+  The clone, the binary-cache download, the `go build` and the cache upload all
+  ran outside the node's context, so only the final child process honoured
+  `--timeout` or Ctrl-C and a stuck git host or cache endpoint held the node
+  open past its budget until the dispatch watchdog dumped stacks.
 
 ### Security
 
