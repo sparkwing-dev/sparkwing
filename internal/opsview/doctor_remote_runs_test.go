@@ -12,8 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// seedRunDirHome builds a home with one recorded run and one run directory
-// whose row is nowhere in the local store.
 func seedRunDirHome(t *testing.T, ghostAge time.Duration) (paths.Paths, string) {
 	t.Helper()
 	home := shortHome(t)

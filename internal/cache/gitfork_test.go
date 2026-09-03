@@ -14,8 +14,6 @@ import (
 	"time"
 )
 
-// holdGitForkSlot shrinks the fork limit to one and takes it, so any git fork
-// under test has to wait. The returned func gives the slot back.
 func holdGitForkSlot(t *testing.T) func() {
 	t.Helper()
 	old := gitForkSem
@@ -105,8 +103,7 @@ func TestGitSmartHTTPRefusesWhenNoForkSlotIsFree(t *testing.T) {
 	release := holdGitForkSlot(t)
 	defer release()
 
-	// A request whose caller has already gone away must not wait out the whole
-	// fork-slot window before answering.
+	// safety: a caller that has already gone away must not wait out the fork-slot window.
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -126,8 +123,6 @@ func TestGitSmartHTTPRefusesWhenNoForkSlotIsFree(t *testing.T) {
 	}
 }
 
-// gitForkCounter puts a git shim first on PATH and returns how many times git
-// has been forked since.
 func gitForkCounter(t *testing.T) func() int {
 	t.Helper()
 	real, err := exec.LookPath("git")
