@@ -779,7 +779,16 @@ type StatsReset struct{}
 // StatsResetAck confirms the daemon cleared its admission-outcome window.
 type StatsResetAck struct{}
 
+// Unsupported answers a message whose type the receiving daemon does not
+// serve, naming that type. The connection stays open, so a client that
+// reached for an operation this daemon predates learns so and continues on
+// the surface they share instead of waiting for a reply that never comes.
+type Unsupported struct {
+	Type string `json:"type"`
+}
+
 func (*StatsReset) wireType() MessageType       { return TypeStatsReset }
+func (*Unsupported) wireType() MessageType      { return TypeUnsupported }
 func (*StatsResetAck) wireType() MessageType    { return TypeStatsResetAck }
 func (*CancelLease) wireType() MessageType      { return TypeCancelLease }
 func (*CancelLeaseAck) wireType() MessageType   { return TypeCancelLeaseAck }

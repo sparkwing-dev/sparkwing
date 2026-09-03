@@ -50,7 +50,10 @@ const ProtocolMajor = 3
 // admission grants instead of being locked out the moment the daemon
 // upgrades. Raising it is what turns a stale pin into a hard failure, so
 // raise it only for a change that genuinely cannot be served in the old
-// major's terms, and document the cut as a break.
+// major's terms, and document the cut as a break. That cut is declared, not
+// discovered: the release gate refuses a raised floor without a `(Breaking)`
+// changelog entry and a migration section, the same way it refuses an
+// undeclared removal from the message set.
 const MinProtocolMajor = 1
 
 // ServedMajor reports the protocol major a daemon of this build answers a
@@ -168,6 +171,7 @@ const (
 	TypeStatsResetAck    MessageType = "stats_reset_ack"
 	TypeLivenessProbe    MessageType = "liveness_probe"
 	TypeLivenessAck      MessageType = "liveness_ack"
+	TypeUnsupported      MessageType = "unsupported"
 )
 
 // Message is implemented by every concrete wire message. The
@@ -176,6 +180,15 @@ const (
 // [MessageType] to concrete type.
 type Message interface {
 	wireType() MessageType
+}
+
+// TypeOf reports the wire type m serializes as, for a receiver that holds a
+// decoded message and needs to name its type back to the sender.
+func TypeOf(m Message) MessageType {
+	if m == nil {
+		return ""
+	}
+	return m.wireType()
 }
 
 // Envelope is the framing wrapper around every message: the type
@@ -224,6 +237,17 @@ func Decode(line []byte) (Message, error) {
 	return m, nil
 }
 
+// UnknownTypeError reports a frame carrying a message type this build does
+// not know. A daemon distinguishes it from a malformed frame so it can answer
+// [Unsupported] and keep serving the connection.
+type UnknownTypeError struct {
+	Type MessageType
+}
+
+func (e *UnknownTypeError) Error() string {
+	return fmt.Sprintf("wingwire: unknown message type %q (peer speaks a different protocol major than %d)", e.Type, ProtocolMajor)
+}
+
 func emptyMessage(t MessageType) (Message, error) {
 	switch t {
 	case TypeHello:
@@ -266,7 +290,9 @@ func emptyMessage(t MessageType) (Message, error) {
 		return &LivenessProbe{}, nil
 	case TypeLivenessAck:
 		return &LivenessAck{}, nil
+	case TypeUnsupported:
+		return &Unsupported{}, nil
 	default:
-		return nil, fmt.Errorf("wingwire: unknown message type %q (peer speaks a different protocol major than %d)", t, ProtocolMajor)
+		return nil, &UnknownTypeError{Type: t}
 	}
 }

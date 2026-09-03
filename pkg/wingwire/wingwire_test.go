@@ -36,6 +36,11 @@ func roundTripMessages() []Message {
 		&DrainAck{HoldersRemaining: 3},
 		&CancelLease{RunID: "deploy-20260710-120000"},
 		&CancelLeaseAck{Found: true},
+		&StatsReset{},
+		&StatsResetAck{},
+		&LivenessProbe{Nonce: 7},
+		&LivenessAck{Nonce: 7},
+		&Unsupported{Type: "warp_core_breach"},
 		&Cancel{RunID: "deploy-20260710-120000", Reason: "cancelled via sparkwing runs cancel"},
 		&QueueState{
 			ExternalSampleAgeMS:      30000,
@@ -96,13 +101,7 @@ func TestEncode_CoversEveryDeclaredType(t *testing.T) {
 		}
 		seen[env.Type] = true
 	}
-	all := []MessageType{
-		TypeHello, TypeHelloAck, TypeAdmissionRequest, TypeGrant,
-		TypeQueued, TypeEvicted, TypeRelease, TypeGuardComplete, TypeGuardCompleteAck, TypeReattach,
-		TypeDrainRequest, TypeDrainAck, TypeQueueState,
-		TypeCancelLease, TypeCancelLeaseAck, TypeCancel,
-	}
-	for _, mt := range all {
+	for _, mt := range snapshotMessageTypes(t) {
 		if !seen[mt] {
 			t.Errorf("round-trip fixtures never exercise %q", mt)
 		}
