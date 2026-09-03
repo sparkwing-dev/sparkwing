@@ -408,14 +408,41 @@ func reapSocketDir(sock string) {
 	if err != nil || !info.IsDir() || !socketDirReapable(info) {
 		return
 	}
-	if _, serr := os.Lstat(sock); errors.Is(serr, fs.ErrNotExist) && time.Since(info.ModTime()) < staleSocketDirAge {
+	api := APISocketBeside(sock)
+	before, serr := os.Lstat(sock)
+	if errors.Is(serr, fs.ErrNotExist) {
+		if time.Since(info.ModTime()) < staleSocketDirAge {
+			return
+		}
+	} else if serr != nil || !socketStillDead(sock, before) {
 		return
+	}
+	beforeAPI, apiErr := os.Lstat(api)
+	if !errors.Is(apiErr, fs.ErrNotExist) {
+		if apiErr != nil || !socketStillDead(api, beforeAPI) {
+			return
+		}
 	}
 	// safety: a killed daemon leaves both sockets behind, and the directory
 	// removal fails silently while either is still there.
 	_ = os.Remove(sock)
-	_ = os.Remove(APISocketBeside(sock))
+	_ = os.Remove(api)
 	_ = os.Remove(dir)
+}
+
+// safety: this sweep holds no election lock, and a hashed socket path does
+// not name the home whose lock it would take. A successor unlinks the socket
+// and listens on a fresh inode, so a path that answers again, that is gone,
+// or that no longer carries the file the dial found dead, is mid-takeover.
+func socketStillDead(sock string, before fs.FileInfo) bool {
+	if _, dead := socketStatus(sock); !dead {
+		return false
+	}
+	after, err := os.Lstat(sock)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(before, after)
 }
 
 func socketBaseDir() string {

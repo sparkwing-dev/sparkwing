@@ -443,8 +443,13 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 			}
 
 			bare := filepath.Join(repoDir, e.Name())
-			mu := repoLock(bare)
-			mu.Lock()
+			// safety: request handlers key this lock on the bare hash, and a second key is no lock at all.
+			mu := repoLock(strings.TrimSuffix(e.Name(), ".git"))
+			// safety: a handler holding this lock is already refreshing the mirror, and blocking
+			// here would stall every other repo behind it.
+			if !mu.TryLock() {
+				continue
+			}
 			fetchStart := time.Now()
 			out, err := mirrorFetch(1*time.Minute, bare)
 			mu.Unlock()
@@ -564,6 +569,9 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case skipped:
 			log.Printf("archive: %s fetched within %s, serving mirror as-is", hash, fetchFreshWindow)
+		case errors.Is(err, errGitForkUnavailable):
+			writeGitForkUnavailable(w, err)
+			return
 		case err != nil:
 
 			if !bgFetch.allowReclone(stateKey(hash)) {
@@ -594,8 +602,11 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// #nosec G702 -- git runs as argv with a constant binary and a ref that cannot begin with a dash
-	commitBytes, err := exec.Command("git", "-C", bareRepo, "rev-parse", "--verify", "--end-of-options", branch).Output()
+	commitBytes, err := gitOutput("-C", bareRepo, "rev-parse", "--verify", "--end-of-options", branch)
+	if errors.Is(err, errGitForkUnavailable) {
+		writeGitForkUnavailable(w, err)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("branch %q not found", branch), http.StatusNotFound)
 		return
@@ -634,6 +645,10 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	if err := archiveToFile(bareRepo, branch, tmpTar); err != nil {
 		// #nosec G703 -- a temporary name beside the hex-validated archive path this handler built
 		_ = os.Remove(tmpTar)
+		if errors.Is(err, errGitForkUnavailable) {
+			writeGitForkUnavailable(w, err)
+			return
+		}
 		http.Error(w, fmt.Sprintf("archive failed: %s", err), http.StatusInternalServerError)
 		return
 	}
@@ -686,7 +701,7 @@ func sshHint(output string) string {
 }
 
 func gitCmd(args ...string) (string, error) {
-	return gitCmdTimeout(2*time.Minute, args...)
+	return gitCmdTimeout(gitDefaultTimeout, args...)
 }
 
 func enableSHAFetch(bareRepo string) {
@@ -698,18 +713,46 @@ func enableSHAFetch(bareRepo string) {
 
 var gitForkSem = make(chan struct{}, 4)
 
-func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+const gitDefaultTimeout = 2 * time.Minute
 
+// safety: a request that wins a slot still has to read its body, so this must expire first.
+var gitForkWait = serverReadTimeout / 3
+
+var errGitForkUnavailable = errors.New("no git fork slot available")
+
+// safety: --git-fork-limit is a promise about every git process, so no fork may skip this.
+func acquireGitFork(ctx context.Context, what string) (release func(), err error) {
 	select {
 	case gitForkSem <- struct{}{}:
-		defer func() { <-gitForkSem }()
+		var once sync.Once
+		return func() { once.Do(func() { <-gitForkSem }) }, nil
 	case <-ctx.Done():
-		return "", fmt.Errorf("git timed out waiting for fork slot (%d in flight): git %s",
-			cap(gitForkSem), strings.Join(args, " "))
+		return nil, fmt.Errorf("git timed out waiting for a fork slot (%d in flight): git %s: %w",
+			cap(gitForkSem), what, errGitForkUnavailable)
 	}
+}
 
+func writeGitForkUnavailable(w http.ResponseWriter, err error) {
+	// #nosec G706 -- the description is built from a repository path this server owns
+	log.Printf("warning: %v", err)
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, fmt.Sprintf("git fork limit reached (%d in flight) -- retry shortly", cap(gitForkSem)),
+		http.StatusServiceUnavailable)
+}
+
+func acquireGitForkHTTP(w http.ResponseWriter, r *http.Request, what string) (release func(), ok bool) {
+	ctx, cancel := context.WithTimeout(r.Context(), gitForkWait)
+	defer cancel()
+
+	release, err := acquireGitFork(ctx, what)
+	if err != nil {
+		writeGitForkUnavailable(w, err)
+		return nil, false
+	}
+	return release, true
+}
+
+func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
 	cmd := exec.CommandContext(ctx, "git", args...)
 	// safety: process group kill prevents SSH child orphans on timeout.
@@ -717,14 +760,60 @@ func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
-	out, err := cmd.CombinedOutput()
+	return cmd
+}
+
+func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
+	// safety: queueing for the whole command timeout stalls the repo lock this caller usually holds.
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), min(gitForkWait, timeout))
+	release, err := acquireGitFork(waitCtx, strings.Join(args, " "))
+	cancelWait()
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	out, err := gitCommand(ctx, args...).CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return string(out), fmt.Errorf("git timed out after %s: git %s", timeout, strings.Join(args, " "))
 	}
 	return string(out), err
 }
 
+// safety: callers parse this, so stderr must not reach them the way CombinedOutput would let it.
+func gitOutput(args ...string) ([]byte, error) {
+	// safety: these callers hold the repo lock, so queueing here for the command timeout would
+	// stall the repository rather than shed the request.
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), gitForkWait)
+	release, err := acquireGitFork(waitCtx, strings.Join(args, " "))
+	cancelWait()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitDefaultTimeout)
+	defer cancel()
+
+	out, err := gitCommand(ctx, args...).Output()
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("git timed out after %s: git %s", gitDefaultTimeout, strings.Join(args, " "))
+	}
+	return out, err
+}
+
 func archiveToFile(bareRepo, branch, outPath string) error {
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), gitForkWait)
+	release, err := acquireGitFork(waitCtx, "archive "+bareRepo)
+	cancelWait()
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
 	gitArchive := exec.Command("git", "-C", bareRepo, "archive", "--format=tar", "--", branch)
 	gzipCmd := exec.Command("gzip")
@@ -787,8 +876,11 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 
 	refreshMirrorBestEffort(hash, bareRepo)
 
-	// #nosec G702 -- git runs as argv with a constant binary and a validated ref leading the object name
-	out, err := exec.Command("git", "-C", bareRepo, "show", "--end-of-options", branch+":"+filePath).Output()
+	out, err := gitOutput("-C", bareRepo, "show", "--end-of-options", branch+":"+filePath)
+	if errors.Is(err, errGitForkUnavailable) {
+		writeGitForkUnavailable(w, err)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("file not found: %s:%s", branch, filePath), http.StatusNotFound)
 		return
@@ -834,8 +926,11 @@ func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 		ref = branch + ":" + path
 	}
 
-	// #nosec G702 -- git runs as argv with a constant binary and a ref that cannot begin with a dash
-	out, err := exec.Command("git", "-C", bareRepo, "rev-parse", "--verify", "--end-of-options", ref).Output()
+	out, err := gitOutput("-C", bareRepo, "rev-parse", "--verify", "--end-of-options", ref)
+	if errors.Is(err, errGitForkUnavailable) {
+		writeGitForkUnavailable(w, err)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("path not found: %s", ref), http.StatusNotFound)
 		return
@@ -876,8 +971,11 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 
 	refreshMirrorBestEffort(hash, bareRepo)
 
-	// #nosec G702 -- git runs as argv with a constant binary and refs that cannot begin with a dash
-	err := exec.Command("git", "-C", bareRepo, "merge-base", "--is-ancestor", "--", commit, branch).Run()
+	_, err := gitOutput("-C", bareRepo, "merge-base", "--is-ancestor", "--", commit, branch)
+	if errors.Is(err, errGitForkUnavailable) {
+		writeGitForkUnavailable(w, err)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("commit %s is not on branch %s", commit, branch), http.StatusNotFound)
 		return
@@ -888,7 +986,7 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "commit %s is on branch %s", commit, branch)
 }
 
-var validBinHash = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}$`)
+var validBinHash = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}(\.sha256)?$`)
 
 type binMeta struct {
 	SHA256    string `json:"sha256"`
@@ -1232,6 +1330,10 @@ const (
 
 var validJobID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
+const artifactTempPrefix = ".sparkwing-upload-"
+
+var maxArtifactBytes int64 = 500 << 20
+
 func handleArtifacts(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/artifacts/")
 	parts := strings.SplitN(path, "/", 2)
@@ -1272,10 +1374,15 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
-	// safety: bsdtar reads a member name that leads with @ as an archive to inline, and -- does not stop it.
 	for seg := range strings.SplitSeq(artifactPath, string(filepath.Separator)) {
+		// safety: bsdtar reads a member name that leads with @ as an archive to inline, and -- does not stop it.
 		if strings.HasPrefix(seg, "@") {
 			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		// safety: the list and download routes hide this prefix, so an artifact wearing it would be unreachable.
+		if strings.HasPrefix(seg, artifactTempPrefix) {
+			http.Error(w, "invalid path: "+artifactTempPrefix+" is reserved for uploads in flight", http.StatusBadRequest)
 			return
 		}
 	}
@@ -1297,16 +1404,39 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// #nosec G703 -- the destination is contained under the artifacts root
-	f, err := os.Create(dest)
+
+	// safety: an unbounded or half-written body must never reach the path a download serves.
+	r.Body = http.MaxBytesReader(w, r.Body, maxArtifactBytes)
+
+	// #nosec G703 -- the staging file sits beside a destination contained under the artifacts root
+	tmp, err := os.CreateTemp(destDir, artifactTempPrefix+"*")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer f.Close()
+	tmpPath := tmp.Name()
 
-	n, err := io.Copy(f, r.Body)
+	n, err := io.Copy(tmp, r.Body)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
+		// #nosec G703 -- a staging name this handler created beside the destination
+		_ = os.Remove(tmpPath)
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, fmt.Sprintf("artifact exceeds the %d byte upload limit", maxArtifactBytes),
+				http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// #nosec G703 -- both names are contained under the artifacts root
+	if err := os.Rename(tmpPath, dest); err != nil {
+		// #nosec G703 -- a staging name this handler created beside the destination
+		_ = os.Remove(tmpPath)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1332,6 +1462,9 @@ func artifactDownload(w http.ResponseWriter, r *http.Request, jobID string) {
 	collect := func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return err
+		}
+		if strings.HasPrefix(filepath.Base(path), artifactTempPrefix) {
+			return nil
 		}
 		rel, _ := filepath.Rel(jobDir, path)
 		if matched, _ := filepath.Match(glob, filepath.Base(rel)); matched {
@@ -1388,10 +1521,13 @@ func artifactList(w http.ResponseWriter, r *http.Request, jobID string) {
 		return
 	}
 
-	var files []string
+	files := []string{}
 	collect := func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return err
+		}
+		if strings.HasPrefix(filepath.Base(path), artifactTempPrefix) {
+			return nil
 		}
 		rel, _ := filepath.Rel(jobDir, path)
 		files = append(files, rel)
@@ -1526,6 +1662,14 @@ func handleIncrementalUpload(diffData []byte, repoURL, base string) (string, int
 }
 
 func archiveToDir(bareRepo, ref, dir string) error {
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), gitForkWait)
+	release, err := acquireGitFork(waitCtx, "archive "+bareRepo)
+	cancelWait()
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	// #nosec G702 -- git runs as argv with a constant binary and pattern-validated refs
 	gitArchive := exec.Command("git", "-C", bareRepo, "archive", "--format=tar", "--", ref)
 	tarExtract := exec.Command("tar", "-xf", "-", "-C", dir)
@@ -1593,7 +1737,7 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo and commits required", http.StatusBadRequest)
 		return
 	}
-	// safety: every commit costs one git fork, so an unbounded list is a free fork bomb.
+	// safety: one batch process reads this whole list into memory, so it stays bounded.
 	if len(req.Commits) > maxNegotiateCommits {
 		http.Error(w, fmt.Sprintf("at most %d commits per negotiate request", maxNegotiateCommits), http.StatusBadRequest)
 		return
@@ -1620,19 +1764,56 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 	refreshMirrorBestEffort(hash, bareRepo)
 	lock.Unlock()
 
-	for _, commit := range req.Commits {
-		err := exec.Command("git", "-C", bareRepo, "cat-file", "-t", "--", commit).Run()
-		if err == nil {
-			log.Printf("sync negotiate: found common ancestor %s for %s", short(commit), hash)
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": commit, "found": true})
-			return
-		}
+	ancestor, err := firstCachedObject(bareRepo, req.Commits)
+	if err != nil {
+		// safety: a client that hears "no ancestor" re-uploads, which is slow but still correct.
+		log.Printf("warning: sync negotiate for %s could not read the mirror, answering not-found: %v", hash, err)
+	}
+	if ancestor != "" {
+		log.Printf("sync negotiate: found common ancestor %s for %s", short(ancestor), hash)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": ancestor, "found": true})
+		return
 	}
 
 	log.Printf("sync negotiate: no common ancestor for %s (%d commits checked)", hash, len(req.Commits))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": "", "found": false})
+}
+
+// safety: one batch process bounds the forks a single request can cost, whatever the commit count.
+func firstCachedObject(bareRepo string, ids []string) (string, error) {
+	if len(ids) == 0 {
+		return "", nil
+	}
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), gitForkWait)
+	release, err := acquireGitFork(waitCtx, "cat-file --batch-check "+bareRepo)
+	cancelWait()
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitDefaultTimeout)
+	defer cancel()
+
+	cmd := gitCommand(ctx, "-C", bareRepo, "cat-file", "--batch-check")
+	cmd.Stdin = strings.NewReader(strings.Join(ids, "\n") + "\n")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	for i, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if i >= len(ids) {
+			break
+		}
+		// safety: git answers "<name> missing" for an object it does not have, and three fields for one it does.
+		if len(strings.Fields(line)) == 3 {
+			return ids[i], nil
+		}
+	}
+	return "", nil
 }
 
 func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
@@ -2124,6 +2305,13 @@ func resolveGitRepo(name string) (string, error) {
 
 func handleInfoRefs(w http.ResponseWriter, r *http.Request, bareRepo, service string) {
 	gitCmd := strings.TrimPrefix(service, "git-")
+
+	release, ok := acquireGitForkHTTP(w, r, gitCmd+" --advertise-refs "+bareRepo)
+	if !ok {
+		return
+	}
+	defer release()
+
 	// #nosec G702 -- the git subcommand is one of two literals, run as argv without a shell
 	cmd := exec.Command("git", gitCmd, "--stateless-rpc", "--advertise-refs", bareRepo)
 	var stdout, stderr strings.Builder
@@ -2145,9 +2333,16 @@ func handleInfoRefs(w http.ResponseWriter, r *http.Request, bareRepo, service st
 }
 
 func handleGitUploadPack(w http.ResponseWriter, r *http.Request, bareRepo string) {
+	release, ok := acquireGitForkHTTP(w, r, "upload-pack "+bareRepo)
+	if !ok {
+		return
+	}
+	defer release()
+
 	w.Header().Set("Content-Type", "application/x-git-upload-pack-result")
 	w.Header().Set("Cache-Control", "no-cache")
 
+	// #nosec G702 -- git runs as argv with a constant binary and a repository path this server owns
 	cmd := exec.Command("git", "upload-pack", "--stateless-rpc", bareRepo)
 	cmd.Stdin = r.Body
 	cmd.Stdout = w

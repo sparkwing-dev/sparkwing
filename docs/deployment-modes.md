@@ -77,7 +77,12 @@ Mode 3's Postgres row locks are the upgrade.
 If a runner's object store is briefly unreachable, run state writes
 stage to a local SQLite outbox (`~/.sparkwing/outbox.db`, one per host,
 honoring `SPARKWING_HOME`) and replay in order when connectivity
-returns, so a transient blip neither fails the run nor loses state.
+returns, so a transient blip neither fails the run nor loses state. A
+blip that outlasts the run does fail it: finishing a run, and closing
+the state backend, report an error when the run's terminal state is
+still queued locally, and `sparkwing run` prints that error and exits
+non-zero, because the bucket is the run's only copy and the outbox
+sits on a disk a CI runner discards at job end.
 Cache and log writes are not buffered this way: a cache write that
 can't reach the bucket surfaces the error, and the step recomputes on
 a later run rather than reading a half-written result.

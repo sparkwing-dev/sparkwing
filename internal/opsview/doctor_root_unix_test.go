@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -19,6 +20,10 @@ func TestDiagnoseDanglingRunDirsStaysWithRenamedDirectory(t *testing.T) {
 	runsPath := filepath.Join(home, "runs")
 	inside := filepath.Join(runsPath, "run-inside")
 	if err := os.MkdirAll(inside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	settled := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(inside, settled, settled); err != nil {
 		t.Fatal(err)
 	}
 	runsRoot, err := os.OpenRoot(runsPath)
@@ -49,7 +54,7 @@ func TestDiagnoseDanglingRunDirsStaysWithRenamedDirectory(t *testing.T) {
 	}
 	defer st.Close()
 	report := DoctorReport{}
-	if err := diagnoseDanglingRunDirs(context.Background(), st, runsRoot, false, &report); err != nil {
+	if err := diagnoseDanglingRunDirs(context.Background(), st, runsRoot, true, false, &report); err != nil {
 		t.Fatal(err)
 	}
 	if len(report.DanglingRunDirs) != 1 || report.DanglingRunDirs[0] != "run-inside" {

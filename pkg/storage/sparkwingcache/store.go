@@ -1,5 +1,10 @@
 // Package sparkwingcache adapts the sparkwing-cache HTTP /bin/<key>
-// endpoints to storage.ArtifactStore. Keys are treated as opaque.
+// endpoints to storage.ArtifactStore. A leading "bin/" on a key is
+// dropped, because the route is already that namespace and a caller
+// that prefixes its keys so a flat backend keeps blobs apart would
+// otherwise address /bin/bin/<key>. The rest of the key must satisfy
+// the server's own validation, so keys are less opaque here than they
+// are on the fs and s3 backends.
 // Runs the shared pkg/storage/conformance.TestArtifactStore suite;
 // List is skipped because the underlying HTTP service has no
 // enumeration primitive.
@@ -149,7 +154,7 @@ func (s *Store) authorize(req *http.Request) {
 }
 
 func (s *Store) binURL(key string) string {
-	segs := strings.Split(key, "/")
+	segs := strings.Split(strings.TrimPrefix(key, "bin/"), "/")
 	for i, seg := range segs {
 		segs[i] = url.PathEscape(seg)
 	}

@@ -21,6 +21,11 @@ import (
 // outbox for queued writes when the object store is reachable again.
 const DefaultOutboxDrainInterval = 5 * time.Second
 
+// DefaultOutboxMaxRows caps the queue. Each row is one key's whole
+// blob, and a key holds at most one row, so this is a ceiling on
+// distinct keys waiting out an outage, not on writes made during it.
+const DefaultOutboxMaxRows = 1024
+
 // OutboxKind tags a queued write so the drainer can route it to the
 // matching store on replay.
 type OutboxKind string
@@ -28,8 +33,15 @@ type OutboxKind string
 const (
 	OutboxKindState    OutboxKind = "state"
 	OutboxKindArtifact OutboxKind = "artifact"
-	OutboxKindLog      OutboxKind = "log"
+
+	// OutboxKindLog is refused by Stage: a log append is not a
+	// whole-blob PUT, which is the only shape the drainer replays.
+	OutboxKindLog OutboxKind = "log"
 )
+
+func replayableKind(kind OutboxKind) bool {
+	return kind == OutboxKindState || kind == OutboxKindArtifact
+}
 
 // Outbox persists writes that failed transiently against the object
 // store and drains them in FIFO order when connectivity returns.
@@ -39,9 +51,11 @@ type Outbox struct {
 	db       *sql.DB
 	art      storage.ArtifactStore
 	interval time.Duration
+	maxRows  int
 	logger   *slog.Logger
 
 	mu       sync.Mutex
+	drainSem chan struct{}
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
@@ -110,7 +124,9 @@ CREATE TABLE IF NOT EXISTS outbox_writes (
 		db:       db,
 		art:      art,
 		interval: interval,
+		maxRows:  DefaultOutboxMaxRows,
 		logger:   logger,
+		drainSem: make(chan struct{}, 1),
 		stopCh:   make(chan struct{}),
 	}
 	if o.interval <= 0 {
@@ -121,18 +137,42 @@ CREATE TABLE IF NOT EXISTS outbox_writes (
 	return o, nil
 }
 
-// Stage enqueues a write. Idempotent only at the byte-identical level
-// (replay re-PUTs whatever bytes are in the row, so re-issuing a
-// state PUT is harmless because the contents include all prior
-// envelopes).
+// Stage enqueues a write, replacing whatever was queued for the same
+// key: the body is that key's whole blob, so only the newest one is
+// worth replaying, and an outage no longer accumulates one copy of a
+// growing run's state per flush. Kinds the drainer cannot replay as a
+// whole-blob PUT are refused rather than queued, as is a write that
+// would take the queue past its row cap.
 func (o *Outbox) Stage(ctx context.Context, kind OutboxKind, key string, body []byte) error {
+	if !replayableKind(kind) {
+		return fmt.Errorf("s3state: outbox cannot replay a %s write", kind)
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	_, err := o.db.ExecContext(ctx, `
+	tx, err := o.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM outbox_writes WHERE key = ?`, key); err != nil {
+		return err
+	}
+	if o.maxRows > 0 {
+		var queued int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_writes`).Scan(&queued); err != nil {
+			return err
+		}
+		if queued >= o.maxRows {
+			return fmt.Errorf("s3state: outbox holds its cap of %d queued writes; %q was not staged", o.maxRows, key)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO outbox_writes (kind, key, body, enqueued_at)
 VALUES (?, ?, ?, ?)`,
-		string(kind), key, body, time.Now().UnixNano())
-	return err
+		string(kind), key, body, time.Now().UnixNano()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // HasPending reports whether any queued write targets key. The state
@@ -155,7 +195,7 @@ func (o *Outbox) HasPending(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-// Pending returns the count of queued writes. Test helper.
+// Pending returns the count of queued writes.
 func (o *Outbox) Pending(ctx context.Context) (int, error) {
 	row := o.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_writes`)
 	var n int
@@ -173,7 +213,16 @@ func (o *Outbox) Drain(ctx context.Context) error {
 	return err
 }
 
+// safety: one replay at a time. Stage may collapse a row while its blob is
+// being sent, so a second replay running alongside could deliver the newer
+// blob first and leave the superseded one as the last write to land.
 func (o *Outbox) drain(ctx context.Context) (outboxHead, error) {
+	select {
+	case o.drainSem <- struct{}{}:
+	case <-ctx.Done():
+		return outboxHead{}, ctx.Err()
+	}
+	defer func() { <-o.drainSem }()
 	for {
 		o.mu.Lock()
 		row := o.db.QueryRowContext(ctx, `
@@ -190,14 +239,10 @@ SELECT id, kind, key, body FROM outbox_writes ORDER BY id ASC LIMIT 1`)
 			return outboxHead{}, err
 		}
 		head := outboxHead{id: id, kind: kind, key: key}
-		switch OutboxKind(kind) {
-		case OutboxKindState, OutboxKindArtifact:
-			perr := o.art.Put(ctx, key, byteReader(body))
-			if perr != nil {
+		if replayableKind(OutboxKind(kind)) {
+			if perr := o.art.Put(ctx, key, byteReader(body)); perr != nil {
 				return head, fmt.Errorf("s3state: drain %s %q: %w", kind, key, perr)
 			}
-		case OutboxKindLog:
-		default:
 		}
 		o.mu.Lock()
 		_, err = o.db.ExecContext(ctx, `DELETE FROM outbox_writes WHERE id = ?`, id)

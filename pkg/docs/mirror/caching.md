@@ -363,3 +363,23 @@ why the last run recompiled.
 
 To skip the binary cache entirely for one invocation, set
 `SPARKWING_NO_BINCACHE=1`; sparkwing falls back to `go run .`.
+
+### The shared artifact store
+
+A `cache:` backend that names a filesystem path, a bucket, or a
+controller makes the binary cache shared: whichever machine compiles
+publishes the binary there, and the rest download it instead of
+compiling their own. The key folds the pipeline's source inputs rather
+than the binary's bytes, so the key alone cannot tell you that the blob
+really is the binary those inputs produce. The publisher therefore
+writes a `.sha256` sidecar beside the blob, and a fetch discards
+anything that does not match it.
+
+A blob with no sidecar is refused for the same reason: nothing outside
+the bytes themselves would attest them, so anyone with write access to
+the store could turn the check off by deleting one small object and
+replacing the blob, and the next runner would execute what they left.
+The fetch fails instead and the run compiles from source. Set
+`SPARKWING_ARTIFACT_DIGEST_BACKFILL=1` to accept such a blob and write
+the sidecar from what was downloaded -- worth doing only against a store
+you trust, to attest binaries published before sidecars existed.

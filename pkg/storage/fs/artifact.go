@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
@@ -30,8 +29,6 @@ import (
 // key, so 100K-blob trees don't blow up any one directory.
 type ArtifactStore struct {
 	Root string
-
-	casLocks sync.Map
 }
 
 // NewArtifactStore returns an ArtifactStore rooted at root, creating
@@ -195,6 +192,9 @@ func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error)
 			return walkErr
 		}
 		if d.IsDir() {
+			if rel, relErr := filepath.Rel(s.Root, path); relErr == nil && rel == casLockDir {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		name := filepath.Base(path)

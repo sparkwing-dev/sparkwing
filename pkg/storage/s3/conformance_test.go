@@ -33,6 +33,18 @@ func TestConformance_ConditionalWriter(t *testing.T) {
 	})
 }
 
+func TestConformance_ConditionalWriterAcrossHandles(t *testing.T) {
+	client, closer := fakeS3(t)
+	defer closer()
+
+	var counter uint64
+	conformance.TestConditionalWriterAcrossHandles(t, func() (storage.ArtifactStore, storage.ArtifactStore) {
+		n := atomic.AddUint64(&counter, 1)
+		prefix := fmt.Sprintf("conformance-cas-handles-%d", n)
+		return NewArtifactStore(testBucket, prefix, client), NewArtifactStore(testBucket, prefix, client)
+	})
+}
+
 func TestConformance_LogStore(t *testing.T) {
 	client, closer := fakeS3(t)
 	defer closer()

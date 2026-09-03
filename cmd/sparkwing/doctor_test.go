@@ -164,6 +164,8 @@ func TestDiagnose_RemovesDeadLocalConcurrencyRows(t *testing.T) {
 
 func TestDiagnose_RemovesDanglingRunDirKeepsKnown(t *testing.T) {
 	p := doctorHome(t)
+	t.Setenv("SPARKWING_HOME", p.Root)
+	t.Setenv("SPARKWING_PROFILES", filepath.Join(t.TempDir(), "profiles.yaml"))
 	ctx := context.Background()
 	withStore(t, p, func(st *store.Store) {
 		if err := st.CreateRun(ctx, store.Run{ID: "run-known", Pipeline: "demo", Status: "success", StartedAt: time.Now()}); err != nil {
@@ -173,7 +175,12 @@ func TestDiagnose_RemovesDanglingRunDirKeepsKnown(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(p.RunsDir(), "run-known"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(p.RunsDir(), "run-ghost"), 0o755); err != nil {
+	ghost := filepath.Join(p.RunsDir(), "run-ghost")
+	if err := os.MkdirAll(ghost, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settled := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(ghost, settled, settled); err != nil {
 		t.Fatal(err)
 	}
 
@@ -184,7 +191,7 @@ func TestDiagnose_RemovesDanglingRunDirKeepsKnown(t *testing.T) {
 	if len(rep.DanglingRunDirs) != 1 || rep.DanglingRunDirs[0] != "run-ghost" {
 		t.Fatalf("DanglingRunDirs = %v, want [run-ghost]", rep.DanglingRunDirs)
 	}
-	if _, err := os.Stat(filepath.Join(p.RunsDir(), "run-ghost")); !os.IsNotExist(err) {
+	if _, err := os.Stat(ghost); !os.IsNotExist(err) {
 		t.Fatalf("dangling dir survived: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(p.RunsDir(), "run-known")); err != nil {

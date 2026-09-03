@@ -673,6 +673,17 @@ func (b *Backend) EnqueueTriggerWithEnv(
 		}
 	}
 
+	body, err := json.Marshal(tg)
+	if err != nil {
+		return "", err
+	}
+	// safety: the record goes first because the index is itself a PutIfAbsent and
+	// cannot be rewritten, so an index naming a record that failed to land would
+	// hand every retry of this spawn the same id of a trigger that never exists.
+	if _, err := cw.PutIfAbsent(ctx, triggerKey(runID), bytes.NewReader(body)); err != nil {
+		return "", err
+	}
+
 	if parentRunID != "" && parentNodeID != "" {
 		idxKey := childTriggerKey(parentRunID, parentNodeID, pipeline)
 		idxBody, err := json.Marshal(childTriggerIndex{TriggerID: runID})
@@ -681,6 +692,10 @@ func (b *Backend) EnqueueTriggerWithEnv(
 		}
 		_, err = cw.PutIfAbsent(ctx, idxKey, bytes.NewReader(idxBody))
 		if errors.Is(err, storage.ErrPreconditionFailed) {
+			// safety: another caller won this spawn point, so the record written
+			// above is unreachable and safe to drop -- its id is freshly minted
+			// and has not been returned to anyone.
+			_ = b.art.Delete(ctx, triggerKey(runID))
 			var existing childTriggerIndex
 			if _, gerr := getRecord(ctx, cw, idxKey, &existing); gerr != nil {
 				return "", gerr
@@ -690,14 +705,6 @@ func (b *Backend) EnqueueTriggerWithEnv(
 		if err != nil {
 			return "", err
 		}
-	}
-
-	body, err := json.Marshal(tg)
-	if err != nil {
-		return "", err
-	}
-	if _, err := cw.PutIfAbsent(ctx, triggerKey(runID), bytes.NewReader(body)); err != nil {
-		return "", err
 	}
 	return runID, nil
 }

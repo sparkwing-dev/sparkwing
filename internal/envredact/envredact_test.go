@@ -119,10 +119,94 @@ func TestRedactValue(t *testing.T) {
 			"https://hooks.example.com/services/T0/redacted",
 		},
 		{"plain path", "https://cache.example.com/v1/objects", "https://cache.example.com/v1/objects"},
+		{"query apikey", "https://x/y?apikey=abc123", "https://x/y?apikey=redacted"},
 	}
 	for _, c := range cases {
 		if got := RedactValue(c.value); got != c.want {
 			t.Errorf("%s: RedactValue(%q) = %q, want %q", c.name, c.value, got, c.want)
 		}
 	}
+}
+
+func TestCredentialTokenBoundaries(t *testing.T) {
+	t.Run("names", func(t *testing.T) {
+		cases := []struct {
+			name string
+			want bool
+		}{
+			{"MONKEY_MODE", false},
+			{"BYPASS_CHECKS", false},
+			{"COMPASS_DIR", false},
+			{"PASSENGER_COUNT", false},
+			{"KEYBOARD_LAYOUT", false},
+			{"CERTAINTY", true},
+			{"AUTHORITY_NAME", true},
+			{"TOKENIZER_PATH", true},
+			{"PASSPHRASE", true},
+			{"SSH_PASSPHRASE", true},
+			{"GPG_PASSPHRASE", true},
+			{"CERTFILE", true},
+			{"PEMFILE", true},
+			{"AUTHHEADER", true},
+			{"SECRETFILE", true},
+			{"TOKENFILE", true},
+			{"PASSWORDFILE", true},
+			{"APIKEY", true},
+			{"apikey", true},
+			{"PASSWD", true},
+			{"MYSQL_PASSWD", true},
+			{"AUTHORIZATION", true},
+			{"HTTP_AUTHORIZATION", true},
+			{"AUTHTOKEN", true},
+			{"ACCESSTOKEN", true},
+			{"PRIVATEKEY", true},
+			{"SSH_PRIVATEKEY", true},
+			{"CLIENTSECRET", true},
+			{"DB_PWD", true},
+			{"PWD", false},
+			{"OLDPWD", false},
+			{"GOOGLE_APPLICATION_CREDENTIALS", true},
+			{"AWS_SECRET_ACCESS_KEY", true},
+			{"apiKey", true},
+			{"serviceAPIKey", true},
+			{"registry-auth", true},
+		}
+		for _, c := range cases {
+			if got := CredentialName(c.name); got != c.want {
+				t.Errorf("CredentialName(%q) = %v, want %v", c.name, got, c.want)
+			}
+		}
+	})
+
+	t.Run("values", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			value string
+			want  bool
+		}{
+			{"array under a field", `{"creds":[{"token":"ghp_secret"}]}`, true},
+			{"top-level array", `[{"api_key":"secret"}]`, true},
+			{"array of arrays", `[[{"password":"hunter2"}]]`, true},
+			{"array of plain scalars", `["us-east-1","us-west-2"]`, false},
+			{"dotenv blob", "GITHUB_TOKEN=ghp_secret\nOTHER=1", true},
+			{"single assignment", "AWS_SECRET_ACCESS_KEY=abc123", true},
+			{"concatenated assignment name", "MYSQL_PASSWD=hunter2", true},
+			{"prefix assignment name", "SSH_PASSPHRASE=hunter2", true},
+			{"assignment beside others", "LANG=C GITHUB_TOKEN=ghp_secret", true},
+			{"plain assignment blob", "MONKEY_MODE=1\nCOMPASS_DIR=/tmp", false},
+			{"url path monkey", "https://x/api/v1/monkey", false},
+			{"url path bypass", "https://api.example.com/v1/bypass", false},
+			{"empty assignment value", "TOKEN=", false},
+			{"lowercase flag fragment", "ANSIBLE=--extra-vars key=1", false},
+			{"allow-listed assignment name", "PWD=/tmp/x\nOLDPWD=/tmp", false},
+			{"deny-listed assignment name", "SSH_KEY_DIR=/home/u/.ssh", false},
+			{"lowercase pass flag", "--set pass=1", false},
+			{"lowercase dotenv-looking flag", "run --opt secret=abc", false},
+		}
+		for _, c := range cases {
+			if got := CredentialValue(c.value); got != c.want {
+				t.Errorf("%s: CredentialValue(%q) = %v, want %v", c.name, c.value, got, c.want)
+			}
+		}
+	})
 }

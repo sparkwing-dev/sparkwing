@@ -143,6 +143,31 @@ resolve to the same place a resolver sends them, and loopback, private,
 link-local, carrier-grade NAT, and the cloud metadata names are rejected
 in every spelling.
 
+An scp-like URL is read the way ssh reads it. `git@a@127.0.0.1:repo.git`
+is refused rather than checked as a host named `a@127.0.0.1`, which is
+what the guard used to do while ssh, splitting the destination at the
+last `@`, dialled the loopback address. A host in that form must read as
+a hostname, with no `@`, `:`, or other character in it that would let the
+host checked differ from the host dialled.
+
+A host is also refused when it sits in a name space that only ever points
+inward: `internal`, `local`, `localdomain`, and `home.arpa`, whole or as
+a suffix, beside `localhost`, the cloud metadata names, and the
+`ip6-localhost` and `ip6-loopback` aliases every Debian and Ubuntu
+`/etc/hosts` ships.
+
+**This is a name check, not an address check, and it is not a complete
+SSRF guard.** A name that resolves to a loopback or private address --
+`evil.example.com` pointed at `127.0.0.1` -- passes it. Names are not
+resolved during validation on purpose: `git` resolves the name again when
+it connects, so an address checked here is not the address reached, and a
+`Host` alias in the runner's `~/.ssh/config` can send ssh somewhere the
+name never resolved to at all. Bound clone targets where the connection
+is actually made: an egress network policy on the cache and runner pods
+that permits only the forges you clone from. Deployments that build
+sparkwing can also install a host allowlist through the clone validator's
+host-policy hook, which runs after every check above.
+
 `GITHUB_REPOSITORY` is the one submitted key a runner reads as a clone
 target, and it wins over `git.repo_url`, so it is accepted only as an
 `owner/name` slug. A caller without `admin` also cannot submit

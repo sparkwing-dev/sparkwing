@@ -58,8 +58,11 @@ func (b *Backend) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps
 func (b *Backend) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (b *Backend) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
 const DefaultBufferThreshold = 16 * 1024
+const DefaultDrainTimeout = 5 * time.Second
 const DefaultFlushInterval = 500 * time.Millisecond
 const DefaultOutboxDrainInterval = 5 * time.Second
+const DefaultOutboxMaxRows = 1024
+const DefaultReadCacheTTL = time.Second
 var ErrNotSupported = fmt.Errorf("%w: s3state: operation not supported in S3-only mode", storage.ErrNotSupported)
 const KindEvent = "event"
 const KindMetricSample = "metric_sample"
@@ -85,6 +88,7 @@ func RunIDFromStateKey(key string) (string, bool)
 func WithBufferThreshold(n int) Option
 func WithFlushInterval(d time.Duration) Option
 func WithOutbox(o *Outbox) Option
+func WithReadCacheTTL(d time.Duration) Option
 
 # methods on un-declared receiver types (likely a bug)
 func (r *byteReaderImpl) Read(p []byte) (int, error)
