@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -31,69 +30,60 @@ func TestMinVersion_FreshOpenStampsBinaryVersion(t *testing.T) {
 	}
 }
 
-func TestMinVersion_SkewMessageNamesVersionAndCommand(t *testing.T) {
+func TestSkew_MessageNamesRequirementsAndVersions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "skew_stamped.db")
 
 	st, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
-	future := store.ExpectedSchemaVersion() + 1
 	if _, err := st.DB().Exec(
-		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,
-		future, 1); err != nil {
-		t.Fatalf("seed future version: %v", err)
-	}
-	if _, err := st.DB().Exec(
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES ('min_binary_version', 'v0.17.0', 1)
-		 ON CONFLICT (key) DO UPDATE SET value = 'v0.17.0'`); err != nil {
-		t.Fatalf("stamp min version: %v", err)
+		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES
+		 ('webhook-replay-keys', 1, 'v0.41.0'), ('unique-token-prefixes', 1, 'v0.40.0')`); err != nil {
+		t.Fatalf("seed future requirements: %v", err)
 	}
 	_ = st.Close()
 
-	store.SetBinaryVersion("v0.16.0")
+	store.SetBinaryVersion("v0.38.2")
 	t.Cleanup(func() { store.SetBinaryVersion("") })
 
 	_, err = store.Open(path)
 	if err == nil {
-		t.Fatal("Open against future-stamped DB should fail")
+		t.Fatal("Open against a DB listing unknown requirements should fail")
 	}
 	var skew *store.SkewError
 	if !errors.As(err, &skew) {
 		t.Fatalf("err = %v, want *SkewError", err)
 	}
-	if skew.MinVersion != "v0.17.0" {
-		t.Errorf("skew.MinVersion = %q, want v0.17.0", skew.MinVersion)
+	if skew.MinVersion != "v0.41.0" {
+		t.Errorf("skew.MinVersion = %q, want v0.41.0 (the highest stamp among the unknown)", skew.MinVersion)
 	}
-	if skew.InstalledVersion != "v0.16.0" {
-		t.Errorf("skew.InstalledVersion = %q, want v0.16.0", skew.InstalledVersion)
+	if skew.InstalledVersion != "v0.38.2" {
+		t.Errorf("skew.InstalledVersion = %q, want v0.38.2", skew.InstalledVersion)
 	}
-	msg := err.Error()
-	for _, want := range []string{"v0.17.0", "v0.16.0", "sparkwing version update --cli"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("skew message missing %q; got: %v", want, msg)
-		}
+	want := "sparkwing: this state database uses unique-token-prefixes and webhook-replay-keys, " +
+		"which need sparkwing >= v0.41.0; you have v0.38.2. Run `sparkwing update` to upgrade."
+	if got := err.Error(); got != want {
+		t.Errorf("skew message =\n%s\nwant\n%s", got, want)
 	}
 }
 
-func TestMinVersion_SkewFallsBackToSchemaNumbers(t *testing.T) {
+func TestSkew_DevelStampNamesANewerBuild(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "skew_unstamped.db")
 
 	st, err := store.Open(path)
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
-	future := store.ExpectedSchemaVersion() + 1
 	if _, err := st.DB().Exec(
-		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,
-		future, 1); err != nil {
-		t.Fatalf("seed future version: %v", err)
-	}
-	if _, err := st.DB().Exec(
-		`DELETE FROM sparkwing_meta WHERE key = 'min_binary_version'`); err != nil {
-		t.Fatalf("clear min version: %v", err)
+		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version)
+		 VALUES ('webhook-replay-keys', 1, '(devel)')`); err != nil {
+		t.Fatalf("seed future requirement: %v", err)
 	}
 	_ = st.Close()
+
+	store.SetBinaryVersion("v0.38.2")
+	t.Cleanup(func() { store.SetBinaryVersion("") })
 
 	_, err = store.Open(path)
 	var skew *store.SkewError
@@ -101,10 +91,12 @@ func TestMinVersion_SkewFallsBackToSchemaNumbers(t *testing.T) {
 		t.Fatalf("err = %v, want *SkewError", err)
 	}
 	if skew.MinVersion != "" {
-		t.Errorf("skew.MinVersion = %q, want empty", skew.MinVersion)
+		t.Errorf("skew.MinVersion = %q, want empty for a development stamp", skew.MinVersion)
 	}
-	if !strings.Contains(strings.ToLower(err.Error()), "upgrade sparkwing") {
-		t.Errorf("fallback message should mention 'upgrade sparkwing'; got: %v", err)
+	want := "sparkwing: this state database uses webhook-replay-keys, which needs a newer build " +
+		"than v0.38.2. Run `sparkwing update` to upgrade."
+	if got := err.Error(); got != want {
+		t.Errorf("skew message =\n%s\nwant\n%s", got, want)
 	}
 }
 

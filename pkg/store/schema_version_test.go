@@ -48,7 +48,7 @@ func TestSchemaVersion_ReopenSQLiteIsNoOp(t *testing.T) {
 	}
 }
 
-func TestSchemaVersion_SQLiteSkewRefuses(t *testing.T) {
+func TestSchemaVersion_SQLiteUnknownRequirementRefuses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "skew.db")
 
 	st, err := store.Open(path)
@@ -62,11 +62,17 @@ func TestSchemaVersion_SQLiteSkewRefuses(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed future version: %v", err)
 	}
+	if _, err := st.DB().Exec(
+		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES (?, ?, ?)`,
+		"webhook-replay-keys", 1, "v0.41.0",
+	); err != nil {
+		t.Fatalf("seed future requirement: %v", err)
+	}
 	_ = st.Close()
 
 	_, err = store.Open(path)
 	if err == nil {
-		t.Fatal("Open against future-version DB should fail")
+		t.Fatal("Open against a DB listing an unknown requirement should fail")
 	}
 	var skew *store.SkewError
 	if !errors.As(err, &skew) {
@@ -77,11 +83,10 @@ func TestSchemaVersion_SQLiteSkewRefuses(t *testing.T) {
 			skew.DBVersion, skew.BinaryVersion, future, store.ExpectedSchemaVersion())
 	}
 	msg := err.Error()
-	if !strings.Contains(strings.ToLower(msg), "upgrade sparkwing") {
-		t.Errorf("error message should mention 'upgrade sparkwing'; got: %v", msg)
-	}
-	if !strings.Contains(msg, fmt.Sprintf("%d", future)) {
-		t.Errorf("error message should mention DB version %d; got: %v", future, msg)
+	for _, want := range []string{"webhook-replay-keys", "v0.41.0", "sparkwing update"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message should mention %q; got: %v", want, msg)
+		}
 	}
 }
 
@@ -93,7 +98,7 @@ func TestSchemaVersion_FreshPostgresRecordsExpected(t *testing.T) {
 	}
 }
 
-func TestSchemaVersion_PostgresSkewRefuses(t *testing.T) {
+func TestSchemaVersion_PostgresUnknownRequirementRefuses(t *testing.T) {
 	dsn := pgTestDSN(t)
 	st := openPGTestStore(t)
 	future := store.ExpectedSchemaVersion() + 1
@@ -103,6 +108,12 @@ func TestSchemaVersion_PostgresSkewRefuses(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed future version: %v", err)
 	}
+	if _, err := st.DB().Exec(
+		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ($1, $2, $3)`,
+		"webhook-replay-keys", int64(1), "v0.41.0",
+	); err != nil {
+		t.Fatalf("seed future requirement: %v", err)
+	}
 	var searchPath string
 	if err := st.DB().QueryRow(`SHOW search_path`).Scan(&searchPath); err != nil {
 		t.Fatalf("read search_path: %v", err)
@@ -111,7 +122,7 @@ func TestSchemaVersion_PostgresSkewRefuses(t *testing.T) {
 	scoped := fmt.Sprintf("%s%ssearch_path=%s", dsn, querySep(dsn), schema)
 	_, err := store.OpenPostgres(context.Background(), scoped)
 	if err == nil {
-		t.Fatal("Open against future-version pg DB should fail")
+		t.Fatal("Open against a pg DB listing an unknown requirement should fail")
 	}
 	var skew *store.SkewError
 	if !errors.As(err, &skew) {
@@ -121,8 +132,8 @@ func TestSchemaVersion_PostgresSkewRefuses(t *testing.T) {
 		t.Errorf("skew = {DB:%d, Binary:%d}, want {DB:%d, Binary:%d}",
 			skew.DBVersion, skew.BinaryVersion, future, store.ExpectedSchemaVersion())
 	}
-	if !strings.Contains(strings.ToLower(err.Error()), "upgrade sparkwing") {
-		t.Errorf("error message should mention 'upgrade sparkwing'; got: %v", err)
+	if !strings.Contains(err.Error(), "webhook-replay-keys") {
+		t.Errorf("error message should name the unknown requirement; got: %v", err)
 	}
 }
 
