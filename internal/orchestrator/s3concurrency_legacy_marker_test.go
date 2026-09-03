@@ -14,14 +14,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// legacyInheritedMarker is the node id every release from v0.15.0 to
-// v0.40.0 wrote for a holder that joined a parent's slot.
 const legacyInheritedMarker = "\x00inherited:parent/-"
 
-// seedLegacySlotDoc writes the slot document a pre-upgrade binary left in
-// the bucket. Both the object key and the document shape are spelled out
-// here rather than reused from production so the test still fails if the
-// reader stops accepting what that binary actually wrote.
+// safety: the object key and document shape are spelled out here rather
+// than reused from production, or the test would follow the reader
+// wherever it moves instead of holding it to what v0.15.0 wrote.
 func seedLegacySlotDoc(t *testing.T, art storage.ArtifactStore, key string, parentCost int) {
 	t.Helper()
 	lease := time.Now().Add(time.Hour).UnixNano()

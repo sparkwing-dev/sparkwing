@@ -19,8 +19,6 @@ func TestCASBackoffSpreadsContendersAcrossTheWholeWait(t *testing.T) {
 			}
 			seen[got]++
 		}
-		// Contenders draw independently, so a shared attempt number must
-		// not hand every one of them the same wait.
 		if len(seen) < 2 {
 			t.Fatalf("attempt %d: 200 draws produced one backoff %v; contenders never decorrelate", attempt, seen)
 		}
