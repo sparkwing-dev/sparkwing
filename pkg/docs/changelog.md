@@ -290,6 +290,9 @@ code change to unlock.
 
 ### Security
 
+- **logs:** Secrets are masked longest-first, so a registered secret that is a
+  prefix of another registered secret no longer leaks the longer one's tail.
+  Registering `abc` and then `abcdef` used to log `abcdef` as `***def`.
 - **store:** A trigger returned to the pending queue no longer keeps the
   principal that held it. A release, a generation-guarded release, and the
   expired-claim reaper all clear `claim_principal` and `claim_token_prefix`,

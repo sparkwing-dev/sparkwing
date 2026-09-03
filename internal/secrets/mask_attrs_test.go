@@ -172,3 +172,17 @@ func TestMaskAttrs_BoundedDepth(t *testing.T) {
 		t.Fatalf("cmd = %#v", out["cmd"])
 	}
 }
+
+func TestMask_OverlappingSecretsLeaveNoTail(t *testing.T) {
+	for name, m := range map[string]*Masker{
+		"short registered first": newTestMasker("abc", "abcdef"),
+		"long registered first":  newTestMasker("abcdef", "abc"),
+	} {
+		if got := m.Mask("token=abcdef"); got != "token=***" {
+			t.Errorf("%s: Mask = %q, want token=***", name, got)
+		}
+		if got := m.Mask("token=abc"); got != "token=***" {
+			t.Errorf("%s: Mask of the short secret = %q, want token=***", name, got)
+		}
+	}
+}

@@ -71,6 +71,9 @@ func (m *Masker) Register(value string) {
 		}
 	}
 	m.values = append(m.values, value)
+	// safety: Mask replaces in slice order, so a shorter secret that prefixes a
+	// longer one must not run first or it leaves the longer tail in the clear.
+	slices.SortStableFunc(m.values, func(a, b string) int { return len(b) - len(a) })
 }
 
 func (m *Masker) Mask(s string) string {
