@@ -450,6 +450,10 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 }
+type SchemaRequirement struct {
+	Name    string
+	AddedBy string
+}
 type Secret struct {
 	Name      string
 	Value     string
@@ -614,6 +618,7 @@ func (s *Store) ReposForClaimant(ctx context.Context, claimant ClaimIdentity, no
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
+func (s *Store) RequirementStamps(ctx context.Context) ([]SchemaRequirement, error)
 func (s *Store) Requirements(ctx context.Context) ([]string, error)
 func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)

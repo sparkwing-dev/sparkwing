@@ -54,8 +54,13 @@ type repoWorktree struct {
 type repoSchema struct {
 	DBVersion  int    `json:"db_version"`
 	MinVersion string `json:"min_version,omitempty"`
-	PinOpensDB bool   `json:"pin_opens_db"`
-	Note       string `json:"note,omitempty"`
+	// Requirements names the schema features the state database records.
+	Requirements []string `json:"requirements,omitempty"`
+	// NeedsVersion is the release the pin must reach to know every
+	// requirement the database lists, empty when the pin already does.
+	NeedsVersion string `json:"needs_version,omitempty"`
+	PinOpensDB   bool   `json:"pin_opens_db"`
+	Note         string `json:"note,omitempty"`
 }
 
 type repoPipeline struct {
@@ -175,7 +180,13 @@ func schemaCompat(ctx context.Context, repo repos.Repo) repoSchema {
 		sc.Note = "no state database path"
 		return sc
 	}
-	st, err := store.Open(paths.StateDB())
+	if _, err := os.Stat(paths.StateDB()); err != nil {
+		sc.Note = "no state database on this machine yet"
+		return sc
+	}
+	// safety: this verb only reports, so it opens read-only rather than
+	// migrating and stamping the database it is describing.
+	st, err := store.OpenReadOnly(paths.StateDB())
 	if err != nil {
 		sc.Note = "state database could not be opened by this binary"
 		return sc
@@ -185,25 +196,58 @@ func schemaCompat(ctx context.Context, repo repos.Repo) repoSchema {
 		sc.DBVersion = v
 	}
 	sc.MinVersion = st.MinBinaryVersion(ctx)
-	sc.PinOpensDB, sc.Note = schemaVerdict(repo.Pin, repo.Replace, sc.MinVersion)
+	listed, err := st.RequirementStamps(ctx)
+	if err != nil {
+		sc.Note = "state database requirements could not be read"
+		return sc
+	}
+	for _, r := range listed {
+		sc.Requirements = append(sc.Requirements, r.Name)
+	}
+	sc.PinOpensDB, sc.NeedsVersion, sc.Note = schemaVerdict(repo.Pin, repo.Replace, listed)
 	return sc
 }
 
-func schemaVerdict(pin, replace, minVersion string) (opensDB bool, note string) {
+// schemaVerdict reports whether a repo pinned to an SDK release could open the
+// state database. The pinned binary is not running, so the only evidence about
+// what it knows is the release stamped on each requirement: a requirement
+// added by a release newer than the pin is one the pin cannot have. A stamp
+// from a development build carries no ordering, so it yields a note rather than
+// a verdict either way.
+func schemaVerdict(pin, replace string, listed []store.SchemaRequirement) (opensDB bool, needs, note string) {
 	switch {
 	case replace != "":
-		return true, "SDK replaced with a local module; schema compatibility depends on that checkout"
+		return true, "", "SDK replaced with a local module; schema compatibility depends on that checkout"
 	case pin == "":
-		return true, "no SDK pin resolved for this repo"
-	case minVersion == "":
-		return true, "database has no minimum-version stamp; any pin may open it"
-	case !semver.IsValid(pin) || !semver.IsValid(minVersion):
-		return true, "pin or database minimum is not a comparable version"
-	case semver.Compare(pin, minVersion) < 0:
-		return false, fmt.Sprintf("pin %s is below the database minimum %s; a run would be refused", pin, minVersion)
-	default:
-		return true, fmt.Sprintf("pin %s satisfies the database minimum %s", pin, minVersion)
+		return true, "", "no SDK pin resolved for this repo"
+	case len(listed) == 0:
+		return true, "", "database records no schema requirements; any pin may open it"
+	case !semver.IsValid(pin):
+		return true, "", fmt.Sprintf("pin %s is not a comparable version", pin)
 	}
+	var blocking, unstamped []string
+	for _, r := range listed {
+		switch {
+		case !semver.IsValid(r.AddedBy):
+			unstamped = append(unstamped, r.Name)
+		case semver.Compare(pin, r.AddedBy) < 0:
+			blocking = append(blocking, r.Name)
+			if needs == "" || semver.Compare(r.AddedBy, needs) > 0 {
+				needs = r.AddedBy
+			}
+		}
+	}
+	if len(blocking) > 0 {
+		return false, needs, fmt.Sprintf(
+			"database uses %s, added after pin %s; a run would be refused",
+			strings.Join(blocking, ", "), pin)
+	}
+	if len(unstamped) > 0 {
+		return true, "", fmt.Sprintf(
+			"database uses %s, stamped by a development build, so whether pin %s knows them cannot be told from the stamp",
+			strings.Join(unstamped, ", "), pin)
+	}
+	return true, "", fmt.Sprintf("pin %s knows every requirement the database records", pin)
 }
 
 func pipelineStates(ctx context.Context, repo repos.Repo) []repoPipeline {
@@ -226,7 +270,7 @@ func pipelineStates(ctx context.Context, repo repos.Repo) []repoPipeline {
 		}
 	}
 	if paths, err := orchestrator.DefaultPaths(); err == nil {
-		if st, err := store.Open(paths.StateDB()); err == nil {
+		if st, err := store.OpenReadOnly(paths.StateDB()); err == nil {
 			defer func() { _ = st.Close() }()
 			if runs, err := st.ListRuns(ctx, store.RunFilter{Limit: 1000}); err == nil {
 				for _, r := range runs {
@@ -252,9 +296,9 @@ func pipelineStates(ctx context.Context, repo repos.Repo) []repoPipeline {
 }
 
 func repoSuggestion(info repoInfo) string {
-	if !info.Schema.PinOpensDB && info.Schema.MinVersion != "" && info.Replace == "" {
+	if !info.Schema.PinOpensDB && info.Schema.NeedsVersion != "" && info.Replace == "" {
 		return fmt.Sprintf("pin cannot open the machine state DB (needs >= %s): sparkwing repos update --version %s --apply",
-			info.Schema.MinVersion, info.Schema.MinVersion)
+			info.Schema.NeedsVersion, info.Schema.NeedsVersion)
 	}
 	if info.GuidesBehind > 0 && info.Replace == "" && info.Latest != "" {
 		return fmt.Sprintf("pin is %d guide(s) behind: sparkwing repos update --version %s --apply", info.GuidesBehind, info.Latest)
@@ -306,8 +350,11 @@ func printRepoInfo(info repoInfo) {
 	}
 	if info.Schema.DBVersion > 0 {
 		fmt.Printf("   (schema %d", info.Schema.DBVersion)
-		if info.Schema.MinVersion != "" {
-			fmt.Printf(", needs >= %s", info.Schema.MinVersion)
+		if len(info.Schema.Requirements) > 0 {
+			fmt.Printf(", uses %s", strings.Join(info.Schema.Requirements, ", "))
+		}
+		if info.Schema.NeedsVersion != "" {
+			fmt.Printf(", needs >= %s", info.Schema.NeedsVersion)
 		}
 		fmt.Printf(")")
 	}

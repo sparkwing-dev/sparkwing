@@ -17,11 +17,14 @@ const requirementsTable = `CREATE TABLE IF NOT EXISTS sparkwing_requirements (
     PRIMARY KEY (name)
 );`
 
-// schemaRequirement is one row of sparkwing_requirements: a feature the
-// database relies on, and the binary version that first stamped it.
-type schemaRequirement struct {
-	name    string
-	addedBy string
+// SchemaRequirement is one row of sparkwing_requirements: a feature the
+// database's schema relies on, and the binary version that first stamped it.
+// AddedBy is a semver release tag, or a development-build marker when the
+// binary that stamped it carried no release version, in which case no version
+// comparison against it is meaningful.
+type SchemaRequirement struct {
+	Name    string
+	AddedBy string
 }
 
 var knownRequirementSet = func() map[string]bool {
@@ -78,19 +81,28 @@ func MissingRequirements(known, listed []string) []string {
 // sorted. A database written before requirements shipped lists none, and
 // so does one this binary opened read-only before any migration ran.
 func (s *Store) Requirements(ctx context.Context) ([]string, error) {
-	exists, err := s.hasRequirementsTable(ctx)
-	if err != nil || !exists {
-		return nil, err
-	}
-	rows, err := listRequirements(ctx, storeExecer{s: s})
+	rows, err := s.RequirementStamps(ctx)
 	if err != nil {
 		return nil, err
 	}
 	names := make([]string, 0, len(rows))
 	for _, r := range rows {
-		names = append(names, r.name)
+		names = append(names, r.Name)
 	}
 	return names, nil
+}
+
+// RequirementStamps returns the requirements the database lists together with
+// the binary version that stamped each, sorted by name. A caller that must
+// reason about a binary it cannot run -- an SDK pin, a release tag -- compares
+// against these stamps, because the requirement set of a version it does not
+// embed is not otherwise knowable.
+func (s *Store) RequirementStamps(ctx context.Context) ([]SchemaRequirement, error) {
+	exists, err := s.hasRequirementsTable(ctx)
+	if err != nil || !exists {
+		return nil, err
+	}
+	return listRequirements(ctx, storeExecer{s: s})
 }
 
 func (s *Store) hasRequirementsTable(ctx context.Context) (bool, error) {
@@ -107,17 +119,17 @@ func (s *Store) hasRequirementsTable(ctx context.Context) (bool, error) {
 	return count > 0, nil
 }
 
-func listRequirements(ctx context.Context, q migrationQueryExecer) ([]schemaRequirement, error) {
+func listRequirements(ctx context.Context, q migrationQueryExecer) ([]SchemaRequirement, error) {
 	rows, err := q.QueryContext(ctx,
 		`SELECT name, added_by_version FROM sparkwing_requirements ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var out []schemaRequirement
+	var out []SchemaRequirement
 	for rows.Next() {
-		var r schemaRequirement
-		if err := rows.Scan(&r.name, &r.addedBy); err != nil {
+		var r SchemaRequirement
+		if err := rows.Scan(&r.Name, &r.AddedBy); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -156,10 +168,10 @@ func requirementsThrough(version int) []string {
 // already applied that the database does not list yet. A database migrated
 // before requirements shipped lists none of them, so the first
 // requirements-aware binary to open it stamps its whole history.
-func requirementsToBackfill(listed []schemaRequirement, version int) []string {
+func requirementsToBackfill(listed []SchemaRequirement, version int) []string {
 	have := make(map[string]bool, len(listed))
 	for _, r := range listed {
-		have[r.name] = true
+		have[r.Name] = true
 	}
 	var missing []string
 	for _, name := range requirementsThrough(version) {
@@ -175,16 +187,16 @@ func requirementsToBackfill(listed []schemaRequirement, version int) []string {
 // version it names is the highest binary version that stamped one of the
 // unknown requirements: every one of them is present in a build at least
 // that new.
-func requirementSkew(dbVersion int, listed []schemaRequirement) *SkewError {
+func requirementSkew(dbVersion int, listed []SchemaRequirement) *SkewError {
 	var unknown []string
 	need := ""
 	for _, r := range listed {
-		if knownRequirementSet[r.name] {
+		if knownRequirementSet[r.Name] {
 			continue
 		}
-		unknown = append(unknown, r.name)
-		if semver.IsValid(r.addedBy) && (need == "" || semver.Compare(r.addedBy, need) > 0) {
-			need = r.addedBy
+		unknown = append(unknown, r.Name)
+		if semver.IsValid(r.AddedBy) && (need == "" || semver.Compare(r.AddedBy, need) > 0) {
+			need = r.AddedBy
 		}
 	}
 	if len(unknown) == 0 {
