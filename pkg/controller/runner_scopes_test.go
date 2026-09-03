@@ -795,3 +795,139 @@ func TestRunnerScopes_CoordinationWritesNeedAClaimOnThatPipeline(t *testing.T) {
 		t.Error("a runner holding no claim read another run's node metrics, want 403")
 	}
 }
+
+// A capacity profile is scoped by repository, so a claim on one
+// repository's pipeline is no standing on another repository's pipeline
+// of the same name. The pin the write can set is a hard limit for every
+// later run of the pipeline it names.
+func TestRunnerScopes_ProfileWritesAreScopedToTheClaimedRepository(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+
+	seedRepoTrigger(t, f.store, "run-1", "acme/web")
+	if _, err := c.ClaimSpecificTrigger(ctx, "run-1", time.Minute); err != nil {
+		t.Fatalf("ClaimSpecificTrigger: %v", err)
+	}
+
+	own := store.JoinProfileKey("github.com/acme/web", "deploy")
+	other := store.JoinProfileKey("github.com/evil/other", "deploy")
+	measurement := store.ProfileObservation{
+		Duration: time.Minute, PeakCores: 99, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+	}
+
+	if err := c.RecordProfileObservation(ctx, own, "", measurement); err != nil {
+		t.Fatalf("observation on this runner's own repository: %v", err)
+	}
+	if err := c.SetPipelinePin(ctx, own, "", 64, 1<<30); err != nil {
+		t.Fatalf("pin on this runner's own repository: %v", err)
+	}
+	if err := c.RecordProfileObservation(ctx, "deploy", "", measurement); err != nil {
+		t.Fatalf("observation on the unscoped key: %v", err)
+	}
+
+	if err := c.RecordProfileObservation(ctx, other, "", measurement); err == nil {
+		t.Error("wrote another repository's profile for a pipeline of the same name")
+	}
+	if err := c.SetPipelinePin(ctx, other, "", 64, 1<<30); err == nil {
+		t.Error("pinned another repository's pipeline of the same name")
+	}
+	if err := c.RecordContention(ctx, other); err == nil {
+		t.Error("recorded contention on another repository's pipeline")
+	}
+	if prof, err := f.store.GetPipelineProfile(ctx, other, ""); err != nil || prof != nil {
+		t.Errorf("other-repository profile = %v (err %v), want none: every write to it was refused", prof, err)
+	}
+	if prof, err := f.store.GetPipelineProfile(ctx, own, ""); err != nil || prof == nil || prof.PinnedCores != 64 {
+		t.Fatalf("own profile = %v (err %v), want a row pinned at 64 cores", prof, err)
+	}
+}
+
+// A pin is a hard limit, so the route bounds it the way the observation
+// routes bound their readings.
+func TestRunnerScopes_PinRefusesAnUnboundedFigure(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+
+	seedRepoTrigger(t, f.store, "run-1", "acme/web")
+	if _, err := c.ClaimSpecificTrigger(ctx, "run-1", time.Minute); err != nil {
+		t.Fatalf("ClaimSpecificTrigger: %v", err)
+	}
+
+	if err := c.SetPipelinePin(ctx, "deploy", "", -5, 1<<30); err == nil {
+		t.Error("a negative core pin was accepted; it is neither a clear nor a limit")
+	}
+	if err := c.SetPipelinePin(ctx, "deploy", "", 1e9, 1<<30); err == nil {
+		t.Error("a billion-core pin was accepted")
+	}
+	prof, err := f.store.GetPipelineProfile(ctx, "deploy", "")
+	if err != nil {
+		t.Fatalf("GetPipelineProfile: %v", err)
+	}
+	if prof != nil {
+		t.Errorf("profile = %+v, want none: every pin was refused", prof)
+	}
+}
+
+// A trigger returned to the queue carries no claimant, so the principal
+// that held it before cannot ride a later in-process claim.
+func TestRunnerScopes_AReleasedTriggerDropsItsClaimant(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+
+	seedRepoTrigger(t, f.store, "run-1", "acme/web")
+	if _, err := c.ClaimSpecificTrigger(ctx, "run-1", time.Minute); err != nil {
+		t.Fatalf("ClaimSpecificTrigger: %v", err)
+	}
+	if _, err := f.store.RequeueUnstartedClaim(ctx, "run-1"); err != nil {
+		t.Fatalf("RequeueUnstartedClaim: %v", err)
+	}
+
+	var principal, prefix string
+	if err := f.store.DB().QueryRowContext(ctx,
+		`SELECT claim_principal, claim_token_prefix FROM triggers WHERE id = ?`, "run-1",
+	).Scan(&principal, &prefix); err != nil {
+		t.Fatalf("read the released row: %v", err)
+	}
+	if principal != "" || prefix != "" {
+		t.Errorf("released trigger still names %q/%q as its claimant", principal, prefix)
+	}
+
+	if _, err := f.store.ClaimSpecificTrigger(ctx, "run-1", time.Minute); err != nil {
+		t.Fatalf("in-process re-claim: %v", err)
+	}
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: "run-1", Pipeline: "deploy", Status: "running", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{"read the trigger", func() error { _, err := c.GetTrigger(ctx, "run-1"); return err }},
+		{"create a node on the live run", func() error {
+			return c.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "intruder", Status: "pending"})
+		}},
+		{"finish the live run", func() error { return c.FinishRun(ctx, "run-1", "failed", "") }},
+		{"record contention against its pipeline", func() error { return c.RecordContention(ctx, "deploy") }},
+	} {
+		if err := tc.call(); err == nil {
+			t.Errorf("the released principal could still %s", tc.name)
+		}
+	}
+
+	run, err := f.store.GetRun(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if run.Status != "running" {
+		t.Errorf("run status = %q, want running: a principal holding nothing finished it", run.Status)
+	}
+}

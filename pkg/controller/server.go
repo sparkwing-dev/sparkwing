@@ -328,14 +328,7 @@ func (s *Server) claimedPipeline(next http.Handler) http.Handler {
 			return
 		}
 		pipeline := r.PathValue("name")
-		// safety: the path carries a stored profile key, which scopes the
-		// pipeline by repository; claims are recorded against the bare name.
-		_, claimed := store.SplitProfileKey(pipeline)
-		claimant := claimIdentity(r)
-		held, err := s.store.PrincipalHoldsPipelineClaim(r.Context(), claimed, claimant, time.Now())
-		if err == nil && !held {
-			held, err = s.store.PrincipalHoldsPipelineTriggerClaim(r.Context(), claimed, claimant, time.Now())
-		}
+		held, err := s.store.PrincipalHoldsProfileClaim(r.Context(), pipeline, claimIdentity(r), time.Now())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return

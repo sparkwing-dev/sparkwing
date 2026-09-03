@@ -1,12 +1,8 @@
 package orchestrator
 
 import (
-	"crypto/sha256"
-	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -49,44 +45,11 @@ func originRepoName(gitDir string) string {
 }
 
 func repoNameFromURL(remote string) string {
-	remote = strings.TrimSpace(remote)
-	if strings.HasPrefix(remote, "/") || (len(remote) >= 3 && remote[1] == ':' && (remote[2] == '/' || remote[2] == '\\')) {
-		return localRepoName(remote)
-	}
-	if !strings.Contains(remote, "://") {
-		if colon := strings.Index(remote, ":"); colon > 0 {
-			remote = "ssh://" + remote[:colon] + "/" + remote[colon+1:]
-		}
-	}
-	parsed, err := url.Parse(remote)
-	if err != nil {
-		return ""
-	}
-	if parsed.Scheme == "file" {
-		return localRepoName(parsed.Host + parsed.Path)
-	}
-	if parsed.Host == "" {
-		return ""
-	}
-	host := parsed.Host
-	if parsed.User != nil {
-		host = strings.TrimPrefix(host, parsed.User.String()+"@")
-	}
-	path := strings.TrimSuffix(strings.Trim(strings.TrimSpace(parsed.Path), "/"), ".git")
-	if path == "" {
-		return ""
-	}
-	return strings.ToLower(host) + "/" + path
+	return store.RepoIdentityFromURL(remote)
 }
 
 func localRepoName(repoPath string) string {
-	normalized := path.Clean(strings.ReplaceAll(strings.TrimSpace(repoPath), "\\", "/"))
-	normalized = strings.TrimSuffix(normalized, ".git")
-	if normalized == "" || normalized == "." {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(normalized))
-	return fmt.Sprintf("local:%x", sum[:12])
+	return store.RepoIdentityFromPath(repoPath)
 }
 
 func alternatesRepoName(gitDir string) string {

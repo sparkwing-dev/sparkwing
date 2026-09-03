@@ -307,14 +307,16 @@ func (l *Loopback) refuseTrigger(w http.ResponseWriter, id string) {
 		fmt.Errorf("trigger %s: %w on the loopback controller for run %s", id, store.ErrNotFound, l.runID))
 }
 
-// safety: the path carries a stored profile key, which scopes the pipeline by
-// repository, so this run's pipeline is compared against the key's pipeline half.
+// safety: the path carries a stored profile key, so both halves are checked
+// against this run: two repositories' pipelines of the same name are priced
+// separately, and a claim on one is no standing on the other.
 func (l *Loopback) ownPipeline(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
-		_, named := store.SplitProfileKey(name)
+		keyRepo, named := store.SplitProfileKey(name)
 		run, err := l.state.GetRun(r.Context(), l.runID)
-		if err != nil || run == nil || named == "" || named != run.Pipeline {
+		if err != nil || run == nil || named == "" || named != run.Pipeline ||
+			!store.RepoIdentityMatches(keyRepo, run.Repo, run.RepoURL) {
 			writeError(w, http.StatusNotFound,
 				fmt.Errorf("pipeline %s: %w on the loopback controller for run %s", name, store.ErrNotFound, l.runID))
 			return
@@ -1213,6 +1215,10 @@ func (l *Loopback) handleSetPipelinePin(w http.ResponseWriter, r *http.Request) 
 	}
 	var body setPinReq
 	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := body.validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}

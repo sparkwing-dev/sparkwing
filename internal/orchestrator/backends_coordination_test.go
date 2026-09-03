@@ -348,3 +348,40 @@ func TestLoopbackRefusesAnAbsurdProfileObservation(t *testing.T) {
 		t.Error("a negative peak core count was accepted into the pricing model")
 	}
 }
+
+func TestLoopbackScopesProfileWritesToItsRunsRepository(t *testing.T) {
+	st := coordinationStore(t)
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+		Repo: "acme/web", RepoURL: "https://github.com/acme/web.git",
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	c := newCoordinationLoopback(t, st)
+
+	own := store.JoinProfileKey("github.com/acme/web", "demo")
+	other := store.JoinProfileKey("github.com/evil/other", "demo")
+	measurement := store.ProfileObservation{
+		Duration: time.Minute, PeakCores: 2, SustainedCores: 1, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+	}
+
+	if err := c.RecordProfileObservation(ctx, own, "", measurement); err != nil {
+		t.Fatalf("observation on this run's own repository: %v", err)
+	}
+	if err := c.SetPipelinePin(ctx, own, "", 4, 1<<30); err != nil {
+		t.Fatalf("pin on this run's own repository: %v", err)
+	}
+	if err := c.RecordProfileObservation(ctx, other, "", measurement); err == nil {
+		t.Error("wrote another repository's profile through a loopback bound to this run")
+	}
+	if err := c.SetPipelinePin(ctx, other, "", 4, 1<<30); err == nil {
+		t.Error("pinned another repository's pipeline through a loopback bound to this run")
+	}
+	if prof, err := st.GetPipelineProfile(ctx, other, ""); err != nil || prof != nil {
+		t.Errorf("other-repository profile = %v (err %v), want none", prof, err)
+	}
+	if prof, err := st.GetPipelineProfile(ctx, own, ""); err != nil || prof == nil || prof.PinnedCores != 4 {
+		t.Fatalf("own profile = %v (err %v), want a row pinned at 4 cores", prof, err)
+	}
+}

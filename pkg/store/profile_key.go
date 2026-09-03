@@ -1,6 +1,10 @@
 package store
 
 import (
+	"crypto/sha256"
+	"fmt"
+	"net/url"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -61,4 +65,69 @@ func cutRepoLength(key string) (int, string, bool) {
 		return 0, "", false
 	}
 	return n, rest, true
+}
+
+// RepoIdentityFromURL derives the repository identity a profile key is
+// scoped by from a git remote URL: the lowercased host joined to the
+// path, with any credentials and ".git" suffix removed. A filesystem
+// remote has no host to name it by, so it hashes to a stable
+// "local:" identity instead. An unparseable remote has no identity.
+func RepoIdentityFromURL(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if strings.HasPrefix(remote, "/") || (len(remote) >= 3 && remote[1] == ':' && (remote[2] == '/' || remote[2] == '\\')) {
+		return RepoIdentityFromPath(remote)
+	}
+	if !strings.Contains(remote, "://") {
+		if colon := strings.Index(remote, ":"); colon > 0 {
+			remote = "ssh://" + remote[:colon] + "/" + remote[colon+1:]
+		}
+	}
+	parsed, err := url.Parse(remote)
+	if err != nil {
+		return ""
+	}
+	if parsed.Scheme == "file" {
+		return RepoIdentityFromPath(parsed.Host + parsed.Path)
+	}
+	if parsed.Host == "" {
+		return ""
+	}
+	host := parsed.Host
+	if parsed.User != nil {
+		host = strings.TrimPrefix(host, parsed.User.String()+"@")
+	}
+	p := strings.TrimSuffix(strings.Trim(strings.TrimSpace(parsed.Path), "/"), ".git")
+	if p == "" {
+		return ""
+	}
+	return strings.ToLower(host) + "/" + p
+}
+
+// RepoIdentityFromPath names a checkout that has no remote to be
+// identified by, hashing its cleaned path so two checkouts of the same
+// directory agree and two different directories do not.
+func RepoIdentityFromPath(repoPath string) string {
+	normalized := path.Clean(strings.ReplaceAll(strings.TrimSpace(repoPath), "\\", "/"))
+	normalized = strings.TrimSuffix(normalized, ".git")
+	if normalized == "" || normalized == "." {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(normalized))
+	return fmt.Sprintf("local:%x", sum[:12])
+}
+
+// RepoIdentityMatches reports whether a profile key's repository scope
+// names the same repository as a run or trigger row. The key carries the
+// canonical identity ("host/owner/name"), while a row records the slug
+// it was triggered for ("owner/name") and, when it has one, the clone
+// URL the identity derives from; any of the three agreeing is a match.
+// A row with no repository at all matches no scoped key.
+func RepoIdentityMatches(keyRepo, repo, repoURL string) bool {
+	if keyRepo == "" {
+		return true
+	}
+	if repo != "" && (keyRepo == repo || strings.HasSuffix(keyRepo, "/"+repo)) {
+		return true
+	}
+	return repoURL != "" && keyRepo == RepoIdentityFromURL(repoURL)
 }

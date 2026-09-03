@@ -3344,26 +3344,55 @@ func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string
 	return held > 0, nil
 }
 
-// PrincipalHoldsPipelineTriggerClaim reports whether claimant holds an
-// unexpired claim on a trigger of the named pipeline. It is the
-// ownership proof an orchestrator process has for a write that names a
-// pipeline: it holds the run's trigger claim from before the run's
-// first node exists until after the last one finishes. An unbound
-// claimant holds nothing.
-func (s *Store) PrincipalHoldsPipelineTriggerClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error) {
+// PrincipalHoldsProfileClaim reports whether claimant may write the
+// capacity profile stored under key. The proof is a live claim -- on a
+// node of a run of that pipeline, or on the run's trigger -- and, when
+// the key carries a repository scope, that claim must be on a run of
+// that repository: two repositories' pipelines of the same name are
+// priced separately, so a claim on one is no standing on the other. An
+// unbound claimant holds nothing.
+func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, claimant ClaimIdentity, now time.Time) (bool, error) {
 	if !claimant.bound() {
 		return false, nil
 	}
-	var held int
-	err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM triggers
-		  WHERE pipeline = ? AND claim_principal = ? AND claim_token_prefix = ?
-		    AND `+triggerClaimLiveSQL,
-		pipeline, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
+	keyRepo, pipeline := SplitProfileKey(key)
+	if pipeline == "" {
+		return false, nil
+	}
+	for _, q := range []struct{ sql string }{
+		{`SELECT repo, repo_url FROM triggers
+		   WHERE pipeline = ? AND claim_principal = ? AND claim_token_prefix = ?
+		     AND ` + triggerClaimLiveSQL},
+		{`SELECT repo, repo_url FROM runs
+		   WHERE pipeline = ? AND id IN (
+		         SELECT run_id FROM nodes
+		          WHERE claim_principal = ? AND claim_token_prefix = ?
+		            AND ` + nodeClaimLiveSQL + `)`},
+	} {
+		held, err := s.anyClaimedRepoMatches(ctx, q.sql, pipeline, claimant, now, keyRepo)
+		if err != nil || held {
+			return held, err
+		}
+	}
+	return false, nil
+}
+
+func (s *Store) anyClaimedRepoMatches(ctx context.Context, query, pipeline string, claimant ClaimIdentity, now time.Time, keyRepo string) (bool, error) {
+	rows, err := s.query(ctx, query, pipeline, claimant.Principal, claimant.TokenPrefix, now.UnixNano())
 	if err != nil {
 		return false, err
 	}
-	return held > 0, nil
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var repo, repoURL string
+		if err := rows.Scan(&repo, &repoURL); err != nil {
+			return false, err
+		}
+		if RepoIdentityMatches(keyRepo, repo, repoURL) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
@@ -4105,7 +4134,8 @@ func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, err
 
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers
-		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL
+		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
+		        claim_principal = '', claim_token_prefix = ''
 		  WHERE id = ? AND status = ?`,
 		triggerStatusPending, id, triggerStatusClaimed)
 	if err != nil {
@@ -4134,7 +4164,8 @@ func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, err
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
 	res, err := s.exec(ctx,
 		`UPDATE triggers
-		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL
+		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
+		        claim_principal = '', claim_token_prefix = ''
 		  WHERE id = ? AND claim_seq = ? AND status = ?`,
 		triggerStatusPending, id, seq, triggerStatusClaimed)
 	if err != nil {
@@ -4486,7 +4517,9 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 		`UPDATE triggers
 		    SET status = ?,
 		        claimed_at = NULL,
-		        lease_expires_at = NULL
+		        lease_expires_at = NULL,
+		        claim_principal = '',
+		        claim_token_prefix = ''
 		  WHERE status = ? AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ?`,
 		triggerStatusPending, triggerStatusClaimed, now); err != nil {
@@ -4801,18 +4834,17 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 
 	now := time.Now()
 	expires := now.Add(lease)
-	args := []any{triggerStatusClaimed, now.UnixNano(), expires.UnixNano()}
-	// safety: an unbound claimant leaves the columns alone rather than blanking
-	// a bound one, so an in-process claim cannot erase an attributed claim.
-	setClaimant := ""
-	if claimant.bound() {
-		setClaimant = `, claim_principal = ?, claim_token_prefix = ?`
-		args = append(args, claimant.Principal, claimant.TokenPrefix)
+	// safety: the claimant replaces whatever a previous holder left, unbound
+	// included; a pending row has no live claim, so keeping the old principal
+	// would let it prove ownership of a claim it does not hold.
+	args := []any{
+		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(),
+		claimant.Principal, claimant.TokenPrefix,
+		id, triggerStatusPending,
 	}
-	args = append(args, id, triggerStatusPending)
 	res, err := tx.ExecContext(ctx,
-		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1`+
-			setClaimant+`
+		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1,
+		        claim_principal = ?, claim_token_prefix = ?
 		  WHERE id = ? AND status = ?`,
 		args...)
 	if err != nil {

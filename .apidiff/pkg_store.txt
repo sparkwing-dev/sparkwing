@@ -394,6 +394,9 @@ func RedactInvocation(inv map[string]any) map[string]any
 const RedactedArgValue = "***"
 func RedactedRun(run *Run) *Run
 func RedactedRuns(runs []*Run) []*Run
+func RepoIdentityFromPath(repoPath string) string
+func RepoIdentityFromURL(remote string) string
+func RepoIdentityMatches(keyRepo, repo, repoURL string) bool
 const RetrySourceAuto = "auto"
 const RetrySourceManual = "manual"
 type Run struct {
@@ -600,7 +603,7 @@ func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error)
-func (s *Store) PrincipalHoldsPipelineTriggerClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error)
+func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
