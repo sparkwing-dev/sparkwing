@@ -83,6 +83,7 @@ func (c *Client) EnqueueTriggerWithEnv(
 	branch string,
 	triggerEnv map[string]string,
 ) (string, error)
+func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error)
 func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (c *Client) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (c *Client) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
@@ -104,6 +105,7 @@ func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error)
 func (c *Client) GetSecretForRepo(ctx context.Context, name, repo string) (*Secret, error)
 func (c *Client) GetSecretForRun(ctx context.Context, name, runID string) (*Secret, error)
 func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)
+func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom Headroom) error
 func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error)
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error)
@@ -119,7 +121,9 @@ func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
+func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim, runID, nodeID string) (ExecutorClaimOfferResult, error)
 func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
+func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) (*store.ExecutorClaimPreparation, error)
 func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 func (c *Client) RequestNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
@@ -149,6 +153,18 @@ type ConcurrencyState struct {
 	UsedCost          int
 	Holders           []WaiterHolder
 	Waiters           []StateWaiter
+}
+type ExecutorClaim struct {
+	ExecutorName   string
+	HolderID       string
+	ReservationID  string
+	ResourceDigest string
+	Slot           int
+	Lease          time.Duration
+}
+type ExecutorClaimOfferResult struct {
+	Node    *store.Node
+	Pending bool
 }
 type GitMeta struct {
 	Branch      string

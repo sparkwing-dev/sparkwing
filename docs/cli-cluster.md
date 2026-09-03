@@ -46,7 +46,7 @@ address; set them up with 'sparkwing configure profiles'.
 sparkwing cluster status --profile prod
 
 # List fleet agents
-sparkwing cluster agents --profile prod
+sparkwing cluster agents list --profile prod
 ```
 
 ## `sparkwing cluster agents`
@@ -54,13 +54,13 @@ sparkwing cluster agents --profile prod
 Inspect the controller's fleet view
 
 Hits GET /api/v1/agents on the selected profile's controller.
-Prints one row per agent seen claiming work in the last hour
-(the controller infers agents from recent node claims; there
-is no explicit registration table yet).
+Prints persisted executor registrations, including idle and
+offline agents and gateways, plus recent legacy claim-only runners.
 
 ### Subcommands
 
 - `list` -- Print the controller's known agents
+- `enroll` -- Enroll or update a trusted executor
 
 ### Examples
 
@@ -69,14 +69,54 @@ is no explicit registration table yet).
 sparkwing cluster agents list --profile prod
 ```
 
+## `sparkwing cluster agents enroll`
+
+Enroll or update a trusted executor
+
+Binds one exact runner or service token prefix to an
+operator-owned executor envelope. The token must be live and carry
+nodes.claim; its stored principal becomes audit metadata. Re-enrollment
+with the same credential updates trusted scheduling fields without changing
+live headroom. Changing the prefix requires a new heartbeat.
+
+Use a distinct revocable token for every coordinator membership. The
+prefix is accepted as input but is never returned by the agents API.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--name NAME` | Executor name (required) |
+| `--token-prefix PREFIX` | Exact runner or service token prefix (required) |
+| `--kind KIND` | Executor kind (agent\|gateway) (default: agent) |
+| `--location WHERE` | Display location (local\|cloud\|unknown) (default: unknown) |
+| `--capability LABEL` | Trusted capability (repeatable) |
+| `--base-priority N` | Base scheduling priority (0-100) (default: 0) |
+| `--priority-ceiling N` | Highest effective priority (0-100) (default: 100) |
+| `--max-concurrent N` | Trusted concurrent slot ceiling (default: 1) |
+| `--budget-cores N` | CPU contribution ceiling (0 = uncapped) (default: 0) |
+| `--budget-memory-bytes N` | Memory contribution ceiling in bytes (0 = uncapped) (default: 0) |
+| `--profile NAME` | Admin controller profile (required) |
+
+### Examples
+
+```sh
+# Enroll a workstation agent
+sparkwing cluster agents enroll --profile prod --name desk --token-prefix swr_01234567 --kind agent --location local --capability linux --max-concurrent 2 --budget-cores 4 --budget-memory-bytes 8589934592
+
+# Enroll a capacity gateway
+sparkwing cluster agents enroll --profile prod --name build-gateway --token-prefix sws_01234567 --kind gateway --location cloud --capability linux-amd64 --max-concurrent 8
+```
+
 ## `sparkwing cluster agents list`
 
 Print the controller's known agents
 
 Fetches /api/v1/agents and renders a table of fleet members.
-The controller infers agents from node claims over the last
-hour, so idle agents without any recent claim activity won't
-show up -- a known limitation until we add explicit heartbeats.
+Registered executors report their operator-assigned identity,
+kind, display location, capabilities, concurrency limit, and
+measured resource headroom. A stale registration remains visible
+as offline; recent legacy claim-only runners remain visible too.
 
 Use -q to print just names, one per line, for shell piping
 (e.g. looping over agents with xargs).

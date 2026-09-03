@@ -282,13 +282,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 	for _, n := range plan.Nodes() {
-		if err := backends.State.CreateNode(ctx, store.Node{
-			RunID:       runID,
-			NodeID:      n.ID(),
-			Status:      "pending",
-			Deps:        n.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(n, snapMeta.PipelineRequires),
-		}); err != nil {
+		if err := backends.State.CreateNode(ctx, pendingStoreNode(runID, n, snapMeta.PipelineRequires)); err != nil {
 			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("create node %s: %v", n.ID(), err))
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
@@ -758,13 +752,7 @@ func dispatch(
 		if rec == nil || seen[rec.ID()] {
 			continue
 		}
-		_ = backends.State.CreateNode(ctx, store.Node{
-			RunID:       runID,
-			NodeID:      rec.ID(),
-			Status:      "pending",
-			Deps:        rec.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(rec, state.pipelineRequires),
-		})
+		_ = backends.State.CreateNode(ctx, pendingStoreNode(runID, rec, state.pipelineRequires))
 		state.scheduleNode(rec)
 		seen[rec.ID()] = true
 	}
@@ -1968,13 +1956,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 		fmt.Appendf(nil, "%d children", len(children)))
 
 	for _, child := range children {
-		if err := s.backends.State.CreateNode(s.ctx, store.Node{
-			RunID:       s.runID,
-			NodeID:      child.ID(),
-			Status:      "pending",
-			Deps:        child.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(child, s.pipelineRequires),
-		}); err != nil {
+		if err := s.backends.State.CreateNode(s.ctx, pendingStoreNode(s.runID, child, s.pipelineRequires)); err != nil {
 			sparkwing.LoggerFromContext(s.resolverCtx).Log("error",
 				fmt.Sprintf("ExpandFrom(%s): store child %s: %v", exp.Source.ID(), child.ID(), err))
 		}
@@ -2965,6 +2947,23 @@ func effectiveClaimLabels(n *sparkwing.JobNode, pipelineRequires []string) []str
 		out = append(out, l)
 	}
 	return out
+}
+
+func pendingStoreNode(runID string, node *sparkwing.JobNode, pipelineRequires []string) store.Node {
+	record := store.Node{
+		RunID:          runID,
+		NodeID:         node.ID(),
+		Status:         "pending",
+		Deps:           node.DepIDs(),
+		NeedsLabels:    effectiveClaimLabels(node, pipelineRequires),
+		PrefersLabels:  node.PrefersLabels(),
+		RequestedSlots: 1,
+	}
+	if resources := node.ResourceHints(); resources != nil {
+		record.RequestedCores = resources.Cores
+		record.RequestedMemoryBytes = resources.MemoryBytes
+	}
+	return record
 }
 
 func effectiveJobRequires(n *sparkwing.JobNode, pipelineRequires []string) []string {

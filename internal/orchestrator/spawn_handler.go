@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -83,13 +82,7 @@ func admitSpawnChild(a spawnAdmission, parentNodeID, spawnID string, job sparkwi
 	if err := sparkwing.RuntimePlumbing.Fns.PlanInsertChild(a.plan, child); err != nil {
 		return nil, fmt.Errorf("orchestrator: insert spawn child %q: %w", childID, err)
 	}
-	if err := a.state.CreateNode(a.writeCtx, store.Node{
-		RunID:       a.runID,
-		NodeID:      child.ID(),
-		Status:      "pending",
-		Deps:        child.DepIDs(),
-		NeedsLabels: effectiveClaimLabels(child, a.pipelineRequires),
-	}); err != nil {
+	if err := a.state.CreateNode(a.writeCtx, pendingStoreNode(a.runID, child, a.pipelineRequires)); err != nil {
 		return nil, fmt.Errorf("orchestrator: persist spawn child row %q: %w", childID, err)
 	}
 	_ = a.state.AppendEvent(a.writeCtx, a.runID, parentNodeID, "spawn_dispatched", []byte(childID))

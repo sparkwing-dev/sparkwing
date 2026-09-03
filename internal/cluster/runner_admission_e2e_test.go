@@ -103,9 +103,9 @@ func TestRunnerAdmissionE2E(t *testing.T) {
 	ctx := context.Background()
 
 	rv := reserve{cores: 1}
-	provider := newHeadroomProvider(home, "v1", rv)
+	provider := newHeadroomProvider(home, "v1", rv, reserve{}, reserve{})
 
-	idle := provider(ctx)
+	idle := provider(ctx).headroom
 	if idle == nil {
 		t.Fatal("provider returned nil against a live daemon")
 	}
@@ -116,7 +116,7 @@ func TestRunnerAdmissionE2E(t *testing.T) {
 	holdLease(t, home, "local-run", 4, wingwire.OriginLocal)
 	holdLease(t, home, "ctrl-run", 1, wingwire.OriginController)
 
-	held := provider(ctx)
+	held := provider(ctx).headroom
 	if held == nil {
 		t.Fatal("provider returned nil while leases held")
 	}

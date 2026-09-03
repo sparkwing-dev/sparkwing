@@ -47,7 +47,7 @@ func runWorkerCLI(args []string) error {
 	k8sMemoryCeiling := fs.String("k8s-memory-ceiling", os.Getenv("SPARKWING_K8S_MEMORY_CEILING"),
 		"hard memory ceiling for runner pods as a Kubernetes quantity (8Gi); a pipeline pin or measured charge above it is clamped (empty = no ceiling; env: SPARKWING_K8S_MEMORY_CEILING)")
 	warmWait := fs.Duration("warm-claim-wait", 5*time.Second,
-		"how long the warm pool Runner waits for a pod to claim before falling back to K8sRunner")
+		"when the warm pool starts checking offer resolution before K8s fallback (maximum 5s)")
 	warmPoll := fs.Duration("warm-poll", 500*time.Millisecond,
 		"how often the warm pool Runner polls GetNode while waiting")
 	token := fs.String("token", os.Getenv("SPARKWING_AGENT_TOKEN"),

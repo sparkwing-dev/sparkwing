@@ -374,19 +374,75 @@ when testing deterministic placement.
 
 ### Remote machine capacity
 
-`sparkwing-runner agent` lets eligible Windows, macOS, and Linux computers
-contribute node capacity through the same controller claim protocol. Developer
-laptops, desktops, office workstations, home or build servers, and cloud
-servers are peers in this pool. Windows is an initial proof target, not a
-scheduling boundary.
+`sparkwing-runner agent` has separate legacy and enrolled modes.
 
-The agent opens no listener. It polls the controller and sends claim,
-heartbeat, log, and result traffic over outbound HTTP(S). Tailscale is not
-required; a private network may instead expose a direct cache while the
-controller proxy remains the portable path. Every claim attempt carries the
-agent's labels. Local admission also reports available CPU and memory with
-claims and heartbeats. The controller's agent view derives from completed or
-active claims; an idle agent that has never claimed a node is not registered.
+The name-less singular configuration uses the existing outbound FIFO
+`/api/v1/nodes/claim` loop. Its `labels` are self-asserted placement terms,
+not administrator-trusted capabilities. The bundled service installer writes
+this format. Existing files keep their `local_admission` setting, including an
+explicit `false`; when enabled, legacy local admission happens after a claim.
+
+Named or plural configuration selects enrolled assisted-offer mode. Before
+starting it, a controller administrator binds the executor to the exact prefix
+of a live runner or service token:
+
+```bash
+sparkwing cluster agents enroll --profile prod \
+  --name desk --token-prefix swr_01234567 \
+  --kind agent --location local --capability linux-amd64 \
+  --base-priority 10 --priority-ceiling 30 \
+  --max-concurrent 2 --budget-cores 4 --budget-memory-bytes 8589934592
+```
+
+The controller-owned enrollment is the trust envelope. Kind identifies an
+`agent` or `gateway` execution boundary; location is display-only and never
+affects placement. Capabilities, priority range, concurrency ceiling, and
+resource budget come only from enrollment. Worker traffic cannot add or widen
+them, and the agents API never returns the credential prefix or principal.
+
+Set `name` for one enrolled coordinator, or use `coordinators` for several.
+Every membership needs a distinct revocable token and its enrolled name;
+network discovery never grants trust. The top-level concurrency and
+contribution settings are machine-wide local ceilings. A membership may narrow
+them, never widen them:
+
+```yaml
+name: desk
+max_concurrent: 2
+contribution: 4,8gb
+local_admission: true
+local_reserve: 1,2gb
+coordinators:
+  - controller: https://personal.example.com
+    token: <personal-agent-token>
+    max_concurrent: 1
+    contribution: 2,4gb
+  - name: desk-at-work
+    controller: https://team.example.com
+    token: <team-agent-token>
+```
+
+Enrolled mode requires local admission. It probes wingd for finite nonnegative
+headroom and reports liveness to each coordinator; a failed probe sends no
+heartbeat and does not clear the coordinator's last report. Coordinator loops
+restart independently. Idle enrollments remain visible, and stale ones appear
+offline.
+
+For each idle slot, the agent asks a coordinator for the oldest eligible node,
+then reserves the returned resource digest and physical slot through wingd
+before offering. The reservation remains pinned through the offer round. An
+award consumes that same lease; a loss or expiry releases it. The agent shares
+one slot ledger across all configured coordinators, so the same physical slot
+cannot back simultaneous offers to two controllers. A gateway needs an
+equivalent downstream admission reservation before it offers.
+
+The controller waits no more than five seconds. Priority 100 and the highest
+eligible ceiling recorded at round open win immediately; otherwise the deadline
+winner is the highest effective priority, then the earliest offer, executor
+name, slot, and holder. `Requires` and resource limits filter before ranking.
+Run priority and `Prefers` may reorder eligible executors only inside each
+administrator-owned priority range. A retry after a lost response recovers the
+same fenced claim. Legacy direct claims remain FIFO and do not use this ranking.
 
 With the Helm values `runner.triggerRunner.kind: warm` and
 `runner.automountServiceAccountToken: true`, a trigger worker offers each node

@@ -146,6 +146,29 @@ func TestRunPoolLoop_EmptyPollsDoNotTickCounter(t *testing.T) {
 	}
 }
 
+func TestRunPoolLoop_RegisteredExecutorWithholdsClaimWithoutLocalCapacity(t *testing.T) {
+	stub := &stubClaimer{}
+	shared := make(chan struct{}, 1)
+	cfg := normalizePoolLoopConfig(PoolLoopConfig{
+		ControllerURL: "http://stub", HolderPrefix: "executor:desk",
+		MaxConcurrent: 1, SharedSlots: shared, PollInterval: time.Millisecond,
+		LocalAdmission: true,
+		ExecutorName:   "desk",
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	provider := func(context.Context) capacityReport { return capacityReport{} }
+	if err := runPoolLoop(ctx, cfg, stub, func(context.Context, *store.Node, string) {}, provider, discardLogger()); err != nil {
+		t.Fatalf("runPoolLoop: %v", err)
+	}
+	if got := stub.calls.Load(); got != 0 {
+		t.Fatalf("ClaimNode calls = %d, want 0", got)
+	}
+	if got := len(shared); got != 0 {
+		t.Fatalf("shared slot tokens = %d after refusal, want 0", got)
+	}
+}
+
 func TestRunRunnerCLI_ClaimNodesFalseRequiresTriggerLoop(t *testing.T) {
 	err := runRunnerCLI([]string{
 		"--controller=http://controller",

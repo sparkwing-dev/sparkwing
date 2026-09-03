@@ -22,7 +22,17 @@ func parseReserve(s string) (reserve, error) {
 	}, nil
 }
 
-type headroomProvider func(ctx context.Context) *client.Headroom
+type capacityReport struct {
+	headroom *client.Headroom
+	budget   resourceBudget
+}
+
+type resourceBudget struct {
+	Cores       float64
+	MemoryBytes int64
+}
+
+type headroomProvider func(ctx context.Context) capacityReport
 
 type reserve struct {
 	cores          float64
@@ -43,7 +53,11 @@ func (rv reserve) resolve(machineCores float64, machineMemoryBytes int64) (float
 	return cores, mem
 }
 
-func advertisedHeadroom(qs wingwire.QueueState, rv reserve) client.Headroom {
+func advertisedHeadroom(qs wingwire.QueueState, rv reserve) *client.Headroom {
+	return advertisedCapacity(qs, rv, reserve{}, reserve{}).headroom
+}
+
+func advertisedCapacity(qs wingwire.QueueState, rv, contribution, membershipContribution reserve) capacityReport {
 	var availCores, machineCores float64
 	var availMem, machineMem int64
 	for _, r := range qs.Resources {
@@ -57,15 +71,46 @@ func advertisedHeadroom(qs wingwire.QueueState, rv reserve) client.Headroom {
 		}
 	}
 	reserveCores, reserveMem := rv.resolve(machineCores, machineMem)
+	budgetCores, budgetMem := contribution.resolve(machineCores, machineMem)
+	if budgetCores <= 0 {
+		budgetCores = machineCores - reserveCores
+	}
+	if budgetMem <= 0 {
+		budgetMem = machineMem - reserveMem
+	}
+	membershipCores, membershipMem := membershipContribution.resolve(machineCores, machineMem)
+	if membershipCores > 0 {
+		budgetCores = min(budgetCores, membershipCores)
+	}
+	if membershipMem > 0 {
+		budgetMem = min(budgetMem, membershipMem)
+	}
+	budgetCores = min(budgetCores, machineCores-reserveCores)
+	budgetMem = min(budgetMem, machineMem-reserveMem)
+	budgetCores = max(budgetCores, 0)
+	budgetMem = max(budgetMem, 0)
+	var controllerCores float64
+	var controllerMem int64
+	for _, holder := range qs.Holders {
+		if holder.Origin == wingwire.OriginController {
+			controllerCores += holder.Resources.Cores
+			controllerMem += holder.Resources.MemoryBytes
+		}
+	}
 	cores := availCores - reserveCores
+	cores = min(cores, budgetCores-controllerCores)
 	if cores < 0 {
 		cores = 0
 	}
 	mem := availMem - reserveMem
+	mem = min(mem, budgetMem-controllerMem)
 	if mem < 0 {
 		mem = 0
 	}
-	return client.Headroom{Cores: cores, MemoryBytes: mem, QueueDepth: len(qs.Waiters)}
+	return capacityReport{
+		headroom: &client.Headroom{Cores: cores, MemoryBytes: mem, QueueDepth: len(qs.Waiters)},
+		budget:   resourceBudget{Cores: budgetCores, MemoryBytes: budgetMem},
+	}
 }
 
 func grantable(r wingwire.ResourceState) float64 {
@@ -79,13 +124,12 @@ func grantable(r wingwire.ResourceState) float64 {
 	return free
 }
 
-func newHeadroomProvider(home, version string, rv reserve) headroomProvider {
-	return func(ctx context.Context) *client.Headroom {
+func newHeadroomProvider(home, version string, rv, contribution, membershipContribution reserve) headroomProvider {
+	return func(ctx context.Context) capacityReport {
 		qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home, Version: version})
 		if err != nil {
-			return nil
+			return capacityReport{}
 		}
-		h := advertisedHeadroom(qs, rv)
-		return &h
+		return advertisedCapacity(qs, rv, contribution, membershipContribution)
 	}
 }

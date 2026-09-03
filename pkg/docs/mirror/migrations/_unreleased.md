@@ -5,6 +5,78 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## Executor registration and contribution budgets
+
+- **Before:** The controller inferred workers from recent node claims. Idle
+  workers were invisible, labels and location had no persisted trust envelope,
+  and `max_concurrent` was the only contribution limit. A helper could claim a
+  node and then wait in local admission.
+- **After:** Run-store schema 28 persists administrator-owned executor
+  enrollments: exact credential binding, name, kind, display-only location,
+  trusted capabilities, priority range, concurrency ceiling, and resource
+  budget. An authenticated heartbeat can update only liveness and finite,
+  nonnegative headroom. Node claims can persist the scheduling summary's exact
+  resource charge and an opaque reservation/physical-slot binding. The local
+  agent config can narrow concurrency and contribution but cannot grant trusted
+  capabilities or raise an operator ceiling. Location never grants a capability
+  or affects placement.
+- **Migration:** Stop every controller that shares the run store, upgrade all
+  of them, then restart them. An older controller refuses schema 28. Existing
+  singular `agent.yaml` files without `name` or `coordinators` keep the legacy
+  FIFO path, including an explicit `local_admission: false`; do not add `name`
+  merely to modernize the file. Named or plural configuration selects enrolled
+  assisted-offer mode. An
+  administrator must first bind the intended executor name and trust envelope
+  to the exact prefix of a live `nodes.claim` runner or service token with
+  `sparkwing cluster agents enroll`. Configure the same name and full token in
+  the agent file. Re-enroll the new prefix before revoking a rotated token. Give
+  each coordinator membership a distinct revocable credential; discovery alone
+  never enrolls one. Upgrade the paired runner and local daemon together before
+  using enrolled mode so their nonblocking-admission wire semantics match.
+- **Why:** A coordinator must know an executor exists before it becomes busy,
+  filter impossible placements before ordering, and avoid awarding work that a
+  workstation or gateway cannot start immediately. Operator-owned limits keep
+  pipeline policy and worker self-reporting from expanding trust or resource
+  boundaries. Schema 28 exposes the authenticated scheduling-summary,
+  membership, and nonblocking reserve/consume/release primitives; schema 29
+  adds offer persistence and arbitration. The current name-less claim
+  loop remains FIFO, treats labels as self-asserted, does not rank on `Prefers`,
+  and can still enter local admission after claiming.
+
+## Enrolled executor offer arbitration
+
+- **Before:** Schema 28 enrolled trusted executors and exposed authenticated
+  scheduling and reservation primitives, but named agents reported liveness
+  only. They could not offer for or execute a node. Unenrolled agents used the
+  legacy FIFO route and could claim before local admission had capacity.
+- **After:** Schema 29 persists a five-second offer round per ready node and one
+  live offer per credential-bound holder. The controller filters hard
+  capabilities, exact resource demand, concurrency, headroom, and budget before
+  priority. It awards immediately when an offer reaches the highest eligible
+  ceiling recorded as the round opened, or reaches priority 100. At the
+  deadline it orders remaining live offers by effective priority, earliest
+  offer, executor name, physical slot, and holder. Run priority and `Prefers`
+  can reorder eligible executors only inside each administrator-owned priority
+  range. A losing or expired offer releases its local reservation; an award
+  consumes that exact reservation and binds its digest and slot to the claim.
+  If no live offer wins, the same controller transaction transfers an unlabeled
+  node to the configured fallback. Repeating an awarded offer after a lost
+  response returns the original fenced claim. A node already ready during the
+  schema upgrade keeps its original readiness timestamp as the round start.
+- **Migration:** Stop every controller sharing the run store, upgrade all of
+  them through schema 29, and restart them before starting enrolled agents.
+  Upgrade each enrolled agent and its wingd together; the agent must reserve
+  the prepared node's exact resource digest and physical slot before it offers.
+  Keep one distinct enrolled credential per coordinator membership. The agent
+  shares its machine-wide slot ledger across those memberships, so one physical
+  slot cannot back simultaneous offers to two controllers. A gateway needs the
+  equivalent downstream admission reservation before it offers. Name-less
+  agents remain on the legacy FIFO route and need no configuration change.
+- **Why:** A claim must mean the executor can start immediately, not that it has
+  queued work behind a local scheduler. Durable rounds let the controller
+  select the best currently runnable executor without double-awarding a node,
+  while reservation and holder fencing make retries safe across lost responses.
+
 ## (Breaking) Submitted runs carry an allow-listed environment
 
 - **Before:** `sparkwing runs submit` snapshotted the whole submitting shell to

@@ -8,6 +8,8 @@ Every route the controller and logs service register, with the scope each requir
 | Method | Path | Scope |
 |---|---|---|
 | `GET` | `/api/v1/agents` | `runs.read` |
+| `PUT` | `/api/v1/agents/{name}` | `admin` |
+| `POST` | `/api/v1/agents/{name}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/approvals/pending` | `runs.read` |
 | `GET` | `/api/v1/artifacts/{key}` | `runs.read` |
 | `GET` | `/api/v1/auth/bootstrap-needed` | `public` |
@@ -31,6 +33,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/gitcache/seed` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
+| `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
 | `PUT` | `/api/v1/pipelines/{name}/profile/pin` | `runs.state` |
@@ -72,6 +75,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatches` | `runs.read` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `admin` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `admin` |

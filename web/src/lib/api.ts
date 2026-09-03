@@ -37,10 +37,7 @@ function getSessionCSRFHeaders(method: string | undefined): HeadersInit {
 }
 
 export type ConnectionStatus =
-  | "ok"
-  | "unreachable"
-  | "unauthorized"
-  | "session-expired";
+  "ok" | "unreachable" | "unauthorized" | "session-expired";
 type StatusListener = (status: ConnectionStatus) => void;
 
 let _connectionStatus: ConnectionStatus = "ok";
@@ -545,11 +542,18 @@ export async function deleteRun(runID: string): Promise<void> {
 export interface Agent {
   name: string;
   type: string;
+  location: "local" | "cloud" | "unknown";
   labels: Record<string, string>;
+  capabilities?: string[];
   last_seen: string;
   status: string;
   active_jobs?: string[];
+  active_slots?: number;
   max_concurrent: number;
+  base_priority: number;
+  priority_ceiling: number;
+  budget: { cores: number; memory_bytes: number };
+  headroom?: { cores: number; memory_bytes: number; queue_depth: number };
 }
 
 export async function getAgents(): Promise<Agent[]> {

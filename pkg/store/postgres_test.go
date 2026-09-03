@@ -161,6 +161,76 @@ func TestSchemaV18_PostgresScrubsSecretInputHash(t *testing.T) {
 	}
 }
 
+func TestSchemaV28_PostgresMigratesActualV27Shape(t *testing.T) {
+	scoped := pgTestSchemaDSN(t)
+	ctx := context.Background()
+	st, err := store.OpenPostgres(ctx, scoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`DROP TABLE executors`,
+		`ALTER TABLE nodes DROP COLUMN claim_executor`,
+		`ALTER TABLE nodes DROP COLUMN claim_cores`,
+		`ALTER TABLE nodes DROP COLUMN claim_memory_bytes`,
+		`ALTER TABLE nodes DROP COLUMN claim_reservation`,
+		`ALTER TABLE nodes DROP COLUMN claim_slot`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 28`,
+	} {
+		if _, err := st.DB().ExecContext(ctx, stmt); err != nil {
+			_ = st.Close()
+			t.Fatalf("downgrade with %q: %v", stmt, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	up, err := store.OpenPostgres(ctx, scoped)
+	if err != nil {
+		t.Fatalf("open v27 shape at schema %d: %v", store.ExpectedSchemaVersion(), err)
+	}
+	defer up.Close()
+	for _, name := range []string{"claim_executor", "claim_cores", "claim_memory_bytes", "claim_reservation", "claim_slot"} {
+		var exists bool
+		if err := up.DB().QueryRowContext(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM information_schema.columns
+   WHERE table_schema = current_schema() AND table_name = 'nodes' AND column_name = $1
+)`, name).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if !exists {
+			t.Errorf("migrated nodes missing %s", name)
+		}
+	}
+	for _, column := range []struct{ table, name, want string }{
+		{table: "nodes", name: "claim_cores", want: "double precision"},
+		{table: "nodes", name: "claim_slot", want: "bigint"},
+		{table: "executors", name: "budget_cores", want: "double precision"},
+		{table: "executors", name: "headroom_cores", want: "double precision"},
+	} {
+		var dataType string
+		if err := up.DB().QueryRowContext(ctx, `
+SELECT data_type FROM information_schema.columns
+ WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2`,
+			column.table, column.name).Scan(&dataType); err != nil {
+			t.Fatal(err)
+		}
+		if dataType != column.want {
+			t.Errorf("%s.%s type = %q, want %s", column.table, column.name, dataType, column.want)
+		}
+	}
+	e := store.Executor{Name: "pg-a", Kind: "agent", Location: "unknown", MaxConcurrent: 1}
+	if err := up.EnrollExecutor(ctx, "swr_pg_exact", e); err != nil {
+		t.Fatalf("enroll migrated executor: %v", err)
+	}
+	e.Name = "pg-b"
+	if err := up.EnrollExecutor(ctx, "swr_pg_exact", e); err == nil {
+		t.Fatal("migrated Postgres schema accepted one credential for two executors")
+	}
+}
+
 func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 	st := openPGTestStore(t)
 	ctx := context.Background()

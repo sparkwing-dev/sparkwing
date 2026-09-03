@@ -531,6 +531,11 @@ CREATE TABLE IF NOT EXISTS nodes (
     -- claim_token_prefix: the claiming token's prefix segment. Unique
     -- per token, so this is what the ownership predicates match on.
     claim_token_prefix TEXT NOT NULL DEFAULT '',
+    claim_executor   TEXT NOT NULL DEFAULT '',
+    claim_cores      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    claim_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    claim_reservation TEXT NOT NULL DEFAULT '',
+    claim_slot       INTEGER NOT NULL DEFAULT -1,
     lease_expires_at INTEGER,
     coordinator_id    TEXT NOT NULL DEFAULT '',
     executor_kind     TEXT NOT NULL DEFAULT '',
@@ -543,6 +548,18 @@ CREATE TABLE IF NOT EXISTS nodes (
     avoid_until       INTEGER,
     -- needs_labels: JSON []string from RunsOn; AND semantics.
     needs_labels     BLOB,
+    -- prefers_labels: ordered soft executor preferences.
+    prefers_labels   BLOB,
+    requested_cores  REAL NOT NULL DEFAULT 0,
+    requested_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    requested_slots  INTEGER NOT NULL DEFAULT 1,
+    offer_started_at INTEGER,
+    offer_priority_ceiling INTEGER NOT NULL DEFAULT 100,
+    claim_base_priority INTEGER NOT NULL DEFAULT 0,
+    claim_priority    INTEGER NOT NULL DEFAULT 0,
+    claim_worker_id   TEXT NOT NULL DEFAULT '',
+    claim_executor_kind TEXT NOT NULL DEFAULT '',
+    claim_reservation_id TEXT NOT NULL DEFAULT '',
     -- status_detail: phase string runners write for the dashboard.
     status_detail    TEXT NOT NULL DEFAULT '',
     -- last_heartbeat: runner liveness; for UI, not lease enforcement.
@@ -564,6 +581,54 @@ CREATE INDEX IF NOT EXISTS idx_nodes_claimable
 CREATE INDEX IF NOT EXISTS idx_nodes_claimed_lease
     ON nodes(lease_expires_at)
     WHERE claimed_by IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS node_claim_offers (
+    claim_token_prefix TEXT NOT NULL DEFAULT '',
+    claim_principal    TEXT NOT NULL DEFAULT '',
+    holder_id          TEXT NOT NULL,
+    run_id             TEXT NOT NULL,
+    node_id            TEXT NOT NULL,
+    executor_name      TEXT NOT NULL DEFAULT '',
+    membership_id      TEXT NOT NULL DEFAULT '',
+    worker_id          TEXT NOT NULL,
+    executor_kind      TEXT NOT NULL DEFAULT '',
+    reservation_id     TEXT NOT NULL,
+    resource_digest    TEXT NOT NULL DEFAULT '',
+    slot                INTEGER NOT NULL DEFAULT -1,
+    base_priority      INTEGER NOT NULL,
+    effective_priority INTEGER NOT NULL,
+    offered_at         INTEGER NOT NULL,
+    last_seen_at       INTEGER NOT NULL,
+    lease_ns           INTEGER NOT NULL,
+    PRIMARY KEY (claim_token_prefix, claim_principal, holder_id),
+    FOREIGN KEY (run_id, node_id) REFERENCES nodes(run_id, node_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_node_claim_offers_award
+    ON node_claim_offers(run_id, node_id, effective_priority DESC, offered_at, executor_name, slot, holder_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_reservation
+    ON node_claim_offers(reservation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_slot
+    ON node_claim_offers(executor_name, slot);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_node
+    ON node_claim_offers(executor_name, run_id, node_id);
+CREATE TABLE IF NOT EXISTS executors (
+    name                  TEXT PRIMARY KEY,
+    token_prefix          TEXT NOT NULL UNIQUE,
+    kind                  TEXT NOT NULL,
+    location              TEXT NOT NULL,
+    capabilities_json     BLOB,
+    base_priority         INTEGER NOT NULL DEFAULT 0,
+    priority_ceiling      INTEGER NOT NULL DEFAULT 0,
+    max_concurrent        INTEGER NOT NULL,
+    budget_cores          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    budget_memory_bytes   INTEGER NOT NULL DEFAULT 0,
+    principal             TEXT NOT NULL,
+    last_seen             INTEGER NOT NULL,
+    headroom_reported     INTEGER NOT NULL DEFAULT 0,
+    headroom_cores        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    headroom_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    queue_depth           INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS events (
     run_id   TEXT NOT NULL,
@@ -871,7 +936,31 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 28
+const expectedSchemaVersion = 29
+
+const executorsTableSQLite = `CREATE TABLE IF NOT EXISTS executors (
+    name                  TEXT PRIMARY KEY,
+    token_prefix          TEXT NOT NULL UNIQUE,
+    kind                  TEXT NOT NULL,
+    location              TEXT NOT NULL,
+    capabilities_json     BLOB,
+    base_priority         INTEGER NOT NULL DEFAULT 0,
+    priority_ceiling      INTEGER NOT NULL DEFAULT 0,
+    max_concurrent        INTEGER NOT NULL,
+    budget_cores          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    budget_memory_bytes   INTEGER NOT NULL DEFAULT 0,
+    principal             TEXT NOT NULL,
+    last_seen             INTEGER NOT NULL,
+    headroom_reported     INTEGER NOT NULL DEFAULT 0,
+    headroom_cores        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    headroom_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    queue_depth           INTEGER NOT NULL DEFAULT 0
+);`
+
+var executorsTablePostgres = strings.NewReplacer(
+	"INTEGER", "BIGINT",
+	"BLOB", "BYTEA",
+).Replace(executorsTableSQLite)
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1011,6 +1100,40 @@ CREATE INDEX IF NOT EXISTS idx_node_bounces_pending
 var nodeBouncesTablePostgres = strings.NewReplacer(
 	"INTEGER", "BIGINT",
 ).Replace(nodeBouncesTableSQLite)
+
+const nodeClaimOffersTableSQLite = `CREATE TABLE IF NOT EXISTS node_claim_offers (
+    claim_token_prefix TEXT NOT NULL DEFAULT '',
+    claim_principal    TEXT NOT NULL DEFAULT '',
+    holder_id          TEXT NOT NULL,
+    run_id             TEXT NOT NULL,
+    node_id            TEXT NOT NULL,
+    executor_name      TEXT NOT NULL DEFAULT '',
+    membership_id      TEXT NOT NULL DEFAULT '',
+    worker_id          TEXT NOT NULL,
+    executor_kind      TEXT NOT NULL DEFAULT '',
+    reservation_id     TEXT NOT NULL,
+    resource_digest    TEXT NOT NULL DEFAULT '',
+    slot                INTEGER NOT NULL DEFAULT -1,
+    base_priority      INTEGER NOT NULL,
+    effective_priority INTEGER NOT NULL,
+    offered_at         INTEGER NOT NULL,
+    last_seen_at       INTEGER NOT NULL,
+    lease_ns           INTEGER NOT NULL,
+    PRIMARY KEY (claim_token_prefix, claim_principal, holder_id),
+    FOREIGN KEY (run_id, node_id) REFERENCES nodes(run_id, node_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_node_claim_offers_award
+    ON node_claim_offers(run_id, node_id, effective_priority DESC, offered_at, executor_name, slot, holder_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_reservation
+    ON node_claim_offers(reservation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_slot
+    ON node_claim_offers(executor_name, slot);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_node
+    ON node_claim_offers(executor_name, run_id, node_id);`
+
+var nodeClaimOffersTablePostgres = strings.NewReplacer(
+	"INTEGER", "BIGINT",
+).Replace(nodeClaimOffersTableSQLite)
 
 // SkewError is returned by Open when the database is at a schema
 // version newer than the binary understands. Callers can use
@@ -1291,16 +1414,20 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 27:
 		return rewriteLegacyInheritedHolderMarkers(ctx, tx)
 	case 28:
-		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodeAgentAttemptCols); err != nil {
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodeExecutorClaimCols); err != nil {
 			return err
 		}
-		if err := ensureColumnsSQLite(ctx, tx, "runs", runAgentRetryCols); err != nil {
+		_, err := tx.ExecContext(ctx, executorsTableSQLite)
+		return err
+	case 29:
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesOfferCols); err != nil {
 			return err
 		}
-		if err := ensureColumnsSQLite(ctx, tx, "triggers", triggerAvailableCols); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET offer_started_at = ready_at
+ WHERE ready_at IS NOT NULL AND offer_started_at IS NULL`); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, triggerPendingIndexV28SQLite)
+		_, err := tx.ExecContext(ctx, nodeClaimOffersTableSQLite)
 		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -1407,16 +1534,20 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		// would only bind a NUL that Postgres rejects again.
 		return nil
 	case 28:
-		if err := addColumnsTx(ctx, tx, "nodes", nodeAgentAttemptCols); err != nil {
+		if err := addColumnsTx(ctx, tx, "nodes", nodeExecutorClaimColsPostgres); err != nil {
 			return err
 		}
-		if err := addColumnsTx(ctx, tx, "runs", runAgentRetryCols); err != nil {
+		_, err := tx.ExecContext(ctx, executorsTablePostgres)
+		return err
+	case 29:
+		if err := addColumnsTx(ctx, tx, "nodes", nodesOfferCols); err != nil {
 			return err
 		}
-		if err := addColumnsTx(ctx, tx, "triggers", triggerAvailableCols); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET offer_started_at = ready_at
+ WHERE ready_at IS NOT NULL AND offer_started_at IS NULL`); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, triggerPendingIndexV28Postgres)
+		_, err := tx.ExecContext(ctx, nodeClaimOffersTablePostgres)
 		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -1510,19 +1641,35 @@ var columnMigrations = []columnSpec{
 	}},
 	// #nosec G101 -- column names, not credentials
 	{"nodes", map[string]string{
-		"ready_at":           "INTEGER",
-		"claimed_by":         "TEXT",
-		"claim_principal":    "TEXT NOT NULL DEFAULT ''",
-		"claim_token_prefix": "TEXT NOT NULL DEFAULT ''",
-		"lease_expires_at":   "INTEGER",
-		"needs_labels":       "BLOB",
-		"status_detail":      "TEXT NOT NULL DEFAULT ''",
-		"last_heartbeat":     "INTEGER",
-		"failure_reason":     "TEXT NOT NULL DEFAULT ''",
-		"exit_code":          "INTEGER",
-		"annotations_json":   "BLOB",
-		"summary":            "TEXT NOT NULL DEFAULT ''",
-		"artifact_manifest":  "TEXT NOT NULL DEFAULT ''",
+		"ready_at":               "INTEGER",
+		"claimed_by":             "TEXT",
+		"claim_principal":        "TEXT NOT NULL DEFAULT ''",
+		"claim_token_prefix":     "TEXT NOT NULL DEFAULT ''",
+		"lease_expires_at":       "INTEGER",
+		"needs_labels":           "BLOB",
+		"status_detail":          "TEXT NOT NULL DEFAULT ''",
+		"last_heartbeat":         "INTEGER",
+		"failure_reason":         "TEXT NOT NULL DEFAULT ''",
+		"exit_code":              "INTEGER",
+		"annotations_json":       "BLOB",
+		"summary":                "TEXT NOT NULL DEFAULT ''",
+		"artifact_manifest":      "TEXT NOT NULL DEFAULT ''",
+		"prefers_labels":         "BLOB",
+		"requested_cores":        "REAL NOT NULL DEFAULT 0",
+		"requested_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
+		"requested_slots":        "INTEGER NOT NULL DEFAULT 1",
+		"offer_started_at":       "INTEGER",
+		"offer_priority_ceiling": "INTEGER NOT NULL DEFAULT 100",
+		"claim_base_priority":    "INTEGER NOT NULL DEFAULT 0",
+		"claim_priority":         "INTEGER NOT NULL DEFAULT 0",
+		"claim_worker_id":        "TEXT NOT NULL DEFAULT ''",
+		"claim_executor_kind":    "TEXT NOT NULL DEFAULT ''",
+		"claim_reservation_id":   "TEXT NOT NULL DEFAULT ''",
+		"claim_executor":         "TEXT NOT NULL DEFAULT ''",
+		"claim_cores":            "DOUBLE PRECISION NOT NULL DEFAULT 0",
+		"claim_memory_bytes":     "INTEGER NOT NULL DEFAULT 0",
+		"claim_reservation":      "TEXT NOT NULL DEFAULT ''",
+		"claim_slot":             "INTEGER NOT NULL DEFAULT -1",
 	}},
 	{"runs", map[string]string{
 		"parent_run_id":     "TEXT",
@@ -1644,6 +1791,35 @@ const triggerPendingIndexV28SQLite = `CREATE INDEX IF NOT EXISTS idx_triggers_pe
 
 const triggerPendingIndexV28Postgres = triggerPendingIndexV28SQLite
 
+var nodesOfferCols = map[string]string{
+	"prefers_labels":         "BLOB",
+	"requested_cores":        "REAL NOT NULL DEFAULT 0",
+	"requested_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
+	"requested_slots":        "INTEGER NOT NULL DEFAULT 1",
+	"offer_started_at":       "INTEGER",
+	"offer_priority_ceiling": "INTEGER NOT NULL DEFAULT 100",
+	"claim_base_priority":    "INTEGER NOT NULL DEFAULT 0",
+	"claim_priority":         "INTEGER NOT NULL DEFAULT 0",
+	"claim_worker_id":        "TEXT NOT NULL DEFAULT ''",
+	"claim_executor_kind":    "TEXT NOT NULL DEFAULT ''",
+	"claim_reservation_id":   "TEXT NOT NULL DEFAULT ''",
+}
+
+var nodeExecutorClaimCols = map[string]string{
+	"claim_executor":     "TEXT NOT NULL DEFAULT ''",
+	"claim_cores":        "DOUBLE PRECISION NOT NULL DEFAULT 0",
+	"claim_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
+	"claim_reservation":  "TEXT NOT NULL DEFAULT ''",
+	"claim_slot":         "INTEGER NOT NULL DEFAULT -1",
+}
+
+var nodeExecutorClaimColsPostgres = map[string]string{
+	"claim_executor":     "TEXT NOT NULL DEFAULT ''",
+	"claim_cores":        "DOUBLE PRECISION NOT NULL DEFAULT 0",
+	"claim_memory_bytes": "BIGINT NOT NULL DEFAULT 0",
+	"claim_reservation":  "TEXT NOT NULL DEFAULT ''",
+	"claim_slot":         "BIGINT NOT NULL DEFAULT -1",
+}
 var nodeDispatchRedactionCols = map[string]string{
 	"redacted_keys": "BLOB",
 }
@@ -2548,21 +2724,34 @@ type Node struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
 	// Warm-pool dispatch; zero on laptop / K8sRunner paths.
-	ReadyAt            *time.Time `json:"ready_at,omitempty"`
-	ClaimedBy          string     `json:"claimed_by,omitempty"`
-	LeaseExpiresAt     *time.Time `json:"lease_expires_at,omitempty"`
-	CoordinatorID      string     `json:"coordinator_id,omitempty"`
-	ExecutorKind       string     `json:"executor_kind,omitempty"`
-	ExecutorID         string     `json:"executor_id,omitempty"`
-	ExecutionStartedAt *time.Time `json:"execution_started_at,omitempty"`
-	ReservationID      string     `json:"reservation_id,omitempty"`
-	AvoidCoordinatorID string     `json:"-"`
-	AvoidExecutorKind  string     `json:"-"`
-	AvoidExecutorID    string     `json:"-"`
-	AvoidUntil         *time.Time `json:"-"`
+	ReadyAt              *time.Time `json:"ready_at,omitempty"`
+	ClaimedBy            string     `json:"claimed_by,omitempty"`
+	LeaseExpiresAt       *time.Time `json:"lease_expires_at,omitempty"`
+	OfferStartedAt       *time.Time `json:"offer_started_at,omitempty"`
+	OfferPriorityCeiling int        `json:"offer_priority_ceiling,omitempty"`
+	ClaimBasePriority    int        `json:"claim_base_priority,omitempty"`
+	ClaimPriority        int        `json:"claim_priority,omitempty"`
+	ClaimWorkerID        string     `json:"claim_worker_id,omitempty"`
+	ClaimExecutorKind    string     `json:"claim_executor_kind,omitempty"`
+	ClaimReservationID   string     `json:"claim_reservation_id,omitempty"`
+	CoordinatorID        string     `json:"coordinator_id,omitempty"`
+	ExecutorKind         string     `json:"executor_kind,omitempty"`
+	ExecutorID           string     `json:"executor_id,omitempty"`
+	ExecutionStartedAt   *time.Time `json:"execution_started_at,omitempty"`
+	ReservationID        string     `json:"reservation_id,omitempty"`
+	AvoidCoordinatorID   string     `json:"-"`
+	AvoidExecutorKind    string     `json:"-"`
+	AvoidExecutorID      string     `json:"-"`
+	AvoidUntil           *time.Time `json:"-"`
 
 	// NeedsLabels: runner labels required (AND semantics). Empty = any.
 	NeedsLabels []string `json:"needs_labels,omitempty"`
+	// PrefersLabels orders soft executor preferences.
+	PrefersLabels []string `json:"prefers_labels,omitempty"`
+
+	RequestedCores       float64 `json:"requested_cores,omitempty"`
+	RequestedMemoryBytes int64   `json:"requested_memory_bytes,omitempty"`
+	RequestedSlots       int     `json:"requested_slots,omitempty"`
 
 	// StatusDetail: phase string for the dashboard.
 	StatusDetail string `json:"status_detail,omitempty"`
@@ -2625,15 +2814,25 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if len(n.NeedsLabels) > 0 {
 		labelsJSON, _ = json.Marshal(n.NeedsLabels)
 	}
+	var prefersJSON []byte
+	if len(n.PrefersLabels) > 0 {
+		prefersJSON, _ = json.Marshal(n.PrefersLabels)
+	}
+	requestedSlots := n.RequestedSlots
+	if requestedSlots < 1 {
+		requestedSlots = 1
+	}
 	_, err := s.exec(ctx, `
-INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels,
+INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels, prefers_labels,
+                   requested_cores, requested_memory_bytes, requested_slots,
                    avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until)
-VALUES (?, ?, ?, ?, ?,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
         COALESCE((SELECT retry_avoid_coordinator_id FROM runs WHERE id = ?), ''),
         COALESCE((SELECT retry_avoid_executor_kind FROM runs WHERE id = ?), ''),
         COALESCE((SELECT retry_avoid_executor_id FROM runs WHERE id = ?), ''),
         (SELECT retry_avoid_until FROM runs WHERE id = ?))`,
-		n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON,
+		n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
+		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
 		n.RunID, n.RunID, n.RunID, n.RunID)
 	return err
 }
@@ -2755,13 +2954,7 @@ UPDATE nodes
 
 // ListNodes returns the nodes for a run in insertion order.
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
-	rows, err := s.query(ctx, `
-SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
-       ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary, artifact_manifest,
-       cpu_nanos, max_rss_bytes, process_wall_nanos,
-       coordinator_id, executor_kind, executor_id, execution_started_at, reservation_id,
-       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until
+	rows, err := s.query(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
  WHERE run_id = ?
  ORDER BY `+s.insertionOrderColumn(), runID)
@@ -2782,13 +2975,7 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 
 // GetNode fetches a single node row; ErrNotFound when missing.
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error) {
-	row := s.queryRow(ctx, `
-SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
-       ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary, artifact_manifest,
-       cpu_nanos, max_rss_bytes, process_wall_nanos,
-       coordinator_id, executor_kind, executor_id, execution_started_at, reservation_id,
-       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until
+	row := s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
  WHERE run_id = ? AND node_id = ?`, runID, nodeID)
 	n := &Node{}
@@ -2798,14 +2985,27 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
 	return n, nil
 }
 
+const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
+       ready_at, claimed_by, lease_expires_at, needs_labels, prefers_labels,
+       requested_cores, requested_memory_bytes, requested_slots,
+       offer_started_at, offer_priority_ceiling, claim_base_priority, claim_priority,
+       claim_worker_id, claim_executor_kind, claim_reservation_id,
+	   status_detail, last_heartbeat, failure_reason, exit_code, annotations_json, summary,
+	   artifact_manifest, cpu_nanos, max_rss_bytes, process_wall_nanos,
+	   coordinator_id, executor_kind, executor_id, execution_started_at, reservation_id,
+	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until`
+
 func scanNodeRow(rs rowScanner, n *Node) error {
-	var depsJSON, outputJSON, labelsJSON, annotationsJSON []byte
-	var startedNS, finishedNS, readyNS, leaseNS, heartbeatNS, executionStartedNS, avoidUntilNS sql.NullInt64
+	var depsJSON, outputJSON, labelsJSON, prefersJSON, annotationsJSON []byte
+	var startedNS, finishedNS, readyNS, leaseNS, offerStartedNS, heartbeatNS, executionStartedNS, avoidUntilNS sql.NullInt64
 	var claimedBy sql.NullString
 	var exitCode sql.NullInt64
 	err := rs.Scan(&n.RunID, &n.NodeID, &n.Status, &n.Outcome,
 		&depsJSON, &n.Error, &outputJSON, &startedNS, &finishedNS,
-		&readyNS, &claimedBy, &leaseNS, &labelsJSON,
+		&readyNS, &claimedBy, &leaseNS, &labelsJSON, &prefersJSON,
+		&n.RequestedCores, &n.RequestedMemoryBytes, &n.RequestedSlots,
+		&offerStartedNS, &n.OfferPriorityCeiling, &n.ClaimBasePriority, &n.ClaimPriority,
+		&n.ClaimWorkerID, &n.ClaimExecutorKind, &n.ClaimReservationID,
 		&n.StatusDetail, &heartbeatNS,
 		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary, &n.ArtifactManifest,
 		&n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos,
@@ -2822,6 +3022,9 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 	if len(labelsJSON) > 0 {
 		_ = json.Unmarshal(labelsJSON, &n.NeedsLabels)
 	}
+	if len(prefersJSON) > 0 {
+		_ = json.Unmarshal(prefersJSON, &n.PrefersLabels)
+	}
 	if startedNS.Valid {
 		t := time.Unix(0, startedNS.Int64)
 		n.StartedAt = &t
@@ -2833,6 +3036,10 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 	if readyNS.Valid {
 		t := time.Unix(0, readyNS.Int64)
 		n.ReadyAt = &t
+	}
+	if offerStartedNS.Valid {
+		t := time.Unix(0, offerStartedNS.Int64)
+		n.OfferStartedAt = &t
 	}
 	if claimedBy.Valid {
 		n.ClaimedBy = claimedBy.String
@@ -3124,13 +3331,25 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 	return tx.Commit()
 }
 
-// MarkNodeReady stamps ready_at if unset. Idempotent.
+// MarkNodeReady opens the node's offer round with the absolute priority ceiling.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
+	return s.MarkNodeReadyWithPriorityCeiling(ctx, runID, nodeID, 100)
+}
+
+// MarkNodeReadyWithPriorityCeiling opens an idempotent offer round with the
+// highest effective priority among eligible executors at that instant.
+func (s *Store) MarkNodeReadyWithPriorityCeiling(ctx context.Context, runID, nodeID string, ceiling int) error {
+	if ceiling < 0 || ceiling > 100 {
+		return fmt.Errorf("node offer priority ceiling %d: expected 0 through 100", ceiling)
+	}
+	now := time.Now().UnixNano()
 	res, err := s.exec(
 		ctx,
-		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?)
+		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?),
+		                  offer_started_at = COALESCE(offer_started_at, ?),
+		                  offer_priority_ceiling = CASE WHEN offer_started_at IS NULL THEN ? ELSE offer_priority_ceiling END
 		  WHERE run_id = ? AND node_id = ?`,
-		time.Now().UnixNano(), runID, nodeID,
+		now, now, ceiling, runID, nodeID,
 	)
 	if err != nil {
 		return err
@@ -3145,12 +3364,15 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	return nil
 }
 
-// RevokeNodeReady clears ready_at when unclaimed. Returns false when
-// a pod already claimed the node.
+// RevokeNodeReady cancels an unclaimed offer round.
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
-	res, err := s.exec(
-		ctx,
-		`UPDATE nodes SET ready_at = NULL
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE nodes SET ready_at = NULL, offer_started_at = NULL
 		  WHERE run_id = ? AND node_id = ?
 		    AND claimed_by IS NULL AND `+nodeNotDone,
 		runID, nodeID,
@@ -3162,7 +3384,20 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 	if err != nil {
 		return false, err
 	}
-	return n > 0, nil
+	if n == 0 {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ClaimNextReadyNode flips the oldest claimable node to holderID with
@@ -3202,13 +3437,7 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 			return nil, err
 		}
 		n := &Node{}
-		err = scanNodeRow(tx.QueryRowContext(ctx, `
-SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
-       ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary, artifact_manifest,
-       cpu_nanos, max_rss_bytes, process_wall_nanos,
-       coordinator_id, executor_kind, executor_id, execution_started_at, reservation_id,
-       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until
+		err = scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
  WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
@@ -3507,7 +3736,8 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-		        lease_expires_at = NULL
+		        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
+		        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {
@@ -3558,7 +3788,8 @@ UPDATE nodes
        error = 'runner heartbeat expired',
        failure_reason = ?, finished_at = ?,
        claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-       lease_expires_at = NULL
+       claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
+       claim_reservation = '', claim_slot = -1, lease_expires_at = NULL
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			FailureAgentLost, now, p[0], p[1]); err != nil {
 			return nil, err

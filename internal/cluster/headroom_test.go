@@ -77,6 +77,18 @@ func TestAdvertisedHeadroom_OlderDaemonFallsBackToCapacityMinusHeld(t *testing.T
 	}
 }
 
+func TestAdvertisedCapacity_MembershipCannotWidenGlobalContribution(t *testing.T) {
+	report := advertisedCapacity(
+		qs(16, 16, 64<<30, 64<<30, 0),
+		reserve{},
+		reserve{coresFraction: 0.5, memoryFraction: 0.5},
+		reserve{coresFraction: 1, memoryFraction: 1},
+	)
+	if report.budget.Cores != 8 || report.budget.MemoryBytes != 32<<30 {
+		t.Fatalf("membership widened global contribution: %+v", report.budget)
+	}
+}
+
 func TestParseReserve_MirrorsBudgetGrammar(t *testing.T) {
 	rv, err := parseReserve("2,4gb")
 	if err != nil {
