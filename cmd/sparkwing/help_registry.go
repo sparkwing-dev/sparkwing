@@ -1817,10 +1817,11 @@ run directories on disk whose run row no longer exists.
 
 That last sweep only unlinks what the local state database can account
 for. It leaves a run directory alone for ten minutes after anything last
-wrote to it, and when a profile keeps run state in S3, Postgres, or a
-controller, or the local store has never recorded a run, it reports the
-directories it found and removes none of them: a missing local row is not
-evidence that the run is gone.
+wrote to it, and it removes nothing at all unless this user's profiles
+describe the home being inspected, every one of them keeps run state in
+that home's own SQLite file, and that store has recorded at least one
+run. Everything else it finds is reported and left in place: a missing
+local row is not evidence that the run is gone.
 
 On POSIX systems, doctor removes group, other, and special permission bits
 without granting new owner access; cached executables retain any existing

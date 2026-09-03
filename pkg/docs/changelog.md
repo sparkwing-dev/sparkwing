@@ -252,14 +252,15 @@ code change to unlock.
 - **cli:** `sparkwing doctor` no longer deletes run directories whose run row
   lives in a remote state backend. The dangling-run sweep now unlinks a
   directory only when the local SQLite store is where that run would have been
-  recorded -- no profile keeps run state in S3, Postgres, or a controller, and
-  the store has recorded at least one run -- and only once nothing has written
-  to the directory for ten minutes, which also closes the window between a
-  starting run creating its directory and its row landing. Directories it
-  cannot account for are reported as `unknown_run_dirs` and left in place.
-  Under `mirror_local: false`, the setting the docs recommend for automated
-  workers, a plain `sparkwing doctor` previously removed every run directory in
-  the home, taking `_envelope.ndjson` and the node logs with it.
+  recorded: this user's profiles describe the home being inspected, every one
+  of them keeps run state in that home's own SQLite file, and that store has
+  recorded at least one run. It also leaves a directory alone for ten minutes
+  after anything last wrote to it, which closes the window between a starting
+  run creating its directory and its row landing. Directories it cannot
+  account for are reported as `unknown_run_dirs` and left in place. Under
+  `mirror_local: false`, the setting the docs recommend for automated workers,
+  a plain `sparkwing doctor` previously removed every run directory in the
+  home, taking `_envelope.ndjson` and the node logs with it.
 - **daemon:** The stale-socket sweep no longer unlinks a live daemon's socket.
   It classified a socket dead by dialing it once and then removed the file
   without rechecking, so a sweep that ran while a daemon for another
