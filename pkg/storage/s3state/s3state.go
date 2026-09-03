@@ -178,6 +178,8 @@ type runState struct {
 	loaded        bool
 	loadedAt      time.Time
 	owned         bool
+
+	pins int
 }
 
 type stepKey struct {
@@ -212,7 +214,11 @@ func (b *Backend) getRunState(ctx context.Context, runID string, mode runAccess)
 		rs = newRunState()
 		b.runs[runID] = rs
 	}
+	// safety: pinned before b.mu is released, so the sweep cannot drop the entry
+	// out of the map while this caller is still deciding what to do with it.
+	rs.pins++
 	b.mu.Unlock()
+	defer b.unpinRunState(rs)
 
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
@@ -266,12 +272,25 @@ func (rs *runState) resetLocked() {
 	rs.metrics = map[string][]store.MetricSample{}
 }
 
+func (b *Backend) unpinRunState(rs *runState) {
+	b.mu.Lock()
+	rs.pins--
+	b.mu.Unlock()
+}
+
+// safety: only a finished snapshot of a run this process neither writes nor
+// holds is a pure cache. Dropping any other entry detaches it from b.runs,
+// where every flush path looks a run up, so its envelopes would never be
+// written.
 func (b *Backend) evictIdleReads(cutoff time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for id, rs := range b.runs {
+		if rs.pins > 0 {
+			continue
+		}
 		rs.mu.Lock()
-		idle := !rs.owned && !rs.dirty && rs.flushing == nil && rs.loadedAt.Before(cutoff)
+		idle := rs.loadAttempted && !rs.owned && !rs.dirty && rs.flushing == nil && rs.loadedAt.Before(cutoff)
 		rs.mu.Unlock()
 		if idle {
 			delete(b.runs, id)

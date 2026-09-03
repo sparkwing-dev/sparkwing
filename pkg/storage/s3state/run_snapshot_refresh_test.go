@@ -3,6 +3,8 @@ package s3state_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -130,5 +132,44 @@ func TestBackend_GetLatestRunDoesNotPinTheRunsItScans(t *testing.T) {
 	}
 	if got.Status != "failed" {
 		t.Errorf("status = %q, want failed; the hour-long read TTL means only a scan that retained nothing lets this read see the other process's write", got.Status)
+	}
+}
+
+func TestBackend_ConcurrentRunsAllReachTheStoreDespiteTheSweep(t *testing.T) {
+	art := newMemArt()
+	b := s3state.New(art,
+		s3state.WithFlushInterval(time.Millisecond),
+		s3state.WithReadCacheTTL(time.Nanosecond),
+	)
+	ctx := context.Background()
+
+	const runs = 800
+	var wg sync.WaitGroup
+	errs := make([]error, runs)
+	for i := 0; i < runs; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = b.CreateRun(ctx, runningRun(fmt.Sprintf("r%d", i)))
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("CreateRun[%d]: %v", i, err)
+		}
+	}
+	if err := b.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	missing := 0
+	for i := 0; i < runs; i++ {
+		if ok, _ := art.Has(ctx, fmt.Sprintf("runs/r%d/state.ndjson", i)); !ok {
+			missing++
+		}
+	}
+	if missing > 0 {
+		t.Fatalf("%d of %d runs have no state in the store after Close returned nil", missing, runs)
 	}
 }
