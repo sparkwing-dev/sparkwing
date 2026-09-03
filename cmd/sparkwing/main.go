@@ -27,6 +27,7 @@ func init() {
 
 func main() {
 	cleanupStaleUpdate()
+	toolchainActive = takeToolchainActive()
 
 	if err := runSparkwing(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, color.Red(color.Bold("sparkwing error:")), err)
@@ -131,6 +132,11 @@ func dispatchRun(args []string) error {
 		return err
 	}
 
+	// safety: the pin decides which CLI runs, so it must be settled before any daemon, worktree, store row, or stdout line this command would otherwise leave behind twice.
+	if err := switchToolchain(dir); err != nil {
+		return err
+	}
+
 	// safety: errors dropped intentionally; read-only home shouldn't break dispatch.
 	_ = repos.AutoRegister(filepath.Dir(dir))
 
@@ -219,7 +225,7 @@ func dispatchRun(args []string) error {
 	}
 
 	if runNeedsDaemon(wf, passthrough) {
-		ensureRunDaemon()
+		ensureRunDaemonFn()
 	}
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
 		compileOptions{NoUpdate: wf.noUpdate})

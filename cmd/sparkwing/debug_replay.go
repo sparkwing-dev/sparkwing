@@ -23,6 +23,14 @@ func runDebugReplay(args []string) error {
 	}
 	ctx := context.Background()
 
+	sparkwingDir, err := findSparkwingDir()
+	if err != nil {
+		return fmt.Errorf("locate .sparkwing/: %w (replay needs the user's pipeline binary to reconstruct the input struct)", err)
+	}
+	if err := switchToolchain(sparkwingDir); err != nil {
+		return err
+	}
+
 	paths, err := orchestrator.DefaultPaths()
 	if err != nil {
 		return err
@@ -54,11 +62,6 @@ func runDebugReplay(args []string) error {
 	_ = st.Close()
 	if err != nil {
 		return fmt.Errorf("mint replay run: %w", err)
-	}
-
-	sparkwingDir, err := findSparkwingDir()
-	if err != nil {
-		return fmt.Errorf("locate .sparkwing/: %w (replay needs the user's pipeline binary to reconstruct the input struct)", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "minted replay run %s (replay of %s/%s)\n", newRunID, t.run, t.node)

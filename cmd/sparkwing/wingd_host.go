@@ -53,6 +53,8 @@ func runInvokesAdmission(passthrough []string) bool {
 	return true
 }
 
+var ensureRunDaemonFn = ensureRunDaemon
+
 func ensureRunDaemon() {
 	sock, err := wingd.SocketPath("")
 	if err != nil {

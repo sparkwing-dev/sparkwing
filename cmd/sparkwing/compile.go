@@ -17,9 +17,6 @@ import (
 )
 
 func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions) error {
-	if err := switchToolchain(sparkwingDir); err != nil {
-		return err
-	}
 	if err := resolveSparks(context.Background(), sparkwingDir, opts); err != nil {
 		return err
 	}
