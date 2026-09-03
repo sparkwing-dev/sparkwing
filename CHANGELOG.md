@@ -311,6 +311,13 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing runs logs --events-only` against a profile whose state
+  lives in a shared database or an object store no longer stops at the first
+  500 events. It made one unpaginated call, and every backend caps that at 500,
+  so a busy run lost everything past the cap without a word. The help now also
+  says what that path emits -- the run's stored event records, not the local
+  envelope stream -- since the three modes genuinely differ.
+
 - **cli:** `sparkwing runs list --by-pipeline` now honours `--limit`. A
   client-side filter -- `--started-after`, `--search`, `--error`, a
   `!`-prefixed `--status` or `--pipeline` -- switches the query to a 1000-run
