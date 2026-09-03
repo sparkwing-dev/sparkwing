@@ -32,11 +32,24 @@ type setPinReq struct {
 	MemoryBytes int64   `json:"memory_bytes"`
 }
 
+// safety: a pin becomes a hard Kubernetes limit for every later run of the
+// pipeline, so a negative component is a bad request rather than a clear.
+func (b setPinReq) validate() error {
+	if err := boundedProfileValue("cores", b.Cores, maxProfileCores); err != nil {
+		return err
+	}
+	return boundedProfileValue("memory_bytes", float64(b.MemoryBytes), maxProfileBytes)
+}
+
 func (s *Server) handleSetPipelinePin(w http.ResponseWriter, r *http.Request) {
 	pipeline := r.PathValue("name")
 	nodeID := r.URL.Query().Get("node")
 	var body setPinReq
 	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := body.validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
