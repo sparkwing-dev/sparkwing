@@ -74,9 +74,30 @@ type nodeUsageReq struct {
 	WallNanos    int64 `json:"wall_nanos,omitempty"`
 }
 
+func (b nodeUsageReq) validate() error {
+	for _, f := range []struct {
+		name  string
+		value float64
+		limit float64
+	}{
+		{"cpu_time_nanos", float64(b.CPUTimeNanos), float64(maxProfileDuration)},
+		{"max_rss_bytes", float64(b.MaxRSSBytes), maxProfileBytes},
+		{"wall_nanos", float64(b.WallNanos), float64(maxProfileDuration)},
+	} {
+		if err := boundedProfileValue(f.name, f.value, f.limit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) handleAddNodeUsage(w http.ResponseWriter, r *http.Request) {
 	var body nodeUsageReq
 	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := body.validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -85,10 +106,6 @@ func (s *Server) handleAddNodeUsage(w http.ResponseWriter, r *http.Request) {
 		MaxRSSBytes: body.MaxRSSBytes,
 		Wall:        time.Duration(body.WallNanos),
 	}); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

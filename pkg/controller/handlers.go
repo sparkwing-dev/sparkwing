@@ -850,9 +850,9 @@ func (s *Server) handleFindSpawnedChildTrigger(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) handleListPendingTriggersForParent(w http.ResponseWriter, r *http.Request) {
-	parent := r.URL.Query().Get("parent_run_id")
+	parent := r.PathValue("id")
 	if parent == "" {
-		writeError(w, http.StatusBadRequest, errors.New("parent_run_id is required"))
+		writeError(w, http.StatusBadRequest, errors.New("parent run id is required"))
 		return
 	}
 	ids, err := s.store.ListPendingTriggersForParent(r.Context(), parent)
@@ -882,7 +882,7 @@ func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Reque
 	if lease <= 0 {
 		lease = store.DefaultLeaseDuration
 	}
-	t, err := s.store.ClaimSpecificTrigger(r.Context(), r.PathValue("id"), lease)
+	t, err := s.store.ClaimSpecificTriggerFor(r.Context(), r.PathValue("id"), claimIdentity(r), lease)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)

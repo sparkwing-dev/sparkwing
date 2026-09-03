@@ -13,7 +13,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func coordinationFixture(t *testing.T) (*client.Client, *store.Store) {
+var coordinationRunnerScopes = []string{
+	controller.ScopeNodesClaim,
+	controller.ScopeTriggersClaim,
+	controller.ScopeRunsState,
+	controller.ScopeSecretsRead,
+	controller.ScopeLogsWrite,
+}
+
+type coordinationFixture struct {
+	runner *client.Client
+	admin  *client.Client
+	store  *store.Store
+}
+
+// safety: the runner client holds only the trigger claim on run r1 of pipeline demo,
+// which is the whole standing an orchestrator process has while it drives a run.
+func newCoordinationFixture(t *testing.T) coordinationFixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -21,36 +37,56 @@ func coordinationFixture(t *testing.T) (*client.Client, *store.Store) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	now := time.Now().UTC()
+	adminRaw, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken admin: %v", err)
+	}
+	runnerRaw, _, err := st.CreateToken("pool", store.TokenKindRunner, coordinationRunnerScopes, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken runner: %v", err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	t.Cleanup(srv.Close)
 
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatalf("create run: %v", err)
+	if err := st.CreateTrigger(ctx, store.Trigger{ID: "r1", Pipeline: "demo", CreatedAt: now}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatalf("create node: %v", err)
+	f := coordinationFixture{
+		runner: client.NewWithToken(srv.URL, srv.Client(), runnerRaw),
+		admin:  client.NewWithToken(srv.URL, srv.Client(), adminRaw),
+		store:  st,
 	}
-	return client.NewWithToken(srv.URL, srv.Client(), ""), st
+	if _, err := f.runner.ClaimTrigger(ctx); err != nil {
+		t.Fatalf("ClaimTrigger: %v", err)
+	}
+	if err := f.runner.CreateRun(ctx, store.Run{
+		ID: "r1", Pipeline: "demo", Status: "running", StartedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := f.runner.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	return f
 }
 
 func TestClientTriggerLoopRoutesMatchTheStore(t *testing.T) {
-	c, st := coordinationFixture(t)
+	f := newCoordinationFixture(t)
+	c, st := f.runner, f.store
 	ctx := context.Background()
 
-	if _, err := c.ListPendingTriggersForParent(ctx, "r1"); err != nil {
-		t.Fatalf("ListPendingTriggersForParent on an empty parent: %v", err)
-	}
-	if _, err := c.CreateTrigger(ctx, client.TriggerRequest{
-		Pipeline: "child", ParentRunID: "r1", ParentNodeID: "build",
-		Trigger: client.TriggerMeta{Source: "await-pipeline"},
+	if err := st.CreateTrigger(ctx, store.Trigger{
+		ID: "child-1", Pipeline: "child", ParentRunID: "r1", CreatedAt: time.Now().UTC(),
 	}); err != nil {
-		t.Fatalf("create trigger: %v", err)
+		t.Fatalf("seed the child trigger: %v", err)
 	}
 
 	pending, err := c.ListPendingTriggersForParent(ctx, "r1")
-	if err != nil || len(pending) != 1 {
-		t.Fatalf("ListPendingTriggersForParent = %v, %v; want one id", pending, err)
+	if err != nil || len(pending) != 1 || pending[0] != "child-1" {
+		t.Fatalf("ListPendingTriggersForParent = %v, %v; want [child-1], nil", pending, err)
 	}
 	want, err := st.ListPendingTriggersForParent(ctx, "r1")
 	if err != nil {
@@ -60,23 +96,34 @@ func TestClientTriggerLoopRoutesMatchTheStore(t *testing.T) {
 		t.Fatalf("client ids %v, store ids %v", pending, want)
 	}
 
-	claimed, err := c.ClaimSpecificTrigger(ctx, pending[0], store.DefaultLeaseDuration)
-	if err != nil || claimed.ID != pending[0] {
+	claimed, err := c.ClaimSpecificTrigger(ctx, "child-1", store.DefaultLeaseDuration)
+	if err != nil || claimed.ID != "child-1" {
 		t.Fatalf("ClaimSpecificTrigger = %v, %v", claimed, err)
 	}
-	if _, err := c.ClaimSpecificTrigger(ctx, pending[0], store.DefaultLeaseDuration); !errors.Is(err, store.ErrNotFound) {
+
+	if err := c.CreateRun(ctx, store.Run{
+		ID: "child-1", Pipeline: "child", Status: "running", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("CreateRun for the trigger this client just claimed: %v", err)
+	}
+	if err := c.CreateNode(ctx, store.Node{RunID: "child-1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode on the claimed child run: %v", err)
+	}
+
+	if _, err := c.ClaimSpecificTrigger(ctx, "child-1", store.DefaultLeaseDuration); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("second claim err = %v, want ErrNotFound", err)
 	}
 	if _, err := c.ClaimSpecificTrigger(ctx, "no-such-trigger", store.DefaultLeaseDuration); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("claim of a missing trigger err = %v, want ErrNotFound", err)
 	}
-	if err := c.FinishTrigger(ctx, pending[0]); err != nil {
+	if err := c.FinishTrigger(ctx, "child-1"); err != nil {
 		t.Fatalf("FinishTrigger: %v", err)
 	}
 }
 
 func TestClientCapacityRoutesLandInTheSameRows(t *testing.T) {
-	c, st := coordinationFixture(t)
+	f := newCoordinationFixture(t)
+	c, st := f.runner, f.store
 	ctx := context.Background()
 
 	obs := store.ProfileObservation{
@@ -115,8 +162,32 @@ func TestClientCapacityRoutesLandInTheSameRows(t *testing.T) {
 	}
 }
 
+func TestClientCapacityRoutesRefuseAnotherPipelineAndAbsurdInput(t *testing.T) {
+	f := newCoordinationFixture(t)
+	c := f.runner
+	ctx := context.Background()
+
+	if err := c.RecordProfileObservation(ctx, "release", "", store.ProfileObservation{
+		Duration: time.Second, PeakCores: 1, CPUMeasured: true,
+	}); err == nil {
+		t.Error("recorded an observation against a pipeline this client holds no claim in")
+	}
+	if err := c.RecordWaitObservation(ctx, "release", time.Second); err == nil {
+		t.Error("recorded a wait against a pipeline this client holds no claim in")
+	}
+	if err := c.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
+		PeakCores: -1, Duration: time.Second,
+	}); err == nil {
+		t.Error("a negative peak core count reached the pricing model")
+	}
+	if err := c.AddNodeUsage(ctx, "r1", "build", store.NodeUsage{CPUTime: -time.Second}); err == nil {
+		t.Error("a negative CPU time was accepted")
+	}
+}
+
 func TestClientNodeUsageAndMetricsRoundTrip(t *testing.T) {
-	c, st := coordinationFixture(t)
+	f := newCoordinationFixture(t)
+	c, st := f.runner, f.store
 	ctx := context.Background()
 
 	sample := store.MetricSample{
@@ -137,6 +208,11 @@ func TestClientNodeUsageAndMetricsRoundTrip(t *testing.T) {
 		t.Errorf("sample ts = %v, want %v", samples[0].TS, sample.TS)
 	}
 
+	nodes, err := c.ListNodes(ctx, "r1")
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("ListNodes = %v, %v; want the run's one node", nodes, err)
+	}
+
 	if err := c.AddNodeUsage(ctx, "r1", "build", store.NodeUsage{
 		CPUTime: 3 * time.Second, MaxRSSBytes: 8192, Wall: 4 * time.Second,
 	}); err != nil {
@@ -153,7 +229,8 @@ func TestClientNodeUsageAndMetricsRoundTrip(t *testing.T) {
 }
 
 func TestClientReconcileOrphansClosesADeadRun(t *testing.T) {
-	c, st := coordinationFixture(t)
+	f := newCoordinationFixture(t)
+	st := f.store
 	ctx := context.Background()
 
 	if err := st.CreateRun(ctx, store.Run{
@@ -165,7 +242,7 @@ func TestClientReconcileOrphansClosesADeadRun(t *testing.T) {
 	if _, err := st.DB().ExecContext(ctx, `UPDATE runs SET last_heartbeat_at = NULL WHERE id = ?`, "stale"); err != nil {
 		t.Fatalf("clear heartbeat: %v", err)
 	}
-	n, err := c.ReconcileOrphanedLocalRuns(ctx, time.Minute)
+	n, err := f.admin.ReconcileOrphanedLocalRuns(ctx, time.Minute)
 	if err != nil {
 		t.Fatalf("ReconcileOrphanedLocalRuns: %v", err)
 	}
@@ -182,8 +259,15 @@ func TestClientReconcileOrphansClosesADeadRun(t *testing.T) {
 }
 
 func TestClientReconcileOrphansRefusesANonPositiveThreshold(t *testing.T) {
-	c, _ := coordinationFixture(t)
-	if _, err := c.ReconcileOrphanedLocalRuns(context.Background(), 0); err == nil {
+	f := newCoordinationFixture(t)
+	if _, err := f.admin.ReconcileOrphanedLocalRuns(context.Background(), 0); err == nil {
 		t.Error("a zero threshold was accepted; it means every running run is orphaned")
+	}
+}
+
+func TestClientReconcileOrphansIsAdminOnly(t *testing.T) {
+	f := newCoordinationFixture(t)
+	if _, err := f.runner.ReconcileOrphanedLocalRuns(context.Background(), time.Minute); err == nil {
+		t.Error("a runner token swept the machine's orphaned runs, want 403")
 	}
 }

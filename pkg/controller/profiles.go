@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"math"
 	"net/http"
 	"time"
 
@@ -161,6 +163,47 @@ type profileObservationReq struct {
 	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
 }
 
+// safety: these figures become the price of every later run of the pipeline,
+// so a wire caller cannot post a negative or an implausible one.
+const (
+	maxProfileDuration = 365 * 24 * time.Hour
+	maxProfileCores    = 1 << 20
+	maxProfileBytes    = 1 << 50
+)
+
+func (b profileObservationReq) validate() error {
+	for _, f := range []struct {
+		name  string
+		value float64
+		limit float64
+	}{
+		{"duration_nanos", float64(b.DurationNanos), float64(maxProfileDuration)},
+		{"peak_cores", b.PeakCores, maxProfileCores},
+		{"peak_memory_bytes", float64(b.PeakMemoryBytes), maxProfileBytes},
+		{"sustained_cores", b.SustainedCores, maxProfileCores},
+		{"floor_cores", b.FloorCores, maxProfileCores},
+		{"floor_memory_bytes", float64(b.FloorMemoryBytes), maxProfileBytes},
+	} {
+		if err := boundedProfileValue(f.name, f.value, f.limit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func boundedProfileValue(name string, value, limit float64) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return fmt.Errorf("%s must be a finite number", name)
+	}
+	if value < 0 {
+		return fmt.Errorf("%s must be >= 0", name)
+	}
+	if value > limit {
+		return fmt.Errorf("%s exceeds the %g ceiling", name, limit)
+	}
+	return nil
+}
+
 func (b profileObservationReq) observation() store.ProfileObservation {
 	return store.ProfileObservation{
 		Duration:         time.Duration(b.DurationNanos),
@@ -178,6 +221,10 @@ func (b profileObservationReq) observation() store.ProfileObservation {
 func (s *Server) handleRecordProfileObservation(w http.ResponseWriter, r *http.Request) {
 	var body profileObservationReq
 	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := body.validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -201,9 +248,17 @@ type waitObservationReq struct {
 	WaitNanos int64 `json:"wait_nanos"`
 }
 
+func (b waitObservationReq) validate() error {
+	return boundedProfileValue("wait_nanos", float64(b.WaitNanos), float64(maxProfileDuration))
+}
+
 func (s *Server) handleRecordWaitObservation(w http.ResponseWriter, r *http.Request) {
 	var body waitObservationReq
 	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := body.validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}

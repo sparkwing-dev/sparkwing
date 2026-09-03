@@ -105,8 +105,12 @@ type loopbackCoordination interface {
 // revocation.
 //
 // "Belongs to one run" is enforced, not just intended: every mutating
-// route is gated on runID, so the bearer sitting in a node's
-// environment writes to that node's run and no other. See [ownRun].
+// route is gated on the run it belongs to, so the bearer sitting in a
+// node's environment writes to that node's run and no other. A route
+// carrying a run id is gated on it directly ([Loopback.ownRun]); a
+// trigger id must be this run or a child it spawned
+// ([Loopback.ownTrigger]); a pipeline name must be this run's
+// ([Loopback.ownPipeline]).
 type Loopback struct {
 	state         LoopbackState
 	concurrency   LoopbackConcurrency
@@ -152,8 +156,9 @@ func (l *Loopback) WithArtifactStore(a storage.ArtifactStore) *Loopback {
 // gates mirror [Server.Handler] exactly; a request this router does not
 // recognize is one a node process never makes.
 //
-// Mutating routes carrying a run id are additionally wrapped in
-// [Loopback.ownRun]. Reads are not: a cross-pipeline ref, a
+// Mutating routes are additionally wrapped in [Loopback.ownRun],
+// [Loopback.ownTrigger], or [Loopback.ownPipeline], by whichever
+// identifier they carry. Reads are not: a cross-pipeline ref, a
 // RunAndAwait poll, and the retry-lineage lookup all read runs that are
 // legitimately not this one.
 func (l *Loopback) Handler() http.Handler {
@@ -206,18 +211,17 @@ func (l *Loopback) Handler() http.Handler {
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(l.handleTrigger)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(l.handleFindSpawnedChildTrigger)))
-	// hack: static segment prevents {id} from consuming "pending-for-parent" as a trigger ID.
-	mux.Handle("GET /api/v1/triggers/pending-for-parent", requireScope(ScopeTriggersRead, http.HandlerFunc(l.handleListPendingTriggersForParent)))
-	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(l.handleClaimSpecificTrigger)))
-	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, http.HandlerFunc(l.handleFinishTrigger)))
+	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, l.ownTrigger(l.handleClaimSpecificTrigger)))
+	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, l.ownTrigger(l.handleFinishTrigger)))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, http.HandlerFunc(l.handleGetTrigger), ScopeNodesClaim, ScopeTriggersClaim))
 
 	mux.Handle("GET /api/v1/pipelines/{name}/profile", requireScope(ScopeNodesClaim, http.HandlerFunc(l.handleGetPipelineProfile)))
-	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeRunsState, http.HandlerFunc(l.handleSetPipelinePin)))
-	mux.Handle("POST /api/v1/pipelines/{name}/profile/observations", requireScope(ScopeRunsState, http.HandlerFunc(l.handleRecordProfileObservation)))
-	mux.Handle("POST /api/v1/pipelines/{name}/profile/contention", requireScope(ScopeRunsState, http.HandlerFunc(l.handleRecordContention)))
-	mux.Handle("POST /api/v1/pipelines/{name}/profile/waits", requireScope(ScopeRunsState, http.HandlerFunc(l.handleRecordWaitObservation)))
+	mux.Handle("PUT /api/v1/pipelines/{name}/profile/pin", requireScope(ScopeRunsState, l.ownPipeline(l.handleSetPipelinePin)))
+	mux.Handle("POST /api/v1/pipelines/{name}/profile/observations", requireScope(ScopeRunsState, l.ownPipeline(l.handleRecordProfileObservation)))
+	mux.Handle("POST /api/v1/pipelines/{name}/profile/contention", requireScope(ScopeRunsState, l.ownPipeline(l.handleRecordContention)))
+	mux.Handle("POST /api/v1/pipelines/{name}/profile/waits", requireScope(ScopeRunsState, l.ownPipeline(l.handleRecordWaitObservation)))
 
+	mux.Handle("GET /api/v1/runs/{id}/pending-triggers", requireScope(ScopeTriggersRead, l.ownRun(l.handleListPendingTriggersForParent)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleGetNodeMetrics)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/usage", requireScope(ScopeNodesClaim, l.ownRun(l.handleAddNodeUsage)))
 
@@ -269,6 +273,50 @@ func (l *Loopback) ownRun(h http.HandlerFunc) http.Handler {
 		if id := r.PathValue("id"); id != l.runID {
 			writeError(w, http.StatusNotFound,
 				fmt.Errorf("run %s: %w on the loopback controller for run %s", id, store.ErrNotFound, l.runID))
+			return
+		}
+		h(w, r)
+	})
+}
+
+// safety: a trigger id is the id of the run it creates, so an ungated claim here
+// would hand a node process ownership of a run its bearer has no part in.
+func (l *Loopback) ownTrigger(h http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == l.runID {
+			h(w, r)
+			return
+		}
+		reader, ok := l.state.(loopbackTriggerReader)
+		if !ok {
+			l.refuseTrigger(w, id)
+			return
+		}
+		tg, err := reader.GetTrigger(r.Context(), id)
+		if err != nil || tg == nil || tg.ParentRunID != l.runID {
+			l.refuseTrigger(w, id)
+			return
+		}
+		h(w, r)
+	})
+}
+
+func (l *Loopback) refuseTrigger(w http.ResponseWriter, id string) {
+	writeError(w, http.StatusNotFound,
+		fmt.Errorf("trigger %s: %w on the loopback controller for run %s", id, store.ErrNotFound, l.runID))
+}
+
+// safety: the path carries a stored profile key, which scopes the pipeline by
+// repository, so this run's pipeline is compared against the key's pipeline half.
+func (l *Loopback) ownPipeline(h http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		_, named := store.SplitProfileKey(name)
+		run, err := l.state.GetRun(r.Context(), l.runID)
+		if err != nil || run == nil || named == "" || named != run.Pipeline {
+			writeError(w, http.StatusNotFound,
+				fmt.Errorf("pipeline %s: %w on the loopback controller for run %s", name, store.ErrNotFound, l.runID))
 			return
 		}
 		h(w, r)
@@ -1094,12 +1142,7 @@ func (l *Loopback) handleListPendingTriggersForParent(w http.ResponseWriter, r *
 	if !ok {
 		return
 	}
-	parent := r.URL.Query().Get("parent_run_id")
-	if parent == "" {
-		writeError(w, http.StatusBadRequest, errors.New("parent_run_id is required"))
-		return
-	}
-	ids, err := c.ListPendingTriggersForParent(r.Context(), parent)
+	ids, err := c.ListPendingTriggersForParent(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeStateError(w, err)
 		return
@@ -1191,6 +1234,10 @@ func (l *Loopback) handleRecordProfileObservation(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := body.validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := c.RecordProfileObservation(r.Context(), r.PathValue("name"),
 		r.URL.Query().Get("node"), body.observation()); err != nil {
 		writeStateError(w, err)
@@ -1221,6 +1268,10 @@ func (l *Loopback) handleRecordWaitObservation(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := body.validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := c.RecordWaitObservation(r.Context(), r.PathValue("name"), time.Duration(body.WaitNanos)); err != nil {
 		writeStateError(w, err)
 		return
@@ -1235,6 +1286,10 @@ func (l *Loopback) handleAddNodeUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	var body nodeUsageReq
 	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := body.validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}

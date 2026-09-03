@@ -631,3 +631,167 @@ func (f scopedFixture) do(t *testing.T, token, method, path, body string) int {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode
 }
+
+// The coordination conversation an orchestrator process has: it claims a
+// named trigger, records the queue wait before any node of the run
+// exists, drives its child triggers, and folds the run's measurements at
+// the end. Every step runs on the documented runner scope set and on the
+// trigger claim alone, so a route that needs a node claim or a wider
+// scope fails here rather than on a laptop.
+func TestRunnerScopes_CoordinationRoutesRunOnATriggerClaim(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+
+	seedRepoTrigger(t, f.store, "run-1", "acme/web")
+	if err := f.store.CreateTrigger(ctx, store.Trigger{
+		ID: "child-1", Pipeline: "child", ParentRunID: "run-1", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed the child trigger: %v", err)
+	}
+
+	claimed, err := c.ClaimSpecificTrigger(ctx, "run-1", time.Minute)
+	if err != nil || claimed == nil {
+		t.Fatalf("ClaimSpecificTrigger: %v", err)
+	}
+
+	for _, step := range []struct {
+		name string
+		call func() error
+	}{
+		{"record the admission wait, before any node of the run exists", func() error {
+			return c.RecordWaitObservation(ctx, "deploy", 250*time.Millisecond)
+		}},
+		{"create the run the claim names", func() error {
+			return c.CreateRun(ctx, store.Run{
+				ID: "run-1", Pipeline: "deploy", Status: "running", StartedAt: time.Now().UTC(),
+			})
+		}},
+		{"create the build node", func() error {
+			return c.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"})
+		}},
+		{"list the run's own nodes", func() error {
+			nodes, err := c.ListNodes(ctx, "run-1")
+			if err != nil {
+				return err
+			}
+			if len(nodes) != 1 {
+				return errors.New("ListNodes returned no nodes for the claimed run")
+			}
+			return nil
+		}},
+		{"list the children this run spawned", func() error {
+			ids, err := c.ListPendingTriggersForParent(ctx, "run-1")
+			if err != nil {
+				return err
+			}
+			if len(ids) != 1 || ids[0] != "child-1" {
+				return errors.New("ListPendingTriggersForParent did not return the seeded child")
+			}
+			return nil
+		}},
+		{"claim the child trigger by id", func() error {
+			_, err := c.ClaimSpecificTrigger(ctx, "child-1", time.Minute)
+			return err
+		}},
+		{"create the child run the new claim names", func() error {
+			return c.CreateRun(ctx, store.Run{
+				ID: "child-1", Pipeline: "child", Status: "running", StartedAt: time.Now().UTC(),
+			})
+		}},
+		{"create a node on the child run", func() error {
+			return c.CreateNode(ctx, store.Node{RunID: "child-1", NodeID: "build", Status: "pending"})
+		}},
+		{"sample the node's resources", func() error {
+			return c.AddNodeMetricSample(ctx, "run-1", "build", store.MetricSample{
+				TS: time.Now().UTC(), CPUMillicores: 500, MemoryBytes: 1 << 20,
+			})
+		}},
+		{"read the samples back at run end", func() error {
+			samples, err := c.ListNodeMetrics(ctx, "run-1", "build")
+			if err != nil {
+				return err
+			}
+			if len(samples) != 1 {
+				return errors.New("ListNodeMetrics returned no samples for the claimed run")
+			}
+			return nil
+		}},
+		{"fold the reaped process's accounting into the node", func() error {
+			return c.AddNodeUsage(ctx, "run-1", "build", store.NodeUsage{
+				CPUTime: time.Second, MaxRSSBytes: 1 << 20, Wall: 2 * time.Second,
+			})
+		}},
+		{"fold the run's measurement into the profile", func() error {
+			return c.RecordProfileObservation(ctx, "deploy", "", store.ProfileObservation{
+				Duration: time.Minute, PeakCores: 2, SustainedCores: 1, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+			})
+		}},
+		{"record that the run was contended", func() error { return c.RecordContention(ctx, "deploy") }},
+		{"pin what the run was charged", func() error {
+			return c.SetPipelinePin(ctx, "deploy", "", 2, 1<<30)
+		}},
+		{"finish the child trigger", func() error { return c.FinishTrigger(ctx, "child-1") }},
+		{"finish the run", func() error { return c.FinishRun(ctx, "run-1", "success", "") }},
+		{"finish the trigger", func() error { return c.FinishTrigger(ctx, "run-1") }},
+	} {
+		if err := step.call(); err != nil {
+			t.Fatalf("%s on the documented runner scope set: %v", step.name, err)
+		}
+	}
+
+	prof, err := f.store.GetPipelineProfile(ctx, "deploy", "")
+	if err != nil || prof == nil {
+		t.Fatalf("GetPipelineProfile: %v (profile %v)", err, prof)
+	}
+	if prof.PinnedCores != 2 {
+		t.Errorf("pinned cores = %v, want 2", prof.PinnedCores)
+	}
+	node, err := f.store.GetNode(ctx, "run-1", "build")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if node.MaxRSSBytes != 1<<20 {
+		t.Errorf("node max rss = %d, want the usage the runner folded in", node.MaxRSSBytes)
+	}
+}
+
+// A claim on one pipeline is not standing on another, and a token holding
+// no claim at all has none anywhere.
+func TestRunnerScopes_CoordinationWritesNeedAClaimOnThatPipeline(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+
+	seedRepoTrigger(t, f.store, "run-1", "acme/web")
+	if _, err := c.ClaimSpecificTrigger(ctx, "run-1", time.Minute); err != nil {
+		t.Fatalf("ClaimSpecificTrigger: %v", err)
+	}
+
+	if err := c.RecordWaitObservation(ctx, "release", time.Second); err == nil {
+		t.Error("recorded a wait against a pipeline this runner holds no claim in, want 403")
+	}
+	if err := c.RecordProfileObservation(ctx, "release", "", store.ProfileObservation{
+		Duration: time.Second, PeakCores: 1, CPUMeasured: true,
+	}); err == nil {
+		t.Error("recorded an observation against a pipeline this runner holds no claim in, want 403")
+	}
+	if err := c.RecordContention(ctx, "release"); err == nil {
+		t.Error("recorded contention against a pipeline this runner holds no claim in, want 403")
+	}
+
+	stranger, _, err := f.store.CreateToken("pool-b", store.TokenKindRunner, runnerScopes, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateToken stranger: %v", err)
+	}
+	sc := client.NewWithToken(f.url, nil, stranger)
+	if err := sc.RecordContention(ctx, "deploy"); err == nil {
+		t.Error("a runner holding no claim recorded contention on another runner's pipeline, want 403")
+	}
+	if _, err := sc.ListPendingTriggersForParent(ctx, "run-1"); err == nil {
+		t.Error("a runner holding no claim listed another run's pending children, want 403")
+	}
+	if _, err := sc.ListNodeMetrics(ctx, "run-1", "build"); err == nil {
+		t.Error("a runner holding no claim read another run's node metrics, want 403")
+	}
+}

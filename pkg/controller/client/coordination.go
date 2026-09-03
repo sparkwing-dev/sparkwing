@@ -16,7 +16,7 @@ import (
 // spawned that no consumer has claimed yet, oldest first. Mirrors
 // store.ListPendingTriggersForParent.
 func (c *Client) ListPendingTriggersForParent(ctx context.Context, parentRunID string) ([]string, error) {
-	u := c.baseURL + "/api/v1/triggers/pending-for-parent?parent_run_id=" + url.QueryEscape(parentRunID)
+	u := fmt.Sprintf("%s/api/v1/runs/%s/pending-triggers", c.baseURL, url.PathEscape(parentRunID))
 	var body struct {
 		TriggerIDs []string `json:"trigger_ids"`
 	}

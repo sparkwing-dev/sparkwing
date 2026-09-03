@@ -3344,6 +3344,28 @@ func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string
 	return held > 0, nil
 }
 
+// PrincipalHoldsPipelineTriggerClaim reports whether claimant holds an
+// unexpired claim on a trigger of the named pipeline. It is the
+// ownership proof an orchestrator process has for a write that names a
+// pipeline: it holds the run's trigger claim from before the run's
+// first node exists until after the last one finishes. An unbound
+// claimant holds nothing.
+func (s *Store) PrincipalHoldsPipelineTriggerClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error) {
+	if !claimant.bound() {
+		return false, nil
+	}
+	var held int
+	err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM triggers
+		  WHERE pipeline = ? AND claim_principal = ? AND claim_token_prefix = ?
+		    AND `+triggerClaimLiveSQL,
+		pipeline, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held > 0, nil
+}
+
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
 // claims; ready_at is left intact. Returns reaped pairs.
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
@@ -4754,9 +4776,20 @@ func (s *Store) CountPendingTriggers(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// ClaimSpecificTrigger flips a known pending trigger to 'claimed';
-// ErrNotFound when not pending.
+// ClaimSpecificTrigger flips a known pending trigger to 'claimed'
+// without recording a claimant; ErrNotFound when not pending. Use it
+// only in-process, where the caller and the store share a lifetime and
+// no later request has to prove ownership.
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error) {
+	return s.ClaimSpecificTriggerFor(ctx, id, ClaimIdentity{}, lease)
+}
+
+// ClaimSpecificTriggerFor is ClaimSpecificTrigger with the claimant
+// recorded, so [Store.PrincipalHoldsTriggerClaim] can later prove the
+// claim and the writes it authorizes. A trigger id is the id of the run
+// it creates, so this claim is what the claimant's whole run rests on.
+// ErrNotFound when the trigger is not pending.
+func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
@@ -4768,10 +4801,20 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 
 	now := time.Now()
 	expires := now.Add(lease)
+	args := []any{triggerStatusClaimed, now.UnixNano(), expires.UnixNano()}
+	// safety: an unbound claimant leaves the columns alone rather than blanking
+	// a bound one, so an in-process claim cannot erase an attributed claim.
+	setClaimant := ""
+	if claimant.bound() {
+		setClaimant = `, claim_principal = ?, claim_token_prefix = ?`
+		args = append(args, claimant.Principal, claimant.TokenPrefix)
+	}
+	args = append(args, id, triggerStatusPending)
 	res, err := tx.ExecContext(ctx,
-		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1
+		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1`+
+			setClaimant+`
 		  WHERE id = ? AND status = ?`,
-		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(), id, triggerStatusPending)
+		args...)
 	if err != nil {
 		return nil, err
 	}
