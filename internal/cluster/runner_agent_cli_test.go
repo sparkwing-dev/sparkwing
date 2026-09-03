@@ -96,19 +96,21 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	var seen atomic.Value
 	claimSeen := make(chan struct{}, 1)
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/nodes/claim", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/v1/nodes/claim/prepare", func(w http.ResponseWriter, r *http.Request) {
 		if h := r.Header.Get("Authorization"); !strings.HasPrefix(h, "Bearer ") {
 			t.Errorf("missing bearer header: %q", h)
 		}
 		var body struct {
-			HolderID string   `json:"holder_id"`
-			Labels   []string `json:"labels"`
+			HolderID      string   `json:"holder_id"`
+			Labels        []string `json:"labels"`
+			ClaimPriority int      `json:"claim_priority"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		seen.Store(&seenClaim{
-			auth:   r.Header.Get("Authorization"),
-			labels: body.Labels,
-			holder: body.HolderID,
+			auth:     r.Header.Get("Authorization"),
+			labels:   body.Labels,
+			holder:   body.HolderID,
+			priority: body.ClaimPriority,
 		})
 		w.WriteHeader(http.StatusNoContent)
 		select {
@@ -123,6 +125,7 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 		Controller:    srv.URL,
 		Token:         "bearer-xyz",
 		Labels:        []string{"laptop", "arch=arm64"},
+		ClaimPriority: 70,
 		MaxConcurrent: 1,
 		Poll:          50 * time.Millisecond,
 	})
@@ -141,6 +144,7 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 			Token:         cfg.Token,
 			HolderPrefix:  "agent:test",
 			Labels:        cfg.Labels,
+			ClaimPriority: cfg.ClaimPriority,
 			MaxConcurrent: cfg.MaxConcurrent,
 			PollInterval:  cfg.Poll,
 			Lease:         cfg.Lease,
@@ -176,13 +180,17 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	if !strings.HasPrefix(got.holder, "agent:test:") {
 		t.Fatalf("holder prefix: %q", got.holder)
 	}
+	if got.priority != 70 {
+		t.Fatalf("claim priority: %d", got.priority)
+	}
 	if elapsed := time.Since(started); elapsed >= 300*time.Millisecond {
 		t.Fatalf("claim observation took %s, want less than 300ms", elapsed)
 	}
 }
 
 type seenClaim struct {
-	auth   string
-	labels []string
-	holder string
+	auth     string
+	labels   []string
+	holder   string
+	priority int
 }

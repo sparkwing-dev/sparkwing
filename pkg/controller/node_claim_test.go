@@ -187,3 +187,73 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 		t.Fatalf("claimed_by: %q", n.ClaimedBy)
 	}
 }
+
+type fixedNodeClaimPolicy struct {
+	ceiling   int
+	effective int
+}
+
+func (p fixedNodeClaimPolicy) HighestEligiblePriority(context.Context, *store.Node) (int, error) {
+	return p.ceiling, nil
+}
+
+func (p fixedNodeClaimPolicy) Resolver(_ context.Context, _ store.ClaimIdentity, req controller.NodeClaimRequest) (store.NodeClaimResolver, error) {
+	return store.NodeClaimResolverFunc(func(*store.Node) (store.NodeClaimResolution, bool) {
+		return store.NodeClaimResolution{
+			WorkerID:          "registered-worker",
+			ExecutorKind:      "gateway",
+			ReservationID:     req.ReservationID,
+			BasePriority:      40,
+			EffectivePriority: p.effective,
+		}, true
+	}), nil
+}
+
+func TestNodeClaimOffer_HTTPUsesTrustedPolicyAndPreservesPendingState(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	srv := httptest.NewServer(controller.New(st, nil).WithNodeClaimPolicy(fixedNodeClaimPolicy{ceiling: 100, effective: 75}).Handler())
+	defer srv.Close()
+	c := client.New(srv.URL, nil)
+	ctx := context.Background()
+	seedRunNode(t, st, "run-1", "node-a")
+	if err := c.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
+		t.Fatal(err)
+	}
+	executor := client.NodeClaimExecutor{
+		HolderID: "holder", WorkerID: "untrusted-worker", ExecutorKind: "direct",
+		ReservationID: "reservation", ClaimPriority: 100,
+	}
+	summary, err := c.PrepareNodeClaim(ctx, executor)
+	if err != nil || summary == nil || summary.RunID != "run-1" || summary.NodeID != "node-a" {
+		t.Fatalf("PrepareNodeClaim = %+v, %v", summary, err)
+	}
+	result, err := c.OfferNodeClaim(ctx, executor, summary.RunID, summary.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Pending || result.Node != nil {
+		t.Fatalf("first offer = %+v, want pending", result)
+	}
+
+	if _, err := st.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = ? AND node_id = ?`,
+		time.Now().Add(-6*time.Second).UnixNano(), "run-1", "node-a"); err != nil {
+		t.Fatal(err)
+	}
+	result, err = c.OfferNodeClaim(ctx, executor, summary.RunID, summary.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Node == nil || result.Pending {
+		t.Fatalf("ceiling offer = %+v", result)
+	}
+	if result.Node.ClaimPriority != 75 || result.Node.ClaimBasePriority != 40 ||
+		result.Node.ClaimWorkerID != "registered-worker" || result.Node.ClaimExecutorKind != "gateway" {
+		t.Fatalf("trusted claim metadata = %+v", result.Node)
+	}
+}

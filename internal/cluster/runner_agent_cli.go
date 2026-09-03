@@ -25,6 +25,7 @@ type AgentConfig struct {
 	Profile       string        `yaml:"profile"`
 	Token         string        `yaml:"token"`
 	MaxConcurrent int           `yaml:"max_concurrent"`
+	ClaimPriority int           `yaml:"claim_priority"`
 	Labels        []string      `yaml:"labels"`
 	SpawnPolicy   string        `yaml:"spawn_policy"`
 	HolderPrefix  string        `yaml:"holder_prefix"`
@@ -72,6 +73,9 @@ func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
 	}
 	if out.MaxConcurrent < 1 {
 		out.MaxConcurrent = 1
+	}
+	if out.ClaimPriority < 0 || out.ClaimPriority > 100 {
+		return out, fmt.Errorf("agent.yaml: claim_priority %d: expected 0 through 100", out.ClaimPriority)
 	}
 	if out.Poll <= 0 {
 		out.Poll = 500 * time.Millisecond
@@ -130,6 +134,7 @@ func RunAgentCLI(args []string) error {
 		"gitcache", cfg.Gitcache,
 		"labels", cfg.Labels,
 		"max_concurrent", cfg.MaxConcurrent,
+		"claim_priority", cfg.ClaimPriority,
 		"spawn_policy", cfg.SpawnPolicy,
 		"auth", cfg.Token != "",
 	)
@@ -151,6 +156,9 @@ func RunAgentCLI(args []string) error {
 		Token:             cfg.Token,
 		HolderPrefix:      prefix,
 		Labels:            cfg.Labels,
+		ClaimPriority:     cfg.ClaimPriority,
+		WorkerID:          prefix,
+		ExecutorKind:      "direct",
 		MaxConcurrent:     cfg.MaxConcurrent,
 		PollInterval:      cfg.Poll,
 		Lease:             cfg.Lease,

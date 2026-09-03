@@ -104,7 +104,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				continue
 			}
 			if !claimedSeen && time.Now().After(waitDeadline) {
-				revoked, rerr := r.ctrl.RevokeNodeReady(ctx, req.RunID, req.NodeID)
+				revoked, rerr := r.ctrl.FinalizeNodeReady(ctx, req.RunID, req.NodeID)
 				if rerr != nil {
 					r.logger.Warn("warmpool: revoke failed",
 						"run_id", req.RunID, "node_id", req.NodeID, "err", rerr)

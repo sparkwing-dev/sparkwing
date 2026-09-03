@@ -1064,10 +1064,16 @@ func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request
 }
 
 type claimNodeReq struct {
-	HolderID  string         `json:"holder_id"`
-	LeaseSecs int            `json:"lease_secs,omitempty"`
-	Labels    []string       `json:"labels,omitempty"`
-	Headroom  *claimHeadroom `json:"headroom,omitempty"`
+	HolderID      string         `json:"holder_id"`
+	RunID         string         `json:"run_id,omitempty"`
+	NodeID        string         `json:"node_id,omitempty"`
+	WorkerID      string         `json:"worker_id,omitempty"`
+	ExecutorKind  string         `json:"executor_kind,omitempty"`
+	ReservationID string         `json:"reservation_id,omitempty"`
+	ClaimPriority *int           `json:"claim_priority,omitempty"`
+	LeaseSecs     int            `json:"lease_secs,omitempty"`
+	Labels        []string       `json:"labels,omitempty"`
+	Headroom      *claimHeadroom `json:"headroom,omitempty"`
 }
 
 type claimHeadroom struct {
@@ -1101,6 +1107,41 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
+	if body.ClaimPriority != nil {
+		if body.RunID == "" || body.NodeID == "" || body.ReservationID == "" {
+			writeError(w, http.StatusBadRequest, errors.New("run_id, node_id, and reservation_id are required for a claim offer"))
+			return
+		}
+		resolver, err := s.nodeClaimPolicy.Resolver(r.Context(), claimIdentity(r), NodeClaimRequest{
+			HolderID:      body.HolderID,
+			WorkerID:      body.WorkerID,
+			ExecutorKind:  body.ExecutorKind,
+			ReservationID: body.ReservationID,
+			ClaimPriority: *body.ClaimPriority,
+			Labels:        body.Labels,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := s.store.OfferNodeClaim(r.Context(), claimIdentity(r), body.HolderID,
+			body.RunID, body.NodeID, lease, resolver)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if result.Node == nil {
+			if result.Pending {
+				w.Header().Set("X-Sparkwing-Claim-Offer-State", "pending")
+			} else {
+				w.Header().Set("X-Sparkwing-Claim-Offer-State", "empty")
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeClaimedNode(w, r, s, result.Node)
+		return
+	}
 	n, err := s.store.ClaimNextReadyNode(r.Context(), claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -1110,6 +1151,10 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	writeClaimedNode(w, r, s, n)
+}
+
+func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *store.Node) {
 	pipeline := ""
 	if run, err := s.store.GetRun(r.Context(), n.RunID); err == nil && run != nil {
 		pipeline = run.Pipeline
@@ -1121,10 +1166,57 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, n)
 }
 
+func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) {
+	var body claimNodeReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.HolderID == "" || body.ClaimPriority == nil {
+		writeError(w, http.StatusBadRequest, errors.New("holder_id and claim_priority are required"))
+		return
+	}
+	resolver, err := s.nodeClaimPolicy.Resolver(r.Context(), claimIdentity(r), NodeClaimRequest{
+		HolderID:      body.HolderID,
+		WorkerID:      body.WorkerID,
+		ExecutorKind:  body.ExecutorKind,
+		ClaimPriority: *body.ClaimPriority,
+		Labels:        body.Labels,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	summary, err := s.store.PrepareNextNodeClaim(r.Context(), resolver)
+	if errors.Is(err, store.ErrNotFound) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, summary)
+}
+
 func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	if err := s.store.MarkNodeReady(r.Context(), runID, nodeID); err != nil {
+	node, err := s.store.GetNode(r.Context(), runID, nodeID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	ceiling, err := s.nodeClaimPolicy.HighestEligiblePriority(r.Context(), node)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := s.store.MarkNodeReadyWithPriorityCeiling(r.Context(), runID, nodeID, ceiling); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return
@@ -1133,6 +1225,21 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleFinalizeNodeReady(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	ok, err := s.store.FinalizeNodeReady(r.Context(), runID, nodeID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, revokeResp{Revoked: ok})
 }
 
 type revokeResp struct {

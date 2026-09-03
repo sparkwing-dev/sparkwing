@@ -62,6 +62,8 @@ type Server struct {
 	reconcileHook func(context.Context) error
 
 	runnerHeadroom *runnerHeadroomRegistry
+
+	nodeClaimPolicy NodeClaimPolicy
 }
 
 // New constructs a Server bound to the given store. A nil dispatcher
@@ -80,6 +82,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		sessionMaxLifetime:  DefaultSessionMaxLifetime,
 		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
 		runnerHeadroom:      newRunnerHeadroomRegistry(),
+		nodeClaimPolicy:     requestNodeClaimPolicy{},
 	}
 }
 
@@ -492,10 +495,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
 
 	mux.Handle("POST /api/v1/nodes/claim", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleClaimNode)))
+	mux.Handle("POST /api/v1/nodes/claim/prepare", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handlePrepareNodeClaim)))
 	// safety: readiness is a dispatcher decision; a runner token must not skip a node's dependencies.
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready", requireScope(ScopeAdmin, http.HandlerFunc(s.handleMarkNodeReady)))
 	// safety: revoke-ready acts only on an unclaimed node, so claim ownership can never stand in for admin.
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRevokeNodeReady)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready", requireScope(ScopeAdmin, http.HandlerFunc(s.handleFinalizeNodeReady)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleHeartbeatNodeClaim)))
 	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRun(http.HandlerFunc(s.handleTouchRunHeartbeat))))
 

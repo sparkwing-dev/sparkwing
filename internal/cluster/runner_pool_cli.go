@@ -28,6 +28,9 @@ type PoolLoopConfig struct {
 	Token             string
 	HolderPrefix      string
 	Labels            []string
+	ClaimPriority     int
+	WorkerID          string
+	ExecutorKind      string
 	MaxConcurrent     int
 	PollInterval      time.Duration
 	Lease             time.Duration
@@ -47,10 +50,17 @@ type PoolLoopConfig struct {
 }
 
 type nodeClaimer interface {
-	ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error)
+	PrepareNodeClaim(ctx context.Context, executor client.NodeClaimExecutor) (*store.NodeSchedulingSummary, error)
+	OfferNodeClaim(ctx context.Context, executor client.NodeClaimExecutor, runID, nodeID string) (client.NodeClaimOfferResult, error)
 }
 
-type poolExecFn func(ctx context.Context, n *store.Node, holderID string)
+type poolReservation interface {
+	ID() string
+	Release()
+	Watch(context.CancelFunc)
+}
+
+type poolExecFn func(ctx context.Context, n *store.Node, holderID string, reservation poolReservation)
 
 func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) error {
 	if cfg.ControllerURL == "" {
@@ -81,11 +91,17 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 			"reserve", cfg.LocalReserve, "source", cfg.SourceName)
 	}
 
-	exec := func(execCtx context.Context, n *store.Node, holderID string) {
-		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.Token, cfg.CacheToken,
-			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger, admission, provider)
+	reserve := func(reserveCtx context.Context, summary store.NodeSchedulingSummary, reservationID string) (poolReservation, bool, error) {
+		if admission == nil {
+			return processSlotReservation{id: reservationID}, true, nil
+		}
+		return admission.TryReserveFleetNode(reserveCtx, summary, reservationID)
 	}
-	return runPoolLoop(ctx, cfg, ctrl, exec, provider, logger)
+	exec := func(execCtx context.Context, n *store.Node, holderID string, reservation poolReservation) {
+		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.Token, cfg.CacheToken,
+			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger, reservation, provider)
+	}
+	return runPoolLoop(ctx, cfg, ctrl, exec, reserve, provider, logger)
 }
 
 func normalizePoolLoopConfig(cfg PoolLoopConfig) PoolLoopConfig {
@@ -108,10 +124,24 @@ func normalizePoolLoopConfig(cfg PoolLoopConfig) PoolLoopConfig {
 			cfg.HolderPrefix = "runner"
 		}
 	}
+	if cfg.WorkerID == "" {
+		cfg.WorkerID = cfg.HolderPrefix
+	}
+	if cfg.ExecutorKind == "" {
+		cfg.ExecutorKind = "direct"
+	}
 	return cfg
 }
 
-func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, exec poolExecFn, provider headroomProvider, logger *slog.Logger) error {
+type reserveNodeFn func(context.Context, store.NodeSchedulingSummary, string) (poolReservation, bool, error)
+
+type processSlotReservation struct{ id string }
+
+func (r processSlotReservation) ID() string             { return r.id }
+func (processSlotReservation) Release()                 {}
+func (processSlotReservation) Watch(context.CancelFunc) {}
+
+func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, exec poolExecFn, reserve reserveNodeFn, provider headroomProvider, logger *slog.Logger) error {
 	logger.Info(
 		cfg.SourceName+" started",
 		"controller", cfg.ControllerURL,
@@ -121,62 +151,141 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		"poll", cfg.PollInterval,
 		"holder_prefix", cfg.HolderPrefix,
 		"labels", cfg.Labels,
+		"claim_priority", cfg.ClaimPriority,
+		"executor_kind", cfg.ExecutorKind,
 		"auth", cfg.Token != "",
 	)
 
-	sem := make(chan struct{}, cfg.MaxConcurrent)
+	instanceID := time.Now().UnixNano()
+	budget := &poolClaimBudget{limit: cfg.MaxClaims}
 	var wg sync.WaitGroup
-	defer wg.Wait()
-
-	claimed := 0
-	for {
-		if err := ctx.Err(); err != nil {
-			logger.Info(cfg.SourceName+" shutting down", "reason", err)
-			return nil
-		}
-		if cfg.MaxClaims > 0 && claimed >= cfg.MaxClaims {
-			logger.Info(cfg.SourceName+" max-claims reached; exiting for container restart",
-				"claimed", claimed, "max_claims", cfg.MaxClaims)
-			return nil
-		}
-
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			return nil
-		}
-
-		holderID := fmt.Sprintf("%s:%d", cfg.HolderPrefix, time.Now().UnixNano())
-		n, err := claimer.ClaimNode(ctx, holderID, cfg.Labels, cfg.Lease, currentHeadroom(ctx, provider))
-		if err != nil {
-			<-sem
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-			observeClaimOutcome("error")
-			logger.Error("claim failed", "err", err, "source", cfg.SourceName)
-			sleepOrCancel(ctx, cfg.PollInterval)
-			continue
-		}
-		if n == nil {
-			<-sem
-			observeClaimOutcome("empty")
-			sleepOrCancel(ctx, cfg.PollInterval)
-			continue
-		}
-		observeClaimOutcome("claimed")
-		claimed++
-
-		logger.Info("claimed node",
-			"run_id", n.RunID, "node_id", n.NodeID,
-			"holder", holderID, "source", cfg.SourceName)
-
+	for slot := range cfg.MaxConcurrent {
+		holderID := fmt.Sprintf("%s:%d:%d", cfg.HolderPrefix, instanceID, slot)
 		wg.Add(1)
-		go func(n *store.Node, holderID string) {
+		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
-			exec(ctx, n, holderID)
-		}(n, holderID)
+			runPoolSlot(ctx, cfg, holderID, claimer, exec, reserve, provider, budget, logger)
+		}()
+	}
+	wg.Wait()
+	logger.Info(cfg.SourceName+" shutting down", "reason", context.Cause(ctx), "claimed", budget.claimedCount())
+	return nil
+}
+
+type poolClaimBudget struct {
+	mu       sync.Mutex
+	limit    int
+	claimed  int
+	inflight int
+}
+
+func (b *poolClaimBudget) reserve() (ok, done bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.limit > 0 && b.claimed >= b.limit {
+		return false, true
+	}
+	if b.limit > 0 && b.claimed+b.inflight >= b.limit {
+		return false, false
+	}
+	b.inflight++
+	return true, false
+}
+
+func (b *poolClaimBudget) finish(claimed bool) {
+	b.mu.Lock()
+	b.inflight--
+	if claimed {
+		b.claimed++
+	}
+	b.mu.Unlock()
+}
+
+func (b *poolClaimBudget) claimedCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.claimed
+}
+
+func runPoolSlot(ctx context.Context, cfg PoolLoopConfig, holderID string, claimer nodeClaimer, exec poolExecFn, reserve reserveNodeFn, provider headroomProvider, budget *poolClaimBudget, logger *slog.Logger) {
+	for ctx.Err() == nil {
+		ok, done := budget.reserve()
+		if done {
+			return
+		}
+		if !ok {
+			sleepOrCancel(ctx, cfg.PollInterval)
+			continue
+		}
+		claimed := false
+		func() {
+			defer func() { budget.finish(claimed) }()
+			executor := client.NodeClaimExecutor{
+				HolderID:      holderID,
+				WorkerID:      cfg.WorkerID,
+				ExecutorKind:  cfg.ExecutorKind,
+				ClaimPriority: cfg.ClaimPriority,
+				Labels:        cfg.Labels,
+				Lease:         cfg.Lease,
+				Headroom:      currentHeadroom(ctx, provider),
+			}
+			summary, err := claimer.PrepareNodeClaim(ctx, executor)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					observeClaimOutcome("error")
+					logger.Error("claim preparation failed", "err", err, "source", cfg.SourceName)
+				}
+				return
+			}
+			if summary == nil {
+				observeClaimOutcome("empty")
+				return
+			}
+			reservationID := fmt.Sprintf("%s:%s:%s", holderID, summary.RunID, summary.NodeID)
+			reservation, available, err := reserve(ctx, *summary, reservationID)
+			if err != nil {
+				observeClaimOutcome("error")
+				logger.Error("claim reservation failed", "err", err, "source", cfg.SourceName)
+				return
+			}
+			if !available {
+				observeClaimOutcome("reserved")
+				return
+			}
+			defer func() {
+				if !claimed {
+					reservation.Release()
+				}
+			}()
+			executor.ReservationID = reservation.ID()
+			for ctx.Err() == nil {
+				executor.Headroom = currentHeadroom(ctx, provider)
+				result, err := claimer.OfferNodeClaim(ctx, executor, summary.RunID, summary.NodeID)
+				if err != nil {
+					if !errors.Is(err, context.Canceled) {
+						observeClaimOutcome("error")
+						logger.Error("claim offer failed", "err", err, "source", cfg.SourceName)
+					}
+					return
+				}
+				if result.Node != nil {
+					claimed = true
+					observeClaimOutcome("claimed")
+					logger.Info("claimed node", "run_id", result.Node.RunID, "node_id", result.Node.NodeID,
+						"holder", holderID, "source", cfg.SourceName)
+					exec(ctx, result.Node, holderID, reservation)
+					return
+				}
+				if !result.Pending {
+					observeClaimOutcome("empty")
+					return
+				}
+				sleepOrCancel(ctx, cfg.PollInterval)
+			}
+		}()
+		if !claimed {
+			sleepOrCancel(ctx, cfg.PollInterval)
+		}
 	}
 }
 
@@ -192,6 +301,8 @@ func runRunnerCLI(args []string) error {
 		"per-claim heartbeat cadence (default: 3s)")
 	maxConcurrent := fs.Int("max-concurrent", 1,
 		"max nodes this runner will execute in parallel")
+	claimPriority := fs.Int("claim-priority", 0,
+		"executor priority from 0 through 100; registered controller policy may lower it")
 	lease := fs.Duration("lease", store.DefaultLeaseDuration,
 		"initial claim lease to request on each claim; the controller clamps it to 10m")
 	holderPrefix := fs.String("holder-prefix", "",
@@ -254,6 +365,9 @@ func runRunnerCLI(args []string) error {
 	if *controllerURL == "" {
 		fs.Usage()
 		return errors.New("--controller is required")
+	}
+	if *claimPriority < 0 || *claimPriority > 100 {
+		return fmt.Errorf("--claim-priority=%d: expected 0 through 100", *claimPriority)
 	}
 	if *triggerRunnerKind != "" && *triggerRunnerKind != "inprocess" &&
 		*triggerRunnerKind != "k8s" && *triggerRunnerKind != "warm" {
@@ -349,6 +463,9 @@ func runRunnerCLI(args []string) error {
 		Token:             *token,
 		HolderPrefix:      *holderPrefix,
 		Labels:            []string(labels),
+		ClaimPriority:     *claimPriority,
+		WorkerID:          *holderPrefix,
+		ExecutorKind:      "pool",
 		MaxConcurrent:     *maxConcurrent,
 		PollInterval:      *poll,
 		Lease:             *lease,
@@ -376,7 +493,7 @@ func executePooledNode(
 	lease, hbInterval time.Duration,
 	source string,
 	logger *slog.Logger,
-	admission *orchestrator.LocalAdmission,
+	reservation poolReservation,
 	provider headroomProvider,
 ) {
 	if hbInterval <= 0 {
@@ -388,6 +505,8 @@ func executePooledNode(
 
 	execCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer reservation.Release()
+	go reservation.Watch(cancel)
 
 	var hbWG sync.WaitGroup
 	hbWG.Add(1)
@@ -397,7 +516,7 @@ func executePooledNode(
 	}()
 
 	res, err := orchestrator.RunNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
-		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken))
+		&stdoutLogger{}, logger, nil, orchestrator.WithGitcache(gitcacheURL, cacheToken))
 	cancel()
 	hbWG.Wait()
 

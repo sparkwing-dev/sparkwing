@@ -142,7 +142,7 @@ func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
 			if strings.HasSuffix(req.URL.Path, "/touch") {
 				touches.Add(1)
 			}
-			if strings.HasSuffix(req.URL.Path, "/revoke-ready") {
+			if strings.HasSuffix(req.URL.Path, "/finalize-ready") {
 				node, err := st.ClaimNextReadyNode(req.Context(), store.ClaimIdentity{
 					Principal:   "remote-workstation",
 					TokenPrefix: "swr_remote-workstation",

@@ -1017,6 +1017,108 @@ type Headroom struct {
 	QueueDepth  int     `json:"queue_depth"`
 }
 
+// NodeClaimExecutor identifies one locally reserved executor slot.
+type NodeClaimExecutor struct {
+	HolderID      string
+	WorkerID      string
+	ExecutorKind  string
+	ReservationID string
+	ClaimPriority int
+	Labels        []string
+	Lease         time.Duration
+	Headroom      *Headroom
+}
+
+// NodeClaimOfferResult distinguishes a pending priority round from an empty
+// queue so a reserved slot stays pinned to one coordinator until resolution.
+type NodeClaimOfferResult struct {
+	Node    *store.Node
+	Pending bool
+}
+
+// PrepareNodeClaim returns the oldest eligible node's admission demand before
+// the executor commits a capacity reservation.
+func (c *Client) PrepareNodeClaim(ctx context.Context, executor NodeClaimExecutor) (*store.NodeSchedulingSummary, error) {
+	body := nodeClaimExecutorBody(executor)
+	delete(body, "reservation_id")
+	buf, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/api/v1/nodes/claim/prepare", bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var summary store.NodeSchedulingSummary
+		if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+			return nil, err
+		}
+		return &summary, nil
+	case http.StatusNoContent:
+		return nil, nil
+	default:
+		return nil, readHTTPError(resp)
+	}
+}
+
+// OfferNodeClaim submits a capacity-backed offer for a prepared node.
+func (c *Client) OfferNodeClaim(ctx context.Context, executor NodeClaimExecutor, runID, nodeID string) (NodeClaimOfferResult, error) {
+	body := nodeClaimExecutorBody(executor)
+	body["run_id"] = runID
+	body["node_id"] = nodeID
+	buf, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/api/v1/nodes/claim", bytes.NewReader(buf))
+	if err != nil {
+		return NodeClaimOfferResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return NodeClaimOfferResult{}, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var n store.Node
+		if err := json.NewDecoder(resp.Body).Decode(&n); err != nil {
+			return NodeClaimOfferResult{}, err
+		}
+		return NodeClaimOfferResult{Node: &n}, nil
+	case http.StatusNoContent:
+		return NodeClaimOfferResult{Pending: resp.Header.Get("X-Sparkwing-Claim-Offer-State") == "pending"}, nil
+	default:
+		return NodeClaimOfferResult{}, readHTTPError(resp)
+	}
+}
+
+func nodeClaimExecutorBody(executor NodeClaimExecutor) map[string]any {
+	body := map[string]any{
+		"holder_id":      executor.HolderID,
+		"worker_id":      executor.WorkerID,
+		"executor_kind":  executor.ExecutorKind,
+		"reservation_id": executor.ReservationID,
+		"claim_priority": executor.ClaimPriority,
+	}
+	if executor.Lease > 0 {
+		secs := max(int(executor.Lease.Seconds()), 1)
+		body["lease_secs"] = secs
+	}
+	if len(executor.Labels) > 0 {
+		body["labels"] = executor.Labels
+	}
+	if executor.Headroom != nil {
+		body["headroom"] = executor.Headroom
+	}
+	return body
+}
+
 // ClaimNode atomically claims the oldest ready, unclaimed node for
 // holderID. Returns (nil, nil) when the queue is empty. A non-nil
 // headroom advertises the box's live free capacity to the controller.
@@ -1077,6 +1179,20 @@ func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error 
 // runner claimed the node in the meantime.
 func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/revoke-ready",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	var resp struct {
+		Revoked bool `json:"revoked"`
+	}
+	if err := c.post(ctx, path, nil, http.StatusOK, &resp); err != nil {
+		return false, err
+	}
+	return resp.Revoked, nil
+}
+
+// FinalizeNodeReady atomically awards the best pending offer or transfers an
+// unclaimed node to the coordinator's local or cloud fallback.
+func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/finalize-ready",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	var resp struct {
 		Revoked bool `json:"revoked"`

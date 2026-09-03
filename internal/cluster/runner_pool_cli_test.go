@@ -20,18 +20,53 @@ type stubClaimer struct {
 }
 
 type claimResp struct {
-	node *store.Node
-	err  error
+	node    *store.Node
+	pending bool
+	err     error
 }
 
-func (s *stubClaimer) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error) {
+func (s *stubClaimer) PrepareNodeClaim(ctx context.Context, executor client.NodeClaimExecutor) (*store.NodeSchedulingSummary, error) {
+	return &store.NodeSchedulingSummary{RunID: "prepared", NodeID: "prepared", RequestedSlots: 1}, nil
+}
+
+func (s *stubClaimer) OfferNodeClaim(ctx context.Context, executor client.NodeClaimExecutor, runID, nodeID string) (client.NodeClaimOfferResult, error) {
 	idx := int(s.calls.Add(1)) - 1
 	if idx >= len(s.responses) {
 		<-ctx.Done()
-		return nil, ctx.Err()
+		return client.NodeClaimOfferResult{}, ctx.Err()
 	}
 	r := s.responses[idx]
-	return r.node, r.err
+	return client.NodeClaimOfferResult{Node: r.node, Pending: r.pending}, r.err
+}
+
+type trackingReservation struct {
+	id       string
+	released atomic.Int64
+}
+
+func (r *trackingReservation) ID() string             { return r.id }
+func (r *trackingReservation) Release()               { r.released.Add(1) }
+func (*trackingReservation) Watch(context.CancelFunc) {}
+
+type pendingClaimer struct {
+	offers []client.NodeClaimExecutor
+	calls  atomic.Int64
+	cancel context.CancelFunc
+}
+
+func (*pendingClaimer) PrepareNodeClaim(context.Context, client.NodeClaimExecutor) (*store.NodeSchedulingSummary, error) {
+	return &store.NodeSchedulingSummary{RunID: "run", NodeID: "node", RequestedSlots: 1}, nil
+}
+
+func (c *pendingClaimer) OfferNodeClaim(_ context.Context, executor client.NodeClaimExecutor, _, _ string) (client.NodeClaimOfferResult, error) {
+	c.offers = append(c.offers, executor)
+	if c.calls.Add(1) == 1 {
+		return client.NodeClaimOfferResult{Pending: true}, nil
+	}
+	if c.cancel != nil {
+		c.cancel()
+	}
+	return client.NodeClaimOfferResult{}, nil
 }
 
 func fakeNode(id string) *store.Node {
@@ -52,8 +87,11 @@ func TestRunPoolLoop_MaxClaimsExitsAfterN(t *testing.T) {
 	}}
 
 	var executed atomic.Int64
-	exec := func(ctx context.Context, n *store.Node, holderID string) {
+	exec := func(ctx context.Context, n *store.Node, holderID string, reservation poolReservation) {
 		executed.Add(1)
+	}
+	reserve := func(_ context.Context, _ store.NodeSchedulingSummary, id string) (poolReservation, bool, error) {
+		return processSlotReservation{id: id}, true, nil
 	}
 
 	cfg := normalizePoolLoopConfig(PoolLoopConfig{
@@ -68,7 +106,7 @@ func TestRunPoolLoop_MaxClaimsExitsAfterN(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	if err := runPoolLoop(ctx, cfg, stub, exec, nil, discardLogger()); err != nil {
+	if err := runPoolLoop(ctx, cfg, stub, exec, reserve, nil, discardLogger()); err != nil {
 		t.Fatalf("runPoolLoop: %v", err)
 	}
 
@@ -88,8 +126,11 @@ func TestRunPoolLoop_MaxClaimsZeroIsUnlimited(t *testing.T) {
 	stub := &stubClaimer{responses: nodes}
 
 	var executed atomic.Int64
-	exec := func(ctx context.Context, n *store.Node, holderID string) {
+	exec := func(ctx context.Context, n *store.Node, holderID string, reservation poolReservation) {
 		executed.Add(1)
+	}
+	reserve := func(_ context.Context, _ store.NodeSchedulingSummary, id string) (poolReservation, bool, error) {
+		return processSlotReservation{id: id}, true, nil
 	}
 
 	cfg := normalizePoolLoopConfig(PoolLoopConfig{
@@ -104,7 +145,7 @@ func TestRunPoolLoop_MaxClaimsZeroIsUnlimited(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	if err := runPoolLoop(ctx, cfg, stub, exec, nil, discardLogger()); err != nil {
+	if err := runPoolLoop(ctx, cfg, stub, exec, reserve, nil, discardLogger()); err != nil {
 		t.Fatalf("runPoolLoop: %v", err)
 	}
 
@@ -122,8 +163,11 @@ func TestRunPoolLoop_EmptyPollsDoNotTickCounter(t *testing.T) {
 	}}
 
 	var executed atomic.Int64
-	exec := func(ctx context.Context, n *store.Node, holderID string) {
+	exec := func(ctx context.Context, n *store.Node, holderID string, reservation poolReservation) {
 		executed.Add(1)
+	}
+	reserve := func(_ context.Context, _ store.NodeSchedulingSummary, id string) (poolReservation, bool, error) {
+		return processSlotReservation{id: id}, true, nil
 	}
 
 	cfg := normalizePoolLoopConfig(PoolLoopConfig{
@@ -137,12 +181,54 @@ func TestRunPoolLoop_EmptyPollsDoNotTickCounter(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := runPoolLoop(ctx, cfg, stub, exec, nil, discardLogger()); err != nil {
+	if err := runPoolLoop(ctx, cfg, stub, exec, reserve, nil, discardLogger()); err != nil {
 		t.Fatalf("runPoolLoop: %v", err)
 	}
 
 	if got := executed.Load(); got != 2 {
 		t.Errorf("exec calls: got %d, want 2 (empty/error should not count toward MaxClaims)", got)
+	}
+}
+
+func TestRunPoolSlot_DoesNotOfferWithoutAnImmediateReservation(t *testing.T) {
+	stub := &stubClaimer{}
+	cfg := normalizePoolLoopConfig(PoolLoopConfig{
+		ControllerURL: "http://stub", HolderPrefix: "test", MaxConcurrent: 1,
+		PollInterval: time.Millisecond, SourceName: "test runner",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	reserve := func(_ context.Context, _ store.NodeSchedulingSummary, _ string) (poolReservation, bool, error) {
+		cancel()
+		return nil, false, nil
+	}
+	runPoolSlot(ctx, cfg, "holder", stub, nil, reserve, nil, &poolClaimBudget{}, discardLogger())
+	if got := stub.calls.Load(); got != 0 {
+		t.Fatalf("offer calls = %d, want 0", got)
+	}
+}
+
+func TestRunPoolSlot_PinsOneReservationAcrossTheOfferRound(t *testing.T) {
+	reservation := &trackingReservation{id: "local-reservation"}
+	cfg := normalizePoolLoopConfig(PoolLoopConfig{
+		ControllerURL: "http://coordinator-a", HolderPrefix: "test", WorkerID: "worker-a",
+		MaxConcurrent: 1, PollInterval: time.Millisecond, SourceName: "test runner",
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	stub := &pendingClaimer{cancel: cancel}
+	reserve := func(_ context.Context, _ store.NodeSchedulingSummary, _ string) (poolReservation, bool, error) {
+		return reservation, true, nil
+	}
+	runPoolSlot(ctx, cfg, "coordinator-a:slot-0", stub, nil, reserve, nil, &poolClaimBudget{limit: 1}, discardLogger())
+	if len(stub.offers) != 2 {
+		t.Fatalf("offers = %d, want 2", len(stub.offers))
+	}
+	for i, offer := range stub.offers {
+		if offer.HolderID != "coordinator-a:slot-0" || offer.WorkerID != "worker-a" || offer.ReservationID != reservation.id {
+			t.Fatalf("offer %d = %+v", i, offer)
+		}
+	}
+	if got := reservation.released.Load(); got != 1 {
+		t.Fatalf("reservation releases = %d, want 1 after losing the offer", got)
 	}
 }
 
