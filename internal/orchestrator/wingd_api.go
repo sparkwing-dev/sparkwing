@@ -172,6 +172,14 @@ func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
 		a.health(w, r.WithContext(ctx))
 		return
 	}
+	// safety: a route this build does not serve is a permanent answer, so it
+	// is given before the store is consulted. Behind the store guard it would
+	// reach a client as the 503 that means "come back", and a pipeline older
+	// or newer than this daemon could never tell the two apart.
+	if !controller.RegisteredRoute(r) {
+		controller.WriteUnsupportedRoute(w, r)
+		return
+	}
 	rw, ro, err := a.handles(ctx, r)
 	if err != nil {
 		writeAPIUnavailable(w, err)

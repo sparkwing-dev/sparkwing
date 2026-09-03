@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -16,9 +17,11 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -207,8 +210,8 @@ func TestHostedSelection_FallsBackWhenTheSocketIsGone(t *testing.T) {
 	if got != "" {
 		t.Fatalf("socket = %q, want the direct path", got)
 	}
-	if !strings.Contains(reason, "api.sock") {
-		t.Fatalf("reason = %q, want it to name the socket", reason)
+	if !strings.Contains(reason.Error(), "api.sock") {
+		t.Fatalf("reason = %v, want it to name the socket", reason)
 	}
 }
 
@@ -222,48 +225,118 @@ func TestHostedSelection_SkippedWhenUnadmittedIsAllowed(t *testing.T) {
 	if got != "" {
 		t.Fatalf("socket = %q, want the direct path", got)
 	}
-	if !strings.Contains(reason, AllowUnadmittedEnv) {
-		t.Fatalf("reason = %q, want it to name %s", reason, AllowUnadmittedEnv)
+	if !strings.Contains(reason.Error(), AllowUnadmittedEnv) {
+		t.Fatalf("reason = %v, want it to name %s", reason, AllowUnadmittedEnv)
 	}
 }
 
-func TestHostedRun_UnusableDaemonStoreFailsTheRun(t *testing.T) {
+func TestHostedRun_BrokenDaemonStoreTakesTheDirectPath(t *testing.T) {
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
 	paths := PathsAt(home)
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
 	}
-	// safety: a directory where the store file belongs is the cheapest open
-	// failure that survives every retry, which is what a wedged store looks
-	// like to the run.
-	if err := os.MkdirAll(filepath.Join(paths.StateDB()), 0o755); err != nil {
-		t.Fatalf("wedge the store: %v", err)
+
+	// safety: the daemon holds a store it cannot open while this run's own
+	// store path is fine, which is the skew the fallback exists for: the
+	// process that can still open the file is the run.
+	brokenHome := wingdTestHome(t)
+	if err := os.MkdirAll(PathsAt(brokenHome).StateDB(), 0o755); err != nil {
+		t.Fatalf("break the daemon's store: %v", err)
 	}
-	startAPIDaemon(t, home, nil)
+	brokenRuns, err := NewHeldRunStore(brokenHome)
+	if err != nil {
+		t.Fatalf("held run store: %v", err)
+	}
+	t.Cleanup(func() { _ = brokenRuns.Close() })
+	admissionRuns, err := NewHeldRunStore(home)
+	if err != nil {
+		t.Fatalf("held run store: %v", err)
+	}
+	t.Cleanup(func() { _ = admissionRuns.Close() })
+	startAPIDaemonSplit(t, home, admissionRuns, brokenRuns, nil, nil)
+
+	opens := countStoreOpens(t)
+	var lines []string
+	var mu sync.Mutex
+	adm := testWingdAdmission(home, nil)
+	adm.Logf = func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, fmt.Sprintf(format, args...))
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	started := time.Now()
-	res, err := RunLocal(ctx, paths, Options{
-		Pipeline:  "hosted-memo",
-		Admission: testWingdAdmission(home, nil),
-	})
-	if err == nil && res != nil && res.Status == "success" {
-		t.Fatal("the run succeeded against a store the daemon cannot open")
+	res, err := RunLocal(ctx, paths, Options{Pipeline: "hosted-memo", Admission: adm})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
 	}
-	if elapsed := time.Since(started); elapsed >= wingdTestWait {
-		t.Fatalf("the run took %s, so it hung rather than failing", elapsed)
+	if res.Status != "success" {
+		t.Fatalf("status = %q, want success (%v)", res.Status, res.Error)
 	}
-	message := ""
-	switch {
-	case err != nil:
-		message = err.Error()
-	case res != nil && res.Error != nil:
-		message = res.Error.Error()
+	if got := opens.Load(); got != 1 {
+		t.Fatalf("the run opened the store %d times, want 1 on the direct path", got)
 	}
-	if !strings.Contains(message, "admission daemon") {
-		t.Fatalf("failure = %q, want it to name the admission daemon", message)
+	mu.Lock()
+	defer mu.Unlock()
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "runs store") {
+		t.Fatalf("the fallback line does not name the daemon's reason: %q", joined)
+	}
+}
+
+func TestHostedAPIReachable_RefusesADegradedDaemon(t *testing.T) {
+	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"status":"degraded","auth":"enabled","store":"error: disk is on fire"}`))
+	}))
+	err := hostedAPIReachable(context.Background(), sock)
+	if err == nil {
+		t.Fatal("a degraded daemon was accepted as this run's host")
+	}
+	if !strings.Contains(err.Error(), "503") {
+		t.Fatalf("err = %v, want it to name the answer", err)
+	}
+}
+
+func TestHostedAPIReachable_RefusesANonJSONAnswer(t *testing.T) {
+	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("nope"))
+	}))
+	if err := hostedAPIReachable(context.Background(), sock); err == nil {
+		t.Fatal("a 500 was accepted as this run's host")
+	}
+}
+
+func TestHostedSelection_LeavesTheNoDaemonLineToAdmission(t *testing.T) {
+	home := wingdTestHome(t)
+	var lines []string
+	var mu sync.Mutex
+	adm := testWingdAdmission(home, nil)
+	adm.Logf = func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, fmt.Sprintf(format, args...))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	opts := Options{DefaultStateDB: PathsAt(home).StateDB(), Admission: adm}
+	if hosted, release := hostedBackendsForRun(ctx, PathsAt(home), &opts); hosted.APISocket != "" {
+		release()
+		t.Fatal("selection found a daemon where none runs")
+	} else {
+		release()
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(lines) != 0 {
+		t.Fatalf("selection printed %d line(s) for a condition admission reports itself: %v", len(lines), lines)
 	}
 }
 
@@ -303,12 +376,13 @@ func serveStubAPI(t *testing.T, h http.Handler) string {
 func TestHostedAPIReachable_RejectsADaemonMissingACoordinationRoute(t *testing.T) {
 	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/api/v1/health" {
-			_, _ = w.Write([]byte(`{"status":"ok","auth":"enabled","store":"ready"}`))
-			return
+		switch r.URL.Path {
+		case "/api/v1/health":
+			_, _ = w.Write([]byte(`{"status":"ok","auth":"enabled","store":"absent"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"unsupported","route":"GET ` + r.URL.Path + `"}`))
 		}
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":"unsupported","route":"GET ` + r.URL.Path + `"}`))
 	}))
 
 	err := hostedAPIReachable(context.Background(), sock)
@@ -318,16 +392,133 @@ func TestHostedAPIReachable_RejectsADaemonMissingACoordinationRoute(t *testing.T
 }
 
 func TestHostedAPIReachable_AcceptsADaemonWithNoStoreYet(t *testing.T) {
+	var probed []string
+	var mu sync.Mutex
 	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/health" {
 			_, _ = w.Write([]byte(`{"status":"ok","auth":"enabled","store":"absent"}`))
 			return
 		}
-		t.Errorf("unexpected request for %s", r.URL.Path)
+		mu.Lock()
+		probed = append(probed, r.URL.Path)
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{}`))
 	}))
 
 	if err := hostedAPIReachable(context.Background(), sock); err != nil {
 		t.Fatalf("err = %v, want a fresh home to be hosted", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(probed) != len(hostedCoordinationProbes) {
+		t.Fatalf("probed %d route(s) on a store-less daemon, want %d: %v",
+			len(probed), len(hostedCoordinationProbes), probed)
+	}
+}
+
+func TestLocalTriggerBackends_HostChildRunsAndReplays(t *testing.T) {
+	home := wingdTestHome(t)
+	// safety: a child run resolves the daemon from the environment, as the
+	// process that spawns it does.
+	t.Setenv("SPARKWING_HOME", home)
+	startAPIDaemon(t, home, nil)
+	paths := PathsAt(home)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	backends, release, err := localTriggerBackends(ctx, paths, "")
+	if err != nil {
+		t.Fatalf("localTriggerBackends: %v", err)
+	}
+	defer release()
+
+	if backends.APISocket == "" {
+		t.Fatal("a child run took the direct path while the daemon serves the API socket")
+	}
+	if _, err := os.Stat(paths.StateDB()); err == nil {
+		t.Fatalf("a child run created %s, which the daemon owns", paths.StateDB())
+	}
+}
+
+func TestLocalTriggerBackends_ANamedProfileKeepsItsOwnStore(t *testing.T) {
+	home := wingdTestHome(t)
+	// safety: a child run resolves the daemon from the environment, as the
+	// process that spawns it does.
+	t.Setenv("SPARKWING_HOME", home)
+	startAPIDaemon(t, home, nil)
+	paths := PathsAt(home)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	if _, release, err := localTriggerBackends(ctx, paths, "does-not-exist"); err == nil {
+		release()
+		t.Fatal("a named profile resolved to the daemon's socket")
+	}
+}
+
+func TestRunReplayNode_ReadsItsRunThroughTheDaemon(t *testing.T) {
+	home := wingdTestHome(t)
+	sock, _ := startAPIDaemon(t, home, nil)
+	paths := PathsAt(home)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+	backends, release := HostedBackends(paths, sock, nil)
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	if err := backends.State.CreateRun(ctx, store.Run{
+		ID: "regular", Pipeline: "hosted-memo", Status: "running", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	_, err := RunReplayNode(ctx, paths, backends, "regular", "first", nil)
+	if err == nil {
+		t.Fatal("a run that is not a replay was replayed")
+	}
+	if !strings.Contains(err.Error(), "replay") {
+		t.Fatalf("err = %v, want the replay guard reached over the daemon", err)
+	}
+}
+
+func TestWingdAPI_UnknownRouteAnswersUnsupportedWithNoStore(t *testing.T) {
+	home := wingdTestHome(t)
+	sock, _ := startAPIDaemon(t, home, nil)
+	if _, err := os.Stat(PathsAt(home).StateDB()); err == nil {
+		t.Fatal("the fixture created a store")
+	}
+
+	httpClient := apiHTTPClient(sock)
+	defer httpClient.CloseIdleConnections()
+	req, err := http.NewRequest(http.MethodGet, apiBaseURL+"/api/v1/no-such-route", nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %s, want 404 for a route this build does not serve", resp.Status)
+	}
+	var body struct {
+		Error string `json:"error"`
+		Route string `json:"route"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error != controller.UnsupportedRouteError || body.Route == "" {
+		t.Fatalf("body = %+v, want the unsupported-route answer", body)
 	}
 }

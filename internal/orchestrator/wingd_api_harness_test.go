@@ -38,7 +38,19 @@ func startAPIDaemonWith(t *testing.T, home string, tune func(*wingd.Config), tun
 		t.Fatalf("held run store: %v", err)
 	}
 	t.Cleanup(func() { _ = runs.Close() })
-	api := newWingdAPI(runs, nil, nil)
+	return startAPIDaemonOn(t, home, runs, tune, tuneAPI)
+}
+
+func startAPIDaemonOn(t *testing.T, home string, runs *HeldRunStore, tune func(*wingd.Config), tuneAPI func(*wingdAPI)) (string, *HeldRunStore) {
+	t.Helper()
+	return startAPIDaemonSplit(t, home, runs, runs, tune, tuneAPI)
+}
+
+// startAPIDaemonSplit gives admission and the API socket different runs
+// stores, so a test can fault one without the other.
+func startAPIDaemonSplit(t *testing.T, home string, runs, apiRuns *HeldRunStore, tune func(*wingd.Config), tuneAPI func(*wingdAPI)) (string, *HeldRunStore) {
+	t.Helper()
+	api := newWingdAPI(apiRuns, nil, nil)
 	if tuneAPI != nil {
 		tuneAPI(api)
 	}

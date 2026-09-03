@@ -99,6 +99,7 @@ type Principal struct {
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
+func RegisteredRoute(r *http.Request) bool
 type RunRequest struct {
 	RunID       string
 	Pipeline    string
@@ -161,6 +162,7 @@ type TrendPoint struct {
 	AvgWaitMs int64
 }
 const UnsupportedRouteError = "unsupported"
+func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 
 # methods on un-declared receiver types (likely a bug)
 func (r *flushingStatusRecorder) Flush()

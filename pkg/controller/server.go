@@ -433,6 +433,16 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 //   - When the Authenticator is disabled, middleware + requireScope are
 //     pass-through.
 func (s *Server) Handler() http.Handler {
+	mux, router := s.routers()
+	router.Handle("/", s.authenticated(unsupportedRouteFallback(mux)))
+	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
+}
+
+// routers registers every route this controller serves and returns the
+// authenticated mux and the public one, neither wired to the other. It runs
+// without reaching the store, so a caller that only needs to know whether a
+// route exists can build it from a zero Server.
+func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux := http.NewServeMux()
 
 	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateRun)))
@@ -588,8 +598,6 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret)))
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret)))
 
-	authed := s.authenticated(unsupportedRouteFallback(mux))
-
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
 	router.Handle("POST /api/v1/auth/login", s.loginLimit.middleware(http.HandlerFunc(s.handleLogin)))
@@ -600,9 +608,33 @@ func (s *Server) Handler() http.Handler {
 		router.Handle("GET /metrics", metricsHandler())
 	}
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
-	router.Handle("/", authed)
 
-	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
+	return mux, router
+}
+
+// safety: registering a route only takes a method value, so no handler runs
+// and the zero Server behind these muxes never reaches a store. They exist to
+// answer "does this build serve that route" for a caller with no store open.
+var routeProbeMuxes = sync.OnceValues(func() (*http.ServeMux, *http.ServeMux) {
+	return (&Server{}).routers()
+})
+
+// RegisteredRoute reports whether a controller of this build registers a
+// handler for the request's method and path. A caller that answers requests
+// in front of a controller uses it to tell a route this build does not serve,
+// which is a permanent answer, from a condition that may clear.
+func RegisteredRoute(r *http.Request) bool {
+	mux, router := routeProbeMuxes()
+	return routeRegistered(router, r) || routeRegistered(mux, r)
+}
+
+// WriteUnsupportedRoute answers a request for a route this build does not
+// register, in the body [UnsupportedRouteError] documents.
+func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusNotFound, map[string]string{
+		"error": UnsupportedRouteError,
+		"route": r.Method + " " + r.URL.Path,
+	})
 }
 
 func (s *Server) authenticated(next http.Handler) http.Handler {

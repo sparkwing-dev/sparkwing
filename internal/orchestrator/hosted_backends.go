@@ -30,30 +30,49 @@ const hostedAPITimeout = APIRequestTimeout + 15*time.Second
 
 const hostedAPIProbeTimeout = 3 * time.Second
 
+// errNoHostedAPI marks a reason the run took the direct path that admission
+// does not report for itself. A daemon this pipeline could not reach at all
+// is admission's own subject, and it says so.
+var errNoHostedAPI = errors.New("the admission daemon does not serve this run's state")
+
 // NewAPISocketClient returns an HTTP client that reaches the daemon's
 // controller API over the unix socket at sock. Requests carry no bearer
-// token: the daemon takes the connection's peer uid as the principal.
+// token: the daemon takes the connection's peer uid as the principal. A
+// write the daemon can still be shown to have missed is retried across a
+// daemon restart; see [HostedRestartBudget].
 func NewAPISocketClient(sock string) *http.Client {
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	return &http.Client{
-		Timeout: hostedAPITimeout,
-		Transport: otelutil.WrapTransport(&http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return dialer.DialContext(ctx, "unix", sock)
-			},
-			MaxIdleConns:          16,
-			MaxIdleConnsPerHost:   16,
-			IdleConnTimeout:       90 * time.Second,
-			ResponseHeaderTimeout: hostedAPITimeout,
-		}),
+		Timeout:   hostedAPITimeout,
+		Transport: otelutil.WrapTransport(newHostedRetryTransport(apiSocketTransport(sock))),
+	}
+}
+
+// safety: selection must read the daemon's answer, not wait it out. The
+// retrying client exists so a run outlives a restart; a probe that retried a
+// 503 would spend its whole budget on a daemon that already said no.
+func newAPIProbeClient(sock string) *http.Client {
+	return &http.Client{Timeout: hostedAPIProbeTimeout, Transport: apiSocketTransport(sock)}
+}
+
+func apiSocketTransport(sock string) *http.Transport {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	return &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", sock)
+		},
+		MaxIdleConns:          16,
+		MaxIdleConnsPerHost:   16,
+		IdleConnTimeout:       90 * time.Second,
+		ResponseHeaderTimeout: hostedAPITimeout,
 	}
 }
 
 // HostedBackends are the backends of a local run whose state lives behind
 // the daemon's API socket. The run opens no store: state and concurrency
 // travel over sock, while logs and artifacts stay on this machine's own
-// files as they are for a run that opens the store directly.
-func HostedBackends(paths Paths, sock string, art storage.ArtifactStore) Backends {
+// files as they are for a run that opens the store directly. The returned
+// function releases the connections the run held.
+func HostedBackends(paths Paths, sock string, art storage.ArtifactStore) (Backends, func()) {
 	httpClient := NewAPISocketClient(sock)
 	return Backends{
 		State:             client.New(HostedAPIBaseURL, httpClient),
@@ -62,63 +81,50 @@ func HostedBackends(paths Paths, sock string, art storage.ArtifactStore) Backend
 		Artifact:          art,
 		LocalCoordination: true,
 		APISocket:         sock,
-	}
+	}, httpClient.CloseIdleConnections
 }
 
 // safety: the handshake is the only place the daemon's own answer about
 // api.sock is available, so selection happens before anything opens a store
 // and never mid-run: once a run row exists on the daemon, an API failure is
 // a run failure through the client's retry policy.
-func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (string, string) {
+func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (string, error) {
 	if adm == nil {
-		return "", "this run does not use the admission daemon"
+		return "", fmt.Errorf("%w: this run does not use the admission daemon", errNoHostedAPI)
 	}
 	if allowUnadmitted() {
-		return "", AllowUnadmittedEnv + "=1 skips the daemon"
+		return "", fmt.Errorf("%w: %s=1 skips the daemon", errNoHostedAPI, AllowUnadmittedEnv)
 	}
 	cl, err := wingdclient.EnsureDaemon(ctx, adm.clientOptions())
 	if err != nil {
-		return "", err.Error()
+		return "", err
 	}
 	defer func() { _ = cl.Close() }()
 	if !cl.APIReady() {
-		if reason := cl.APIError(); reason != "" {
-			return "", reason
+		reason := cl.APIError()
+		if reason == "" {
+			reason = fmt.Sprintf("the daemon (%s) advertises no controller API socket", cl.DaemonVersion())
 		}
-		return "", fmt.Sprintf("the admission daemon (%s) serves no controller API socket", cl.DaemonVersion())
+		return "", fmt.Errorf("%w: %s", errNoHostedAPI, reason)
 	}
 	sock := cl.APISocket()
 	if err := hostedAPIReachable(ctx, sock); err != nil {
-		return "", err.Error()
+		return "", fmt.Errorf("%w: %w", errNoHostedAPI, err)
 	}
-	return sock, ""
+	return sock, nil
 }
 
-// safety: a daemon older than this pipeline serves api.sock but not every
-// route the run needs, and answers 404 with the unsupported-route body. The
-// probe asks before any state is written, because after that a missing route
-// is a run failure rather than a reason to change backend.
-func hostedAPIServesCoordination(ctx context.Context, sock string) error {
-	ctx, cancel := context.WithTimeout(ctx, hostedAPIProbeTimeout)
-	defer cancel()
-	httpClient := NewAPISocketClient(sock)
-	defer httpClient.CloseIdleConnections()
-	_, err := client.New(HostedAPIBaseURL, httpClient).
-		ListPendingTriggersForParent(ctx, coordinationProbeRunID)
-	if errors.Is(err, client.ErrControllerLacksRoute) {
-		return err
-	}
-	return nil
+// hostedHealth is the part of the daemon's health answer that decides
+// whether it can hold this run's state.
+type hostedHealth struct {
+	Store string `json:"store"`
 }
 
-// safety: no run carries this id, so the probe reads an empty list from a
-// daemon that serves the route and 404 from one that does not.
-const coordinationProbeRunID = "sparkwing-route-probe"
-
-// safety: one request before any state is written, because a socket the
-// daemon advertised can still be gone, and a daemon older than this pipeline
-// answers 404 on routes the run needs. Either way the run takes today's
-// direct path instead of failing.
+// safety: only a daemon answering 200 with a store it can open, or with none
+// yet, hosts a run. Every other answer -- a degraded 503 from a daemon whose
+// own handle failed, a 404 from one too old for the route, a body that is not
+// the health answer -- is a daemon this run must not bind to, because the
+// process that could still open that file itself is this one.
 func hostedAPIReachable(ctx context.Context, sock string) error {
 	ctx, cancel := context.WithTimeout(ctx, hostedAPIProbeTimeout)
 	defer cancel()
@@ -126,7 +132,7 @@ func hostedAPIReachable(ctx context.Context, sock string) error {
 	if err != nil {
 		return err
 	}
-	probe := NewAPISocketClient(sock)
+	probe := newAPIProbeClient(sock)
 	defer probe.CloseIdleConnections()
 	resp, err := probe.Do(req)
 	if err != nil {
@@ -136,29 +142,87 @@ func hostedAPIReachable(ctx context.Context, sock string) error {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 	}()
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("the admission daemon on %s does not serve GET /api/v1/health", sock)
+	var health hostedHealth
+	decodeErr := json.NewDecoder(resp.Body).Decode(&health)
+	if resp.StatusCode != http.StatusOK {
+		if decodeErr == nil && health.Store != "" {
+			return fmt.Errorf("%s answered %s for GET /api/v1/health with its runs store %q",
+				sock, resp.Status, health.Store)
+		}
+		return fmt.Errorf("%s answered %s for GET /api/v1/health", sock, resp.Status)
 	}
-	var health struct {
-		Store string `json:"store"`
+	if decodeErr != nil {
+		return fmt.Errorf("%s did not answer GET /api/v1/health with a health report: %w", sock, decodeErr)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil || health.Store != "ready" {
-		return nil
+	switch health.Store {
+	case "ready", "absent":
+	default:
+		return fmt.Errorf("the daemon on %s reports its runs store %q", sock, health.Store)
 	}
 	return hostedAPIServesCoordination(ctx, sock)
 }
 
-func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) Backends {
-	if opts.State != nil || !runsOnMachineStore(opts, paths) {
-		return Backends{}
-	}
-	sock, reason := selectHostedAPI(ctx, opts.Admission)
-	if sock == "" {
-		if opts.Admission != nil && !allowUnadmitted() {
-			opts.Admission.logf("the admission daemon does not serve this run's state, so it opens %s directly: %s",
-				paths.StateDB(), reason)
+// hostedCoordinationProbes names one route per family a hosted run needs
+// beyond the run and node state every released daemon serving api.sock
+// already carries. They are GETs so the probe writes nothing.
+//
+// safety: no run and no pipeline carries these ids, so a daemon that serves
+// the route answers an empty result and one that does not answers the
+// unsupported body, whatever state its store is in.
+var hostedCoordinationProbes = []func(context.Context, *client.Client) error{
+	func(ctx context.Context, c *client.Client) error {
+		_, err := c.ListPendingTriggersForParent(ctx, hostedProbeID)
+		return err
+	},
+	func(ctx context.Context, c *client.Client) error {
+		_, err := c.GetTrigger(ctx, hostedProbeID)
+		return err
+	},
+	func(ctx context.Context, c *client.Client) error {
+		_, err := c.GetPipelineProfile(ctx, hostedProbeID, "")
+		return err
+	},
+	func(ctx context.Context, c *client.Client) error {
+		_, err := c.ListNodeMetrics(ctx, hostedProbeID, hostedProbeID)
+		return err
+	},
+}
+
+const hostedProbeID = "sparkwing-route-probe"
+
+// safety: a daemon older than this pipeline serves api.sock but not every
+// route the run needs, and the trigger loop's failure is otherwise silent --
+// it retries every 500 ms and gives up on the wedge budget while the run
+// reports success. The probe asks before any state is written, because after
+// that a missing route is a run failure rather than a reason to change
+// backend.
+func hostedAPIServesCoordination(ctx context.Context, sock string) error {
+	httpClient := newAPIProbeClient(sock)
+	defer httpClient.CloseIdleConnections()
+	c := client.New(HostedAPIBaseURL, httpClient)
+	for _, probe := range hostedCoordinationProbes {
+		if err := probe(ctx, c); errors.Is(err, client.ErrControllerLacksRoute) {
+			return err
 		}
-		return Backends{}
+	}
+	return nil
+}
+
+func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) (Backends, func()) {
+	noop := func() {}
+	if opts.State != nil || !runsOnMachineStore(opts, paths) {
+		return Backends{}, noop
+	}
+	sock, err := selectHostedAPI(ctx, opts.Admission)
+	if err != nil {
+		// safety: a daemon this run could not reach at all is admission's own
+		// subject and it prints its own line, so only a reason admission never
+		// sees is announced here. Two lines for one condition is the thing
+		// the design's single stderr warning replaces.
+		if opts.Admission != nil && errors.Is(err, errNoHostedAPI) && !allowUnadmitted() {
+			opts.Admission.logf("%s, so it opens %s directly", err, paths.StateDB())
+		}
+		return Backends{}, noop
 	}
 	return HostedBackends(paths, sock, nil)
 }
