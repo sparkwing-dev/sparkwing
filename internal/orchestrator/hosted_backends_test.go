@@ -2,7 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -275,5 +279,55 @@ func TestAPISocketBeside_MatchesTheDaemonLayout(t *testing.T) {
 	}
 	if got := wingd.APISocketBeside(sock); got != want {
 		t.Fatalf("APISocketBeside = %q, want %q", got, want)
+	}
+}
+
+func serveStubAPI(t *testing.T, h http.Handler) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "swstub")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "api.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	return sock
+}
+
+func TestHostedAPIReachable_RejectsADaemonMissingACoordinationRoute(t *testing.T) {
+	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/health" {
+			_, _ = w.Write([]byte(`{"status":"ok","auth":"enabled","store":"ready"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"unsupported","route":"GET ` + r.URL.Path + `"}`))
+	}))
+
+	err := hostedAPIReachable(context.Background(), sock)
+	if !errors.Is(err, client.ErrControllerLacksRoute) {
+		t.Fatalf("err = %v, want ErrControllerLacksRoute", err)
+	}
+}
+
+func TestHostedAPIReachable_AcceptsADaemonWithNoStoreYet(t *testing.T) {
+	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/health" {
+			_, _ = w.Write([]byte(`{"status":"ok","auth":"enabled","store":"absent"}`))
+			return
+		}
+		t.Errorf("unexpected request for %s", r.URL.Path)
+	}))
+
+	if err := hostedAPIReachable(context.Background(), sock); err != nil {
+		t.Fatalf("err = %v, want a fresh home to be hosted", err)
 	}
 }

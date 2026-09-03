@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -97,6 +99,27 @@ func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (string, string) 
 	return sock, ""
 }
 
+// safety: a daemon older than this pipeline serves api.sock but not every
+// route the run needs, and answers 404 with the unsupported-route body. The
+// probe asks before any state is written, because after that a missing route
+// is a run failure rather than a reason to change backend.
+func hostedAPIServesCoordination(ctx context.Context, sock string) error {
+	ctx, cancel := context.WithTimeout(ctx, hostedAPIProbeTimeout)
+	defer cancel()
+	httpClient := NewAPISocketClient(sock)
+	defer httpClient.CloseIdleConnections()
+	_, err := client.New(HostedAPIBaseURL, httpClient).
+		ListPendingTriggersForParent(ctx, coordinationProbeRunID)
+	if errors.Is(err, client.ErrControllerLacksRoute) {
+		return err
+	}
+	return nil
+}
+
+// safety: no run carries this id, so the probe reads an empty list from a
+// daemon that serves the route and 404 from one that does not.
+const coordinationProbeRunID = "sparkwing-route-probe"
+
 // safety: one request before any state is written, because a socket the
 // daemon advertised can still be gone, and a daemon older than this pipeline
 // answers 404 on routes the run needs. Either way the run takes today's
@@ -121,7 +144,13 @@ func hostedAPIReachable(ctx context.Context, sock string) error {
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("the admission daemon on %s does not serve GET /api/v1/health", sock)
 	}
-	return nil
+	var health struct {
+		Store string `json:"store"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil || health.Store != "ready" {
+		return nil
+	}
+	return hostedAPIServesCoordination(ctx, sock)
 }
 
 func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) Backends {
