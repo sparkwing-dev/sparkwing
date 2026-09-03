@@ -245,6 +245,20 @@ func TestStandaloneRunError_NamesTheStoreAndTheHome(t *testing.T) {
 	}
 }
 
+func TestRunStatus_ResolvesAStandaloneRun(t *testing.T) {
+	p := homeWithBothStores(t)
+	status, err := orchestrator.RunStatus(context.Background(), p, nil, "alone-mid")
+	if err != nil {
+		t.Fatalf("RunStatus: %v", err)
+	}
+	if status != "success" {
+		t.Fatalf("RunStatus = %q, want success", status)
+	}
+	if _, err := orchestrator.RunStatus(context.Background(), p, nil, "no-such-run"); err == nil {
+		t.Fatal("a run in no store must still be an error")
+	}
+}
+
 func stampRequirement(t *testing.T, dir, name, addedBy string) {
 	t.Helper()
 	path := filepath.Join(dir, "state.db")

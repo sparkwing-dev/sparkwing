@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -233,8 +234,9 @@ func StandaloneRunError(ctx context.Context, paths Paths, runID, verb string) er
 	if !ok {
 		return nil
 	}
+	remedy := strings.TrimPrefix(verb, "sparkwing ")
 	return fmt.Errorf(
 		"%s: run %s lives in the standalone store %s, and %s writes to the store that holds the run; "+
 			"point sparkwing at that store:\n  SPARKWING_HOME=%s sparkwing %s --run %s",
-		verb, runID, path, verb, filepath.Dir(path), verb, runID)
+		verb, runID, path, verb, filepath.Dir(path), remedy, runID)
 }

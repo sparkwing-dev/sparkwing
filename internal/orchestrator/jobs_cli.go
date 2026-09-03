@@ -1630,8 +1630,16 @@ func RunStatus(ctx context.Context, paths Paths, p *profile.Profile, runID strin
 	}
 	defer func() { _ = closer.Close() }()
 	run, err := b.GetRun(ctx, runID)
-	if err != nil {
+	if err == nil {
+		return run.Status, nil
+	}
+	if localStore(b) == nil {
 		return "", err
 	}
-	return run.Status, nil
+	standalone := OpenStandaloneStores(ctx, paths)
+	defer func() { _ = standalone.Close() }()
+	if _, _, held, ok := standalone.Find(ctx, runID); ok {
+		return held.Status, nil
+	}
+	return "", err
 }
