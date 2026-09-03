@@ -189,25 +189,37 @@ controller-bearing profile before enabling `--require-login`.
 
 ### Schema versioning
 
-Every runner records the schema version it operates against in a
-`sparkwing_schema_version` row. On startup:
+The database records two things: the migrations applied, one
+`sparkwing_schema_version` row each, and the features its schema relies
+on, one `sparkwing_requirements` row each. A binary opens the database
+when it knows every requirement listed, whatever version number the
+schema table holds. On startup:
 
 - Database at a *lower* version than the binary: the binary runs the
-  missing migrations atomically inside one transaction. Concurrent
-  runners against a fresh database coordinate via a Postgres
-  advisory lock; exactly one runs the migration.
+  missing migrations atomically inside one transaction and stamps the
+  requirements those versions declare. Concurrent runners against a
+  fresh database coordinate via a Postgres advisory lock; exactly one
+  runs the migration.
 - Database at the *same* version: nothing to do.
-- Database at a *higher* version than the binary: the binary refuses
-  to start with a clear error naming both versions
-  (`sparkwing: database is at schema version N; this binary expects
-  M. Upgrade sparkwing or restore the database to a matching
-  version.`).
+- Database at a *higher* version than the binary, listing only
+  requirements the binary knows: the binary opens it read/write,
+  migrates nothing, and stamps nothing. Every additive migration lands
+  here, so it never freezes a fleet.
+- Database listing a requirement the binary does not know: the binary
+  refuses to start, naming the requirements and the release that
+  introduced them (`sparkwing: this state database uses
+  unique-token-prefix, which needs sparkwing >= v0.40.0; you have
+  v0.38.2. Run sparkwing update to upgrade.`). A database an older
+  binary migrated carries no requirement rows; the first
+  requirements-aware binary to open it stamps the ones its applied
+  versions declare.
 
-This couples runner version to schema version. Stagger upgrades:
-upgrade every runner *before* you upgrade the database, or run
+Only a breaking migration couples runner version to schema version, and
+`sparkwing_requirements` names exactly which one. Stagger those
+upgrades: upgrade every runner *before* you upgrade the database, or run
 mixed-version fleets briefly during a rollout. Mode 4 (hosted
 controller) is the alternative that decouples client and schema
-versions.
+versions entirely.
 
 ### One-click provisioning
 
