@@ -112,7 +112,11 @@ func (c *conn) refuse(t wingwire.MessageType) (closeConn bool) {
 		name = name[:maxRefusedTypeName]
 	}
 	c.unsupported++
-	c.logf("conn %d: message type %q is not served (%d/%d)", c.id, name, c.unsupported, maxUnsupportedReplies)
+	where := ""
+	if c.healthProbe {
+		where = " on a health probe"
+	}
+	c.logf("conn %d: message type %q is not served%s (%d/%d)", c.id, name, where, c.unsupported, maxUnsupportedReplies)
 	if err := c.send(&wingwire.Unsupported{Type: name}); err != nil {
 		return true
 	}

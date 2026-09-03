@@ -179,13 +179,17 @@ on purpose.
 - Each side ignores fields it does not know. After the handshake, a
   message type the daemon does not know or does not serve is answered with
   `unsupported`, naming the type, and the connection continues, on a
-  health-probe connection as on any other. Before the handshake the daemon
+  health-probe connection as on any other. A health probe may only read
+  queue state, so `unsupported` there means "not served on a health probe"
+  rather than "unknown to this daemon". Before the handshake the daemon
   answers `unsupported` and then hangs up, because there is no session to
-  continue. A connection is allowed eight refusals; the ninth ends it, and
-  a frame carrying no type at all is malformed rather than unknown, so it
-  ends the connection with no reply. An unregistered controller route
-  answers 404 with `{"error":"unsupported","route":"<method> <path>"}`.
-  None of these is a dropped frame the caller has to time out on.
+  continue. The eighth refusal on a connection is its last: the daemon
+  sends it and closes. The type name in the reply is the peer's own,
+  truncated to 64 bytes, and a frame carrying no type at all is malformed
+  rather than unknown, so it ends the connection with no reply. An
+  unregistered controller route answers 404 with
+  `{"error":"unsupported","route":"<method> <path>"}`. None of these is a
+  dropped frame the caller has to time out on.
 - A cut is a release decision. Removing or retyping a message field,
   removing a route, method, parameter, or response member, or raising the
   protocol floor needs a `(Breaking)` changelog entry under a `wingd`,
@@ -200,7 +204,9 @@ The release pipeline's `gate-wire-changelog` job then diffs that snapshot,
 `api/openapi.yaml` (routes, methods, parameters, and response members), and
 the protocol constants against the previous tag. It refuses to cut a
 release unless every entry the diff names is spelled out in the breaking
-changelog entry or in the migration section that entry links.
+changelog entry or in the migration section that entry links. Naming the
+route, the operation, or the message type covers everything beneath it, so
+a release note reads as prose rather than as a list of document paths.
 
 Raising the floor is a warning boundary rather than a failure boundary. A
 pipeline binary whose pin speaks a major below the floor will run
