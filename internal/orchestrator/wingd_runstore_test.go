@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,7 +83,7 @@ func TestHeldRunStoreServesEveryCallFromOneHandle(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runs.Close() })
 
-	st, err := runs.Store(true)
+	st, err := runs.Store(context.Background(), true)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -100,7 +102,7 @@ func TestHeldRunStoreServesEveryCallFromOneHandle(t *testing.T) {
 	if err != nil || !terminal {
 		t.Fatalf("terminal check on a cancelled run = (%v, %v), want (true, nil)", terminal, err)
 	}
-	again, err := runs.Store(false)
+	again, err := runs.Store(context.Background(), false)
 	if err != nil {
 		t.Fatalf("second store call: %v", err)
 	}
@@ -124,7 +126,7 @@ func TestHeldRunStoreReportsAnUnreadableStoreAndRecovers(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = runs.Close() })
 
-	if _, err := runs.Store(true); err == nil {
+	if _, err := runs.Store(context.Background(), true); err == nil {
 		t.Fatal("opening a store path that is a directory succeeded")
 	}
 	if runs.Ready() == nil {
@@ -157,18 +159,18 @@ func TestHeldRunStoreRetriesAFailedOpenOnlyOnItsTimer(t *testing.T) {
 		t.Fatalf("new held run store: %v", err)
 	}
 	t.Cleanup(func() { _ = runs.Close() })
-	if _, err := runs.Store(true); err == nil {
+	if _, err := runs.Store(context.Background(), true); err == nil {
 		t.Fatal("opening a store path that is a directory succeeded")
 	}
 	if err := os.Remove(db); err != nil {
 		t.Fatalf("free the store path: %v", err)
 	}
 	createStore(t, home)
-	if _, err := runs.Store(false); err == nil {
+	if _, err := runs.Store(context.Background(), false); err == nil {
 		t.Fatal("a background pass reopened the store before the retry interval")
 	}
 	runs.now = func() time.Time { return time.Now().Add(HeldRunStoreRetry) }
-	if _, err := runs.Store(false); err != nil {
+	if _, err := runs.Store(context.Background(), false); err != nil {
 		t.Fatalf("a background pass past the retry interval did not reopen: %v", err)
 	}
 }
@@ -181,7 +183,7 @@ func TestRunStoreMaintenanceReapsALapsedHolder(t *testing.T) {
 		t.Fatalf("new held run store: %v", err)
 	}
 	t.Cleanup(func() { _ = runs.Close() })
-	st, err := runs.Store(true)
+	st, err := runs.Store(context.Background(), true)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -213,7 +215,7 @@ func TestWingdDaemonReapsWhileServingAndClosesTheStoreOnIdleExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new held run store: %v", err)
 	}
-	st, err := seed.Store(true)
+	st, err := seed.Store(context.Background(), true)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -259,7 +261,7 @@ func TestHeldRunStoreReadsWhileTheReaperWaitsOnAForeignWriter(t *testing.T) {
 		t.Fatalf("new held run store: %v", err)
 	}
 	t.Cleanup(func() { _ = runs.Close() })
-	rw, err := runs.Store(true)
+	rw, err := runs.Store(context.Background(), true)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -335,7 +337,7 @@ func TestHeldRunStoreFollowsAReplacedStoreFile(t *testing.T) {
 		t.Fatalf("new held run store: %v", err)
 	}
 	t.Cleanup(func() { _ = runs.Close() })
-	if _, err := runs.Store(true); err != nil {
+	if _, err := runs.Store(context.Background(), true); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 
@@ -382,5 +384,137 @@ func TestHeldRunStoreOpensAStoreThatAppearsWithoutWaitingOutTheRetry(t *testing.
 	createStore(t, home)
 	if err := runs.Ready(); err != nil {
 		t.Fatalf("Ready one call after the store appeared = %v, want nil", err)
+	}
+}
+
+func blockTheStoreOpen(t *testing.T, home string) *sql.Tx {
+	t.Helper()
+	t.Setenv(store.BusyTimeoutEnvVar, "2000")
+	ctx := context.Background()
+	foreign, err := store.Open(PathsAt(home).StateDB())
+	if err != nil {
+		t.Fatalf("foreign open: %v", err)
+	}
+	t.Cleanup(func() { _ = foreign.Close() })
+	if err := foreign.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	// safety: the next open only migrates, and so only takes the write lock
+	// the foreign transaction holds, when the applied versions are gone.
+	if _, err := foreign.DB().ExecContext(ctx, `DELETE FROM sparkwing_schema_version`); err != nil {
+		t.Fatalf("clear the applied schema versions: %v", err)
+	}
+	tx, err := foreign.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("foreign begin: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES ('open-block-probe', '1', ?)`,
+		time.Now().UnixNano()); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("foreign write: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	return tx
+}
+
+func TestHeldRunStoreBoundsAnOpenThatCannotMigrate(t *testing.T) {
+	home := t.TempDir()
+	createStore(t, home)
+	tx := blockTheStoreOpen(t, home)
+
+	runs, err := NewHeldRunStore(home)
+	if err != nil {
+		t.Fatalf("new held run store: %v", err)
+	}
+	t.Cleanup(func() { _ = runs.Close() })
+
+	start := time.Now()
+	if err := runs.Ready(); err == nil {
+		t.Fatal("Ready reported a store whose open is blocked as ready")
+	}
+	if waited := time.Since(start); waited > time.Second {
+		t.Fatalf("Ready waited %s on a blocked open, want at most its %s budget", waited, readyOpenBudget)
+	}
+
+	answers := make(chan time.Duration, 2)
+	for range 2 {
+		go func() {
+			began := time.Now()
+			_, err := runs.IsRunTerminal("r1")
+			if err == nil {
+				t.Error("the terminal check answered from a store that never opened")
+			} else if !strings.Contains(err.Error(), "still opening") {
+				t.Errorf("terminal check error = %v, want the pending open named", err)
+			}
+			answers <- time.Since(began)
+		}()
+	}
+	for range 2 {
+		select {
+		case waited := <-answers:
+			if waited > terminalCheckTimeout+2*time.Second {
+				t.Fatalf("the terminal check waited %s on a blocked open, want its %s deadline",
+					waited, terminalCheckTimeout)
+			}
+		case <-time.After(3 * terminalCheckTimeout):
+			t.Fatal("a terminal check stacked behind the blocked open instead of honouring its deadline")
+		}
+	}
+
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("foreign rollback: %v", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if err := runs.Ready(); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the store never opened after the writer released: %v", runs.Ready())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	terminal, err := runs.IsRunTerminal("r1")
+	if err != nil || !terminal {
+		t.Fatalf("terminal check after the open completed = (%v, %v), want (true, nil)", terminal, err)
+	}
+}
+
+func TestFinalizeGivesUpInsideTheDrainWindow(t *testing.T) {
+	home := t.TempDir()
+	createStore(t, home)
+	runs, err := NewHeldRunStore(home)
+	if err != nil {
+		t.Fatalf("new held run store: %v", err)
+	}
+	t.Cleanup(func() { _ = runs.Close() })
+	ctx := context.Background()
+	rw, err := runs.Store(ctx, true)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := rw.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	busy, err := rw.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("occupy the writing connection: %v", err)
+	}
+	defer func() { _ = busy.Rollback() }()
+
+	start := time.Now()
+	err = runs.finalizeRun("r1", "cancelled in a test")
+	waited := time.Since(start)
+	if err == nil {
+		t.Fatal("finalize claimed to write through an occupied connection")
+	}
+	if waited >= wingd.FinalizeDrainWindow {
+		t.Fatalf("finalize took %s, which outlasts the %s shutdown drain: the run is lost to a closed handle",
+			waited, wingd.FinalizeDrainWindow)
+	}
+	if !strings.Contains(err.Error(), FinalizeTimeout.String()) {
+		t.Fatalf("finalize error = %v, want the %s deadline named", err, FinalizeTimeout)
 	}
 }

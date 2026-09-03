@@ -96,7 +96,9 @@ func maintainRunStore(ctx context.Context, runs *HeldRunStore, ready <-chan stru
 	reconciled := false
 	fault := ""
 	pass := func(force bool) {
-		st, err := runs.Store(force)
+		passCtx, cancel := context.WithTimeout(ctx, runStoreReapTimeout)
+		defer cancel()
+		st, err := runs.Store(passCtx, force)
 		if err != nil {
 			if ctx.Err() == nil && !errors.Is(err, errRunStoreAbsent) && err.Error() != fault {
 				fault = err.Error()
@@ -105,8 +107,6 @@ func maintainRunStore(ctx context.Context, runs *HeldRunStore, ready <-chan stru
 			return
 		}
 		fault = ""
-		passCtx, cancel := context.WithTimeout(ctx, runStoreReapTimeout)
-		defer cancel()
 		if !reconciled {
 			reconciled = true
 			if n, err := ReconcileOrphanedLocalRuns(passCtx, st, 0); err != nil {

@@ -259,7 +259,7 @@ func (d *Daemon) finalShutdown() {
 	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("final persist: %v", err)
 	}
-	d.awaitFinalizers(finalizeDrainWindow)
+	d.awaitFinalizers(FinalizeDrainWindow)
 }
 
 // safety: a finalize is the only record that an orphaned run ended, and the

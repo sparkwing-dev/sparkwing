@@ -20,6 +20,18 @@ import (
 
 var ErrNotElected = errors.New("wingd: another daemon is already elected")
 
+// FinalizeDrainWindow is how long a stopping daemon waits for the run
+// finalizes it started to reach the store. It is the middle of four windows
+// that must nest, so a finalize is neither cut short by its own deadline
+// before the drain can wait for it nor killed by the supervisor while the
+// drain still holds the process open:
+//
+//	orchestrator.FinalizeTimeout (one finalize)
+//	  < FinalizeDrainWindow (the daemon's drain)
+//	  <= supervise.DefaultTermGrace (before SIGKILL)
+//	  < the CLI's daemon-restart budget
+const FinalizeDrainWindow = 10 * time.Second
+
 const (
 	DefaultIdleTimeout = 5 * time.Minute
 
@@ -42,8 +54,6 @@ const (
 	DefaultStallProbeTimeout = 10 * time.Second
 
 	staleSocketDirAge = 24 * time.Hour
-
-	finalizeDrainWindow = 10 * time.Second
 )
 
 type Config struct {

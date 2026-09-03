@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,9 +18,13 @@ import (
 // because the attempt is a stat.
 const HeldRunStoreRetry = 30 * time.Second
 
+// FinalizeTimeout bounds one finalize against the runs store. It is the
+// first window in the shutdown chain described on
+// [github.com/sparkwing-dev/sparkwing/internal/wingd.FinalizeDrainWindow].
+const FinalizeTimeout = 8 * time.Second
+
 const (
 	terminalCheckTimeout = 5 * time.Second
-	finalizeTimeout      = 30 * time.Second
 	readyOpenBudget      = 250 * time.Millisecond
 )
 
@@ -38,9 +43,13 @@ var errRunStoreReplaced = errors.New("the runs store was replaced")
 // so the writing handle that serves finalize and the reaper serializes every
 // caller behind whatever it is doing; the terminal check on the admission
 // path therefore reads through a separate read-only handle, which under WAL
-// never waits on a writer. Every call carries a deadline, so a store that
-// stops answering evicts a run with that reason instead of hanging admission
-// for the machine.
+// never waits on a writer.
+//
+// Opening is done by one goroutine, and callers wait for it under their own
+// context. Nothing here blocks a caller past its deadline: a store that will
+// not open, or one whose migration waits out another process's write lock,
+// evicts a run with that reason instead of stalling admission for the
+// machine.
 //
 // An unusable store never stops the daemon serving. Open failures are
 // reported by Ready and returned to the terminal check, the open is retried,
@@ -50,15 +59,14 @@ type HeldRunStore struct {
 	retry time.Duration
 	now   func() time.Time
 
-	openMu sync.Mutex
-
-	mu        sync.RWMutex
+	mu        sync.Mutex
 	rw        *store.Store
 	ro        *store.Store
 	info      os.FileInfo
 	err       error
 	attempted time.Time
 	opening   chan struct{}
+	openedAt  time.Time
 	closed    bool
 }
 
@@ -77,55 +85,103 @@ func NewHeldRunStore(home string) (*HeldRunStore, error) {
 }
 
 // Store returns the writing handle, opening the store when it is closed and
-// either force is set or the retry interval has passed. Reads on the
-// admission path belong on Reader instead.
-func (h *HeldRunStore) Store(force bool) (*store.Store, error) {
-	rw, _, err := h.handles(force)
+// either force is set or the retry interval has passed. It waits for an open
+// in flight only as long as ctx allows. Reads on the admission path belong on
+// Reader instead.
+func (h *HeldRunStore) Store(ctx context.Context, force bool) (*store.Store, error) {
+	rw, _, err := h.handles(ctx, force)
 	return rw, err
 }
 
-// Reader returns the read-only handle, opened alongside the writing one.
-func (h *HeldRunStore) Reader(force bool) (*store.Store, error) {
-	_, ro, err := h.handles(force)
+// Reader returns the read-only handle, opened alongside the writing one,
+// waiting for an open in flight only as long as ctx allows.
+func (h *HeldRunStore) Reader(ctx context.Context, force bool) (*store.Store, error) {
+	_, ro, err := h.handles(ctx, force)
 	return ro, err
 }
 
-func (h *HeldRunStore) handles(force bool) (*store.Store, *store.Store, error) {
+func (h *HeldRunStore) handles(ctx context.Context, force bool) (*store.Store, *store.Store, error) {
 	h.revalidate()
-	h.openMu.Lock()
-	defer h.openMu.Unlock()
-	h.mu.RLock()
-	rw, ro, lastErr, attempted, closed := h.rw, h.ro, h.err, h.attempted, h.closed
-	h.mu.RUnlock()
-	if closed {
-		return nil, nil, errRunStoreClosed
-	}
-	if rw != nil {
-		return rw, ro, nil
-	}
-	if !force && h.cachedFailure(lastErr, attempted) {
-		return nil, nil, lastErr
-	}
-	newRW, newRO, info, openErr := h.openStore()
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
-		closeHandles(newRW, newRO)
 		return nil, nil, errRunStoreClosed
 	}
-	h.rw, h.ro, h.info, h.err, h.attempted = newRW, newRO, info, openErr, h.now()
+	if h.rw != nil {
+		rw, ro := h.rw, h.ro
+		h.mu.Unlock()
+		return rw, ro, nil
+	}
+	if !force && h.cachedFailureLocked() {
+		err := h.err
+		h.mu.Unlock()
+		return nil, nil, err
+	}
+	done := h.beginOpenLocked()
+	started, pending := h.openedAt, h.err
 	h.mu.Unlock()
-	return newRW, newRO, openErr
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return nil, nil, stillOpening(h.now().Sub(started), pending, ctx.Err())
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	switch {
+	case h.closed:
+		return nil, nil, errRunStoreClosed
+	case h.rw != nil:
+		return h.rw, h.ro, nil
+	default:
+		return nil, nil, h.err
+	}
+}
+
+// safety: store.Open migrates, and a migration waits out another process's
+// write lock with no deadline of its own, so the open runs on one goroutine
+// that holds no lock while it blocks and every caller waits on this channel
+// under its own deadline instead.
+func (h *HeldRunStore) beginOpenLocked() chan struct{} {
+	if h.opening != nil {
+		return h.opening
+	}
+	done := make(chan struct{})
+	h.opening = done
+	h.openedAt = h.now()
+	go func() {
+		defer close(done)
+		rw, ro, info, err := h.openStore()
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.opening = nil
+		if h.closed {
+			closeHandles(rw, ro)
+			return
+		}
+		h.rw, h.ro, h.info, h.err, h.attempted = rw, ro, info, err, h.now()
+	}()
+	return done
+}
+
+func stillOpening(elapsed time.Duration, pending error, cause error) error {
+	if pending != nil && !errors.Is(pending, errRunStoreAbsent) {
+		return fmt.Errorf("the runs store is still opening (%s so far, last failure: %v): %w",
+			elapsed.Round(100*time.Millisecond), pending, cause)
+	}
+	return fmt.Errorf("the runs store is still opening (%s so far): %w",
+		elapsed.Round(100*time.Millisecond), cause)
 }
 
 // safety: an absent store costs a stat to retry, so only a failed open of a
 // file that exists is worth caching; caching absence stalls the first run on
 // a fresh home behind the retry interval.
-func (h *HeldRunStore) cachedFailure(lastErr error, attempted time.Time) bool {
-	if attempted.IsZero() || errors.Is(lastErr, errRunStoreAbsent) {
+func (h *HeldRunStore) cachedFailureLocked() bool {
+	if h.attempted.IsZero() || errors.Is(h.err, errRunStoreAbsent) {
 		return false
 	}
-	return h.now().Sub(attempted) < h.retry
+	return h.now().Sub(h.attempted) < h.retry
 }
 
 // safety: a run against an object-store profile keeps no local state, so the
@@ -158,12 +214,14 @@ func (h *HeldRunStore) openStore() (*store.Store, *store.Store, os.FileInfo, err
 // was deleted or replaced leaves the daemon reading an inode nobody else can
 // see, so every readiness check and every pass compares the file identity.
 func (h *HeldRunStore) revalidate() {
-	h.mu.RLock()
+	h.mu.Lock()
 	rw, ro, info, closed := h.rw, h.ro, h.info, h.closed
-	h.mu.RUnlock()
 	if closed || rw == nil {
+		h.mu.Unlock()
 		return
 	}
+	h.mu.Unlock()
+
 	current, err := os.Stat(h.paths.StateDB())
 	if err == nil && os.SameFile(current, info) {
 		return
@@ -194,21 +252,32 @@ func closeHandles(rw, ro *store.Store) {
 	}
 }
 
+// safety: revalidate closes a replaced handle while a caller may still hold
+// the pointer it was given, and database/sql reports that only as a message,
+// so a closed handle costs one retry against the reopened store rather than
+// an eviction.
+func closedHandle(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "database is closed")
+}
+
 // Ready returns why the handle is unusable, or nil when it is open on the
-// store file that is there now. It bounds the work it does, so a handshake
-// never waits on the store beyond that budget.
+// store file that is there now. It waits at most [readyOpenBudget] for an
+// open in flight, so a handshake never waits on the store beyond that.
 func (h *HeldRunStore) Ready() error {
-	h.revalidate()
-	if err := h.state(); err == nil {
-		return nil
+	ctx, cancel := context.WithTimeout(context.Background(), readyOpenBudget)
+	defer cancel()
+	if _, _, err := h.handles(ctx, false); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return h.state()
 	}
-	h.openWithinBudget()
-	return h.state()
+	return nil
 }
 
 func (h *HeldRunStore) state() error {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	switch {
 	case h.closed:
 		return errRunStoreClosed
@@ -218,33 +287,6 @@ func (h *HeldRunStore) state() error {
 		return h.err
 	default:
 		return errRunStoreUnopened
-	}
-}
-
-func (h *HeldRunStore) openWithinBudget() {
-	h.mu.Lock()
-	if h.closed {
-		h.mu.Unlock()
-		return
-	}
-	done := h.opening
-	if done == nil {
-		done = make(chan struct{})
-		h.opening = done
-		go func() {
-			_, _, _ = h.handles(false)
-			h.mu.Lock()
-			h.opening = nil
-			h.mu.Unlock()
-			close(done)
-		}()
-	}
-	h.mu.Unlock()
-	timer := time.NewTimer(readyOpenBudget)
-	defer timer.Stop()
-	select {
-	case <-done:
-	case <-timer.C:
 	}
 }
 
@@ -268,23 +310,24 @@ func (h *HeldRunStore) Close() error {
 }
 
 func (h *HeldRunStore) IsRunTerminal(runID string) (bool, error) {
-	st, err := h.Reader(true)
-	if errors.Is(err, errRunStoreAbsent) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), terminalCheckTimeout)
 	defer cancel()
-	run, err := st.GetRun(ctx, runID)
-	if errors.Is(err, store.ErrNotFound) {
+	terminal := false
+	err := h.read(ctx, func(st *store.Store) error {
+		run, err := st.GetRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		terminal = isTerminalStatus(run.Status)
+		return nil
+	})
+	if errors.Is(err, errRunStoreAbsent) || errors.Is(err, store.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {
-		return false, storeStalled(err, terminalCheckTimeout)
+		return false, stalled(err, terminalCheckTimeout)
 	}
-	return isTerminalStatus(run.Status), nil
+	return terminal, nil
 }
 
 func (h *HeldRunStore) FinalizeRun(runID string) {
@@ -295,43 +338,60 @@ func (h *HeldRunStore) FinalizeRun(runID string) {
 }
 
 func (h *HeldRunStore) finalizeRun(runID, reason string) error {
-	st, err := h.Store(true)
-	if errors.Is(err, errRunStoreAbsent) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), finalizeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), FinalizeTimeout)
 	defer cancel()
-	run, err := st.GetRun(ctx, runID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+	err := h.write(ctx, func(st *store.Store) error {
+		run, err := st.GetRun(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if isTerminalStatus(run.Status) {
 			return nil
 		}
-		return storeStalled(err, finalizeTimeout)
-	}
-	if isTerminalStatus(run.Status) {
+		return st.FinishRun(ctx, runID, "cancelled", reason)
+	})
+	if errors.Is(err, errRunStoreAbsent) || errors.Is(err, store.ErrNotFound) {
 		return nil
 	}
-	return storeStalled(st.FinishRun(ctx, runID, "cancelled", reason), finalizeTimeout)
+	return stalled(err, FinalizeTimeout)
 }
 
 func (h *HeldRunStore) FinalizeCancelledRuns(runIDs []string, reason string) error {
-	st, err := h.Store(true)
+	ctx, cancel := context.WithTimeout(context.Background(), FinalizeTimeout)
+	defer cancel()
+	err := h.write(ctx, func(st *store.Store) error {
+		return st.FinishRunsIfActive(ctx, runIDs, "cancelled", reason)
+	})
 	if errors.Is(err, errRunStoreAbsent) {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), finalizeTimeout)
-	defer cancel()
-	return storeStalled(st.FinishRunsIfActive(ctx, runIDs, "cancelled", reason), finalizeTimeout)
+	return stalled(err, FinalizeTimeout)
 }
 
-func storeStalled(err error, within time.Duration) error {
-	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+func (h *HeldRunStore) read(ctx context.Context, fn func(*store.Store) error) error {
+	return h.call(ctx, fn, h.Reader)
+}
+
+func (h *HeldRunStore) write(ctx context.Context, fn func(*store.Store) error) error {
+	return h.call(ctx, fn, h.Store)
+}
+
+func (h *HeldRunStore) call(ctx context.Context, fn func(*store.Store) error, handle func(context.Context, bool) (*store.Store, error)) error {
+	for attempt := 0; ; attempt++ {
+		st, err := handle(ctx, true)
+		if err != nil {
+			return err
+		}
+		err = fn(st)
+		if attempt == 0 && closedHandle(err) {
+			continue
+		}
+		return err
+	}
+}
+
+func stalled(err error, within time.Duration) error {
+	if err != nil && errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "still opening") {
 		return fmt.Errorf("the runs store did not answer within %s: %w", within, err)
 	}
 	return err
