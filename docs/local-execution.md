@@ -655,9 +655,20 @@ which process claimed it, every stored secret, and the ability to mint
 bearer tokens that outlive the process. That is the same authority a
 same-uid process already had by opening `state.db` directly, and it is why
 the socket is 0600 with a peer-credential check on accept and why the
-daemon serves exactly one account. A request that does carry a bearer token
-is authenticated against the store's tokens instead, so a stale token fails
-closed rather than falling back to the uid.
+daemon serves exactly one account. A local run sends no token and is
+served as that peer principal; that is also the faster path, because a
+bearer token is looked up on the writing handle and waits behind whatever
+it is doing. A request that does carry a bearer token is authenticated
+against the store's tokens instead, so a stale token fails closed rather
+than falling back to the uid.
+
+`GET /api/v1/health` is answered by the daemon rather than by a controller,
+so it reports on a home that has no runs store. Alongside the usual
+`status` and `auth` it carries `store`: `absent` when this home has no
+state file (a machine running only object-store profiles, which is healthy
+and stays that way, because a probe never creates the file), `ready` when
+the daemon can read it, and `error: <reason>` with a 503 when a store that
+exists will not open.
 
 ### Running with no daemon available
 
