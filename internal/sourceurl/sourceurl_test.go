@@ -172,12 +172,33 @@ func TestValidateCloneURLRejectsInternalOnlyNamespaces(t *testing.T) {
 	}
 }
 
+func TestValidateCloneURLRejectsTheHostsFileIPv6Aliases(t *testing.T) {
+	cases := []string{
+		"https://ip6-localhost/repo.git",
+		"https://ip6-loopback/repo.git",
+		"https://ip6-localnet/repo.git",
+		"https://ip6-mcastprefix/repo.git",
+		"https://ip6-allnodes/repo.git",
+		"https://ip6-allrouters/repo.git",
+		"git@ip6-localhost:repo.git",
+		"https://IP6-LOOPBACK./repo.git",
+	}
+	for _, tc := range cases {
+		t.Run(tc, func(t *testing.T) {
+			if got, err := ValidateCloneURL(tc); err == nil {
+				t.Fatalf("ValidateCloneURL(%q) = %q, want rejection", tc, got)
+			}
+		})
+	}
+}
+
 func TestValidateCloneURLKeepsPublicNamesThatMerelyLookInternal(t *testing.T) {
 	cases := []string{
 		"https://internal.example.com/repo.git",
 		"https://mylocal.example/repo.git",
 		"https://local-shop.com/acme/repo.git",
 		"git@internal-git.example.com:acme/repo.git",
+		"https://ip6-router.example.com/repo.git",
 	}
 	for _, tc := range cases {
 		t.Run(tc, func(t *testing.T) {

@@ -154,6 +154,14 @@ var internalHostNames = map[string]bool{
 	"home.arpa":                true,
 	"metadata":                 true,
 	"metadata.google.internal": true,
+	// safety: every Debian and Ubuntu /etc/hosts ships this stanza, so these
+	// names reach loopback, link-local, or multicast without any resolver.
+	"ip6-localhost":   true,
+	"ip6-loopback":    true,
+	"ip6-localnet":    true,
+	"ip6-mcastprefix": true,
+	"ip6-allnodes":    true,
+	"ip6-allrouters":  true,
 }
 
 var internalHostSuffixes = []string{".localhost", ".local", ".internal", ".localdomain", ".home.arpa"}
