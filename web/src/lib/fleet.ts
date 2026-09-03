@@ -1,5 +1,8 @@
 import type { Agent } from "./api";
 
+export type FleetRegistration = "registered" | "legacy";
+export type FleetHeadroomState = "reported" | "stale" | "not-reported";
+
 const statusOrder: Record<string, number> = { busy: 0, idle: 1, offline: 2 };
 const kindOrder: Record<string, number> = {
   agent: 0,
@@ -22,6 +25,16 @@ export function fleetLocation(agent: Agent): "local" | "cloud" | "unknown" {
     return agent.location;
   }
   return "unknown";
+}
+
+export function fleetRegistration(agent: Agent): FleetRegistration {
+  return agent.max_concurrent > 0 ? "registered" : "legacy";
+}
+
+export function fleetHeadroomState(agent: Agent): FleetHeadroomState {
+  if (agent.headroom) return "reported";
+  if (agent.status === "offline") return "stale";
+  return "not-reported";
 }
 
 export function formatFleetResources(

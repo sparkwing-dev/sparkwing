@@ -6,6 +6,7 @@ export interface ExecutionDisplay {
   location: ExecutionLocation;
   locationLabel: string;
   executorLabel: string;
+  platformLabel: string | null;
   className: string;
 }
 
@@ -17,16 +18,18 @@ export function executionAttempts(node: Node): ExecutionAttempt[] {
   if (attempts.length === 0) {
     if (
       !node.executor_kind &&
-      !node.executor_id &&
+      !node.executor_name &&
+      !node.executor_location &&
       !node.execution_started_at
     ) {
       return [];
     }
     attempts = [
       {
-        coordinator_id: node.coordinator_id,
+        run_id: node.run_id,
+        node_id: node.id,
         executor_kind: node.executor_kind,
-        executor_id: node.executor_id,
+        executor_name: node.executor_name,
         location: node.executor_location ?? "unknown",
         started_at: node.execution_started_at,
         finished_at: node.finished_at,
@@ -72,17 +75,25 @@ export function executionDisplay(attempt?: ExecutionAttempt): ExecutionDisplay {
       : location === "cloud"
         ? "Cloud"
         : "Location unknown";
-  const kind = attempt?.executor_kind || "executor";
-  const executorLabel = attempt?.executor_id
-    ? `${kind} ${attempt.executor_id}`
-    : kind;
+  const kind = attempt?.executor_kind?.trim();
+  const name = attempt?.executor_name?.trim();
+  const executorLabel =
+    kind && name ? `${kind} ${name}` : name || kind || "Executor unknown";
+  const platform = attempt?.platform?.trim();
+  const platformLabel = platform || null;
   const className =
     location === "local"
       ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
       : location === "cloud"
         ? "border-sky-400/40 bg-sky-400/10 text-sky-200"
         : "border-slate-400/40 bg-slate-400/10 text-slate-300";
-  return { location, locationLabel, executorLabel, className };
+  return {
+    location,
+    locationLabel,
+    executorLabel,
+    platformLabel,
+    className,
+  };
 }
 
 function normalizeLocation(location?: string): ExecutionLocation {

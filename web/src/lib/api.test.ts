@@ -8,8 +8,6 @@ type RuntimeWindow = {
 let getNodeStreamUrl!: typeof import("./api").getNodeStreamUrl;
 let cancelRun!: typeof import("./api").cancelRun;
 let getConnectionStatus!: typeof import("./api").getConnectionStatus;
-let computeVenue!: typeof import("./api").computeVenue;
-let parseHolder!: typeof import("./api").parseHolder;
 
 before(async () => {
   const runtime = globalThis as unknown as { window?: RuntimeWindow };
@@ -21,20 +19,11 @@ before(async () => {
       getNodeStreamUrl,
       cancelRun,
       getConnectionStatus,
-      computeVenue,
-      parseHolder,
     } = await import("./api"));
   } finally {
     if (hadWindow) runtime.window = previousWindow;
     else delete runtime.window;
   }
-});
-
-describe("legacy execution metadata", () => {
-  it("reports missing attribution as unknown", () => {
-    assert.deepEqual(parseHolder(), { kind: "unknown", label: "unknown" });
-    assert.equal(computeVenue([]), "unknown");
-  });
 });
 
 describe("getNodeStreamUrl", () => {

@@ -51,12 +51,11 @@ code change to unlock.
 
 ### Changed
 
-- **web:** The Fleet view shows each registered executor's kind, declared
-  location, idle/busy/offline state, slots, budget, and live headroom. Run
-  nodes show accessible local, cloud, or unknown execution badges and retain
-  every durable executor attempt in the selected-node history. Older node and
-  executor payloads with no location stay unknown instead of being labeled
-  local from transient claim data.
+- **web:** The Fleet view separates each registered executor's configured
+  policy, observed liveness and headroom, and current slot and run activity.
+  Run nodes show accessible local, cloud, or unknown execution badges, retain
+  every durable executor attempt, and link retries across runs. Legacy records
+  stay visible without invented policy, platform, location, or headroom timing.
 - **ci:** The pre-commit formatters step and the em-dash and tracker-ID sweeps
   judge the whole change, not only what is staged. Each reads the staged files
   when something is staged and the files changed since `origin/main` otherwise,

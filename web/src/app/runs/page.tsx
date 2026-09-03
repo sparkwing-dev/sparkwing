@@ -4493,7 +4493,7 @@ function DAG({
                   const pills: TopPill[] = [];
                   if (
                     n.started_at ||
-                    n.claimed_by ||
+                    n.claimed ||
                     executionAttempts(n).length > 0
                   ) {
                     pills.push({ kind: "execution", w: executionPillWidth(n) });
@@ -5439,7 +5439,7 @@ function DagNodeTooltip({
           <span className="font-mono">{state || "pending"}</span>
           <span className="text-[var(--muted)]">Duration:</span>
           <span className="font-mono">{fmtMs(nodeDuration(node))}</span>
-          {(attempts.length > 0 || node.claimed_by || node.started_at) && (
+          {(attempts.length > 0 || node.claimed || node.started_at) && (
             <>
               <span className="text-[var(--muted)]">Execution:</span>
               <span className="font-mono">

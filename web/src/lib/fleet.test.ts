@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Agent } from "./api";
 import {
+  fleetHeadroomState,
   fleetLocation,
+  fleetRegistration,
   fleetSlotTotals,
   fleetSlots,
   formatFleetResources,
@@ -24,6 +26,22 @@ function agent(fields: Partial<Agent>): Agent {
 describe("fleet presentation", () => {
   it("does not infer a missing location", () => {
     assert.equal(fleetLocation(agent({})), "unknown");
+  });
+
+  it("separates registered policy from legacy activity", () => {
+    assert.equal(fleetRegistration(agent({ max_concurrent: 2 })), "registered");
+    assert.equal(fleetRegistration(agent({ max_concurrent: 0 })), "legacy");
+  });
+
+  it("distinguishes fresh, stale, and absent headroom observations", () => {
+    assert.equal(
+      fleetHeadroomState(
+        agent({ headroom: { cores: 2, memory_bytes: 4 << 30, queue_depth: 0 } }),
+      ),
+      "reported",
+    );
+    assert.equal(fleetHeadroomState(agent({ status: "offline" })), "stale");
+    assert.equal(fleetHeadroomState(agent({ status: "idle" })), "not-reported");
   });
 
   it("keeps offline executors after active ones", () => {

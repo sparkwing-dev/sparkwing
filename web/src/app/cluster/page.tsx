@@ -11,7 +11,9 @@ import {
 } from "@/lib/api";
 import { HeartbeatLabel } from "@/components/HeartbeatDot";
 import {
+  fleetHeadroomState,
   fleetLocation,
+  fleetRegistration,
   fleetSlotTotals,
   fleetSlots,
   formatFleetResources,
@@ -410,15 +412,21 @@ function AgentRow({
 }) {
   const badge = typeBadge(agent.type);
   const activeRuns = agent.active_jobs?.length || 0;
+  const registration = fleetRegistration(agent);
+  const headroomState = fleetHeadroomState(agent);
   const labels = Object.entries(agent.labels || {});
 
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg overflow-hidden">
       <button
         onClick={onToggle}
+        aria-expanded={expanded}
         className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-[var(--surface-raised)] transition-colors"
       >
-        <span className="w-4 text-center text-xs text-[var(--muted)]">
+        <span
+          aria-hidden
+          className="w-4 text-center text-xs text-[var(--muted)]"
+        >
           {expanded ? "-" : "+"}
         </span>
         <span
@@ -429,83 +437,142 @@ function AgentRow({
         <span className="font-mono text-sm font-medium truncate flex-1">
           {agent.name || "(anonymous)"}
         </span>
-        <LocationPill location={fleetLocation(agent)} />
-        <AgentStatusPill status={agent.status} />
-        <span className="hidden md:inline text-[10px] text-[var(--muted)] font-mono whitespace-nowrap">
-          slots {fleetSlots(agent)}
+        <span className="hidden md:flex flex-col items-end gap-0.5">
+          <span className="text-[9px] uppercase tracking-wider text-[var(--muted)]">
+            Policy
+          </span>
+          {registration === "registered" ? (
+            <LocationPill location={fleetLocation(agent)} configured />
+          ) : (
+            <span className="text-[10px] font-mono text-[var(--muted)]">
+              legacy activity
+            </span>
+          )}
         </span>
-        <span className="hidden lg:inline text-[10px] text-[var(--muted)] font-mono whitespace-nowrap">
-          headroom {formatFleetResources(agent.headroom)}
+        <span className="hidden lg:flex flex-col items-end gap-0.5">
+          <span className="text-[9px] uppercase tracking-wider text-[var(--muted)]">
+            Liveness
+          </span>
+          <AgentStatusPill status={agent.status} />
         </span>
-        <span className="hidden xl:inline text-[10px] text-[var(--muted)] font-mono whitespace-nowrap">
-          budget {formatFleetResources(agent.budget, true)}
+        <span className="hidden xl:flex flex-col items-end gap-0.5 text-[10px] font-mono">
+          <span className="text-[9px] uppercase tracking-wider text-[var(--muted)]">
+            Activity
+          </span>
+          <span>
+            {fleetSlots(agent)} slots · {activeRuns} runs
+          </span>
         </span>
-        <HeartbeatLabel lastHeartbeat={agent.last_seen} />
+        <span className="hidden 2xl:inline">
+          <HeartbeatLabel lastHeartbeat={agent.last_seen} />
+        </span>
       </button>
 
       {expanded && (
-        <div className="border-t border-[var(--border)] px-3 py-3 space-y-3 text-xs">
-          <div className="grid grid-cols-2 gap-3">
-            <KV label="type" value={agent.type} />
-            <KV label="location" value={fleetLocation(agent)} />
-            <KV label="slots" value={fleetSlots(agent)} />
-            <KV label="last seen" value={relativeTime(agent.last_seen)} />
-            <KV label="status" value={agent.status} />
-            <KV
-              label="priority"
-              value={
-                agent.base_priority == null
-                  ? "unknown"
-                  : `${agent.base_priority} (ceiling ${agent.priority_ceiling ?? "unknown"})`
-              }
-            />
-            <KV
-              label="budget"
-              value={formatFleetResources(agent.budget, true)}
-            />
-            <KV
-              label="live headroom"
-              value={formatFleetResources(agent.headroom)}
-            />
-            {agent.headroom && (
-              <KV label="admission queue" value={agent.headroom.queue_depth} />
+        <div className="border-t border-[var(--border)] px-3 py-3 grid gap-3 lg:grid-cols-3 text-xs">
+          <FleetDetailSection title="Configured policy">
+            {registration === "legacy" ? (
+              <p className="text-[var(--muted)]">
+                Configuration unavailable. This executor was inferred from
+                recent activity.
+              </p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <KV label="type" value={agent.type || "unknown"} />
+                  <KV label="location" value={fleetLocation(agent)} />
+                  <KV
+                    label="priority"
+                    value={
+                      agent.base_priority == null
+                        ? "unknown"
+                        : `${agent.base_priority} (ceiling ${agent.priority_ceiling ?? "unknown"})`
+                    }
+                  />
+                  <KV label="slot limit" value={agent.max_concurrent} />
+                  <KV
+                    label="contribution budget"
+                    value={formatFleetResources(agent.budget, true)}
+                  />
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
+                    capabilities
+                  </div>
+                  {labels.length === 0 ? (
+                    <span className="text-[var(--muted)]">None configured</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1">
+                      {labels.map(([k, v]) => (
+                        <span
+                          key={k}
+                          className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--background)] border border-[var(--border)] rounded"
+                        >
+                          {v ? `${k}=${v}` : k}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
             )}
-          </div>
-          {labels.length > 0 && (
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
-                labels
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {labels.map(([k, v]) => (
-                  <span
-                    key={k}
-                    className="font-mono text-[10px] px-1.5 py-0.5 bg-[var(--background)] border border-[var(--border)] rounded"
-                  >
-                    {v ? `${k}=${v}` : k}
-                  </span>
-                ))}
-              </div>
+          </FleetDetailSection>
+
+          <FleetDetailSection title="Observed liveness">
+            <div className="grid grid-cols-2 gap-3">
+              <KV label="status" value={agent.status || "unknown"} />
+              <KV
+                label="last heartbeat"
+                value={relativeTime(agent.last_seen)}
+              />
+              <KV
+                label="headroom"
+                value={
+                  headroomState === "reported"
+                    ? formatFleetResources(agent.headroom)
+                    : headroomState === "stale"
+                      ? "stale or unavailable"
+                      : "not reported"
+                }
+              />
+              {agent.headroom && (
+                <KV label="admission queue" value={agent.headroom.queue_depth} />
+              )}
             </div>
-          )}
-          {activeRuns > 0 && (
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
-                active runs
-              </div>
+            <p className="text-[10px] text-[var(--muted)]">
+              {headroomState === "reported"
+                ? "The controller considers this headroom live; its observation time is not available."
+                : headroomState === "stale"
+                  ? "The controller omits headroom after its observation expires."
+                  : "The controller has no live headroom observation for this executor."}
+            </p>
+          </FleetDetailSection>
+
+          <FleetDetailSection title="Current activity">
+            <div className="grid grid-cols-2 gap-3">
+              <KV label="active slots" value={agent.active_slots ?? "unknown"} />
+              <KV
+                label="slot capacity"
+                value={agent.max_concurrent > 0 ? agent.max_concurrent : "unknown"}
+              />
+              <KV label="active runs" value={activeRuns} />
+            </div>
+            {activeRuns > 0 ? (
               <div className="space-y-1">
                 {agent.active_jobs!.map((runID) => (
                   <Link
                     key={runID}
-                    href={`/runs?run=${runID}`}
+                    href={`/runs?run=${encodeURIComponent(runID)}`}
                     className="block font-mono text-xs text-[var(--accent)] hover:underline"
                   >
                     {runID}
                   </Link>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <p className="text-[var(--muted)]">No active runs.</p>
+            )}
+          </FleetDetailSection>
         </div>
       )}
     </div>
@@ -529,13 +596,19 @@ function AgentStatusPill({ status }: { status: string }) {
     <span
       className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${cls}`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+      <span aria-hidden className={`w-1.5 h-1.5 rounded-full ${dot}`} />
       {status || "idle"}
     </span>
   );
 }
 
-function LocationPill({ location }: { location: string }) {
+function LocationPill({
+  location,
+  configured = false,
+}: {
+  location: string;
+  configured?: boolean;
+}) {
   const cls =
     location === "local"
       ? "bg-emerald-400/15 text-emerald-300"
@@ -545,10 +618,30 @@ function LocationPill({ location }: { location: string }) {
   return (
     <span
       className={`rounded px-1.5 py-0.5 text-[10px] font-mono font-bold ${cls}`}
-      aria-label={`Display location: ${location}`}
+      aria-label={`${configured ? "Configured" : "Observed"} location: ${location}`}
     >
       {location}
     </span>
+  );
+}
+
+function FleetDetailSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      aria-label={title}
+      className="rounded border border-[var(--border)] bg-[var(--background)] p-3 space-y-3"
+    >
+      <h3 className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+        {title}
+      </h3>
+      {children}
+    </section>
   );
 }
 

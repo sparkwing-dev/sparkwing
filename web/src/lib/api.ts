@@ -174,6 +174,7 @@ export function runDurationMs(run: Run): number {
 }
 
 export interface Node {
+  run_id?: string;
   id: string;
   status: string;
   outcome: string;
@@ -183,11 +184,9 @@ export interface Node {
   started_at?: string;
   finished_at?: string;
   duration_ms: number;
-  claimed_by?: string;
-  lease_expires_at?: string;
-  coordinator_id?: string;
+  claimed?: boolean;
   executor_kind?: string;
-  executor_id?: string;
+  executor_name?: string;
   executor_location?: "local" | "cloud" | "unknown";
   execution_started_at?: string;
   execution_attempts?: ExecutionAttempt[];
@@ -207,11 +206,13 @@ export interface Node {
 }
 
 export interface ExecutionAttempt {
+  run_id?: string;
+  node_id?: string;
   attempt?: number;
-  coordinator_id?: string;
   executor_kind?: string;
-  executor_id?: string;
+  executor_name?: string;
   location?: "local" | "cloud" | "unknown";
+  platform?: string;
   started_at?: string;
   finished_at?: string;
   outcome?: string;
@@ -294,43 +295,6 @@ export interface NodeWorkSpawnEach {
 export interface RunDetail {
   run: Run;
   nodes: Node[];
-}
-
-export type RunVenue =
-  | "local"
-  | "pool"
-  | "jobs"
-  | "pool+jobs"
-  | "cluster"
-  | "unknown";
-
-export function computeVenue(nodes: Node[]): RunVenue {
-  const prefixes = new Set<string>();
-  for (const n of nodes) {
-    if (!n.claimed_by) continue;
-    const idx = n.claimed_by.indexOf(":");
-    prefixes.add(idx >= 0 ? n.claimed_by.slice(0, idx) : n.claimed_by);
-  }
-  if (prefixes.size === 0) return "unknown";
-  const hasRunner = prefixes.has("runner");
-  const hasPod = prefixes.has("pod");
-  if (prefixes.size === 1 && hasRunner) return "pool";
-  if (prefixes.size === 1 && hasPod) return "jobs";
-  if (prefixes.size === 2 && hasRunner && hasPod) return "pool+jobs";
-  return "cluster";
-}
-
-export function parseHolder(claimedBy?: string): {
-  kind: "local" | "pool" | "jobs" | "cluster" | "unknown";
-  label: string;
-} {
-  if (!claimedBy) return { kind: "unknown", label: "unknown" };
-  const parts = claimedBy.split(":");
-  const prefix = parts[0];
-  const second = parts[1] || claimedBy;
-  if (prefix === "runner") return { kind: "pool", label: second };
-  if (prefix === "pod") return { kind: "jobs", label: second };
-  return { kind: "cluster", label: second };
 }
 
 export interface RunFilter {
