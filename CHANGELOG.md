@@ -317,6 +317,13 @@ code change to unlock.
   been cancelled, so it never reached the store and the node's row stayed at
   `status=pending` under a finished run -- visible in `sparkwing runs status`
   and the receipt until a `doctor`/`jobs` sweep reconciled it.
+- **orchestrator:** A local child trigger that a parent run's shutdown
+  interrupts now goes back on the queue instead of vanishing. The loop wrote the
+  child's run and trigger rows on the context that had just killed the child --
+  which fires at the end of every parent run, not only on Ctrl-C -- so the
+  trigger stayed `claimed` with no run row and `sparkwing runs status <child>`
+  reported it as not found. A dispatch that fails for its own reasons still
+  records a failed run, now on a context that outlives the parent.
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,

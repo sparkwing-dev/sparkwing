@@ -95,18 +95,52 @@ func runLocalTriggerLoop(ctx context.Context, state StateBackend, runID, profile
 		go func(t *store.Trigger) {
 			defer wg.Done()
 			if err := dispatchLocalTrigger(ctx, t, profileName, parentRepoDir, cache, logger, childStore.apply(nil)); err != nil {
-				logger.Error("local trigger dispatch failed",
-					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
-				_ = state.CreateRun(ctx, store.Run{
-					ID:        t.ID,
-					Pipeline:  t.Pipeline,
-					Status:    "failed",
-					StartedAt: time.Now(),
-				})
-				_ = state.FinishRun(ctx, t.ID, "failed", "local dispatch: "+err.Error())
-				_ = state.FinishTrigger(ctx, t.ID)
+				recordLocalTriggerFailure(ctx, state, t, err, logger)
 			}
 		}(trig)
+	}
+}
+
+// safety: the loop's context dies with the parent run, and a store write on a
+// cancelled context is refused before it reaches the driver, so a child's
+// bookkeeping runs on a context that outlives the parent.
+func recordLocalTriggerFailure(ctx context.Context, state StateBackend, trig *store.Trigger, dispatchErr error, logger *slog.Logger) {
+	book := context.WithoutCancel(ctx)
+	if ctx.Err() != nil {
+		logger.Info("local trigger dispatch interrupted by shutdown; returning it to the queue",
+			"trigger_id", trig.ID, "pipeline", trig.Pipeline)
+		releaseInterruptedTriggerClaim(book, state, trig, logger)
+		return
+	}
+	logger.Error("local trigger dispatch failed",
+		"trigger_id", trig.ID, "pipeline", trig.Pipeline, "err", dispatchErr)
+	_ = state.CreateRun(book, store.Run{
+		ID:        trig.ID,
+		Pipeline:  trig.Pipeline,
+		Status:    "failed",
+		StartedAt: time.Now(),
+	})
+	_ = state.FinishRun(book, trig.ID, "failed", "local dispatch: "+dispatchErr.Error())
+	_ = state.FinishTrigger(book, trig.ID)
+}
+
+// safety: this is an optional interface because a run hosted behind the
+// daemon's API socket coordinates over a client with no requeue route; there
+// the claim returns to the queue only when its lease lapses.
+type triggerClaimReleaser interface {
+	ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
+}
+
+func releaseInterruptedTriggerClaim(ctx context.Context, state StateBackend, trig *store.Trigger, logger *slog.Logger) {
+	releaser, ok := state.(triggerClaimReleaser)
+	if !ok {
+		logger.Warn("cannot return the interrupted trigger to the queue; waiting for its claim lease to lapse",
+			"trigger_id", trig.ID)
+		return
+	}
+	if _, err := releaser.ReleaseClaimAtGeneration(ctx, trig.ID, trig.ClaimSeq); err != nil {
+		logger.Warn("could not return the interrupted trigger to the queue",
+			"trigger_id", trig.ID, "err", err)
 	}
 }
 
