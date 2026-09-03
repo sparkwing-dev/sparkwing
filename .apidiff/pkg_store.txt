@@ -626,6 +626,7 @@ func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, err
 func (s *Store) RequirementSkew(ctx context.Context) (*SkewError, error)
 func (s *Store) RequirementStamps(ctx context.Context) ([]SchemaRequirement, error)
 func (s *Store) Requirements(ctx context.Context) ([]string, error)
+func (s *Store) RequirementsWritingWouldAdd(ctx context.Context) ([]string, error)
 func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)

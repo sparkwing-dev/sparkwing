@@ -193,6 +193,35 @@ func (s *Store) RequirementSkew(ctx context.Context) (*SkewError, error) {
 	return requirementSkew(version, listed), nil
 }
 
+// RequirementsWritingWouldAdd returns the schema requirement names a read-write
+// open of this database would stamp that it does not already list, sorted. An
+// empty result means catching the database up to this binary's schema is
+// additive under the requirements rule: every binary that can open it now can
+// still open it afterwards, so a caller may write to it without stranding the
+// binary that owns it. A non-empty result names what that write would cost.
+func (s *Store) RequirementsWritingWouldAdd(ctx context.Context) ([]string, error) {
+	version, err := s.CurrentSchemaVersion(ctx)
+	if err != nil {
+		return nil, err
+	}
+	listed, err := s.Requirements(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return MissingRequirements(listed, requirementsBetween(version, expectedSchemaVersion)), nil
+}
+
+func requirementsBetween(from, to int) []string {
+	var names []string
+	for v, declared := range migrationRequirements {
+		if v > from && v <= to {
+			names = append(names, declared...)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // safety: name the highest stamp among the unknown requirements, because a build
 // new enough for that one carries all of them.
 func requirementSkew(dbVersion int, listed []SchemaRequirement) *SkewError {
