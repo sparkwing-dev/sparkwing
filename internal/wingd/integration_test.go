@@ -1139,7 +1139,8 @@ func TestSharedCancelPersistenceFailureFallsBackWithoutSuppression(t *testing.T)
 					return fmt.Errorf("batch members = %v", runIDs)
 				}
 				return errors.New("second member failed")
-			}},
+			},
+		},
 	})
 	parent := ensure(t, home, "")
 	parentLease := mustAcquire(t, parent, coreReq("failed-parent", 1))
@@ -1173,7 +1174,8 @@ func TestDisconnectDuringFailedCancelPersistenceGetsOrphanFallback(t *testing.T)
 				close(entered)
 				<-resume
 				return errors.New("store unavailable")
-			}},
+			},
+		},
 	})
 	holder := ensure(t, home, "")
 	mustAcquire(t, holder, coreReq("disconnect-during-persist", 1))
