@@ -67,21 +67,107 @@ func TestRunJobsReceipt_ReadsAStandaloneRun(t *testing.T) {
 	}
 }
 
-func TestRunsCancel_StandaloneRunNamesItsStore(t *testing.T) {
+func TestRunsCancel_StandaloneRunRefusesWithoutACommand(t *testing.T) {
 	paths := standaloneHome(t)
 	out := captureStdout(t, func() {
 		err := runRunsCancel(context.Background(), []string{"--run", "run-alone", "--home", paths.Root})
 		if err == nil {
-			t.Fatal("expected cancel to fail for a run in another store")
+			t.Fatal("expected cancel to fail for a standalone run")
 		}
 	})
 	if !strings.Contains(out, filepath.Join(paths.StandaloneDir(), "state.db")) {
 		t.Fatalf("cancel did not name the standalone store:\n%s", out)
 	}
-	if !strings.Contains(out, "SPARKWING_HOME="+paths.StandaloneDir()) {
-		t.Fatalf("cancel did not name the home that reaches the store:\n%s", out)
+	if !strings.Contains(out, "cannot cancel") {
+		t.Fatalf("cancel did not say it cannot cancel a standalone run:\n%s", out)
 	}
-	if strings.Contains(out, "not found") {
-		t.Fatalf("cancel still answers not found:\n%s", out)
+	for _, banned := range []string{"SPARKWING_HOME", "not found"} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("cancel output still contains %q:\n%s", banned, out)
+		}
+	}
+}
+
+func TestRunsRetry_StandaloneRunReachesTheRefusalWithNoDashboard(t *testing.T) {
+	standaloneHome(t)
+	err := runRunsRetry(context.Background(), []string{"--run", "run-alone", "--failed"})
+	if err == nil {
+		t.Fatal("expected retry to fail for a standalone run")
+	}
+	// The refusal itself goes to stderr; the returned error only counts.
+	if !strings.Contains(err.Error(), "retry: 1 of 1 failed") {
+		t.Fatalf("retry did not count the standalone run as its own failure: %v", err)
+	}
+	if strings.Contains(err.Error(), "no local dashboard running") {
+		t.Fatalf("retry exited on the client before reaching the standalone sweep: %v", err)
+	}
+}
+
+func TestRunsAnnotate_WritesIntoTheStandaloneStore(t *testing.T) {
+	paths := standaloneHome(t)
+	writeNode(t, paths.StandaloneStateDB(), "run-alone", "n1")
+
+	err := addLocalAnnotation(context.Background(), paths, "run-alone", "n1", "", "from the test")
+	if err != nil {
+		t.Fatalf("annotate a standalone run: %v", err)
+	}
+
+	st, err := store.OpenReadOnly(paths.StandaloneStateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	node, err := st.GetNode(context.Background(), "run-alone", "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(node.Annotations) != 1 || node.Annotations[0] != "from the test" {
+		t.Fatalf("annotation did not land in the standalone store: %v", node.Annotations)
+	}
+}
+
+func TestRunsErrors_ReportsAStandaloneRunsFailure(t *testing.T) {
+	paths := standaloneHome(t)
+	writeFailedNode(t, paths.StandaloneStateDB(), "run-alone", "n1", "boom")
+
+	out := captureStdout(t, func() {
+		if err := orchestrator.JobErrors(context.Background(), paths, "run-alone", false, os.Stdout); err != nil {
+			t.Fatalf("JobErrors: %v", err)
+		}
+	})
+	if strings.Contains(out, "no failing nodes") {
+		t.Fatalf("runs errors reported a clean run for a failed standalone run:\n%s", out)
+	}
+	if !strings.Contains(out, "boom") {
+		t.Fatalf("runs errors did not report the failure:\n%s", out)
+	}
+}
+
+func writeNode(t *testing.T, path, runID, nodeID string) {
+	t.Helper()
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	err = st.CreateNode(context.Background(), store.Node{RunID: runID, NodeID: nodeID, Status: "done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeFailedNode(t *testing.T, path, runID, nodeID, msg string) {
+	t.Helper()
+	writeNode(t, path, runID, nodeID)
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	_, err = st.DB().ExecContext(context.Background(),
+		`UPDATE nodes SET status='done', outcome='failed', error=? WHERE run_id=? AND node_id=?`,
+		msg, runID, nodeID)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

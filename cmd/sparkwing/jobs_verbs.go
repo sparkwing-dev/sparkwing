@@ -165,9 +165,11 @@ func failureRowFor(
 	}
 	holder := shared
 	if r.Store != orchestrator.SharedStoreLabel {
-		if st, _, _, ok := standalone.Find(ctx, r.ID); ok {
-			holder = st
+		st, ok := standalone.StoreFor(r.Store)
+		if !ok {
+			return row
 		}
+		holder = st
 	}
 	if nodes, err := holder.ListNodes(ctx, r.ID); err == nil {
 		for _, n := range nodes {
@@ -600,11 +602,11 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err := paths.EnsureRoot(); err != nil {
 			return err
 		}
-		st, err := store.Open(paths.StateDB())
+		st, _, done, err := orchestrator.OpenStoreForRun(ctx, paths, *runID)
 		if err != nil {
 			return err
 		}
-		defer func() { _ = st.Close() }()
+		defer done()
 		r, err := st.GetRun(ctx, *runID)
 		if err != nil {
 			return err
@@ -728,11 +730,11 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err := paths.EnsureRoot(); err != nil {
 			return exitError(4, err)
 		}
-		st, oerr := store.Open(paths.StateDB())
+		st, _, done, oerr := orchestrator.OpenStoreForRun(ctx, paths, *runID)
 		if oerr != nil {
 			return exitError(4, oerr)
 		}
-		defer func() { _ = st.Close() }()
+		defer done()
 		fetch = func() (*store.Run, error) { return st.GetRun(ctx, *runID) }
 	}
 

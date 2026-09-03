@@ -79,7 +79,7 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	}
 	rows := TagShared(runs)
 	var notes []string
-	if localStore(b) != nil {
+	if mergesStandalone(b, paths, opts.Profile) {
 		standalone := OpenStandaloneStores(ctx, paths)
 		defer func() { _ = standalone.Close() }()
 		rows = MergeTaggedRuns(append(rows, standalone.ListRuns(ctx, filter)...))
@@ -287,8 +287,8 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	}
 
 	storeLabel := SharedStoreLabel
-	if st := localStore(b); st != nil {
-		if _, gerr := st.GetRun(ctx, runID); gerr != nil {
+	if mergesStandalone(b, paths, opts.Profile) {
+		if _, gerr := localStore(b).GetRun(ctx, runID); gerr != nil {
 			standalone := OpenStandaloneStores(ctx, paths)
 			defer func() { _ = standalone.Close() }()
 			if held, label, _, ok := standalone.Find(ctx, runID); ok {
@@ -1401,12 +1401,15 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, _, done, err := OpenStoreForRun(ctx, paths, runID)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer done()
 
+	if _, err := st.GetRun(ctx, runID); err != nil {
+		return err
+	}
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {
 		return err
@@ -1633,7 +1636,7 @@ func RunStatus(ctx context.Context, paths Paths, p *profile.Profile, runID strin
 	if err == nil {
 		return run.Status, nil
 	}
-	if localStore(b) == nil {
+	if !mergesStandalone(b, paths, p) {
 		return "", err
 	}
 	standalone := OpenStandaloneStores(ctx, paths)
