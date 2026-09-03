@@ -51,9 +51,9 @@ code change to unlock.
 
 ### Added
 
-- **controller + sdk:** Routes for the store operations a run reaches around
-  its own state backend, so a run served by a controller needs no database
-  handle. `GET /api/v1/triggers/pending-for-parent` and
+- **controller + sdk:** Routes for the store operations a run makes around its
+  own state, so a run served by a controller can do them over the wire.
+  `GET /api/v1/runs/{id}/pending-triggers` and
   `POST /api/v1/triggers/{id}/claim` carry the child-trigger loop;
   `POST /api/v1/pipelines/{name}/profile/observations`, `/contention`, and
   `/waits` carry the capacity measurements a later run is priced from;
@@ -62,10 +62,13 @@ code change to unlock.
   `POST /api/v1/maintenance/reconcile-orphans` closes runs whose orchestrator
   process died. `pkg/controller/client` gains a method for each, plus
   `ListNodeMetrics` over the metrics route, which now returns the per-command
-  CPU time it always accepted. The orchestrator reaches all of them through
-  its state interface rather than by casting the backend back to a store, so
-  the object-store backend reports them unsupported instead of being silently
-  skipped.
+  CPU time it always accepted. The capacity writes are bound to a live claim on
+  a run of that pipeline, which an orchestrator holds as the run's trigger
+  claim, and they refuse a negative or implausible figure. Runs choose their
+  backend as before: a local run reaches these through its own store, and a run
+  on an object store or a hosted controller skips local coordination, so this
+  release changes no run's behaviour. It is the wire surface the next step
+  builds a hosted local run on.
 
 - **wingd:** The daemon's wire surface is pinned by a snapshot, and the
   daemon now answers for what it cannot serve.

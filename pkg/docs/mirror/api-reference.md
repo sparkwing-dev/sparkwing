@@ -62,7 +62,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/heartbeat` | `nodes.claim` |
-| `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` |
+| `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `nodes.claim` |
@@ -79,7 +79,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `admin` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `runs.read` |
+| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.write` |
@@ -95,6 +95,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/touch` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
+| `GET` | `/api/v1/runs/{id}/pending-triggers` | `triggers.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/plan` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/retry` | `runs.write` |
@@ -113,7 +114,6 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/triggers` | `triggers.read` |
 | `POST` | `/api/v1/triggers` | `runs.write` |
 | `POST` | `/api/v1/triggers/claim` | `triggers.claim` |
-| `GET` | `/api/v1/triggers/pending-for-parent` | `triggers.read` |
 | `GET` | `/api/v1/triggers/spawned-child` | `triggers.read` |
 | `GET` | `/api/v1/triggers/{id}` | `triggers.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |

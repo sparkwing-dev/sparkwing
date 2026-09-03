@@ -329,6 +329,31 @@ paths:
                     items: {$ref: "#/components/schemas/Run"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/runs/{id}/pending-triggers:
+    parameters: [{$ref: "#/components/parameters/RunID"}]
+    get:
+      x-sparkwing-scope: triggers.read or nodes.claim or triggers.claim
+      tags: [triggers]
+      summary: List a run's unclaimed child triggers.
+      description: |
+        Trigger ids this run spawned that no consumer holds, oldest first.
+        Scoping the list to one parent is what keeps two runs on one machine
+        from dispatching each other's children. A claim-scoped token reads
+        only a run it holds a claim on.
+      responses:
+        "200":
+          description: Candidate trigger ids.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trigger_ids]
+                properties:
+                  trigger_ids: {type: array, items: {type: string}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
   /api/v1/runs/{id}/receipt:
     parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
@@ -349,7 +374,7 @@ paths:
   /api/v1/runs/{id}/nodes:
     parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
-      x-sparkwing-scope: runs.read
+      x-sparkwing-scope: runs.read or nodes.claim or triggers.claim
       tags: [nodes]
       summary: List nodes for a run, insertion order.
       responses:
@@ -627,19 +652,19 @@ paths:
       responses:
         "204": {description: Recorded.}
     get:
-      x-sparkwing-scope: runs.read
+      x-sparkwing-scope: runs.read or nodes.claim or triggers.claim
       tags: [nodes]
       summary: List metric samples for a node.
       responses:
         "200":
-          description: Sample list.
+          description: Sample list, oldest first.
           content:
             application/json:
               schema:
                 type: object
-                required: [metrics]
+                required: [points]
                 properties:
-                  metrics:
+                  points:
                     type: array
                     items: {$ref: "#/components/schemas/MetricSample"}
 
@@ -2589,45 +2614,20 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-
-  /api/v1/triggers/pending-for-parent:
-    get:
-      x-sparkwing-scope: triggers.read
-      summary: List a parent run's unclaimed child triggers.
-      description: |
-        Trigger ids spawned by `parent_run_id` that no consumer holds, oldest
-        first. The parent filter is what keeps two runs on one machine from
-        dispatching each other's children.
-      parameters:
-        - in: query
-          name: parent_run_id
-          required: true
-          schema: {type: string}
-      responses:
-        "200":
-          description: Candidate trigger ids.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  trigger_ids: {type: array, items: {type: string}}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/triggers/{id}/claim:
     parameters: [{$ref: "#/components/parameters/TriggerID"}]
     post:
       x-sparkwing-scope: triggers.claim
+      tags: [triggers]
       summary: Claim one named trigger.
       description: |
         Takes the lease on a trigger the caller already chose, unlike
-        `/api/v1/triggers/claim` which picks the next queued one. 404 means
-        the trigger is gone or another consumer holds it, so the caller moves
-        on to its next candidate.
+        `/api/v1/triggers/claim` which picks the next queued one. The
+        caller is recorded as the claimant, so the claim proves ownership of
+        the run the trigger creates. 404 means the trigger is gone or another
+        consumer holds it, so the caller moves on to its next candidate.
       requestBody:
         content:
           application/json:
@@ -2882,14 +2882,14 @@ components:
         secret_redactions: {type: integer}
     MetricSample:
       type: object
-      description: One metric data point attached to a node.
+      description: |
+        One resource reading for a node. A zero `cpu_time_nanos` is a
+        sampler tick; a nonzero one is a single command's measurement.
       properties:
         ts: {type: string, format: date-time}
-        name: {type: string}
-        value: {type: number}
-        labels:
-          type: object
-          additionalProperties: {type: string}
+        cpu_millicores: {type: integer, format: int64}
+        memory_bytes: {type: integer, format: int64}
+        cpu_time_nanos: {type: integer, format: int64}
     Trigger:
       type: object
       description: One queued or in-flight trigger. Mirrors `pkg/store.Trigger`.
