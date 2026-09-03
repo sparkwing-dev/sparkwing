@@ -343,16 +343,7 @@ func TestBackgroundFetchSkipsARepoALockedHandlerHolds(t *testing.T) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		backgroundFetchLoop(ctx, 5*time.Millisecond)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
+	startBackgroundFetch(t, 5*time.Millisecond)
 
 	deadline := time.After(5 * time.Second)
 	for {

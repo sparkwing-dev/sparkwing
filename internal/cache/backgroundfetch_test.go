@@ -6,6 +6,21 @@ import (
 	"time"
 )
 
+// safety: the loop reads the path globals, so it has to be joined before a cleanup restores them.
+func startBackgroundFetch(t *testing.T, interval time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		backgroundFetchLoop(ctx, interval)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+}
+
 func TestBackgroundFetchWaitsForTheHandlerLockOnTheSameRepo(t *testing.T) {
 	repoURL, _, _ := gitcacheFixture(t)
 
@@ -23,16 +38,7 @@ func TestBackgroundFetchWaitsForTheHandlerLockOnTheSameRepo(t *testing.T) {
 	lock := repoLock(repoHash(repoURL))
 	lock.Lock()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		backgroundFetchLoop(ctx, 5*time.Millisecond)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
+	startBackgroundFetch(t, 5*time.Millisecond)
 
 	select {
 	case <-started:
