@@ -88,6 +88,49 @@ func TestAgents_DerivedFromClaims(t *testing.T) {
 	}
 }
 
+func TestAgents_LegacyHeadroomIncludesControllerObservationTime(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-headroom", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-headroom", NodeID: "work", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-headroom", "work"); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+	ctrl := client.NewWithToken(srv.URL, nil, "")
+	if _, err := ctrl.ClaimNode(ctx, "runner:legacy-box:1", nil, time.Minute, &client.Headroom{
+		Cores: 2, MemoryBytes: 4 << 30, QueueDepth: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := httpGet(srv.URL + "/api/v1/agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Agents []controller.Agent `json:"agents"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil || len(body.Agents) != 1 {
+		t.Fatalf("agents response = %+v, %v", body, err)
+	}
+	headroom := body.Agents[0].Headroom
+	if headroom == nil || headroom.Cores != 2 || headroom.QueueDepth != 1 {
+		t.Fatalf("legacy headroom = %+v", headroom)
+	}
+	if _, err := time.Parse(time.RFC3339, headroom.ObservedAt); err != nil {
+		t.Fatalf("legacy headroom observed_at = %q: %v", headroom.ObservedAt, err)
+	}
+}
+
 func TestAgents_RegisteredIdleAndOfflineExecutorsExposeNoPrincipal(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -135,6 +178,9 @@ func TestAgents_RegisteredIdleAndOfflineExecutorsExposeNoPrincipal(t *testing.T)
 	idle := byName["idle-agent"]
 	if idle.Status != "idle" || idle.Location != "local" || idle.MaxConcurrent != 2 || idle.Headroom == nil || idle.Budget.Cores != 4 {
 		t.Fatalf("idle executor = %+v", idle)
+	}
+	if idle.Headroom.ObservedAt != idle.LastSeen {
+		t.Fatalf("idle headroom observed_at = %q, last_seen = %q", idle.Headroom.ObservedAt, idle.LastSeen)
 	}
 	offline := byName["old-gateway"]
 	if offline.Status != "offline" || offline.Type != "gateway" || offline.Location != "cloud" || offline.Headroom != nil {
@@ -212,6 +258,9 @@ func TestAgents_AdminEnrollmentExactCredentialLivenessAndLegacyBoundary(t *testi
 	got := listed.Agents[0]
 	if got.Name != "desk" || got.Headroom == nil || got.Headroom.Cores != 3 || got.Budget.Cores != 4 || got.BasePriority != 10 || got.PriorityCeiling != 30 {
 		t.Fatalf("registered agent = %+v", got)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, got.Headroom.ObservedAt); err != nil {
+		t.Fatalf("registered headroom observed_at = %q: %v", got.Headroom.ObservedAt, err)
 	}
 
 	ctx := context.Background()

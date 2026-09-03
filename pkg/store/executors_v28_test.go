@@ -117,6 +117,43 @@ func TestExecutorEnrollmentOwnsTrustAndHeartbeatOnlyNarrowsLiveness(t *testing.T
 	}
 }
 
+func TestProvisionExecutorRollbackRevokesCredentialAndRemovesExactEnrollment(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	raw, tok, err := s.ProvisionExecutor(ctx, "desk-owner", store.Executor{
+		Name: "desk", Kind: "agent", Location: "local", BasePriority: 50,
+		PriorityCeiling: 100, MaxConcurrent: 1,
+	}, []string{"nodes.claim"}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RollbackExecutorProvisioning(ctx, "desk", tok.Prefix, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LookupToken(raw, now.Add(time.Second)); !errors.Is(err, store.ErrTokenRevoked) {
+		t.Fatalf("rolled-back token authentication = %v", err)
+	}
+	if _, err := s.ExecutorForCredential(ctx, store.ClaimIdentity{Principal: "desk-owner", TokenPrefix: tok.Prefix}, "desk"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("rolled-back enrollment lookup = %v", err)
+	}
+}
+
+func TestResetExecutorLivenessPreventsStaleTrustFromRemainingEligible(t *testing.T) {
+	s := newStoreT(t)
+	identity := enrollTestExecutor(t, s, "removed-worker", 1, 2)
+	if err := s.ResetExecutorLiveness(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := s.ExecutorForCredential(context.Background(), identity, "removed-worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !executor.LastSeen.IsZero() || executor.HeadroomReported || executor.Headroom != (store.ExecutorResource{}) || executor.QueueDepth != 0 {
+		t.Fatalf("stale liveness survived reset: %+v", executor)
+	}
+}
+
 func TestExecutorSchedulingSummaryAndMembershipAreReadOnlyAndLocationNeutral(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()

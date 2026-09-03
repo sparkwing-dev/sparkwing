@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/executorinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -62,12 +64,22 @@ type AgentCoordinatorConfig struct {
 }
 
 func LoadAgentConfig(path string) (*AgentConfig, error) {
-	data, err := os.ReadFile(path)
+	f, err := fssecure.OpenPrivateConfig(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	defer func() { _ = f.Close() }()
 	var cfg AgentConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	decoder := yaml.NewDecoder(f)
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("multiple YAML documents are not allowed")
+		}
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return &cfg, nil
@@ -414,6 +426,7 @@ func RunAgentCLI(args []string) error {
 		"labels", cfg.Labels,
 		"max_concurrent", cfg.MaxConcurrent,
 		"spawn_policy", cfg.SpawnPolicy,
+		"observed_platform", executorinfo.DetectObservedPlatform(),
 	)
 
 	if !cfg.registered {

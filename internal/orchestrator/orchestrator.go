@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
@@ -76,6 +77,16 @@ type Options struct {
 	NoCache bool
 
 	LocalOnly bool
+	Fleet     bool
+
+	FleetConfigPath    string
+	FleetSourceRoot    string
+	FleetSourceBundle  string
+	FleetSourceSHA     string
+	FleetSourceRepoURL string
+	FleetSourceFiles   int
+	FleetSourceBytes   int64
+	FleetBundleBytes   int64
 
 	DryRun bool
 
@@ -217,6 +228,13 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		Invocation:    invocation,
 	}); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
+	}
+	if opts.Fleet {
+		payload := fleetSourceSnapshotPayload(opts)
+		if err := backends.State.AppendEvent(ctx, runID, "", "fleet_source_snapshot", payload); err != nil {
+			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("record fleet source snapshot: %v", err))
+			return &Result{RunID: runID, Status: "failed", Error: err}, nil
+		}
 	}
 	if opts.RunHandlePath != "" {
 		handle := NewRunHandle(runID, opts.Pipeline, localRunLogDir(backends.Logs, runID), "running")
@@ -572,7 +590,7 @@ func statusForRunError(err error) string {
 	var superseded *nodeSupersededError
 	var canceled *runDaemonCanceledError
 	if errors.As(err, &evicted) || errors.As(err, &interrupted) ||
-		errors.As(err, &superseded) || errors.As(err, &canceled) {
+		errors.As(err, &superseded) || errors.As(err, &canceled) || errors.Is(err, fleet.ErrCoordinatorProcessGone) {
 		return "cancelled"
 	}
 	return "failed"

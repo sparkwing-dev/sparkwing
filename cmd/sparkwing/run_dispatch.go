@@ -59,6 +59,7 @@ type runFlags struct {
 	allow []string
 
 	localOnly bool
+	fleet     bool
 
 	index string
 
@@ -215,6 +216,9 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			i++
 		case a == "--sw-local-only":
 			wf.localOnly = true
+			i++
+		case a == "--sw-fleet":
+			wf.fleet = true
 			i++
 		case a == "--sw-dry-run", a == "--dry-run=true":
 			wf.dryRun = true

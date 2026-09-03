@@ -8,7 +8,9 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -55,13 +57,78 @@ type Server struct {
 	cachePodURL string
 	logsURL     string
 
-	cacheURL string
+	cacheURL   string
+	cacheToken string
 
 	metricsAddr string
 
 	reconcileHook func(context.Context) error
 
 	runnerHeadroom *runnerHeadroomRegistry
+
+	assistedRunID string
+	draining      atomic.Bool
+}
+
+// WithAssistedRunScope restricts executor preparation and offers to one
+// foreground coordinator run.
+func (s *Server) WithAssistedRunScope(runID string) *Server {
+	s.assistedRunID = runID
+	return s
+}
+
+// StopAssistedClaims makes a foreground coordinator refuse new preparations
+// and offers while already-claimed nodes wind down.
+func (s *Server) StopAssistedClaims() { s.draining.Store(true) }
+
+// AssistedRunHandler exposes only the authenticated surfaces an enrolled
+// executor needs for one foreground run.
+func (s *Server) AssistedRunHandler() http.Handler {
+	full := s.Handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.assistedPathAllowed(r.Method, r.URL.Path) {
+			http.NotFound(w, r)
+			return
+		}
+		if s.draining.Load() && r.Method == http.MethodPost &&
+			(r.URL.Path == "/api/v1/nodes/claim" || r.URL.Path == "/api/v1/nodes/claim/prepare") {
+			http.Error(w, "foreground coordinator is stopping", http.StatusServiceUnavailable)
+			return
+		}
+		full.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) assistedPathAllowed(method, path string) bool {
+	if method == http.MethodGet && (path == "/api/v1/health" || path == "/api/v1/auth/whoami" || path == "/api/v1/services") {
+		return true
+	}
+	if method == http.MethodPost && (path == "/api/v1/nodes/claim" || path == "/api/v1/nodes/claim/prepare") {
+		return true
+	}
+	if strings.HasPrefix(path, "/api/v1/agents/") && strings.HasSuffix(path, "/heartbeat") {
+		return method == http.MethodPost
+	}
+	if method == http.MethodGet && path == "/api/v1/triggers/"+s.assistedRunID {
+		return true
+	}
+	prefix := "/api/v1/runs/" + s.assistedRunID
+	if method == http.MethodGet && path == prefix {
+		return true
+	}
+	if strings.HasPrefix(path, prefix+"/gitcache/git/") {
+		return method == http.MethodGet || method == http.MethodPost
+	}
+	if strings.HasPrefix(path, prefix+"/nodes/") {
+		suffix := strings.TrimPrefix(path, prefix+"/nodes/")
+		if method == http.MethodGet && !strings.Contains(suffix, "/") {
+			return true
+		}
+		if method == http.MethodGet && strings.HasSuffix(suffix, "/output") {
+			return true
+		}
+	}
+	return false
 }
 
 // New constructs a Server bound to the given store. A nil dispatcher
@@ -141,6 +208,14 @@ func (s *Server) WithLogsURL(url string) *Server {
 // gitcache seed and refresh routes.
 func (s *Server) WithCacheURL(url string) *Server {
 	s.cacheURL = url
+	return s
+}
+
+// WithCacheCredentials configures a private controller-to-cache hop. The
+// bearer is never forwarded to an executor.
+func (s *Server) WithCacheCredentials(url, token string) *Server {
+	s.cacheURL = url
+	s.cacheToken = token
 	return s
 }
 

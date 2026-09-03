@@ -1,9 +1,13 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 )
 
 func TestParseRunFlags_Only(t *testing.T) {
@@ -63,6 +67,55 @@ func TestParseRunFlags_LocalOnly(t *testing.T) {
 	}
 	if len(pass) != 0 {
 		t.Errorf("passthrough should be empty, got %v", pass)
+	}
+}
+
+func TestParseRunFlags_FleetAndLocalOnlyCoexist(t *testing.T) {
+	wf, pass := parseRunFlags([]string{"--sw-fleet", "--sw-local-only"})
+	if !wf.fleet || !wf.localOnly {
+		t.Fatalf("flags = %+v", wf)
+	}
+	if len(pass) != 0 {
+		t.Fatalf("passthrough = %v", pass)
+	}
+}
+
+func TestDispatchFleetMissingConfigNamesSetupCommand(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv("SPARKWING_FLEET_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := dispatchRun([]string{"missing", "--sw-fleet", "--sw-cd", repo})
+	if err == nil || !strings.Contains(err.Error(), "sparkwing fleet init") {
+		t.Fatalf("missing config error = %v", err)
+	}
+}
+
+func TestDispatchFleetEmptyConfigNamesEnrollmentCommand(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	configPath := filepath.Join(t.TempDir(), "fleet.yaml")
+	if err := fleet.Create(configPath, fleet.Config{
+		Listen: "127.0.0.1:7443", PublicURL: "http://127.0.0.1:7443",
+		Local: fleet.Local{MaxConcurrent: 1, Contribution: "50%,50%"},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_FLEET_CONFIG", configPath)
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := dispatchRun([]string{"missing", "--sw-fleet", "--sw-cd", repo})
+	if err == nil || !strings.Contains(err.Error(), "sparkwing fleet agents enroll") {
+		t.Fatalf("empty config error = %v", err)
 	}
 }
 

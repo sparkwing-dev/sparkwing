@@ -49,6 +49,9 @@ type AgentHeadroom struct {
 	Cores       float64 `json:"cores"`
 	MemoryBytes int64   `json:"memory_bytes"`
 	QueueDepth  int     `json:"queue_depth"`
+	// ObservedAt is when the controller accepted this measurement, not a
+	// worker-supplied clock value.
+	ObservedAt string `json:"observed_at"`
 }
 
 type enrollAgentReq struct {
@@ -254,6 +257,7 @@ SELECT run_id, node_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(le
 				Cores:       hr.Cores,
 				MemoryBytes: hr.MemoryBytes,
 				QueueDepth:  hr.QueueDepth,
+				ObservedAt:  hr.UpdatedAt.UTC().Format(time.RFC3339),
 			}
 		}
 		out = append(out, agent)

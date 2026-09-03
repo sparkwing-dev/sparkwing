@@ -66,7 +66,14 @@ func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Execut
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result, err := tx.ExecContext(ctx, `
+	if err := enrollExecutorWith(ctx, tx, tokenPrefix, e, caps); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func enrollExecutorWith(ctx context.Context, e tokenExecer, tokenPrefix string, executor Executor, caps []byte) error {
+	result, err := e.ExecContext(ctx, `
 UPDATE executors
    SET last_seen = CASE WHEN token_prefix = ? THEN last_seen ELSE 0 END,
        headroom_reported = CASE WHEN token_prefix = ? THEN headroom_reported ELSE 0 END,
@@ -78,8 +85,8 @@ UPDATE executors
        budget_cores = ?, budget_memory_bytes = ?, principal = ?
  WHERE name = ?`,
 		tokenPrefix, tokenPrefix, tokenPrefix, tokenPrefix, tokenPrefix,
-		tokenPrefix, e.Kind, e.Location, caps, e.BasePriority, e.PriorityCeiling, e.MaxConcurrent,
-		e.Budget.Cores, e.Budget.MemoryBytes, e.Principal, e.Name)
+		tokenPrefix, executor.Kind, executor.Location, caps, executor.BasePriority, executor.PriorityCeiling, executor.MaxConcurrent,
+		executor.Budget.Cores, executor.Budget.MemoryBytes, executor.Principal, executor.Name)
 	if err != nil {
 		return err
 	}
@@ -88,17 +95,88 @@ UPDATE executors
 		return err
 	}
 	if updated == 0 {
-		_, err = tx.ExecContext(ctx, `
+		_, err = e.ExecContext(ctx, `
 INSERT INTO executors
     (name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
      budget_cores, budget_memory_bytes, principal, last_seen,
      headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)`,
-			e.Name, tokenPrefix, e.Kind, e.Location, caps, e.BasePriority, e.PriorityCeiling, e.MaxConcurrent,
-			e.Budget.Cores, e.Budget.MemoryBytes, e.Principal)
+			executor.Name, tokenPrefix, executor.Kind, executor.Location, caps, executor.BasePriority, executor.PriorityCeiling, executor.MaxConcurrent,
+			executor.Budget.Cores, executor.Budget.MemoryBytes, executor.Principal)
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// ProvisionExecutor atomically mints one runner credential and binds its
+// verifier to an operator-owned executor enrollment. The raw bearer is
+// returned once and is not recoverable from the store.
+func (s *Store) ProvisionExecutor(ctx context.Context, principal string, executor Executor, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error) {
+	if executor.Name == "" {
+		return "", nil, errors.New("executor name is required")
+	}
+	if executor.BasePriority < 0 || executor.BasePriority > 100 || executor.PriorityCeiling < executor.BasePriority || executor.PriorityCeiling > 100 ||
+		executor.MaxConcurrent < 1 || executor.Budget.Cores < 0 || math.IsNaN(executor.Budget.Cores) || math.IsInf(executor.Budget.Cores, 0) || executor.Budget.MemoryBytes < 0 {
+		return "", nil, errors.New("executor enrollment has invalid priority or contribution limits")
+	}
+	caps, err := json.Marshal(executor.Capabilities)
+	if err != nil {
+		return "", nil, err
+	}
+	for attempt := 1; attempt <= mintAttempts; attempt++ {
+		tx, err := s.beginTx(ctx)
+		if err != nil {
+			return "", nil, err
+		}
+		raw, tok, err := createTokenRow(ctx, tx, principal, TokenKindRunner, scopes, ttl, now)
+		if err == nil {
+			executor.Principal = principal
+			err = enrollExecutorWith(ctx, tx, tok.Prefix, executor, caps)
+		}
+		if err == nil {
+			err = tx.Commit()
+		} else {
+			_ = tx.Rollback()
+		}
+		if err == nil {
+			return raw, tok, nil
+		}
+		if attempt == mintAttempts || !isTokenPrefixCollision(err) {
+			return "", nil, err
+		}
+	}
+	return "", nil, errors.New("executor credential prefix allocation exhausted")
+}
+
+// RollbackExecutorProvisioning revokes a newly provisioned credential and
+// removes only the enrollment still bound to that exact credential.
+func (s *Store) RollbackExecutorProvisioning(ctx context.Context, name, tokenPrefix string, now time.Time) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `DELETE FROM executors WHERE name = ? AND token_prefix = ?`, name, tokenPrefix)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		if err != nil {
+			return err
+		}
+		return ErrExecutorCredentialMismatch
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE tokens SET revoked_at = ? WHERE prefix = ? AND revoked_at IS NULL`, now.UTC().Unix(), tokenPrefix)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		if err != nil {
+			return err
+		}
+		return ErrExecutorCredentialMismatch
 	}
 	return tx.Commit()
 }
@@ -180,6 +258,16 @@ SELECT name, token_prefix, kind, location, capabilities_json, base_priority, pri
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ResetExecutorLiveness makes every persisted enrollment ineligible until its
+// exact credential heartbeats again. A foreground coordinator calls this
+// before reconciling its narrower fleet allowlist.
+func (s *Store) ResetExecutorLiveness(ctx context.Context) error {
+	_, err := s.exec(ctx, `UPDATE executors
+SET last_seen = 0, headroom_reported = 0, headroom_cores = 0,
+    headroom_memory_bytes = 0, queue_depth = 0`)
+	return err
 }
 
 // ExecutorActivity reports live claims without collapsing multiple slots from

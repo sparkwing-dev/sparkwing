@@ -41,7 +41,10 @@ func (s *Server) registeredAgents(ctx context.Context, now time.Time) ([]Agent, 
 		}
 		a := Agent{Name: e.Name, Type: e.Kind, Location: e.Location, Labels: labels, Capabilities: e.Capabilities, LastSeen: lastSeen, Status: status, ActiveJobs: jobs, ActiveSlots: &activity.ActiveSlots, MaxConcurrent: e.MaxConcurrent, BasePriority: e.BasePriority, PriorityCeiling: e.PriorityCeiling, Budget: AgentResources{Cores: e.Budget.Cores, MemoryBytes: e.Budget.MemoryBytes}}
 		if e.HeadroomReported && status != "offline" {
-			a.Headroom = &AgentHeadroom{Cores: e.Headroom.Cores, MemoryBytes: e.Headroom.MemoryBytes, QueueDepth: e.QueueDepth}
+			a.Headroom = &AgentHeadroom{
+				Cores: e.Headroom.Cores, MemoryBytes: e.Headroom.MemoryBytes, QueueDepth: e.QueueDepth,
+				ObservedAt: e.LastSeen.UTC().Format(time.RFC3339),
+			}
 		}
 		out = append(out, a)
 	}

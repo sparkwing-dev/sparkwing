@@ -62,7 +62,8 @@ type agentResources struct {
 
 type agentHeadroom struct {
 	agentResources
-	QueueDepth int `json:"queue_depth"`
+	QueueDepth int    `json:"queue_depth"`
+	ObservedAt string `json:"observed_at"`
 }
 
 type agentsResp struct {

@@ -177,7 +177,9 @@ func redactDispatchEnv(ctx context.Context, env map[string]string) dispatchEnv {
 }
 
 var envDenyExact = map[string]bool{
-	wingdclient.HostBinEnv: true,
+	wingdclient.HostBinEnv:         true,
+	"SPARKWING_FLEET_PARENT_GUARD": true,
+	"SPARKWING_FLEET_PARENT_TOKEN": true,
 }
 
 func envAllowed(name string) bool {

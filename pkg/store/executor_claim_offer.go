@@ -50,6 +50,19 @@ type ExecutorClaimRoundResult struct {
 // PrepareNextExecutorClaim returns the oldest eligible node without changing
 // queue or claim state. The exact resource digest is recomputed on award.
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error) {
+	return s.prepareNextExecutorClaim(ctx, claimant, executorName, "")
+}
+
+// PrepareExecutorClaimForRun restricts preparation to one coordinator-owned
+// run. It keeps a foreground authority from exposing unrelated local work.
+func (s *Store) PrepareExecutorClaimForRun(ctx context.Context, claimant ClaimIdentity, executorName, runID string) (*ExecutorClaimPreparation, error) {
+	if runID == "" {
+		return nil, errors.New("executor claim preparation requires a run")
+	}
+	return s.prepareNextExecutorClaim(ctx, claimant, executorName, runID)
+}
+
+func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName, runID string) (*ExecutorClaimPreparation, error) {
 	if _, err := s.ExecutorForCredential(ctx, claimant, executorName); err != nil {
 		return nil, err
 	}
@@ -64,13 +77,14 @@ func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 SELECT n.run_id, n.node_id, n.ready_at
   FROM nodes n
  WHERE n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.`+nodeNotDone+`
+	   AND (? = '' OR n.run_id = ?)
 	   AND NOT EXISTS (
 	       SELECT 1 FROM node_claim_offers o
 	        WHERE o.run_id = n.run_id AND o.node_id = n.node_id
 	          AND o.executor_name = ? AND o.last_seen_at >= ?)
    AND (n.ready_at > ? OR (n.ready_at = ? AND (n.run_id > ? OR (n.run_id = ? AND n.node_id > ?))))
  ORDER BY n.ready_at, n.run_id, n.node_id
-	LIMIT 64`, executorName, activeAfter, after.readyAt, after.readyAt, after.runID, after.runID, after.nodeID)
+	LIMIT 64`, runID, runID, executorName, activeAfter, after.readyAt, after.readyAt, after.runID, after.runID, after.nodeID)
 		if err != nil {
 			return nil, err
 		}

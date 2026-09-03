@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -38,6 +39,9 @@ spawn_policy: return-to-queue
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := fssecure.SecurePrivateConfig(path); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := LoadAgentConfig(path)
 	if err != nil {
@@ -61,6 +65,28 @@ spawn_policy: return-to-queue
 	}
 	if norm.Poll <= 0 || norm.Lease <= 0 {
 		t.Fatalf("defaults missing: %+v", norm)
+	}
+}
+
+func TestAgentConfig_RejectsUnknownFieldsAndAdditionalDocuments(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"unknown field", "controller: http://localhost:4344\nadmin: true\n", "field admin not found"},
+		{"second document", "controller: http://localhost:4344\n---\ntoken: hidden\n", "multiple YAML documents"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "agent.yaml")
+			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := fssecure.SecurePrivateConfig(path); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadAgentConfig(path); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("LoadAgentConfig error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

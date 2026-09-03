@@ -1127,6 +1127,10 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, errors.New("run_id, node_id, reservation_id, resource_digest, and non-negative slot are required for an executor offer"))
 			return
 		}
+		if s.assistedRunID != "" && body.RunID != s.assistedRunID {
+			writeError(w, http.StatusForbidden, errors.New("executor offer does not belong to this foreground run"))
+			return
+		}
 		result, err := s.store.OfferExecutorClaim(r.Context(), claimIdentity(r), store.ExecutorClaimOffer{
 			ExecutorName: body.ExecutorName, HolderID: body.HolderID,
 			RunID: body.RunID, NodeID: body.NodeID, ReservationID: body.ReservationID,
@@ -1196,7 +1200,13 @@ func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, errors.New("executor_name is required"))
 		return
 	}
-	preparation, err := s.store.PrepareNextExecutorClaim(r.Context(), claimIdentity(r), body.ExecutorName)
+	var preparation *store.ExecutorClaimPreparation
+	var err error
+	if s.assistedRunID != "" {
+		preparation, err = s.store.PrepareExecutorClaimForRun(r.Context(), claimIdentity(r), body.ExecutorName, s.assistedRunID)
+	} else {
+		preparation, err = s.store.PrepareNextExecutorClaim(r.Context(), claimIdentity(r), body.ExecutorName)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		w.WriteHeader(http.StatusNoContent)
 		return
