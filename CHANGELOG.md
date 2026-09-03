@@ -249,6 +249,29 @@ code change to unlock.
 
 ### Fixed
 
+- **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
+  every git subprocess the cache server spawns, which is what it always claimed
+  to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
+  sync-negotiate, workspace-checkout and git smart-HTTP paths -- forked git
+  without taking a slot, so a burst of clones or `POST /sync/negotiate` requests
+  could exhaust the pod's PIDs whatever the limit said. `/git/<name>/info/refs`
+  and `/git/<name>/git-upload-pack` wait up to 30 seconds for a slot and then
+  answer 503 with `Retry-After`, so a saturated cache sheds load instead of
+  forking without bound. `POST /sync/negotiate` now checks every candidate
+  commit with one `git cat-file --batch-check` process instead of one fork per
+  commit (up to 256 per request). Operators serving many concurrent clones
+  through the cache should raise the limit from its default of 4.
+- **cache:** Artifact uploads are capped and atomic. `POST /artifacts/<job>` now
+  refuses a body over 500 MiB with 413 and stages the upload beside its
+  destination, renaming it into place only once the whole body has landed. A
+  runner killed mid-upload used to leave a truncated file at the artifact's
+  permanent path, which the list and download routes then served as complete.
+- **cache:** The gitcache background fetch loop now takes the same per-repo lock
+  the request handlers take. It keyed the lock on the mirror's full path while
+  every handler keyed it on the repository hash, so a background
+  `git fetch --prune` could run concurrently with an `/archive` recovery reclone
+  (which deletes and re-clones the mirror) or with a tarball being streamed,
+  producing truncated archives and spurious 500s.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads
