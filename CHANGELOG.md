@@ -148,6 +148,8 @@ code change to unlock.
   require a live node claim. Because the compiled pipeline binary interprets
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
+- **s3state:** `WithReadCacheTTL` bounds how stale a read of a run this process
+  does not write may be.
 
 ### Changed
 
@@ -287,6 +289,15 @@ code change to unlock.
   `daemon_schema_version` against `store_schema_version`, marks a diverged pair
   unhealthy, says when a restart will not help, and reports a store that exists
   but cannot be read as `store_schema_error` instead of as an absent store.
+- **s3state:** A run another process writes is no longer read once and cached
+  forever. In S3-only shared state, the first read of a run id was kept for the
+  life of the process, including a read that found nothing, so a pipeline
+  awaiting a child it spawned polled a "not found" that could never change and
+  waited until something outside it gave up. Reads of a run this process does
+  not write now expire after `DefaultReadCacheTTL` (one second, tunable with
+  `WithReadCacheTTL`), a read that found no run is not cached at all, and
+  `GetLatestRun` reads each run envelope without retaining it, so scanning a
+  bucket no longer pins every run in it for the life of the process.
 
 ### Security
 

@@ -47,6 +47,13 @@ const DefaultFlushInterval = 500 * time.Millisecond
 // envelopes since the last flush exceed this many bytes.
 const DefaultBufferThreshold = 16 * 1024
 
+// DefaultReadCacheTTL bounds how stale a snapshot of a run this
+// process does not write may be. Past it the next read re-parses the
+// object store's copy, so a run another runner has advanced since the
+// first read becomes visible. A read that found no run is never
+// cached at all, whatever this is set to.
+const DefaultReadCacheTTL = time.Second
+
 // ErrNotSupported is the sentinel returned by methods that require
 // cross-runner coordination Mode 2 omits. Callers check with errors.Is.
 //
@@ -75,6 +82,7 @@ type Backend struct {
 	art           storage.ArtifactStore
 	flushInterval time.Duration
 	bufferLimit   int
+	readTTL       time.Duration
 	outbox        *Outbox
 
 	mu   sync.Mutex
@@ -108,6 +116,13 @@ func WithBufferThreshold(n int) Option {
 	}
 }
 
+// WithReadCacheTTL overrides DefaultReadCacheTTL. A value at or below
+// zero re-reads the object store on every access to a run this
+// process does not write.
+func WithReadCacheTTL(d time.Duration) Option {
+	return func(b *Backend) { b.readTTL = d }
+}
+
 // WithOutbox attaches a local SQLite outbox that absorbs writes when
 // the object store is unreachable, draining when connectivity
 // returns. Pass nil (or omit) to disable.
@@ -123,6 +138,7 @@ func New(art storage.ArtifactStore, opts ...Option) *Backend {
 		art:           art,
 		flushInterval: DefaultFlushInterval,
 		bufferLimit:   DefaultBufferThreshold,
+		readTTL:       DefaultReadCacheTTL,
 		runs:          map[string]*runState{},
 		stopCh:        make(chan struct{}),
 	}
@@ -152,7 +168,11 @@ type runState struct {
 	stepOrder []stepKey
 	events    []store.Event
 	metrics   map[string][]store.MetricSample
-	loaded    bool
+
+	loadAttempted bool
+	loaded        bool
+	loadedAt      time.Time
+	owned         bool
 }
 
 type stepKey struct {
@@ -173,7 +193,14 @@ func newRunState() *runState {
 	}
 }
 
-func (b *Backend) getRunState(ctx context.Context, runID string, load bool) (*runState, error) {
+type runAccess int
+
+const (
+	accessRead runAccess = iota
+	accessWrite
+)
+
+func (b *Backend) getRunState(ctx context.Context, runID string, mode runAccess) (*runState, error) {
 	b.mu.Lock()
 	rs, ok := b.runs[runID]
 	if !ok {
@@ -184,13 +211,67 @@ func (b *Backend) getRunState(ctx context.Context, runID string, load bool) (*ru
 
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	if load && !rs.loaded {
-		if err := b.loadLocked(ctx, runID, rs); err != nil {
-			return nil, err
-		}
-		rs.loaded = true
+	// safety: once this process writes a run, its envelope log is the newest
+	// copy of it and no re-read may replace it.
+	if mode == accessWrite {
+		rs.owned = true
 	}
+	if !b.needsLoadLocked(rs) {
+		return rs, nil
+	}
+	rs.resetLocked()
+	if err := b.loadLocked(ctx, runID, rs); err != nil {
+		return nil, err
+	}
+	rs.loadAttempted = true
+	rs.loaded = rs.run != nil || len(rs.envelopes) > 0
+	rs.loadedAt = time.Now()
 	return rs, nil
+}
+
+// safety: a snapshot of a run this process does not write is a cache of
+// another process's copy, so it expires; a load that found no run is not
+// cached at all, since whoever owns the run may create it at any moment.
+func (b *Backend) needsLoadLocked(rs *runState) bool {
+	if rs.dirty || rs.flushing != nil {
+		return false
+	}
+	if !rs.loadAttempted {
+		return true
+	}
+	if rs.owned {
+		return false
+	}
+	if !rs.loaded {
+		return true
+	}
+	return b.readTTL <= 0 || time.Since(rs.loadedAt) >= b.readTTL
+}
+
+// safety: a re-read replays the store's whole envelope log, so the previous
+// snapshot has to go or the two are concatenated.
+func (rs *runState) resetLocked() {
+	rs.envelopes = nil
+	rs.bufSize = 0
+	rs.run = nil
+	rs.nodes = map[string]*store.Node{}
+	rs.steps = map[string]map[string]*store.NodeStep{}
+	rs.stepOrder = nil
+	rs.events = nil
+	rs.metrics = map[string][]store.MetricSample{}
+}
+
+func (b *Backend) evictIdleReads(cutoff time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for id, rs := range b.runs {
+		rs.mu.Lock()
+		idle := !rs.owned && !rs.dirty && rs.flushing == nil && rs.loadedAt.Before(cutoff)
+		rs.mu.Unlock()
+		if idle {
+			delete(b.runs, id)
+		}
+	}
 }
 
 func (b *Backend) loadLocked(ctx context.Context, runID string, rs *runState) error {
@@ -214,7 +295,7 @@ func (b *Backend) loadLocked(ctx context.Context, runID string, rs *runState) er
 }
 
 func (b *Backend) appendEnvelope(ctx context.Context, runID string, env envelope) error {
-	rs, err := b.getRunState(ctx, runID, true)
+	rs, err := b.getRunState(ctx, runID, accessWrite)
 	if err != nil {
 		return err
 	}
@@ -350,6 +431,7 @@ func (b *Backend) flushLoop() {
 			return
 		case <-t.C:
 			b.flushAllDirty()
+			b.evictIdleReads(time.Now().Add(-b.readTTL))
 		}
 	}
 }
@@ -509,7 +591,7 @@ func (b *Backend) CreateRun(ctx context.Context, r store.Run) error {
 // object store, since in Mode 2 that store is the only copy. Callers
 // that see an error must treat the run's state as not yet persisted.
 func (b *Backend) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	rs, err := b.getRunState(ctx, runID, true)
+	rs, err := b.getRunState(ctx, runID, accessWrite)
 	if err != nil {
 		return err
 	}
@@ -537,7 +619,7 @@ func (b *Backend) FinishRun(ctx context.Context, runID, status, errMsg string) e
 }
 
 func (b *Backend) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
-	rs, err := b.getRunState(ctx, runID, true)
+	rs, err := b.getRunState(ctx, runID, accessWrite)
 	if err != nil {
 		return err
 	}
@@ -558,7 +640,7 @@ func (b *Backend) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot
 }
 
 func (b *Backend) GetRun(ctx context.Context, runID string) (*store.Run, error) {
-	rs, err := b.getRunState(ctx, runID, true)
+	rs, err := b.getRunState(ctx, runID, accessRead)
 	if err != nil {
 		return nil, err
 	}
@@ -571,8 +653,48 @@ func (b *Backend) GetRun(ctx context.Context, runID string) (*store.Run, error) 
 	return &clone, nil
 }
 
+// perf: reads the run envelope without retaining a snapshot, so a scan over a
+// whole bucket does not pin every run it reads.
+func (b *Backend) readRunRecord(ctx context.Context, runID string) (*store.Run, error) {
+	if rs := b.lookupRun(runID); rs != nil {
+		rs.mu.Lock()
+		if rs.owned && rs.run != nil {
+			clone := *rs.run
+			rs.mu.Unlock()
+			return &clone, nil
+		}
+		rs.mu.Unlock()
+	}
+	rc, err := b.art.Get(ctx, stateKey(runID))
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, store.ErrNotFound
+		}
+		return nil, fmt.Errorf("s3state: load %s: %w", runID, err)
+	}
+	defer func() { _ = rc.Close() }()
+	envs, err := parseEnvelopes(rc)
+	if err != nil {
+		return nil, fmt.Errorf("s3state: parse %s: %w", runID, err)
+	}
+	var latest *store.Run
+	for _, env := range envs {
+		if env.Kind != KindRun {
+			continue
+		}
+		var r store.Run
+		if err := json.Unmarshal(env.Data, &r); err == nil {
+			latest = &r
+		}
+	}
+	if latest == nil {
+		return nil, store.ErrNotFound
+	}
+	return latest, nil
+}
+
 // GetLatestRun scans every runs/<id>/state.ndjson key in the
-// artifact store, loads the run envelope, and returns the
+// artifact store, reads the run envelope, and returns the
 // most-recent match. Latency scales with the number of runs in the
 // bucket; this is the deliberate tradeoff for not running a
 // database. Returns store.ErrNotFound when no run matches.
@@ -598,7 +720,7 @@ func (b *Backend) GetLatestRun(ctx context.Context, pipeline string, statuses []
 		if !ok {
 			continue
 		}
-		r, gerr := b.GetRun(ctx, runID)
+		r, gerr := b.readRunRecord(ctx, runID)
 		if gerr != nil {
 			continue
 		}
@@ -678,7 +800,7 @@ func (b *Backend) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, ma
 }
 
 func (b *Backend) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {
-	rs, err := b.getRunState(ctx, runID, true)
+	rs, err := b.getRunState(ctx, runID, accessRead)
 	if err != nil {
 		return nil, err
 	}
@@ -716,7 +838,7 @@ func (b *Backend) SetNodeSummary(ctx context.Context, runID, nodeID, md string) 
 }
 
 func (b *Backend) mutateNode(ctx context.Context, runID, nodeID string, f func(*store.Node)) error {
-	rs, err := b.getRunState(ctx, runID, true)
+	rs, err := b.getRunState(ctx, runID, accessWrite)
 	if err != nil {
 		return err
 	}
@@ -782,7 +904,7 @@ func (b *Backend) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md 
 }
 
 func (b *Backend) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error) {
-	rs, err := b.getRunState(ctx, runID, true)
+	rs, err := b.getRunState(ctx, runID, accessRead)
 	if err != nil {
 		return nil, err
 	}
@@ -801,7 +923,7 @@ func (b *Backend) ListNodeSteps(ctx context.Context, runID string) ([]*store.Nod
 }
 
 func (b *Backend) mutateStep(ctx context.Context, runID, nodeID, stepID string, f func(*store.NodeStep)) error {
-	rs, err := b.getRunState(ctx, runID, true)
+	rs, err := b.getRunState(ctx, runID, accessWrite)
 	if err != nil {
 		return err
 	}
