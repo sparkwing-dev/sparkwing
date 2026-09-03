@@ -43,7 +43,7 @@ func runWingdCLI(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	art, artFault := wingdArtifactStore(ctx)
+	art, artFault := WingdArtifactStore(ctx)
 	return RunWingdDaemon(ctx, WingdOptions{
 		Home:               *home,
 		Version:            v,
@@ -59,10 +59,14 @@ func runWingdCLI(args []string) error {
 	})
 }
 
+// WingdArtifactStore resolves the artifact store the daemon's controller API
+// serves artifact routes from, and reports why it could not as a string
+// rather than an error.
+//
 // safety: a cache URL that will not open leaves the artifact routes
 // unregistered; it is not a reason to leave the machine with no daemon, which
 // would stop every run including those that touch no artifact.
-func wingdArtifactStore(ctx context.Context) (storage.ArtifactStore, string) {
+func WingdArtifactStore(ctx context.Context) (storage.ArtifactStore, string) {
 	art, err := resolveArtifactStoreFromEnv(ctx)
 	if err != nil {
 		return nil, err.Error()

@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -119,4 +123,27 @@ func TestDaemonWithAnUnboundAPISocketIsNotHealthy(t *testing.T) {
 	if daemonAPIUnusable(old) {
 		t.Fatal("a daemon that does not report api_ready is judged on it")
 	}
+}
+
+func TestTheInstalledDaemonVerbResolvesAnArtifactStore(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_URL", "bogus-scheme://nowhere")
+	art, fault := orchestrator.WingdArtifactStore(context.Background())
+	if art != nil {
+		t.Fatalf("a cache URL that will not open resolved to %T", art)
+	}
+	if fault == "" {
+		t.Fatal("a cache URL that will not open reported no fault, so the daemon would serve artifact routes it cannot back")
+	}
+	if !strings.Contains(runWingdRunSource(t), "WingdArtifactStore") {
+		t.Fatal("the installed sparkwing's wingd run verb does not resolve an artifact store, so its daemon serves none")
+	}
+}
+
+func runWingdRunSource(t *testing.T) string {
+	t.Helper()
+	src, err := os.ReadFile("wingd.go")
+	if err != nil {
+		t.Fatalf("read the wingd verb: %v", err)
+	}
+	return string(src)
 }

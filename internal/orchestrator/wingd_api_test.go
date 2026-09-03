@@ -333,7 +333,7 @@ func TestAReadRouteDoesNotCreateTheRunsStore(t *testing.T) {
 
 func TestDaemonServesWhenTheCacheURLWillNotResolve(t *testing.T) {
 	t.Setenv(ArtifactStoreEnvVar, "bogus-scheme://nowhere")
-	art, fault := wingdArtifactStore(context.Background())
+	art, fault := WingdArtifactStore(context.Background())
 	if art != nil {
 		t.Fatalf("a cache URL that will not open resolved to %T", art)
 	}
