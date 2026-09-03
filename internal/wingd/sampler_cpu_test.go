@@ -1,6 +1,9 @@
 package wingd
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 const procStatIOWaitHeavy = "cpu  60 0 40 400 500 0 0 0 0 0\ncpu0 60 0 40 400 500 0 0 0\nintr 12345\n"
 
@@ -74,6 +77,31 @@ func TestBusyCoresFromTotals_ClampsToTheMachine(t *testing.T) {
 	}
 	if got != 4 {
 		t.Errorf("busy cores = %v, want the 4-core capacity", got)
+	}
+}
+
+func TestProcessCPUFraction_RequiresTheSameProcessIdentity(t *testing.T) {
+	t.Parallel()
+	before := time.Unix(100, 0)
+	for name, identity := range map[string][2]uint64{
+		"recycled PID":     {1000, 2000},
+		"unknown identity": {0, 0},
+	} {
+		previous := cpuSample{cpuSeconds: 1, at: before, startTicks: identity[0]}
+		current := cpuSample{cpuSeconds: 3, at: before.Add(time.Second), startTicks: identity[1]}
+		if usage, measured := processCPUFraction(previous, current); measured || usage != 0 {
+			t.Errorf("%s CPU = %v, measured %v; want a fresh unmeasured baseline", name, usage, measured)
+		}
+	}
+}
+
+func TestProcessCPUFraction_MeasuresAnUnchangedIdentity(t *testing.T) {
+	t.Parallel()
+	before := time.Unix(100, 0)
+	previous := cpuSample{cpuSeconds: 1, at: before, startTicks: 1000}
+	current := cpuSample{cpuSeconds: 3, at: before.Add(time.Second), startTicks: 1000}
+	if usage, measured := processCPUFraction(previous, current); !measured || usage != 2 {
+		t.Fatalf("process CPU = %v, measured %v; want two cores", usage, measured)
 	}
 }
 

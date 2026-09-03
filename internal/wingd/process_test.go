@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -29,13 +28,13 @@ func TestMain(m *testing.M) {
 func buildFixture(t *testing.T) string {
 	t.Helper()
 	fixtureOnce.Do(func() {
-		dir, err := os.MkdirTemp("/tmp", "wdfix")
+		dir, err := os.MkdirTemp(processFixtureTempRoot(), "wdfix")
 		if err != nil {
 			fixtureErr = err
 			return
 		}
 		fixtureDir = dir
-		bin := filepath.Join(dir, "testprog")
+		bin := filepath.Join(dir, "testprog"+processFixtureSuffix())
 		cmd := exec.Command("go", "build", "-o", bin,
 			"github.com/sparkwing-dev/sparkwing/internal/wingd/testprog")
 		cmd.Stderr = os.Stderr
@@ -149,8 +148,8 @@ func (ph *procHandle) mustStayQueued(within time.Duration) {
 	}
 }
 
-func (ph *procHandle) kill(sig syscall.Signal) {
-	_ = ph.cmd.Process.Signal(sig)
+func (ph *procHandle) kill() {
+	_ = ph.cmd.Process.Kill()
 }
 
 func readDaemonPid(t *testing.T, home string) int {
@@ -256,7 +255,7 @@ func TestProcess_ClientKillReleasesAndPromotes(t *testing.T) {
 	b := startProc(t, "hold", "--home", home, "--run", "b", "--sem", "lock", "--daemon-idle-ms", "3000")
 	b.mustStayQueued(500 * time.Millisecond)
 
-	a.kill(syscall.SIGKILL)
+	a.kill()
 	b.waitOK(5 * time.Second)
 }
 
@@ -351,7 +350,7 @@ func TestProcess_DaemonKillRestoresAndReattaches(t *testing.T) {
 	a.waitOK(10 * time.Second)
 
 	dpid := readDaemonPid(t, home)
-	if err := syscall.Kill(dpid, syscall.SIGKILL); err != nil {
+	if err := killProcessPID(dpid); err != nil {
 		t.Fatalf("kill daemon %d: %v", dpid, err)
 	}
 
@@ -359,7 +358,7 @@ func TestProcess_DaemonKillRestoresAndReattaches(t *testing.T) {
 
 	waitForHolder(t, home, "a")
 	observeReattachedHolderFor(t, home, "a", 750*time.Millisecond)
-	if err := a.cmd.Process.Signal(syscall.Signal(0)); err != nil {
+	if err := processPIDAlive(a.cmd.Process.Pid); err != nil {
 		t.Fatalf("original holder exited instead of reclaiming its lease: %v", err)
 	}
 }

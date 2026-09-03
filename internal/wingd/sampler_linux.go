@@ -61,16 +61,20 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 			if !ok {
 				continue
 			}
-			nextSamples[treePID] = cpuSample{cpuSeconds: proc.cpuSeconds, at: now}
+			current := cpuSample{
+				cpuSeconds: proc.cpuSeconds,
+				at:         now,
+				startTicks: proc.startTicks,
+			}
+			nextSamples[treePID] = current
 			prev, ok := previous[treePID]
 			if !ok {
 				continue
 			}
-			wall := now.Sub(prev.at).Seconds()
-			if wall <= 0 {
+			frac, ok := processCPUFraction(prev, current)
+			if !ok {
 				continue
 			}
-			frac := (proc.cpuSeconds - prev.cpuSeconds) / wall
 			if frac > 0 {
 				usage.Fraction += frac
 			}
@@ -175,30 +179,6 @@ func parseLinuxProcessStat(line string) (linuxProc, bool) {
 		selfCPUSeconds: (utime + stime) / linuxClockTicks,
 		cpuSeconds:     (utime + stime + cutime + cstime) / linuxClockTicks,
 	}, true
-}
-
-func (p *procSampler) forget(pid int) {
-	p.mu.Lock()
-	delete(p.last, pid)
-	delete(p.tree, pid)
-	p.mu.Unlock()
-}
-
-func trackedPIDs(pids []int) map[int]struct{} {
-	tracked := make(map[int]struct{}, len(pids))
-	for _, pid := range pids {
-		tracked[pid] = struct{}{}
-	}
-	return tracked
-}
-
-func (p *procSampler) pruneTreeLocked(root int, live map[int]struct{}) {
-	for pid := range p.tree[root] {
-		if _, ok := live[pid]; !ok {
-			delete(p.last, pid)
-		}
-	}
-	p.tree[root] = live
 }
 
 func sampleHost() (HostStat, error) {

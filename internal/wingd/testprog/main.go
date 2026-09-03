@@ -241,7 +241,7 @@ func daemonSpawner(graceMS, idleMS int) func(home, version string) error {
 			"--grace-ms", strconv.Itoa(graceMS),
 			"--idle-ms", strconv.Itoa(idleMS),
 		)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		cmd.SysProcAttr = daemonDetachSysProcAttr()
 		if err := cmd.Start(); err != nil {
 			return err
 		}

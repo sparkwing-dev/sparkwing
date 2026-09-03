@@ -66,7 +66,7 @@ type OwnedCPUSampler interface {
 }
 
 type ownedProcSampler struct {
-	//lint:ignore U1000 used by the Linux implementation
+	//lint:ignore U1000 used by platform implementations
 	mu   sync.Mutex
 	last map[processIdentity]cpuSample
 }
@@ -85,7 +85,7 @@ type ProcUsage struct {
 }
 
 type procSampler struct {
-	//lint:ignore U1000 used by the Linux implementation
+	//lint:ignore U1000 used by platform implementations
 	mu   sync.Mutex
 	last map[int]cpuSample
 	tree map[int]map[int]struct{}
@@ -94,6 +94,19 @@ type procSampler struct {
 type cpuSample struct {
 	cpuSeconds float64
 	at         time.Time
+	startTicks uint64
+}
+
+func processCPUFraction(previous, current cpuSample) (float64, bool) {
+	if previous.startTicks == 0 || previous.startTicks != current.startTicks {
+		return 0, false
+	}
+	wall := current.at.Sub(previous.at).Seconds()
+	delta := current.cpuSeconds - previous.cpuSeconds
+	if wall <= 0 || delta < 0 {
+		return 0, false
+	}
+	return delta / wall, true
 }
 
 type processIdentity struct {
@@ -275,4 +288,28 @@ func collectSubtree(root int, children map[int][]int) []int {
 		stack = append(stack, children[n]...)
 	}
 	return out
+}
+
+func (p *procSampler) forget(pid int) {
+	p.mu.Lock()
+	delete(p.last, pid)
+	delete(p.tree, pid)
+	p.mu.Unlock()
+}
+
+func trackedPIDs(pids []int) map[int]struct{} {
+	tracked := make(map[int]struct{}, len(pids))
+	for _, pid := range pids {
+		tracked[pid] = struct{}{}
+	}
+	return tracked
+}
+
+func (p *procSampler) pruneTreeLocked(root int, live map[int]struct{}) {
+	for pid := range p.tree[root] {
+		if _, ok := live[pid]; !ok {
+			delete(p.last, pid)
+		}
+	}
+	p.tree[root] = live
 }
