@@ -1157,6 +1157,49 @@ const storeSchemaSourcePath = "pkg/store/store.go"
 
 var storeSchemaConstRe = regexp.MustCompile(`(?m)^const\s+expectedSchemaVersion\s*=\s*(\d+)\b`)
 
+var (
+	migrationRequirementsBlockRe = regexp.MustCompile(`(?s)^var\s+migrationRequirements\s*=\s*map\[int\]\[\]string\{(.*?)\n\}`)
+	migrationRequirementsEntryRe = regexp.MustCompile(`(?m)^\s*(\d+)\s*:\s*\{([^}]*)\}`)
+	migrationRequirementNameRe   = regexp.MustCompile(`"([^"]+)"`)
+)
+
+// parseMigrationRequirements reads the per-version requirement registry out of
+// the store source. The release gate reads the source rather than importing
+// the package so it can compare the registry at a released tag with the one on
+// the branch being cut.
+func parseMigrationRequirements(goSource string) (map[int][]string, error) {
+	loc := regexp.MustCompile(`(?m)^var\s+migrationRequirements\s*=`).FindStringIndex(goSource)
+	if loc == nil {
+		return nil, fmt.Errorf("no `var migrationRequirements = map[int][]string{...}` in %s", storeSchemaSourcePath)
+	}
+	block := migrationRequirementsBlockRe.FindStringSubmatch(goSource[loc[0]:])
+	if block == nil {
+		return nil, fmt.Errorf("unterminated migrationRequirements registry in %s", storeSchemaSourcePath)
+	}
+	out := map[int][]string{}
+	for _, entry := range migrationRequirementsEntryRe.FindAllStringSubmatch(block[1], -1) {
+		version, err := strconv.Atoi(entry[1])
+		if err != nil {
+			return nil, fmt.Errorf("parse %s requirement version %q: %w", storeSchemaSourcePath, entry[1], err)
+		}
+		for _, name := range migrationRequirementNameRe.FindAllStringSubmatch(entry[2], -1) {
+			out[version] = append(out[version], name[1])
+		}
+	}
+	return out, nil
+}
+
+// requirementsAddedBetween returns the requirements the versions in
+// (prevSchema, curSchema] declare, sorted.
+func requirementsAddedBetween(registry map[int][]string, prevSchema, curSchema int) []string {
+	var added []string
+	for v := prevSchema + 1; v <= curSchema; v++ {
+		added = append(added, registry[v]...)
+	}
+	sort.Strings(added)
+	return added
+}
+
 func parseStoreSchemaVersion(goSource string) (int, error) {
 	m := storeSchemaConstRe.FindStringSubmatch(goSource)
 	if m == nil {
@@ -1210,20 +1253,30 @@ func (j *checkSchemaBreakJob) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d); gate passes", prevTag, curSchema)
 		return nil
 	}
+	registry, err := parseMigrationRequirements(string(curSrc))
+	if err != nil {
+		return fmt.Errorf("release: current schema requirements: %w", err)
+	}
+	added := requirementsAddedBetween(registry, prevSchema, curSchema)
 	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
-	issues := LintSchemaBreak(string(body), version, prevSchema, curSchema)
+	issues := LintSchemaBreak(string(body), version, prevSchema, curSchema, added)
 	if len(issues) > 0 {
 		var b strings.Builder
 		for _, i := range issues {
 			b.WriteString(i.Format())
 			b.WriteByte('\n')
 		}
-		return fmt.Errorf("release: unmarked runs-store schema change blocks %s:\n%s", version, b.String())
+		return fmt.Errorf("release: undescribed runs-store schema change blocks %s:\n%s", version, b.String())
 	}
-	sparkwing.Info(ctx, "runs-store schema %d -> %d is marked (Breaking) in the changelog; gate passes", prevSchema, curSchema)
+	if len(added) > 0 {
+		sparkwing.Info(ctx, "runs-store schema %d -> %d adds requirement(s) %s and is marked (Breaking) in the changelog; gate passes",
+			prevSchema, curSchema, strings.Join(added, ", "))
+		return nil
+	}
+	sparkwing.Info(ctx, "runs-store schema %d -> %d adds no requirement and carries a store changelog entry; gate passes", prevSchema, curSchema)
 	return nil
 }
 
