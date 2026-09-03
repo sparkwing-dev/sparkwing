@@ -64,25 +64,30 @@ func (c *s3Concurrency) fallback(ctx context.Context) (ConcurrencyBackend, error
 		}
 		return nil, nil
 	}
-	// safety: one probe serves everyone waiting on it, the wait itself
-	// stays cancellable, and the round trip is bounded, so a store that
-	// stops answering cannot park every operation behind it.
-	if inFlight := c.probing; inFlight != nil {
-		c.probeMu.Unlock()
-		select {
-		case <-inFlight:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		return c.probeResult()
+	// safety: one probe serves everyone waiting on it and outlives the
+	// caller that started it, so a run that is cancelled mid-probe
+	// abandons only its own wait. Its own bound keeps a store that
+	// stopped answering from holding the rest.
+	inFlight := c.probing
+	if inFlight == nil {
+		inFlight = make(chan struct{})
+		c.probing = inFlight
+		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s3ProbeTimeout)
+		go c.probe(probeCtx, cancel, inFlight)
 	}
-	done := make(chan struct{})
-	c.probing = done
 	c.probeMu.Unlock()
 
-	probeCtx, cancel := context.WithTimeout(ctx, s3ProbeTimeout)
-	ok, err := c.cw.ConditionalWritesSupported(probeCtx)
-	cancel()
+	select {
+	case <-inFlight:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return c.probeResult()
+}
+
+func (c *s3Concurrency) probe(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	defer cancel()
+	ok, err := c.cw.ConditionalWritesSupported(ctx)
 
 	c.probeMu.Lock()
 	c.probing = nil
@@ -97,7 +102,6 @@ func (c *s3Concurrency) fallback(ctx context.Context) (ConcurrencyBackend, error
 	}
 	c.probeMu.Unlock()
 	close(done)
-	return c.probeResult()
 }
 
 func (c *s3Concurrency) probeResult() (ConcurrencyBackend, error) {

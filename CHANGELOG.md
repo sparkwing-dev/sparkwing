@@ -166,8 +166,9 @@ code change to unlock.
   credential, or cancelled context during a long-lived process's first
   concurrency operation left every group it dispatched afterwards unenforced,
   behind a single log warning. Only the store's own answer settles the question
-  now, a failed probe is retried by the next operation, and one probe is shared
-  by everything waiting on it under a bounded timeout. `AcquireSlot` does not
+  now, a failed probe is retried by the next operation, and one bounded probe is
+  shared by everything waiting on it and outlives whichever caller started it,
+  so a cancelled run abandons only its own wait. `AcquireSlot` does not
   retry internally -- the node is marked failed -- so a deployment that was
   silently over-admitting will start surfacing the object-store errors it used
   to swallow. Expect to see them; they were always there.
