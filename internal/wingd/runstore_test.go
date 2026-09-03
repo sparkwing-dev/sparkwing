@@ -66,8 +66,11 @@ func TestHandshakeReportsTheDaemonStoreIsReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("probe: %v", err)
 	}
-	if !info.StoreReady || info.StoreError != "" {
-		t.Fatalf("store readiness = (%v, %q), want ready", info.StoreReady, info.StoreError)
+	if info.StoreReady == nil {
+		t.Fatal("a daemon holding a store omitted its readiness")
+	}
+	if !*info.StoreReady || info.StoreError != "" {
+		t.Fatalf("store readiness = (%v, %q), want ready", *info.StoreReady, info.StoreError)
 	}
 }
 
@@ -86,10 +89,46 @@ func TestHandshakeReportsWhyTheStoreIsUnusable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("probe: %v", err)
 	}
-	if info.StoreReady {
+	if info.StoreReady == nil {
+		t.Fatal("a daemon with an unusable store omitted its readiness instead of answering false")
+	}
+	if *info.StoreReady {
 		t.Fatal("an unusable store reported ready")
 	}
 	if info.StoreError != "database is at schema version 26; this binary expects 17" {
 		t.Fatalf("store error = %q, want the store failure verbatim", info.StoreError)
+	}
+}
+
+func TestShutdownWaitsForAnInFlightFinalize(t *testing.T) {
+	home := shortHome(t)
+	entered := make(chan struct{})
+	finalized := make(chan string, 1)
+	td := startDaemon(t, wingd.Config{
+		Home: home,
+		Runs: &wingd.FuncRunStore{Finalize: func(runID string) {
+			close(entered)
+			time.Sleep(300 * time.Millisecond)
+			finalized <- runID
+		}},
+	})
+
+	cl := ensure(t, home, "")
+	mustAcquire(t, cl, coreReq("drain-finalize", 1))
+	cl.Close()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the orphaned run was never finalized")
+	}
+
+	td.stopAndWait(t)
+	select {
+	case got := <-finalized:
+		if got != "drain-finalize" {
+			t.Fatalf("finalized %q, want drain-finalize", got)
+		}
+	default:
+		t.Fatal("shutdown returned before an in-flight finalize finished; the host closes the store next")
 	}
 }

@@ -42,6 +42,8 @@ const (
 	DefaultStallProbeTimeout = 10 * time.Second
 
 	staleSocketDirAge = 24 * time.Hour
+
+	finalizeDrainWindow = 10 * time.Second
 )
 
 type Config struct {

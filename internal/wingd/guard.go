@@ -146,8 +146,8 @@ func (d *Daemon) completeEmptyGuard(guard guardReconcileState) {
 	if guard.completion != nil {
 		_ = guard.completion.send(&wingwire.GuardCompleteAck{})
 	}
-	if guard.finalize && d.cfg.Runs != nil {
-		go d.cfg.Runs.FinalizeRun(guard.RunID)
+	if guard.finalize {
+		d.finalizeAsync(guard.RunID)
 	}
 }
 

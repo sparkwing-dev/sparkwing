@@ -31,8 +31,9 @@ type daemonReport struct {
 	DaemonSchemaVersion int      `json:"daemon_schema_version,omitempty"`
 	StoreSchemaVersion  int      `json:"store_schema_version,omitempty"`
 	StoreSchemaError    string   `json:"store_schema_error,omitempty"`
-	DaemonStoreReady    bool     `json:"daemon_store_ready,omitempty"`
+	DaemonStoreReady    *bool    `json:"daemon_store_ready,omitempty"`
 	DaemonStoreError    string   `json:"daemon_store_error,omitempty"`
+	StorePath           string   `json:"store_path,omitempty"`
 	SchemaDiverged      bool     `json:"schema_diverged,omitempty"`
 	MissingRequirements []string `json:"missing_requirements,omitempty"`
 }
@@ -107,7 +108,7 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	if err != nil {
 		return daemonReport{}, err
 	}
-	report := daemonReport{Socket: socket, InstalledVersion: installedVersion()}
+	report := daemonReport{Socket: socket, InstalledVersion: installedVersion(), StorePath: storeDBPath(home)}
 	version, storeRequirements, schemaErr := storeSchemaState(ctx, home)
 	report.StoreSchemaVersion = version
 	if schemaErr != nil {
@@ -157,6 +158,14 @@ func daemonCannotReadStore(report daemonReport, daemonRequirements []string) boo
 		return len(report.MissingRequirements) > 0
 	}
 	return report.StoreSchemaVersion > report.DaemonSchemaVersion
+}
+
+func storeDBPath(home string) string {
+	root, err := wingd.HomeDir(home)
+	if err != nil || root == "" {
+		return ""
+	}
+	return paths.PathsAt(root).StateDB()
 }
 
 // safety: an absent store is 0 with no error, but a store that exists and
@@ -265,6 +274,13 @@ func schemaRemedy(report daemonReport) string {
 	return fmt.Sprintf("run `sparkwing daemon restart` to replace it with the installed %s", report.InstalledVersion)
 }
 
+func storeRemedy(report daemonReport) string {
+	if report.StorePath == "" {
+		return "run `sparkwing doctor` to inspect this home's runs store"
+	}
+	return fmt.Sprintf("inspect %s, then run `sparkwing doctor`", report.StorePath)
+}
+
 func schemaShortfall(report daemonReport) string {
 	if len(report.MissingRequirements) > 0 {
 		return strings.Join(report.MissingRequirements, ", ")
@@ -300,6 +316,9 @@ func emitDaemonReport(report daemonReport, output string) error {
 		}
 		if daemonStoreUnusable(report) {
 			fmt.Fprintf(os.Stdout, "the daemon cannot use the runs store: %s\n", report.DaemonStoreError)
+			if !report.SchemaDiverged {
+				fmt.Fprintln(os.Stdout, storeRemedy(report))
+			}
 		}
 		if report.SchemaDiverged {
 			if len(report.MissingRequirements) > 0 {

@@ -71,11 +71,13 @@ type HelloAck struct {
 	// the field; the list is never empty otherwise, because the schema has
 	// carried requirements since they shipped.
 	StoreRequirements []string `json:"store_requirements"`
-	// StoreReady reports that the daemon holds an open, usable handle on the
-	// runs store. False from a daemon whose store is missing, skewed or
-	// corrupt, and from daemons that predate the field, where readiness is
-	// only discoverable by admitting a run.
-	StoreReady bool `json:"store_ready,omitempty"`
+	// StoreReady reports whether the daemon holds an open handle on the runs
+	// store file that is there now. False when the store is missing, skewed,
+	// corrupt, or replaced since the open. Nil from daemons that predate the
+	// field, where readiness is only discoverable by admitting a run, so a
+	// daemon that answers false is distinguishable from one that cannot
+	// answer at all.
+	StoreReady *bool `json:"store_ready,omitempty"`
 	// StoreError is why the daemon's store handle is unusable, empty when
 	// StoreReady is true and from daemons that predate the field.
 	StoreError string `json:"store_error,omitempty"`

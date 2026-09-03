@@ -27,10 +27,10 @@ type DaemonInfo struct {
 	// field.
 	StoreRequirements []string
 
-	// StoreReady reports that the daemon holds an open, usable handle on
-	// the runs store. False from a daemon that predates the field, where
-	// StoreError is empty too.
-	StoreReady bool
+	// StoreReady reports whether the daemon holds an open handle on the
+	// runs store file that is there now. Nil from a daemon that predates
+	// the field, where StoreError is empty too.
+	StoreReady *bool
 
 	// StoreError is why the daemon's own store handle is unusable, empty
 	// when it is usable and from a daemon that predates the field.

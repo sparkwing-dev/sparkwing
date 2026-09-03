@@ -37,6 +37,7 @@ type Daemon struct {
 	quit        chan struct{}
 	shutdownOne sync.Once
 	graceTimer  *time.Timer
+	finalizers  sync.WaitGroup
 
 	events eventWindow
 
@@ -258,6 +259,36 @@ func (d *Daemon) finalShutdown() {
 	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("final persist: %v", err)
 	}
+	d.awaitFinalizers(finalizeDrainWindow)
+}
+
+// safety: a finalize is the only record that an orphaned run ended, and the
+// host closes the store as soon as Run returns, so an in-flight one is drained
+// rather than left to fail against a closed handle.
+func (d *Daemon) awaitFinalizers(within time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		d.finalizers.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(within)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		d.cfg.logf("shutdown: a run finalize did not finish within %s", within)
+	}
+}
+
+func (d *Daemon) finalizeAsync(runID string) {
+	if d.cfg.Runs == nil {
+		return
+	}
+	d.finalizers.Add(1)
+	go func() {
+		defer d.finalizers.Done()
+		d.cfg.Runs.FinalizeRun(runID)
+	}()
 }
 
 func (d *Daemon) initLedger() error {
@@ -471,10 +502,11 @@ func (d *Daemon) serveConn(c *conn) {
 		StoreRequirements:   d.cfg.StoreRequirements,
 	}
 	if d.cfg.Runs != nil {
-		if err := d.cfg.Runs.Ready(); err != nil {
-			ack.StoreError = err.Error()
-		} else {
-			ack.StoreReady = true
+		storeErr := d.cfg.Runs.Ready()
+		storeReady := storeErr == nil
+		ack.StoreReady = &storeReady
+		if storeErr != nil {
+			ack.StoreError = storeErr.Error()
 		}
 	}
 	if err := c.send(ack); err != nil {
@@ -1353,7 +1385,7 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			}
 			d.mu.Unlock()
 			for _, runID := range orphaned {
-				go d.cfg.Runs.FinalizeRun(runID)
+				d.finalizeAsync(runID)
 			}
 			c.close()
 			return
@@ -1503,7 +1535,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		d.logDisconnect(c, role, runID)
 		for _, orphan := range orphaned {
 			d.cfg.logf("orphan: conn %d lost run %s without release; finalizing", c.id, orphan)
-			go d.cfg.Runs.FinalizeRun(orphan)
+			d.finalizeAsync(orphan)
 		}
 		d.flush(deliveries, snap)
 	})

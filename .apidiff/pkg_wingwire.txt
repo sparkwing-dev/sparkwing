@@ -184,7 +184,7 @@ type HelloAck struct {
 
 	StoreRequirements []string
 
-	StoreReady bool
+	StoreReady *bool
 
 	StoreError string
 }
