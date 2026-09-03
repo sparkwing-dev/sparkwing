@@ -443,7 +443,8 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 			}
 
 			bare := filepath.Join(repoDir, e.Name())
-			mu := repoLock(bare)
+			// safety: request handlers key this lock on the bare hash, and a second key is no lock at all.
+			mu := repoLock(strings.TrimSuffix(e.Name(), ".git"))
 			mu.Lock()
 			fetchStart := time.Now()
 			out, err := mirrorFetch(1*time.Minute, bare)

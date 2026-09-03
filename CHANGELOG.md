@@ -249,6 +249,12 @@ code change to unlock.
 
 ### Fixed
 
+- **cache:** The gitcache background fetch loop now takes the same per-repo lock
+  the request handlers take. It keyed the lock on the mirror's full path while
+  every handler keyed it on the repository hash, so a background
+  `git fetch --prune` could run concurrently with an `/archive` recovery reclone
+  (which deletes and re-clones the mirror) or with a tarball being streamed,
+  producing truncated archives and spurious 500s.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads
