@@ -3644,6 +3644,19 @@ SELECT run_id, seq, node_id, kind, ts, payload
 	return out, rows.Err()
 }
 
+// safety: holding the run row is what serializes callers that allocate a
+// per-run sequence number from MAX(seq)+1. A run with no row leaves nothing
+// to lock; the caller's own insert then fails its foreign key, as before.
+func lockRunRow(ctx context.Context, tx *storeTx, runID string) error {
+	var id string
+	err := tx.QueryRowContext(ctx,
+		`SELECT id FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&id)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return nil
+}
+
 // AppendEvent writes an ordered event; returns the assigned seq.
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error) {
 	tx, err := s.beginTx(ctx)
@@ -3651,6 +3664,14 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// safety: seq is half the events primary key, so the run row is held
+	// while it is chosen. Postgres runs this transaction at READ COMMITTED,
+	// where two appenders otherwise read the same MAX and the second insert
+	// dies on the duplicate key.
+	if err := lockRunRow(ctx, tx, runID); err != nil {
+		return 0, err
+	}
 
 	var seq int64
 	err = tx.QueryRowContext(ctx,

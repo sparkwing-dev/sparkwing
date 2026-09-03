@@ -92,12 +92,21 @@ func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedB
 	}
 
 	// safety: allocate the request number and insert in one transaction or
-	// concurrent bounces can choose the same primary key.
+	// concurrent bounces can choose the same primary key. The transaction is
+	// not enough on its own under Postgres' READ COMMITTED, so the node row
+	// is held across the read and the insert.
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	var locked string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT node_id FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
+		runID, nodeID).Scan(&locked); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 
 	var seq int64
 	if err := tx.QueryRowContext(ctx, `
