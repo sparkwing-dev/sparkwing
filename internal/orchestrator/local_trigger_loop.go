@@ -175,6 +175,7 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {}, "SPARKWING_DISPATCH_WAIT_TIMEOUT": {},
 		"SPARKWING_DEBUG_PAUSE_BEFORE": {}, "SPARKWING_DEBUG_PAUSE_AFTER": {},
 		"SPARKWING_DEBUG_PAUSE_ON_FAILURE": {},
+		StandaloneStateDBEnv:               {}, StandaloneReasonEnv: {},
 	}
 	out := make([]string, 0, len(captured)+1)
 	for _, entry := range captured {

@@ -53,14 +53,12 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	var r runner.Runner
 	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)
 	opts := Options{
+		standalone:        childStandalone(backends, selection),
 		Pipeline:          trigger.Pipeline,
 		RunID:             trigger.ID,
 		Args:              args,
 		ParentRunID:       trigger.ParentRunID,
 		Admission:         pipelineAdmission(childAttachTokenFromEnv(trigger.TriggerEnv), wingwire.OriginLocal),
-		standaloneReason:  parentStandaloneReason(),
-		standaloneStateDB: parentStateDB(),
-		standaloneSkew:    selection.storeSkew,
 		RetryOf:           trigger.RetryOf,
 		RetrySource:       trigger.RetrySource,
 		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],
@@ -132,6 +130,20 @@ func localTriggerBackends(ctx context.Context, paths Paths, profileName string) 
 func parentStateDB() string { return strings.TrimSpace(os.Getenv(StandaloneStateDBEnv)) }
 
 func parentStandaloneReason() string { return strings.TrimSpace(os.Getenv(StandaloneReasonEnv)) }
+
+// safety: only a child that did not reach the daemon inherits the parent's
+// answer. A hosted child that read these would record a store it never opened
+// and re-export that path to its own children.
+func childStandalone(backends Backends, sel hostedSelection) *standaloneRun {
+	if backends.APISocket != "" {
+		return nil
+	}
+	path, reason := parentStateDB(), parentStandaloneReason()
+	if path == "" && reason == "" {
+		return nil
+	}
+	return &standaloneRun{reason: reason, stateDB: path, skew: sel.storeSkew, announced: true}
+}
 
 func openLocalTriggerStore(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {
 	if profileName == "" {

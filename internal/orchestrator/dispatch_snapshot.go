@@ -176,8 +176,13 @@ func redactDispatchEnv(ctx context.Context, env map[string]string) dispatchEnv {
 	return got
 }
 
+// safety: a store path and its reason name where one particular parent put its
+// runs, so a captured shell value would send an unrelated run into that file.
+// A parent that means to pass them appends them after this filter.
 var envDenyExact = map[string]bool{
 	wingdclient.HostBinEnv: true,
+	StandaloneStateDBEnv:   true,
+	StandaloneReasonEnv:    true,
 }
 
 func envAllowed(name string) bool {
