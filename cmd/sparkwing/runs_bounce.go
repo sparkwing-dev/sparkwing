@@ -48,7 +48,11 @@ func runRunsBounce(ctx context.Context, args []string) error {
 		// writers already say which id was missing or which status the
 		// node is in, and that sentence is the answer the operator came
 		// for.
-		return fmt.Errorf("%s: %w", cmdJobsBounce.Path, err)
+		passthrough := fmt.Errorf("%s: %w", cmdJobsBounce.Path, err)
+		if *on != "" {
+			return passthrough
+		}
+		return standaloneWriteErrorAtHome(ctx, *home, id, cmdJobsBounce.Path, passthrough)
 	}
 	fmt.Fprintf(os.Stdout, "bounce requested for %s/%s (request %d)\n", id, *nodeID, b.Seq)
 	fmt.Fprintln(os.Stdout,

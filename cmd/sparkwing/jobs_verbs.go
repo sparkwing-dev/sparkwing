@@ -27,6 +27,7 @@ type failureRow struct {
 	Status    string    `json:"status"`
 	Step      string    `json:"step,omitempty"`
 	Message   string    `json:"message,omitempty"`
+	Store     string    `json:"store"`
 }
 
 func (f failureRow) clusterKey(groupBy string) string {
@@ -68,6 +69,7 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 	emitJSON := resolvedFmt == "json"
 
 	var rows []failureRow
+	var notes []string
 	var err error
 	if *on != "" {
 		prof, perr := resolveProfile(*on)
@@ -80,13 +82,17 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 		rows, err = collectRemoteFailures(ctx, prof.ControllerURL(), prof.ControllerToken(),
 			failureRunFilter(*pipeline, *gitSHA, *branch, *repo, *since, *limit))
 	} else {
-		rows, err = collectLocalFailures(ctx, paths,
-			failureRunFilter(*pipeline, *gitSHA, *branch, *repo, *since, *limit))
+		rows, notes, err = collectLocalFailures(ctx, paths,
+			failureRunFilter(*pipeline, *gitSHA, *branch, *repo, *since, *limit), *limit)
 	}
 	if err != nil {
 		return err
 	}
-	return renderFailures(rows, *groupBy, emitJSON)
+	if err := renderFailures(rows, *groupBy, emitJSON); err != nil {
+		return err
+	}
+	orchestrator.WriteStandaloneNotes(os.Stderr, notes)
+	return nil
 }
 
 func failureRunFilter(pipeline, gitSHA, branch, repo string, since time.Duration, limit int) store.RunFilter {
@@ -113,39 +119,69 @@ func failureRunFilter(pipeline, gitSHA, branch, repo string, since time.Duration
 	return f
 }
 
-func collectLocalFailures(ctx context.Context, paths orchestrator.Paths, filter store.RunFilter) ([]failureRow, error) {
+func collectLocalFailures(
+	ctx context.Context,
+	paths orchestrator.Paths,
+	filter store.RunFilter,
+	limit int,
+) ([]failureRow, []string, error) {
 	if err := paths.EnsureRoot(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = st.Close() }()
 
 	runs, err := st.ListRuns(ctx, filter)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	rows := make([]failureRow, 0, len(runs))
-	for _, r := range runs {
-		row := failureRow{ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status}
-		nodes, err := st.ListNodes(ctx, r.ID)
-		if err == nil {
-			for _, n := range nodes {
-				if n.Outcome == "failed" && n.Error != "" && n.Error != "upstream-failed" {
-					row.Step = n.NodeID
-					row.Message = truncateOneLine(n.Error, 160)
-					break
-				}
+	merged := orchestrator.TagShared(runs)
+
+	standalone := orchestrator.OpenStandaloneStores(ctx, paths)
+	defer func() { _ = standalone.Close() }()
+	merged = orchestrator.MergeTaggedRuns(append(merged, standalone.ListRuns(ctx, filter)...))
+	if limit > 0 && len(merged) > limit {
+		merged = merged[:limit]
+	}
+
+	rows := make([]failureRow, 0, len(merged))
+	for _, r := range merged {
+		rows = append(rows, failureRowFor(ctx, standalone, st, r))
+	}
+	return rows, standalone.Notes(), nil
+}
+
+func failureRowFor(
+	ctx context.Context,
+	standalone *orchestrator.StandaloneStores,
+	shared *store.Store,
+	r orchestrator.TaggedRun,
+) failureRow {
+	row := failureRow{
+		ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status, Store: r.Store,
+	}
+	holder := shared
+	if r.Store != orchestrator.SharedStoreLabel {
+		if st, _, _, ok := standalone.Find(ctx, r.ID); ok {
+			holder = st
+		}
+	}
+	if nodes, err := holder.ListNodes(ctx, r.ID); err == nil {
+		for _, n := range nodes {
+			if n.Outcome == "failed" && n.Error != "" && n.Error != "upstream-failed" {
+				row.Step = n.NodeID
+				row.Message = truncateOneLine(n.Error, 160)
+				break
 			}
 		}
-		if row.Message == "" && r.Error != "" {
-			row.Message = truncateOneLine(r.Error, 160)
-		}
-		rows = append(rows, row)
 	}
-	return rows, nil
+	if row.Message == "" && r.Error != "" {
+		row.Message = truncateOneLine(r.Error, 160)
+	}
+	return row
 }
 
 func collectRemoteFailures(ctx context.Context, controllerURL, token string, filter store.RunFilter) ([]failureRow, error) {
@@ -156,7 +192,10 @@ func collectRemoteFailures(ctx context.Context, controllerURL, token string, fil
 	}
 	rows := make([]failureRow, 0, len(runs))
 	for _, r := range runs {
-		row := failureRow{ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status}
+		row := failureRow{
+			ID: r.ID, Pipeline: r.Pipeline, CreatedAt: r.StartedAt, Status: r.Status,
+			Store: orchestrator.SharedStoreLabel,
+		}
 		nodes, err := c.ListNodes(ctx, r.ID)
 		if err == nil {
 			for _, n := range nodes {
@@ -186,12 +225,27 @@ func renderFailures(rows []failureRow, groupBy string, asJSON bool) error {
 		fmt.Println("no failures found")
 		return nil
 	}
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tPIPELINE\tWHEN\tSTEP\tERROR")
+	header := "ID\tPIPELINE\tWHEN\tSTEP\tERROR"
+	showStore := false
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		if r.Store != "" && r.Store != orchestrator.SharedStoreLabel {
+			showStore = true
+			break
+		}
+	}
+	if showStore {
+		header += "\tSTORE"
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, header)
+	for _, r := range rows {
+		line := fmt.Sprintf("%s\t%s\t%s\t%s\t%s",
 			r.ID, r.Pipeline, relTime(r.CreatedAt),
 			dashIfEmpty(r.Step), dashIfEmpty(r.Message))
+		if showStore {
+			line += "\t" + r.Store
+		}
+		fmt.Fprintln(tw, line)
 	}
 	return tw.Flush()
 }
@@ -755,7 +809,8 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		return err
 	}
 
-	var searchOnce func() ([]*store.Run, error)
+	var searchOnce func() ([]orchestrator.TaggedRun, error)
+	var notes func() []string
 	if *on != "" {
 		prof, perr := resolveProfile(*on)
 		if perr != nil {
@@ -765,8 +820,12 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 			return err
 		}
 		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
-		searchOnce = func() ([]*store.Run, error) {
-			return c.ListRuns(ctx, findRunFilter(*gitSHA, *branch, *pipeline, *repo, *rootOnly, *since, *limit))
+		searchOnce = func() ([]orchestrator.TaggedRun, error) {
+			runs, err := c.ListRuns(ctx, findRunFilter(*gitSHA, *branch, *pipeline, *repo, *rootOnly, *since, *limit))
+			if err != nil {
+				return nil, err
+			}
+			return orchestrator.TagShared(runs), nil
 		}
 	} else {
 		if err := paths.EnsureRoot(); err != nil {
@@ -777,8 +836,21 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 			return oerr
 		}
 		defer func() { _ = st.Close() }()
-		searchOnce = func() ([]*store.Run, error) {
-			return st.ListRuns(ctx, findRunFilter(*gitSHA, *branch, *pipeline, *repo, *rootOnly, *since, *limit))
+		standalone := orchestrator.OpenStandaloneStores(ctx, paths)
+		defer func() { _ = standalone.Close() }()
+		notes = standalone.Notes
+		searchOnce = func() ([]orchestrator.TaggedRun, error) {
+			filter := findRunFilter(*gitSHA, *branch, *pipeline, *repo, *rootOnly, *since, *limit)
+			runs, err := st.ListRuns(ctx, filter)
+			if err != nil {
+				return nil, err
+			}
+			merged := orchestrator.MergeTaggedRuns(
+				append(orchestrator.TagShared(runs), standalone.ListRuns(ctx, filter)...))
+			if *limit > 0 && len(merged) > *limit {
+				merged = merged[:*limit]
+			}
+			return merged, nil
 		}
 	}
 
@@ -805,7 +877,13 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 			}
 		}
 	}
-	return renderFindResults(runs, resolvedFmt, *quiet)
+	if err := renderFindResults(runs, resolvedFmt, *quiet); err != nil {
+		return err
+	}
+	if notes != nil {
+		orchestrator.WriteStandaloneNotes(os.Stderr, notes())
+	}
+	return nil
 }
 
 func findRunFilter(gitSHA, branch, pipeline, repo string, rootOnly bool, since time.Duration, limit int) store.RunFilter {
@@ -828,7 +906,7 @@ func findRunFilter(gitSHA, branch, pipeline, repo string, rootOnly bool, since t
 	return filter
 }
 
-func renderFindResults(runs []*store.Run, format string, quiet bool) error {
+func renderFindResults(runs []orchestrator.TaggedRun, format string, quiet bool) error {
 	if quiet {
 		if format == "json" {
 			ids := make([]string, 0, len(runs))
@@ -844,19 +922,38 @@ func renderFindResults(runs []*store.Run, format string, quiet bool) error {
 		return nil
 	}
 	if format == "json" {
-		return ndjson.Write(os.Stdout, store.RedactedRuns(runs))
+		redacted := make([]orchestrator.TaggedRun, 0, len(runs))
+		for _, r := range runs {
+			redacted = append(redacted, orchestrator.TaggedRun{Run: store.RedactedRun(r.Run), Store: r.Store})
+		}
+		return ndjson.Write(os.Stdout, redacted)
 	}
 	if len(runs) == 0 {
 		fmt.Fprintln(os.Stdout, "no runs match the requested filter")
 		return nil
 	}
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tPIPELINE\tSTATUS\tSHA\tSTARTED")
+	header := "RUN\tPIPELINE\tSTATUS\tSHA\tSTARTED"
+	showStore := false
 	for _, r := range runs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		if r.Store != orchestrator.SharedStoreLabel {
+			showStore = true
+			break
+		}
+	}
+	if showStore {
+		header += "\tSTORE"
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, header)
+	for _, r := range runs {
+		line := fmt.Sprintf("%s\t%s\t%s\t%s\t%s",
 			r.ID, r.Pipeline, r.Status,
 			dashIfEmpty(shortSHAOrDash(r.GitSHA)),
 			relTime(r.StartedAt))
+		if showStore {
+			line += "\t" + r.Store
+		}
+		fmt.Fprintln(tw, line)
 	}
 	return tw.Flush()
 }

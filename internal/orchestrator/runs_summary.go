@@ -59,17 +59,20 @@ type RunSummary struct {
 	WorkItems   []SummaryWorkItem   `json:"work_items,omitempty"`
 	Modifiers   []SummaryModifier   `json:"modifiers,omitempty"`
 	Approvals   []*store.Approval   `json:"approvals,omitempty"`
+	// Store names where the run was read from: SharedStoreLabel, or a
+	// standalone store's path relative to the home.
+	Store string `json:"store"`
 }
 
 func RunSummaryLocal(ctx context.Context, paths Paths, runID string, opts SummaryOpts, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, label, done, err := OpenStoreForRun(ctx, paths, runID)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer done()
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {
 		return err
@@ -80,7 +83,9 @@ func RunSummaryLocal(ctx context.Context, paths Paths, runID string, opts Summar
 	}
 	steps, _ := st.ListNodeSteps(ctx, runID)
 	approvals, _ := st.ListApprovalsForRun(ctx, runID)
-	return renderSummary(buildSummary(run, nodes, steps, approvals), opts, out)
+	summary := buildSummary(run, nodes, steps, approvals)
+	summary.Store = label
+	return renderSummary(summary, opts, out)
 }
 
 func RunSummaryRemote(ctx context.Context, controllerURL, token, runID string, opts SummaryOpts, out io.Writer) error {
@@ -98,7 +103,9 @@ func RunSummaryRemote(ctx context.Context, controllerURL, token, runID string, o
 	}
 	steps, _ := c.ListNodeSteps(ctx, runID)
 	approvals, _ := c.ListApprovalsForRun(ctx, runID)
-	return renderSummary(buildSummary(run, nodes, steps, approvals), opts, out)
+	summary := buildSummary(run, nodes, steps, approvals)
+	summary.Store = SharedStoreLabel
+	return renderSummary(summary, opts, out)
 }
 
 func buildSummary(run *store.Run, nodes []*store.Node, steps []*store.NodeStep, approvals []*store.Approval) RunSummary {

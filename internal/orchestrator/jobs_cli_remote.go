@@ -49,7 +49,7 @@ func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListO
 	if opts.Limit > 0 && len(runs) > opts.Limit {
 		runs = runs[:opts.Limit]
 	}
-	return renderRunList(runs, opts, out, nil)
+	return renderRunList(TagShared(runs), opts, out, nil)
 }
 
 func JobStatusRemote(ctx context.Context, controllerURL, token, runID string, opts StatusOpts, out io.Writer) error {
@@ -241,12 +241,12 @@ func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writ
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, label, done, err := OpenStoreForRun(ctx, paths, runID)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
-	return writeRunDetailJSON(ctx, st, runID, out)
+	defer done()
+	return writeRunDetailJSON(ctx, st, runID, label, out)
 }
 
 func JobLogsRemote(ctx context.Context, controllerURL, logsURL, runID string, opts LogsOpts, out io.Writer) error {

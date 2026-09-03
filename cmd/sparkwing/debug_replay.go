@@ -61,7 +61,8 @@ func runDebugReplay(args []string) error {
 	newRunID, err := orchestrator.MintReplayRun(ctx, st, t.run, t.node)
 	_ = st.Close()
 	if err != nil {
-		return fmt.Errorf("mint replay run: %w", err)
+		return standaloneWriteError(ctx, paths, t.run, cmdDebugReplay.Path,
+			fmt.Errorf("mint replay run: %w", err))
 	}
 
 	fmt.Fprintf(os.Stderr, "minted replay run %s (replay of %s/%s)\n", newRunID, t.run, t.node)

@@ -155,6 +155,9 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		newID, err := c.RetryRun(ctx, srcID, full)
 		if err != nil {
 			failures++
+			if *on == "" {
+				err = standaloneWriteErrorAtHome(ctx, "", srcID, cmdJobsRetry.Path, err)
+			}
 			fmt.Fprintf(os.Stderr, "rerun of %s failed: %v\n", srcID, err)
 			continue
 		}
@@ -205,6 +208,10 @@ func runRunsCancel(ctx context.Context, args []string) error {
 		var queued []runResult
 		queued, remaining = cancelQueuedLocalRuns(ctx, *home, remaining)
 		results = append(results, queued...)
+
+		var standalone []runResult
+		standalone, remaining = standaloneLocalRuns(ctx, *home, remaining, cmdJobsCancel.Path)
+		results = append(results, standalone...)
 	}
 	if len(remaining) == 0 {
 		return reportResults(os.Stdout, "cancel", results)
@@ -296,6 +303,29 @@ func cancelQueuedLocalRuns(ctx context.Context, home string, ids []string) (done
 		default:
 			remaining = append(remaining, id)
 		}
+	}
+	return done, remaining
+}
+
+func standaloneLocalRuns(ctx context.Context, home string, ids []string, verb string) (done []runResult, remaining []string) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	paths, err := submitPaths(home)
+	if err != nil {
+		return nil, ids
+	}
+	stores := orchestrator.OpenStandaloneStores(ctx, paths)
+	defer func() { _ = stores.Close() }()
+	if stores.Empty() {
+		return nil, ids
+	}
+	for _, id := range ids {
+		if err := orchestrator.StandaloneRunError(ctx, paths, id, verb); err != nil {
+			done = append(done, runResult{RunID: id, Error: err.Error()})
+			continue
+		}
+		remaining = append(remaining, id)
 	}
 	return done, remaining
 }

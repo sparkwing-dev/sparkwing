@@ -248,13 +248,13 @@ func addLocalAnnotation(ctx context.Context, paths orchestrator.Paths, runID, no
 	defer func() { _ = st.Close() }()
 	if stepID != "" {
 		if err := st.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg); err != nil {
-			return err
+			return standaloneWriteError(ctx, paths, runID, cmdAnnotationsAdd.Path, err)
 		}
 		fmt.Fprintf(os.Stdout, "annotated %s/%s/%s: %s\n", runID, nodeID, stepID, msg)
 		return nil
 	}
 	if err := st.AppendNodeAnnotation(ctx, runID, nodeID, msg); err != nil {
-		return err
+		return standaloneWriteError(ctx, paths, runID, cmdAnnotationsAdd.Path, err)
 	}
 	fmt.Fprintf(os.Stdout, "annotated %s/%s: %s\n", runID, nodeID, msg)
 	return nil

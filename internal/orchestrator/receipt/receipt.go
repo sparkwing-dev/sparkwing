@@ -24,6 +24,10 @@ type Receipt struct {
 	Steps      []Step         `json:"steps"`
 	Cost       Cost           `json:"cost"`
 	ReceiptSHA string         `json:"receipt_sha"`
+	// Store names the runs store the receipt was read from, and is excluded
+	// from ReceiptSHA: where a copy of the run sits says nothing about what
+	// ran, so the same run yields the same hash from any store.
+	Store string `json:"store,omitempty"`
 }
 
 type Identity struct {
@@ -174,6 +178,7 @@ func buildCost(nodes []*store.Node, rate float64, rateSource string) Cost {
 
 func computeReceiptSHA(r Receipt) string {
 	r.ReceiptSHA = ""
+	r.Store = ""
 	return hashCanonical(r)
 }
 

@@ -56,7 +56,7 @@ func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []s
 
 	var got *store.Approval
 	if *on == "" {
-		got, err = resolveLocalApproval(ctx, paths, runID, nodeID, resolution, approver, *comment)
+		got, err = resolveLocalApproval(ctx, paths, runID, nodeID, resolution, approver, *comment, cmd.Path)
 	} else {
 		prof, perr := resolveProfile(*on)
 		if perr != nil {
@@ -75,7 +75,11 @@ func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []s
 	return nil
 }
 
-func resolveLocalApproval(ctx context.Context, paths orchestrator.Paths, runID, nodeID, resolution, approver, comment string) (*store.Approval, error) {
+func resolveLocalApproval(
+	ctx context.Context,
+	paths orchestrator.Paths,
+	runID, nodeID, resolution, approver, comment, verb string,
+) (*store.Approval, error) {
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
 	}
@@ -84,7 +88,11 @@ func resolveLocalApproval(ctx context.Context, paths orchestrator.Paths, runID, 
 		return nil, err
 	}
 	defer func() { _ = st.Close() }()
-	return st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
+	got, err := st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
+	if err != nil {
+		return nil, standaloneWriteError(ctx, paths, runID, verb, err)
+	}
+	return got, nil
 }
 
 func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []string) error {
