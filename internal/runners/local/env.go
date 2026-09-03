@@ -12,11 +12,9 @@ import (
 // APISocketEnv names the daemon's controller API socket for a node process.
 const APISocketEnv = "SPARKWING_API_SOCKET"
 
-// safety: a node process reaching the daemon's API socket is authenticated
-// by the uid the kernel reports for its connection. A bearer inherited from
-// this process's environment would be authenticated against the store's
-// tokens instead, which is a write behind the daemon's single writing
-// handle and loses the read-handle latency the socket exists for.
+// safety: the daemon authenticates an api.sock caller by its peer uid, and
+// a bearer inherited from this process would be looked up on the daemon's
+// writing handle instead, behind whatever it is doing.
 var tokenEnvNames = []string{"SPARKWING_AGENT_TOKEN", "SPARKWING_TOKEN"}
 
 func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request) []string {

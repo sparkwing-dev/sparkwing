@@ -77,8 +77,7 @@ func applyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 	return nil
 }
 
-// openStateStoreFromSpec is the orchestrator's only path to a state store
-// file, so a test counts what a run opens by replacing it.
+// hack: an indirection so a test can count what a run opens.
 var openStateStoreFromSpec = storeurl.OpenStateStoreFromSpec
 
 func ApplyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths) error {

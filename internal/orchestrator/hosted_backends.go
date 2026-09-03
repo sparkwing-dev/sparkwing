@@ -124,10 +124,6 @@ func hostedAPIReachable(ctx context.Context, sock string) error {
 	return nil
 }
 
-// hostedBackendsForRun decides whether this run reaches this machine's runs
-// store through the admission daemon, and returns the backends for it. The
-// zero Backends means the run takes the direct path this release still
-// serves when no daemon can host it.
 func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) Backends {
 	if opts.State != nil || !runsOnMachineStore(opts, paths) {
 		return Backends{}
@@ -143,9 +139,9 @@ func hostedBackendsForRun(ctx context.Context, paths Paths, opts *Options) Backe
 	return HostedBackends(paths, sock, nil)
 }
 
-// runsOnMachineStore reports whether the run's state surface is this
-// machine's own runs store rather than a hosted controller or an object
-// store, which are the profiles the daemon does not stand in front of.
+// safety: the daemon stands in front of this machine's own runs store and
+// nothing else, so a controller or object-store profile keeps its own
+// backend even when a daemon is serving.
 func runsOnMachineStore(opts *Options, paths Paths) bool {
 	if opts.LocalOnly {
 		return opts.DefaultStateDB == paths.StateDB()
