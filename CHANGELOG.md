@@ -311,6 +311,13 @@ code change to unlock.
 
 ### Fixed
 
+- **store:** Orphan reconciliation now runs on Postgres. Its freshness test
+  called SQLite's variadic `max()` in a `WHERE` clause, which Postgres spells
+  `GREATEST` and where its own `max` is an aggregate no `WHERE` accepts, so
+  against a `postgres://` state spec the query errored and runs abandoned by a
+  dead orchestrator stayed `running` forever. `sparkwing jobs list` and
+  `sparkwing job status` also discarded that error; they now warn on stderr
+  instead of failing silently.
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,

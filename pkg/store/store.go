@@ -4730,20 +4730,23 @@ UPDATE nodes
 	return err
 }
 
-func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
-	cutoff := time.Now().Add(-threshold).UnixNano()
-
-	rows, err := s.query(ctx, `
+func (s *Store) orphanedRunsQuery() string {
+	return `
 SELECT r.id
   FROM runs r
  WHERE r.status = ?
    AND r.started_at < ?
-   AND max(
+   AND ` + s.greatest() + `(
          COALESCE((SELECT MAX(last_heartbeat) FROM nodes n WHERE n.run_id = r.id), 0),
          COALESCE(r.last_heartbeat_at, 0),
          r.started_at
-       ) < ?`,
-		runStatusRunning, cutoff, cutoff)
+       ) < ?`
+}
+
+func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
+	cutoff := time.Now().Add(-threshold).UnixNano()
+
+	rows, err := s.query(ctx, s.orphanedRunsQuery(), runStatusRunning, cutoff, cutoff)
 	if err != nil {
 		return 0, err
 	}
