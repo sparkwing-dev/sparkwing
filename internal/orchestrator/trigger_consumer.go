@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -365,7 +366,14 @@ func runClaimedTrigger(
 
 	dispatchCtx, stopHeartbeat := context.WithCancel(ctx)
 	defer stopHeartbeat()
-	go heartbeatClaimedTrigger(dispatchCtx, st, trig.ID, trig.ClaimSeq, lease, logger)
+	cancelled := &atomic.Bool{}
+	go heartbeatClaimedTrigger(dispatchCtx, st, trig.ID, trig.ClaimSeq, lease, logger, func() {
+		if cancelled.CompareAndSwap(false, true) {
+			logger.Info("operator cancel requested; cancelling the dispatched run",
+				"trigger_id", trig.ID)
+			stopHeartbeat()
+		}
+	})
 
 	env, envErr := consumeSubmissionEnvironment(home, trig, logger)
 	if envErr != nil {
@@ -375,6 +383,10 @@ func runClaimedTrigger(
 	env = submissionExecutionEnvironment(env, home)
 	err := dispatchLocalTrigger(dispatchCtx, trig, "", "", cache, logger, env)
 	if err == nil {
+		return
+	}
+	if cancelled.Load() {
+		finishCancelledClaimedTrigger(book, st, trig, logger)
 		return
 	}
 	if ctx.Err() != nil {
@@ -414,6 +426,16 @@ func runClaimedTrigger(
 	}
 }
 
+func finishCancelledClaimedTrigger(ctx context.Context, st *store.Store, trig *store.Trigger, logger *slog.Logger) {
+	_ = st.CreateRun(ctx, store.Run{ID: trig.ID, Pipeline: trig.Pipeline, Status: "pending", StartedAt: time.Now()})
+	if _, finishErr := st.FinishRunAtGeneration(ctx, trig.ID, trig.ClaimSeq, "cancelled", "cancelled by operator"); finishErr != nil {
+		logger.Warn("record dispatch cancellation", "trigger_id", trig.ID, "err", finishErr)
+	}
+	if _, finishErr := st.FinishTriggerAtGeneration(ctx, trig.ID, trig.ClaimSeq); finishErr != nil {
+		logger.Warn("finish cancelled trigger", "trigger_id", trig.ID, "err", finishErr)
+	}
+}
+
 func finishClaimedTriggerFailure(ctx context.Context, st *store.Store, trig *store.Trigger, logger *slog.Logger, err error) {
 	_ = st.CreateRun(ctx, store.Run{ID: trig.ID, Pipeline: trig.Pipeline, Status: "failed", StartedAt: time.Now()})
 	if _, finishErr := st.FinishRunAtGeneration(ctx, trig.ID, trig.ClaimSeq, "failed", "local dispatch: "+err.Error()); finishErr != nil {
@@ -450,8 +472,8 @@ func cancelClaimedTriggerIfRequested(
 const heartbeatRetryFraction = 3
 
 func heartbeatClaimedTrigger(
-	ctx context.Context, st *store.Store, id string, seq int64,
-	lease time.Duration, logger *slog.Logger,
+	ctx context.Context, st triggerHeartbeatStore, id string, seq int64,
+	lease time.Duration, logger *slog.Logger, onCancelRequested func(),
 ) {
 	interval := lease / heartbeatRetryFraction
 	if interval < 200*time.Millisecond {
@@ -465,7 +487,14 @@ func heartbeatClaimedTrigger(
 			return
 		case <-t.C:
 		}
-		if !heartbeatOnce(ctx, st, id, seq, lease, interval, logger) {
+		cancelRequested, keepGoing := heartbeatOnce(ctx, st, id, seq, lease, interval, logger)
+		if cancelRequested {
+			if onCancelRequested != nil {
+				onCancelRequested()
+			}
+			return
+		}
+		if !keepGoing {
 			return
 		}
 	}
@@ -479,35 +508,35 @@ type triggerHeartbeatStore interface {
 func heartbeatOnce(
 	ctx context.Context, st triggerHeartbeatStore, id string, seq int64,
 	lease, budget time.Duration, logger *slog.Logger,
-) bool {
+) (cancelRequested, keepGoing bool) {
 	deadline := time.Now().Add(budget)
 	backoff := 50 * time.Millisecond
 	for {
-		_, err := st.HeartbeatTrigger(ctx, id, lease)
+		cancel, err := st.HeartbeatTrigger(ctx, id, lease)
 		if err == nil {
 
 			if current, gerr := st.TriggerClaimGeneration(ctx, id); gerr == nil && current != seq {
 				logger.Warn("stopping heartbeat; the claim was superseded",
 					"trigger_id", id, "claimed_generation", seq, "current_generation", current)
-				return false
+				return false, false
 			}
-			return true
+			return cancel, true
 		}
 		if errors.Is(err, store.ErrNotFound) {
-			return false
+			return false, false
 		}
 		if ctx.Err() != nil {
-			return false
+			return false, false
 		}
 		if !time.Now().Before(deadline) {
 			logger.Warn("local trigger heartbeat failing; the claim may lapse",
 				"trigger_id", id, "err", err)
 
-			return true
+			return false, true
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return false, false
 		case <-time.After(backoff):
 		}
 		if backoff < time.Second {

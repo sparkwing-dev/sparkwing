@@ -324,6 +324,13 @@ code change to unlock.
   trigger stayed `claimed` with no run row and `sparkwing runs status <child>`
   reported it as not found. A dispatch that fails for its own reasons still
   records a failed run, now on a context that outlives the parent.
+- **orchestrator:** The local trigger consumer now honours a cancel request that
+  arrives after dispatch has started. Its claim heartbeat asks the store whether
+  cancel was requested on every beat but discarded the answer, so only the
+  pre-dispatch check could act on it and a run flagged mid-flight -- through the
+  controller's cancel endpoint against a shared store -- ran to completion. The
+  heartbeat now cancels the dispatch and records the run as `cancelled`, the way
+  the controller-backed worker already did.
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
