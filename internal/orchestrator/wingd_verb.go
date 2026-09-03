@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/supervise"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
 func RunWingd(args []string) error {
@@ -42,15 +43,33 @@ func runWingdCLI(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	art, artFault := WingdArtifactStore(ctx)
 	return RunWingdDaemon(ctx, WingdOptions{
-		Home:         *home,
-		Version:      v,
-		Budget:       resolvedBudget.Budget,
-		BudgetSource: resolvedBudget.Source,
-		BudgetOrigin: resolvedBudget.Origin,
+		Home:               *home,
+		Version:            v,
+		Budget:             resolvedBudget.Budget,
+		BudgetSource:       resolvedBudget.Source,
+		BudgetOrigin:       resolvedBudget.Origin,
+		ArtifactStore:      art,
+		ArtifactStoreError: artFault,
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
 				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))
 		},
 	})
+}
+
+// WingdArtifactStore resolves the artifact store the daemon's controller API
+// serves artifact routes from, and reports why it could not as a string
+// rather than an error.
+//
+// safety: a cache URL that will not open leaves the artifact routes
+// unregistered; it is not a reason to leave the machine with no daemon, which
+// would stop every run including those that touch no artifact.
+func WingdArtifactStore(ctx context.Context) (storage.ArtifactStore, string) {
+	art, err := resolveArtifactStoreFromEnv(ctx)
+	if err != nil {
+		return nil, err.Error()
+	}
+	return art, ""
 }

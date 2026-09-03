@@ -97,7 +97,7 @@ func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotReq
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(httpReq)
+	resp, err := c.do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*Waiter
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +161,7 @@ func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +232,7 @@ func (c *Client) ConcurrencyState(ctx context.Context, key string) (*Concurrency
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +293,7 @@ func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +321,7 @@ func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (b
 		return false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return false, err
 	}
@@ -346,7 +346,7 @@ func (c *Client) ForceReleaseSuperseded(ctx context.Context, key string) ([]Wait
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +386,7 @@ func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, output
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}

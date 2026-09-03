@@ -69,6 +69,35 @@ code change to unlock.
   on an object store or a hosted controller skips local coordination, so this
   release changes no run's behaviour. It is the wire surface the next step
   builds a hosted local run on.
+- **wingd:** The admission daemon serves the controller HTTP API on a second
+  socket, `api.sock`, beside `d.sock` in the private directory it already
+  owns. It carries the same route set a hosted controller serves, including
+  the concurrency routes, over the runs-store handle the daemon holds, so a
+  run the daemon hosts can reach run, node, event, and concurrency state
+  without opening `state.db` itself. Both sockets are mode 0600 and refuse
+  any connection whose peer uid is not the daemon's own; on `api.sock` that
+  uid is the identity, so a local run needs no token, and a request that does
+  carry a bearer token is still authenticated against the store. Only the
+  process holding the election lock binds either socket, and a daemon being
+  replaced closes `api.sock` before it acknowledges the drain, so its
+  successor binds it with no overlap. An open API connection counts as
+  activity, so a daemon does not idle out from under a run. Read routes are
+  served from the daemon's read-only handle, so a process outside the daemon
+  holding a write transaction no longer stalls a caller that sends no token,
+  which is what a local run is; a caller that sends a bearer token still
+  waits, because the token is looked up on the writing handle. Every request is bounded
+  except the streaming routes, which keep setting their own deadline, so a
+  wedged store answers 503 with `Retry-After` and the controller client
+  retries it instead of failing the run. A socket that will not bind and a
+  cache URL that will not open both leave the daemon arbitrating admission
+  rather than stopping it; `sparkwing daemon status` and `sparkwing doctor`
+  report `api_socket`, `api_ready`, `api_error`, and `artifact_store_error`,
+  and treat an unbound socket as unhealthy. `GET /api/v1/health` is answered
+  by the daemon itself and reports the runs store as `absent`, `ready`, or
+  `error: <reason>` without ever creating the file, so a machine that runs
+  only object-store profiles probes healthy. With no `Authorization` header
+  the same-uid peer is an admin principal, the authority it already had by
+  opening the store file directly. No client uses the socket yet.
 
 - **wingd:** The daemon's wire surface is pinned by a snapshot, and the
   daemon now answers for what it cannot serve.
@@ -88,6 +117,34 @@ code change to unlock.
   can match on, so an operation an older daemon lacks is no longer a hang, a
   missing row, or a delete that reports success. The rule the checks enforce
   is in [docs/versioning.md](docs/versioning.md).
+- **cli:** A repo's SDK pin now selects the CLI that runs its pipelines. Before
+  compiling a pipeline, `sparkwing` compares its own version with the
+  `github.com/sparkwing-dev/sparkwing` requirement in `.sparkwing/go.mod`; when
+  the pin is a release tag newer than the installed release, it fetches that
+  release into `$SPARKWING_HOME/toolchains/<version>/sparkwing`, verifies the
+  Ed25519 signatures and the sha256 digest, and execs it with the original
+  arguments. One stderr line names the version, the path, and why. The signed
+  release manifest is stored beside the binary, so a later run re-checks that
+  signature offline and refetches anything that no longer matches. A
+  pseudo-version pin, a `replace` for the SDK, or a
+  source-built CLI on either side switches nothing, and a CLI at or above the
+  pin already serves it. `SPARKWING_TOOLCHAIN=local` refuses to fetch and fails
+  with the version to install by hand; `sparkwing info` reports both versions
+  when they differ and `sparkwing doctor` lists the store.
+  See [docs/versioning.md](docs/versioning.md).
+- **runner + charts:** `--trigger-runner=warm` and
+  `runner.triggerRunner.kind: warm` offer nodes to outbound-only remote
+  Windows, macOS, and Linux agents before using Kubernetes Jobs for unlabeled
+  overflow. Agent claims win atomically over fallback, labels remain hard
+  placement constraints, and the chart reuses its existing fallback settings
+  while granting only namespace-scoped Job lifecycle and pod-read access.
+  Remote nodes fetch only the repository of their live claim through a new
+  `nodes.claim`-scoped controller Git proxy; direct caches use the separate
+  `gitcache` and `cache_token` agent settings. Runner tokens can read only
+  trigger and run records covered by their live claim; secret run values still
+  require a live node claim. Because the compiled pipeline binary interprets
+  `warm`, upgrade the controller, runner, and pipeline module to the same
+  release before enabling it. Defaults remain `inprocess`.
 
 ### Changed
 
@@ -549,37 +606,6 @@ code change to unlock.
   covers those paths. Each release also carries a signed `image-digests.json`
   asset listing every published image, its tag, and its digest, so operators
   can pin and diff them.
-
-### Added
-
-- **cli:** A repo's SDK pin now selects the CLI that runs its pipelines. Before
-  compiling a pipeline, `sparkwing` compares its own version with the
-  `github.com/sparkwing-dev/sparkwing` requirement in `.sparkwing/go.mod`; when
-  the pin is a release tag newer than the installed release, it fetches that
-  release into `$SPARKWING_HOME/toolchains/<version>/sparkwing`, verifies the
-  Ed25519 signatures and the sha256 digest, and execs it with the original
-  arguments. One stderr line names the version, the path, and why. The signed
-  release manifest is stored beside the binary, so a later run re-checks that
-  signature offline and refetches anything that no longer matches. A
-  pseudo-version pin, a `replace` for the SDK, or a
-  source-built CLI on either side switches nothing, and a CLI at or above the
-  pin already serves it. `SPARKWING_TOOLCHAIN=local` refuses to fetch and fails
-  with the version to install by hand; `sparkwing info` reports both versions
-  when they differ and `sparkwing doctor` lists the store.
-  See [docs/versioning.md](docs/versioning.md).
-- **runner + charts:** `--trigger-runner=warm` and
-  `runner.triggerRunner.kind: warm` offer nodes to outbound-only remote
-  Windows, macOS, and Linux agents before using Kubernetes Jobs for unlabeled
-  overflow. Agent claims win atomically over fallback, labels remain hard
-  placement constraints, and the chart reuses its existing fallback settings
-  while granting only namespace-scoped Job lifecycle and pod-read access.
-  Remote nodes fetch only the repository of their live claim through a new
-  `nodes.claim`-scoped controller Git proxy; direct caches use the separate
-  `gitcache` and `cache_token` agent settings. Runner tokens can read only
-  trigger and run records covered by their live claim; secret run values still
-  require a live node claim. Because the compiled pipeline binary interprets
-  `warm`, upgrade the controller, runner, and pipeline module to the same
-  release before enabling it. Defaults remain `inprocess`.
 
 ### Docs
 

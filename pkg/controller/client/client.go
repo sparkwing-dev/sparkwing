@@ -130,7 +130,7 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ func (c *Client) getRun(ctx context.Context, runID string, secretValues bool) (*
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +212,7 @@ func (c *Client) GetRunReceipt(ctx context.Context, runID string) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func (c *Client) ListNodes(ctx context.Context, runID string) ([]*store.Node, er
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +414,7 @@ func (c *Client) ListNodeSteps(ctx context.Context, runID string) ([]*store.Node
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +464,7 @@ func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +497,7 @@ func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, co
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}
@@ -522,7 +522,7 @@ func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatSta
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -630,7 +630,7 @@ func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*st
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -655,7 +655,7 @@ func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigg
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -682,7 +682,7 @@ func (c *Client) CancelRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}
@@ -713,7 +713,7 @@ func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (stri
 	if err != nil {
 		return "", err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return "", err
 	}
@@ -742,7 +742,7 @@ func (c *Client) DeleteRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}
@@ -788,7 +788,7 @@ func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []strin
 	if body != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := c.http.Do(httpReq)
+	resp, err := c.do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -824,7 +824,7 @@ func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, par
 	if err != nil {
 		return "", err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return "", err
 	}
@@ -936,7 +936,7 @@ func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -963,7 +963,7 @@ func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -992,7 +992,7 @@ func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1047,7 +1047,7 @@ func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1113,7 +1113,7 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}
@@ -1140,7 +1140,7 @@ func (c *Client) GetActiveDebugPause(ctx context.Context, runID, nodeID string) 
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1178,7 +1178,7 @@ func (c *Client) ListEventsAfter(ctx context.Context, runID string, afterSeq int
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1199,7 +1199,7 @@ func (c *Client) ListDebugPauses(ctx context.Context, runID string) ([]*store.De
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1256,7 +1256,7 @@ func (c *Client) GetApproval(ctx context.Context, runID, nodeID string) (*store.
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1295,7 +1295,7 @@ func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution,
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1323,7 +1323,7 @@ func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*stor
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1347,7 +1347,7 @@ func (c *Client) ListPendingApprovals(ctx context.Context) ([]*store.Approval, e
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1380,7 +1380,7 @@ func (c *Client) post(ctx context.Context, path string, body any, wantStatus int
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}
@@ -1402,7 +1402,7 @@ func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStat
 		return err
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return err
 	}

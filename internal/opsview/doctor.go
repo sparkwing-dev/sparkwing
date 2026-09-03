@@ -101,6 +101,17 @@ type DoctorDaemon struct {
 
 	Socket string `json:"socket,omitempty"`
 
+	// APISocket is where the daemon serves the controller HTTP API.
+	APISocket string `json:"api_socket,omitempty"`
+
+	// APIReady reports whether that socket is bound and serving. Nil from a
+	// daemon that does not report the field, which is how "not serving" is
+	// distinguishable from "cannot say".
+	APIReady *bool `json:"api_ready,omitempty"`
+
+	// APIError is why that socket is unbound.
+	APIError string `json:"api_error,omitempty"`
+
 	Version string `json:"version,omitempty"`
 
 	ProtocolMajor int `json:"protocol_major,omitempty"`
@@ -109,6 +120,13 @@ type DoctorDaemon struct {
 }
 
 func (d DoctorDaemon) Blind() bool { return d.State == ReachUnreachable }
+
+// APIUnserved reports a serving daemon whose controller API socket is
+// unbound, so no run it hosts can reach its state. A daemon that does not
+// report the field cannot be judged on it.
+func (d DoctorDaemon) APIUnserved() bool {
+	return d.State == ReachServing && d.APIReady != nil && !*d.APIReady
+}
 
 type DoctorInstallConflict struct {
 	Self string `json:"self"`
@@ -193,6 +211,7 @@ type DoctorLegacyHolder struct {
 
 func (r DoctorReport) Clean() bool {
 	return !r.Daemon.Blind() &&
+		!r.Daemon.APIUnserved() &&
 		len(r.PermissionRepairs) == 0 &&
 		!r.PermissionAuditUnverified &&
 		len(r.OrphanedRuns) == 0 &&
@@ -739,6 +758,10 @@ func probeDaemon(ctx context.Context, home string) DoctorDaemon {
 	if err != nil {
 		return DoctorDaemon{State: ReachUnreachable, Detail: "could not resolve the daemon socket path: " + err.Error()}
 	}
+	apiSock, apiErr := wingd.APISocketPath(home)
+	if apiErr != nil {
+		apiSock = ""
+	}
 	info, err := wingdclient.Probe(ctx, sock)
 	switch {
 	case err == nil:
@@ -746,17 +769,21 @@ func probeDaemon(ctx context.Context, home string) DoctorDaemon {
 			Reachable:     true,
 			State:         ReachServing,
 			Socket:        sock,
+			APISocket:     apiSock,
+			APIReady:      info.APIReady,
+			APIError:      info.APIError,
 			Version:       info.BinaryVersion,
 			ProtocolMajor: info.ProtocolMajor,
 		}
 	case errors.Is(err, wingdclient.ErrNoDaemon):
 		return DoctorDaemon{
-			State:  ReachAbsent,
-			Socket: sock,
-			Detail: "nothing is listening; no admission is being arbitrated on this home",
+			State:     ReachAbsent,
+			Socket:    sock,
+			APISocket: apiSock,
+			Detail:    "nothing is listening; no admission is being arbitrated on this home",
 		}
 	default:
-		return DoctorDaemon{State: ReachUnreachable, Socket: sock, Detail: err.Error()}
+		return DoctorDaemon{State: ReachUnreachable, Socket: sock, APISocket: apiSock, Detail: err.Error()}
 	}
 }
 
@@ -1223,6 +1250,14 @@ func renderDaemonSection(w io.Writer, r DoctorReport) {
 			version = "version unreported"
 		}
 		fmt.Fprintf(w, "daemon: serving, %s, protocol %d (%s)\n", version, d.ProtocolMajor, d.Socket)
+		switch {
+		case d.APIReady == nil:
+		case *d.APIReady:
+			fmt.Fprintf(w, "  controller API: serving (%s)\n", d.APISocket)
+		default:
+			fmt.Fprintf(w, "\nwarning: the daemon serves admission but not the controller API, so no run it hosts can reach its state\n  %s\n",
+				doctorAPIFault(d))
+		}
 	case ReachAbsent:
 		fmt.Fprintf(w, "daemon: none running -- %s\n", d.Detail)
 	default:
@@ -1232,6 +1267,13 @@ func renderDaemonSection(w io.Writer, r DoctorReport) {
 		}
 		fmt.Fprint(w, "  the rejection-pattern, version-skew and lockout checks did not run, and orphaned run rows were left alone because a blind sweep cannot tell a dead run from one the daemon is holding\n")
 	}
+}
+
+func doctorAPIFault(d DoctorDaemon) string {
+	if d.APIError != "" {
+		return d.APIError
+	}
+	return "the daemon did not say why"
 }
 
 func renderMachineBudget(w io.Writer, r DoctorReport) {

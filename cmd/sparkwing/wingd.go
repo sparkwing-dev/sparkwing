@@ -56,13 +56,16 @@ func runWingdRun(args []string) error {
 	logger := log.New(os.Stderr, "", log.LstdFlags|log.LUTC)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	art, artFault := orchestrator.WingdArtifactStore(ctx)
 	return orchestrator.RunWingdDaemon(ctx, orchestrator.WingdOptions{
-		Home:             *home,
-		Version:          v,
-		HeadroomFraction: *headroom,
-		Budget:           resolvedBudget.Budget,
-		BudgetSource:     resolvedBudget.Source,
-		BudgetOrigin:     resolvedBudget.Origin,
-		Logf:             func(format string, args ...any) { logger.Printf(format, args...) },
+		Home:               *home,
+		Version:            v,
+		HeadroomFraction:   *headroom,
+		Budget:             resolvedBudget.Budget,
+		BudgetSource:       resolvedBudget.Source,
+		BudgetOrigin:       resolvedBudget.Origin,
+		ArtifactStore:      art,
+		ArtifactStoreError: artFault,
+		Logf:               func(format string, args ...any) { logger.Printf(format, args...) },
 	})
 }

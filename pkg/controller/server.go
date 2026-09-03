@@ -28,6 +28,8 @@ type Server struct {
 
 	auth *Authenticator
 
+	peerPrincipal func(*http.Request) *Principal
+
 	loginLimit *loginLimiter
 
 	githubWebhookSecret  string
@@ -408,6 +410,16 @@ func (s *Server) WithAuthenticator(a *Authenticator) *Server {
 	return s
 }
 
+// WithPeerPrincipal authenticates a request that carries no Authorization
+// header by the transport it arrived on, which is how a controller served
+// over a unix socket treats the peer's uid as the identity. fn returns nil to
+// refuse the request with 401. A request that does carry a bearer token still
+// goes to the Authenticator, so a token keeps working on the same listener.
+func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
+	s.peerPrincipal = fn
+	return s
+}
+
 // Handler returns the HTTP router. Exposed separately from Serve so
 // tests can wrap it in httptest without binding a real port. Callers using
 // Handler directly must call Shutdown to drain server-owned background work.
@@ -576,7 +588,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret)))
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret)))
 
-	authed := s.authMiddleware().Middleware(unsupportedRouteFallback(mux))
+	authed := s.authenticated(unsupportedRouteFallback(mux))
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
@@ -591,6 +603,30 @@ func (s *Server) Handler() http.Handler {
 	router.Handle("/", authed)
 
 	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
+}
+
+func (s *Server) authenticated(next http.Handler) http.Handler {
+	byToken := s.authMiddleware().Middleware(next)
+	if s.peerPrincipal == nil {
+		return byToken
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			byToken.ServeHTTP(w, r)
+			return
+		}
+		p := s.peerPrincipal(r)
+		if p == nil {
+			writeAuthError(w, http.StatusUnauthorized, authErrorBody{
+				Code:    "unauthenticated",
+				Message: "the connection carries no identity this controller accepts",
+			})
+			return
+		}
+		ctx := contextWithPrincipal(r.Context(), p)
+		otelutil.StampSpan(ctx, otelutil.SpanAttrs{Principal: p.Name})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // UnsupportedRouteError is the `error` member of the 404 body a controller

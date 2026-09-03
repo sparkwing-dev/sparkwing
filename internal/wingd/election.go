@@ -65,22 +65,26 @@ func LockHeld(home string) (bool, error) {
 }
 
 func (d *Daemon) bindListener() (net.Listener, error) {
-	if err := ValidateSocketPath(d.layout.sock); err != nil {
+	return bindSocket(d.layout.sock)
+}
+
+func bindSocket(path string) (net.Listener, error) {
+	if err := ValidateSocketPath(path); err != nil {
 		return nil, err
 	}
-	if err := ensureSocketDir(filepath.Dir(d.layout.sock)); err != nil {
+	if err := ensureSocketDir(filepath.Dir(path)); err != nil {
 		return nil, err
 	}
-	_ = os.Remove(d.layout.sock)
-	ln, err := net.Listen("unix", d.layout.sock)
+	_ = os.Remove(path)
+	ln, err := net.Listen("unix", path)
 	if err != nil {
-		return nil, fmt.Errorf("wingd: listen %s: %w", d.layout.sock, err)
+		return nil, fmt.Errorf("wingd: listen %s: %w", path, err)
 	}
 	// safety: the bound socket inherits the process umask, which can leave it
 	// connectable by other accounts on platforms that honor socket modes.
-	if err := os.Chmod(d.layout.sock, 0o600); err != nil {
+	if err := os.Chmod(path, 0o600); err != nil {
 		_ = ln.Close()
-		return nil, fmt.Errorf("wingd: restrict socket %s: %w", d.layout.sock, err)
+		return nil, fmt.Errorf("wingd: restrict socket %s: %w", path, err)
 	}
 	return ln, nil
 }

@@ -36,6 +36,18 @@ type DaemonInfo struct {
 	// when it is usable and from a daemon that predates the field.
 	StoreError string
 
+	// APIReady reports whether the daemon serves the controller HTTP API on
+	// its api.sock. Nil from a daemon that predates the field.
+	APIReady *bool
+
+	// APIError is why that socket is unbound, empty when it is bound and
+	// from a daemon that predates the field.
+	APIError string
+
+	// ArtifactStoreError is why the daemon serves no artifact routes, empty
+	// when it resolved a cache or none is configured.
+	ArtifactStoreError string
+
 	Draining bool
 }
 
@@ -68,6 +80,9 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 		StoreRequirements:  ack.StoreRequirements,
 		StoreReady:         ack.StoreReady,
 		StoreError:         ack.StoreError,
+		APIReady:           ack.APIReady,
+		APIError:           ack.APIError,
+		ArtifactStoreError: ack.ArtifactStoreError,
 		Draining:           ack.Draining,
 	}, nil
 }

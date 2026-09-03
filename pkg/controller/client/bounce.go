@@ -27,7 +27,7 @@ func (c *Client) RequestNodeBounce(ctx context.Context, runID, nodeID string) (*
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}

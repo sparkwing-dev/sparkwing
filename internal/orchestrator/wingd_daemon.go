@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -29,7 +31,15 @@ type WingdOptions struct {
 	Budget           wingd.Budget
 	BudgetSource     wingd.BudgetSource
 	BudgetOrigin     string
-	Logf             func(format string, args ...any)
+	// ArtifactStore backs the controller API's artifact routes. Nil leaves
+	// them unregistered, which is what a machine with no cache configured
+	// gets from a run's own controller today.
+	ArtifactStore storage.ArtifactStore
+	// ArtifactStoreError is why no artifact store resolved. The daemon serves
+	// without artifact routes and reports the reason in its handshake.
+	ArtifactStoreError string
+	Logger             *slog.Logger
+	Logf               func(format string, args ...any)
 }
 
 // RunWingdDaemon runs the admission daemon until ctx ends or it idles out.
@@ -52,6 +62,7 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	api := newWingdAPI(runs, opts.ArtifactStore, opts.Logger)
 	cfg := wingd.Config{
 		Home:               opts.Home,
 		Version:            opts.Version,
@@ -62,7 +73,12 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 		Runs:               runs,
 		StoreSchemaVersion: store.ExpectedSchemaVersion(),
 		StoreRequirements:  store.KnownRequirements(),
+		ServeAPI:           api.serve,
+		ArtifactStoreError: opts.ArtifactStoreError,
 		Logf:               logf,
+	}
+	if opts.ArtifactStoreError != "" {
+		logf("cache backend unavailable, serving no artifact routes: %s", opts.ArtifactStoreError)
 	}
 	if tune != nil {
 		tune(&cfg, runs)

@@ -26,6 +26,7 @@ const FinalizeTimeout = 8 * time.Second
 const (
 	terminalCheckTimeout = 5 * time.Second
 	readyOpenBudget      = 250 * time.Millisecond
+	createdStorePoll     = 10 * time.Millisecond
 )
 
 var errRunStoreClosed = errors.New("the runs store handle is closed")
@@ -59,6 +60,7 @@ type HeldRunStore struct {
 	retry time.Duration
 	now   func() time.Time
 
+	createMu  sync.Mutex
 	mu        sync.Mutex
 	rw        *store.Store
 	ro        *store.Store
@@ -91,6 +93,74 @@ func NewHeldRunStore(home string) (*HeldRunStore, error) {
 func (h *HeldRunStore) Store(ctx context.Context, force bool) (*store.Store, error) {
 	rw, _, err := h.handles(ctx, force)
 	return rw, err
+}
+
+// Handles returns both handles without creating a store this home does not
+// have, reporting errRunStoreAbsent when there is none.
+func (h *HeldRunStore) Handles(ctx context.Context) (*store.Store, *store.Store, error) {
+	return h.handles(ctx, false)
+}
+
+// Create returns both handles, creating this home's runs store when it has
+// none. The daemon opens the file it finds and never creates one at start,
+// because a run against an object-store profile must leave no local state
+// behind; a state request over the API is the first proof that a local run
+// wants one.
+func (h *HeldRunStore) Create(ctx context.Context) (*store.Store, *store.Store, error) {
+	rw, ro, err := h.handles(ctx, false)
+	if !errors.Is(err, errRunStoreAbsent) {
+		return rw, ro, err
+	}
+	if err := h.createStore(); err != nil {
+		return nil, nil, err
+	}
+	return h.openCreated(ctx)
+}
+
+// safety: a forced call joins an open already in flight, and one that started
+// before the file existed reports it absent, so the created store is waited
+// for under the caller's deadline rather than reported missing once.
+func (h *HeldRunStore) openCreated(ctx context.Context) (*store.Store, *store.Store, error) {
+	for {
+		rw, ro, err := h.handles(ctx, true)
+		if !errors.Is(err, errRunStoreAbsent) {
+			return rw, ro, err
+		}
+		if sleepErr := sleepUntil(ctx, createdStorePoll); sleepErr != nil {
+			return nil, nil, err
+		}
+	}
+}
+
+func sleepUntil(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// safety: two concurrent requests would otherwise each migrate a store they
+// both just created, and store.Open answers the loser with a locked file
+// rather than the handle.
+func (h *HeldRunStore) createStore() error {
+	h.createMu.Lock()
+	defer h.createMu.Unlock()
+	db := h.paths.StateDB()
+	if _, err := os.Stat(db); err == nil {
+		return nil
+	}
+	if err := h.paths.EnsureRoot(); err != nil {
+		return err
+	}
+	st, err := store.Open(db)
+	if err != nil {
+		return err
+	}
+	return st.Close()
 }
 
 // Reader returns the read-only handle, opened alongside the writing one,
@@ -167,7 +237,7 @@ func (h *HeldRunStore) beginOpenLocked() chan struct{} {
 
 func stillOpening(elapsed time.Duration, pending, cause error) error {
 	if pending != nil && !errors.Is(pending, errRunStoreAbsent) {
-		return fmt.Errorf("the runs store is still opening (%s so far, last failure: %v): %w",
+		return fmt.Errorf("the runs store is still opening (%s so far, last failure: %w): %w",
 			elapsed.Round(100*time.Millisecond), pending, cause)
 	}
 	return fmt.Errorf("the runs store is still opening (%s so far): %w",

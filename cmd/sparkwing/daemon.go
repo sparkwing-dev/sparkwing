@@ -32,6 +32,10 @@ type daemonReport struct {
 	PreviousVersion     string   `json:"previous_version,omitempty"`
 	PreviousRevision    string   `json:"previous_revision,omitempty"`
 	Socket              string   `json:"socket"`
+	APISocket           string   `json:"api_socket"`
+	APIReady            *bool    `json:"api_ready,omitempty"`
+	APIError            string   `json:"api_error,omitempty"`
+	ArtifactStoreError  string   `json:"artifact_store_error,omitempty"`
 	InstalledVersion    string   `json:"installed_version,omitempty"`
 	DaemonSchemaVersion int      `json:"daemon_schema_version,omitempty"`
 	StoreSchemaVersion  int      `json:"store_schema_version,omitempty"`
@@ -113,7 +117,16 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	if err != nil {
 		return daemonReport{}, err
 	}
-	report := daemonReport{Socket: socket, InstalledVersion: installedVersion(), StorePath: storeDBPath(home)}
+	apiSocket, err := wingd.APISocketPath(home)
+	if err != nil {
+		return daemonReport{}, err
+	}
+	report := daemonReport{
+		Socket:           socket,
+		APISocket:        apiSocket,
+		InstalledVersion: installedVersion(),
+		StorePath:        storeDBPath(home),
+	}
 	version, storeRequirements, schemaErr := storeSchemaState(ctx, home)
 	report.StoreSchemaVersion = version
 	if schemaErr != nil {
@@ -134,12 +147,23 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 	report.DaemonSchemaVersion = info.StoreSchemaVersion
 	report.DaemonStoreReady = info.StoreReady
 	report.DaemonStoreError = info.StoreError
+	report.APIReady = info.APIReady
+	report.APIError = info.APIError
+	report.ArtifactStoreError = info.ArtifactStoreError
 	report.MissingRequirements = store.MissingRequirements(info.StoreRequirements, storeRequirements)
 	report.SchemaDiverged = daemonCannotReadStore(report, info.StoreRequirements)
-	if report.SchemaDiverged || report.StoreSchemaError != "" || daemonStoreUnusable(report) {
+	if report.SchemaDiverged || report.StoreSchemaError != "" || daemonStoreUnusable(report) || daemonAPIUnusable(report) {
 		report.Healthy = false
 	}
 	return report, nil
+}
+
+// safety: a daemon whose API socket is unbound arbitrates admission and
+// serves no run state, so it answers a probe like a healthy daemon while
+// every hosted run fails; only a daemon that reports the field at all can be
+// judged on it.
+func daemonAPIUnusable(report daemonReport) bool {
+	return report.APIReady != nil && !*report.APIReady && !report.Draining
 }
 
 // safety: a daemon that has not met the store yet reports the same "not ready" as
@@ -270,6 +294,13 @@ func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
 	return emitDaemonReport(report, format)
 }
 
+func apiFault(report daemonReport) string {
+	if report.APIError != "" {
+		return report.APIError
+	}
+	return "the daemon did not say why"
+}
+
 func schemaRemedy(report daemonReport) string {
 	if report.InstalledVersion != "" && report.InstalledVersion == report.BinaryVersion {
 		return fmt.Sprintf(
@@ -316,6 +347,16 @@ func emitDaemonReport(report daemonReport, output string) error {
 			action = "restarted"
 		}
 		fmt.Fprintf(os.Stdout, "wingd %s %s\n", action, report.BinaryVersion)
+		switch {
+		case report.APIReady == nil:
+		case *report.APIReady:
+			fmt.Fprintf(os.Stdout, "controller API on %s\n", report.APISocket)
+		default:
+			fmt.Fprintf(os.Stdout, "controller API not served: %s\n", apiFault(report))
+		}
+		if report.ArtifactStoreError != "" {
+			fmt.Fprintf(os.Stdout, "no artifact routes: %s\n", report.ArtifactStoreError)
+		}
 		if report.StoreSchemaError != "" {
 			fmt.Fprintf(os.Stdout, "runs store unreadable: %s\n", report.StoreSchemaError)
 		}
