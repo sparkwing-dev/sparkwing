@@ -287,6 +287,14 @@ code change to unlock.
   `daemon_schema_version` against `store_schema_version`, marks a diverged pair
   unhealthy, says when a restart will not help, and reports a store that exists
   but cannot be read as `store_schema_error` instead of as an absent store.
+- **cache:** A `type: controller` cache backend can read and write artifacts
+  again. The adapter prepended `/bin/` to keys that the binary cache had
+  already prefixed with `bin/`, so every request addressed `/bin/bin/<key>` and
+  the cache answered 400; the `/bin/` route's key pattern also rejected the
+  `.sha256` digest sidecar, so a digest could never be stored even once the
+  path was right. The adapter now drops a leading `bin/`, because the route is
+  that namespace, and the route accepts the sidecar key. `fs` and `s3` caches
+  were never affected; they treat a key as opaque.
 
 ### Security
 
