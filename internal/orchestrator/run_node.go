@@ -46,6 +46,11 @@ func RunNodeOnce(
 	httpClient := &http.Client{
 		Timeout: 60 * time.Second,
 	}
+	if cfg.apiSocket != "" {
+		httpClient = NewAPISocketClient(cfg.apiSocket)
+		controllerURL = HostedAPIBaseURL
+		token = ""
+	}
 	stateClient := client.NewWithToken(controllerURL, httpClient, token)
 
 	paths, err := DefaultPaths()
@@ -485,6 +490,9 @@ func runNodeCLI(args []string) error {
 	if nodeID == "" {
 		nodeID = os.Getenv("SPARKWING_NODE_ID")
 	}
+	if os.Getenv(APISocketEnvVar) != "" && *controllerURL == "" {
+		*controllerURL = HostedAPIBaseURL
+	}
 	if *controllerURL == "" || runID == "" || nodeID == "" {
 		fs.Usage()
 		return errors.New("--controller + <runID> + <nodeID> are required (or SPARKWING_CONTROLLER_URL + SPARKWING_RUN_ID + SPARKWING_NODE_ID env)")
@@ -503,6 +511,10 @@ func runNodeCLI(args []string) error {
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
 	var runOpts []RunNodeOption
+	if sock := os.Getenv(APISocketEnvVar); sock != "" {
+		runOpts = append(runOpts, OverAPISocket(sock))
+		token = ""
+	}
 	if *coordinated {
 		holderID = fmt.Sprintf("node:%s:%s", runID, nodeID)
 		runOpts = append(runOpts, Coordinated())

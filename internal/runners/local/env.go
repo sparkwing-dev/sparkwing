@@ -9,8 +9,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
+// APISocketEnv names the daemon's controller API socket for a node process.
+const APISocketEnv = "SPARKWING_API_SOCKET"
+
+// safety: a node process reaching the daemon's API socket is authenticated
+// by the uid the kernel reports for its connection. A bearer inherited from
+// this process's environment would be authenticated against the store's
+// tokens instead, which is a write behind the daemon's single writing
+// handle and loses the read-handle latency the socket exists for.
+var tokenEnvNames = []string{"SPARKWING_AGENT_TOKEN", "SPARKWING_TOKEN"}
+
 func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request) []string {
 	env := make([]string, 0, len(base)+16)
+	if cfg.APISocket != "" {
+		base = withoutEnv(base, tokenEnvNames)
+	}
 	env = append(env, base...)
 
 	set := func(k, v string) {
@@ -23,7 +36,10 @@ func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request
 	set("SPARKWING_HOME", cfg.Home)
 	set("SPARKWING_CONTROLLER_URL", cfg.ControllerURL)
 	set("SPARKWING_CACHE_URL", cfg.CacheURL)
-	set("SPARKWING_AGENT_TOKEN", cfg.AgentToken)
+	set(APISocketEnv, cfg.APISocket)
+	if cfg.APISocket == "" {
+		set("SPARKWING_AGENT_TOKEN", cfg.AgentToken)
+	}
 	set("SPARKWING_RUN_ID", req.RunID)
 	set("SPARKWING_NODE_ID", req.NodeID)
 
@@ -61,4 +77,21 @@ func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request
 	set("SPARKWING_STOP_AT", cfg.StopAt)
 
 	return env
+}
+
+func withoutEnv(base, names []string) []string {
+	out := make([]string, 0, len(base))
+	for _, kv := range base {
+		drop := false
+		for _, name := range names {
+			if strings.HasPrefix(kv, name+"=") {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

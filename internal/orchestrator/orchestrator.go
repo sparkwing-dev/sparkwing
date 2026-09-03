@@ -595,7 +595,14 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		opts.DefaultStateDB = paths.StateDB()
 	}
 	ownsState := opts.State == nil
-	if err := ApplyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths); err != nil {
+	hosted := hostedBackendsForRun(ctx, paths, &opts)
+	if hosted.APISocket != "" {
+		// safety: profile resolution opens this machine's store only when no
+		// state backend is set yet, so the daemon's client goes in before it
+		// runs and the run opens nothing.
+		opts.State = hosted.State
+	}
+	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, hosted.APISocket != ""); err != nil {
 		return nil, fmt.Errorf("profile backends: %w", err)
 	}
 	if opts.State == nil {
@@ -603,29 +610,34 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	}
 	var backends Backends
 	var st *store.Store
-	switch s := opts.State.(type) {
-	case *store.Store:
-		st = s
-		if ownsState {
-			defer func() { _ = st.Close() }()
+	if hosted.APISocket != "" {
+		hosted.Artifact = opts.ArtifactStore
+		backends = hosted
+	} else {
+		switch s := opts.State.(type) {
+		case *store.Store:
+			st = s
+			if ownsState {
+				defer func() { _ = st.Close() }()
+			}
+			backends = LocalBackends(paths, st, opts.ArtifactStore)
+		case *s3state.Backend:
+			if opts.LogStore == nil {
+				return nil, fmt.Errorf("state backend: S3-only mode requires LogStore to be configured")
+			}
+			if ownsState {
+				defer func() { _ = s.Close() }()
+			}
+			backends = S3Backends(opts.LogStore, s, opts.ArtifactStore)
+		case *client.Client:
+			var logsBackend LogBackend
+			if opts.LogStore != nil {
+				logsBackend = NewLogStoreBackend(opts.LogStore, nil)
+			}
+			backends = RemoteBackends(s, logsBackend, opts.ArtifactStore, nil, 0)
+		default:
+			return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 		}
-		backends = LocalBackends(paths, st, opts.ArtifactStore)
-	case *s3state.Backend:
-		if opts.LogStore == nil {
-			return nil, fmt.Errorf("state backend: S3-only mode requires LogStore to be configured")
-		}
-		if ownsState {
-			defer func() { _ = s.Close() }()
-		}
-		backends = S3Backends(opts.LogStore, s, opts.ArtifactStore)
-	case *client.Client:
-		var logsBackend LogBackend
-		if opts.LogStore != nil {
-			logsBackend = NewLogStoreBackend(opts.LogStore, nil)
-		}
-		backends = RemoteBackends(s, logsBackend, opts.ArtifactStore, nil, 0)
-	default:
-		return nil, fmt.Errorf("state backend: unrecognized implementation %T", opts.State)
 	}
 	if opts.MirrorLocal != nil {
 		backends.State = newMirrorStateBackend(backends.State, opts.MirrorLocal, nil)
@@ -662,8 +674,8 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	}
 
 	res, runErr := Run(ctx, backends, opts)
-	if st != nil && opts.ArtifactStore != nil && res != nil && res.RunID != "" {
-		if err := DumpRunState(ctx, st, res.RunID, opts.ArtifactStore); err != nil {
+	if backends.LocalCoordination && opts.ArtifactStore != nil && res != nil && res.RunID != "" {
+		if err := dumpRunState(ctx, canonicalState(backends.State), res.RunID, opts.ArtifactStore); err != nil {
 			fmt.Fprintf(os.Stderr, "warn: state dump failed: %v\n", err)
 		}
 	}
@@ -671,11 +683,15 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 }
 
 func DumpRunState(ctx context.Context, st *store.Store, runID string, art storage.ArtifactStore) error {
-	run, err := st.GetRun(ctx, runID)
+	return dumpRunState(ctx, localState{st: st}, runID, art)
+}
+
+func dumpRunState(ctx context.Context, state StateBackend, runID string, art storage.ArtifactStore) error {
+	run, err := state.GetRun(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("read run: %w", err)
 	}
-	nodes, err := st.ListNodes(ctx, runID)
+	nodes, err := state.ListNodes(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("list nodes: %w", err)
 	}

@@ -41,6 +41,11 @@ type Backends struct {
 	// the host capacity profile. A hosted controller runs both of those on
 	// its own side, and an object-store backend has neither.
 	LocalCoordination bool
+
+	// APISocket is the admission daemon's controller API socket when this
+	// run's state lives behind it, and empty when the run holds the store
+	// itself. Node subprocesses dial it instead of a loopback controller.
+	APISocket string
 }
 
 // RunCoordination is the store surface a run needs for its own

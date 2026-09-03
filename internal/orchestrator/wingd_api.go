@@ -240,7 +240,10 @@ func writeAPIUnavailable(w http.ResponseWriter, err error) {
 		w.Header().Set("Retry-After", "1")
 	}
 	w.WriteHeader(http.StatusServiceUnavailable)
-	fmt.Fprintf(w, "{%q:%q,%q:%q}\n", "error", "unavailable", "message", err.Error())
+	// safety: the error member is what a controller client puts in the run's
+	// failure, so it names the daemon; a bare "unavailable" reads as the run's
+	// own state backend having gone away.
+	fmt.Fprintf(w, "{%q:%q,%q:%q}\n", "error", "admission daemon: "+err.Error(), "message", err.Error())
 }
 
 // safety: the held store opens lazily and is reopened when the file under it

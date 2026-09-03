@@ -19,12 +19,20 @@ type runNodeConfig struct {
 	coordinated   bool
 	gitcacheURL   string
 	gitcacheToken string
+	apiSocket     string
 }
 
 type RunNodeOption func(*runNodeConfig)
 
 func Coordinated() RunNodeOption {
 	return func(c *runNodeConfig) { c.coordinated = true }
+}
+
+// OverAPISocket sends this node's controller calls over the admission
+// daemon's unix API socket at sock. The requests carry no bearer token: the
+// daemon takes the connection's peer uid as the principal.
+func OverAPISocket(sock string) RunNodeOption {
+	return func(c *runNodeConfig) { c.apiSocket = sock }
 }
 
 // WithGitcache avoids process-global cache credentials when one agent executes concurrent nodes.

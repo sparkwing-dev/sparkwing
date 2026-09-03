@@ -46,6 +46,12 @@ type Config struct {
 	ControllerURL string
 	AgentToken    string
 
+	// APISocket is the admission daemon's controller API socket when the
+	// run's state lives behind it. A node process that gets one dials it
+	// and sends no bearer token, because the daemon takes the connection's
+	// peer uid as the principal.
+	APISocket string
+
 	WorkDir string
 
 	Home string

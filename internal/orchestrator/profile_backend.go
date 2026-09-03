@@ -19,15 +19,26 @@ func OpenReadBackendForProfile(ctx context.Context, paths Paths, p *profile.Prof
 }
 
 func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile) error {
+	return applyProfileBackends(ctx, opts, p, false)
+}
+
+// safety: keepState is set by a run whose state already reaches this
+// machine's store through the admission daemon. Resolving the state surface
+// again would open the file the daemon owns, which is the whole point of
+// that run not owning it.
+func applyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile, keepState bool) error {
 	if opts.LocalOnly {
 		opts.LogStore = nil
 		opts.ArtifactStore = nil
+		if keepState {
+			return nil
+		}
 		opts.State = nil
 		if opts.DefaultStateDB == "" {
 			return fmt.Errorf("--sw-local-only: no default state database path resolved")
 		}
 		spec := backends.Spec{Type: backends.TypeSQLite, Path: opts.DefaultStateDB}
-		st, err := storeurl.OpenStateStoreFromSpec(ctx, spec, nil)
+		st, err := openStateStoreFromSpec(ctx, spec, nil)
 		if err != nil {
 			return fmt.Errorf("--sw-local-only: open sqlite state: %w", err)
 		}
@@ -56,8 +67,8 @@ func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 		}
 		opts.LogStore = store
 	}
-	if opts.State == nil && state != nil {
-		st, err := storeurl.OpenStateStoreFromSpec(ctx, *state, lookup)
+	if opts.State == nil && state != nil && !keepState {
+		st, err := openStateStoreFromSpec(ctx, *state, lookup)
 		if err != nil {
 			return fmt.Errorf("state backend: %w", err)
 		}
@@ -66,9 +77,17 @@ func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 	return nil
 }
 
+// openStateStoreFromSpec is the orchestrator's only path to a state store
+// file, so a test counts what a run opens by replacing it.
+var openStateStoreFromSpec = storeurl.OpenStateStoreFromSpec
+
 func ApplyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths) error {
+	return applyProfileBackendsWithMirror(ctx, opts, p, paths, false)
+}
+
+func applyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths, keepState bool) error {
 	hadState := opts.State != nil
-	if err := ApplyProfileBackends(ctx, opts, p); err != nil {
+	if err := applyProfileBackends(ctx, opts, p, keepState); err != nil {
 		return err
 	}
 	if opts.LocalOnly || hadState || opts.State == nil {

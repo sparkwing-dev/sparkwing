@@ -43,6 +43,7 @@ func setupLocalExecution(paths Paths, opts *Options, backends Backends, workDir 
 	if c, ok := backends.State.(*client.Client); ok {
 		cfg.ControllerURL = c.BaseURL()
 		cfg.AgentToken = c.Token()
+		cfg.APISocket = backends.APISocket
 		ctrl = c
 		cleanup = func() {}
 	} else {

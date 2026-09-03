@@ -118,3 +118,36 @@ func TestChildEnv_OmitsEmptyAndUnavailableValues(t *testing.T) {
 		}
 	}
 }
+
+func TestChildEnv_APISocketCarriesNoBearer(t *testing.T) {
+	cfg := testConfig()
+	cfg.APISocket = "/tmp/sparkwing-501-abc/api.sock"
+	base := []string{"SPARKWING_AGENT_TOKEN=inherited", "SPARKWING_TOKEN=inherited", "PATH=/usr/bin"}
+
+	env := childEnv(context.Background(), base, cfg,
+		runner.Request{RunID: "run-1", NodeID: "build"})
+
+	if got, ok := lastValue(env, APISocketEnv); !ok || got != cfg.APISocket {
+		t.Fatalf("%s = %q (found %v), want %q", APISocketEnv, got, ok, cfg.APISocket)
+	}
+	for _, name := range tokenEnvNames {
+		if got, ok := lastValue(env, name); ok {
+			t.Fatalf("%s = %q, want it stripped on the API socket path", name, got)
+		}
+	}
+	if got, ok := lastValue(env, "PATH"); !ok || got != "/usr/bin" {
+		t.Fatalf("PATH = %q (found %v), want the inherited value", got, ok)
+	}
+}
+
+func TestChildEnv_LoopbackKeepsItsBearer(t *testing.T) {
+	env := childEnv(context.Background(), []string{"SPARKWING_AGENT_TOKEN=inherited"}, testConfig(),
+		runner.Request{RunID: "run-1", NodeID: "build"})
+
+	if got, ok := lastValue(env, "SPARKWING_AGENT_TOKEN"); !ok || got != "svc_tok" {
+		t.Fatalf("SPARKWING_AGENT_TOKEN = %q (found %v), want the loopback token", got, ok)
+	}
+	if got, ok := lastValue(env, APISocketEnv); ok {
+		t.Fatalf("%s = %q, want it unset without an API socket", APISocketEnv, got)
+	}
+}

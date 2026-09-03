@@ -258,7 +258,7 @@ func resolveLayout(home string) (layout, error) {
 		dir:     dir,
 		lock:    filepath.Join(dir, "d.lock"),
 		sock:    sock,
-		apiSock: apiSocketBeside(sock),
+		apiSock: APISocketBeside(sock),
 		state:   filepath.Join(dir, "state.json"),
 		log:     filepath.Join(dir, "d.log"),
 	}, nil
@@ -414,7 +414,7 @@ func reapSocketDir(sock string) {
 	// safety: a killed daemon leaves both sockets behind, and the directory
 	// removal fails silently while either is still there.
 	_ = os.Remove(sock)
-	_ = os.Remove(apiSocketBeside(sock))
+	_ = os.Remove(APISocketBeside(sock))
 	_ = os.Remove(dir)
 }
 
@@ -451,10 +451,15 @@ func SocketPath(home string) (string, error) {
 	return l.sock, nil
 }
 
+// APISocketBeside reports the controller API socket that belongs to the
+// admission socket at sock. A caller that already holds a daemon connection
+// derives the path from the socket it reached rather than recomputing the
+// home hash.
+//
 // safety: the admission socket is hashed into a short shared base because a
 // home-relative path overruns the OS sun_path limit, and the API socket has
 // to obey the same limit and the same directory privacy checks.
-func apiSocketBeside(sock string) string {
+func APISocketBeside(sock string) string {
 	return filepath.Join(filepath.Dir(sock), "api.sock")
 }
 
