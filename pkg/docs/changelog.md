@@ -260,6 +260,13 @@ code change to unlock.
   Under `mirror_local: false`, the setting the docs recommend for automated
   workers, a plain `sparkwing doctor` previously removed every run directory in
   the home, taking `_envelope.ndjson` and the node logs with it.
+- **daemon:** The stale-socket sweep no longer unlinks a live daemon's socket.
+  It classified a socket dead by dialing it once and then removed the file
+  without rechecking, so a sweep that ran while a daemon for another
+  `SPARKWING_HOME` was taking over deleted the successor's freshly bound
+  socket, leaving clients spinning until they failed with "predecessor daemon
+  still holds the election lock". It now redials and confirms the path still
+  carries the same file before unlinking.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads
