@@ -18,9 +18,9 @@ import (
 )
 
 // APIRequestTimeout bounds one controller API request against the daemon's
-// held store. It matches the write timeout a hosted controller applies, so a
-// caller wedged behind a foreign writer gets an error it can retry instead of
-// a connection that never answers.
+// held store, so a caller wedged behind a foreign writer gets an error it can
+// retry instead of a connection that never answers. The streaming routes are
+// exempt; they run to the deadline the handler sets for itself.
 const APIRequestTimeout = 30 * time.Second
 
 const apiAuthCacheTTL = time.Minute
@@ -33,9 +33,10 @@ const PeerPrincipalPrefix = "unix-peer:"
 type peerUIDKey struct{}
 
 type wingdAPI struct {
-	runs     *HeldRunStore
-	artifact storage.ArtifactStore
-	logger   *slog.Logger
+	runs           *HeldRunStore
+	artifact       storage.ArtifactStore
+	logger         *slog.Logger
+	requestTimeout time.Duration
 
 	mu      sync.Mutex
 	builtOn *store.Store
@@ -73,19 +74,44 @@ var apiReadRoutes = []string{
 	"GET /api/v1/pipelines/{name}/profile",
 }
 
+// safety: these routes hold a response open far longer than a request bound
+// would allow, and each sets its own deadline through http.ResponseController,
+// so a context deadline here truncates them into a clean EOF the client reads
+// as completion.
+var apiStreamRoutes = []string{
+	"GET /api/v1/concurrency/{key}/notify",
+	"GET /api/v1/artifacts/{key}",
+	"GET /api/v1/gitcache/git/{path...}",
+	"POST /api/v1/gitcache/git/{path...}",
+	"GET /api/v1/runs/{id}/gitcache/git/{path...}",
+	"POST /api/v1/runs/{id}/gitcache/git/{path...}",
+}
+
+var apiStreamMux = routeSet(apiStreamRoutes)
+
+func routeSet(routes []string) *http.ServeMux {
+	mux := http.NewServeMux()
+	marker := http.NotFoundHandler()
+	for _, route := range routes {
+		mux.Handle(route, marker)
+	}
+	return mux
+}
+
 func newWingdAPI(runs *HeldRunStore, artifact storage.ArtifactStore, logger *slog.Logger) *wingdAPI {
 	if logger == nil {
 		logger = loopbackLogger()
 	}
-	return &wingdAPI{runs: runs, artifact: artifact, logger: logger}
+	return &wingdAPI{runs: runs, artifact: artifact, logger: logger, requestTimeout: APIRequestTimeout}
 }
 
 func (a *wingdAPI) serve(ctx context.Context, ln net.Listener) {
+	// safety: no write timeout, because the streaming routes extend the
+	// connection's own deadline instead and a server-wide one would cut them;
+	// the loopback controller this replaces for a local run does the same.
 	srv := &http.Server{
 		Handler:           http.HandlerFunc(a.route),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       APIRequestTimeout,
-		WriteTimeout:      APIRequestTimeout,
 		IdleTimeout:       2 * time.Minute,
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			if peer, ok := c.(wingd.APIConn); ok {
@@ -110,15 +136,26 @@ func (a *wingdAPI) serve(ctx context.Context, ln net.Listener) {
 	drainCtx, cancel := context.WithTimeout(context.Background(), wingd.APIDrainWindow)
 	defer cancel()
 	_ = srv.Shutdown(drainCtx)
-	if err != nil && !errors.Is(err, http.ErrServerClosed) && ctx.Err() == nil {
+	if a.unexpected(err) && ctx.Err() == nil {
 		a.logger.Warn("controller API stopped", "err", err)
 	}
 }
 
+// safety: a takeover closes the listener directly rather than through the
+// server, so Serve reports a closed connection on the path that is working
+// exactly as intended.
+func (a *wingdAPI) unexpected(err error) bool {
+	return err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed)
+}
+
 func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), APIRequestTimeout)
-	defer cancel()
-	rw, ro, err := a.runs.Create(ctx)
+	ctx := r.Context()
+	if !streamingRoute(r) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, a.requestTimeout)
+		defer cancel()
+	}
+	rw, ro, err := a.handles(ctx, r)
 	if err != nil {
 		writeAPIUnavailable(w, err)
 		return
@@ -126,9 +163,28 @@ func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
 	a.handlerFor(rw, ro).ServeHTTP(w, r.WithContext(ctx))
 }
 
+// safety: a run against an object-store profile must leave no local state
+// behind, so only a request that changes state proves this home wants a store;
+// a read, including the health probe, answers 503 rather than creating one.
+func (a *wingdAPI) handles(ctx context.Context, r *http.Request) (*store.Store, *store.Store, error) {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return a.runs.Handles(ctx)
+	}
+	return a.runs.Create(ctx)
+}
+
+func streamingRoute(r *http.Request) bool {
+	_, pattern := apiStreamMux.Handler(r)
+	return pattern != ""
+}
+
 func writeAPIUnavailable(w http.ResponseWriter, err error) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Retry-After", "1")
+	if !errors.Is(err, errRunStoreAbsent) {
+		// safety: an absent store is answered rather than waited out, so only
+		// a store that may yet open invites the client back.
+		w.Header().Set("Retry-After", "1")
+	}
 	w.WriteHeader(http.StatusServiceUnavailable)
 	fmt.Fprintf(w, "{%q:%q,%q:%q}\n", "error", "unavailable", "message", err.Error())
 }
@@ -148,25 +204,31 @@ func (a *wingdAPI) handlerFor(rw, ro *store.Store) http.Handler {
 }
 
 func (a *wingdAPI) split(rw, ro *store.Store) http.Handler {
+	// safety: one authenticator for both servers, because each holds its own
+	// token cache and its own revocation generation, and a revoke reaches only
+	// the server that served it.
+	auth := controller.NewAuthenticator(rw, apiAuthCacheTTL).WithLogger(a.logger)
 	mux := http.NewServeMux()
-	mux.Handle("/", a.controllerOn(rw, rw))
+	mux.Handle("/", a.controllerOn(rw, auth))
 	if ro == nil {
 		return mux
 	}
-	// safety: the authenticator keeps the writing handle because a bearer
-	// token's own bookkeeping is a write, and a read route must not fail on
-	// the header a CLI verb may send.
-	read := a.controllerOn(ro, rw)
+	read := a.controllerOn(ro, auth)
 	for _, route := range apiReadRoutes {
 		mux.Handle(route, read)
 	}
 	return mux
 }
 
-func (a *wingdAPI) controllerOn(st, auth *store.Store) http.Handler {
+// safety: the read server must never be given a reconcile hook. The two
+// busiest read routes run it before answering, it writes, and the controller
+// discards its error, so a hook here would fail silently on a read-only
+// handle. The authenticator keeps the writing handle because a bearer token's
+// own bookkeeping is a write.
+func (a *wingdAPI) controllerOn(st *store.Store, auth *controller.Authenticator) http.Handler {
 	return controller.New(st, a.logger).
 		WithArtifactStore(a.artifact).
-		WithAuthenticator(controller.NewAuthenticator(auth, apiAuthCacheTTL).WithLogger(a.logger)).
+		WithAuthenticator(auth).
 		WithPeerPrincipal(peerPrincipal).
 		Handler()
 }
