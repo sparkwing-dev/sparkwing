@@ -55,6 +55,7 @@ const finishedDetail = {
 type MockAPIOptions = {
   runs?: Record<string, unknown>[];
   details?: Record<string, Record<string, unknown>>;
+  agents?: Record<string, unknown>[];
   unauthorized?: boolean;
   failPath?: string;
   onDetail?: (route: Route, runID: string) => Promise<boolean>;
@@ -129,6 +130,10 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
     }
     if (request.method() === "GET" && path === "/api/v1/health/services") {
       await route.fulfill({ json: { services: [] } });
+      return;
+    }
+    if (request.method() === "GET" && path === "/api/v1/agents") {
+      await route.fulfill({ json: { agents: options.agents ?? [] } });
       return;
     }
     if (request.method() === "GET" && path === "/api/v1/pipelines") {
@@ -772,6 +777,142 @@ test("surfaces a general controller connection failure", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("shows retry lineage from privacy-safe execution attempts", async ({
+  page,
+}) => {
+  const retriedDetail = {
+    ...finishedDetail,
+    nodes: finishedDetail.nodes.map((node) => ({
+      ...node,
+      run_id: finishedRun.id,
+      claimed: true,
+      executor_kind: "gateway",
+      executor_name: "cloud-helper",
+      executor_location: "cloud",
+      execution_attempts: [
+        {
+          run_id: "run-original",
+          node_id: node.id,
+          attempt: 1,
+          executor_kind: "agent",
+          executor_name: "design-mac",
+          location: "local",
+          platform: "darwin/arm64",
+          started_at: "2026-08-27T17:59:00Z",
+          finished_at: "2026-08-27T17:59:20Z",
+          outcome: "failed",
+          failure_reason: "agent_lost",
+          retry_run_id: finishedRun.id,
+        },
+        {
+          run_id: finishedRun.id,
+          node_id: node.id,
+          attempt: 2,
+          executor_kind: "gateway",
+          executor_name: "cloud-helper",
+          location: "cloud",
+          started_at: "2026-08-27T18:00:00Z",
+          finished_at: "2026-08-27T18:01:30Z",
+          outcome: "success",
+        },
+      ],
+    })),
+  };
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: retriedDetail },
+  });
+
+  await page.goto(`/runs?run=${finishedRun.id}&node=verify`);
+
+  await expect(
+    page.getByRole("region", { name: "Execution history for verify" }),
+  ).toBeVisible();
+  await expect(page.getByText("Attempt 2", { exact: true })).toBeVisible();
+  await expect(page.getByText("Attempt 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Platform darwin/arm64")).toBeVisible();
+  await expect(page.getByText("failure agent_lost")).toBeVisible();
+  await expect(
+    page.getByRole("link", {
+      name: `Open execution run ${finishedRun.id}`,
+      exact: true,
+    }),
+  ).toHaveAttribute("href", `/runs?run=${finishedRun.id}`);
+  await expect(
+    page.getByRole("link", {
+      name: `Open retry run ${finishedRun.id}`,
+      exact: true,
+    }),
+  ).toHaveAttribute("href", `/runs?run=${finishedRun.id}`);
+});
+
+test("separates fleet policy, observations, and current activity", async ({
+  page,
+}) => {
+  await installMockAPI(page, {
+    agents: [
+      {
+        name: "design-mac",
+        type: "agent",
+        location: "local",
+        labels: { os: "darwin", arch: "arm64" },
+        capabilities: ["arch=arm64", "os=darwin"],
+        last_seen: new Date().toISOString(),
+        status: "busy",
+        active_jobs: [finishedRun.id],
+        active_slots: 2,
+        max_concurrent: 4,
+        base_priority: 20,
+        priority_ceiling: 80,
+        budget: { cores: 6, memory_bytes: 12 * 1024 ** 3 },
+        headroom: {
+          cores: 3,
+          memory_bytes: 6 * 1024 ** 3,
+          queue_depth: 1,
+          observed_at: new Date().toISOString(),
+        },
+      },
+      {
+        name: "old-pool",
+        type: "pool",
+        location: "unknown",
+        labels: {},
+        last_seen: new Date().toISOString(),
+        status: "idle",
+        active_jobs: [],
+        max_concurrent: 0,
+      },
+    ],
+  });
+
+  await page.goto("/cluster");
+  await expect(
+    page.getByRole("heading", { name: "Fleet", exact: true, level: 1 }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: /design-mac/ }).click();
+  const configured = page.getByRole("region", { name: "Configured policy" });
+  const observed = page.getByRole("region", { name: "Observed liveness" });
+  const activity = page.getByRole("region", { name: "Current activity" });
+  await expect(configured.getByText("local", { exact: true })).toBeVisible();
+  await expect(configured.getByText("20 (ceiling 80)")).toBeVisible();
+  await expect(observed.getByText("3 cores / 6.0 GiB")).toBeVisible();
+  await expect(observed.getByText("headroom observed", { exact: true })).toBeVisible();
+  await expect(observed.getByText(/controller accepted this headroom/)).toBeVisible();
+  await expect(activity.getByText("2", { exact: true })).toBeVisible();
+  await expect(
+    activity.getByRole("link", { name: finishedRun.id, exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: /old-pool/ }).click();
+  await expect(
+    page.getByText(
+      "Configuration unavailable. This executor was inferred from recent activity.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("not reported", { exact: true })).toBeVisible();
+});
+
 test("keeps every public dashboard navigation target routable", async ({
   page,
 }) => {
@@ -780,7 +921,7 @@ test("keeps every public dashboard navigation target routable", async ({
     ["Home", "Overview"],
     ["Queue", "Admission queue"],
     ["Capacity", "Capacity"],
-    ["Cluster", "Cluster"],
+    ["Fleet", "Fleet"],
     ["Analytics (preview)", "Analytics"],
   ] as const;
   await page.goto("/");
@@ -789,7 +930,9 @@ test("keeps every public dashboard navigation target routable", async ({
   await expect(page.getByRole("button", { name: "Activity", exact: true })).toBeVisible();
   for (const [link, heading] of routes) {
     await page.getByRole("link", { name: link, exact: true }).click();
-    await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: heading, exact: true, level: 1 }),
+    ).toBeVisible();
   }
   const docs = page.getByRole("link", { name: "Docs", exact: true });
   await expect(docs).toHaveAttribute("href", "https://sparkwing.dev/docs/");

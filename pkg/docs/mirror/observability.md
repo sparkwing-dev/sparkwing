@@ -256,6 +256,20 @@ It also shows what admission is doing with the machine:
 - **Queue page**: the live admission queue -- every resource with its
   headroom, every holder, every waiter in order with its ETA. Mirrors
   `sparkwing queue`.
+- **Fleet section**: registered executors with their configured policy, observed
+  liveness and headroom, and current slot and run activity in separate panels.
+  Legacy executors inferred from recent activity stay visible without invented
+  policy. The API does not expose a distinct headroom observation time, so the
+  view reports whether the controller considers headroom live, stale, or
+  absent without fabricating a timestamp.
+
+The run node list and DAG mark execution location with both text and color.
+Selecting a node shows every durable execution attempt, including the executor
+kind and name, timestamps, outcome, and retry link when the controller recorded
+one. A recorded platform appears with its attempt; a missing platform remains
+unknown. The dashboard reads this history from explicit public execution
+attribution. It does not derive location from transient claim ownership; an
+older record with no attribution is shown as unknown.
 - **Capacity page**: the same host ledger with the subtraction behind
   each Available cell written out, then every measured pipeline with the
   charge it resolves to (the live form of `sparkwing runs stats

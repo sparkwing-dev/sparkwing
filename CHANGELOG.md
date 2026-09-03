@@ -123,6 +123,11 @@ code change to unlock.
   required placement. This bounds at-least-once execution; it does not make
   external effects exactly-once.
 
+- **web:** The Fleet view separates each registered executor's configured
+  policy, observed liveness and headroom, and current slot and run activity.
+  Run nodes show accessible local, cloud, or unknown execution badges, retain
+  every durable executor attempt, and link retries across runs. Legacy records
+  stay visible without invented policy, platform, location, or headroom timing.
 - **ci:** The pre-commit formatters step and the em-dash and tracker-ID sweeps
   judge the whole change, not only what is staged. Each reads the staged files
   when something is staged and the files changed since `origin/main` otherwise,

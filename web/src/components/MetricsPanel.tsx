@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { type Job, type Agent } from "@/lib/api";
 import AgentUtilization from "@/components/AgentUtilization";
 import { ResponsiveContainer, BarChart, Bar, Tooltip } from "recharts";
+import { fleetSlotTotals } from "@/lib/fleet";
 
 function pct(n: number, d: number): string {
   if (d === 0) return "--";
@@ -172,8 +173,7 @@ export default function MetricsPanel({
   const medDuration = median(durations);
   const p95Duration = p95(durations);
 
-  const totalCapacity = agents.reduce((s, a) => s + a.max_concurrent, 0);
-  const utilized = agents.reduce((s, a) => s + (a.active_jobs?.length || 0), 0);
+  const slotTotals = fleetSlotTotals(agents);
 
   const pipelineStats = computePipelineStats(topLevel);
 
@@ -201,10 +201,10 @@ export default function MetricsPanel({
         </div>
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
           <div className="text-xl font-bold text-indigo-400">
-            {utilized}/{totalCapacity}
+            {slotTotals.active ?? "—"}/{slotTotals.capacity ?? "—"}
           </div>
           <div className="text-[10px] text-[var(--muted)]">
-            Agent slots used
+            Executor slots used
           </div>
         </div>
       </div>

@@ -1,11 +1,14 @@
 "use client";
 
 import type { Node as RunNode } from "@/lib/api";
-import { parseHolder } from "@/lib/api";
 import { HeartbeatLabel } from "@/components/HeartbeatDot";
 import StatusLabel from "@/components/StatusLabel";
 import FailureReasonBadge from "@/components/FailureReasonBadge";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
+import {
+  executionAttempts,
+  executionDisplay,
+} from "@/lib/executionAttribution";
 
 function fmtMs(ms: number): string {
   if (!ms) return "";
@@ -27,7 +30,8 @@ function elapsed(node: RunNode): string {
 
 export default function SelectedNodePanel({ node }: { node: RunNode }) {
   const isRunning = !node.finished_at && node.status !== "pending";
-  const holder = parseHolder(node.claimed_by);
+  const attempt = executionAttempts(node).at(-1);
+  const execution = executionDisplay(attempt);
   const dur = elapsed(node);
 
   return (
@@ -37,9 +41,12 @@ export default function SelectedNodePanel({ node }: { node: RunNode }) {
         <span className="font-mono text-[var(--foreground)] font-semibold">
           {node.id}
         </span>
-        {holder.label && (
+        {attempt && (
           <span className="text-[var(--muted)]">
-            on <span className="font-mono text-[#c9d1d9]">{holder.label}</span>
+            on{" "}
+            <span className="font-mono text-[#c9d1d9]">
+              {execution.executorLabel}
+            </span>
           </span>
         )}
         {node.started_at && (

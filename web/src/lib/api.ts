@@ -171,6 +171,7 @@ export function runDurationMs(run: Run): number {
 }
 
 export interface Node {
+  run_id?: string;
   id: string;
   status: string;
   outcome: string;
@@ -180,9 +181,12 @@ export interface Node {
   started_at?: string;
   finished_at?: string;
   duration_ms: number;
-  claimed_by?: string;
   claimed?: boolean;
-  lease_expires_at?: string;
+  executor_kind?: string;
+  executor_name?: string;
+  executor_location?: "local" | "cloud" | "unknown";
+  execution_started_at?: string;
+  execution_attempts?: ExecutionAttempt[];
   status_detail?: string;
   last_heartbeat?: string;
   failure_reason?: string;
@@ -196,6 +200,21 @@ export interface Node {
   modifiers?: NodeModifiers;
   work?: NodeWork;
   spawned_pipelines?: SpawnedPipelineRef[];
+}
+
+export interface ExecutionAttempt {
+  run_id?: string;
+  node_id?: string;
+  attempt?: number;
+  executor_kind?: string;
+  executor_name?: string;
+  location?: "local" | "cloud" | "unknown";
+  platform?: string;
+  started_at?: string;
+  finished_at?: string;
+  outcome?: string;
+  failure_reason?: string;
+  retry_run_id?: string;
 }
 
 export interface SpawnedPipelineRef {
@@ -273,37 +292,6 @@ export interface NodeWorkSpawnEach {
 export interface RunDetail {
   run: Run;
   nodes: Node[];
-}
-
-export type RunVenue = "local" | "pool" | "jobs" | "pool+jobs" | "cluster";
-
-export function computeVenue(nodes: Node[]): RunVenue {
-  const prefixes = new Set<string>();
-  for (const n of nodes) {
-    if (!n.claimed_by) continue;
-    const idx = n.claimed_by.indexOf(":");
-    prefixes.add(idx >= 0 ? n.claimed_by.slice(0, idx) : n.claimed_by);
-  }
-  if (prefixes.size === 0) return "local";
-  const hasRunner = prefixes.has("runner");
-  const hasPod = prefixes.has("pod");
-  if (prefixes.size === 1 && hasRunner) return "pool";
-  if (prefixes.size === 1 && hasPod) return "jobs";
-  if (prefixes.size === 2 && hasRunner && hasPod) return "pool+jobs";
-  return "cluster";
-}
-
-export function parseHolder(claimedBy?: string): {
-  kind: "local" | "pool" | "jobs" | "cluster";
-  label: string;
-} {
-  if (!claimedBy) return { kind: "local", label: "local" };
-  const parts = claimedBy.split(":");
-  const prefix = parts[0];
-  const second = parts[1] || claimedBy;
-  if (prefix === "runner") return { kind: "pool", label: second };
-  if (prefix === "pod") return { kind: "jobs", label: second };
-  return { kind: "cluster", label: second };
 }
 
 export interface RunFilter {
@@ -543,7 +531,7 @@ export async function deleteRun(runID: string): Promise<void> {
 export interface Agent {
   name: string;
   type: string;
-  location: "local" | "cloud" | "unknown";
+  location?: "local" | "cloud" | "unknown";
   labels: Record<string, string>;
   capabilities?: string[];
   last_seen: string;
@@ -551,10 +539,15 @@ export interface Agent {
   active_jobs?: string[];
   active_slots?: number;
   max_concurrent: number;
-  base_priority: number;
-  priority_ceiling: number;
-  budget: { cores: number; memory_bytes: number };
-  headroom?: { cores: number; memory_bytes: number; queue_depth: number };
+  base_priority?: number;
+  priority_ceiling?: number;
+  budget?: { cores: number; memory_bytes: number };
+  headroom?: {
+    cores: number;
+    memory_bytes: number;
+    queue_depth: number;
+    observed_at: string;
+  };
 }
 
 export async function getAgents(): Promise<Agent[]> {
