@@ -31,13 +31,15 @@ CHANGELOG links here.
 
   A script that reads a run back by id after launching it needs no change:
   `sparkwing runs status --run "$RUN_ID"` searches the shared store and then
-  every standalone store, and its `store` field says which one answered. A
-  script that then writes to the run -- cancels or retries it -- points a home
-  at the store the read named, because a write verb works on one store:
+  every standalone store, and its `store` field says which one answered.
+  `runs bounce`, `runs annotations add`, `runs approvals approve` and
+  `deny`, `debug rerun`, and `debug replay` write in whichever store answered.
 
-  ```bash
-  SPARKWING_HOME=~/.sparkwing/standalone sparkwing runs cancel --run "$RUN_ID"
-  ```
+  A script that cancels or retries a run it launched needs a different answer
+  for a standalone one: neither is possible. Cancel needs a daemon arbitrating
+  the run and retry needs one to admit the new run, and a standalone run has
+  neither, so both name the store and say so instead of reporting the run
+  missing. Check `standalone` on the start record before relying on either.
 
   The run's own start record says which it was: `standalone` and
   `standalone_reason` are on the invocation and on `sparkwing runs status`

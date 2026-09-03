@@ -154,16 +154,23 @@ code change to unlock.
 - **cli:** The read verbs see runs that went standalone. `runs list`, `jobs`,
   `runs find`, and `runs failures` merge this home's own store with every
   standalone store under it, newest first, and tag each row with the store it
-  came from: `shared`, or the store's path under the home. `runs status`,
-  `runs get`, `runs receipt`, `runs summary`, and `runs timeline` look an id up
-  in the shared store and then in each standalone store, and report which one
-  answered. Every standalone store is opened read-only, so a read never
-  migrates one; a store this sparkwing cannot read is skipped and named on
-  stderr with the release that can. A verb that writes -- `runs cancel`,
-  `runs retry`, `runs bounce`, `annotate`, `approvals approve` and
-  `approvals reject`, `debug rerun`, `debug replay` -- writes to the store that
-  holds the run, so on a standalone id it answers with that store's path and
-  the `SPARKWING_HOME` that reaches it instead of reporting the run missing.
+  came from: `shared`, or the store's path under the home. An id in both stores
+  lists once, from the shared store. `runs status`, `runs get`, `runs receipt`,
+  `runs summary`, `runs timeline`, `runs errors`, `runs tree`, and `runs wait`
+  look an id up in the shared store and then in each standalone store, and
+  report which one answered. Every standalone store is opened read-only, so a
+  read never migrates one; a store this sparkwing cannot open is named on
+  stderr with the release that can, and one written at an older store schema is
+  named with its run count.
+- **cli:** The write verbs act on a standalone run in its own store.
+  `runs bounce`, `runs annotations add`, `runs approvals approve` and `deny`,
+  `debug rerun`, and `debug replay` open that store read-write only when
+  catching it up to this build's schema would stamp no requirement it does not
+  already list; otherwise they refuse and name the requirement, because
+  stamping it puts the file out of reach of the pipeline binary that owns it.
+  `runs cancel` and `runs retry` cannot act on a standalone run at all -- one
+  needs a daemon arbitrating the run, the other needs one to admit a new run --
+  and now say so, naming the store, instead of reporting the run missing.
 - **orchestrator (Breaking):** A run the admission daemon cannot serve now runs
   standalone against `~/.sparkwing/standalone/state.db` instead of the shared
   `state.db`, and says so once on stderr before its first node. Five cases

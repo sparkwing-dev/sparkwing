@@ -827,24 +827,35 @@ opens the shared store, which is where its trigger row lives.
 count and the oldest run's age. Nothing prunes them: delete a file once
 you no longer want the runs in it.
 
-A `standalone/` directory, and each `schema-<N>` under it, is itself a
-Sparkwing home. `sparkwing runs list` already merges them into one table,
-so pointing a home at one is what a verb that writes needs rather than a
-way to see the runs:
-
-```sh
-SPARKWING_HOME=~/.sparkwing/standalone sparkwing runs cancel --run "$RUN_ID"
-```
-
-A write verb -- `runs cancel`, `runs retry`, `runs bounce`, `annotate`,
-`approvals approve` and `approvals reject`, `debug rerun`, `debug replay`
--- writes to the store that holds the run, so asked for an id that lives
-only in a standalone store it answers with that store's path and the
-`SPARKWING_HOME` that reaches it, rather than reporting the run missing.
-
 A read verb opens every standalone store read-only, so reporting on one
-never migrates it. A store this sparkwing is too old to read is skipped
-and named on stderr after the table, with the release that can read it.
+never migrates it, and lists what it finds newest first. An id that is in
+both the shared store and a standalone one lists once, from the shared
+store, which is the store the single-id verbs resolve first.
+
+A standalone store this build cannot read is named on stderr after the
+table instead of listed. One this sparkwing is too old to open -- it records a schema
+requirement this build does not know -- is named with the release that
+can open it. One written at an older store schema, which is what the
+`schema-<N>` directories hold, is named with its run count
+(`standalone/schema-20/state.db holds 3 runs written by an older
+sparkwing; read them with that release`), because this build's queries
+ask for columns that store does not have. Neither is ever reported as a
+database error.
+
+`sparkwing runs bounce`, `runs annotations add`, `runs approvals approve`,
+`runs approvals deny`, `debug rerun`, and `debug replay` write to the
+store that holds the run, so they act on a standalone run in its own
+store. They open that store read-write only when catching it up to this
+build's schema would stamp no requirement it does not already list; when
+it would, they refuse and name the requirement, because stamping it is
+what puts the file out of reach of the pipeline binary that owns it.
+
+`runs cancel` and `runs retry` cannot act on a standalone run at all, and
+say so rather than reporting it missing. Cancel needs something arbitrating the run,
+and a standalone run is by definition one no daemon arbitrates, so
+nothing is watching its store for a cancel request; stop the process or
+wait. Retry submits a new run, which needs a daemon or a controller to
+admit it; start the pipeline again from its repository.
 
 The start record of a standalone run carries `standalone: true` and
 `standalone_reason` (`no-daemon`, `daemon-older`, `daemon-fault`,
