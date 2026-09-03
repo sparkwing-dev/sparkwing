@@ -64,12 +64,17 @@ code change to unlock.
   replaced closes `api.sock` before it acknowledges the drain, so its
   successor binds it with no overlap. An open API connection counts as
   activity, so a daemon does not idle out from under a run. Read routes are
-  served from the daemon's read-only handle: with another process holding a
-  write transaction for three seconds, trigger polls stayed under 10ms
-  instead of waiting the writer out. Every request is bounded, so a wedged
-  store answers 503 rather than hanging. `sparkwing daemon status` and
-  `sparkwing doctor` report the socket path and whether it is bound as
-  `api_socket` and `api_ready`. No client uses the socket yet.
+  served from the daemon's read-only handle, so a process outside the daemon
+  holding a write transaction no longer stalls them. Every request is bounded
+  except the streaming routes, which keep setting their own deadline, so a
+  wedged store answers 503 with `Retry-After` and the controller client
+  retries it instead of failing the run. A socket that will not bind and a
+  cache URL that will not open both leave the daemon arbitrating admission
+  rather than stopping it; `sparkwing daemon status` and `sparkwing doctor`
+  report `api_socket`, `api_ready`, `api_error`, and `artifact_store_error`,
+  and treat an unbound socket as unhealthy. With no `Authorization` header
+  the same-uid peer is an admin principal, the authority it already had by
+  opening the store file directly. No client uses the socket yet.
 
 - **wingd:** The daemon's wire surface is pinned by a snapshot, and the
   daemon now answers for what it cannot serve.

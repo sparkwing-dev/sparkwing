@@ -628,18 +628,36 @@ A newer *installed* sparkwing transparently replaces a running older
 daemon. Pipeline binaries never do, so one repo bumping its `.sparkwing/`
 SDK pin cannot churn the daemon every other repo on the box shares.
 
-The daemon binds two sockets in the private directory it owns, both mode
+The daemon serves two sockets in the private directory it owns, both mode
 0600, and refuses any connection whose peer uid is not its own. `d.sock`
 carries admission. `api.sock` serves the controller HTTP API over the
 runs-store handle the daemon holds, so a run it hosts can read and write
 run, node, event, and concurrency state without opening the store file
 itself; that is what removes the store's schema from a pipeline binary's
-contract. The peer uid is the identity on `api.sock`, so no token is
-minted for a local run. `sparkwing daemon status` reports the path as
-`api_socket` and whether it is bound as `api_ready`. Only the process
-holding the election lock binds either socket, and a daemon being replaced
-closes `api.sock` before it acknowledges the drain, so the successor binds
-it with no overlap.
+contract. Only the process holding the election lock binds either socket,
+and a daemon being replaced closes `api.sock` before it acknowledges the
+drain, so the successor binds it with no overlap.
+
+`api.sock` can fail to bind while `d.sock` is serving: the socket path is
+too long for the OS, the private directory is not owned by this user or is
+not mode 0700, or the filesystem refuses the socket. The daemon keeps
+arbitrating admission in that state rather than leaving the machine with no
+daemon, and says so: `sparkwing daemon status` reports `api_ready: false`
+with the bind failure in `api_error`, `sparkwing doctor` warns, and both
+name the path as `api_socket`. A cache URL the daemon cannot open is the
+same shape of fault: the daemon serves without artifact routes and reports
+`artifact_store_error`.
+
+On `api.sock` the peer uid *is* the identity. A request with no
+`Authorization` header is served as an admin principal named
+`unix-peer:<uid>`, which is every route: every run's state regardless of
+which process claimed it, every stored secret, and the ability to mint
+bearer tokens that outlive the process. That is the same authority a
+same-uid process already had by opening `state.db` directly, and it is why
+the socket is 0600 with a peer-credential check on accept and why the
+daemon serves exactly one account. A request that does carry a bearer token
+is authenticated against the store's tokens instead, so a stale token fails
+closed rather than falling back to the uid.
 
 ### Running with no daemon available
 
