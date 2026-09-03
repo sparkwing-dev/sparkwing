@@ -128,3 +128,47 @@ func TestArtifactUploadIsAtomic(t *testing.T) {
 		t.Errorf("artifact content %q, want the previously stored copy", data)
 	}
 }
+
+func TestArtifactUploadRefusesTheReservedStagingPrefix(t *testing.T) {
+	oldDir := artifactsDir
+	artifactsDir = t.TempDir()
+	t.Cleanup(func() { artifactsDir = oldDir })
+
+	for _, path := range []string{
+		artifactTempPrefix + "report.txt",
+		"out/" + artifactTempPrefix + "report.txt",
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/artifacts/job9?path="+path, strings.NewReader("hi"))
+		w := httptest.NewRecorder()
+		handleArtifacts(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("path %q: status %d, want 400 for the reserved staging prefix", path, w.Code)
+		}
+		if _, err := os.Stat(filepath.Join(artifactsDir, "job9", path)); !os.IsNotExist(err) {
+			t.Errorf("path %q: a refused upload still landed on disk: %v", path, err)
+		}
+	}
+}
+
+func TestArtifactListReturnsAnEmptyArrayNotNull(t *testing.T) {
+	oldDir := artifactsDir
+	artifactsDir = t.TempDir()
+	t.Cleanup(func() { artifactsDir = oldDir })
+
+	jobDir := filepath.Join(artifactsDir, "job123")
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jobDir, artifactTempPrefix+"leftover"), []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/artifacts/job123", nil)
+	w := httptest.NewRecorder()
+	handleArtifacts(w, req)
+
+	if got := strings.TrimSpace(w.Body.String()); got != "[]" {
+		t.Errorf("body %q, want []", got)
+	}
+}

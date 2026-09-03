@@ -445,7 +445,11 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 			bare := filepath.Join(repoDir, e.Name())
 			// safety: request handlers key this lock on the bare hash, and a second key is no lock at all.
 			mu := repoLock(strings.TrimSuffix(e.Name(), ".git"))
-			mu.Lock()
+			// safety: a handler holding this lock is already refreshing the mirror, and blocking
+			// here would stall every other repo behind it.
+			if !mu.TryLock() {
+				continue
+			}
 			fetchStart := time.Now()
 			out, err := mirrorFetch(1*time.Minute, bare)
 			mu.Unlock()
@@ -565,6 +569,9 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case skipped:
 			log.Printf("archive: %s fetched within %s, serving mirror as-is", hash, fetchFreshWindow)
+		case errors.Is(err, errGitForkUnavailable):
+			writeGitForkUnavailable(w, err)
+			return
 		case err != nil:
 
 			if !bgFetch.allowReclone(stateKey(hash)) {
@@ -596,6 +603,10 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	commitBytes, err := gitOutput("-C", bareRepo, "rev-parse", "--verify", "--end-of-options", branch)
+	if errors.Is(err, errGitForkUnavailable) {
+		writeGitForkUnavailable(w, err)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("branch %q not found", branch), http.StatusNotFound)
 		return
@@ -634,6 +645,10 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	if err := archiveToFile(bareRepo, branch, tmpTar); err != nil {
 		// #nosec G703 -- a temporary name beside the hex-validated archive path this handler built
 		_ = os.Remove(tmpTar)
+		if errors.Is(err, errGitForkUnavailable) {
+			writeGitForkUnavailable(w, err)
+			return
+		}
 		http.Error(w, fmt.Sprintf("archive failed: %s", err), http.StatusInternalServerError)
 		return
 	}
@@ -700,7 +715,10 @@ var gitForkSem = make(chan struct{}, 4)
 
 const gitDefaultTimeout = 2 * time.Minute
 
-const gitForkWait = 30 * time.Second
+// safety: a request that wins a slot still has to read its body, so this must expire first.
+var gitForkWait = serverReadTimeout / 3
+
+var errGitForkUnavailable = errors.New("no git fork slot available")
 
 // safety: --git-fork-limit is a promise about every git process, so no fork may skip this.
 func acquireGitFork(ctx context.Context, what string) (release func(), err error) {
@@ -709,9 +727,17 @@ func acquireGitFork(ctx context.Context, what string) (release func(), err error
 		var once sync.Once
 		return func() { once.Do(func() { <-gitForkSem }) }, nil
 	case <-ctx.Done():
-		return nil, fmt.Errorf("git timed out waiting for fork slot (%d in flight): git %s",
-			cap(gitForkSem), what)
+		return nil, fmt.Errorf("git timed out waiting for a fork slot (%d in flight): git %s: %w",
+			cap(gitForkSem), what, errGitForkUnavailable)
 	}
+}
+
+func writeGitForkUnavailable(w http.ResponseWriter, err error) {
+	// #nosec G706 -- the description is built from a repository path this server owns
+	log.Printf("warning: %v", err)
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, fmt.Sprintf("git fork limit reached (%d in flight) -- retry shortly", cap(gitForkSem)),
+		http.StatusServiceUnavailable)
 }
 
 func acquireGitForkHTTP(w http.ResponseWriter, r *http.Request, what string) (release func(), ok bool) {
@@ -720,11 +746,7 @@ func acquireGitForkHTTP(w http.ResponseWriter, r *http.Request, what string) (re
 
 	release, err := acquireGitFork(ctx, what)
 	if err != nil {
-		// #nosec G706 -- the description is built from a repository path this server owns
-		log.Printf("warning: %v", err)
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, fmt.Sprintf("git fork limit reached (%d in flight) -- retry shortly", cap(gitForkSem)),
-			http.StatusServiceUnavailable)
+		writeGitForkUnavailable(w, err)
 		return nil, false
 	}
 	return release, true
@@ -742,14 +764,17 @@ func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
 }
 
 func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	release, err := acquireGitFork(ctx, strings.Join(args, " "))
+	// safety: queueing for the whole command timeout stalls the repo lock this caller usually holds.
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), min(gitForkWait, timeout))
+	release, err := acquireGitFork(waitCtx, strings.Join(args, " "))
+	cancelWait()
 	if err != nil {
 		return "", err
 	}
 	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
 	out, err := gitCommand(ctx, args...).CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
@@ -760,14 +785,18 @@ func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
 
 // safety: callers parse this, so stderr must not reach them the way CombinedOutput would let it.
 func gitOutput(args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitDefaultTimeout)
-	defer cancel()
-
-	release, err := acquireGitFork(ctx, strings.Join(args, " "))
+	// safety: these callers hold the repo lock, so queueing here for the command timeout would
+	// stall the repository rather than shed the request.
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), gitForkWait)
+	release, err := acquireGitFork(waitCtx, strings.Join(args, " "))
+	cancelWait()
 	if err != nil {
 		return nil, err
 	}
 	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitDefaultTimeout)
+	defer cancel()
 
 	out, err := gitCommand(ctx, args...).Output()
 	if ctx.Err() == context.DeadlineExceeded {
@@ -848,6 +877,10 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 	refreshMirrorBestEffort(hash, bareRepo)
 
 	out, err := gitOutput("-C", bareRepo, "show", "--end-of-options", branch+":"+filePath)
+	if errors.Is(err, errGitForkUnavailable) {
+		writeGitForkUnavailable(w, err)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("file not found: %s:%s", branch, filePath), http.StatusNotFound)
 		return
@@ -894,6 +927,10 @@ func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out, err := gitOutput("-C", bareRepo, "rev-parse", "--verify", "--end-of-options", ref)
+	if errors.Is(err, errGitForkUnavailable) {
+		writeGitForkUnavailable(w, err)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("path not found: %s", ref), http.StatusNotFound)
 		return
@@ -935,6 +972,10 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 	refreshMirrorBestEffort(hash, bareRepo)
 
 	_, err := gitOutput("-C", bareRepo, "merge-base", "--is-ancestor", "--", commit, branch)
+	if errors.Is(err, errGitForkUnavailable) {
+		writeGitForkUnavailable(w, err)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf("commit %s is not on branch %s", commit, branch), http.StatusNotFound)
 		return
@@ -1333,10 +1374,15 @@ func artifactUpload(w http.ResponseWriter, r *http.Request, jobID string) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
-	// safety: bsdtar reads a member name that leads with @ as an archive to inline, and -- does not stop it.
 	for seg := range strings.SplitSeq(artifactPath, string(filepath.Separator)) {
+		// safety: bsdtar reads a member name that leads with @ as an archive to inline, and -- does not stop it.
 		if strings.HasPrefix(seg, "@") {
 			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		// safety: the list and download routes hide this prefix, so an artifact wearing it would be unreachable.
+		if strings.HasPrefix(seg, artifactTempPrefix) {
+			http.Error(w, "invalid path: "+artifactTempPrefix+" is reserved for uploads in flight", http.StatusBadRequest)
 			return
 		}
 	}
@@ -1475,7 +1521,7 @@ func artifactList(w http.ResponseWriter, r *http.Request, jobID string) {
 		return
 	}
 
-	var files []string
+	files := []string{}
 	collect := func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return err
@@ -1691,7 +1737,7 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo and commits required", http.StatusBadRequest)
 		return
 	}
-	// safety: every commit costs one git fork, so an unbounded list is a free fork bomb.
+	// safety: one batch process reads this whole list into memory, so it stays bounded.
 	if len(req.Commits) > maxNegotiateCommits {
 		http.Error(w, fmt.Sprintf("at most %d commits per negotiate request", maxNegotiateCommits), http.StatusBadRequest)
 		return
@@ -1740,14 +1786,16 @@ func firstCachedObject(bareRepo string, ids []string) (string, error) {
 	if len(ids) == 0 {
 		return "", nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), gitDefaultTimeout)
-	defer cancel()
-
-	release, err := acquireGitFork(ctx, "cat-file --batch-check "+bareRepo)
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), gitForkWait)
+	release, err := acquireGitFork(waitCtx, "cat-file --batch-check "+bareRepo)
+	cancelWait()
 	if err != nil {
 		return "", err
 	}
 	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), gitDefaultTimeout)
+	defer cancel()
 
 	cmd := gitCommand(ctx, "-C", bareRepo, "cat-file", "--batch-check")
 	cmd.Stdin = strings.NewReader(strings.Join(ids, "\n") + "\n")
