@@ -87,3 +87,126 @@ func TestClientRecognisesAnUnsupportedRoute(t *testing.T) {
 		t.Errorf("error %q does not name the route the controller lacks", err)
 	}
 }
+
+func unsupportedRouteServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": controller.UnsupportedRouteError,
+			"route": r.Method + " " + r.URL.Path,
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func plainNotFoundServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no such row", http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func clientCalls() []struct {
+	name string
+	call func(context.Context, *client.Client) error
+} {
+	return []struct {
+		name string
+		call func(context.Context, *client.Client) error
+	}{
+		{"CreateRun", func(ctx context.Context, c *client.Client) error { return c.CreateRun(ctx, store.Run{ID: "r1"}) }},
+		{"GetRun", func(ctx context.Context, c *client.Client) error { _, err := c.GetRun(ctx, "r1"); return err }},
+		{"GetRunForExecution", func(ctx context.Context, c *client.Client) error {
+			_, err := c.GetRunForExecution(ctx, "r1")
+			return err
+		}},
+		{"GetRunReceipt", func(ctx context.Context, c *client.Client) error { _, err := c.GetRunReceipt(ctx, "r1"); return err }},
+		{"GetLatestRun", func(ctx context.Context, c *client.Client) error {
+			_, err := c.GetLatestRun(ctx, "p", nil, 0)
+			return err
+		}},
+		{"CancelRun", func(ctx context.Context, c *client.Client) error { return c.CancelRun(ctx, "r1") }},
+		{"DeleteRun", func(ctx context.Context, c *client.Client) error { return c.DeleteRun(ctx, "r1") }},
+		{"RetryRun", func(ctx context.Context, c *client.Client) error { _, err := c.RetryRun(ctx, "r1", false); return err }},
+		{"GetNode", func(ctx context.Context, c *client.Client) error { _, err := c.GetNode(ctx, "r1", "n1"); return err }},
+		{"GetNodeOutput", func(ctx context.Context, c *client.Client) error {
+			_, err := c.GetNodeOutput(ctx, "r1", "n1")
+			return err
+		}},
+		{"GetNodeDispatch", func(ctx context.Context, c *client.Client) error {
+			_, err := c.GetNodeDispatch(ctx, "r1", "n1", 1)
+			return err
+		}},
+		{"ListNodeDispatches", func(ctx context.Context, c *client.Client) error {
+			_, err := c.ListNodeDispatches(ctx, "r1", "n1")
+			return err
+		}},
+		{"GetApproval", func(ctx context.Context, c *client.Client) error {
+			_, err := c.GetApproval(ctx, "r1", "n1")
+			return err
+		}},
+		{"ResolveApproval", func(ctx context.Context, c *client.Client) error {
+			_, err := c.ResolveApproval(ctx, "r1", "n1", "approved", "me", "")
+			return err
+		}},
+		{"GetActiveDebugPause", func(ctx context.Context, c *client.Client) error {
+			_, err := c.GetActiveDebugPause(ctx, "r1", "n1")
+			return err
+		}},
+		{"GetTrigger", func(ctx context.Context, c *client.Client) error { _, err := c.GetTrigger(ctx, "t1"); return err }},
+		{"HeartbeatTrigger", func(ctx context.Context, c *client.Client) error { _, err := c.HeartbeatTrigger(ctx, "t1"); return err }},
+		{"GetPipelineProfile", func(ctx context.Context, c *client.Client) error {
+			_, err := c.GetPipelineProfile(ctx, "p", "n1")
+			return err
+		}},
+		{"ObserveSlot", func(ctx context.Context, c *client.Client) error { _, err := c.ObserveSlot(ctx, "k", "h"); return err }},
+		{"ConcurrencyState", func(ctx context.Context, c *client.Client) error { _, err := c.ConcurrencyState(ctx, "k"); return err }},
+		{"GetSecret", func(ctx context.Context, c *client.Client) error { _, err := c.GetSecret(ctx, "s"); return err }},
+		{"DeleteSecretForRepo", func(ctx context.Context, c *client.Client) error { return c.DeleteSecretForRepo(ctx, "s", "") }},
+	}
+}
+
+func TestEveryHelperReportsAnUnsupportedRoute(t *testing.T) {
+	srv := unsupportedRouteServer(t)
+	for _, tc := range clientCalls() {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call(context.Background(), client.New(srv.URL, srv.Client()))
+			if !errors.Is(err, client.ErrControllerLacksRoute) {
+				t.Fatalf("%s error = %v, want ErrControllerLacksRoute", tc.name, err)
+			}
+			if errors.Is(err, store.ErrNotFound) {
+				t.Errorf("%s reports a route the controller lacks as a missing row", tc.name)
+			}
+		})
+	}
+}
+
+func TestAPlainNotFoundKeepsItsMeaning(t *testing.T) {
+	srv := plainNotFoundServer(t)
+	nilOn404 := map[string]bool{"DeleteRun": true, "GetPipelineProfile": true}
+	for _, tc := range clientCalls() {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call(context.Background(), client.New(srv.URL, srv.Client()))
+			if errors.Is(err, client.ErrControllerLacksRoute) {
+				t.Fatalf("%s read an ordinary 404 as a missing route: %v", tc.name, err)
+			}
+			if nilOn404[tc.name] {
+				if err != nil {
+					t.Errorf("%s error = %v, want nil for an ordinary 404", tc.name, err)
+				}
+				return
+			}
+			if tc.name == "CreateRun" {
+				return
+			}
+			if !errors.Is(err, store.ErrNotFound) {
+				t.Errorf("%s error = %v, want store.ErrNotFound for an ordinary 404", tc.name, err)
+			}
+		})
+	}
+}

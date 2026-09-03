@@ -197,7 +197,7 @@ func (c *Client) getRun(ctx context.Context, runID string, secretValues bool) (*
 		}
 		return &run, nil
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -221,7 +221,7 @@ func (c *Client) GetRunReceipt(ctx context.Context, runID string) ([]byte, error
 	case http.StatusOK:
 		return io.ReadAll(resp.Body)
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -477,7 +477,7 @@ func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string
 		}
 		return &prof, nil
 	case http.StatusNotFound:
-		return nil, nil
+		return nil, unsupportedRoute(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -538,7 +538,7 @@ func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatSta
 		// hack: older controllers without cancel support return 204; treat as not-cancelled.
 		return &HeartbeatStatus{}, nil
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -668,7 +668,7 @@ func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigg
 		}
 		return &tr, nil
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -691,7 +691,7 @@ func (c *Client) CancelRun(ctx context.Context, runID string) error {
 	case http.StatusNoContent:
 		return nil
 	case http.StatusNotFound:
-		return store.ErrNotFound
+		return notFound(resp)
 	default:
 		return readHTTPError(resp)
 	}
@@ -728,7 +728,7 @@ func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (stri
 		}
 		return body.ID, nil
 	case http.StatusNotFound:
-		return "", store.ErrNotFound
+		return "", notFound(resp)
 	default:
 		return "", readHTTPError(resp)
 	}
@@ -748,8 +748,10 @@ func (c *Client) DeleteRun(ctx context.Context, runID string) error {
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
-	case http.StatusNoContent, http.StatusNotFound:
+	case http.StatusNoContent:
 		return nil
+	case http.StatusNotFound:
+		return unsupportedRoute(resp)
 	default:
 		return readHTTPError(resp)
 	}
@@ -947,7 +949,7 @@ func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []s
 		}
 		return &run, nil
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -974,7 +976,7 @@ func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node
 		}
 		return &n, nil
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -999,7 +1001,7 @@ func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byt
 	case http.StatusOK:
 		return io.ReadAll(resp.Body)
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -1144,7 +1146,7 @@ func (c *Client) GetActiveDebugPause(ctx context.Context, runID, nodeID string) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, readHTTPError(resp)
@@ -1267,7 +1269,7 @@ func (c *Client) GetApproval(ctx context.Context, runID, nodeID string) (*store.
 		}
 		return &a, nil
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	default:
 		return nil, readHTTPError(resp)
 	}
@@ -1306,7 +1308,7 @@ func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution,
 		}
 		return &out, nil
 	case http.StatusNotFound:
-		return nil, store.ErrNotFound
+		return nil, notFound(resp)
 	case http.StatusConflict:
 		return nil, store.ErrLockHeld
 	default:
@@ -1419,19 +1421,46 @@ const unsupportedRouteError = "unsupported"
 // caller degrades instead of reporting the resource missing.
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 
+// safety: every 404 in this package routes through notFound or
+// unsupportedRoute, so a route the controller does not register is never
+// reported as a missing row (or, for a delete, as success).
+func notFound(resp *http.Response) error {
+	if err := unsupportedRoute(resp); err != nil {
+		return err
+	}
+	return store.ErrNotFound
+}
+
+func unsupportedRoute(resp *http.Response) error {
+	if resp.StatusCode != http.StatusNotFound {
+		return nil
+	}
+	body, _ := io.ReadAll(resp.Body)
+	var payload unsupportedRouteBody
+	if json.Unmarshal(body, &payload) != nil || payload.Error != unsupportedRouteError {
+		return nil
+	}
+	return controllerLacksRoute(payload.Route)
+}
+
+type unsupportedRouteBody struct {
+	Error string `json:"error"`
+	Route string `json:"route"`
+}
+
+func controllerLacksRoute(route string) error {
+	if route == "" {
+		route = "(unnamed)"
+	}
+	return fmt.Errorf("%w: %s", ErrControllerLacksRoute, route)
+}
+
 func readHTTPError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
-	var payload struct {
-		Error string `json:"error"`
-		Route string `json:"route"`
-	}
+	var payload unsupportedRouteBody
 	if len(body) > 0 && json.Unmarshal(body, &payload) == nil && payload.Error != "" {
 		if resp.StatusCode == http.StatusNotFound && payload.Error == unsupportedRouteError {
-			route := payload.Route
-			if route == "" {
-				route = "(unnamed)"
-			}
-			return fmt.Errorf("%w: %s", ErrControllerLacksRoute, route)
+			return controllerLacksRoute(payload.Route)
 		}
 		return fmt.Errorf("controller %d: %s", resp.StatusCode, payload.Error)
 	}
