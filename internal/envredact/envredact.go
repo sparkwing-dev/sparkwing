@@ -14,22 +14,48 @@ import (
 )
 
 var credentialWords = map[string]bool{
-	"TOKEN":      true,
-	"SECRET":     true,
-	"PASSWORD":   true,
-	"PASS":       true,
-	"KEY":        true,
-	"CREDENTIAL": true,
-	"DSN":        true,
-	"AUTH":       true,
-	"PRIVATE":    true,
-	"PEM":        true,
-	"CERT":       true,
-	"JWT":        true,
-	"COOKIE":     true,
-	"SIGNATURE":  true,
-	"PAT":        true,
-	"SIG":        true,
+	"TOKEN":         true,
+	"SECRET":        true,
+	"PASSWORD":      true,
+	"PASS":          true,
+	"KEY":           true,
+	"CREDENTIAL":    true,
+	"DSN":           true,
+	"AUTH":          true,
+	"PRIVATE":       true,
+	"PEM":           true,
+	"CERT":          true,
+	"JWT":           true,
+	"COOKIE":        true,
+	"SIGNATURE":     true,
+	"PAT":           true,
+	"SIG":           true,
+	"PASSWD":        true,
+	"PWD":           true,
+	"AUTHORIZATION": true,
+	"BEARER":        true,
+}
+
+var credentialSuffixes = []string{
+	"KEY",
+	"SECRET",
+	"TOKEN",
+	"PASSWORD",
+	"PASSWD",
+	"PWD",
+}
+
+var nonCredentialSegments = map[string]bool{
+	"MONKEY":  true,
+	"DONKEY":  true,
+	"TURKEY":  true,
+	"HOCKEY":  true,
+	"JOCKEY":  true,
+	"WHISKEY": true,
+	"MICKEY":  true,
+	"LACKEY":  true,
+	"HOTKEY":  true,
+	"OLDPWD":  true,
 }
 
 var credentialExact = map[string]bool{
@@ -56,6 +82,8 @@ var nonCredentialExact = map[string]bool{
 	"DOCKER_CERT_PATH":                      true,
 	"SPARKWING_REQUIRE_AUTH":                true,
 	"SPARKWING_CACHE_ALLOW_UNAUTHENTICATED": true,
+	"PWD":                                   true,
+	"OLDPWD":                                true,
 }
 
 const jsonScanDepth = 8
@@ -65,8 +93,9 @@ const bearerScheme = "BEARER "
 const redactedPlaceholder = "redacted"
 
 // CredentialName reports whether an environment variable name is
-// credential-shaped. A short allow-list of well-known configuration
-// names wins over the substring rule.
+// credential-shaped: a name segment that is a credential word, or that
+// ends in one such as APIKEY. A short allow-list of well-known
+// configuration names wins over that rule.
 func CredentialName(name string) bool {
 	trimmed := strings.TrimSpace(name)
 	upper := strings.ToUpper(trimmed)
@@ -124,10 +153,25 @@ func RedactValue(value string) string {
 
 func credentialShaped(name string) bool {
 	for _, seg := range nameSegments(name) {
-		if credentialWords[seg] {
+		if credentialSegment(seg) {
 			return true
 		}
-		if strings.HasSuffix(seg, "S") && credentialWords[seg[:len(seg)-1]] {
+		if strings.HasSuffix(seg, "S") && credentialSegment(seg[:len(seg)-1]) {
+			return true
+		}
+	}
+	return false
+}
+
+func credentialSegment(seg string) bool {
+	if nonCredentialSegments[seg] {
+		return false
+	}
+	if credentialWords[seg] {
+		return true
+	}
+	for _, suffix := range credentialSuffixes {
+		if len(seg) > len(suffix) && strings.HasSuffix(seg, suffix) {
 			return true
 		}
 	}
@@ -283,7 +327,7 @@ func credentialAssignmentIn(line string) bool {
 		if !ok || value == "" || !envNameShaped(name) {
 			continue
 		}
-		if credentialShaped(name) {
+		if CredentialName(name) {
 			return true
 		}
 	}
@@ -291,14 +335,14 @@ func credentialAssignmentIn(line string) bool {
 }
 
 func envNameShaped(name string) bool {
-	if name == "" {
+	if len(name) < 2 {
 		return false
 	}
 	for i := 0; i < len(name); i++ {
 		b := name[i]
 		switch {
 		case b == '_':
-		case b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z':
+		case b >= 'A' && b <= 'Z':
 		case b >= '0' && b <= '9' && i > 0:
 		default:
 			return false
