@@ -149,7 +149,8 @@ code change to unlock.
   `warm`, upgrade the controller, runner, and pipeline module to the same
   release before enabling it. Defaults remain `inprocess`.
 - **s3state:** `WithReadCacheTTL` bounds how stale a read of a run this process
-  does not write may be.
+  does not write may be, `DefaultCloseDrainTimeout` bounds the drain
+  `Backend.Close` attempts, and `DefaultOutboxMaxRows` caps the outbox queue.
 
 ### Changed
 
@@ -289,6 +290,12 @@ code change to unlock.
   `daemon_schema_version` against `store_schema_version`, marks a diverged pair
   unhealthy, says when a restart will not help, and reports a store that exists
   but cannot be read as `store_schema_error` instead of as an absent store.
+- **s3state:** An object-store outage no longer piles up redundant copies of a
+  run's state. Staging a write now replaces whatever was queued for the same
+  key, because each body is that key's whole blob and only the newest is worth
+  replaying, and the queue is capped at `DefaultOutboxMaxRows` (1024) distinct
+  keys. An hour-long outage used to leave thousands of rows, each holding the
+  entire run state, and replay them all in order before the newest one landed.
 - **s3state:** A run whose state reached only the local outbox no longer reports
   success. `FinishRun` returns an error when the terminal state is queued on
   this machine's disk rather than in the object store, `Close` returns the

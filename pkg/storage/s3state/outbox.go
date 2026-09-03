@@ -21,6 +21,11 @@ import (
 // outbox for queued writes when the object store is reachable again.
 const DefaultOutboxDrainInterval = 5 * time.Second
 
+// DefaultOutboxMaxRows caps the queue. Each row is one key's whole
+// blob, and a key holds at most one row, so this is a ceiling on
+// distinct keys waiting out an outage, not on writes made during it.
+const DefaultOutboxMaxRows = 1024
+
 // OutboxKind tags a queued write so the drainer can route it to the
 // matching store on replay.
 type OutboxKind string
@@ -46,6 +51,7 @@ type Outbox struct {
 	db       *sql.DB
 	art      storage.ArtifactStore
 	interval time.Duration
+	maxRows  int
 	logger   *slog.Logger
 
 	mu       sync.Mutex
@@ -117,6 +123,7 @@ CREATE TABLE IF NOT EXISTS outbox_writes (
 		db:       db,
 		art:      art,
 		interval: interval,
+		maxRows:  DefaultOutboxMaxRows,
 		logger:   logger,
 		stopCh:   make(chan struct{}),
 	}
@@ -128,22 +135,42 @@ CREATE TABLE IF NOT EXISTS outbox_writes (
 	return o, nil
 }
 
-// Stage enqueues a write. Idempotent only at the byte-identical level
-// (replay re-PUTs whatever bytes are in the row, so re-issuing a
-// state PUT is harmless because the contents include all prior
-// envelopes). Kinds the drainer cannot replay as a whole-blob PUT are
-// refused rather than queued.
+// Stage enqueues a write, replacing whatever was queued for the same
+// key: the body is that key's whole blob, so only the newest one is
+// worth replaying, and an outage no longer accumulates one copy of a
+// growing run's state per flush. Kinds the drainer cannot replay as a
+// whole-blob PUT are refused rather than queued, as is a write that
+// would take the queue past its row cap.
 func (o *Outbox) Stage(ctx context.Context, kind OutboxKind, key string, body []byte) error {
 	if !replayableKind(kind) {
 		return fmt.Errorf("s3state: outbox cannot replay a %s write", kind)
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	_, err := o.db.ExecContext(ctx, `
+	tx, err := o.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM outbox_writes WHERE key = ?`, key); err != nil {
+		return err
+	}
+	if o.maxRows > 0 {
+		var queued int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_writes`).Scan(&queued); err != nil {
+			return err
+		}
+		if queued >= o.maxRows {
+			return fmt.Errorf("s3state: outbox holds its cap of %d queued writes; %q was not staged", o.maxRows, key)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO outbox_writes (kind, key, body, enqueued_at)
 VALUES (?, ?, ?, ?)`,
-		string(kind), key, body, time.Now().UnixNano())
-	return err
+		string(kind), key, body, time.Now().UnixNano()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // HasPending reports whether any queued write targets key. The state

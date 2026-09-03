@@ -61,6 +61,7 @@ const DefaultBufferThreshold = 16 * 1024
 const DefaultCloseDrainTimeout = 5 * time.Second
 const DefaultFlushInterval = 500 * time.Millisecond
 const DefaultOutboxDrainInterval = 5 * time.Second
+const DefaultOutboxMaxRows = 1024
 const DefaultReadCacheTTL = time.Second
 var ErrNotSupported = fmt.Errorf("%w: s3state: operation not supported in S3-only mode", storage.ErrNotSupported)
 const KindEvent = "event"

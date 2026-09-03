@@ -432,8 +432,8 @@ func TestS3StateBackend_OutboxRouting_KeepsFIFOAfterRecovery(t *testing.T) {
 	if ok, _ := art.Has(ctx, "runs/r/state.ndjson"); ok {
 		t.Fatal("a follow-up write jumped ahead of the still-pending outbox queue")
 	}
-	if n, _ := outbox.Pending(ctx); n < 2 {
-		t.Fatalf("follow-up write did not queue behind the pending one; pending=%d", n)
+	if n, _ := outbox.Pending(ctx); n != 1 {
+		t.Fatalf("follow-up write did not collapse onto the queued blob for the same key; pending=%d", n)
 	}
 
 	if err := outbox.Drain(ctx); err != nil {
