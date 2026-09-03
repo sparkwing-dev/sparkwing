@@ -966,8 +966,9 @@ func (n *JobNode) AfterRunHooks() []AfterRunFn { return n.afterRun }
 // An unmatched non-inline dispatched job remains queued until the controller
 // fails it with queue_timeout. Direct runs and inline jobs have no runner claim
 // step, so Requires does not select or reject their runner. For conditional
-// execution based on the active runner, use WhenRunner. For metadata-only
-// preference, use Prefers.
+// execution based on the active runner, use WhenRunner. The reserved "local"
+// term is a compatibility alias for "location=coordinator" and cannot be
+// claimed by a fleet helper. For soft enrolled-executor ordering, use Prefers.
 func (n *JobNode) Requires(labels ...string) *JobNode {
 	n.requires = normalizeLabels(labels)
 	return n
@@ -978,9 +979,12 @@ func (n *JobNode) RequiresLabels() []string {
 	return copyLabels(n.requires)
 }
 
-// Prefers records ordered runner-label preferences in plan-snapshot metadata; preferences do not affect runner selection.
-// Each argument is one term with the same comma-OR / AND semantics as
-// Requires.
+// Prefers records ordered runner-label preferences in plan-snapshot metadata and gives matching enrolled-executor offers a small boost bounded by their priority ceiling; legacy claims ignore it.
+// Within one controller's enrolled-executor offer round, the first preference
+// an eligible executor satisfies adds a small ordering boost, bounded by that
+// executor's administrator-owned priority ceiling. Prefers does not affect
+// legacy name-less runner claims. Each argument is one term with the same
+// comma-OR / AND semantics as Requires.
 //
 //	sw.Job(plan, "integration", &Integration{}).
 //	    Requires("os=linux").

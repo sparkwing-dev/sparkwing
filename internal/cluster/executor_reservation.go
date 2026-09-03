@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"sync"
 	"time"
@@ -22,7 +23,11 @@ var ErrExecutorCapacityUnavailable = errors.New("executor capacity is not immedi
 
 // ExecutorCapacityLedger reserves real helper capacity before an offer.
 type ExecutorCapacityLedger interface {
-	Reserve(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, int) (ExecutorCapacityReservation, error)
+	Reserve(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, executorCapacityLimits, int) (ExecutorCapacityReservation, error)
+}
+
+type executorCapacityLimits struct {
+	localReserve, globalContribution, membershipContribution reserve
 }
 
 // ExecutorCapacityReservation is one single-use admission lease. Release is
@@ -35,6 +40,7 @@ type ExecutorCapacityReservation interface {
 	NodeID() string
 	ResourceDigest() string
 	Slot() int
+	ExecutionContext(context.Context) (context.Context, context.CancelFunc)
 	Consume() (*orchestrator.LocalAdmission, error)
 	Release() error
 }
@@ -45,16 +51,26 @@ type WingdExecutorCapacityLedger struct {
 	mu            sync.Mutex
 	slots         map[string]*wingdExecutorReservation
 	reservations  map[string]*wingdExecutorReservation
+	logger        *slog.Logger
+	spawn         func(home, version string) error
 }
 
-func NewWingdExecutorCapacityLedger(home, version string) *WingdExecutorCapacityLedger {
+func NewWingdExecutorCapacityLedger(home, version string, logger ...*slog.Logger) *WingdExecutorCapacityLedger {
+	var log *slog.Logger
+	if len(logger) > 0 {
+		log = logger[0]
+	}
 	return &WingdExecutorCapacityLedger{
 		home: home, version: version,
-		slots: map[string]*wingdExecutorReservation{}, reservations: map[string]*wingdExecutorReservation{},
+		slots: map[string]*wingdExecutorReservation{}, reservations: map[string]*wingdExecutorReservation{}, logger: log,
 	}
 }
 
-func (l *WingdExecutorCapacityLedger) Reserve(ctx context.Context, summary store.ExecutorSchedulingSummary, membership store.ExecutorMembershipSnapshot, slot int) (ExecutorCapacityReservation, error) {
+func (l *WingdExecutorCapacityLedger) clientOptions() wingdclient.Options {
+	return wingdclient.Options{Home: l.home, Version: l.version, Spawn: l.spawn}
+}
+
+func (l *WingdExecutorCapacityLedger) Reserve(ctx context.Context, summary store.ExecutorSchedulingSummary, membership store.ExecutorMembershipSnapshot, limits executorCapacityLimits, slot int) (ExecutorCapacityReservation, error) {
 	if !membership.Eligible {
 		return nil, ErrExecutorCapacityUnavailable
 	}
@@ -66,49 +82,121 @@ func (l *WingdExecutorCapacityLedger) Reserve(ctx context.Context, summary store
 	if summary.Resources.Cores < 0 || math.IsNaN(summary.Resources.Cores) || math.IsInf(summary.Resources.Cores, 0) || summary.Resources.MemoryBytes < 0 {
 		return nil, errors.New("executor reservation: resources must be non-negative")
 	}
-	// safety: membership-agnostic keys stop two coordinators from sharing one physical slot
+	id, err := newExecutorReservationID()
+	if err != nil {
+		return nil, err
+	}
+	cl, err := wingdclient.EnsureDaemon(ctx, l.clientOptions())
+	if err != nil {
+		return nil, fmt.Errorf("executor reservation: %w", err)
+	}
+	// safety: daemon semaphores cover processes; the mutex closes the local slot check/acquire race.
 	key := fmt.Sprint(slot)
 	l.mu.Lock()
 	if _, occupied := l.slots[key]; occupied {
 		l.mu.Unlock()
+		_ = cl.Close()
 		return nil, ErrExecutorCapacityUnavailable
-	}
-	id, err := newExecutorReservationID()
-	if err != nil {
-		l.mu.Unlock()
-		return nil, err
 	}
 	if _, occupied := l.reservations[id]; occupied {
 		l.mu.Unlock()
+		_ = cl.Close()
 		return nil, errors.New("executor reservation: generated duplicate id")
+	}
+	queue, err := cl.QueueState(ctx)
+	if err != nil {
+		l.mu.Unlock()
+		_ = cl.Close()
+		return nil, fmt.Errorf("executor reservation: %w", err)
+	}
+	semaphores, ok := executorCapacitySemaphores(queue, summary.Resources, membership.MembershipID, limits, slot)
+	if !ok {
+		l.mu.Unlock()
+		_ = cl.Close()
+		return nil, ErrExecutorCapacityUnavailable
+	}
+	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: "executor-reservation/" + id, DisplayRunID: summary.RunID + "/" + summary.NodeID,
+		Resources:  wingwire.HostResources{Cores: summary.Resources.Cores, MemoryBytes: summary.Resources.MemoryBytes},
+		Semaphores: semaphores, CostSource: wingwire.CostSourcePin, Origin: wingwire.OriginController, NonBlocking: true,
+	}, nil)
+	if err != nil {
+		l.mu.Unlock()
+		_ = cl.Close()
+		return nil, fmt.Errorf("%w: %v", ErrExecutorCapacityUnavailable, err)
 	}
 	r := &wingdExecutorReservation{
 		id: id, membershipID: membership.MembershipID, workerID: membership.WorkerID,
 		runID: summary.RunID, nodeID: summary.NodeID, resourceDigest: summary.ResourceDigest,
 		slot: slot, ledger: l, key: key,
 	}
+	r.mu.Lock()
+	r.lease = lease
+	r.ownershipCtx, r.cancelOwnership = context.WithCancelCause(context.Background())
+	r.watchDone = make(chan struct{})
+	r.mu.Unlock()
 	l.slots[key] = r
 	l.reservations[id] = r
 	l.mu.Unlock()
-	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: l.home, Version: l.version})
-	if err != nil {
-		l.forget(r)
-		return nil, fmt.Errorf("executor reservation: %w", err)
-	}
-	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
-		RunID: "executor-reservation/" + id, DisplayRunID: summary.RunID + "/" + summary.NodeID,
-		Resources:  wingwire.HostResources{Cores: summary.Resources.Cores, MemoryBytes: summary.Resources.MemoryBytes},
-		CostSource: wingwire.CostSourcePin, Origin: wingwire.OriginController, NonBlocking: true,
-	}, nil)
-	if err != nil {
-		_ = cl.Close()
-		l.forget(r)
-		return nil, fmt.Errorf("%w: %v", ErrExecutorCapacityUnavailable, err)
-	}
-	r.mu.Lock()
-	r.lease = lease
-	r.mu.Unlock()
+	r.log("executor reservation acquired")
+	go r.watchLease(lease)
 	return r, nil
+}
+
+const executorCapacityMemoryUnit = int64(1 << 20)
+
+func executorCapacitySemaphores(queue wingwire.QueueState, resources store.ExecutorResource, membershipID string, limits executorCapacityLimits, slot int) ([]wingwire.SemaphoreClaim, bool) {
+	var machineCores float64
+	var machineMemory int64
+	for _, resource := range queue.Resources {
+		switch resource.Key {
+		case "cores":
+			machineCores = resource.Capacity
+		case "memory":
+			machineMemory = int64(resource.Capacity)
+		}
+	}
+	global, membership := resolvedContributionBudgets(
+		machineCores, machineMemory, limits.localReserve, limits.globalContribution, limits.membershipContribution,
+	)
+	claims := []wingwire.SemaphoreClaim{{
+		Name: fmt.Sprintf("sparkwing/executor/slot/%d", slot), Cost: 1, Capacity: 1, Policy: wingwire.PolicyFail,
+	}}
+	coreCost := int(math.Ceil(resources.Cores * 1000))
+	if coreCost > 0 {
+		globalCapacity := int(math.Floor(global.Cores * 1000))
+		membershipCapacity := int(math.Floor(membership.Cores * 1000))
+		if coreCost > globalCapacity || coreCost > membershipCapacity {
+			return nil, false
+		}
+		claims = append(claims,
+			wingwire.SemaphoreClaim{Name: "sparkwing/executor/global/cores", Cost: coreCost, Capacity: globalCapacity, Policy: wingwire.PolicyFail},
+			wingwire.SemaphoreClaim{Name: "sparkwing/executor/membership/" + membershipID + "/cores", Cost: coreCost, Capacity: membershipCapacity, Policy: wingwire.PolicyFail},
+		)
+	}
+	memoryCost := memorySemaphoreUnits(resources.MemoryBytes, true)
+	if memoryCost > 0 {
+		globalCapacity := memorySemaphoreUnits(global.MemoryBytes, false)
+		membershipCapacity := memorySemaphoreUnits(membership.MemoryBytes, false)
+		if memoryCost > globalCapacity || memoryCost > membershipCapacity {
+			return nil, false
+		}
+		claims = append(claims,
+			wingwire.SemaphoreClaim{Name: "sparkwing/executor/global/memory", Cost: memoryCost, Capacity: globalCapacity, Policy: wingwire.PolicyFail},
+			wingwire.SemaphoreClaim{Name: "sparkwing/executor/membership/" + membershipID + "/memory", Cost: memoryCost, Capacity: membershipCapacity, Policy: wingwire.PolicyFail},
+		)
+	}
+	return claims, true
+}
+
+func memorySemaphoreUnits(bytes int64, roundUp bool) int {
+	if bytes <= 0 {
+		return 0
+	}
+	if roundUp {
+		return int((bytes-1)/executorCapacityMemoryUnit + 1)
+	}
+	return int(bytes / executorCapacityMemoryUnit)
 }
 
 func (l *WingdExecutorCapacityLedger) forget(r *wingdExecutorReservation) {
@@ -137,7 +225,10 @@ type wingdExecutorReservation struct {
 	key                                                       string
 	mu                                                        sync.Mutex
 	lease                                                     *wingdclient.Lease
-	consumed, released                                        bool
+	ownershipCtx                                              context.Context
+	cancelOwnership                                           context.CancelCauseFunc
+	watchDone                                                 chan struct{}
+	consumed, released, lost                                  bool
 }
 
 func (r *wingdExecutorReservation) ID() string           { return r.id }
@@ -150,9 +241,72 @@ func (r *wingdExecutorReservation) ResourceDigest() string {
 }
 func (r *wingdExecutorReservation) Slot() int { return r.slot }
 
+func (r *wingdExecutorReservation) ExecutionContext(parent context.Context) (context.Context, context.CancelFunc) {
+	r.mu.Lock()
+	ownership := r.ownershipCtx
+	r.mu.Unlock()
+	ctx, cancel := context.WithCancelCause(parent)
+	if ownership == nil {
+		cancel(errors.New("executor reservation ownership is unavailable"))
+		return ctx, func() {}
+	}
+	stop := context.AfterFunc(ownership, func() {
+		cancel(context.Cause(ownership))
+	})
+	return ctx, func() {
+		stop()
+		cancel(context.Canceled)
+	}
+}
+
+func (r *wingdExecutorReservation) watchLease(lease *wingdclient.Lease) {
+	defer close(r.watchDone)
+	err := lease.WatchOwnership(
+		func(ev wingwire.Evicted) {
+			r.loseOwnership(fmt.Errorf("executor reservation was evicted: %s", ev.Reason))
+		},
+		func(cancel wingwire.Cancel) {
+			r.loseOwnership(fmt.Errorf("executor reservation was cancelled: %s", cancel.Reason))
+		},
+		func() { r.log("executor reservation reattached") },
+	)
+	if err == nil {
+		err = errors.New("executor reservation ownership watch stopped")
+	}
+	r.loseOwnership(err)
+}
+
+func (r *wingdExecutorReservation) loseOwnership(err error) {
+	r.mu.Lock()
+	if r.released || r.lost {
+		r.mu.Unlock()
+		return
+	}
+	r.lost = true
+	cancel := r.cancelOwnership
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel(fmt.Errorf("executor reservation ownership lost: %w", err))
+	}
+	r.log("executor reservation lost", "err", err)
+}
+
+func (r *wingdExecutorReservation) log(message string, attrs ...any) {
+	if r.ledger.logger == nil {
+		return
+	}
+	base := []any{
+		"executor", r.workerID,
+		"run_id", r.runID,
+		"node_id", r.nodeID,
+		"slot", r.slot,
+	}
+	r.ledger.logger.Info(message, append(base, attrs...)...)
+}
+
 func (r *wingdExecutorReservation) Consume() (*orchestrator.LocalAdmission, error) {
 	r.mu.Lock()
-	if r.released || r.lease == nil {
+	if r.released || r.lost || r.lease == nil {
 		r.mu.Unlock()
 		return nil, errors.New("executor reservation is not live")
 	}
@@ -160,32 +314,11 @@ func (r *wingdExecutorReservation) Consume() (*orchestrator.LocalAdmission, erro
 		r.mu.Unlock()
 		return nil, errors.New("executor reservation was already consumed")
 	}
-	r.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	state, err := wingdclient.Query(ctx, wingdclient.Options{Home: r.ledger.home, Version: r.ledger.version})
-	cancel()
-	if err != nil {
-		return nil, fmt.Errorf("executor reservation is not live: %w", err)
-	}
-	live := false
-	for _, holder := range state.Holders {
-		if holder.RunID == "executor-reservation/"+r.id && holder.Origin == wingwire.OriginController {
-			live = true
-			break
-		}
-	}
-	if !live {
-		return nil, errors.New("executor reservation is not live")
-	}
-
-	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.released || r.lease == nil || r.consumed {
-		return nil, errors.New("executor reservation is not live")
-	}
 	r.consumed = true
-	return &orchestrator.LocalAdmission{Home: r.ledger.home, Version: r.ledger.version, ParentLeaseToken: r.lease.Token, Origin: wingwire.OriginController}, nil
+	return orchestrator.NewReservedNodeAdmission(
+		r.ledger.home, r.ledger.version, r.lease.Token, wingwire.OriginController,
+	), nil
 }
 
 func (r *wingdExecutorReservation) Release() error {
@@ -196,10 +329,24 @@ func (r *wingdExecutorReservation) Release() error {
 	}
 	r.released = true
 	lease := r.lease
+	cancelOwnership := r.cancelOwnership
+	watchDone := r.watchDone
 	r.mu.Unlock()
-	r.ledger.forget(r)
-	if lease != nil {
-		return lease.Release()
+	if cancelOwnership != nil {
+		cancelOwnership(errors.New("executor reservation released"))
 	}
-	return nil
+	r.ledger.forget(r)
+	var releaseErr error
+	if lease != nil {
+		releaseErr = lease.Release()
+	}
+	if watchDone != nil {
+		select {
+		case <-watchDone:
+		case <-time.After(2 * time.Second):
+			return errors.Join(releaseErr, errors.New("executor reservation ownership watch did not stop"))
+		}
+	}
+	r.log("executor reservation released", "err", releaseErr)
+	return releaseErr
 }

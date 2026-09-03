@@ -100,7 +100,7 @@ func TestCoordinatedChildSurfaces_ProfileBackendsRemainRemoteWithoutLocalOnly(t 
 	if found, err := art.Has(context.Background(), "probe"); err != nil || found {
 		t.Fatalf("remote cache probe = %v, %v; want missing", found, err)
 	}
-	nodeLog, err := logs.OpenNodeLog("run", "node", nil)
+	nodeLog, err := logs.OpenNodeLog(context.Background(), "run", "node", nil)
 	if err != nil {
 		t.Fatalf("open remote log: %v", err)
 	}

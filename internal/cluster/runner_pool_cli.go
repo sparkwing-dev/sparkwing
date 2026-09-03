@@ -58,6 +58,10 @@ type nodeClaimer interface {
 	ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error)
 }
 
+type executorNodeClaimer interface {
+	ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom, executor store.ExecutorIdentity) (*store.Node, error)
+}
+
 type poolExecFn func(ctx context.Context, n *store.Node, holderID string)
 
 func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) error {
@@ -223,6 +227,13 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			exec(ctx, n, holderID)
 		}(n, holderID)
 	}
+}
+
+func executorKind(source string) string {
+	if source == "agent" {
+		return "agent"
+	}
+	return "runner"
 }
 
 func runRunnerCLI(args []string) error {
@@ -433,16 +444,20 @@ func executePooledNode(
 
 	execCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	heartbeatCtx := store.WithNodeClaimFence(execCtx, store.NodeClaimFence{
+		HolderID: holderID, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	})
 
 	var hbWG sync.WaitGroup
 	hbWG.Add(1)
 	go func() {
 		defer hbWG.Done()
-		runPoolHeartbeat(execCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
+		runPoolHeartbeat(heartbeatCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
 	}()
 
 	res, err := orchestrator.RunNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
-		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken))
+		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken), orchestrator.ClaimedNodeAttempt(n))
 	cancel()
 	hbWG.Wait()
 

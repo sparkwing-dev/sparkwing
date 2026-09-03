@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -51,6 +52,7 @@ func GetRunHandler(b backend.Backend) http.HandlerFunc {
 			if nodes == nil {
 				nodes = []*store.Node{}
 			}
+			nodes = api.PublicNodes(nodes)
 			// safety: JSON null for Deps crashes the dashboard DAG view (.length / .map on null).
 			for _, n := range nodes {
 				if n.Deps == nil {

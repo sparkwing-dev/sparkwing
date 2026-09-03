@@ -15,7 +15,6 @@ import (
 
 const runnerHeadroomStale = time.Hour
 
-// Agent matches web/src/lib/api.ts:Agent. Location is display-only.
 type Agent struct {
 	Name            string            `json:"name"`
 	Type            string            `json:"type"` // "agent" | "gateway" | "pool" | "local"
@@ -93,6 +92,12 @@ func normalizeEnrollment(name string, in enrollAgentReq) (store.Executor, error)
 	capabilities := make([]string, 0, len(in.Capabilities))
 	for _, capability := range in.Capabilities {
 		capability = strings.TrimSpace(capability)
+		for _, value := range strings.Split(capability, ",") {
+			value = strings.TrimSpace(value)
+			if value == "local" || strings.HasPrefix(value, "location=") {
+				return store.Executor{}, fmt.Errorf("executor capability %q uses reserved placement vocabulary", capability)
+			}
+		}
 		if capability != "" && !seen[capability] {
 			seen[capability] = true
 			capabilities = append(capabilities, capability)
@@ -127,6 +132,10 @@ func (s *Server) handleEnrollAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	executor.Principal = token.Principal
 	if err := s.store.EnrollExecutor(r.Context(), token.Prefix, executor); err != nil {
+		if errors.Is(err, store.ErrExecutorEnrollmentLimit) {
+			writeError(w, http.StatusConflict, store.ErrExecutorEnrollmentLimit)
+			return
+		}
 		// safety: PostgreSQL constraint errors can expose credential prefixes
 		writeError(w, http.StatusConflict, errors.New("executor enrollment conflicts with an existing name or credential"))
 		return
@@ -159,7 +168,11 @@ func (s *Server) handleHeartbeatAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.HeartbeatExecutor(r.Context(), claimIdentity(r), r.PathValue("name"),
 		store.ExecutorResource{Cores: body.Headroom.Cores, MemoryBytes: body.Headroom.MemoryBytes},
 		body.Headroom.QueueDepth, time.Now()); err != nil {
-		writeError(w, http.StatusConflict, err)
+		if errors.Is(err, store.ErrExecutorCredentialMismatch) {
+			writeError(w, http.StatusConflict, store.ErrExecutorCredentialMismatch)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

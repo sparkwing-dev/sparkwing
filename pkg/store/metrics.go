@@ -33,13 +33,23 @@ func (m MetricSample) OneShot() bool { return m.CPUTime > 0 }
 // AddNodeMetricSample appends; duplicates by (run, node, ts) are
 // silently ignored so retries don't trip UNIQUE.
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error {
-	_, err := s.exec(ctx, `
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_metrics (run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos)
 VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (run_id, node_id, ts) DO NOTHING`,
 		runID, nodeID, sample.TS.UnixNano(), sample.CPUMillicores, sample.MemoryBytes,
-		max(int64(sample.CPUTime), 0))
-	return err
+		max(int64(sample.CPUTime), 0)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListNodeMetrics returns samples oldest-first.

@@ -64,6 +64,15 @@ func TestExecutorEnrollmentOwnsTrustAndHeartbeatOnlyNarrowsLiveness(t *testing.T
 	if err := s.HeartbeatExecutor(ctx, identity, "worker-a", store.ExecutorResource{Cores: 3, MemoryBytes: 6 << 30}, 2, time.Now()); err != nil {
 		t.Fatalf("valid heartbeat: %v", err)
 	}
+	summary := store.ExecutorSchedulingSummary{RunID: "identity", NodeID: "work", Slots: 1}
+	beforeRotation, err := s.ResolveExecutorMembership(ctx, identity, "worker-a", summary)
+	if err != nil {
+		t.Fatalf("membership before rotation: %v", err)
+	}
+	wrongPrincipal := store.ClaimIdentity{Principal: "attacker", TokenPrefix: identity.TokenPrefix}
+	if err := s.HeartbeatExecutor(ctx, wrongPrincipal, "worker-a", store.ExecutorResource{Cores: 99}, 0, time.Now()); !errors.Is(err, store.ErrExecutorCredentialMismatch) {
+		t.Fatalf("wrong-principal heartbeat = %v", err)
+	}
 
 	listed, err := s.ListExecutors(ctx)
 	if err != nil || len(listed) != 1 {
@@ -112,6 +121,16 @@ func TestExecutorEnrollmentOwnsTrustAndHeartbeatOnlyNarrowsLiveness(t *testing.T
 	if !rotated.LastSeen.IsZero() || rotated.HeadroomReported || rotated.Headroom != (store.ExecutorResource{}) || rotated.QueueDepth != 0 {
 		t.Fatalf("credential rotation retained old credential liveness: %+v", rotated)
 	}
+	if err := s.HeartbeatExecutor(ctx, otherToken, "worker-a", store.ExecutorResource{Cores: 2}, 0, time.Now()); err != nil {
+		t.Fatalf("rotated credential heartbeat: %v", err)
+	}
+	afterRotation, err := s.ResolveExecutorMembership(ctx, otherToken, "worker-a", summary)
+	if err != nil {
+		t.Fatalf("membership after rotation: %v", err)
+	}
+	if beforeRotation.MembershipID == "" || beforeRotation.MembershipID != afterRotation.MembershipID {
+		t.Fatalf("credential rotation changed stable identity: before=%+v after=%+v", beforeRotation, afterRotation)
+	}
 	if err := s.EnrollExecutor(ctx, otherToken.TokenPrefix, store.Executor{Name: "worker-b", Kind: "agent", Location: "unknown", MaxConcurrent: 1}); err == nil {
 		t.Fatal("one exact credential was enrolled to two names")
 	}
@@ -154,7 +173,47 @@ func TestResetExecutorLivenessPreventsStaleTrustFromRemainingEligible(t *testing
 	}
 }
 
-func TestExecutorSchedulingSummaryAndMembershipAreReadOnlyAndLocationNeutral(t *testing.T) {
+func TestExecutorEnrollmentRejectsReservedPlacementCapabilities(t *testing.T) {
+	s := newStoreT(t)
+	replacer := strings.NewReplacer("=", "_", ",", "_")
+	for _, capability := range []string{"local", "location=local", "gpu,location=cloud", "location=coordinator"} {
+		name := replacer.Replace(capability)
+		err := s.EnrollExecutor(context.Background(), "swr_"+name, store.Executor{
+			Name: "worker-" + name, Kind: "agent", Location: "local", Principal: "principal",
+			Capabilities: []string{capability}, MaxConcurrent: 1,
+		})
+		if err == nil {
+			t.Errorf("reserved capability %q was accepted", capability)
+		}
+	}
+}
+
+func TestUnknownExecutorLocationFailsClosedForPlacementSelectors(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	identity := store.ClaimIdentity{Principal: "principal", TokenPrefix: "swr_unknown"}
+	if err := s.EnrollExecutor(ctx, identity.TokenPrefix, store.Executor{
+		Name: "unknown", Kind: "agent", Location: "unknown", Principal: identity.Principal,
+		Capabilities: []string{"linux"}, BasePriority: 50, PriorityCeiling: 50, MaxConcurrent: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.HeartbeatExecutor(ctx, identity, "unknown", store.ExecutorResource{Cores: 4}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, selector := range []string{"location=local", "location=cloud", "location=coordinator", "local"} {
+		summary := store.ExecutorSchedulingSummary{RunID: "run", NodeID: "node", HardCapabilities: []string{selector}, Slots: 1}
+		membership, err := s.ResolveExecutorMembership(ctx, identity, "unknown", summary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if membership.Eligible {
+			t.Errorf("unknown location satisfied %q", selector)
+		}
+	}
+}
+
+func TestExecutorSchedulingSummaryAndMembershipUseTrustedLocation(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
 	identity := enrollTestExecutor(t, s, "worker-a", 2, 4)
@@ -172,16 +231,94 @@ func TestExecutorSchedulingSummaryAndMembershipAreReadOnlyAndLocationNeutral(t *
 	if err != nil {
 		t.Fatalf("ResolveExecutorMembership: %v", err)
 	}
-	if !membership.Eligible || membership.EffectivePriority != 20 || membership.HighestEligibleCeiling != 20 || membership.MembershipID == "" {
+	if !membership.Eligible || membership.EffectivePriority != 20 || membership.HighestEligiblePriority != 20 || membership.MembershipID == "" {
 		t.Fatalf("membership = %+v", membership)
 	}
-	summary.HardCapabilities = []string{"cloud"}
+	summary.HardCapabilities = []string{"location=cloud"}
 	membership, err = s.ResolveExecutorMembership(ctx, identity, "worker-a", summary)
 	if err != nil {
 		t.Fatalf("ResolveExecutorMembership location check: %v", err)
 	}
+	if !membership.Eligible {
+		t.Fatal("trusted cloud location did not satisfy cloud placement")
+	}
+	summary.HardCapabilities = []string{"location=local"}
+	membership, err = s.ResolveExecutorMembership(ctx, identity, "worker-a", summary)
+	if err != nil {
+		t.Fatalf("ResolveExecutorMembership local location check: %v", err)
+	}
 	if membership.Eligible {
-		t.Fatal("display location was treated as a trusted capability")
+		t.Fatal("cloud enrollment satisfied local placement")
+	}
+}
+
+func TestPreviewExecutorEligibilitySharesAwardFiltersAndSafeReasons(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	now := time.Now()
+	identity := store.ClaimIdentity{Principal: "preview-principal", TokenPrefix: "swr_preview"}
+	enroll := func(maxConcurrent int, budget store.ExecutorResource) {
+		t.Helper()
+		if err := s.EnrollExecutor(ctx, identity.TokenPrefix, store.Executor{
+			Name: "preview", Kind: "agent", Location: "cloud", Principal: identity.Principal,
+			Capabilities: []string{"linux"}, BasePriority: 10, PriorityCeiling: 20,
+			MaxConcurrent: maxConcurrent, Budget: budget,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	heartbeat := func(at time.Time, headroom store.ExecutorResource) {
+		t.Helper()
+		if err := s.HeartbeatExecutor(ctx, identity, "preview", headroom, 0, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	preview := func(summary store.ExecutorSchedulingSummary) store.ExecutorEligibilityPreview {
+		t.Helper()
+		got, err := s.PreviewExecutorEligibility(ctx, summary, now.Add(-store.ExecutorRegistrationActiveWindow))
+		if err != nil || len(got) != 1 {
+			t.Fatalf("PreviewExecutorEligibility = %+v, %v", got, err)
+		}
+		return got[0]
+	}
+
+	enroll(1, store.ExecutorResource{Cores: 4, MemoryBytes: 8 << 30})
+	heartbeat(now, store.ExecutorResource{Cores: 4, MemoryBytes: 8 << 30})
+	base := store.ExecutorSchedulingSummary{Slots: 1, HardCapabilities: []string{"linux", "location=cloud"}, Resources: store.ExecutorResource{Cores: 1}}
+	eligible := preview(base)
+	if !eligible.Eligible || eligible.ExclusionReason != "" || eligible.EffectiveScore == nil || *eligible.EffectiveScore != 10 || eligible.PriorityCeiling == nil || *eligible.PriorityCeiling != 20 || eligible.MembershipID == "" {
+		t.Fatalf("eligible preview = %+v", eligible)
+	}
+
+	tests := []struct {
+		name       string
+		summary    store.ExecutorSchedulingSummary
+		seen       time.Time
+		headroom   store.ExecutorResource
+		concurrent int
+		budget     store.ExecutorResource
+		want       string
+	}{
+		{name: "offline", summary: base, seen: now.Add(-3 * time.Minute), headroom: store.ExecutorResource{Cores: 4}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "offline"},
+		{name: "placement", summary: store.ExecutorSchedulingSummary{Slots: 1, HardCapabilities: []string{"location=local"}}, seen: now, headroom: store.ExecutorResource{Cores: 4}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "trusted_placement"},
+		{name: "capability", summary: store.ExecutorSchedulingSummary{Slots: 1, HardCapabilities: []string{"gpu"}}, seen: now, headroom: store.ExecutorResource{Cores: 4}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "hard_capability"},
+		{name: "slots", summary: store.ExecutorSchedulingSummary{Slots: 2}, seen: now, headroom: store.ExecutorResource{Cores: 4}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "slot_limit"},
+		{name: "budget", summary: store.ExecutorSchedulingSummary{Slots: 1, Resources: store.ExecutorResource{Cores: 5}}, seen: now, headroom: store.ExecutorResource{Cores: 8}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "resource_budget"},
+		{name: "headroom", summary: store.ExecutorSchedulingSummary{Slots: 1, Resources: store.ExecutorResource{Cores: 3}}, seen: now, headroom: store.ExecutorResource{Cores: 2}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "headroom"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			enroll(test.concurrent, test.budget)
+			heartbeat(test.seen, test.headroom)
+			got := preview(test.summary)
+			if got.Eligible || got.ExclusionReason != test.want || got.EffectiveScore != nil || got.PriorityCeiling != nil {
+				t.Fatalf("preview = %+v, want excluded by %q without score", got, test.want)
+			}
+			membership, err := s.ResolveExecutorMembership(ctx, identity, "preview", test.summary)
+			if err != nil || membership.Eligible != got.Eligible {
+				t.Fatalf("award matcher eligible=%v err=%v disagrees with preview %+v", membership.Eligible, err, got)
+			}
+		})
 	}
 }
 

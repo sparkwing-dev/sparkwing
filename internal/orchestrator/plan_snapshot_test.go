@@ -112,6 +112,30 @@ func TestMarshalPlanSnapshot_IncludesBothExecutionTimeouts(t *testing.T) {
 	}
 }
 
+func TestMarshalPlanSnapshot_PipelineRequirementsAffectProvenance(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	sparkwing.Job(plan, "build", func(context.Context) error { return nil })
+	rc := sparkwing.RunContext{Pipeline: "demo", RunID: "run"}
+	local, err := marshalPlanSnapshot(plan, rc, planSnapshotMeta{PipelineRequires: []string{"local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloud, err := marshalPlanSnapshot(plan, rc, planSnapshotMeta{PipelineRequires: []string{"cloud"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reflect.DeepEqual(local, cloud) {
+		t.Fatal("changing pipeline requirements did not change the immutable plan snapshot")
+	}
+	var snapshot planSnapshot
+	if err := json.Unmarshal(local, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(snapshot.Requires, []string{"local"}) {
+		t.Fatalf("snapshot requirements = %v, want [local]", snapshot.Requires)
+	}
+}
+
 func TestMarshalPlanSnapshot_EmbedsWorkAndSpawnTargets(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "parent", snapshotParentJob{}).Retry(2)
@@ -326,6 +350,41 @@ func TestMarshalPlanSnapshot_CarriesResourceHints(t *testing.T) {
 	if byID["plain"].Modifiers != nil {
 		t.Errorf("plain node grew modifiers: %+v", byID["plain"].Modifiers)
 	}
+}
+
+func TestMarshalPlanSnapshot_OptionalDependenciesAffectProvenance(t *testing.T) {
+	without := sparkwing.NewPlan()
+	sparkwing.Job(without, "source", func(context.Context) error { return nil })
+	sparkwing.Job(without, "consumer", func(context.Context) error { return nil })
+
+	with := sparkwing.NewPlan()
+	withSource := sparkwing.Job(with, "source", func(context.Context) error { return nil })
+	sparkwing.Job(with, "consumer", func(context.Context) error { return nil }).NeedsOptional(withSource)
+
+	withoutRaw, err := marshalPlanSnapshot(without, sparkwing.RunContext{Pipeline: "p", RunID: "run"}, planSnapshotMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withRaw, err := marshalPlanSnapshot(with, sparkwing.RunContext{Pipeline: "p", RunID: "run"}, planSnapshotMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(withRaw) == string(withoutRaw) {
+		t.Fatal("adding an optional dependency did not change retry provenance")
+	}
+	var snapshot planSnapshot
+	if err := json.Unmarshal(withRaw, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range snapshot.Nodes {
+		if node.ID == "consumer" {
+			if len(node.OptionalDeps) != 1 || node.OptionalDeps[0] != withSource.ID() {
+				t.Fatalf("optional dependencies = %v", node.OptionalDeps)
+			}
+			return
+		}
+	}
+	t.Fatal("consumer absent from plan snapshot")
 }
 
 func TestMarshalPlanSnapshot_CarriesPriority(t *testing.T) {

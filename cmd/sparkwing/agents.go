@@ -86,7 +86,7 @@ func runAgentsEnroll(args []string) error {
 	name := fs.String("name", "", "executor name")
 	tokenPrefix := fs.String("token-prefix", "", "exact runner or service token prefix")
 	kind := fs.String("kind", "agent", "executor kind (agent|gateway)")
-	location := fs.String("location", "unknown", "display location (local|cloud|unknown)")
+	location := fs.String("location", "unknown", "trusted placement location (local|cloud|unknown)")
 	capabilities := fs.StringSlice("capability", nil, "trusted capability (repeatable)")
 	basePriority := fs.Int("base-priority", 0, "base scheduling priority (0-100)")
 	priorityCeiling := fs.Int("priority-ceiling", 100, "highest effective priority (0-100)")

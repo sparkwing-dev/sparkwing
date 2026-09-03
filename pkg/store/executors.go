@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -15,9 +17,24 @@ import (
 // exact token prefix.
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
 
+// ErrExecutorEnrollmentLimit means a controller already has the maximum
+// number of enrolled executors supported by one scheduling snapshot.
+var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
+
+// MaxEnrolledExecutors bounds one controller's executor scheduling work.
+// Raising it does not require a schema change.
+const MaxEnrolledExecutors = 256
+
 // ExecutorRegistrationActiveWindow is how long the last successful heartbeat
 // remains eligible before the executor is reported offline.
 const ExecutorRegistrationActiveWindow = 2 * time.Minute
+
+const (
+	executorLocationLocal       = "local"
+	executorLocationCloud       = "cloud"
+	executorLocationUnknown     = "unknown"
+	executorLocationCoordinator = "coordinator"
+)
 
 // ExecutorResource is a CPU and memory capacity or charge.
 type ExecutorResource struct {
@@ -25,9 +42,9 @@ type ExecutorResource struct {
 	MemoryBytes int64   `json:"memory_bytes" yaml:"memory_bytes"`
 }
 
-// Executor is one administrator-enrolled execution membership. Kind describes
-// the execution boundary, while Location is display-only.
+// Executor is one administrator-enrolled execution membership.
 type Executor struct {
+	id               string
 	Name             string           `json:"name"`
 	TokenPrefix      string           `json:"-"`
 	Kind             string           `json:"kind"`
@@ -56,6 +73,20 @@ func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Execut
 	if e.MaxConcurrent < 1 || e.Budget.Cores < 0 || math.IsNaN(e.Budget.Cores) || math.IsInf(e.Budget.Cores, 0) || e.Budget.MemoryBytes < 0 {
 		return errors.New("executor limits must be finite and non-negative with max_concurrent >= 1")
 	}
+	if e.Location == "" {
+		e.Location = executorLocationUnknown
+	}
+	if e.Location != executorLocationLocal && e.Location != executorLocationCloud && e.Location != executorLocationUnknown {
+		return errors.New("executor location must be local, cloud, or unknown")
+	}
+	for _, capability := range e.Capabilities {
+		for _, value := range strings.Split(capability, ",") {
+			value = strings.TrimSpace(value)
+			if value == "local" || strings.HasPrefix(value, "location=") {
+				return fmt.Errorf("executor capability %q uses reserved placement vocabulary", capability)
+			}
+		}
+	}
 	caps, err := json.Marshal(e.Capabilities)
 	if err != nil {
 		return err
@@ -65,6 +96,9 @@ func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Execut
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorRegistryTx(ctx, tx, true); err != nil {
+		return err
+	}
 
 	if err := enrollExecutorWith(ctx, tx, tokenPrefix, e, caps); err != nil {
 		return err
@@ -72,8 +106,8 @@ func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Execut
 	return tx.Commit()
 }
 
-func enrollExecutorWith(ctx context.Context, e tokenExecer, tokenPrefix string, executor Executor, caps []byte) error {
-	result, err := e.ExecContext(ctx, `
+func enrollExecutorWith(ctx context.Context, tx *storeTx, tokenPrefix string, executor Executor, caps []byte) error {
+	result, err := tx.ExecContext(ctx, `
 UPDATE executors
    SET last_seen = CASE WHEN token_prefix = ? THEN last_seen ELSE 0 END,
        headroom_reported = CASE WHEN token_prefix = ? THEN headroom_reported ELSE 0 END,
@@ -95,13 +129,24 @@ UPDATE executors
 		return err
 	}
 	if updated == 0 {
-		_, err = e.ExecContext(ctx, `
+		var enrolled int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM executors`).Scan(&enrolled); err != nil {
+			return err
+		}
+		if enrolled >= MaxEnrolledExecutors {
+			return ErrExecutorEnrollmentLimit
+		}
+		executorID, idErr := newOpaqueIdentity(executorIdentityPrefix)
+		if idErr != nil {
+			return idErr
+		}
+		_, err = tx.ExecContext(ctx, `
 INSERT INTO executors
-    (name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+    (executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
      budget_cores, budget_memory_bytes, principal, last_seen,
      headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)`,
-			executor.Name, tokenPrefix, executor.Kind, executor.Location, caps, executor.BasePriority, executor.PriorityCeiling, executor.MaxConcurrent,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)`,
+			executorID, executor.Name, tokenPrefix, executor.Kind, executor.Location, caps, executor.BasePriority, executor.PriorityCeiling, executor.MaxConcurrent,
 			executor.Budget.Cores, executor.Budget.MemoryBytes, executor.Principal)
 		if err != nil {
 			return err
@@ -187,11 +232,19 @@ func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, n
 	if claimant.TokenPrefix == "" || headroom.Cores < 0 || math.IsNaN(headroom.Cores) || math.IsInf(headroom.Cores, 0) || headroom.MemoryBytes < 0 || queueDepth < 0 {
 		return errors.New("executor heartbeat requires a credential and finite non-negative headroom")
 	}
-	result, err := s.exec(ctx, `
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorRegistryTx(ctx, tx, true); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
 UPDATE executors
    SET last_seen = ?, headroom_reported = 1, headroom_cores = ?, headroom_memory_bytes = ?, queue_depth = ?
- WHERE name = ? AND token_prefix = ?`,
-		now.UnixNano(), headroom.Cores, headroom.MemoryBytes, queueDepth, name, claimant.TokenPrefix)
+ WHERE name = ? AND token_prefix = ? AND principal = ?`,
+		now.UnixNano(), headroom.Cores, headroom.MemoryBytes, queueDepth, name, claimant.TokenPrefix, claimant.Principal)
 	if err != nil {
 		return err
 	}
@@ -202,7 +255,7 @@ UPDATE executors
 	if updated == 0 {
 		return fmt.Errorf("%w: %s", ErrExecutorCredentialMismatch, name)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ExecutorForCredential returns an enrollment only when name and the exact
@@ -231,7 +284,7 @@ func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix stri
 // ListExecutors returns every registered executor, including stale entries.
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error) {
 	rows, err := s.query(ctx, `
-SELECT name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
   FROM executors ORDER BY kind, name`)
@@ -245,7 +298,7 @@ SELECT name, token_prefix, kind, location, capabilities_json, base_priority, pri
 		var caps []byte
 		var seen int64
 		var reported int
-		if err := rows.Scan(&e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
+		if err := rows.Scan(&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
 			&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
 			&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes, &e.QueueDepth); err != nil {
 			return nil, err
@@ -316,20 +369,75 @@ type ExecutorSchedulingSummary struct {
 	ResourceDigest        string           `json:"resource_digest"`
 	Slots                 int              `json:"slots"`
 	RunPriority           int              `json:"run_priority"`
+	RequiredCoordinatorID string           `json:"required_coordinator_id,omitempty"`
+	RequiredLocation      string           `json:"required_location,omitempty"`
 }
 
-// ExecutorMembershipSnapshot binds a registered executor to the exact
-// controller membership credential without exposing that credential.
+// ExecutorMembershipSnapshot binds a registered executor to one controller
+// authority without exposing the credential used to prove that membership.
 type ExecutorMembershipSnapshot struct {
-	MembershipID           string `json:"membership_id"`
-	WorkerID               string `json:"worker_id"`
-	Kind                   string `json:"kind"`
-	RegisteredBasePriority int    `json:"registered_base_priority"`
-	Eligible               bool   `json:"eligible"`
-	EffectivePriority      int    `json:"effective_priority"`
-	HighestEligibleCeiling int    `json:"highest_eligible_ceiling"`
-	ActiveSlots            int    `json:"active_slots"`
-	MaxConcurrent          int    `json:"max_concurrent"`
+	MembershipID            string `json:"membership_id"`
+	WorkerID                string `json:"worker_id"`
+	Kind                    string `json:"kind"`
+	RegisteredBasePriority  int    `json:"registered_base_priority"`
+	Eligible                bool   `json:"eligible"`
+	EffectivePriority       int    `json:"effective_priority"`
+	HighestEligiblePriority int    `json:"highest_eligible_priority"`
+	ActiveSlots             int    `json:"active_slots"`
+	MaxConcurrent           int    `json:"max_concurrent"`
+}
+
+// ExecutorEligibilityPreview explains whether one configured executor can
+// enter arbitration for a scheduling summary without exposing its credential.
+type ExecutorEligibilityPreview struct {
+	MembershipID    string `json:"membership_id"`
+	Name            string `json:"name"`
+	Kind            string `json:"kind"`
+	Location        string `json:"location"`
+	Eligible        bool   `json:"eligible"`
+	ExclusionReason string `json:"exclusion_reason,omitempty"`
+	EffectiveScore  *int   `json:"effective_score,omitempty"`
+	PriorityCeiling *int   `json:"priority_ceiling,omitempty"`
+}
+
+// PreviewExecutorEligibility evaluates every enrollment with the same filters
+// used by claim-offer award revalidation. activeAfter defines online liveness.
+func (s *Store) PreviewExecutorEligibility(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) ([]ExecutorEligibilityPreview, error) {
+	executors, err := s.ListExecutors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(executors) > MaxEnrolledExecutors {
+		return nil, ErrExecutorEnrollmentLimit
+	}
+	authorityID, err := s.controllerAuthorityID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	coordinatorID, err := s.CoordinatorID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	usage, err := s.loadExecutorUsage(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ExecutorEligibilityPreview, 0, len(executors))
+	for _, e := range executors {
+		used := usage.ByExecutor[e.Name]
+		reason := executorExclusionReason(e, summary, used.Active, used.Cores, used.MemoryBytes, activeAfter, coordinatorID)
+		preview := ExecutorEligibilityPreview{
+			MembershipID: executorMembershipID(authorityID, e.id), Name: e.Name,
+			Kind: e.Kind, Location: e.Location, Eligible: reason == "", ExclusionReason: reason,
+		}
+		if preview.Eligible {
+			score, ceiling := executorEffectivePriority(e, summary), e.PriorityCeiling
+			preview.EffectiveScore, preview.PriorityCeiling = &score, &ceiling
+		}
+		out = append(out, preview)
+	}
+	return out, nil
 }
 
 // SchedulingSummary resolves the resource charge and hard/preferred labels
@@ -340,6 +448,14 @@ func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (Ex
 		return ExecutorSchedulingSummary{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	summary, err := s.schedulingSummaryTx(ctx, tx, runID, nodeID)
+	if err != nil {
+		return ExecutorSchedulingSummary{}, err
+	}
+	return summary, nil
+}
+
+func (s *Store) schedulingSummaryTx(ctx context.Context, tx *storeTx, runID, nodeID string) (ExecutorSchedulingSummary, error) {
 	n := &Node{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes WHERE run_id = ? AND node_id = ?`, runID, nodeID), n); err != nil {
@@ -356,7 +472,8 @@ func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (Ex
 	return ExecutorSchedulingSummary{
 		RunID: runID, NodeID: nodeID, HardCapabilities: append([]string(nil), n.NeedsLabels...),
 		PreferredCapabilities: snapshotNodePrefers(plan, nodeID), Resources: charge, ResourceDigest: executorResourceDigest(charge), Slots: 1,
-		RunPriority: snapshotRunPriority(plan),
+		RunPriority: snapshotRunPriority(plan), RequiredCoordinatorID: n.RequiredCoordinatorID,
+		RequiredLocation: n.RequiredExecutorLocation,
 	}, nil
 }
 
@@ -364,22 +481,299 @@ func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (Ex
 // before computing priority. Run priority and preferred-capability order may
 // adjust ordering only within the operator's configured ceiling.
 func (s *Store) ResolveExecutorMembership(ctx context.Context, claimant ClaimIdentity, executorName string, summary ExecutorSchedulingSummary) (ExecutorMembershipSnapshot, error) {
+	now := time.Now()
+	membership, err := s.resolveExecutorMembership(ctx, claimant, executorName, summary, now)
+	if err != nil {
+		return ExecutorMembershipSnapshot{}, err
+	}
+	highest, err := s.HighestActiveExecutorPriority(ctx, summary, now.Add(-ExecutorRegistrationActiveWindow))
+	if err != nil {
+		return ExecutorMembershipSnapshot{}, err
+	}
+	membership.HighestEligiblePriority = highest
+	return membership, nil
+}
+
+// Offer admission consumes the target recorded at round creation, so resolving
+// one membership here must not repeat that fleet-wide work.
+func (s *Store) resolveExecutorMembership(ctx context.Context, claimant ClaimIdentity, executorName string, summary ExecutorSchedulingSummary, now time.Time) (ExecutorMembershipSnapshot, error) {
 	e, err := s.getExecutor(ctx, executorName)
 	if err != nil {
 		return ExecutorMembershipSnapshot{}, err
 	}
-	if e.TokenPrefix != claimant.TokenPrefix || claimant.TokenPrefix == "" {
+	if e.TokenPrefix != claimant.TokenPrefix || claimant.TokenPrefix == "" || e.Principal != claimant.Principal {
 		return ExecutorMembershipSnapshot{}, fmt.Errorf("%w: %s", ErrExecutorCredentialMismatch, executorName)
 	}
-	active, eligible, err := s.executorEligible(ctx, e, summary)
+	activeAfter := now.Add(-ExecutorRegistrationActiveWindow)
+	active, reason, err := s.executorEligibility(ctx, e, summary, now, activeAfter)
 	if err != nil {
 		return ExecutorMembershipSnapshot{}, err
 	}
-	eligible = eligible && !e.LastSeen.Before(time.Now().Add(-ExecutorRegistrationActiveWindow))
-	capSet := make(map[string]struct{}, len(e.Capabilities))
-	for _, capability := range e.Capabilities {
-		capSet[capability] = struct{}{}
+	eligible := reason == ""
+	authorityID, err := s.controllerAuthorityID(ctx)
+	if err != nil {
+		return ExecutorMembershipSnapshot{}, err
 	}
+	return ExecutorMembershipSnapshot{
+		MembershipID: executorMembershipID(authorityID, e.id), WorkerID: e.Name,
+		Kind: e.Kind, RegisteredBasePriority: e.BasePriority,
+		Eligible: eligible, EffectivePriority: executorEffectivePriority(e, summary),
+		ActiveSlots: active, MaxConcurrent: e.MaxConcurrent,
+	}, nil
+}
+
+func (s *Store) resolveExecutorMembershipTx(ctx context.Context, tx *storeTx, claimant ClaimIdentity, executorName string, summary ExecutorSchedulingSummary, now time.Time) (ExecutorMembershipSnapshot, error) {
+	e, err := s.getExecutorTx(ctx, tx, executorName)
+	if err != nil {
+		return ExecutorMembershipSnapshot{}, err
+	}
+	if e.TokenPrefix != claimant.TokenPrefix || claimant.TokenPrefix == "" || e.Principal != claimant.Principal {
+		return ExecutorMembershipSnapshot{}, fmt.Errorf("%w: %s", ErrExecutorCredentialMismatch, executorName)
+	}
+	activeAfter := now.Add(-ExecutorRegistrationActiveWindow)
+	active, reason, err := s.executorEligibilityTx(ctx, tx, e, summary, now, activeAfter)
+	if err != nil {
+		return ExecutorMembershipSnapshot{}, err
+	}
+	eligible := reason == ""
+	authorityID, err := controllerAuthorityIDTx(ctx, tx)
+	if err != nil {
+		return ExecutorMembershipSnapshot{}, err
+	}
+	return ExecutorMembershipSnapshot{
+		MembershipID: executorMembershipID(authorityID, e.id), WorkerID: e.Name,
+		Kind: e.Kind, RegisteredBasePriority: e.BasePriority,
+		Eligible: eligible, EffectivePriority: executorEffectivePriority(e, summary),
+		ActiveSlots: active, MaxConcurrent: e.MaxConcurrent,
+	}, nil
+}
+
+func executorMembershipFromSnapshot(e Executor, claimant ClaimIdentity, summary ExecutorSchedulingSummary, used executorUsage, authorityID, coordinatorID string, activeAfter time.Time) (ExecutorMembershipSnapshot, error) {
+	if e.TokenPrefix != claimant.TokenPrefix || claimant.TokenPrefix == "" || e.Principal != claimant.Principal {
+		return ExecutorMembershipSnapshot{}, fmt.Errorf("%w: %s", ErrExecutorCredentialMismatch, e.Name)
+	}
+	reason := executorExclusionReason(e, summary, used.Active, used.Cores, used.MemoryBytes, activeAfter, coordinatorID)
+	return ExecutorMembershipSnapshot{
+		MembershipID: executorMembershipID(authorityID, e.id), WorkerID: e.Name,
+		Kind: e.Kind, RegisteredBasePriority: e.BasePriority,
+		Eligible: reason == "", EffectivePriority: executorEffectivePriority(e, summary),
+		ActiveSlots: used.Active, MaxConcurrent: e.MaxConcurrent,
+	}, nil
+}
+
+// HighestActiveExecutorPriority returns the largest attainable score among
+// active registered executors that satisfy the same hard slot/resource filter.
+func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error) {
+	executors, err := s.ListExecutors(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if len(executors) > MaxEnrolledExecutors {
+		return 0, ErrExecutorEnrollmentLimit
+	}
+	highest := 0
+	now := time.Now()
+	usage, err := s.loadExecutorUsage(ctx, now)
+	if err != nil {
+		return 0, err
+	}
+	coordinatorID, err := s.CoordinatorID(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, e := range executors {
+		used := usage.ByExecutor[e.Name]
+		reason := executorExclusionReason(e, summary, used.Active, used.Cores, used.MemoryBytes, activeAfter, coordinatorID)
+		if reason == "" {
+			highest = max(highest, executorEffectivePriority(e, summary))
+		}
+	}
+	return highest, nil
+}
+
+func (s *Store) highestActiveExecutorPriorityTx(ctx context.Context, tx *storeTx, summary ExecutorSchedulingSummary, activeAfter, now time.Time) (int, error) {
+	executors, err := loadExecutorsForSchedulingTx(ctx, tx, activeAfter)
+	if err != nil {
+		return 0, err
+	}
+	usage, err := loadExecutorUsageTx(ctx, tx, now)
+	if err != nil {
+		return 0, err
+	}
+	coordinatorID, err := coordinatorIDTx(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	highest := 0
+	for _, e := range executors {
+		used := usage.ByExecutor[e.Name]
+		reason := executorExclusionReason(e, summary, used.Active, used.Cores, used.MemoryBytes, activeAfter, coordinatorID)
+		if reason == "" {
+			highest = max(highest, executorEffectivePriority(e, summary))
+		}
+	}
+	return highest, nil
+}
+
+type executorUsage struct {
+	Active      int
+	Cores       float64
+	MemoryBytes int64
+	Slots       map[int]struct{}
+}
+
+type executorUsageSnapshot struct {
+	ByExecutor   map[string]executorUsage
+	Reservations map[string]struct{}
+}
+
+const executorUsageQuery = `
+SELECT claim_executor, claim_slot, claim_reservation, claim_cores, claim_memory_bytes
+  FROM nodes
+ WHERE claimed_by IS NOT NULL AND lease_expires_at >= ? AND ` + nodeNotDone
+
+func (s *Store) loadExecutorUsage(ctx context.Context, now time.Time) (executorUsageSnapshot, error) {
+	rows, err := s.query(ctx, executorUsageQuery, now.UnixNano())
+	if err != nil {
+		return executorUsageSnapshot{}, err
+	}
+	return scanExecutorUsage(rows)
+}
+
+func loadExecutorUsageTx(ctx context.Context, tx *storeTx, now time.Time) (executorUsageSnapshot, error) {
+	rows, err := tx.QueryContext(ctx, executorUsageQuery, now.UnixNano())
+	if err != nil {
+		return executorUsageSnapshot{}, err
+	}
+	return scanExecutorUsage(rows)
+}
+
+func scanExecutorUsage(rows *sql.Rows) (executorUsageSnapshot, error) {
+	defer func() { _ = rows.Close() }()
+	out := executorUsageSnapshot{
+		ByExecutor:   map[string]executorUsage{},
+		Reservations: map[string]struct{}{},
+	}
+	for rows.Next() {
+		var name, reservation string
+		var slot int
+		var cores float64
+		var memory int64
+		if err := rows.Scan(&name, &slot, &reservation, &cores, &memory); err != nil {
+			return executorUsageSnapshot{}, err
+		}
+		if reservation != "" {
+			out.Reservations[reservation] = struct{}{}
+		}
+		if name == "" {
+			continue
+		}
+		used := out.ByExecutor[name]
+		used.Active++
+		used.Cores += cores
+		used.MemoryBytes += memory
+		if used.Slots == nil {
+			used.Slots = map[int]struct{}{}
+		}
+		used.Slots[slot] = struct{}{}
+		out.ByExecutor[name] = used
+	}
+	return out, rows.Err()
+}
+
+func loadExecutorsForSchedulingTx(ctx context.Context, tx *storeTx, activeAfter time.Time) ([]Executor, error) {
+	rows, err := tx.QueryContext(ctx, `
+SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+       budget_cores, budget_memory_bytes, principal, last_seen,
+       headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
+  FROM executors WHERE last_seen >= ? ORDER BY name LIMIT ?`, activeAfter.UnixNano(), MaxEnrolledExecutors+1)
+	if err != nil {
+		return nil, err
+	}
+	out, err := scanExecutors(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) > MaxEnrolledExecutors {
+		return nil, ErrExecutorEnrollmentLimit
+	}
+	return out, nil
+}
+
+func ensureExecutorCardinalityTx(ctx context.Context, tx *storeTx) error {
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM executors LIMIT ?`, MaxEnrolledExecutors+1)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if count > MaxEnrolledExecutors {
+		return ErrExecutorEnrollmentLimit
+	}
+	return nil
+}
+
+func loadExecutorsByNameTx(ctx context.Context, tx *storeTx, names []string) (map[string]Executor, error) {
+	names = canonicalExecutorNames(names...)
+	if len(names) == 0 {
+		return map[string]Executor{}, nil
+	}
+	if len(names) > MaxEnrolledExecutors {
+		return nil, ErrExecutorEnrollmentLimit
+	}
+	args := make([]any, len(names))
+	for i := range names {
+		args[i] = names[i]
+	}
+	rows, err := tx.QueryContext(ctx, `
+SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+       budget_cores, budget_memory_bytes, principal, last_seen,
+       headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
+  FROM executors WHERE name IN (`+strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")+`) ORDER BY name`, args...)
+	if err != nil {
+		return nil, err
+	}
+	items, err := scanExecutors(rows)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]Executor, len(items))
+	for _, e := range items {
+		out[e.Name] = e
+	}
+	return out, nil
+}
+
+func scanExecutors(rows *sql.Rows) ([]Executor, error) {
+	defer func() { _ = rows.Close() }()
+	var out []Executor
+	for rows.Next() {
+		var e Executor
+		var caps []byte
+		var seen int64
+		var reported int
+		if err := rows.Scan(&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps,
+			&e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
+			&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
+			&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes, &e.QueueDepth); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(caps, &e.Capabilities)
+		e.LastSeen = time.Unix(0, seen)
+		e.HeadroomReported = reported != 0
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func executorEffectivePriority(e Executor, summary ExecutorSchedulingSummary) int {
+	capSet := executorTrustSet(e)
 	preferenceBoost := 0
 	for i, preference := range summary.PreferredCapabilities {
 		if labelsSatisfied([]string{preference}, capSet) {
@@ -390,68 +784,110 @@ func (s *Store) ResolveExecutorMembership(ctx context.Context, claimant ClaimIde
 	effective := e.BasePriority
 	adjustment := summary.RunPriority + preferenceBoost
 	if adjustment > 0 {
-		effective += min(adjustment, e.PriorityCeiling-e.BasePriority)
-	} else {
-		effective += max(adjustment, -e.BasePriority)
+		return effective + min(adjustment, e.PriorityCeiling-e.BasePriority)
 	}
-	highest, err := s.HighestActiveExecutorCeiling(ctx, summary, time.Now().Add(-ExecutorRegistrationActiveWindow))
-	if err != nil {
-		return ExecutorMembershipSnapshot{}, err
-	}
-	return ExecutorMembershipSnapshot{
-		MembershipID: executorMembershipID(e.TokenPrefix, e.Name), WorkerID: e.Name,
-		Kind: e.Kind, RegisteredBasePriority: e.BasePriority,
-		Eligible: eligible, EffectivePriority: effective, HighestEligibleCeiling: highest,
-		ActiveSlots: active, MaxConcurrent: e.MaxConcurrent,
-	}, nil
+	return effective + max(adjustment, -e.BasePriority)
 }
 
-// HighestActiveExecutorCeiling returns the largest operator ceiling among
-// active registered executors that satisfy the same hard slot/resource filter.
-func (s *Store) HighestActiveExecutorCeiling(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error) {
-	executors, err := s.ListExecutors(ctx)
-	if err != nil {
-		return 0, err
-	}
-	highest := 0
-	for _, e := range executors {
-		if e.LastSeen.Before(activeAfter) {
-			continue
-		}
-		_, eligible, err := s.executorEligible(ctx, e, summary)
-		if err != nil {
-			return 0, err
-		}
-		if eligible {
-			highest = max(highest, e.PriorityCeiling)
-		}
-	}
-	return highest, nil
-}
-
-func (s *Store) executorEligible(ctx context.Context, e Executor, summary ExecutorSchedulingSummary) (int, bool, error) {
+func (s *Store) executorEligibility(ctx context.Context, e Executor, summary ExecutorSchedulingSummary, now, activeAfter time.Time) (int, string, error) {
 	var active int
 	var usedCores float64
 	var usedMemory int64
 	if err := s.queryRow(ctx, `
 SELECT COUNT(*), COALESCE(SUM(claim_cores), 0), COALESCE(SUM(claim_memory_bytes), 0)
   FROM nodes WHERE claim_executor = ? AND claimed_by IS NOT NULL
-   AND lease_expires_at >= ? AND `+nodeNotDone, e.Name, time.Now().UnixNano()).Scan(&active, &usedCores, &usedMemory); err != nil {
-		return 0, false, err
+   AND lease_expires_at >= ? AND `+nodeNotDone, e.Name, now.UnixNano()).Scan(&active, &usedCores, &usedMemory); err != nil {
+		return 0, "", err
 	}
-	capSet := make(map[string]struct{}, len(e.Capabilities))
-	for _, capability := range e.Capabilities {
-		capSet[capability] = struct{}{}
+	coordinatorID, err := s.CoordinatorID(ctx)
+	if err != nil {
+		return 0, "", err
 	}
-	eligible := summary.Slots == 1 && active+summary.Slots <= e.MaxConcurrent &&
-		labelsSatisfied(summary.HardCapabilities, capSet) &&
-		executorResourcesFit(e, usedCores, usedMemory, summary.Resources)
-	return active, eligible, nil
+	return active, executorExclusionReason(e, summary, active, usedCores, usedMemory, activeAfter, coordinatorID), nil
 }
 
-func executorMembershipID(tokenPrefix, name string) string {
-	digest := sha256.Sum256([]byte(tokenPrefix + "\x00" + name))
-	return fmt.Sprintf("membership-%x", digest[:12])
+func (s *Store) executorEligibilityTx(ctx context.Context, tx *storeTx, e Executor, summary ExecutorSchedulingSummary, now, activeAfter time.Time) (int, string, error) {
+	var active int
+	var usedCores float64
+	var usedMemory int64
+	if err := tx.QueryRowContext(ctx, `
+SELECT COUNT(*), COALESCE(SUM(claim_cores), 0), COALESCE(SUM(claim_memory_bytes), 0)
+  FROM nodes WHERE claim_executor = ? AND claimed_by IS NOT NULL
+   AND lease_expires_at >= ? AND `+nodeNotDone, e.Name, now.UnixNano()).Scan(&active, &usedCores, &usedMemory); err != nil {
+		return 0, "", err
+	}
+	coordinatorID, err := coordinatorIDTx(ctx, tx)
+	if err != nil {
+		return 0, "", err
+	}
+	return active, executorExclusionReason(e, summary, active, usedCores, usedMemory, activeAfter, coordinatorID), nil
+}
+
+func executorExclusionReason(e Executor, summary ExecutorSchedulingSummary, active int, usedCores float64, usedMemory int64, activeAfter time.Time, coordinatorID string) string {
+	if e.LastSeen.Before(activeAfter) {
+		return "offline"
+	}
+	if summary.RequiredCoordinatorID != "" && summary.RequiredCoordinatorID != coordinatorID {
+		return "trusted_placement"
+	}
+	if summary.RequiredLocation != "" && (summary.RequiredLocation == executorLocationUnknown || summary.RequiredLocation != e.Location) {
+		return "trusted_placement"
+	}
+	capSet := executorTrustSet(e)
+	placementMissing, capabilityMissing := false, false
+	for _, term := range summary.HardCapabilities {
+		if term == "" || labelTermSatisfied(term, capSet) {
+			continue
+		}
+		if executorTermContainsPlacement(term) {
+			placementMissing = true
+		} else {
+			capabilityMissing = true
+		}
+	}
+	if placementMissing {
+		return "trusted_placement"
+	}
+	if capabilityMissing {
+		return "hard_capability"
+	}
+	if summary.Slots != 1 || active+summary.Slots > e.MaxConcurrent {
+		return "slot_limit"
+	}
+	if (e.Budget.Cores > 0 && usedCores+summary.Resources.Cores > e.Budget.Cores) ||
+		(e.Budget.MemoryBytes > 0 && usedMemory+summary.Resources.MemoryBytes > e.Budget.MemoryBytes) {
+		return "resource_budget"
+	}
+	if (e.HeadroomReported && e.Headroom.Cores >= 0 && summary.Resources.Cores > e.Headroom.Cores) ||
+		(e.HeadroomReported && e.Headroom.MemoryBytes >= 0 && summary.Resources.MemoryBytes > e.Headroom.MemoryBytes) {
+		return "headroom"
+	}
+	return ""
+}
+
+func executorTermContainsPlacement(term string) bool {
+	for _, value := range strings.Split(term, ",") {
+		value = strings.TrimSpace(value)
+		if value == "local" || strings.HasPrefix(value, "location=") {
+			return true
+		}
+	}
+	return false
+}
+
+func executorTrustSet(e Executor) map[string]struct{} {
+	trusted := make(map[string]struct{}, len(e.Capabilities)+1)
+	for _, capability := range e.Capabilities {
+		if capability != "local" && !strings.HasPrefix(capability, "location=") {
+			trusted[capability] = struct{}{}
+		}
+	}
+	if e.Location == executorLocationLocal || e.Location == executorLocationCloud {
+		trusted["location="+e.Location] = struct{}{}
+	}
+	// safety: coordinator placement is never grantable to an enrolled helper.
+	delete(trusted, "location="+executorLocationCoordinator)
+	return trusted
 }
 
 func executorResourceDigest(resource ExecutorResource) string {
@@ -466,11 +902,166 @@ func (s *Store) getExecutor(ctx context.Context, name string) (Executor, error) 
 	var seen int64
 	var reported int
 	err := s.queryRow(ctx, `
-SELECT name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
   FROM executors WHERE name = ?`, name).Scan(
-		&e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
+		&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
+		&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
+		&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes, &e.QueueDepth)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Executor{}, ErrNotFound
+	}
+	if err != nil {
+		return Executor{}, err
+	}
+	_ = json.Unmarshal(caps, &e.Capabilities)
+	if seen > 0 {
+		e.LastSeen = time.Unix(0, seen)
+	}
+	e.HeadroomReported = reported != 0
+	return e, nil
+}
+
+const executorRegistryAdvisoryLock = "sparkwing/executor-registry"
+const executorEligibilityAdvisoryLock = "sparkwing/executor-eligibility"
+
+// PostgreSQL allocation, release, claim-heartbeat, and plan mutations take a
+// shared eligibility lock. MarkNodeReady takes it exclusively while choosing
+// and recording a target, so ordinary mutations can overlap each other but no
+// availability change can cross the round-opening snapshot. Executor changes
+// use the registry lock; allocation paths also fence the affected executor row.
+func lockExecutorEligibilityTx(ctx context.Context, tx *storeTx, exclusive bool) error {
+	if tx.dialect != DialectPostgres {
+		return nil
+	}
+	lockFunction := "pg_advisory_xact_lock_shared"
+	if exclusive {
+		lockFunction = "pg_advisory_xact_lock"
+	}
+	_, err := tx.ExecContext(ctx, `SELECT `+lockFunction+`(hashtext(?))`, executorEligibilityAdvisoryLock)
+	return err
+}
+
+func (s *Store) withExecutorEligibilityTx(ctx context.Context, mutate func(*storeTx) error) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return err
+	}
+	if err := mutate(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func lockExecutorRegistryTx(ctx context.Context, tx *storeTx, exclusive bool) error {
+	if tx.dialect != DialectPostgres {
+		return nil
+	}
+	lockFunction := "pg_advisory_xact_lock_shared"
+	if exclusive {
+		lockFunction = "pg_advisory_xact_lock"
+	}
+	_, err := tx.ExecContext(ctx, `SELECT `+lockFunction+`(hashtext(?))`, executorRegistryAdvisoryLock)
+	return err
+}
+
+func canonicalExecutorNames(names ...string) []string {
+	ordered := append([]string(nil), names...)
+	sort.Strings(ordered)
+	out := ordered[:0]
+	for _, name := range ordered {
+		if name == "" || len(out) > 0 && out[len(out)-1] == name {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+func lockExecutorRowsCanonicalTx(ctx context.Context, tx *storeTx, names ...string) error {
+	return lockExecutorRowsTx(ctx, tx, true, names...)
+}
+
+func lockExistingExecutorRowsCanonicalTx(ctx context.Context, tx *storeTx, names ...string) error {
+	return lockExecutorRowsTx(ctx, tx, false, names...)
+}
+
+func lockExecutorRowsTx(ctx context.Context, tx *storeTx, requireAll bool, names ...string) error {
+	if tx.dialect != DialectPostgres {
+		return nil
+	}
+	ordered := canonicalExecutorNames(names...)
+	if len(ordered) == 0 {
+		return nil
+	}
+	if len(ordered) > MaxEnrolledExecutors {
+		return ErrExecutorEnrollmentLimit
+	}
+	args := make([]any, len(ordered))
+	for i := range ordered {
+		args[i] = ordered[i]
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM executors WHERE name IN (`+
+		strings.TrimSuffix(strings.Repeat("?,", len(ordered)), ",")+`) ORDER BY name`+tx.forUpdate(), args...)
+	if err != nil {
+		return err
+	}
+	locked := 0
+	for rows.Next() {
+		locked++
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	if requireAll && locked != len(ordered) {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func lockAllExecutorRowsCanonicalTx(ctx context.Context, tx *storeTx) error {
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM executors ORDER BY name LIMIT ?`, MaxEnrolledExecutors+1)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		names = append(names, name)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	if len(names) > MaxEnrolledExecutors {
+		return ErrExecutorEnrollmentLimit
+	}
+	return lockExecutorRowsCanonicalTx(ctx, tx, names...)
+}
+
+func (s *Store) getExecutorTx(ctx context.Context, tx *storeTx, name string) (Executor, error) {
+	var e Executor
+	var caps []byte
+	var seen int64
+	var reported int
+	err := tx.QueryRowContext(ctx, `
+SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+       budget_cores, budget_memory_bytes, principal, last_seen,
+       headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
+  FROM executors WHERE name = ?`, name).Scan(
+		&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
 		&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
 		&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes, &e.QueueDepth)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -501,6 +1092,9 @@ func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, cl
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return nil, err
+	}
 	n, err := s.claimReadyNodeForExecutorTx(ctx, tx, claimant, executorName, runID, nodeID, holderID, lease, reservationID, slot, resourceDigest)
 	if err != nil {
 		return nil, err
@@ -512,16 +1106,36 @@ func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, cl
 }
 
 func (s *Store) claimReadyNodeForExecutorTx(ctx context.Context, tx *storeTx, claimant ClaimIdentity, executorName, runID, nodeID, holderID string, lease time.Duration, reservationID string, slot int, resourceDigest string) (*Node, error) {
+	n := &Node{}
+	err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
+  FROM nodes
+ WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+tx.forUpdate(), runID, nodeID), n)
+	if errors.Is(err, ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var lockedRun string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&lockedRun); err != nil {
+		return nil, err
+	}
+	if err := lockExecutorRegistryTx(ctx, tx, false); err != nil {
+		return nil, err
+	}
+	if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
+		return nil, err
+	}
 	var e Executor
 	var caps []byte
 	var reported int
 	var seen int64
-	err := tx.QueryRowContext(ctx, `
-SELECT token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+	err = tx.QueryRowContext(ctx, `
+SELECT executor_id, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes
-  FROM executors WHERE name = ?`+s.forUpdate(), executorName).Scan(
-		&e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
+  FROM executors WHERE name = ?`, executorName).Scan(
+		&e.id, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
 		&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
 		&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -535,6 +1149,9 @@ SELECT token_prefix, kind, location, capabilities_json, base_priority, priority_
 	}
 	_ = json.Unmarshal(caps, &e.Capabilities)
 	e.HeadroomReported = reported != 0
+	if seen > 0 {
+		e.LastSeen = time.Unix(0, seen)
+	}
 
 	now := time.Now()
 	if !e.HeadroomReported || time.Unix(0, seen).Before(now.Add(-ExecutorRegistrationActiveWindow)) || slot >= e.MaxConcurrent {
@@ -566,20 +1183,6 @@ SELECT COUNT(*), COALESCE(SUM(claim_cores), 0), COALESCE(SUM(claim_memory_bytes)
 		return nil, ErrNotFound
 	}
 
-	n := &Node{}
-	err = scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
-  FROM nodes
- WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+s.forUpdate(), runID, nodeID), n)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	capSet := make(map[string]struct{}, len(e.Capabilities))
-	for _, capability := range e.Capabilities {
-		capSet[capability] = struct{}{}
-	}
 	charge, err := s.executorNodeCharge(ctx, tx, n)
 	if err != nil {
 		return nil, err
@@ -587,24 +1190,77 @@ SELECT COUNT(*), COALESCE(SUM(claim_cores), 0), COALESCE(SUM(claim_memory_bytes)
 	if resourceDigest != executorResourceDigest(charge) {
 		return nil, ErrLockHeld
 	}
-	if !labelsSatisfied(n.NeedsLabels, capSet) || !executorResourcesFit(e, usedCores, usedMemory, charge) {
+	coordinatorID, err := coordinatorIDTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	summary, err := s.schedulingSummaryTx(ctx, tx, runID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	if executorExclusionReason(e, summary, active, usedCores, usedMemory, now.Add(-ExecutorRegistrationActiveWindow), coordinatorID) != "" {
 		return nil, ErrNotFound
 	}
-
+	authorityID, err := controllerAuthorityIDTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	expires := now.Add(lease)
-	if _, err := tx.ExecContext(ctx, `
+	membershipID := executorMembershipID(authorityID, e.id)
+	result, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
        claim_executor = ?, claim_cores = ?, claim_memory_bytes = ?,
-       claim_reservation = ?, claim_slot = ?, lease_expires_at = ?
- WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
+       claim_reservation = ?, claim_slot = ?, lease_expires_at = ?,
+       coordinator_id = ?, claim_membership_id = ?, executor_kind = ?, executor_id = ?,
+	   executor_location = ?, reservation_id = ?, claim_generation = claim_generation + 1,
+	   required_coordinator_id = CASE WHEN required_coordinator_id = '' THEN ? ELSE required_coordinator_id END,
+	   required_executor_location = CASE WHEN required_executor_location = '' THEN ? ELSE required_executor_location END
+	 WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL
+	   AND (required_coordinator_id = '' OR required_coordinator_id = ?)
+	   AND (required_executor_location = '' OR (required_executor_location != 'unknown' AND required_executor_location = ?))`,
 		holderID, e.Principal, claimant.TokenPrefix,
 		executorName, charge.Cores, charge.MemoryBytes, reservationID, slot,
-		expires.UnixNano(), n.RunID, n.NodeID); err != nil {
+		expires.UnixNano(), coordinatorID, membershipID, e.Kind, e.id,
+		e.Location, reservationID, coordinatorID, e.Location, n.RunID, n.NodeID, coordinatorID, e.Location)
+	if err != nil {
 		return nil, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if changed != 1 {
+		return nil, ErrLockHeld
 	}
 	n.ClaimedBy = holderID
 	n.LeaseExpiresAt = &expires
+	n.CoordinatorID = coordinatorID
+	n.ClaimMembershipID = membershipID
+	n.ExecutorKind = e.Kind
+	n.ExecutorID = e.id
+	n.ExecutorLocation = e.Location
+	if n.RequiredCoordinatorID == "" {
+		n.RequiredCoordinatorID = coordinatorID
+	}
+	if n.RequiredExecutorLocation == "" {
+		n.RequiredExecutorLocation = e.Location
+	}
+	n.ReservationID = reservationID
+	n.ClaimGeneration++
+	event := executionAttributionEventFields(e.Kind, executorName, e.Location)
+	event["claim_generation"] = n.ClaimGeneration
+	if n.AvoidUntil != nil && n.AvoidUntil.After(now) {
+		event["avoided_executor_kind"] = n.AvoidExecutorKind
+		if n.AvoidExecutorID == e.id {
+			event["avoided_executor_name"] = executorName
+		}
+		event["avoid_until"] = n.AvoidUntil
+	}
+	payload, _ := json.Marshal(event)
+	if _, err := appendEventTx(ctx, tx, n.RunID, n.NodeID, "executor_selected", payload, now); err != nil {
+		return nil, err
+	}
 	return n, nil
 }
 

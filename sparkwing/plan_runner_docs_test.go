@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestPrefersDocumentationStatesStoredBehavior(t *testing.T) {
+func TestPrefersDocumentationStatesEnrolledExecutorBehavior(t *testing.T) {
 	tests := []struct {
 		file     string
 		receiver string
@@ -39,7 +39,7 @@ func TestExecutionModelIsClearlyHistorical(t *testing.T) {
 	}
 }
 
-func TestGeneratedPrefersDocumentationStatesStoredBehavior(t *testing.T) {
+func TestGeneratedPrefersDocumentationStatesEnrolledExecutorBehavior(t *testing.T) {
 	for _, path := range []string{"../docs/sdk-reference.md", "../pkg/docs/mirror/sdk-reference.md"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -61,7 +61,7 @@ func TestGeneratedPrefersDocumentationStatesStoredBehavior(t *testing.T) {
 	}
 }
 
-func TestSchedulingPrefersDocumentationStatesStoredBehavior(t *testing.T) {
+func TestSchedulingPrefersDocumentationStatesEnrolledExecutorBehavior(t *testing.T) {
 	for _, path := range []string{"../docs/scheduling.md", "../pkg/docs/mirror/scheduling.md"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -111,12 +111,13 @@ func methodDoc(t *testing.T, path, receiver, method string) string {
 func assertPreferenceContract(t *testing.T, doc string) {
 	t.Helper()
 	doc = strings.Join(strings.Fields(doc), " ")
-	for _, want := range []string{"plan-snapshot metadata", "do not affect runner selection"} {
+	for _, want := range []string{"plan-snapshot metadata", "enrolled-executor", "priority ceiling", "legacy"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("preference documentation does not contain %q", want)
 		}
 	}
 	for _, falseClaim := range []string{
+		"do not affect runner selection",
 		"profile default",
 		"default runner",
 		"biases runner selection",

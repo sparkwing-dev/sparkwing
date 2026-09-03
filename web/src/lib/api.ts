@@ -181,6 +181,7 @@ export interface Node {
   finished_at?: string;
   duration_ms: number;
   claimed_by?: string;
+  claimed?: boolean;
   lease_expires_at?: string;
   status_detail?: string;
   last_heartbeat?: string;

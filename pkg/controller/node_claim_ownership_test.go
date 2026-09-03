@@ -22,9 +22,14 @@ type ownershipFixture struct {
 	owner    string
 	stranger string
 	store    *store.Store
+	fence    store.NodeClaimFence
 }
 
 func newOwnershipFixture(t *testing.T) ownershipFixture {
+	return newOwnershipFixtureWithScopes(t, []string{controller.ScopeNodesClaim})
+}
+
+func newOwnershipFixtureWithScopes(t *testing.T, scopes []string) ownershipFixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -34,12 +39,12 @@ func newOwnershipFixture(t *testing.T) ownershipFixture {
 
 	now := time.Now().UTC()
 	owner, _, err := st.CreateToken("runner-a", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim}, 0, now)
+		scopes, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken owner: %v", err)
 	}
 	stranger, _, err := st.CreateToken("runner-b", store.TokenKindRunner,
-		[]string{controller.ScopeNodesClaim}, 0, now)
+		scopes, 0, now)
 	if err != nil {
 		t.Fatalf("CreateToken stranger: %v", err)
 	}
@@ -61,7 +66,11 @@ func newOwnershipFixture(t *testing.T) ownershipFixture {
 	if n == nil || n.NodeID != "only" {
 		t.Fatalf("owner claimed %+v, want node only", n)
 	}
-	return ownershipFixture{url: srv.URL, owner: owner, stranger: stranger, store: st}
+	return ownershipFixture{
+		url: srv.URL, owner: owner, stranger: stranger, store: st,
+		fence: store.NodeClaimFence{HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+			ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration},
+	}
 }
 
 func (f ownershipFixture) post(t *testing.T, token, path, body string) int {
@@ -76,6 +85,12 @@ func (f ownershipFixture) post(t *testing.T, token, path, body string) int {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
+	if token == f.owner {
+		req.Header.Set(store.ClaimHolderHeader, f.fence.HolderID)
+		req.Header.Set(store.ClaimMembershipHeader, f.fence.MembershipID)
+		req.Header.Set(store.ClaimReservationHeader, f.fence.ReservationID)
+		req.Header.Set(store.ClaimGenerationHeader, strconv.FormatInt(f.fence.ClaimGeneration, 10))
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +150,7 @@ func TestNodeClaimOwnership_ReadinessRoutesAreAdminOnly(t *testing.T) {
 
 func TestNodeClaimOwnership_HeartbeatRefusesAnotherPrincipalsHolderID(t *testing.T) {
 	f := newOwnershipFixture(t)
-	ctx := context.Background()
+	ctx := store.WithNodeClaimFence(context.Background(), f.fence)
 
 	if err := client.NewWithToken(f.url, nil, f.owner).
 		HeartbeatNodeClaim(ctx, "run-1", "only", "runner:box-a:1", time.Minute, nil); err != nil {
@@ -149,7 +164,7 @@ func TestNodeClaimOwnership_HeartbeatRefusesAnotherPrincipalsHolderID(t *testing
 }
 
 func TestNodeClaimOwnership_ExpiredClaimStopsAdmittingWrites(t *testing.T) {
-	f := newOwnershipFixture(t)
+	f := newOwnershipFixtureWithScopes(t, []string{controller.ScopeNodesClaim, controller.ScopeRunsState})
 	if _, err := f.store.DB().Exec(
 		`UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ?`,
 		time.Now().Add(-time.Minute).UnixNano(), "run-1", "only",
@@ -157,9 +172,93 @@ func TestNodeClaimOwnership_ExpiredClaimStopsAdmittingWrites(t *testing.T) {
 		t.Fatalf("expire lease: %v", err)
 	}
 	got := f.post(t, f.owner, "/api/v1/runs/run-1/nodes/only/annotations", `{"message":"hi"}`)
-	if got != http.StatusForbidden {
-		t.Errorf("POST annotations under an expired claim = %d, want 403", got)
+	if got != http.StatusConflict {
+		t.Errorf("POST annotations under an expired claim = %d, want 409", got)
 	}
+	got = f.post(t, f.owner, "/api/v1/runs/run-1/events", `{"node_id":"only","kind":"stale"}`)
+	if got != http.StatusConflict {
+		t.Errorf("POST event under an expired claim = %d, want 409", got)
+	}
+	got = f.post(t, f.owner, "/api/v1/runs/run-1/nodes/only/status", `{"status":"paused"}`)
+	if got != http.StatusConflict {
+		t.Errorf("POST status under an expired claim = %d, want 409", got)
+	}
+}
+
+func TestNodeClaimOwnership_TerminalEventKeepsExactAttribution(t *testing.T) {
+	f := newOwnershipFixtureWithScopes(t, []string{controller.ScopeNodesClaim, controller.ScopeRunsState})
+	if got := f.post(t, f.owner, "/api/v1/runs/run-1/nodes/only/finish", `{"outcome":"success"}`); got != http.StatusNoContent {
+		t.Fatalf("POST finish = %d, want 204", got)
+	}
+	if got := f.post(t, f.owner, "/api/v1/runs/run-1/events", `{"node_id":"only","kind":"node_succeeded"}`); got != http.StatusOK {
+		t.Fatalf("POST terminal event = %d, want 200", got)
+	}
+}
+
+func TestTriggerClaimOwnership_RequiresExactLiveRunBoundGeneration(t *testing.T) {
+	newClaim := func(t *testing.T) (scopedFixture, *client.Client, *store.Trigger) {
+		t.Helper()
+		f, raw := newScopedFixture(t, runnerScopes)
+		seedRepoTrigger(t, f.store, "trigger-run", "acme/repo")
+		c := client.NewWithToken(f.url, nil, raw)
+		trigger, err := c.ClaimTrigger(context.Background())
+		if err != nil || trigger == nil {
+			t.Fatalf("ClaimTrigger = (%+v, %v)", trigger, err)
+		}
+		seedRunNode(t, f.store, trigger.ID, "build")
+		return f, c, trigger
+	}
+	triggerContext := func(trigger *store.Trigger) context.Context {
+		return store.WithTriggerClaimFence(context.Background(), store.TriggerClaimFence{
+			ClaimGeneration: trigger.ClaimSeq,
+		})
+	}
+
+	t.Run("live generation", func(t *testing.T) {
+		_, c, trigger := newClaim(t)
+		if err := c.SetNodeSummary(triggerContext(trigger), trigger.ID, "build", "live"); err != nil {
+			t.Fatalf("SetNodeSummary: %v", err)
+		}
+	})
+
+	t.Run("expired lease", func(t *testing.T) {
+		f, c, trigger := newClaim(t)
+		if _, err := f.store.DB().Exec(`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`,
+			time.Now().Add(-time.Second).UnixNano(), trigger.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.SetNodeSummary(triggerContext(trigger), trigger.ID, "build", "stale"); !errors.Is(err, store.ErrLockHeld) {
+			t.Fatalf("expired trigger mutation = %v, want ErrLockHeld", err)
+		}
+	})
+
+	t.Run("stale generation", func(t *testing.T) {
+		f, c, trigger := newClaim(t)
+		if _, err := f.store.DB().Exec(`UPDATE triggers SET claim_seq = claim_seq + 1 WHERE id = ?`, trigger.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.SetNodeSummary(triggerContext(trigger), trigger.ID, "build", "stale"); !errors.Is(err, store.ErrLockHeld) {
+			t.Fatalf("stale trigger generation mutation = %v, want ErrLockHeld", err)
+		}
+	})
+
+	t.Run("cross run", func(t *testing.T) {
+		f, c, trigger := newClaim(t)
+		seedRunNode(t, f.store, "other-run", "build")
+		if err := c.SetNodeSummary(triggerContext(trigger), "other-run", "build", "cross-run"); !errors.Is(err, store.ErrLockHeld) {
+			t.Fatalf("cross-run trigger mutation = %v, want ErrLockHeld", err)
+		}
+	})
+
+	t.Run("node fence takes precedence", func(t *testing.T) {
+		_, c, trigger := newClaim(t)
+		ctx := store.WithNodeClaimFence(triggerContext(trigger), store.NodeClaimFence{
+			HolderID: "stale-holder", ClaimGeneration: 1,
+		})
+		if err := c.SetNodeSummary(ctx, trigger.ID, "build", "fallback"); err == nil {
+			t.Fatal("mixed node and trigger fences unexpectedly authorized the mutation")
+		}
+	})
 }
 
 func (f ownershipFixture) get(t *testing.T, token, path string) (int, string) {
@@ -201,18 +300,22 @@ func TestNodeClaimOwnership_ServerCapsTheRequestedLease(t *testing.T) {
 	}
 
 	const dayInSeconds = 86400
-	if got := f.post(t, f.stranger, "/api/v1/nodes/claim",
-		`{"holder_id":"greedy-1","lease_secs":`+strconv.Itoa(dayInSeconds)+`}`); got != http.StatusOK {
-		t.Fatalf("claim with a day-long lease = %d, want 200", got)
+	greedy := client.NewWithToken(f.url, nil, f.stranger)
+	n, err := greedy.ClaimNode(context.Background(), "greedy-1", nil, dayInSeconds*time.Second, nil)
+	if err != nil || n == nil {
+		t.Fatalf("claim with a day-long lease = %+v, %v", n, err)
 	}
 	limit := time.Now().Add(store.MaxLeaseDuration).Add(time.Minute)
 	if exp := f.leaseExpiry(t, "run-2", "only"); exp.After(limit) {
 		t.Errorf("claim lease expires at %s, want no later than %s", exp, limit)
 	}
 
-	if got := f.post(t, f.stranger, "/api/v1/runs/run-2/nodes/only/heartbeat",
-		`{"holder_id":"greedy-1","lease_secs":`+strconv.Itoa(dayInSeconds)+`}`); got != http.StatusNoContent {
-		t.Fatalf("heartbeat with a day-long lease = %d, want 204", got)
+	claimCtx := store.WithNodeClaimFence(context.Background(), store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	})
+	if err := greedy.HeartbeatNodeClaim(claimCtx, "run-2", "only", "greedy-1", dayInSeconds*time.Second, nil); err != nil {
+		t.Fatalf("heartbeat with a day-long lease: %v", err)
 	}
 	limit = time.Now().Add(store.MaxLeaseDuration).Add(time.Minute)
 	if exp := f.leaseExpiry(t, "run-2", "only"); exp.After(limit) {
@@ -269,6 +372,73 @@ func TestNodeClaimOwnership_CrossRunReadsAndHeartbeatNeedAClaim(t *testing.T) {
 	}
 	if got := f.post(t, f.owner, "/api/v1/runs/run-1/heartbeat", ""); got == http.StatusForbidden {
 		t.Errorf("POST the claimed run's own heartbeat = 403, want the route to admit it")
+	}
+}
+
+func TestNodeReadResponsesHideClaimHolderAndReservations(t *testing.T) {
+	f := newOwnershipFixtureWithScopes(t, []string{controller.ScopeNodesClaim, controller.ScopeRunsRead})
+	now := time.Now().UnixNano()
+	if _, err := f.store.DB().Exec(`UPDATE nodes SET reservation_id = ?, claim_reservation_id = ?,
+coordinator_id = ?, claim_membership_id = ?, executor_kind = 'agent', executor_id = ?,
+executor_location = 'local', required_coordinator_id = ?, claim_worker_id = ?,
+claim_executor_kind = 'agent', attempts_consumed = 1, execution_started_at = ?
+WHERE run_id = ? AND node_id = ?`, "execution-reservation", "offer-reservation",
+		"coordinator-secret", "membership-secret", "desktop", "coordinator-secret", "desktop",
+		now, "run-1", "only"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.DB().Exec(`INSERT INTO node_execution_attempts
+(lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
+ coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
+ holder_id, reservation_id, started_at)
+VALUES (?, ?, ?, 1, ?, ?, ?, 'agent', 'desktop', ?, 'local', ?, ?, ?)`,
+		"run-1", "run-1", "only", f.fence.ClaimGeneration,
+		"coordinator-secret", "membership-secret", "desktop", f.fence.HolderID,
+		"execution-reservation", now); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/api/v1/runs/run-1/nodes/only",
+		"/api/v1/runs/run-1/nodes",
+		"/api/v1/runs/run-1?include=nodes",
+	} {
+		code, body := f.get(t, f.owner, path)
+		if code != http.StatusOK {
+			t.Fatalf("GET %s = %d (%s)", path, code, body)
+		}
+		for _, secret := range []string{"runner:box-a:1", "execution-reservation", "offer-reservation", "coordinator-secret", "membership-secret"} {
+			if strings.Contains(body, secret) {
+				t.Errorf("GET %s exposed %q", path, secret)
+			}
+		}
+		for _, internal := range []string{"claimed_by", "claim_worker_id", "claim_generation", "claim_membership_id", "coordinator_id", "executor_id", "required_coordinator_id", "reservation_id", "holder_id", "membership_id", "token_prefix"} {
+			if strings.Contains(body, `"`+internal+`"`) {
+				t.Errorf("GET %s exposed internal field %q: %s", path, internal, body)
+			}
+		}
+		if !strings.Contains(body, `"executor_name":"desktop"`) ||
+			!strings.Contains(body, `"executor_kind":"agent"`) ||
+			!strings.Contains(body, `"executor_location":"local"`) {
+			t.Errorf("GET %s omitted public execution attribution: %s", path, body)
+		}
+	}
+	for _, kind := range []string{"executor_selected", "execution_attempt_started", "execution_attempt_finished"} {
+		payload := []byte(`{"claim_generation":"private-generation-value","attempt":1,"executor_name":"desktop"}`)
+		if _, err := f.store.AppendEvent(context.Background(), "run-1", "only", kind, payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, body := f.get(t, f.owner, "/api/v1/runs/run-1/events")
+	if code != http.StatusOK {
+		t.Fatalf("GET events = %d (%s)", code, body)
+	}
+	for _, private := range []string{`"claim_generation"`, "private-generation-value"} {
+		if strings.Contains(body, private) {
+			t.Errorf("GET events exposed %q: %s", private, body)
+		}
+	}
+	if count := strings.Count(body, `"executor_name":"desktop"`); count < 3 {
+		t.Errorf("GET events omitted public attribution: %s", body)
 	}
 }
 

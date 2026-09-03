@@ -121,6 +121,9 @@ func collectDispatchEnv(ctx context.Context, node *sparkwing.JobNode, runID stri
 		}
 		k, v := kv[:i], kv[i+1:]
 		if !envAllowed(k) {
+			if envDenyExact[k] {
+				out[k] = v
+			}
 			continue
 		}
 		out[k] = v
@@ -153,6 +156,11 @@ func redactDispatchEnv(ctx context.Context, env map[string]string) dispatchEnv {
 	got := dispatchEnv{values: env}
 	masker := secrets.MaskerFromContext(ctx)
 	for k, v := range env {
+		if envDenyExact[k] {
+			delete(env, k)
+			got.redactedKeys = append(got.redactedKeys, k)
+			continue
+		}
 		// safety: drop credential-shaped names and values; the snapshot must not carry a bearer or a DSN password.
 		if envredact.CredentialName(k) || envredact.CredentialValue(v) {
 			delete(env, k)
@@ -177,9 +185,24 @@ func redactDispatchEnv(ctx context.Context, env map[string]string) dispatchEnv {
 }
 
 var envDenyExact = map[string]bool{
-	wingdclient.HostBinEnv:         true,
-	"SPARKWING_FLEET_PARENT_GUARD": true,
-	"SPARKWING_FLEET_PARENT_TOKEN": true,
+	wingdclient.HostBinEnv:               true,
+	"SPARKWING_AGENT_TOKEN":              true,
+	"SPARKWING_CONTROLLER_URL":           true,
+	"SPARKWING_LOGS_URL":                 true,
+	"SPARKWING_CACHE_TOKEN":              true,
+	remoteExecutionCapabilityEnv:         true,
+	remoteExecutionCapabilityInputEnv:    true,
+	remoteBrokeredArtifactEnv:            true,
+	remoteBrokeredClaimEnv:               true,
+	"SPARKWING_NODE_CLAIM_HOLDER":        true,
+	"SPARKWING_NODE_CLAIM_GENERATION":    true,
+	"SPARKWING_NODE_CLAIM_MEMBERSHIP":    true,
+	"SPARKWING_NODE_CLAIM_RESERVATION":   true,
+	"SPARKWING_TRIGGER_CLAIM_GENERATION": true,
+	"SPARKWING_TRIGGER_GENERATION":       true,
+	"SPARKWING_ATTEMPT_ORDINAL":          true,
+	"SPARKWING_FLEET_PARENT_GUARD":       true,
+	"SPARKWING_FLEET_PARENT_TOKEN":       true,
 }
 
 func envAllowed(name string) bool {

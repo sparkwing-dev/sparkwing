@@ -12,19 +12,45 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type runNodeConfig struct {
-	coordinated   bool
-	gitcacheURL   string
-	gitcacheToken string
+	coordinated    bool
+	claimed        bool
+	brokeredChild  bool
+	brokerArtifact bool
+	claimFence     store.NodeClaimFence
+	gitcacheURL    string
+	gitcacheToken  string
+}
+
+func brokeredExecutionChild(artifact bool) RunNodeOption {
+	return func(c *runNodeConfig) {
+		c.brokeredChild = true
+		c.brokerArtifact = artifact
+	}
 }
 
 type RunNodeOption func(*runNodeConfig)
 
 func Coordinated() RunNodeOption {
 	return func(c *runNodeConfig) { c.coordinated = true }
+}
+
+func ClaimedNode() RunNodeOption {
+	return func(c *runNodeConfig) { c.claimed = true }
+}
+
+func ClaimedNodeAttempt(node *store.Node) RunNodeOption {
+	return func(c *runNodeConfig) {
+		c.claimed = true
+		c.claimFence = store.NodeClaimFence{
+			MembershipID: node.ClaimMembershipID, ReservationID: node.ReservationID,
+			ClaimGeneration: node.ClaimGeneration,
+		}
+	}
 }
 
 // WithGitcache avoids process-global cache credentials when one agent executes concurrent nodes.

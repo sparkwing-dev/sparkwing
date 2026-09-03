@@ -130,17 +130,18 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			selfTerminate, err := handleOneTrigger(ctx, cli, trigger, opts, logger)
+			claimCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trigger.ClaimSeq})
+			selfTerminate, err := handleOneTrigger(claimCtx, cli, trigger, opts, logger)
 			if err != nil {
 				logger.Error("trigger loop: trigger failed",
 					"run_id", trigger.ID, "err", err)
-				finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(claimCtx), 5*time.Second)
 				if ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error()); ferr != nil {
 					logger.Warn("trigger loop: FinishRun failed",
 						"run_id", trigger.ID, "err", ferr)
 				}
 				finishCancel()
-				_ = cli.FinishTrigger(context.WithoutCancel(ctx), trigger.ID)
+				_ = cli.FinishTrigger(context.WithoutCancel(claimCtx), trigger.ID)
 			}
 			if selfTerminate {
 				logger.Error("trigger loop: self-terminating after prolonged controller silence",
@@ -161,6 +162,7 @@ func ensureTriggerWorkRoot(path string, private bool) error {
 var BakedBinary = os.Getenv("SPARKWING_BAKED_BINARY")
 
 func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) (selfTerminate bool, err error) {
+	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trigger.ClaimSeq})
 	ctx, span := otelutil.Tracer("sparkwing-trigger-loop").Start(ctx, "handleOneTrigger")
 	defer span.End()
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{

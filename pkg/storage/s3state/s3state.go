@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -657,6 +658,42 @@ func (b *Backend) FinishNodeWithReason(ctx context.Context, runID, nodeID, outco
 	})
 }
 
+func (b *Backend) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
+	n, err := b.GetNode(ctx, runID, nodeID)
+	if err != nil {
+		return err
+	}
+	if n.Status != "done" || n.Outcome != "failed" || n.FailureReason == store.FailureAgentLost {
+		return store.ErrLockHeld
+	}
+	return b.mutateNode(ctx, runID, nodeID, func(n *store.Node) {
+		n.Status = "pending"
+		n.Outcome = ""
+		n.Error = ""
+		n.Output = nil
+		n.StartedAt = nil
+		n.FinishedAt = nil
+		n.ReadyAt = nil
+		n.ClaimedBy = ""
+		n.Claimed = false
+		n.LeaseExpiresAt = nil
+		n.CoordinatorID = ""
+		n.ClaimMembershipID = ""
+		n.ExecutorKind = ""
+		n.ExecutorID = ""
+		n.ExecutorLocation = ""
+		n.ExecutionStartedAt = nil
+		n.ReservationID = ""
+		n.StatusDetail = ""
+		n.LastHeartbeat = nil
+		n.FailureReason = ""
+		n.ExitCode = nil
+		n.Annotations = nil
+		n.Summary = ""
+		n.ArtifactManifest = ""
+	})
+}
+
 func (b *Backend) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	return b.mutateNode(ctx, runID, nodeID, func(n *store.Node) { n.Deps = deps })
 }
@@ -690,6 +727,22 @@ func (b *Backend) GetNode(ctx context.Context, runID, nodeID string) (*store.Nod
 	}
 	clone := *n
 	return &clone, nil
+}
+
+func (b *Backend) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
+	rs, err := b.getRunState(ctx, runID, true)
+	if err != nil {
+		return nil, err
+	}
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	nodes := make([]*store.Node, 0, len(rs.nodes))
+	for _, node := range rs.nodes {
+		clone := *node
+		nodes = append(nodes, &clone)
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
+	return nodes, nil
 }
 
 func (b *Backend) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {

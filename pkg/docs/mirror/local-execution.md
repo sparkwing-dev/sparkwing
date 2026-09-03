@@ -395,8 +395,12 @@ sparkwing cluster agents enroll --profile prod \
 ```
 
 The controller-owned enrollment is the trust envelope. Kind identifies an
-`agent` or `gateway` execution boundary; location is display-only and never
-affects placement. Capabilities, priority range, concurrency ceiling, and
+`agent` or `gateway` execution boundary; location is controller-owned placement
+policy. `location=local` and `location=cloud` requirements match only this
+field, while `unknown` fails both. The reserved `location=coordinator` selector
+and compatibility alias `local` are ungrantable to helpers. The awarded value
+also becomes immutable attribution and a hard requirement for an agent-loss
+retry. Capabilities, priority range, concurrency ceiling, and
 resource budget come only from enrollment. Worker traffic cannot add or widen
 them, and the agents API never returns the credential prefix or principal.
 
@@ -404,7 +408,9 @@ Set `name` for one enrolled coordinator, or use `coordinators` for several.
 Every membership needs a distinct revocable token and its enrolled name;
 network discovery never grants trust. The top-level concurrency and
 contribution settings are machine-wide local ceilings. A membership may narrow
-them, never widen them:
+them, never widen them. wingd enforces both levels when it grants each
+reservation, so simultaneous slots and separate agent processes cannot
+oversubscribe a ceiling after advertising stale headroom:
 
 ```yaml
 name: desk
@@ -436,13 +442,30 @@ one slot ledger across all configured coordinators, so the same physical slot
 cannot back simultaneous offers to two controllers. A gateway needs an
 equivalent downstream admission reservation before it offers.
 
-The controller waits no more than five seconds. Priority 100 and the highest
-eligible ceiling recorded at round open win immediately; otherwise the deadline
-winner is the highest effective priority, then the earliest offer, executor
-name, slot, and holder. `Requires` and resource limits filter before ranking.
-Run priority and `Prefers` may reorder eligible executors only inside each
-administrator-owned priority range. A retry after a lost response recovers the
-same fenced claim. Legacy direct claims remain FIFO and do not use this ranking.
+The controller waits no more than five seconds. Priority 100 and the exact
+highest eligible effective priority recorded at round open win immediately;
+otherwise the deadline winner is the highest effective priority, then the
+earliest offer, executor name, slot, and holder. `Requires` and resource limits
+filter before ranking.
+Run priority and the first matching `Prefers` term add to base priority and are
+then clamped inside each administrator-owned priority range. A preference is a
+small tie-breaking boost, not an absolute override: base priority can still
+outweigh it. Arbitration is scoped to one controller; configured memberships
+share physical slots but do not yet compare priorities across controllers. A
+retry after a lost response recovers the same fenced claim. Legacy direct
+claims remain FIFO and do not use this ranking.
+
+The controller owns retries after an agent or gateway disappears. The source
+node becomes terminal `agent_lost` and is never resumed. Loss before the
+job-body start acknowledgement creates a fresh linked run without spending
+`.Retry(n)`; loss after acknowledgement spends the persisted invocation count.
+The same total budget covers local retry loops, `RetryAuto` dispatches, and
+fresh runs. A replacement keeps the captured source/plan and the original
+coordinator and location, rehydrates unrelated terminal work, and reruns only
+the lost work and its descendants after durable backoff. Another executor is
+preferred briefly, but the original may reclaim when it is the only eligible
+capacity. Coordinator fallback cannot relax the required placement. External
+effects remain at-least-once within the configured budget.
 
 With the Helm values `runner.triggerRunner.kind: warm` and
 `runner.automountServiceAccountToken: true`, a trigger worker offers each node
@@ -478,17 +501,36 @@ Kubernetes quantity fails at startup rather than at pod creation. The
 namespace-wide backstop is the chart's `limitRange` and `resourceQuota`; see
 the `sparkwing-runner-bundle` README.
 
-The first remote-machine deployment assumes a trusted single-tenant boundary.
-Give each device its own short-lived runner token, revoke it when the device
-leaves the pool, and do not expose a raw unauthenticated cache outside a
-trusted private network. Kubernetes fallback supplies its runner token to the
-`run-node` process as `SPARKWING_AGENT_TOKEN`, so pipeline code in that Job can
-read the controller credential. Source snapshots remain immutable, and
-Sparkwing does not embed credentials into cached source or binary objects.
-Runner tokens may read only trigger and run records covered by their live
-claim; secret run values still require a live node claim. The compiled pipeline
-binary interprets `warm`, so upgrade the controller, runner, and pipeline module
-to the same release before enabling this mode.
+Enrolling a workstation or gateway authorizes repository pipeline code to run
+as the agent service's OS user. Assisted execution starts every job body in a
+child process. The supervisor keeps the enrollment token and claim identity;
+the child receives a process-lifetime loopback capability limited to its
+awarded run and node. Execution start, finish, and logs also require the
+acknowledged attempt ordinal. That capability cannot claim or renew work,
+manage the fleet, or call administrative routes. The child inherits only the minimum
+runtime environment plus non-credential variables explicitly named by
+`SPARKWING_SUBMIT_ENV_ALLOW`, not the agent service's arbitrary cloud, cache,
+or service credentials.
+
+This is credential isolation, not an OS sandbox. Pipeline code can still read
+files, use the network, and start processes with every permission the agent OS
+user has. Run an agent under a dedicated account and enroll it only for
+repositories whose code that account may execute. Give each device its own
+short-lived runner token and revoke it when the device leaves the pool.
+Sparkwing never joins a tailnet or changes host networking; configure the
+controller connection outside Sparkwing. Do not expose a raw unauthenticated
+cache outside a trusted private network. Source snapshots remain immutable,
+and cached source or binary objects do not contain credentials. The compiled
+pipeline binary interprets `warm`, so upgrade the controller, runner, and
+pipeline module to the same release before enabling this mode.
+
+Schema 30 is an internal dependency of the assisted-execution release, not a
+standalone compatibility boundary. It establishes the process and credential
+boundary, but ordinary node mutations are not yet current-attempt-scoped and
+the child cannot yet use `Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`,
+cross-pipeline references, or dynamic `SpawnNode`. Those operations and the
+complete attempt API require the durable grants in schema 31. Do not deploy
+schema 30 without that follow-on capability layer.
 The bundled service installer supports Linux and macOS. Native Windows agents
 run under an operator-managed service; WSL can use the Linux installer when
 systemd user services are enabled.

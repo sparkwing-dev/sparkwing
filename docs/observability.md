@@ -3,6 +3,23 @@
 Sparkwing tracks run health, failure reasons, and resource usage so you
 can debug failures fast and right-size containers.
 
+## Assisted-offer lifecycle
+
+Enrolled-executor arbitration writes transition events to the run stream. The
+events carry node requirements, the round priority target, safe executor
+display fields (`executor_name`, `executor_kind`, and `executor_location`), and
+effective scores. Events never carry a credential, token prefix, principal,
+holder, membership ID, internal controller or executor ID, or reservation ID.
+
+| Event | Meaning |
+|---|---|
+| `executor_offer_round_opened` | The controller opened a five-second round and recorded its exact highest attainable effective priority. |
+| `executor_offer_received` | An eligible executor supplied a new capacity-backed offer. Refreshing the same offer does not append another event. |
+| `executor_offer_expired` | The offer stopped refreshing for two seconds and was removed. |
+| `executor_offer_declined` | Current enrollment or claim validation rejected the offer, or a higher-ranked offer won. The safe `reason` field distinguishes those cases. |
+| `executor_offer_awarded` | The offer won at the recorded priority target or at the deadline. |
+| `executor_offer_round_empty` | The deadline had no live eligible offer, so the existing coordinator fallback took ownership. |
+
 ## Failure reasons
 
 A failed node carries a `failure_reason` when the controller could
@@ -15,7 +32,7 @@ the logs.
 | `oom_killed` | Container exceeded its memory limit and was killed by the kernel (exit 137). | Raise the runner memory limit or reduce the pipeline's memory use; check the resource chart. |
 | `timeout` | Node exceeded its configured execution timeout. | Raise the timeout or optimize the pipeline. |
 | `no_progress_timeout` | Node emitted no observable progress for its configured inactivity window. | Check where the node stopped, stream command output or report progress when work is healthy, and raise the inactivity window if the expected quiet period is longer. |
-| `agent_lost` | Runner stopped heartbeating (crashed, evicted, or lost network). | Check pod events with `kubectl describe pod`; may indicate node pressure or a pipeline bug. |
+| `agent_lost` | The agent or gateway stopped heartbeating. The source node is terminal; a fresh linked run may retry it within `.Retry(n)`. | Check the executor and `agent_loss_*` events. A post-start retry is at-least-once and spends each acknowledged invocation. |
 | `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no runner claimed the node within the controller's queue deadline (default 15m). The node's error text names which. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
@@ -40,6 +57,27 @@ the heartbeat sweep.
 For nodes where the pod disappears entirely (node failure, eviction),
 the controller's heartbeat sweep catches the missed lease and marks the
 node `agent_lost`.
+
+An assisted executor records `execution_attempts` on the node. Each entry has
+the global attempt ordinal, source or retry run, executor
+name and kind, controller-owned location, timestamps, outcome, failure reason,
+and retry link. Missing legacy attribution remains unknown. Node read responses
+and `state.ndjson` node records omit claim generations and all coordinator,
+membership, holder, token, reservation, and internal executor identifiers.
+Public event reads also omit claim generations from executor-selection and
+attempt-lifecycle payloads.
+
+The ordered event stream records `executor_selected`,
+`execution_attempt_started`, `agent_lease_lost`, pre-start requeue or
+post-start scheduling with availability, and exhaustion or another explicit
+no-retry reason. These payloads carry attribution, not credentials.
+
+Remote logs use immutable substreams keyed by claim generation and execution
+attempt. A stale append is rejected, while an append that had already passed
+validation before lease loss can finish only in the old attempt's history. The
+normal log read and stream merge those substreams; exact reads may select
+`attempt` with `claim_generation`, `attempt` with `trigger_generation` for
+trigger-owned node work, or `trigger_generation` alone for `_compile` output.
 
 ### API
 

@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,8 +10,74 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+func TestHTTPLogs_ClaimedNodeBuffersUntilAttemptAndKeepsItsOrdinal(t *testing.T) {
+	var posts atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posts.Add(1)
+		if got := r.Header.Get(store.AttemptOrdinalHeader); got != "7" {
+			t.Errorf("attempt ordinal = %q, want 7", got)
+		}
+		if got := r.Header.Get(store.ClaimGenerationHeader); got != "3" {
+			t.Errorf("claim generation = %q, want 3", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	ctx := store.WithNodeClaimFence(context.Background(), store.NodeClaimFence{
+		HolderID: "holder", MembershipID: "membership", ReservationID: "reservation", ClaimGeneration: 3,
+	})
+	nlog, err := orchestrator.NewHTTPLogs(srv.URL, nil, nil).OpenNodeLog(ctx, "run", "node", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "before acknowledgement"})
+	if got := posts.Load(); got != 0 {
+		t.Fatalf("pre-ack posts = %d, want 0", got)
+	}
+	binder := nlog.(interface{ BindExecutionAttempt(int) error })
+	if err := binder.BindExecutionAttempt(7); err != nil {
+		t.Fatal(err)
+	}
+	if got := posts.Load(); got != 0 {
+		t.Fatalf("bind posts = %d, want 0 before execution acknowledgement", got)
+	}
+	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "after acknowledgement"})
+	if got := posts.Load(); got != 2 {
+		t.Fatalf("posts = %d, want 2", got)
+	}
+}
+
+func TestHTTPLogs_ClaimedNodeFlushesBufferedLogsAfterBodyWithoutAnotherEmit(t *testing.T) {
+	var posts atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posts.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	ctx := store.WithNodeClaimFence(context.Background(), store.NodeClaimFence{
+		HolderID: "holder", ClaimGeneration: 3,
+	})
+	nlog, err := orchestrator.NewHTTPLogs(srv.URL, nil, nil).OpenNodeLog(ctx, "run", "node", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "before acknowledgement"})
+	if err := nlog.(interface{ BindExecutionAttempt(int) error }).BindExecutionAttempt(7); err != nil {
+		t.Fatal(err)
+	}
+	if err := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt(); err != nil {
+		t.Fatal(err)
+	}
+	if got := posts.Load(); got != 1 {
+		t.Fatalf("posts = %d, want 1", got)
+	}
+}
 
 func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 	var posts atomic.Int64
@@ -34,7 +101,7 @@ func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 	orchestrator.SetTestHTTPNodeLogDropCooldown(t, 0)
 
 	be := orchestrator.NewHTTPLogs(srv.URL, nil, nil)
-	nlog, err := be.OpenNodeLog("run-x", "node-x", nil)
+	nlog, err := be.OpenNodeLog(context.Background(), "run-x", "node-x", nil)
 	if err != nil {
 		t.Fatalf("OpenNodeLog: %v", err)
 	}
@@ -91,7 +158,7 @@ func TestHTTPLogs_AuthLatchedShortCircuitsLaterEmits(t *testing.T) {
 	orchestrator.SetTestHTTPNodeLogRetry(t, 3, 1)
 
 	be := orchestrator.NewHTTPLogs(srv.URL, nil, nil)
-	nlog, _ := be.OpenNodeLog("run-x", "node-x", nil)
+	nlog, _ := be.OpenNodeLog(context.Background(), "run-x", "node-x", nil)
 
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "first"})
 	first := posts.Load()
@@ -127,7 +194,7 @@ func TestHTTPLogs_DropCooldownStopsAttemptsButKeepsCounting(t *testing.T) {
 	orchestrator.SetTestHTTPNodeLogDropCooldown(t, 60_000)
 
 	be := orchestrator.NewHTTPLogs(srv.URL, nil, nil)
-	nlog, err := be.OpenNodeLog("run-x", "node-x", nil)
+	nlog, err := be.OpenNodeLog(context.Background(), "run-x", "node-x", nil)
 	if err != nil {
 		t.Fatalf("OpenNodeLog: %v", err)
 	}
@@ -169,7 +236,7 @@ func TestHTTPLogs_DropCooldownExpiryProbesAgain(t *testing.T) {
 	orchestrator.SetTestHTTPNodeLogDropCooldown(t, 25)
 
 	be := orchestrator.NewHTTPLogs(srv.URL, nil, nil)
-	nlog, _ := be.OpenNodeLog("run-x", "node-x", nil)
+	nlog, _ := be.OpenNodeLog(context.Background(), "run-x", "node-x", nil)
 
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "first"})
 	posts.Store(0)

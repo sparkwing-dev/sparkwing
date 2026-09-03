@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -112,6 +113,67 @@ func TestLoopbackContract_MatchesTheRealController(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	runContractSurface(t, client.NewWithToken(srv.URL, nil, ""), "sqlite")
+}
+
+func TestLoopbackGetNodeUsesCanonicalPublicProjection(t *testing.T) {
+	art := newMemArt()
+	backend := s3state.New(art)
+	t.Cleanup(func() { _ = backend.Close() })
+	ctx := context.Background()
+	if err := backend.CreateRun(ctx, store.Run{ID: contractRunID, Pipeline: "demo", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	node := &store.Node{
+		RunID: contractRunID, NodeID: "build", Status: "running",
+		ClaimedBy: "private-holder", ClaimWorkerID: "desktop-public", ClaimExecutorKind: "agent",
+		ClaimReservationID: "private-claim-reservation", CoordinatorID: "private-coordinator",
+		ClaimGeneration: 7, ClaimMembershipID: "private-membership", ExecutorKind: "agent",
+		ExecutorID: "private-executor", ExecutorLocation: "local",
+		RequiredCoordinatorID: "private-required-coordinator", ReservationID: "private-reservation",
+		ExecutionAttempts: []store.ExecutionAttempt{{
+			RunID: contractRunID, NodeID: "build", Attempt: 1, ClaimGeneration: 7,
+			ExecutorKind: "agent", ExecutorName: "desktop-public", ExecutorLocation: "local",
+			StartedAt: time.Now().UTC(), RetryRunID: "retry-public",
+		}},
+	}
+	if err := backend.CreateNode(ctx, *node); err != nil {
+		t.Fatal(err)
+	}
+	_, srv := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil, art)
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/runs/"+contractRunID+"/nodes/build", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+loopbackToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(api.PublicNode(node))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, '\n')
+	if !bytes.Equal(body, want) {
+		t.Fatalf("loopback node differs from canonical projection\n got: %s\nwant: %s", body, want)
+	}
+	for _, private := range []string{
+		"private-holder", "private-claim-reservation", "private-coordinator", "private-membership",
+		"private-executor", "private-required-coordinator", "private-reservation", `"claim_generation"`,
+	} {
+		if bytes.Contains(body, []byte(private)) {
+			t.Errorf("loopback node exposed %q: %s", private, body)
+		}
+	}
+	if !bytes.Contains(body, []byte(`"executor_name":"desktop-public"`)) ||
+		!bytes.Contains(body, []byte(`"retry_run_id":"retry-public"`)) {
+		t.Errorf("loopback node omitted public attribution: %s", body)
+	}
 }
 
 func newLoopbackClient(t *testing.T, state controller.LoopbackState, runID string, conc controller.LoopbackConcurrency, art storage.ArtifactStore) (*client.Client, *httptest.Server) {
@@ -471,8 +533,8 @@ func TestLoopback_PlainBackendErrorIs500(t *testing.T) {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "bucket unreachable") {
-		t.Errorf("body = %s, want the backend's message", body)
+	if got := strings.TrimSpace(string(body)); got != `{"error":"internal server error"}` {
+		t.Errorf("body = %s, want stable internal error", body)
 	}
 }
 

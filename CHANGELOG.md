@@ -53,34 +53,75 @@ code change to unlock.
 
 - **controller + runner:** Controller administrators can enroll an executor by
   name and bind it to the exact prefix of a live runner or service token.
-  Enrollment owns its `agent` or `gateway` kind, display-only location, trusted
+  Enrollment owns its `agent` or `gateway` kind, trusted placement location,
   capabilities, priority range, concurrency ceiling, and resource budget;
   worker heartbeats update only last-seen and finite nonnegative headroom. Idle
   registrations appear in the fleet API, CLI, and dashboard, while stale ones
   remain visible as offline. The API reports each enrollment's exact live claim
   count separately from its distinct active run IDs; legacy rows leave that
   count unknown. Scheduling summaries apply hard capability, slot, headroom,
-  and resource filters before bounded priority. Rotating an enrollment's
-  credential resets liveness until the new credential sends a heartbeat.
+  and resource filters before bounded priority. Stable random internal
+  controller and executor identities derive a membership ID without binding
+  history to a credential or mutable display name. A shared eligibility preview
+  reports stable offline, placement, capability, slot, budget, and headroom
+  exclusions without exposing credentials. Rotating an enrollment's
+  credential resets liveness until the new credential sends a heartbeat. One
+  controller accepts at most 256 executor enrollments; the fixed safety bound
+  keeps arbitration work finite and can increase later without a schema change.
+  Reserved `location=local` and `location=cloud` requirements use enrollment,
+  never worker claims; `unknown` fails closed. `location=coordinator` and the
+  compatibility label `local` remain ungrantable to fleet helpers.
+  An awarded node keeps that coordinator and location as a hard requirement
+  for any agent-loss retry.
 - **runner + wingd:** An agent configuration with `name` or `coordinators`
   selects enrolled assisted-offer mode. It requires local admission, uses a
   distinct credential per coordinator, shares one machine slot ceiling, and
-  lets membership settings only narrow the global contribution. Coordinator
+  lets membership settings only narrow the global contribution. wingd enforces
+  both contribution levels atomically when it grants a reservation. Coordinator
   loops restart independently; a failed wingd probe withholds the heartbeat
   without erasing the last report. Wingd now supports the nonblocking exact-node,
   resource, and physical-slot reservation lifecycle used by assisted offers.
   An agent reserves capacity before it offers, keeps that reservation pinned
-  while the controller arbitrates, consumes the same reservation on an award,
-  and releases it after a loss. Name-less agents keep legacy FIFO claims.
-- **controller + runner:** Enrolled agents now compete for each eligible node in
-  a durable five-second offer round. Hard capabilities and resource limits
+  while the controller arbitrates, reattaches the same lease across a wingd
+  restart, consumes that reservation on an award, and releases it after a loss
+  or bounded controller timeout. Execution is cancelled before wingd can shed
+  an unrecoverable lease. Name-less agents keep legacy FIFO claims.
+- **controller + runner (Breaking):** Run-store schema 29 lets enrolled agents
+  compete for each eligible node in a durable five-second offer round. Hard capabilities and resource limits
   filter first; the controller then awards immediately at the round's recorded
-  priority ceiling or at priority 100, otherwise by effective priority,
-  earliest offer, executor name, physical slot, and holder at the deadline.
+  highest eligible effective priority or at priority 100, otherwise by
+  effective priority, earliest offer, executor name, physical slot, and holder
+  at the deadline.
   Effective priority starts from the administrator-owned base, stays within its
-  ceiling, and may be reordered by run priority and `Prefers`. Retrying an offer
-  recovers the same fenced claim after a lost response. If no live offer wins,
-  the same transaction returns an unlabeled node to coordinator fallback.
+  ceiling, and may be reordered by run priority and the first matching
+  `Prefers` term. `Store.MarkNodeReady` computes the target in the same
+  transaction that opens the round. PostgreSQL uses an exclusive fence for that
+  snapshot and shared fences for ordinary allocation, release, expiry, claim
+  heartbeat, and plan mutations, so deadline arbitration cannot stall unrelated
+  claim heartbeats. Target calculation and award each load executor occupancy
+  once and batch-lock executor rows in canonical order. A heartbeat cannot
+  revive an expired claim after that capacity becomes available again;
+  `MarkNodeReadyWithPriorityCeiling` is removed. The controller re-resolves
+  enrollment before award, so a narrowed capability, priority, slot limit, or
+  rotated credential cannot leave a stale offer eligible. Retrying an offer
+  recovers the same fenced claim after
+  a lost response. If no live offer wins, the same transaction returns an
+  unlabeled node to coordinator fallback. Offer-round lifecycle events expose
+  requirements, safe executor name, kind, and location fields, scores, and
+  outcomes without credentials, membership IDs, internal controller or
+  executor IDs, holders, or reservation identifiers. See the
+  [migration guide](docs/migrations/_unreleased.md#enrolled-executor-offer-arbitration).
+- **controller + runner:** A node whose agent or gateway lease expires now ends
+  as `agent_lost` and, when its pipeline retry budget allows, the source
+  controller creates one fresh linked run for the lost work and its descendants.
+  Loss before the job body starts does not spend `.Retry(n)`; every acknowledged
+  body invocation does, across in-process and fresh-run attempts. Retry backoff,
+  deadline, source snapshot, unrelated terminal work and artifacts, attempt
+  history, and the original coordinator/location requirement are durable. A
+  retry prefers another eligible executor briefly but may return to the
+  original when it is the only capacity; coordinator fallback cannot relax the
+  required placement. This bounds at-least-once execution; it does not make
+  external effects exactly-once.
 
 - **ci:** The pre-commit formatters step and the em-dash and tracker-ID sweeps
   judge the whole change, not only what is staged. Each reads the staged files
@@ -122,6 +163,16 @@ code change to unlock.
   upgraded store; upgrade every controller sharing it before any opens it, and
   upgrade enrolled agents and wingd before resuming them. See the
   [migration guide](docs/migrations/_unreleased.md#enrolled-executor-offer-arbitration).
+- **store + controller client (Breaking):** Run-store schema 30 persists
+  generation-bound execution attempts, global invocation counts, agent-loss
+  retry lineage, and durable retry availability. Older controller binaries
+  refuse the upgraded store. `AcknowledgeNodeExecutionStart` now takes an
+  `ExecutionStart`, and custom remote executors must acknowledge each ordinal
+  immediately before invoking the job body and finish that attempt afterward.
+  Custom HTTP clients must also send the exact node-claim headers on node
+  writes, or the exact trigger-generation header for source-coordinator writes.
+  See the
+  [migration guide](docs/migrations/_unreleased.md#agent-loss-retry-lineage-and-execution-fencing).
 
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
@@ -164,6 +215,36 @@ code change to unlock.
 
 ### Security
 
+- **runner:** Assisted workstation and gateway job bodies now always execute in
+  a child process behind a process-lifetime loopback capability scoped to the
+  awarded run and node; attempt start, finish, and logs also require the
+  acknowledged ordinal. The supervisor keeps its enrollment token and claim
+  identity; the child cannot claim or renew work, manage the fleet, or call
+  administrative routes, and it receives only minimal runtime variables plus
+  safe names explicitly allowed by `SPARKWING_SUBMIT_ENV_ALLOW`. This
+  isolates controller credentials, not the helper OS account: enrollment still
+  authorizes repository code to use that account's files, network, and process
+  permissions. Sparkwing does not join a tailnet or change host networking.
+  This schema-30 boundary is an internal release dependency and must ship with
+  schema 31's current-attempt mutation fence and durable grants for `Memoize`,
+  `Concurrency`, `ToolSlot`, `RunAndAwait`, cross-pipeline references, and
+  dynamic `SpawnNode`; it is not a complete assisted-node compatibility
+  boundary by itself.
+- **controller + logs:** Every claim-scoped remote node mutation now carries the exact live
+  claimant token, holder, membership, reservation, and claim generation in the
+  store transaction that writes it; stale writers receive `409 Conflict`.
+  Trigger-driven node writes and run-definition writes use the trigger's exact
+  run-bound generation. Remote node-log appends additionally require a started
+  attempt ordinal and land in immutable attempt/generation substreams, so an
+  append that passed validation before lease loss cannot contaminate its
+  replacement executor's log. Node read responses expose attribution and
+  attempt history with executor names, kinds, and controller-owned locations.
+  Node read responses, `state.ndjson` node records, and public executor/attempt
+  event payloads omit claim generations and coordinator, membership, internal
+  executor, holder, token, and reservation values; cancelled bodies close
+  their acknowledged attempt as `cancelled`. Controller JSON `5xx` responses
+  now use one stable error message instead of returning database, path,
+  token-prefix, or private-URL details.
 - **controller + cache:** Code scanning's open findings are triaged. A clone URL
   is refused when any component begins with `-` -- the whole string, the
   scp-like host or path, the ssh userinfo, or the parsed host -- where git would

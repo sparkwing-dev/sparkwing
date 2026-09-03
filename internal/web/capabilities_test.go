@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
@@ -161,7 +162,12 @@ func TestGetRunHandler_IncludeNodes(t *testing.T) {
 			return &store.Run{ID: id, Pipeline: "p"}, nil
 		},
 		listNodes: func(string) ([]*store.Node, error) {
-			return []*store.Node{{NodeID: "n1"}}, nil
+			return []*store.Node{{
+				NodeID: "n1", ClaimedBy: "private-holder", ClaimGeneration: 9,
+				ClaimWorkerID: "desktop-public", ClaimMembershipID: "private-membership",
+				ExecutorKind: "agent", ExecutorID: "private-executor", ExecutorLocation: "local",
+				ReservationID: "private-reservation",
+			}}, nil
 		},
 	}
 
@@ -191,7 +197,8 @@ func TestGetRunHandler_IncludeNodes(t *testing.T) {
 		Run   *store.Run    `json:"run"`
 		Nodes []*store.Node `json:"nodes"`
 	}
-	if err := json.NewDecoder(rec2.Body).Decode(&wrap); err != nil {
+	body := rec2.Body.String()
+	if err := json.NewDecoder(strings.NewReader(body)).Decode(&wrap); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if wrap.Run == nil || wrap.Run.ID != "abc" {
@@ -199,6 +206,14 @@ func TestGetRunHandler_IncludeNodes(t *testing.T) {
 	}
 	if len(wrap.Nodes) != 1 || wrap.Nodes[0].NodeID != "n1" {
 		t.Errorf("wrap.Nodes = %+v", wrap.Nodes)
+	}
+	for _, private := range []string{"private-holder", "private-membership", "private-executor", "private-reservation", `"claim_generation"`} {
+		if strings.Contains(body, private) {
+			t.Errorf("local dashboard exposed %q: %s", private, body)
+		}
+	}
+	if !strings.Contains(body, `"executor_name":"desktop-public"`) {
+		t.Errorf("local dashboard omitted public executor attribution: %s", body)
 	}
 }
 
@@ -213,6 +228,38 @@ func TestGetRunHandler_NotFound(t *testing.T) {
 	GetRunHandler(b)(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestEventsStreamUsesCanonicalPublicProjection(t *testing.T) {
+	b := &fakeBackend{
+		getRun: func(string) (*store.Run, error) {
+			return &store.Run{ID: "run-private-event", Status: "success"}, nil
+		},
+		listEvents: func(_ string, after int64, _ int) ([]store.Event, error) {
+			if after > 0 {
+				return nil, nil
+			}
+			return []store.Event{{
+				RunID: "run-private-event", Seq: 1, Kind: "execution_attempt_started",
+				Payload: json.RawMessage(`{"claim_generation":"private-generation-value","attempt":2,"executor_name":"desktop"}`),
+			}}, nil
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-private-event/events", nil)
+	rec := httptest.NewRecorder()
+	serveEventsStream(b, rec, req, "run-private-event")
+
+	body := rec.Body.String()
+	for _, private := range []string{`"claim_generation"`, "private-generation-value"} {
+		if strings.Contains(body, private) {
+			t.Errorf("local event stream exposed %q: %s", private, body)
+		}
+	}
+	for _, public := range []string{`"attempt":2`, `"executor_name":"desktop"`} {
+		if !strings.Contains(body, public) {
+			t.Errorf("local event stream omitted %q: %s", public, body)
+		}
 	}
 }
 

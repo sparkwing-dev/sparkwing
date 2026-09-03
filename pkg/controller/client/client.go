@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -497,6 +498,7 @@ func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, co
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -522,6 +524,7 @@ func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatSta
 	if err != nil {
 		return nil, err
 	}
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -1040,6 +1043,7 @@ func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) 
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -1112,6 +1116,11 @@ func executorClaimBody(executor ExecutorClaim) map[string]any {
 // The controller filters candidates so a returned node's needs_labels
 // is a subset of labels (AND semantics).
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error) {
+	return c.ClaimNodeAs(ctx, holderID, labels, lease, headroom, store.ExecutorIdentity{})
+}
+
+func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error) {
+	_ = executor
 	body := map[string]any{"holder_id": holderID}
 	if lease > 0 {
 		secs := int(lease.Seconds())
@@ -1152,6 +1161,55 @@ func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string
 	}
 }
 
+func (c *Client) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, start store.ExecutionStart) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/execution-start",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	buf, _ := json.Marshal(start)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	setNodeClaimFenceHeaders(req, ctx)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return nil
+	case http.StatusConflict:
+		return store.ErrLockHeld
+	default:
+		return readHTTPError(resp)
+	}
+}
+
+func (c *Client) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish store.ExecutionAttemptFinish) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/execution-finish",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	buf, _ := json.Marshal(finish)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	setNodeClaimFenceHeaders(req, ctx)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return store.ErrLockHeld
+	}
+	return readHTTPError(resp)
+}
+
 // HeartbeatExecutor reports live capacity for an administrator-enrolled
 // executor. The controller authenticates the exact enrollment credential.
 func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom Headroom) error {
@@ -1163,6 +1221,12 @@ func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom He
 // Idempotent; first call wins (stable FIFO ordering).
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/mark-ready",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path, nil, http.StatusNoContent, nil)
+}
+
+func (c *Client) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/auto-retry/reset",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path, nil, http.StatusNoContent, nil)
 }
@@ -1218,6 +1282,7 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -1485,6 +1550,7 @@ func (c *Client) post(ctx context.Context, path string, body any, wantStatus int
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -1507,6 +1573,7 @@ func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStat
 		return err
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -1518,8 +1585,26 @@ func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStat
 	return nil
 }
 
+func setNodeClaimFenceHeaders(req *http.Request, ctx context.Context) {
+	if fence, ok := store.NodeClaimFenceFromContext(ctx); ok {
+		req.Header.Set(store.ClaimHolderHeader, fence.HolderID)
+		req.Header.Set(store.ClaimMembershipHeader, fence.MembershipID)
+		req.Header.Set(store.ClaimReservationHeader, fence.ReservationID)
+		req.Header.Set(store.ClaimGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
+	}
+	if fence, ok := store.TriggerClaimFenceFromContext(ctx); ok {
+		req.Header.Set(store.TriggerGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
+	}
+}
+
 func readHTTPError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusConflict {
+		return fmt.Errorf("%w: %s", store.ErrLockHeld, bytes.TrimSpace(body))
+	}
+	if resp.StatusCode == http.StatusNotImplemented {
+		return fmt.Errorf("%w: controller returned %s", storage.ErrNotSupported, resp.Status)
+	}
 	var payload struct {
 		Error string `json:"error"`
 	}

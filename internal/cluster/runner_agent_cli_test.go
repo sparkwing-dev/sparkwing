@@ -346,6 +346,7 @@ type offerSlotClient struct {
 	offers      []client.ExecutorClaim
 	results     []client.ExecutorClaimOfferResult
 	offerErrors map[int]error
+	offer       func(context.Context, client.ExecutorClaim, int) (client.ExecutorClaimOfferResult, error)
 }
 
 func (*offerSlotClient) HeartbeatExecutor(context.Context, string, client.Headroom) error { return nil }
@@ -354,8 +355,11 @@ func (c *offerSlotClient) PrepareExecutorClaim(context.Context, string) (*store.
 	return c.preparation, nil
 }
 
-func (c *offerSlotClient) OfferExecutorClaim(_ context.Context, claim client.ExecutorClaim, _, _ string) (client.ExecutorClaimOfferResult, error) {
+func (c *offerSlotClient) OfferExecutorClaim(ctx context.Context, claim client.ExecutorClaim, _, _ string) (client.ExecutorClaimOfferResult, error) {
 	c.offers = append(c.offers, claim)
+	if c.offer != nil {
+		return c.offer(ctx, claim, len(c.offers))
+	}
 	if err := c.offerErrors[len(c.offers)]; err != nil {
 		return client.ExecutorClaimOfferResult{}, err
 	}
@@ -365,11 +369,11 @@ func (c *offerSlotClient) OfferExecutorClaim(_ context.Context, claim client.Exe
 }
 
 type offerSlotLedger struct {
-	reserve func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, int) (ExecutorCapacityReservation, error)
+	reserve func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, executorCapacityLimits, int) (ExecutorCapacityReservation, error)
 }
 
-func (l offerSlotLedger) Reserve(ctx context.Context, summary store.ExecutorSchedulingSummary, membership store.ExecutorMembershipSnapshot, slot int) (ExecutorCapacityReservation, error) {
-	return l.reserve(ctx, summary, membership, slot)
+func (l offerSlotLedger) Reserve(ctx context.Context, summary store.ExecutorSchedulingSummary, membership store.ExecutorMembershipSnapshot, limits executorCapacityLimits, slot int) (ExecutorCapacityReservation, error) {
+	return l.reserve(ctx, summary, membership, limits, slot)
 }
 
 type offerSlotReservation struct {
@@ -385,6 +389,9 @@ func (r *offerSlotReservation) RunID() string          { return r.runID }
 func (r *offerSlotReservation) NodeID() string         { return r.nodeID }
 func (r *offerSlotReservation) ResourceDigest() string { return r.digest }
 func (r *offerSlotReservation) Slot() int              { return r.slot }
+func (r *offerSlotReservation) ExecutionContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithCancel(parent)
+}
 func (r *offerSlotReservation) Consume() (*orchestrator.LocalAdmission, error) {
 	r.consumed.Add(1)
 	return &orchestrator.LocalAdmission{}, nil
@@ -404,7 +411,7 @@ func TestExecutorOfferSlotPinsAcrossLostResponseAndConsumesThePreparedReservatio
 	}}
 	reservation := &offerSlotReservation{id: "reservation", membership: "membership", worker: "desk", runID: "run", nodeID: "node", digest: "sha256:digest", slot: 0}
 	ctx, cancel := context.WithCancel(context.Background())
-	ledger := offerSlotLedger{reserve: func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, int) (ExecutorCapacityReservation, error) {
+	ledger := offerSlotLedger{reserve: func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, executorCapacityLimits, int) (ExecutorCapacityReservation, error) {
 		return reservation, nil
 	}}
 	executed := atomic.Int64{}
@@ -433,7 +440,7 @@ func TestExecutorOfferSlotWithholdsOfferWithoutImmediateCapacity(t *testing.T) {
 		Summary:    store.ExecutorSchedulingSummary{RunID: "run", NodeID: "node", ResourceDigest: "sha256:digest", Slots: 1},
 		Membership: store.ExecutorMembershipSnapshot{MembershipID: "membership", WorkerID: "desk", Eligible: true, MaxConcurrent: 1},
 	}}
-	ledger := offerSlotLedger{reserve: func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, int) (ExecutorCapacityReservation, error) {
+	ledger := offerSlotLedger{reserve: func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, executorCapacityLimits, int) (ExecutorCapacityReservation, error) {
 		cancel()
 		return nil, ErrExecutorCapacityUnavailable
 	}}
@@ -452,7 +459,7 @@ func TestExecutorOfferSlotHonorsEnrollmentConcurrencyCeiling(t *testing.T) {
 		Membership: store.ExecutorMembershipSnapshot{MembershipID: "membership", WorkerID: "desk", Eligible: true, MaxConcurrent: 1},
 	}}
 	var reservations atomic.Int64
-	ledger := offerSlotLedger{reserve: func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, int) (ExecutorCapacityReservation, error) {
+	ledger := offerSlotLedger{reserve: func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, executorCapacityLimits, int) (ExecutorCapacityReservation, error) {
 		reservations.Add(1)
 		return nil, errors.New("unexpected reservation")
 	}}
@@ -460,5 +467,48 @@ func TestExecutorOfferSlotHonorsEnrollmentConcurrencyCeiling(t *testing.T) {
 		ctrl, ledger, nil, discardSlog())
 	if reservations.Load() != 0 || len(ctrl.offers) != 0 {
 		t.Fatalf("reservations = %d, offers = %d", reservations.Load(), len(ctrl.offers))
+	}
+}
+
+func TestExecutorOfferSlotReleasesReservationWhenControllerHangsAfterFirstOffer(t *testing.T) {
+	deadline := time.Now().Add(100 * time.Millisecond)
+	preparation := &store.ExecutorClaimPreparation{
+		Summary:       store.ExecutorSchedulingSummary{RunID: "run", NodeID: "node", ResourceDigest: "sha256:digest", Slots: 1},
+		Membership:    store.ExecutorMembershipSnapshot{MembershipID: "membership", WorkerID: "desk", Eligible: true, MaxConcurrent: 1},
+		OfferDeadline: &deadline,
+	}
+	ctrl := &offerSlotClient{preparation: preparation}
+	ctrl.offer = func(ctx context.Context, _ client.ExecutorClaim, attempt int) (client.ExecutorClaimOfferResult, error) {
+		if attempt == 1 {
+			return client.ExecutorClaimOfferResult{Pending: true}, nil
+		}
+		<-ctx.Done()
+		return client.ExecutorClaimOfferResult{}, ctx.Err()
+	}
+	reservation := &offerSlotReservation{id: "reservation", membership: "membership", worker: "desk", runID: "run", nodeID: "node", digest: "sha256:digest", slot: 0}
+	ctx, cancel := context.WithCancel(context.Background())
+	ledger := offerSlotLedger{reserve: func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, executorCapacityLimits, int) (ExecutorCapacityReservation, error) {
+		return reservation, nil
+	}}
+	started := time.Now()
+	done := make(chan struct{})
+	go func() {
+		runExecutorOfferSlot(ctx, AgentConfig{Poll: time.Hour}, AgentCoordinatorConfig{Name: "desk"}, 123, 0,
+			ctrl, ledger, nil, discardSlog())
+		close(done)
+	}()
+	for reservation.released.Load() == 0 && time.Since(started) < time.Second {
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	<-done
+	if reservation.released.Load() != 1 {
+		t.Fatalf("reservation releases = %d, want 1", reservation.released.Load())
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("hung offer held reservation for %s", elapsed)
+	}
+	if len(ctrl.offers) < 2 {
+		t.Fatalf("offers = %d, want first response plus hung retry", len(ctrl.offers))
 	}
 }

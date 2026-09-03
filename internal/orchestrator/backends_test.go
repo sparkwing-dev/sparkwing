@@ -317,7 +317,7 @@ type fakeLogs struct {
 	opened int
 }
 
-func (f *fakeLogs) OpenNodeLog(runID, nodeID string, delegate sparkwing.Logger) (orchestrator.NodeLog, error) {
+func (f *fakeLogs) OpenNodeLog(_ context.Context, runID, nodeID string, delegate sparkwing.Logger) (orchestrator.NodeLog, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.opened++
