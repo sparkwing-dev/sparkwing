@@ -88,12 +88,16 @@ func (l *storeOpenLog) opened(path string) int {
 func countStoreOpens(t *testing.T) *storeOpenLog {
 	t.Helper()
 	log := &storeOpenLog{}
-	previous := openStateStoreFromSpec
+	previousSpec, previousOpen := openStateStoreFromSpec, storeOpen
 	openStateStoreFromSpec = func(ctx context.Context, spec backends.Spec, lookup storeurl.ProfileLookup) (storage.StateStore, error) {
 		log.record(spec.Path)
-		return previous(ctx, spec, lookup)
+		return previousSpec(ctx, spec, lookup)
 	}
-	t.Cleanup(func() { openStateStoreFromSpec = previous })
+	storeOpen = func(path string) (*store.Store, error) {
+		log.record(path)
+		return previousOpen(path)
+	}
+	t.Cleanup(func() { openStateStoreFromSpec, storeOpen = previousSpec, previousOpen })
 	return log
 }
 
@@ -250,12 +254,15 @@ func TestHostedSelection_FallsBackWhenTheSocketIsGone(t *testing.T) {
 	if sel.sock != "" {
 		t.Fatalf("socket = %q, want the standalone path", sel.sock)
 	}
-	if sel.standalone != standaloneDaemonOlder {
-		t.Fatalf("reason = %q, want %q", sel.standalone, standaloneDaemonOlder)
+	if sel.standalone != standaloneDaemonFault {
+		t.Fatalf("reason = %q, want %q", sel.standalone, standaloneDaemonFault)
+	}
+	if !strings.Contains(sel.fault, "api.sock") {
+		t.Fatalf("fault = %q, want it to name the socket that would not answer", sel.fault)
 	}
 }
 
-func TestHostedSelection_SkippedWhenUnadmittedIsAllowed(t *testing.T) {
+func TestHostedSelection_ForcedWhileADaemonAnswers(t *testing.T) {
 	home := wingdTestHome(t)
 	startAPIDaemon(t, home, nil)
 	t.Setenv(AllowUnadmittedEnv, "1")
@@ -268,8 +275,22 @@ func TestHostedSelection_SkippedWhenUnadmittedIsAllowed(t *testing.T) {
 	if sel.sock != "" {
 		t.Fatalf("socket = %q, want the standalone path", sel.sock)
 	}
+	if sel.standalone != standaloneForced {
+		t.Fatalf("reason = %q, want %q while a daemon answers", sel.standalone, standaloneForced)
+	}
+}
+
+func TestHostedSelection_ForcedStillSaysNoDaemonWhenThereIsNone(t *testing.T) {
+	home := wingdTestHome(t)
+	t.Setenv(AllowUnadmittedEnv, "1")
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	sel, err := selectHostedAPI(ctx, unhostedAdmission(home, io.Discard))
+	if err != nil {
+		t.Fatalf("selectHostedAPI: %v", err)
+	}
 	if sel.standalone != standaloneNoDaemon {
-		t.Fatalf("reason = %q, want %q", sel.standalone, standaloneNoDaemon)
+		t.Fatalf("reason = %q, want %q on a box with no daemon", sel.standalone, standaloneNoDaemon)
 	}
 }
 
@@ -420,13 +441,17 @@ func TestStoreHealthState_SplitsSkewFromFault(t *testing.T) {
 	}
 }
 
-func TestHostedAPIReachable_RefusesANonJSONAnswer(t *testing.T) {
+func TestHostedAPIReachable_DegradesOnANonJSONAnswer(t *testing.T) {
 	sock := serveStubAPI(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("nope"))
 	}))
-	if err := hostedAPIReachable(context.Background(), sock); err == nil {
+	err := hostedAPIReachable(context.Background(), sock)
+	if err == nil {
 		t.Fatal("a 500 was accepted as this run's host")
+	}
+	if errors.Is(err, errHostedStoreFault) || standaloneReasonFor(err) != "" {
+		t.Fatalf("err = %v, want a daemon fault the run degrades around while naming it", err)
 	}
 }
 
@@ -553,7 +578,7 @@ func TestLocalTriggerBackends_HostChildRunsAndReplays(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	backends, release, err := localTriggerBackends(ctx, paths, "")
+	backends, _, release, err := localTriggerBackends(ctx, paths, "")
 	if err != nil {
 		t.Fatalf("localTriggerBackends: %v", err)
 	}
@@ -580,7 +605,7 @@ func TestLocalTriggerBackends_ANamedProfileKeepsItsOwnStore(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
-	if _, release, err := localTriggerBackends(ctx, paths, "does-not-exist"); err == nil {
+	if _, _, release, err := localTriggerBackends(ctx, paths, "does-not-exist"); err == nil {
 		release()
 		t.Fatal("a named profile resolved to the daemon's socket")
 	}

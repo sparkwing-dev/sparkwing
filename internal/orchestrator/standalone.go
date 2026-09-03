@@ -5,16 +5,29 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const (
 	standaloneNoDaemon    = "no-daemon"
 	standaloneDaemonOlder = "daemon-older"
+	standaloneDaemonFault = "daemon-fault"
 	standaloneFloor       = "floor"
+	standaloneForced      = "forced"
 )
+
+// StandaloneStateDBEnv names the runs store a parent already chose, so a child
+// run it dispatches lands beside it instead of deriving a store of its own.
+const StandaloneStateDBEnv = "SPARKWING_STATE_DB"
+
+// StandaloneReasonEnv carries the parent's standalone reason to that child, so
+// the child's start record says what the parent's says.
+const StandaloneReasonEnv = "SPARKWING_STANDALONE_REASON"
 
 // hack: an indirection so a test can read the block a run prints.
 var standaloneWarningOut io.Writer = os.Stderr
@@ -22,9 +35,9 @@ var standaloneWarningOut io.Writer = os.Stderr
 const standaloneLoss = "It cannot see other runs on this machine and they cannot see it, " +
 	"so together they may oversubscribe it. Everything else works."
 
-// safety: the sentinels are the whole rule. A failure that names none of them
-// is a machine fault rather than a version gap, and running standalone on one
-// would hide it behind a run that looks like it worked.
+// safety: only a gap in what the daemon can serve degrades. A machine fault
+// keeps its own error, because a run that looks like it worked is the worst
+// place to hide one.
 func standaloneReasonFor(err error) string {
 	switch {
 	case err == nil:
@@ -44,8 +57,10 @@ func standaloneReasonFor(err error) string {
 	return ""
 }
 
-func standaloneWarning(reason, daemonVersion, sdkVersion string) string {
-	switch reason {
+func standaloneWarning(sel hostedSelection, sdkVersion string) string {
+	daemon := bareVersion(sel.daemon)
+	sdk := bareVersion(sdkVersion)
+	switch sel.standalone {
 	case standaloneNoDaemon:
 		return "sparkwing: no admission daemon is running and no sparkwing is installed to host one, " +
 			"so this run is standalone. " + standaloneLoss +
@@ -53,21 +68,82 @@ func standaloneWarning(reason, daemonVersion, sdkVersion string) string {
 	case standaloneDaemonOlder:
 		return fmt.Sprintf("sparkwing: the admission daemon (%s) predates this pipeline's SDK (%s), "+
 			"so this run is standalone. "+standaloneLoss+
-			"\n\n  to update the daemon\n    sparkwing update\n",
-			orUnknownVersion(daemonVersion), orUnknownVersion(sdkVersion))
+			"\n\n  to update the daemon\n    sparkwing update\n", daemon, sdk)
 	case standaloneFloor:
 		return fmt.Sprintf("sparkwing: this pipeline's SDK (%s) predates what the admission daemon can serve, "+
 			"so this run is standalone. "+standaloneLoss+
 			"\n\n  to update every repo on this machine\n    sparkwing repos update --apply"+
-			"\n\n  to update just this repo\n    sparkwing repos update --apply --repo .\n",
-			orUnknownVersion(sdkVersion))
+			"\n\n  to update just this repo\n    sparkwing repos update --apply --repo .\n", sdk)
+	case standaloneDaemonFault:
+		return fmt.Sprintf("sparkwing: the admission daemon (%s) cannot serve this run's state (%s), "+
+			"so this run is standalone. "+standaloneLoss+
+			"\n\n  to see why\n    sparkwing daemon status\n", daemon, sel.fault)
+	case standaloneForced:
+		return "sparkwing: " + AllowUnadmittedEnv + " is set, so this run is standalone. " + standaloneLoss +
+			"\n\n  to rejoin the daemon\n    unset " + AllowUnadmittedEnv + "\n"
 	}
 	return ""
 }
 
-func orUnknownVersion(v string) string {
+// safety: the version is wrapped in parentheses by every block, so one that
+// already carries them, as a source build's "(devel)" does, must not double
+// them.
+func bareVersion(v string) string {
+	v = strings.TrimSpace(v)
 	if v == "" {
-		return "(unknown)"
+		return "unknown"
+	}
+	if trimmed, ok := strings.CutPrefix(v, "("); ok {
+		if inner, closed := strings.CutSuffix(trimmed, ")"); closed {
+			return inner
+		}
 	}
 	return v
+}
+
+// safety: the shared standalone store is the one the design promises two pins
+// can share, so a binary falls back to its own only when that file records a
+// requirement it does not know; every other open error is the store's own and
+// is reported rather than routed around.
+func openStandaloneStore(paths Paths, dryRun bool) (*store.Store, string, func(), error) {
+	if dryRun {
+		return openThrowawayStandaloneStore()
+	}
+	if err := paths.EnsureStandaloneDir(); err != nil {
+		return nil, "", nil, fmt.Errorf("standalone store: %w", err)
+	}
+	shared := paths.StandaloneStateDB()
+	st, err := storeOpen(shared)
+	if err == nil {
+		return st, shared, func() {}, nil
+	}
+	var skew *store.SkewError
+	if !errors.As(err, &skew) || len(skew.Requirements) == 0 {
+		return nil, "", nil, fmt.Errorf("standalone store %s: %w", shared, err)
+	}
+	if err := paths.EnsureStandaloneSchemaDir(); err != nil {
+		return nil, "", nil, fmt.Errorf("standalone store: %w", err)
+	}
+	own := paths.StandaloneSchemaStateDB()
+	st, err = storeOpen(own)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("standalone store %s: %w", own, err)
+	}
+	return st, own, func() {}, nil
+}
+
+// safety: a dry run mutates nothing, so it must not be what creates this
+// home's standalone store or leave rows doctor then counts against it.
+func openThrowawayStandaloneStore() (*store.Store, string, func(), error) {
+	dir, err := os.MkdirTemp("", "sparkwing-dry-standalone-")
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("standalone store: %w", err)
+	}
+	path := filepath.Join(dir, "state.db")
+	st, err := storeOpen(path)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, "", nil, fmt.Errorf("standalone store %s: %w", path, err)
+	}
+	return st, path, func() { _ = os.RemoveAll(dir) }, nil
 }

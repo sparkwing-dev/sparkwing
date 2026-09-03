@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
@@ -94,6 +96,8 @@ type hostedSelection struct {
 	sock       string
 	daemon     string
 	standalone string
+	fault      string
+	storeSkew  bool
 }
 
 // safety: the handshake is the only place the daemon's own answer about
@@ -107,9 +111,6 @@ func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (hostedSelection,
 	if adm == nil {
 		return hostedSelection{}, nil
 	}
-	if allowUnadmitted() {
-		return hostedSelection{standalone: standaloneNoDaemon}, nil
-	}
 	cl, err := wingdclient.EnsureDaemon(ctx, adm.clientOptions())
 	if err != nil {
 		if reason := standaloneReasonFor(err); reason != "" {
@@ -119,8 +120,15 @@ func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (hostedSelection,
 	}
 	defer func() { _ = cl.Close() }()
 	sel := hostedSelection{daemon: cl.DaemonVersion()}
+	// safety: the operator asked for the direct path with a daemon answering,
+	// so the run says that rather than a sentence about a daemon that is not
+	// there. Asked after the handshake because only it proves which is true.
+	if allowUnadmitted() {
+		sel.standalone = standaloneForced
+		return sel, nil
+	}
 	if !cl.APIReady() {
-		sel.standalone = standaloneDaemonOlder
+		sel.standalone, sel.fault = daemonAPIRefusal(cl)
 		return sel, nil
 	}
 	sock := cl.APISocket()
@@ -128,11 +136,44 @@ func selectHostedAPI(ctx context.Context, adm *LocalAdmission) (hostedSelection,
 		if errors.Is(err, errHostedStoreFault) {
 			return hostedSelection{}, err
 		}
-		sel.standalone = standaloneDaemonOlder
+		if reason := standaloneReasonFor(err); reason != "" {
+			sel.standalone = reason
+			sel.storeSkew = errors.Is(err, errHostedStoreSkew)
+			return sel, nil
+		}
+		sel.standalone, sel.fault = standaloneDaemonFault, err.Error()
 		return sel, nil
 	}
 	sel.sock = sock
 	return sel, nil
+}
+
+// safety: a daemon that never advertised api_ready predates the field, which
+// is age; one that advertises it false bound no socket, which is a fault of
+// this machine's daemon and whose own reason the operator needs verbatim.
+func daemonAPIRefusal(cl *wingdclient.Client) (reason, fault string) {
+	if !cl.APIAdvertised() {
+		return standaloneDaemonOlder, ""
+	}
+	detail := cl.APIError()
+	if detail == "" {
+		detail = "it advertises no controller API socket"
+	}
+	if supersedesSDK(sparkwingModuleVersion(), cl.DaemonVersion()) {
+		return standaloneDaemonOlder, detail
+	}
+	return standaloneDaemonFault, detail
+}
+
+// safety: only a comparable pair proves age. Two builds whose versions cannot
+// be ordered are not evidence the daemon is behind, so they read as a fault
+// and keep the daemon's own reason.
+func supersedesSDK(sdk, daemon string) bool {
+	sdk, daemon = bareVersion(sdk), bareVersion(daemon)
+	if !semver.IsValid(sdk) || !semver.IsValid(daemon) {
+		return false
+	}
+	return semver.Compare(daemon, sdk) < 0
 }
 
 type hostedHealth struct {

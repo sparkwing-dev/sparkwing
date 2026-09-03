@@ -564,6 +564,11 @@ func (cl *Client) DaemonStoreRequirements() []string { return cl.ack.StoreRequir
 // which reads as false.
 func (cl *Client) APIReady() bool { return cl.ack.APIReady != nil && *cl.ack.APIReady }
 
+// APIAdvertised reports whether the connected daemon answered about its
+// controller API socket at all. A daemon that predates the field advertises
+// nothing, which is not the same as advertising that the socket is unbound.
+func (cl *Client) APIAdvertised() bool { return cl.ack.APIReady != nil }
+
 // APIError reports why the connected daemon's API socket is unbound, empty
 // when it is bound or when the daemon predates the field.
 func (cl *Client) APIError() string { return cl.ack.APIError }
