@@ -256,10 +256,22 @@ func TestOpenStandaloneStore_ADryRunLeavesNothingBehind(t *testing.T) {
 	}
 }
 
-func TestLocalTriggerBackends_OpensTheStoreTheParentNamed(t *testing.T) {
+// safety: the admission this helper's callers build resolves its host binary
+// from PATH, so a checkout that happens to have a sparkwing on PATH -- which
+// the gate does -- would otherwise spawn a real daemon for this temp home and
+// decide the test against a daemon it never meant to involve.
+func noDaemonHome(t *testing.T) string {
+	t.Helper()
 	home := wingdTestHome(t)
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv(AllowUnadmittedEnv, "")
+	t.Setenv(wingdclient.HostBinEnv, "")
+	t.Setenv("PATH", t.TempDir())
+	return home
+}
+
+func TestLocalTriggerBackends_OpensTheStoreTheParentNamed(t *testing.T) {
+	home := noDaemonHome(t)
 	paths := PathsAt(home)
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatalf("ensure root: %v", err)
@@ -304,9 +316,7 @@ func TestLocalTriggerBackends_OpensTheStoreTheParentNamed(t *testing.T) {
 // safety: the dashboard's trigger consumer claims from the shared store and
 // names no store for its child, so the child must land in that same file.
 func TestLocalTriggerBackends_DefaultsToTheSharedStore(t *testing.T) {
-	home := wingdTestHome(t)
-	t.Setenv("SPARKWING_HOME", home)
-	t.Setenv(AllowUnadmittedEnv, "")
+	home := noDaemonHome(t)
 	t.Setenv(StandaloneStateDBEnv, "")
 	t.Setenv(StandaloneReasonEnv, "")
 	paths := PathsAt(home)
