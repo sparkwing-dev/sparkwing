@@ -463,9 +463,10 @@ code change to unlock.
   the pin is a release tag newer than the installed release, it fetches that
   release into `$SPARKWING_HOME/toolchains/<version>/sparkwing`, verifies the
   Ed25519 signatures and the sha256 digest, and execs it with the original
-  arguments. One stderr line names the version, the path, and why. A cached
-  binary is rehashed against its recorded digest instead of refetched, and a
-  mismatch refetches. A pseudo-version pin, a `replace` for the SDK, or a
+  arguments. One stderr line names the version, the path, and why. The signed
+  release manifest is stored beside the binary, so a later run re-checks that
+  signature offline and refetches anything that no longer matches. A
+  pseudo-version pin, a `replace` for the SDK, or a
   source-built CLI on either side switches nothing, and a CLI at or above the
   pin already serves it. `SPARKWING_TOOLCHAIN=local` refuses to fetch and fails
   with the version to install by hand; `sparkwing info` reports both versions

@@ -91,9 +91,20 @@ The version store is `$SPARKWING_HOME/toolchains/<version>/sparkwing`,
 `~/.sparkwing/toolchains/<version>/sparkwing` by default. A fetch pulls
 the release asset for this OS and architecture, verifies the Ed25519
 signatures over the manifest and the asset plus the manifest's sha256
-digest, and installs it by rename, so two concurrent hooks cannot exec a
-half-written binary. Later runs rehash the stored binary against the
-recorded digest and touch no network on a match; a mismatch re-fetches.
+digest, asks the fetched binary for its own version and refuses to cache
+it under a name it does not answer to, then installs it by rename, so two
+concurrent hooks cannot exec a half-written binary. The signed
+`SHA256SUMS` and `SHA256SUMS.sig` land beside the binary; a later run
+re-checks that signature offline against the same release keys
+`sparkwing update` trusts and compares the stored binary's digest against
+the manifest entry, so a cache hit touches no network and anything that
+does not check out is fetched again.
+
+The pinned release hosts the admission daemon and migrates the shared
+runs store in `$SPARKWING_HOME` exactly as the pipeline binary compiled
+at that pin already does on every run; the schema requirements rule
+decides whether binaries at older pins keep opening it, which is why
+`sparkwing repos update` moves the fleet together.
 
 A switch is never silent. It prints one line to stderr and nothing to
 stdout:
@@ -123,7 +134,21 @@ that is the build the pin already ruled out.
 
 `SPARKWING_TOOLCHAIN=auto` is the default and the only other accepted
 value. The CLI a switch starts runs with `SPARKWING_TOOLCHAIN_ACTIVE` set
-to its own version, so it never switches again.
+to the version it was chosen as, so it does not switch again for that
+pin; it clears the variable from its own environment, so the pipeline
+binary and the daemon it starts do not carry the guard on to another
+repo. A repo pinned to some other release down that tree still switches.
+
+On unix a switch replaces the process. On Windows it runs the pinned CLI
+as a child and exits with its status.
+
+### Reclaiming the store
+
+Nothing prunes the store. Each release a repo pins leaves one CLI binary
+under `$SPARKWING_HOME/toolchains/`, around 60 MB each. `sparkwing
+doctor` lists the version, path, and size of every entry; delete
+`$SPARKWING_HOME/toolchains/<version>` to reclaim one. The next run that
+needs it fetches it again.
 
 ### How this relates to the update commands
 
@@ -135,7 +160,8 @@ to its own version, so it never switches again.
 - The version store is neither. It holds the releases individual repos
   ask for while their pins sit ahead of your PATH. Fetches stop once
   `sparkwing update` raises the installed CLI to the highest pin, or
-  `sparkwing repos update --apply` lowers the pins onto it.
+  `sparkwing repos update --apply` lowers the pins onto it, and the store
+  is safe to delete once they agree.
 
 ## Compatibility coordinate (post-v1)
 
