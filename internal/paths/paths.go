@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -45,8 +47,8 @@ func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
 
 // StandaloneDir holds the runs stores written by pipeline binaries that could
-// not reach the admission daemon. The CLI's own verbs read [Paths.StateDB] and
-// never look here.
+// not reach the admission daemon. The read verbs merge these with
+// [Paths.StateDB]; [Paths.StandaloneStores] enumerates them.
 func (p Paths) StandaloneDir() string { return filepath.Join(p.Root, "standalone") }
 
 // StandaloneStateDB is the store standalone runs share. Binaries at
@@ -84,6 +86,65 @@ func (p Paths) EnsureStandaloneSchemaDir() error {
 		return err
 	}
 	return fssecure.EnsureDir(p.StandaloneSchemaDir(store.ExpectedSchemaVersion()))
+}
+
+// StandaloneStore is one runs store under [Paths.StandaloneDir]: the shared
+// standalone file, whose Schema is zero, or a per-schema fallback carrying the
+// store schema version its directory names.
+type StandaloneStore struct {
+	Path   string
+	Schema int
+}
+
+// StandaloneStores lists the standalone runs stores that exist under this
+// home, the shared file first and each per-schema fallback after it in schema
+// order. A home with no standalone directory yields none. Only regular files
+// are listed, so a caller still handles a store it cannot open.
+func (p Paths) StandaloneStores() []StandaloneStore {
+	var out []StandaloneStore
+	if isRegularFile(p.StandaloneStateDB()) {
+		out = append(out, StandaloneStore{Path: p.StandaloneStateDB()})
+	}
+	entries, err := os.ReadDir(p.StandaloneDir())
+	if err != nil {
+		return out
+	}
+	var fallbacks []StandaloneStore
+	for _, entry := range entries {
+		schema, ok := standaloneSchemaOf(entry)
+		if !ok {
+			continue
+		}
+		path := filepath.Join(p.StandaloneSchemaDir(schema), "state.db")
+		if !isRegularFile(path) {
+			continue
+		}
+		fallbacks = append(fallbacks, StandaloneStore{Path: path, Schema: schema})
+	}
+	sort.Slice(fallbacks, func(i, j int) bool { return fallbacks[i].Schema < fallbacks[j].Schema })
+	return append(out, fallbacks...)
+}
+
+func standaloneSchemaOf(entry os.DirEntry) (int, bool) {
+	if !entry.IsDir() {
+		return 0, false
+	}
+	rest, found := strings.CutPrefix(entry.Name(), "schema-")
+	if !found {
+		return 0, false
+	}
+	schema, err := strconv.Atoi(rest)
+	if err != nil || schema <= 0 {
+		return 0, false
+	}
+	return schema, true
+}
+
+// safety: Lstat, because a symlink into another home's store is not this
+// home's standalone run and must not be read as one.
+func isRegularFile(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 func (p Paths) ToolchainsDir() string { return filepath.Join(p.Root, "toolchains") }

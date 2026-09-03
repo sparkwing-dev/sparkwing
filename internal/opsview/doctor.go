@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -676,21 +675,9 @@ func diagnoseToolchains(p paths.Paths, report *DoctorReport) {
 }
 
 func diagnoseStandaloneStores(p paths.Paths, report *DoctorReport) {
-	addStandaloneStore(report, filepath.Join(p.StandaloneDir(), "state.db"), 0)
-	entries, err := os.ReadDir(p.StandaloneDir())
-	if err != nil {
-		return
+	for _, s := range p.StandaloneStores() {
+		addStandaloneStore(report, s.Path, s.Schema)
 	}
-	for _, entry := range entries {
-		schema, ok := standaloneSchemaOf(entry)
-		if !ok {
-			continue
-		}
-		addStandaloneStore(report, filepath.Join(p.StandaloneSchemaDir(schema), "state.db"), schema)
-	}
-	sort.Slice(report.StandaloneStores, func(i, j int) bool {
-		return report.StandaloneStores[i].Schema < report.StandaloneStores[j].Schema
-	})
 }
 
 func addStandaloneStore(report *DoctorReport, path string, schema int) {
@@ -701,21 +688,6 @@ func addStandaloneStore(report *DoctorReport, path string, schema int) {
 	report.StandaloneStores = append(report.StandaloneStores, DoctorStandaloneStore{
 		Path: path, Schema: schema, Runs: runs, OldestRunAt: oldest,
 	})
-}
-
-func standaloneSchemaOf(entry os.DirEntry) (int, bool) {
-	if !entry.IsDir() {
-		return 0, false
-	}
-	rest, found := strings.CutPrefix(entry.Name(), "schema-")
-	if !found {
-		return 0, false
-	}
-	schema, err := strconv.Atoi(rest)
-	if err != nil || schema <= 0 {
-		return 0, false
-	}
-	return schema, true
 }
 
 // safety: read-only and without migration, because a store at another
