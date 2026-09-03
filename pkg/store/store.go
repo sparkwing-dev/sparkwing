@@ -3324,9 +3324,10 @@ func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claima
 }
 
 // PrincipalHoldsPipelineClaim reports whether claimant holds an
-// unexpired claim on any node of any run of the named pipeline. It is
-// the ownership proof for a write that names a pipeline instead of a
-// run. An unbound claimant holds nothing.
+// unexpired claim on any node of any run of the named pipeline, whatever
+// repository the run belongs to. A write that names a profile key uses
+// PrincipalHoldsProfileClaim, which also checks the key's repository
+// scope. An unbound claimant holds nothing.
 func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error) {
 	if !claimant.bound() {
 		return false, nil

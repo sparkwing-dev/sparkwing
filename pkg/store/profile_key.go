@@ -120,21 +120,25 @@ func RepoIdentityFromPath(repoPath string) string {
 // names the same repository as a run or trigger row. The key carries the
 // canonical identity ("host/owner/name"); a row records the slug it was
 // triggered for ("owner/name") and, when it has one, the clone URL the
-// identity derives from. The slug matches only under a bare host, so a
-// caller cannot reach "host/other/owner/name" by naming its own
-// "owner/name"; a deeper path is proved by the clone URL instead. A row
-// with no repository at all matches no scoped key.
+// identity derives from. A clone URL decides alone when the row has one,
+// so a slug cannot claim a key under a host the URL contradicts. Without
+// a URL the slug matches only under a bare host, so a caller cannot reach
+// "host/other/owner/name" by naming its own "owner/name". A row with no
+// repository at all matches no scoped key.
 func RepoIdentityMatches(keyRepo, repo, repoURL string) bool {
 	if keyRepo == "" {
 		return true
 	}
-	if repo != "" {
-		if keyRepo == repo {
-			return true
-		}
-		if host, ok := strings.CutSuffix(keyRepo, "/"+repo); ok && host != "" && !strings.Contains(host, "/") {
-			return true
-		}
+	// safety: a clone URL names the repository exactly, so it decides alone; the slug rule is only for rows without one.
+	if identity := RepoIdentityFromURL(repoURL); identity != "" {
+		return keyRepo == identity
 	}
-	return repoURL != "" && keyRepo == RepoIdentityFromURL(repoURL)
+	if repo == "" {
+		return false
+	}
+	if keyRepo == repo {
+		return true
+	}
+	host, ok := strings.CutSuffix(keyRepo, "/"+repo)
+	return ok && host != "" && !strings.Contains(host, "/")
 }

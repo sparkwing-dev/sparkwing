@@ -26,3 +26,27 @@ func TestRepoIdentityMatchesHonoursTheHostBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoIdentityMatchesLetsTheCloneURLDecide(t *testing.T) {
+	url := "https://github.com/acme/web.git"
+	cases := []struct {
+		key  string
+		want bool
+	}{
+		{"github.com/acme/web", true},
+		{"evil.example/acme/web", false},
+		{"github.com/x/acme/web", false},
+		{"acme/web", false},
+	}
+	for _, c := range cases {
+		if got := store.RepoIdentityMatches(c.key, "acme/web", url); got != c.want {
+			t.Errorf("store.RepoIdentityMatches(%q, acme/web, %s) = %v, want %v", c.key, url, got, c.want)
+		}
+	}
+	if !store.RepoIdentityMatches("acme/web", "acme/web", "") {
+		t.Error("a row with no clone URL should still match its own slug")
+	}
+	if store.RepoIdentityMatches("github.com/acme/web", "", "") {
+		t.Error("a row with no repository should match no scoped key")
+	}
+}
