@@ -731,3 +731,60 @@ func TestWingdAPI_ArtifactRouteFollowsTheConfiguredStore(t *testing.T) {
 		t.Fatalf("status = %d, want 404 from a daemon with no artifact store", got)
 	}
 }
+
+// safety: a refusal must not read like a success. The block promises
+// "everything else works" and the store it opens is what doctor reports as
+// runs that went standalone, so neither may survive a run that is refused.
+func TestHostedRun_ARefusedRunLeavesNoBlockAndNoStore(t *testing.T) {
+	registerHostedPipelines(t)
+	home := wingdTestHome(t)
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv(AllowUnadmittedEnv, "")
+	paths := PathsAt(home)
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+
+	// safety: a daemon that serves no api.sock, so selection cannot ask its
+	// health which kind of store fault this is, holding a file that is not a
+	// database. Admission is the first thing that answers.
+	brokenHome := wingdTestHome(t)
+	if err := PathsAt(brokenHome).EnsureRoot(); err != nil {
+		t.Fatalf("ensure broken root: %v", err)
+	}
+	if err := os.WriteFile(PathsAt(brokenHome).StateDB(), []byte("this is not a database"), 0o600); err != nil {
+		t.Fatalf("write a non-database: %v", err)
+	}
+	runs, err := NewHeldRunStore(brokenHome)
+	if err != nil {
+		t.Fatalf("held run store: %v", err)
+	}
+	t.Cleanup(func() { _ = runs.Close() })
+	startWingdCfg(t, wingd.Config{
+		Home:    home,
+		Version: "test",
+		Runs:    runs,
+		Sampler: stubSampler{wingd.HostStat{
+			TotalCores: 8, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30,
+			LoadMeasured: true, MemoryMeasured: true,
+		}},
+		HeadroomFraction: -1,
+	})
+
+	warnings := captureStandaloneWarnings(t)
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	res, err := RunLocal(ctx, paths, Options{Pipeline: "hosted-memo", Admission: testWingdAdmission(home, nil)})
+	if err == nil && res != nil && res.Status == "success" {
+		t.Fatal("a daemon that cannot read its runs store admitted this run")
+	}
+	if got := warnings.String(); got != "" {
+		t.Fatalf("a refused run printed a standalone block:\n%s", got)
+	}
+	if _, err := os.Stat(paths.StandaloneStateDB()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat %s = %v, want no standalone store after a refusal", paths.StandaloneStateDB(), err)
+	}
+	if _, err := os.Stat(paths.StandaloneDir()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a refused run left %s behind", paths.StandaloneDir())
+	}
+}

@@ -99,9 +99,7 @@ type Options struct {
 
 	// safety: set only after a store is chosen, so a caller that builds its
 	// own Options cannot claim a run reached the standalone store.
-	standaloneReason  string
-	standaloneStateDB string
-	standaloneSkew    bool
+	standalone *standaloneRun
 
 	ProfileLookup storeurl.ProfileLookup
 
@@ -368,8 +366,11 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
 		defer cancelConsumer()
-		go runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget,
-			childStoreEnv{path: opts.standaloneStateDB, reason: opts.standaloneReason})
+		child := childStoreEnv{}
+		if opts.standalone != nil {
+			child = childStoreEnv{path: opts.standalone.stateDB, reason: opts.standalone.reason}
+		}
+		go runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget, child)
 	}
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout
@@ -392,11 +393,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		var outcome admitOutcome
 		var admitErr error
 		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, opts.Pipeline, runID, plan, opts.MaxParallel, cancelRun)
-		degradeState := unhosted{
-			reason: opts.standaloneReason,
-			skew:   opts.standaloneSkew,
-			hosted: backends.APISocket != "",
-		}
+		degradeState := opts.standalone.state(backends.APISocket != "")
 		if admitErr != nil && opts.Admission.unhostedOutcome(admitErr, degradeState) {
 			opts.Admission = nil
 			lease, outcome, admitErr = nil, admitProceed, nil
@@ -431,6 +428,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		// safety: release only after FinishRun below, so the daemon's
 		// orphan finalizer can never observe a still-running row.
 		defer lease.release()
+		// safety: admission has answered, so the block cannot promise
+		// "everything else works" above a refusal, and a store this run made
+		// for a run that never started is discarded by the caller instead.
+		opts.standalone.announce()
 		if outcome == admitSkipped {
 			skipDispatch = true
 		} else if lease != nil {
@@ -610,22 +611,26 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		// runs and the run opens nothing.
 		opts.State = hosted.State
 	} else if selection.standalone != "" {
-		st, path, discard, serr := openStandaloneStore(paths, opts.DryRun)
+		st, path, fresh, discard, serr := openStandaloneStore(paths, opts.DryRun)
 		if serr != nil {
 			return nil, serr
 		}
 		defer discard()
 		opts.State = st
 		opts.DefaultStateDB = path
-		opts.standaloneStateDB = path
-		opts.standaloneReason = selection.standalone
-		opts.standaloneSkew = selection.storeSkew
-		fmt.Fprint(standaloneWarningOut, standaloneWarning(selection, sparkwingModuleVersion()))
+		opts.standalone = &standaloneRun{
+			reason:  selection.standalone,
+			stateDB: path,
+			warning: standaloneWarning(selection, sparkwingModuleVersion()),
+			skew:    selection.storeSkew,
+			created: fresh,
+		}
+		defer func() { opts.standalone.discardIfUnused() }()
 	}
 	// safety: a standalone run holds the store the fallback already chose, so
 	// profile resolution must not reopen or replace it the way it would for a
 	// run that arrived with none.
-	keepState := hosted.APISocket != "" || opts.standaloneReason != ""
+	keepState := hosted.APISocket != "" || opts.standalone != nil
 	if err := applyProfileBackendsWithMirror(ctx, &opts, opts.Profile, paths, keepState); err != nil {
 		return nil, fmt.Errorf("profile backends: %w", err)
 	}
@@ -1026,9 +1031,9 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if len(secretArgs) > 0 {
 		inv[store.InvocationSecretArgsKey] = secretArgs
 	}
-	if opts.standaloneReason != "" {
+	if opts.standalone != nil && opts.standalone.reason != "" {
 		inv["standalone"] = true
-		inv["standalone_reason"] = opts.standaloneReason
+		inv["standalone_reason"] = opts.standalone.reason
 	}
 	if opts.RetryRepoDir != "" || opts.RetryRepoIdentity != "" || opts.RetryRevision != "" || opts.RetryPlanHash != "" {
 		inv["retry_provenance"] = map[string]string{
