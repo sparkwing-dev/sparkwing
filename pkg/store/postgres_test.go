@@ -118,6 +118,40 @@ func TestPostgresOpenAndMigrate(t *testing.T) {
 	}
 }
 
+func TestSchemaV29_PostgresFreshShape(t *testing.T) {
+	st := openPGTestStore(t)
+	assertPostgresNodeOfferColumnTypes(t, st)
+}
+
+func assertPostgresNodeOfferColumnTypes(t *testing.T, st *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	for _, column := range []struct{ name, want string }{
+		{name: "prefers_labels", want: "bytea"},
+		{name: "requested_cores", want: "double precision"},
+		{name: "requested_memory_bytes", want: "bigint"},
+		{name: "requested_slots", want: "bigint"},
+		{name: "offer_started_at", want: "bigint"},
+		{name: "offer_priority_target", want: "bigint"},
+		{name: "claim_base_priority", want: "bigint"},
+		{name: "claim_priority", want: "bigint"},
+		{name: "claim_worker_id", want: "text"},
+		{name: "claim_executor_kind", want: "text"},
+		{name: "claim_reservation_id", want: "text"},
+	} {
+		var dataType string
+		if err := st.DB().QueryRowContext(ctx, `
+SELECT data_type FROM information_schema.columns
+ WHERE table_schema = current_schema() AND table_name = 'nodes' AND column_name = $1`,
+			column.name).Scan(&dataType); err != nil {
+			t.Fatal(err)
+		}
+		if dataType != column.want {
+			t.Errorf("nodes.%s type = %q, want %s", column.name, dataType, column.want)
+		}
+	}
+}
+
 func TestSchemaV18_PostgresScrubsSecretInputHash(t *testing.T) {
 	scoped := pgTestSchemaDSN(t)
 	ctx := context.Background()
@@ -231,6 +265,47 @@ SELECT data_type FROM information_schema.columns
 	}
 }
 
+func TestSchemaV29_PostgresMigratesActualV28Shape(t *testing.T) {
+	scoped := pgTestSchemaDSN(t)
+	ctx := context.Background()
+	st, err := store.OpenPostgres(ctx, scoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`DROP TABLE node_claim_offers`,
+		`ALTER TABLE nodes DROP COLUMN prefers_labels`,
+		`ALTER TABLE nodes DROP COLUMN requested_cores`,
+		`ALTER TABLE nodes DROP COLUMN requested_memory_bytes`,
+		`ALTER TABLE nodes DROP COLUMN requested_slots`,
+		`ALTER TABLE nodes DROP COLUMN offer_started_at`,
+		`ALTER TABLE nodes DROP COLUMN offer_priority_target`,
+		`ALTER TABLE nodes DROP COLUMN claim_base_priority`,
+		`ALTER TABLE nodes DROP COLUMN claim_priority`,
+		`ALTER TABLE nodes DROP COLUMN claim_worker_id`,
+		`ALTER TABLE nodes DROP COLUMN claim_executor_kind`,
+		`ALTER TABLE nodes DROP COLUMN claim_reservation_id`,
+		`DROP INDEX idx_executors_executor_id`,
+		`ALTER TABLE executors DROP COLUMN executor_id`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 29`,
+	} {
+		if _, err := st.DB().ExecContext(ctx, stmt); err != nil {
+			_ = st.Close()
+			t.Fatalf("downgrade with %q: %v", stmt, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	up, err := store.OpenPostgres(ctx, scoped)
+	if err != nil {
+		t.Fatalf("open v28 shape at schema %d: %v", store.ExpectedSchemaVersion(), err)
+	}
+	defer up.Close()
+	assertPostgresNodeOfferColumnTypes(t, up)
+}
+
 func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 	st := openPGTestStore(t)
 	ctx := context.Background()
@@ -277,6 +352,359 @@ func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 	}
 	if losers != 3 {
 		t.Errorf("losers = %d, want 3", losers)
+	}
+}
+
+func TestPostgresMarkNodeReadyIncludesEligibilityWriterBeforeSnapshot(t *testing.T) {
+	st := openPGTestStore(t)
+	ctx := context.Background()
+	low := enrollOfferExecutor(t, st, "low", 20, 20, "linux")
+	high := enrollOfferExecutor(t, st, "high", 80, 80, "linux")
+	if _, err := st.DB().ExecContext(ctx, `UPDATE executors SET last_seen = 0, headroom_reported = 0 WHERE name = 'high'`); err != nil {
+		t.Fatal(err)
+	}
+	if low.TokenPrefix == high.TokenPrefix {
+		t.Fatal("test executors unexpectedly share a credential")
+	}
+	if err := st.CreateRun(ctx, store.Run{ID: "priority-run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "priority-run", NodeID: "work", Status: "pending", NeedsLabels: []string{"linux"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	writer, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "sparkwing/executor-registry"); err != nil {
+		_ = writer.Rollback()
+		t.Fatal(err)
+	}
+	if _, err := writer.ExecContext(ctx, `UPDATE executors
+   SET last_seen = $1, headroom_reported = 1, headroom_cores = 4
+ WHERE name = 'high'`, time.Now().UnixNano()); err != nil {
+		_ = writer.Rollback()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- st.MarkNodeReady(ctx, "priority-run", "work") }()
+	select {
+	case err := <-done:
+		_ = writer.Rollback()
+		t.Fatalf("MarkNodeReady passed an uncommitted eligibility writer: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := writer.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("MarkNodeReady did not resume after eligibility committed")
+	}
+	node, err := st.GetNode(ctx, "priority-run", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.OfferPriorityTarget != 80 {
+		t.Fatalf("offer priority target = %d, want newly eligible priority 80", node.OfferPriorityTarget)
+	}
+}
+
+func TestPostgresMarkNodeReadyIncludesActiveSlotReleaseBeforeOpening(t *testing.T) {
+	st := openPGTestStore(t)
+	ctx := context.Background()
+	low := enrollOfferExecutor(t, st, "low", 20, 20, "linux")
+	high := enrollOfferExecutor(t, st, "high", 80, 80, "linux")
+	if low.TokenPrefix == high.TokenPrefix {
+		t.Fatal("test executors unexpectedly share a credential")
+	}
+	if _, err := st.DB().ExecContext(ctx, `UPDATE executors SET max_concurrent = 1 WHERE name IN ('low', 'high')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(ctx, store.Run{ID: "slot-run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, nodeID := range []string{"active", "work"} {
+		if err := st.CreateNode(ctx, store.Node{
+			RunID: "slot-run", NodeID: nodeID, Status: "pending",
+			NeedsLabels: []string{"linux"}, RequestedCores: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET
+ claimed_by = 'holder', claim_executor = 'high', claim_cores = 1,
+ claim_slot = 0, lease_expires_at = $1
+ WHERE run_id = 'slot-run' AND node_id = 'active'`, time.Now().Add(time.Minute).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+
+	release, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := release.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared(hashtext($1))`, "sparkwing/executor-eligibility"); err != nil {
+		_ = release.Rollback()
+		t.Fatal(err)
+	}
+	if _, err := release.ExecContext(ctx, `UPDATE nodes SET status = 'done'
+ WHERE run_id = 'slot-run' AND node_id = 'active'`); err != nil {
+		_ = release.Rollback()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- st.MarkNodeReady(ctx, "slot-run", "work") }()
+	select {
+	case err := <-done:
+		_ = release.Rollback()
+		t.Fatalf("MarkNodeReady passed an uncommitted slot release: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := release.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("MarkNodeReady did not resume after slot release committed")
+	}
+	node, err := st.GetNode(ctx, "slot-run", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.OfferPriorityTarget != 80 {
+		t.Fatalf("offer priority target = %d, want newly available priority 80", node.OfferPriorityTarget)
+	}
+}
+
+func TestPostgresFinishNodeUsesExecutorEligibilityLock(t *testing.T) {
+	st := openPGTestStore(t)
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{ID: "finish-run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "finish-run", NodeID: "work", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertPostgresEligibilityMutationWaits(t, st, func() error {
+		return st.FinishNode(ctx, "finish-run", "work", "success", "", nil)
+	})
+}
+
+func TestPostgresHeartbeatNodeClaimUsesExecutorEligibilityLock(t *testing.T) {
+	st := openPGTestStore(t)
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{ID: "heartbeat-run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "heartbeat-run", NodeID: "work", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
+	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET claimed_by = 'holder',
+ claim_principal = $1, claim_token_prefix = $2, lease_expires_at = $3
+ WHERE run_id = 'heartbeat-run' AND node_id = 'work'`,
+		identity.Principal, identity.TokenPrefix, time.Now().Add(time.Minute).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	assertPostgresEligibilityMutationWaits(t, st, func() error {
+		return st.HeartbeatNodeClaim(ctx, "heartbeat-run", "work", identity, "holder", time.Minute)
+	})
+}
+
+func TestPostgresDeadlineAwardDoesNotBlockUnrelatedClaimHeartbeat(t *testing.T) {
+	st := openPGTestStore(t)
+	ctx := context.Background()
+	low := enrollOfferExecutor(t, st, "shared-low", 20, 20, "linux")
+	high := enrollOfferExecutor(t, st, "shared-high", 80, 80, "linux")
+	if low.TokenPrefix == high.TokenPrefix {
+		t.Fatal("test executors unexpectedly share a credential")
+	}
+	seedExecutorNode(t, st, "shared-round", 1, "linux")
+	summary, err := st.SchedulingSummary(ctx, "shared-round", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := st.OfferExecutorClaim(ctx, low, store.ExecutorClaimOffer{
+		ExecutorName: "shared-low", HolderID: "shared-holder", RunID: "shared-round", NodeID: "work",
+		ReservationID: "shared-reservation", ResourceDigest: summary.ResourceDigest, Slot: 0, Lease: time.Minute,
+	})
+	if err != nil || !result.Pending {
+		t.Fatalf("seed pending offer = %+v, %v", result, err)
+	}
+	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET offer_started_at = $1
+ WHERE run_id = 'shared-round' AND node_id = 'work'`, time.Now().Add(-6*time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	claimant := store.ClaimIdentity{Principal: "unrelated-runner", TokenPrefix: "swr_unrelated"}
+	if err := st.CreateRun(ctx, store.Run{ID: "heartbeat-progress", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "heartbeat-progress", NodeID: "work", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET claimed_by = 'heartbeat-holder',
+ claim_principal = $1, claim_token_prefix = $2, lease_expires_at = $3
+ WHERE run_id = 'heartbeat-progress' AND node_id = 'work'`,
+		claimant.Principal, claimant.TokenPrefix, time.Now().Add(time.Minute).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+
+	blocker, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var locked string
+	if err := blocker.QueryRowContext(ctx, `SELECT name FROM executors WHERE name = 'shared-low' FOR UPDATE`).Scan(&locked); err != nil {
+		_ = blocker.Rollback()
+		t.Fatal(err)
+	}
+	finalized := make(chan error, 1)
+	go func() {
+		_, err := st.FinalizeExecutorClaimRound(ctx, "shared-round", "work")
+		finalized <- err
+	}()
+	waitForPostgresSharedEligibilityLock(t, st)
+	heartbeatCtx, cancel := context.WithTimeout(ctx, time.Second)
+	heartbeatErr := st.HeartbeatNodeClaim(heartbeatCtx, "heartbeat-progress", "work", claimant, "heartbeat-holder", time.Minute)
+	cancel()
+	if heartbeatErr != nil {
+		_ = blocker.Rollback()
+		t.Fatalf("unrelated heartbeat waited behind deadline award: %v", heartbeatErr)
+	}
+	executorHeartbeatCtx, executorCancel := context.WithTimeout(ctx, time.Second)
+	executorHeartbeatErr := st.HeartbeatExecutor(executorHeartbeatCtx, high, "shared-high", store.ExecutorResource{Cores: 8, MemoryBytes: 16 << 30}, 0, time.Now())
+	executorCancel()
+	if executorHeartbeatErr != nil {
+		_ = blocker.Rollback()
+		t.Fatalf("unrelated executor heartbeat waited behind deadline award: %v", executorHeartbeatErr)
+	}
+	select {
+	case err := <-finalized:
+		_ = blocker.Rollback()
+		t.Fatalf("deadline award did not remain blocked on its candidate row: %v", err)
+	default:
+	}
+	if err := blocker.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-finalized:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("deadline award did not resume after candidate row unlocked")
+	}
+}
+
+func waitForPostgresSharedEligibilityLock(t *testing.T, st *store.Store) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for ctx.Err() == nil {
+		probe, err := st.DB().BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var exclusive bool
+		err = probe.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtext($1))`, "sparkwing/executor-eligibility").Scan(&exclusive)
+		_ = probe.Rollback()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !exclusive {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("deadline award did not acquire the shared eligibility lock")
+}
+
+func assertPostgresEligibilityMutationWaits(t *testing.T, st *store.Store, mutate func() error) {
+	t.Helper()
+	ctx := context.Background()
+	blocker, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blocker.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "sparkwing/executor-eligibility"); err != nil {
+		_ = blocker.Rollback()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- mutate() }()
+	select {
+	case err := <-done:
+		_ = blocker.Rollback()
+		t.Fatalf("eligibility mutation bypassed executor eligibility lock: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := blocker.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("eligibility mutation did not resume after lock released")
+	}
+}
+
+func TestPostgresExecutorOffersOnDifferentClaimantsDoNotDeadlock(t *testing.T) {
+	st := openPGTestStore(t)
+	alpha := enrollOfferExecutor(t, st, "alpha", 50, 50, "linux")
+	zeta := enrollOfferExecutor(t, st, "zeta", 50, 50, "linux")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for iteration := range 32 {
+		runAlpha := fmt.Sprintf("deadlock-alpha-%d", iteration)
+		runZeta := fmt.Sprintf("deadlock-zeta-%d", iteration)
+		seedExecutorNode(t, st, runAlpha, 1, "linux")
+		seedExecutorNode(t, st, runZeta, 1, "linux")
+		summaryAlpha, err := st.SchedulingSummary(ctx, runAlpha, "work")
+		if err != nil {
+			t.Fatal(err)
+		}
+		summaryZeta, err := st.SchedulingSummary(ctx, runZeta, "work")
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		go func() {
+			<-start
+			_, err := st.OfferExecutorClaim(ctx, alpha, store.ExecutorClaimOffer{
+				ExecutorName: "alpha", HolderID: "holder-alpha", RunID: runAlpha, NodeID: "work",
+				ReservationID: "reservation-" + runAlpha, ResourceDigest: summaryAlpha.ResourceDigest, Slot: 0, Lease: time.Minute,
+			})
+			errs <- err
+		}()
+		go func() {
+			<-start
+			_, err := st.OfferExecutorClaim(ctx, zeta, store.ExecutorClaimOffer{
+				ExecutorName: "zeta", HolderID: "holder-zeta", RunID: runZeta, NodeID: "work",
+				ReservationID: "reservation-" + runZeta, ResourceDigest: summaryZeta.ResourceDigest, Slot: 0, Lease: time.Minute,
+			})
+			errs <- err
+		}()
+		close(start)
+		for range 2 {
+			if err := <-errs; err != nil {
+				t.Fatalf("iteration %d offer: %v", iteration, err)
+			}
+		}
 	}
 }
 

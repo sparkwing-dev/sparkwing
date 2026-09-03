@@ -395,8 +395,11 @@ sparkwing cluster agents enroll --profile prod \
 ```
 
 The controller-owned enrollment is the trust envelope. Kind identifies an
-`agent` or `gateway` execution boundary; location is display-only and never
-affects placement. Capabilities, priority range, concurrency ceiling, and
+`agent` or `gateway` execution boundary; location is controller-owned placement
+policy. `location=local` and `location=cloud` requirements match only this
+field, while `unknown` fails both. The reserved `location=coordinator` selector
+and compatibility alias `local` are ungrantable to helpers. Capabilities,
+priority range, concurrency ceiling, and
 resource budget come only from enrollment. Worker traffic cannot add or widen
 them, and the agents API never returns the credential prefix or principal.
 
@@ -404,7 +407,9 @@ Set `name` for one enrolled coordinator, or use `coordinators` for several.
 Every membership needs a distinct revocable token and its enrolled name;
 network discovery never grants trust. The top-level concurrency and
 contribution settings are machine-wide local ceilings. A membership may narrow
-them, never widen them:
+them, never widen them. wingd enforces both levels when it grants each
+reservation, so simultaneous slots and separate agent processes cannot
+oversubscribe a ceiling after advertising stale headroom:
 
 ```yaml
 name: desk
@@ -436,13 +441,18 @@ one slot ledger across all configured coordinators, so the same physical slot
 cannot back simultaneous offers to two controllers. A gateway needs an
 equivalent downstream admission reservation before it offers.
 
-The controller waits no more than five seconds. Priority 100 and the highest
-eligible ceiling recorded at round open win immediately; otherwise the deadline
-winner is the highest effective priority, then the earliest offer, executor
-name, slot, and holder. `Requires` and resource limits filter before ranking.
-Run priority and `Prefers` may reorder eligible executors only inside each
-administrator-owned priority range. A retry after a lost response recovers the
-same fenced claim. Legacy direct claims remain FIFO and do not use this ranking.
+The controller waits no more than five seconds. Priority 100 and the exact
+highest eligible effective priority recorded at round open win immediately;
+otherwise the deadline winner is the highest effective priority, then the
+earliest offer, executor name, slot, and holder. `Requires` and resource limits
+filter before ranking.
+Run priority and the first matching `Prefers` term add to base priority and are
+then clamped inside each administrator-owned priority range. A preference is a
+small tie-breaking boost, not an absolute override: base priority can still
+outweigh it. Arbitration is scoped to one controller; configured memberships
+share physical slots but do not yet compare priorities across controllers. A
+retry after a lost response recovers the same fenced claim. Legacy direct
+claims remain FIFO and do not use this ranking.
 
 With the Helm values `runner.triggerRunner.kind: warm` and
 `runner.automountServiceAccountToken: true`, a trigger worker offers each node

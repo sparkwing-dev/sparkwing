@@ -214,13 +214,23 @@ func TestNodeClaimOffer_HTTPUsesEnrolledPriorityAndPreservesPendingState(t *test
 	if err := st.HeartbeatExecutor(context.Background(), claimant, "desk", store.ExecutorResource{Cores: 4}, 0, now); err != nil {
 		t.Fatal(err)
 	}
+	high := store.ClaimIdentity{Principal: "priority-target", TokenPrefix: "swr_priority_target"}
+	if err := st.EnrollExecutor(context.Background(), high.TokenPrefix, store.Executor{
+		Name: "priority-target", Kind: "agent", Location: "local", BasePriority: 75, PriorityCeiling: 75,
+		MaxConcurrent: 1, Principal: high.Principal, Budget: store.ExecutorResource{Cores: 4},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.HeartbeatExecutor(context.Background(), high, "priority-target", store.ExecutorResource{Cores: 4}, 0, now); err != nil {
+		t.Fatal(err)
+	}
 
 	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	defer srv.Close()
 	c := client.NewWithToken(srv.URL, nil, raw)
 	ctx := context.Background()
 	seedRunNode(t, st, "run-1", "node-a")
-	if err := st.MarkNodeReadyWithPriorityCeiling(ctx, "run-1", "node-a", 100); err != nil {
+	if err := st.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
 	preparation, err := c.PrepareExecutorClaim(ctx, "desk")

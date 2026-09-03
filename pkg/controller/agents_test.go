@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -195,6 +196,15 @@ func TestAgents_AdminEnrollmentExactCredentialLivenessAndLegacyBoundary(t *testi
 		map[string]any{"headroom": map[string]any{"cores": -1, "memory_bytes": 0, "queue_depth": 0}}); status != http.StatusBadRequest {
 		t.Fatalf("invalid heartbeat = %d, want 400", status)
 	}
+	if status, _ := agentRequest(t, http.MethodPost, srv.URL+"/api/v1/agents/desk/heartbeat", runnerRaw,
+		map[string]any{"headroom": map[string]any{"cores": 3, "memory_bytes": 0, "queue_depth": 0}, "location": "cloud"}); status != http.StatusBadRequest {
+		t.Fatalf("heartbeat location self-report = %d, want 400", status)
+	}
+	spoofed := maps.Clone(enrollment)
+	spoofed["capabilities"] = []string{"linux", "location=cloud"}
+	if status, _ := agentRequest(t, http.MethodPut, srv.URL+"/api/v1/agents/spoofed", adminRaw, spoofed); status != http.StatusBadRequest {
+		t.Fatalf("reserved capability enrollment = %d, want 400", status)
+	}
 
 	status, body := agentRequest(t, http.MethodGet, srv.URL+"/api/v1/agents", adminRaw, nil)
 	if status != http.StatusOK {
@@ -290,6 +300,45 @@ func TestAgents_AdminEnrollmentExactCredentialLivenessAndLegacyBoundary(t *testi
 	enrollment["token_prefix"] = "swr_missing"
 	if status, _ := agentRequest(t, http.MethodPut, srv.URL+"/api/v1/agents/desk", adminRaw, enrollment); status != http.StatusBadRequest {
 		t.Fatalf("enrollment accepted missing prefix: status %d", status)
+	}
+}
+
+func TestAgents_EnrollmentLimitReturnsStableError(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	for i := range store.MaxEnrolledExecutors {
+		name := fmt.Sprintf("seed-%d", i)
+		if err := st.EnrollExecutor(ctx, "swr_"+name, store.Executor{
+			Name: name, Kind: "agent", Location: "local", Principal: "principal-" + name, MaxConcurrent: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	adminRaw, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, runner, err := st.CreateToken("runner", store.TokenKindRunner, []string{controller.ScopeNodesClaim}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	defer srv.Close()
+	status, body := agentRequest(t, http.MethodPut, srv.URL+"/api/v1/agents/overflow", adminRaw, map[string]any{
+		"token_prefix": runner.Prefix, "kind": "agent", "location": "local", "max_concurrent": 1,
+		"budget": map[string]any{"cores": 0, "memory_bytes": 0},
+	})
+	if status != http.StatusConflict {
+		t.Fatalf("enrollment status = %d: %s", status, body)
+	}
+	want := `"error":"` + store.ErrExecutorEnrollmentLimit.Error() + `"`
+	if !strings.Contains(body, want) {
+		t.Fatalf("enrollment limit response = %s, want %s", body, want)
 	}
 }
 

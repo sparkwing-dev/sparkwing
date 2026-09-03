@@ -53,34 +53,62 @@ code change to unlock.
 
 - **controller + runner:** Controller administrators can enroll an executor by
   name and bind it to the exact prefix of a live runner or service token.
-  Enrollment owns its `agent` or `gateway` kind, display-only location, trusted
+  Enrollment owns its `agent` or `gateway` kind, trusted placement location,
   capabilities, priority range, concurrency ceiling, and resource budget;
   worker heartbeats update only last-seen and finite nonnegative headroom. Idle
   registrations appear in the fleet API, CLI, and dashboard, while stale ones
   remain visible as offline. The API reports each enrollment's exact live claim
   count separately from its distinct active run IDs; legacy rows leave that
   count unknown. Scheduling summaries apply hard capability, slot, headroom,
-  and resource filters before bounded priority. Rotating an enrollment's
-  credential resets liveness until the new credential sends a heartbeat.
+  and resource filters before bounded priority. Stable random internal
+  controller and executor identities derive a membership ID without binding
+  history to a credential or mutable display name. A shared eligibility preview
+  reports stable offline, placement, capability, slot, budget, and headroom
+  exclusions without exposing credentials. Rotating an enrollment's
+  credential resets liveness until the new credential sends a heartbeat. One
+  controller accepts at most 256 executor enrollments; the fixed safety bound
+  keeps arbitration work finite and can increase later without a schema change.
+  Reserved `location=local` and `location=cloud` requirements use enrollment,
+  never worker claims; `unknown` fails closed. `location=coordinator` and the
+  compatibility label `local` remain ungrantable to fleet helpers.
 - **runner + wingd:** An agent configuration with `name` or `coordinators`
   selects enrolled assisted-offer mode. It requires local admission, uses a
   distinct credential per coordinator, shares one machine slot ceiling, and
-  lets membership settings only narrow the global contribution. Coordinator
+  lets membership settings only narrow the global contribution. wingd enforces
+  both contribution levels atomically when it grants a reservation. Coordinator
   loops restart independently; a failed wingd probe withholds the heartbeat
   without erasing the last report. Wingd now supports the nonblocking exact-node,
   resource, and physical-slot reservation lifecycle used by assisted offers.
   An agent reserves capacity before it offers, keeps that reservation pinned
-  while the controller arbitrates, consumes the same reservation on an award,
-  and releases it after a loss. Name-less agents keep legacy FIFO claims.
-- **controller + runner:** Enrolled agents now compete for each eligible node in
-  a durable five-second offer round. Hard capabilities and resource limits
+  while the controller arbitrates, reattaches the same lease across a wingd
+  restart, consumes that reservation on an award, and releases it after a loss
+  or bounded controller timeout. Execution is cancelled before wingd can shed
+  an unrecoverable lease. Name-less agents keep legacy FIFO claims.
+- **controller + runner (Breaking):** Run-store schema 29 lets enrolled agents
+  compete for each eligible node in a durable five-second offer round. Hard capabilities and resource limits
   filter first; the controller then awards immediately at the round's recorded
-  priority ceiling or at priority 100, otherwise by effective priority,
-  earliest offer, executor name, physical slot, and holder at the deadline.
+  highest eligible effective priority or at priority 100, otherwise by
+  effective priority, earliest offer, executor name, physical slot, and holder
+  at the deadline.
   Effective priority starts from the administrator-owned base, stays within its
-  ceiling, and may be reordered by run priority and `Prefers`. Retrying an offer
-  recovers the same fenced claim after a lost response. If no live offer wins,
-  the same transaction returns an unlabeled node to coordinator fallback.
+  ceiling, and may be reordered by run priority and the first matching
+  `Prefers` term. `Store.MarkNodeReady` computes the target in the same
+  transaction that opens the round. PostgreSQL uses an exclusive fence for that
+  snapshot and shared fences for ordinary allocation, release, expiry, claim
+  heartbeat, and plan mutations, so deadline arbitration cannot stall unrelated
+  claim heartbeats. Target calculation and award each load executor occupancy
+  once and batch-lock executor rows in canonical order. A heartbeat cannot
+  revive an expired claim after that capacity becomes available again;
+  `MarkNodeReadyWithPriorityCeiling` is removed. The controller re-resolves
+  enrollment before award, so a narrowed capability, priority, slot limit, or
+  rotated credential cannot leave a stale offer eligible. Retrying an offer
+  recovers the same fenced claim after
+  a lost response. If no live offer wins, the same transaction returns an
+  unlabeled node to coordinator fallback. Offer-round lifecycle events expose
+  requirements, safe executor name, kind, and location fields, scores, and
+  outcomes without credentials, membership IDs, internal controller or
+  executor IDs, holders, or reservation identifiers. See the
+  [migration guide](docs/migrations/_unreleased.md#enrolled-executor-offer-arbitration).
 
 - **ci:** The pre-commit formatters step and the em-dash and tracker-ID sweeps
   judge the whole change, not only what is staged. Each reads the staged files

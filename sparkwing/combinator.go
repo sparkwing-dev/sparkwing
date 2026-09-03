@@ -272,8 +272,11 @@ func (g *JobGroup) Requires(labels ...string) *JobGroup {
 	return g
 }
 
-// Prefers records runner-label preferences for every member in plan-snapshot metadata; preferences do not affect runner selection.
-// See Job.Prefers.
+// Prefers records ordered runner-label preferences for every member in plan-snapshot metadata and gives matching enrolled-executor offers a small boost bounded by their priority ceiling; legacy claims ignore it.
+// Within one controller's enrolled-executor offer
+// round, matching a preference adds a small ordering boost bounded by each
+// executor's administrator-owned priority ceiling. It does not affect legacy
+// name-less runner claims. See Job.Prefers.
 func (g *JobGroup) Prefers(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.Prefers(labels...)

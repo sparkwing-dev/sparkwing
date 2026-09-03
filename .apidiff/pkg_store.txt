@@ -161,6 +161,7 @@ var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
+var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrInvalidCredentials = errors.New("invalid username or password")
 var ErrInvalidToken = errors.New("invalid token")
@@ -225,16 +226,26 @@ type ExecutorClaimRoundResult struct {
 	Revoked bool
 	Pending bool
 }
+type ExecutorEligibilityPreview struct {
+	MembershipID    string
+	Name            string
+	Kind            string
+	Location        string
+	Eligible        bool
+	ExclusionReason string
+	EffectiveScore  *int
+	PriorityCeiling *int
+}
 type ExecutorMembershipSnapshot struct {
-	MembershipID           string
-	WorkerID               string
-	Kind                   string
-	RegisteredBasePriority int
-	Eligible               bool
-	EffectivePriority      int
-	HighestEligibleCeiling int
-	ActiveSlots            int
-	MaxConcurrent          int
+	MembershipID            string
+	WorkerID                string
+	Kind                    string
+	RegisteredBasePriority  int
+	Eligible                bool
+	EffectivePriority       int
+	HighestEligiblePriority int
+	ActiveSlots             int
+	MaxConcurrent           int
 }
 const ExecutorRegistrationActiveWindow = 2 * time.Minute
 type ExecutorResource struct {
@@ -282,6 +293,7 @@ var Maintenance = storeMaintenanceFns{
 	SweepLRUConcurrencyCache:     (*Store).sweepLRUConcurrencyCache,
 	ReconcileConcurrencyKeys:     (*Store).reconcileConcurrencyKeys,
 }
+const MaxEnrolledExecutors = 256
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
 const MaxRunListLimit = 1000
@@ -306,16 +318,16 @@ type Node struct {
 	StartedAt  *time.Time
 	FinishedAt *time.Time
 
-	ReadyAt              *time.Time
-	ClaimedBy            string
-	LeaseExpiresAt       *time.Time
-	OfferStartedAt       *time.Time
-	OfferPriorityCeiling int
-	ClaimBasePriority    int
-	ClaimPriority        int
-	ClaimWorkerID        string
-	ClaimExecutorKind    string
-	ClaimReservationID   string
+	ReadyAt             *time.Time
+	ClaimedBy           string
+	LeaseExpiresAt      *time.Time
+	OfferStartedAt      *time.Time
+	OfferPriorityTarget int
+	ClaimBasePriority   int
+	ClaimPriority       int
+	ClaimWorkerID       string
+	ClaimExecutorKind   string
+	ClaimReservationID  string
 
 	NeedsLabels []string
 
@@ -652,7 +664,7 @@ func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID stri
 func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, name string, headroom ExecutorResource, queueDepth int, now time.Time) error
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
-func (s *Store) HighestActiveExecutorCeiling(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error)
+func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)
@@ -680,11 +692,11 @@ func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error)
 func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)
 func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts ConcurrencyMaintenanceOptions, minInterval time.Duration) (ConcurrencyMaintenanceResult, bool, error)
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
-func (s *Store) MarkNodeReadyWithPriorityCeiling(ctx context.Context, runID, nodeID string, ceiling int) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) OfferExecutorClaim(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) (ExecutorClaimOfferResult, error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error)
+func (s *Store) PreviewExecutorEligibility(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) ([]ExecutorEligibilityPreview, error)
 func (s *Store) PrincipalHoldsNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)

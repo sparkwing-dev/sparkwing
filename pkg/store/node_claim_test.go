@@ -179,6 +179,25 @@ func TestNodeClaim_HeartbeatExtendsLeaseForHolder(t *testing.T) {
 	}
 }
 
+func TestNodeClaim_HeartbeatCannotReviveExpiredLease(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	seedRunAndNode(t, s, "run-1", "node-a")
+	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
+		t.Fatal(err)
+	}
+	claimant := store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}
+	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ? WHERE run_id = 'run-1' AND node_id = 'node-a'`, time.Now().Add(-time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.HeartbeatNodeClaim(ctx, "run-1", "node-a", claimant, "pod-1", time.Minute); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("expired heartbeat = %v, want ErrLockHeld", err)
+	}
+}
+
 func TestNodeClaim_PrincipalBindingGatesClaimOwnership(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -395,6 +414,22 @@ func TestNodeClaim_UnlabeledNodeAlwaysClaimable(t *testing.T) {
 	}
 	if n.NodeID != "node-a" {
 		t.Fatalf("wrong node: %+v", n)
+	}
+}
+
+func TestNodeClaim_LegacyRunnerCannotSelfAssertReservedLocation(t *testing.T) {
+	for _, selector := range []string{"local", "location=coordinator", "location=local", "location=cloud"} {
+		t.Run(selector, func(t *testing.T) {
+			s := newStoreT(t)
+			ctx := context.Background()
+			seedNodeWithLabels(t, s, "run", "work", []string{selector})
+			node, err := s.ClaimNextReadyNode(ctx,
+				store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"},
+				"pod", 30*time.Second, []string{selector})
+			if !errors.Is(err, store.ErrNotFound) || node != nil {
+				t.Fatalf("self-asserted %q claim = %+v, %v", selector, node, err)
+			}
+		})
 	}
 }
 

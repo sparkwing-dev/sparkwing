@@ -12,14 +12,21 @@ CHANGELOG links here.
   and `max_concurrent` was the only contribution limit. A helper could claim a
   node and then wait in local admission.
 - **After:** Run-store schema 28 persists administrator-owned executor
-  enrollments: exact credential binding, name, kind, display-only location,
+  enrollments: exact credential binding, name, kind, trusted placement location,
   trusted capabilities, priority range, concurrency ceiling, and resource
   budget. An authenticated heartbeat can update only liveness and finite,
   nonnegative headroom. Node claims can persist the scheduling summary's exact
   resource charge and an opaque reservation/physical-slot binding. The local
   agent config can narrow concurrency and contribution but cannot grant trusted
-  capabilities or raise an operator ceiling. Location never grants a capability
-  or affects placement.
+  capabilities or raise an operator ceiling. `location=local` and
+  `location=cloud` are matched only from enrollment; `unknown` fails closed.
+  The reserved `location=coordinator` selector and compatibility alias `local`
+  cannot be granted to a helper. The eligibility preview uses the same matcher
+  as award revalidation and gives excluded enrollments stable offline,
+  placement, capability, slot, budget, or headroom reasons without scores.
+  A controller accepts at most 256 enrolled executors. Attempting to add the
+  257th returns `executor enrollment limit reached: maximum 256 per controller`.
+  This is a fixed scheduling safety bound, not a configurable resource limit.
 - **Migration:** Stop every controller that shares the run store, upgrade all
   of them, then restart them. An older controller refuses schema 28. Existing
   singular `agent.yaml` files without `name` or `coordinators` keep the legacy
@@ -52,17 +59,37 @@ CHANGELOG links here.
 - **After:** Schema 29 persists a five-second offer round per ready node and one
   live offer per credential-bound holder. The controller filters hard
   capabilities, exact resource demand, concurrency, headroom, and budget before
-  priority. It awards immediately when an offer reaches the highest eligible
-  ceiling recorded as the round opened, or reaches priority 100. At the
+  priority. Schema 29 also gives the controller and each enrollment stable
+  random internal identities; the derived membership ID survives credential
+  rotation without treating a mutable display name as identity. It awards
+  immediately when an offer reaches the exact highest
+  eligible effective priority recorded as the round opened, or reaches
+  priority 100. At the
   deadline it orders remaining live offers by effective priority, earliest
   offer, executor name, physical slot, and holder. Run priority and `Prefers`
   can reorder eligible executors only inside each administrator-owned priority
-  range. A losing or expired offer releases its local reservation; an award
-  consumes that exact reservation and binds its digest and slot to the claim.
+  range. A losing or expired offer releases its local reservation; a wingd
+  restart reattaches the same lease, and an unrecoverable reattach cancels
+  execution before lease shedding. An award consumes that exact reservation
+  and binds its digest and slot to the claim.
   If no live offer wins, the same controller transaction transfers an unlabeled
   node to the configured fallback. Repeating an awarded offer after a lost
   response returns the original fenced claim. A node already ready during the
   schema upgrade keeps its original readiness timestamp as the round start.
+  Lifecycle events record `executor_name`, safe kind and location fields,
+  scores, requirements, and outcomes, never credentials, principals, holders,
+  membership IDs, internal controller or executor IDs, or reservation IDs.
+  Store integrations call `MarkNodeReady`; the controller now snapshots node
+  requirements and computes the exact attainable priority target inside that
+  transaction. PostgreSQL gives round opening an exclusive eligibility fence;
+  ordinary allocation, release, expiry, claim-heartbeat, and plan mutations use
+  a shared fence, so unrelated lease heartbeats keep progressing during deadline
+  arbitration. Target calculation and award load active occupancy once, and
+  award batch-locks at most 256 executor rows in canonical order. An expired
+  claim cannot be revived by a late heartbeat after its capacity is reusable.
+  `MarkNodeReadyWithPriorityCeiling` is
+  removed so a caller cannot inject a stale target between those reads and
+  opening the round.
 - **Migration:** Stop every controller sharing the run store, upgrade all of
   them through schema 29, and restart them before starting enrolled agents.
   Upgrade each enrolled agent and its wingd together; the agent must reserve
@@ -72,6 +99,7 @@ CHANGELOG links here.
   slot cannot back simultaneous offers to two controllers. A gateway needs the
   equivalent downstream admission reservation before it offers. Name-less
   agents remain on the legacy FIFO route and need no configuration change.
+  Replace `MarkNodeReadyWithPriorityCeiling` calls with `MarkNodeReady`.
 - **Why:** A claim must mean the executor can start immediately, not that it has
   queued work behind a local scheduler. Durable rounds let the controller
   select the best currently runnable executor without double-awarding a node,

@@ -188,25 +188,35 @@ func agentCoordinators(cfg AgentConfig) []AgentCoordinatorConfig {
 }
 
 func runAgentMembership(ctx context.Context, cfg AgentConfig, member AgentCoordinatorConfig, ledger ExecutorCapacityLedger, logger *slog.Logger) error {
-	localReserve, err := parseReserve(cfg.LocalReserve)
+	limits, err := executorCapacityLimitsFor(cfg, member)
 	if err != nil {
 		return err
 	}
-	globalContribution, err := parseReserve(cfg.Contribution)
-	if err != nil {
-		return err
-	}
-	membershipContribution, err := parseReserve(member.Contribution)
-	if err != nil {
-		return err
-	}
-	provider := newHeadroomProvider("", "", localReserve, globalContribution, membershipContribution)
+	provider := newHeadroomProvider("", "", limits.localReserve, limits.globalContribution, limits.membershipContribution)
 	ctrl := client.NewWithToken(member.Controller, &http.Client{Timeout: 30 * time.Second}, member.Token)
 	exec := func(execCtx context.Context, n *store.Node, holderID string, admission *orchestrator.LocalAdmission) {
 		executePooledNode(execCtx, ctrl, member.Controller, member.Logs, member.Gitcache, member.Token, member.CacheToken,
 			n, holderID, cfg.Lease, cfg.Heartbeat, "agent", logger, admission, provider)
 	}
 	return runAgentMembershipLoop(ctx, cfg, member, provider, ctrl, ledger, exec, logger)
+}
+
+func executorCapacityLimitsFor(cfg AgentConfig, member AgentCoordinatorConfig) (executorCapacityLimits, error) {
+	localReserve, err := parseReserve(cfg.LocalReserve)
+	if err != nil {
+		return executorCapacityLimits{}, err
+	}
+	globalContribution, err := parseReserve(cfg.Contribution)
+	if err != nil {
+		return executorCapacityLimits{}, err
+	}
+	membershipContribution, err := parseReserve(member.Contribution)
+	if err != nil {
+		return executorCapacityLimits{}, err
+	}
+	return executorCapacityLimits{
+		localReserve: localReserve, globalContribution: globalContribution, membershipContribution: membershipContribution,
+	}, nil
 }
 
 type executorMembershipClient interface {
@@ -216,6 +226,11 @@ type executorMembershipClient interface {
 }
 
 type executorNodeFn func(context.Context, *store.Node, string, *orchestrator.LocalAdmission)
+
+const (
+	executorClaimRequestTimeout  = 2 * time.Second
+	executorOfferTransportBudget = 500 * time.Millisecond
+)
 
 func runAgentMembershipLoop(ctx context.Context, cfg AgentConfig, member AgentCoordinatorConfig, provider headroomProvider, ctrl executorMembershipClient, ledger ExecutorCapacityLedger, exec executorNodeFn, logger *slog.Logger) error {
 	interval := cfg.Heartbeat
@@ -280,12 +295,19 @@ func heartbeatExecutor(ctx context.Context, executorName string, provider headro
 }
 
 func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoordinatorConfig, instanceID int64, slot int, ctrl executorMembershipClient, ledger ExecutorCapacityLedger, exec executorNodeFn, logger *slog.Logger) {
+	limits, err := executorCapacityLimitsFor(cfg, member)
+	if err != nil {
+		logger.Error("executor capacity configuration is invalid", "err", err, "slot", slot)
+		return
+	}
 	offerPoll := cfg.Poll
 	if offerPoll <= 0 || offerPoll > 500*time.Millisecond {
 		offerPoll = 500 * time.Millisecond
 	}
 	for ctx.Err() == nil {
-		preparation, err := ctrl.PrepareExecutorClaim(ctx, member.Name)
+		prepareCtx, cancelPrepare := context.WithTimeout(ctx, executorClaimRequestTimeout)
+		preparation, err := ctrl.PrepareExecutorClaim(prepareCtx, member.Name)
+		cancelPrepare()
 		if err != nil {
 			if ctx.Err() == nil {
 				logger.Error("executor claim preparation failed", "err", err, "slot", slot)
@@ -301,7 +323,7 @@ func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoor
 			sleepOrCancel(ctx, cfg.Poll)
 			continue
 		}
-		reservation, err := ledger.Reserve(ctx, preparation.Summary, preparation.Membership, slot)
+		reservation, err := ledger.Reserve(ctx, preparation.Summary, preparation.Membership, limits, slot)
 		if err != nil {
 			if !errors.Is(err, ErrExecutorCapacityUnavailable) && ctx.Err() == nil {
 				logger.Error("executor capacity reservation failed", "err", err, "slot", slot)
@@ -315,13 +337,29 @@ func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoor
 			ReservationID: reservation.ID(), ResourceDigest: reservation.ResourceDigest(),
 			Slot: reservation.Slot(), Lease: cfg.Lease,
 		}
+		reservationCtx, cancelReservation := reservation.ExecutionContext(ctx)
+		offerStop := time.Now().Add(executorClaimRequestTimeout)
+		if preparation.OfferDeadline != nil {
+			offerStop = preparation.OfferDeadline.Add(executorOfferTransportBudget)
+			minimumStop := time.Now().Add(executorOfferTransportBudget)
+			if offerStop.Before(minimumStop) {
+				offerStop = minimumStop
+			}
+		}
+		offerCtx, cancelOffer := context.WithDeadline(reservationCtx, offerStop)
 		won := false
-		for ctx.Err() == nil {
-			result, err := ctrl.OfferExecutorClaim(ctx, claim, preparation.Summary.RunID, preparation.Summary.NodeID)
+		for offerCtx.Err() == nil {
+			requestStop := time.Now().Add(executorClaimRequestTimeout)
+			if offerStop.Before(requestStop) {
+				requestStop = offerStop
+			}
+			requestCtx, cancelRequest := context.WithDeadline(offerCtx, requestStop)
+			result, err := ctrl.OfferExecutorClaim(requestCtx, claim, preparation.Summary.RunID, preparation.Summary.NodeID)
+			cancelRequest()
 			if err != nil {
-				if ctx.Err() == nil {
+				if offerCtx.Err() == nil {
 					logger.Error("executor claim offer failed", "err", err, "slot", slot)
-					sleepOrCancel(ctx, offerPoll)
+					sleepOrCancel(offerCtx, offerPoll)
 				}
 				continue
 			}
@@ -334,14 +372,16 @@ func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoor
 				}
 				won = true
 				logger.Info("executor claimed node", "run_id", result.Node.RunID, "node_id", result.Node.NodeID, "slot", slot)
-				exec(ctx, result.Node, holderID, admission)
+				exec(reservationCtx, result.Node, holderID, admission)
 				break
 			}
 			if !result.Pending {
 				break
 			}
-			sleepOrCancel(ctx, offerPoll)
+			sleepOrCancel(offerCtx, offerPoll)
 		}
+		cancelOffer()
+		cancelReservation()
 		if err := reservation.Release(); err != nil && ctx.Err() == nil {
 			logger.Error("executor capacity release failed", "err", err, "slot", slot)
 		}
@@ -435,7 +475,7 @@ func RunAgentCLI(args []string) error {
 		}, logger)
 	}
 
-	ledger := NewWingdExecutorCapacityLedger("", "")
+	ledger := NewWingdExecutorCapacityLedger("", "", logger)
 	errCh := make(chan error, len(memberships))
 	for _, membership := range memberships {
 		membership := membership

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sort"
 	"time"
 )
 
@@ -11,6 +12,8 @@ const (
 	nodeClaimOfferWindow  = 5 * time.Second
 	executorOfferLiveness = 2 * time.Second
 )
+
+var errExecutorOfferLimit = errors.New("executor scheduling limit exceeded: maximum 256 offers per node")
 
 // ExecutorClaimPreparation is the controller-owned admission contract for one
 // enrolled executor and ready node.
@@ -46,6 +49,35 @@ type ExecutorClaimRoundResult struct {
 	Revoked bool
 	Pending bool
 }
+
+type executorOfferEvent struct {
+	ExecutorName          string           `json:"executor_name,omitempty"`
+	ExecutorKind          string           `json:"executor_kind,omitempty"`
+	ExecutorLocation      string           `json:"executor_location,omitempty"`
+	BasePriority          int              `json:"base_priority"`
+	EffectivePriority     int              `json:"effective_priority"`
+	PriorityTarget        int              `json:"priority_target"`
+	HardCapabilities      []string         `json:"hard_capabilities,omitempty"`
+	PreferredCapabilities []string         `json:"preferred_capabilities,omitempty"`
+	Resources             ExecutorResource `json:"resources"`
+	Slots                 int              `json:"slots"`
+	Slot                  *int             `json:"slot,omitempty"`
+	Reason                string           `json:"reason,omitempty"`
+	Outcome               string           `json:"outcome,omitempty"`
+}
+
+func executorOfferEventFor(summary ExecutorSchedulingSummary, membership ExecutorMembershipSnapshot, location string, target, slot int) executorOfferEvent {
+	return executorOfferEvent{
+		ExecutorName: membership.WorkerID,
+		ExecutorKind: membership.Kind, ExecutorLocation: location,
+		BasePriority: membership.RegisteredBasePriority, EffectivePriority: membership.EffectivePriority,
+		PriorityTarget: target, HardCapabilities: summary.HardCapabilities,
+		PreferredCapabilities: summary.PreferredCapabilities, Resources: summary.Resources, Slots: summary.Slots,
+		Slot: offerSlot(slot),
+	}
+}
+
+func offerSlot(slot int) *int { return &slot }
 
 // PrepareNextExecutorClaim returns the oldest eligible node without changing
 // queue or claim state. The exact resource digest is recomputed on award.
@@ -96,18 +128,18 @@ SELECT n.run_id, n.node_id, n.ready_at
 			if err != nil {
 				return nil, err
 			}
-			membership, err := s.ResolveExecutorMembership(ctx, claimant, executorName, summary)
+			membership, err := s.resolveExecutorMembership(ctx, claimant, executorName, summary, time.Now())
 			if err != nil {
 				return nil, err
 			}
 			if !membership.Eligible {
 				continue
 			}
-			preparation := &ExecutorClaimPreparation{Summary: summary, Membership: membership}
 			var opened sql.NullInt64
-			if err := s.queryRow(ctx, `SELECT offer_started_at FROM nodes WHERE run_id = ? AND node_id = ?`, item.runID, item.nodeID).Scan(&opened); err != nil {
+			if err := s.queryRow(ctx, `SELECT offer_started_at, offer_priority_target FROM nodes WHERE run_id = ? AND node_id = ?`, item.runID, item.nodeID).Scan(&opened, &membership.HighestEligiblePriority); err != nil {
 				return nil, err
 			}
+			preparation := &ExecutorClaimPreparation{Summary: summary, Membership: membership}
 			if opened.Valid {
 				deadline := time.Unix(0, opened.Int64).Add(nodeClaimOfferWindow)
 				preparation.OfferDeadline = &deadline
@@ -122,7 +154,7 @@ SELECT n.run_id, n.node_id, n.ready_at
 }
 
 // OfferExecutorClaim records one live reservation and awards immediately at
-// the round ceiling or deterministically at the deadline.
+// the round target or deterministically at the deadline.
 func (s *Store) OfferExecutorClaim(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) (ExecutorClaimOfferResult, error) {
 	return s.offerExecutorClaimAt(ctx, claimant, offer, time.Now())
 }
@@ -150,7 +182,7 @@ func (s *Store) offerExecutorClaimAt(ctx context.Context, claimant ClaimIdentity
 	if summary.ResourceDigest != offer.ResourceDigest {
 		return ExecutorClaimOfferResult{}, ErrLockHeld
 	}
-	membership, err := s.ResolveExecutorMembership(ctx, claimant, offer.ExecutorName, summary)
+	membership, err := s.resolveExecutorMembership(ctx, claimant, offer.ExecutorName, summary, now)
 	if err != nil {
 		return ExecutorClaimOfferResult{}, err
 	}
@@ -163,6 +195,9 @@ func (s *Store) offerExecutorClaimAt(ctx context.Context, claimant ClaimIdentity
 		return ExecutorClaimOfferResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return ExecutorClaimOfferResult{}, err
+	}
 	if n, ok, err := claimedExecutorOffer(ctx, tx, claimant, offer, now); err != nil {
 		return ExecutorClaimOfferResult{}, err
 	} else if ok {
@@ -188,11 +223,21 @@ func (s *Store) offerExecutorClaimAt(ctx context.Context, claimant ClaimIdentity
 	if err != nil {
 		return ExecutorClaimOfferResult{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers
- WHERE last_seen_at < ? AND (reservation_id = ? OR (executor_name = ? AND slot = ?)
-        OR (executor_name = ? AND run_id = ? AND node_id = ?))`,
-		now.Add(-executorOfferLiveness).UnixNano(), offer.ReservationID, offer.ExecutorName, offer.Slot,
-		offer.ExecutorName, offer.RunID, offer.NodeID); err != nil {
+	summary, err = s.schedulingSummaryTx(ctx, tx, offer.RunID, offer.NodeID)
+	if err != nil {
+		return ExecutorClaimOfferResult{}, err
+	}
+	if summary.ResourceDigest != offer.ResourceDigest {
+		return ExecutorClaimOfferResult{}, ErrLockHeld
+	}
+	membership, err = s.resolveExecutorMembershipTx(ctx, tx, claimant, offer.ExecutorName, summary, now)
+	if err != nil {
+		return ExecutorClaimOfferResult{}, err
+	}
+	if !membership.Eligible || offer.Slot >= membership.MaxConcurrent {
+		return ExecutorClaimOfferResult{}, ErrNotFound
+	}
+	if err := s.expireConflictingExecutorOffersTx(ctx, tx, offer, now); err != nil {
 		return ExecutorClaimOfferResult{}, err
 	}
 
@@ -225,6 +270,17 @@ func (s *Store) offerExecutorClaimAt(ctx context.Context, claimant ClaimIdentity
 	} else if priorErr != nil && !errors.Is(priorErr, sql.ErrNoRows) {
 		return ExecutorClaimOfferResult{}, priorErr
 	}
+	newOffer := priorErr != nil || priorRunID != offer.RunID || priorNodeID != offer.NodeID ||
+		priorReservationID != offer.ReservationID || priorDigest != offer.ResourceDigest || priorSlot != offer.Slot
+	if newOffer {
+		count, err := nodeExecutorOfferCountTx(ctx, tx, offer.RunID, offer.NodeID)
+		if err != nil {
+			return ExecutorClaimOfferResult{}, err
+		}
+		if count >= MaxEnrolledExecutors {
+			return ExecutorClaimOfferResult{}, errExecutorOfferLimit
+		}
+	}
 
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_claim_offers
@@ -249,16 +305,30 @@ ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
 		}
 		return ExecutorClaimOfferResult{}, err
 	}
+	if newOffer {
+		executor, err := s.getExecutorTx(ctx, tx, offer.ExecutorName)
+		if err != nil {
+			return ExecutorClaimOfferResult{}, err
+		}
+		if err := appendEventTx(ctx, tx, offer.RunID, offer.NodeID, "executor_offer_received", now,
+			executorOfferEventFor(summary, membership, executor.Location, n.OfferPriorityTarget, offer.Slot)); err != nil {
+			return ExecutorClaimOfferResult{}, err
+		}
+	}
 
-	due := membership.EffectivePriority == 100 || membership.EffectivePriority >= n.OfferPriorityCeiling ||
-		(n.OfferStartedAt != nil && !now.Before(n.OfferStartedAt.Add(nodeClaimOfferWindow)))
+	deadlineReached := n.OfferStartedAt != nil && !now.Before(n.OfferStartedAt.Add(nodeClaimOfferWindow))
+	due := membership.EffectivePriority == 100 || membership.EffectivePriority >= n.OfferPriorityTarget || deadlineReached
 	if !due {
 		if err := tx.Commit(); err != nil {
 			return ExecutorClaimOfferResult{}, err
 		}
 		return ExecutorClaimOfferResult{Pending: true}, nil
 	}
-	winner, err := s.awardBestExecutorOffer(ctx, tx, offer.RunID, offer.NodeID, now)
+	awardReason := "priority_target"
+	if deadlineReached {
+		awardReason = "deadline"
+	}
+	winner, err := s.awardBestExecutorOffer(ctx, tx, offer.RunID, offer.NodeID, now, awardReason)
 	if err != nil {
 		return ExecutorClaimOfferResult{}, err
 	}
@@ -273,21 +343,44 @@ ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
 
 type executorOfferWinner struct {
 	ExecutorName, MembershipID, ExecutorKind, HolderID, ReservationID, ResourceDigest string
+	ExecutorLocation                                                                  string
 	Claimant                                                                          ClaimIdentity
 	Slot, BasePriority, EffectivePriority                                             int
+	OfferedAt, LastSeenAt                                                             int64
 	Lease                                                                             time.Duration
 	Node                                                                              *Node
 }
 
-func (s *Store) awardBestExecutorOffer(ctx context.Context, tx *storeTx, runID, nodeID string, now time.Time) (*executorOfferWinner, error) {
+func (s *Store) awardBestExecutorOffer(ctx context.Context, tx *storeTx, runID, nodeID string, now time.Time, awardReason string) (*executorOfferWinner, error) {
+	if err := ensureExecutorCardinalityTx(ctx, tx); err != nil {
+		return nil, err
+	}
+	if err := ensureNodeExecutorOfferCardinalityTx(ctx, tx, runID, nodeID); err != nil {
+		return nil, err
+	}
+	var lockedRun string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&lockedRun); err != nil {
+		return nil, err
+	}
+	summary, err := s.schedulingSummaryTx(ctx, tx, runID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	var priorityTarget int
+	if err := tx.QueryRowContext(ctx, `SELECT offer_priority_target FROM nodes WHERE run_id = ? AND node_id = ?`, runID, nodeID).Scan(&priorityTarget); err != nil {
+		return nil, err
+	}
+	if err := s.expireNodeExecutorOffersTx(ctx, tx, summary, priorityTarget, now); err != nil {
+		return nil, err
+	}
 	rows, err := tx.QueryContext(ctx, `
 SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder_id,
 	   reservation_id, resource_digest, slot, base_priority, effective_priority,
-	   executor_kind, lease_ns
+	   executor_kind, offered_at, last_seen_at, lease_ns
   FROM node_claim_offers
  WHERE run_id = ? AND node_id = ? AND last_seen_at >= ?
- ORDER BY effective_priority DESC, offered_at ASC, executor_name ASC, slot ASC, holder_id ASC`+tx.forUpdate(),
-		runID, nodeID, now.Add(-executorOfferLiveness).UnixNano())
+ LIMIT ?`+tx.forUpdate(),
+		runID, nodeID, now.Add(-executorOfferLiveness).UnixNano(), MaxEnrolledExecutors+1)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +390,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 		var leaseNS int64
 		if err := rows.Scan(&item.ExecutorName, &item.MembershipID, &item.Claimant.Principal, &item.Claimant.TokenPrefix,
 			&item.HolderID, &item.ReservationID, &item.ResourceDigest, &item.Slot, &item.BasePriority,
-			&item.EffectivePriority, &item.ExecutorKind, &leaseNS); err != nil {
+			&item.EffectivePriority, &item.ExecutorKind, &item.OfferedAt, &item.LastSeenAt, &leaseNS); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -309,37 +402,319 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 	if err != nil {
 		return nil, err
 	}
+	if len(candidates) > MaxEnrolledExecutors {
+		return nil, ErrExecutorEnrollmentLimit
+	}
+	names := make([]string, 0, len(candidates))
+	for i := range candidates {
+		names = append(names, candidates[i].ExecutorName)
+	}
+	if err := lockExistingExecutorRowsCanonicalTx(ctx, tx, names...); err != nil {
+		return nil, err
+	}
+	now = time.Now()
+	// Allocation and live-lease extension fence the same executor rows, so one
+	// occupancy scan stays valid until this transaction records its winner.
+	executors, err := loadExecutorsByNameTx(ctx, tx, names)
+	if err != nil {
+		return nil, err
+	}
+	usage, err := loadExecutorUsageTx(ctx, tx, now)
+	if err != nil {
+		return nil, err
+	}
+	authorityID, err := controllerAuthorityIDTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	live := candidates[:0]
 	for i := range candidates {
 		item := &candidates[i]
-		n, err := s.claimReadyNodeForExecutorTx(ctx, tx, item.Claimant, item.ExecutorName,
-			runID, nodeID, item.HolderID, item.Lease, item.ReservationID, item.Slot, item.ResourceDigest)
-		if err == nil {
-			item.Node = n
-			if _, err := tx.ExecContext(ctx, `UPDATE nodes SET
-			 claim_base_priority = ?, claim_priority = ?, claim_worker_id = ?, claim_executor_kind = ?,
-			 claim_reservation_id = ?
-			 WHERE run_id = ? AND node_id = ?`, item.BasePriority, item.EffectivePriority,
-				item.ExecutorName, item.ExecutorKind, item.ReservationID, runID, nodeID); err != nil {
-				return nil, err
-			}
-			item.Node.ClaimBasePriority = item.BasePriority
-			item.Node.ClaimPriority = item.EffectivePriority
-			item.Node.ClaimWorkerID = item.ExecutorName
-			item.Node.ClaimExecutorKind = item.ExecutorKind
-			item.Node.ClaimReservationID = item.ReservationID
-			if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
-				return nil, err
-			}
-			return item, nil
+		executor, found := executors[item.ExecutorName]
+		membership, err := executorMembershipFromSnapshot(
+			executor, item.Claimant, summary, usage.ByExecutor[item.ExecutorName], authorityID,
+			now.Add(-ExecutorRegistrationActiveWindow),
+		)
+		if !found {
+			err = ErrNotFound
 		}
-		if !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrLockHeld) && !errors.Is(err, ErrExecutorCredentialMismatch) {
+		if err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrExecutorCredentialMismatch) {
 			return nil, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE executor_name = ? AND slot = ?`, item.ExecutorName, item.Slot); err != nil {
+		_, slotBusy := usage.ByExecutor[item.ExecutorName].Slots[item.Slot]
+		_, reservationBusy := usage.Reservations[item.ReservationID]
+		offerExpired := item.LastSeenAt < now.Add(-executorOfferLiveness).UnixNano()
+		if err != nil || offerExpired || !membership.Eligible || item.Slot >= membership.MaxConcurrent ||
+			item.ResourceDigest != summary.ResourceDigest || slotBusy || reservationBusy {
+			reason := "ineligible"
+			if offerExpired {
+				reason = "liveness_expired"
+			} else if errors.Is(err, ErrNotFound) {
+				reason = "enrollment_missing"
+			} else if errors.Is(err, ErrExecutorCredentialMismatch) {
+				reason = "credential_changed"
+			} else if item.ResourceDigest != summary.ResourceDigest {
+				reason = "requirements_changed"
+			} else if err == nil && item.Slot >= membership.MaxConcurrent {
+				reason = "slot_limit_changed"
+			} else if slotBusy {
+				reason = "slot_in_use"
+			} else if reservationBusy {
+				reason = "reservation_in_use"
+			}
+			event := executorOfferEventFor(summary, membership, "", priorityTarget, item.Slot)
+			event.ExecutorName = item.ExecutorName
+			event.ExecutorKind = item.ExecutorKind
+			event.EffectivePriority = item.EffectivePriority
+			event.BasePriority = item.BasePriority
+			event.Reason = reason
+			eventType := "executor_offer_declined"
+			if offerExpired {
+				eventType = "executor_offer_expired"
+				event.Outcome = "expired"
+			}
+			if found {
+				event.ExecutorKind = executor.Kind
+				event.ExecutorLocation = executor.Location
+			}
+			if err := appendEventTx(ctx, tx, runID, nodeID, eventType, now, event); err != nil {
+				return nil, err
+			}
+			if _, deleteErr := tx.ExecContext(ctx, `DELETE FROM node_claim_offers
+ WHERE claim_token_prefix = ? AND claim_principal = ? AND holder_id = ?`,
+				item.Claimant.TokenPrefix, item.Claimant.Principal, item.HolderID); deleteErr != nil {
+				return nil, deleteErr
+			}
+			continue
+		}
+		item.MembershipID = membership.MembershipID
+		item.ExecutorKind = membership.Kind
+		item.ExecutorLocation = executor.Location
+		item.BasePriority = membership.RegisteredBasePriority
+		item.EffectivePriority = membership.EffectivePriority
+		live = append(live, *item)
+	}
+	candidates = live
+	sort.Slice(candidates, func(i, j int) bool {
+		left, right := candidates[i], candidates[j]
+		if left.EffectivePriority != right.EffectivePriority {
+			return left.EffectivePriority > right.EffectivePriority
+		}
+		if left.OfferedAt != right.OfferedAt {
+			return left.OfferedAt < right.OfferedAt
+		}
+		if left.ExecutorName != right.ExecutorName {
+			return left.ExecutorName < right.ExecutorName
+		}
+		if left.Slot != right.Slot {
+			return left.Slot < right.Slot
+		}
+		return left.HolderID < right.HolderID
+	})
+	if len(candidates) == 0 {
+		return nil, ErrNotFound
+	}
+	item := &candidates[0]
+	n := &Node{}
+	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
+  FROM nodes WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL
+   AND claimed_by IS NULL AND `+nodeNotDone, runID, nodeID), n); err != nil {
+		return nil, err
+	}
+	expires := now.Add(item.Lease)
+	res, err := tx.ExecContext(ctx, `UPDATE nodes SET
+       claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
+       claim_executor = ?, claim_cores = ?, claim_memory_bytes = ?,
+       claim_reservation = ?, claim_slot = ?, lease_expires_at = ?,
+       claim_base_priority = ?, claim_priority = ?, claim_worker_id = ?, claim_executor_kind = ?,
+       claim_reservation_id = ?
+ WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL
+   AND claimed_by IS NULL AND `+nodeNotDone,
+		item.HolderID, item.Claimant.Principal, item.Claimant.TokenPrefix,
+		item.ExecutorName, summary.Resources.Cores, summary.Resources.MemoryBytes,
+		item.ReservationID, item.Slot, expires.UnixNano(),
+		item.BasePriority, item.EffectivePriority, item.ExecutorName, item.ExecutorKind,
+		item.ReservationID, runID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if changed != 1 {
+		return nil, ErrLockHeld
+	}
+	n.ClaimedBy = item.HolderID
+	n.LeaseExpiresAt = &expires
+	n.ClaimBasePriority = item.BasePriority
+	n.ClaimPriority = item.EffectivePriority
+	n.ClaimWorkerID = item.ExecutorName
+	n.ClaimExecutorKind = item.ExecutorKind
+	n.ClaimReservationID = item.ReservationID
+	item.Node = n
+	winnerEvent := executorOfferEvent{
+		ExecutorName: item.ExecutorName,
+		ExecutorKind: item.ExecutorKind, ExecutorLocation: item.ExecutorLocation,
+		BasePriority: item.BasePriority, EffectivePriority: item.EffectivePriority, PriorityTarget: priorityTarget,
+		HardCapabilities: summary.HardCapabilities, PreferredCapabilities: summary.PreferredCapabilities,
+		Resources: summary.Resources, Slots: summary.Slots, Reason: awardReason, Outcome: "awarded",
+		Slot: offerSlot(item.Slot),
+	}
+	if err := appendEventTx(ctx, tx, runID, nodeID, "executor_offer_awarded", now, winnerEvent); err != nil {
+		return nil, err
+	}
+	for loserIndex := 1; loserIndex < len(candidates); loserIndex++ {
+		loser := &candidates[loserIndex]
+		loserEvent := executorOfferEvent{
+			ExecutorName: loser.ExecutorName,
+			ExecutorKind: loser.ExecutorKind, ExecutorLocation: loser.ExecutorLocation,
+			BasePriority: loser.BasePriority, EffectivePriority: loser.EffectivePriority, PriorityTarget: priorityTarget,
+			HardCapabilities: summary.HardCapabilities, PreferredCapabilities: summary.PreferredCapabilities,
+			Resources: summary.Resources, Slots: summary.Slots, Reason: "lower_ranked", Outcome: "declined",
+			Slot: offerSlot(loser.Slot),
+		}
+		if err := appendEventTx(ctx, tx, runID, nodeID, "executor_offer_declined", now, loserEvent); err != nil {
 			return nil, err
 		}
 	}
-	return nil, ErrNotFound
+	if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+func ensureNodeExecutorOfferCardinalityTx(ctx context.Context, tx *storeTx, runID, nodeID string) error {
+	count, err := nodeExecutorOfferCountTx(ctx, tx, runID, nodeID)
+	if err != nil {
+		return err
+	}
+	if count > MaxEnrolledExecutors {
+		return errExecutorOfferLimit
+	}
+	return nil
+}
+
+func nodeExecutorOfferCountTx(ctx context.Context, tx *storeTx, runID, nodeID string) (int, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT holder_id FROM node_claim_offers
+ WHERE run_id = ? AND node_id = ? LIMIT ?`, runID, nodeID, MaxEnrolledExecutors+1)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *Store) expireNodeExecutorOffersTx(ctx context.Context, tx *storeTx, summary ExecutorSchedulingSummary, priorityTarget int, now time.Time) error {
+	rows, err := tx.QueryContext(ctx, `
+SELECT o.executor_name, o.executor_kind, o.base_priority, o.effective_priority, o.slot, COALESCE(e.location, '')
+  FROM node_claim_offers o LEFT JOIN executors e ON e.name = o.executor_name
+ WHERE o.run_id = ? AND o.node_id = ? AND o.last_seen_at < ?`,
+		summary.RunID, summary.NodeID, now.Add(-executorOfferLiveness).UnixNano())
+	if err != nil {
+		return err
+	}
+	var expired []executorOfferEvent
+	for rows.Next() {
+		var event executorOfferEvent
+		var slot int
+		if err := rows.Scan(&event.ExecutorName, &event.ExecutorKind, &event.BasePriority, &event.EffectivePriority, &slot, &event.ExecutorLocation); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		event.Slot = offerSlot(slot)
+		event.HardCapabilities = summary.HardCapabilities
+		event.PreferredCapabilities = summary.PreferredCapabilities
+		event.Resources = summary.Resources
+		event.Slots = summary.Slots
+		event.PriorityTarget = priorityTarget
+		event.Reason = "liveness_expired"
+		event.Outcome = "expired"
+		expired = append(expired, event)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, event := range expired {
+		if err := appendEventTx(ctx, tx, summary.RunID, summary.NodeID, "executor_offer_expired", now, event); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM node_claim_offers
+ WHERE run_id = ? AND node_id = ? AND last_seen_at < ?`,
+		summary.RunID, summary.NodeID, now.Add(-executorOfferLiveness).UnixNano())
+	return err
+}
+
+func (s *Store) expireConflictingExecutorOffersTx(ctx context.Context, tx *storeTx, offer ExecutorClaimOffer, now time.Time) error {
+	cutoff := now.Add(-executorOfferLiveness).UnixNano()
+	rows, err := tx.QueryContext(ctx, `
+SELECT o.run_id, o.node_id, o.executor_name, o.executor_kind, o.base_priority,
+       o.effective_priority, o.slot, COALESCE(e.location, '')
+  FROM node_claim_offers o LEFT JOIN executors e ON e.name = o.executor_name
+ WHERE o.last_seen_at < ? AND (o.reservation_id = ? OR (o.executor_name = ? AND o.slot = ?)
+        OR (o.executor_name = ? AND o.run_id = ? AND o.node_id = ?))`,
+		cutoff, offer.ReservationID, offer.ExecutorName, offer.Slot,
+		offer.ExecutorName, offer.RunID, offer.NodeID)
+	if err != nil {
+		return err
+	}
+	type expiredOffer struct {
+		runID, nodeID string
+		event         executorOfferEvent
+	}
+	var expired []expiredOffer
+	for rows.Next() {
+		var item expiredOffer
+		var slot int
+		if err := rows.Scan(&item.runID, &item.nodeID, &item.event.ExecutorName, &item.event.ExecutorKind,
+			&item.event.BasePriority, &item.event.EffectivePriority, &slot, &item.event.ExecutorLocation); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		item.event.Slot = offerSlot(slot)
+		expired = append(expired, item)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, item := range expired {
+		summary, err := s.schedulingSummaryTx(ctx, tx, item.runID, item.nodeID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if err == nil {
+			item.event.HardCapabilities = summary.HardCapabilities
+			item.event.PreferredCapabilities = summary.PreferredCapabilities
+			item.event.Resources = summary.Resources
+			item.event.Slots = summary.Slots
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT offer_priority_target FROM nodes WHERE run_id = ? AND node_id = ?`, item.runID, item.nodeID).Scan(&item.event.PriorityTarget); err != nil {
+			return err
+		}
+		item.event.Reason = "liveness_expired"
+		item.event.Outcome = "expired"
+		if err := appendEventTx(ctx, tx, item.runID, item.nodeID, "executor_offer_expired", now, item.event); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM node_claim_offers
+ WHERE last_seen_at < ? AND (reservation_id = ? OR (executor_name = ? AND slot = ?)
+        OR (executor_name = ? AND run_id = ? AND node_id = ?))`,
+		cutoff, offer.ReservationID, offer.ExecutorName, offer.Slot,
+		offer.ExecutorName, offer.RunID, offer.NodeID)
+	return err
 }
 
 func claimedExecutorOffer(ctx context.Context, tx *storeTx, claimant ClaimIdentity, offer ExecutorClaimOffer, now time.Time) (*Node, bool, error) {
@@ -380,6 +755,9 @@ func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID 
 		return ExecutorClaimRoundResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return ExecutorClaimRoundResult{}, err
+	}
 	var readyAt, opened sql.NullInt64
 	var claimedBy sql.NullString
 	var status string
@@ -403,7 +781,7 @@ func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID 
 		}
 		return ExecutorClaimRoundResult{Pending: true}, nil
 	}
-	if winner, err := s.awardBestExecutorOffer(ctx, tx, runID, nodeID, now); err == nil && winner != nil {
+	if winner, err := s.awardBestExecutorOffer(ctx, tx, runID, nodeID, now, "deadline"); err == nil && winner != nil {
 		if err := tx.Commit(); err != nil {
 			return ExecutorClaimRoundResult{}, err
 		}
@@ -422,6 +800,23 @@ func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID 
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM node_claim_offers WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
 		return ExecutorClaimRoundResult{}, err
+	}
+	if changed == 1 {
+		summary, err := s.schedulingSummaryTx(ctx, tx, runID, nodeID)
+		if err != nil {
+			return ExecutorClaimRoundResult{}, err
+		}
+		var target int
+		if err := tx.QueryRowContext(ctx, `SELECT offer_priority_target FROM nodes WHERE run_id = ? AND node_id = ?`, runID, nodeID).Scan(&target); err != nil {
+			return ExecutorClaimRoundResult{}, err
+		}
+		if err := appendEventTx(ctx, tx, runID, nodeID, "executor_offer_round_empty", now, executorOfferEvent{
+			PriorityTarget: target, HardCapabilities: summary.HardCapabilities,
+			PreferredCapabilities: summary.PreferredCapabilities, Resources: summary.Resources,
+			Slots: summary.Slots, Reason: "no_live_offer", Outcome: "coordinator_fallback",
+		}); err != nil {
+			return ExecutorClaimRoundResult{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return ExecutorClaimRoundResult{}, err
