@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -38,7 +39,9 @@ type standaloneRun struct {
 	warning   string
 	skew      bool
 	created   bool
+	refused   bool
 	announced bool
+	lock      *standaloneLock
 }
 
 func (sa *standaloneRun) state(hosted bool) unhosted {
@@ -58,17 +61,70 @@ func (sa *standaloneRun) announce() {
 	}
 }
 
-// safety: a store this run created for a run that never started is a store the
-// operator did not ask for, and doctor would report it as runs that went
-// standalone when none did.
-func (sa *standaloneRun) discardIfUnused() {
-	if sa == nil || !sa.created || sa.announced || sa.stateDB == "" {
+// safety: a run refused by admission never started, so a store it created for
+// itself is discarded and no block promises that everything else worked. Every
+// other ending, including a setup failure, wrote a run row and says so.
+func (sa *standaloneRun) settle() {
+	if sa == nil || sa.announced {
+		return
+	}
+	if sa.refused {
+		sa.discard()
+		return
+	}
+	sa.announce()
+}
+
+// safety: only the run that created the file may remove it, and only while it
+// can take the lock every standalone opener holds for the life of its handle.
+// Without that check a second run's discard unlinks a store the first is still
+// writing to, and the rows go to a deleted inode.
+func (sa *standaloneRun) discard() {
+	if !sa.created || sa.stateDB == "" || !sa.lock.exclusive() {
 		return
 	}
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		_ = os.Remove(sa.stateDB + suffix)
 	}
-	_ = os.Remove(filepath.Dir(sa.stateDB))
+}
+
+type standaloneLock struct{ f *os.File }
+
+// safety: the lock file is never removed. Unlinking it would let the next
+// opener create a second inode and hold a lock that guards nothing, which is
+// the mutual exclusion this exists for.
+func acquireStandaloneLock(dir string) (*standaloneLock, error) {
+	f, err := fssecure.OpenFile(filepath.Join(dir, "state.lock"), os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		return nil, err
+	}
+	if err := flockShared(f); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return &standaloneLock{f: f}, nil
+}
+
+func (l *standaloneLock) release() {
+	if l == nil {
+		return
+	}
+	_ = flockUnlock(l.f)
+	_ = l.f.Close()
+}
+
+// safety: dropping this run's own share first is what lets the attempt see
+// every other holder; failing to take it back means someone else has the store
+// open, and the caller leaves their file alone.
+func (l *standaloneLock) exclusive() bool {
+	if l == nil {
+		return false
+	}
+	if err := flockUnlock(l.f); err != nil {
+		return false
+	}
+	ok, err := flockTry(l.f)
+	return err == nil && ok
 }
 
 // hack: an indirection so a test can read the block a run prints.
@@ -157,52 +213,67 @@ func bareVersion(v string) string {
 // can share, so a binary falls back to its own only when that file records a
 // requirement it does not know; every other open error is the store's own and
 // is reported rather than routed around.
-func openStandaloneStore(paths Paths, dryRun bool) (*store.Store, string, bool, func(), error) {
+func openStandaloneStore(paths Paths, dryRun bool) (*store.Store, *standaloneRun, func(), error) {
 	if dryRun {
 		return openThrowawayStandaloneStore()
 	}
 	if err := paths.EnsureStandaloneDir(); err != nil {
-		return nil, "", false, nil, fmt.Errorf("standalone store: %w", err)
+		return nil, nil, nil, fmt.Errorf("standalone store: %w", err)
 	}
+	lock, err := acquireStandaloneLock(paths.StandaloneDir())
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("standalone store: %w", err)
+	}
+	release := func() { lock.release() }
+
 	shared := paths.StandaloneStateDB()
-	fresh := !storeFileExists(shared)
+	fresh := claimStoreFile(shared)
 	st, err := storeOpen(shared)
 	if err == nil {
-		return st, shared, fresh, func() {}, nil
+		return st, &standaloneRun{stateDB: shared, created: fresh, lock: lock}, release, nil
 	}
 	var skew *store.SkewError
 	if !errors.As(err, &skew) || len(skew.Requirements) == 0 {
-		return nil, "", false, nil, fmt.Errorf("standalone store %s: %w", shared, err)
+		release()
+		return nil, nil, nil, fmt.Errorf("standalone store %s: %w", shared, err)
 	}
 	if err := paths.EnsureStandaloneSchemaDir(); err != nil {
-		return nil, "", false, nil, fmt.Errorf("standalone store: %w", err)
+		release()
+		return nil, nil, nil, fmt.Errorf("standalone store: %w", err)
 	}
 	own := paths.StandaloneSchemaStateDB()
-	fresh = !storeFileExists(own)
+	fresh = claimStoreFile(own)
 	st, err = storeOpen(own)
 	if err != nil {
-		return nil, "", false, nil, fmt.Errorf("standalone store %s: %w", own, err)
+		release()
+		return nil, nil, nil, fmt.Errorf("standalone store %s: %w", own, err)
 	}
-	return st, own, fresh, func() {}, nil
+	return st, &standaloneRun{stateDB: own, created: fresh, lock: lock}, release, nil
 }
 
-func storeFileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+// safety: creation is observed rather than guessed. Two runs starting together
+// on a fresh box both stat an absent file, and both would then believe they may
+// remove it; an exclusive create hands that claim to exactly one of them.
+func claimStoreFile(path string) bool {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return false
+	}
+	return f.Close() == nil
 }
 
 // safety: a dry run mutates nothing, so it must not be what creates this
 // home's standalone store or leave rows doctor then counts against it.
-func openThrowawayStandaloneStore() (*store.Store, string, bool, func(), error) {
+func openThrowawayStandaloneStore() (*store.Store, *standaloneRun, func(), error) {
 	dir, err := os.MkdirTemp("", "sparkwing-dry-standalone-")
 	if err != nil {
-		return nil, "", false, nil, fmt.Errorf("standalone store: %w", err)
+		return nil, nil, nil, fmt.Errorf("standalone store: %w", err)
 	}
 	path := filepath.Join(dir, "state.db")
 	st, err := storeOpen(path)
 	if err != nil {
 		_ = os.RemoveAll(dir)
-		return nil, "", false, nil, fmt.Errorf("standalone store %s: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("standalone store %s: %w", path, err)
 	}
-	return st, path, false, func() { _ = os.RemoveAll(dir) }, nil
+	return st, &standaloneRun{stateDB: path}, func() { _ = os.RemoveAll(dir) }, nil
 }

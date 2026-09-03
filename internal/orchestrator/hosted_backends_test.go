@@ -784,7 +784,16 @@ func TestHostedRun_ARefusedRunLeavesNoBlockAndNoStore(t *testing.T) {
 	if _, err := os.Stat(paths.StandaloneStateDB()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stat %s = %v, want no standalone store after a refusal", paths.StandaloneStateDB(), err)
 	}
-	if _, err := os.Stat(paths.StandaloneDir()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("a refused run left %s behind", paths.StandaloneDir())
+	// safety: the lock file every standalone opener holds stays, so the
+	// directory does. What must not survive is a store, which is what doctor
+	// reads and what would report runs that went standalone when none did.
+	entries, rerr := os.ReadDir(paths.StandaloneDir())
+	if rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+		t.Fatalf("read %s: %v", paths.StandaloneDir(), rerr)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "state.db") {
+			t.Fatalf("a refused run left %s behind", entry.Name())
+		}
 	}
 }

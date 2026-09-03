@@ -26,6 +26,14 @@ func flockTry(f *os.File) (ok bool, err error) {
 	return false, err
 }
 
+// safety: blocking on purpose. A shared holder that failed instead would open
+// the store anyway, and the discard that is waiting on the exclusive lock is
+// two unlink calls.
+func flockShared(f *os.File) error {
+	var ol windows.Overlapped
+	return windows.LockFileEx(windows.Handle(f.Fd()), 0, 0, consumerLockBytes, 0, &ol)
+}
+
 func flockUnlock(f *os.File) error {
 	var ol windows.Overlapped
 	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, consumerLockBytes, 0, &ol)

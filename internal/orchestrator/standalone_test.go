@@ -206,7 +206,7 @@ func TestOpenStandaloneStore_SharesOneFileUntilItIsRefused(t *testing.T) {
 	home := wingdTestHome(t)
 	paths := PathsAt(home)
 
-	st, path, _, discard, err := openStandaloneStore(paths, false)
+	st, sa, discard, err := openStandaloneStore(paths, false)
 	if err != nil {
 		t.Fatalf("openStandaloneStore: %v", err)
 	}
@@ -214,22 +214,22 @@ func TestOpenStandaloneStore_SharesOneFileUntilItIsRefused(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if path != paths.StandaloneStateDB() {
-		t.Fatalf("path = %q, want the shared standalone store %q", path, paths.StandaloneStateDB())
+	if sa.stateDB != paths.StandaloneStateDB() {
+		t.Fatalf("path = %q, want the shared standalone store %q", sa.stateDB, paths.StandaloneStateDB())
 	}
 
 	// safety: the shared file now records a requirement this binary does not
 	// know, which is the only thing that may send it to a store of its own.
 	requireUnknownFeature(t, paths.StandaloneStateDB())
 
-	st, path, _, discard, err = openStandaloneStore(paths, false)
+	st, sa, discard, err = openStandaloneStore(paths, false)
 	if err != nil {
 		t.Fatalf("openStandaloneStore after a refusal: %v", err)
 	}
 	defer discard()
 	defer func() { _ = st.Close() }()
-	if path != paths.StandaloneSchemaStateDB() {
-		t.Fatalf("path = %q, want the per-schema fallback %q", path, paths.StandaloneSchemaStateDB())
+	if sa.stateDB != paths.StandaloneSchemaStateDB() {
+		t.Fatalf("path = %q, want the per-schema fallback %q", sa.stateDB, paths.StandaloneSchemaStateDB())
 	}
 }
 
@@ -237,7 +237,7 @@ func TestOpenStandaloneStore_ADryRunLeavesNothingBehind(t *testing.T) {
 	home := wingdTestHome(t)
 	paths := PathsAt(home)
 
-	st, path, _, discard, err := openStandaloneStore(paths, true)
+	st, sa, discard, err := openStandaloneStore(paths, true)
 	if err != nil {
 		t.Fatalf("openStandaloneStore: %v", err)
 	}
@@ -246,11 +246,11 @@ func TestOpenStandaloneStore_ADryRunLeavesNothingBehind(t *testing.T) {
 	}
 	discard()
 
-	if strings.HasPrefix(path, home) {
-		t.Fatalf("a dry run wrote %q inside this home", path)
+	if strings.HasPrefix(sa.stateDB, home) {
+		t.Fatalf("a dry run wrote %q inside this home", sa.stateDB)
 	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("stat %s = %v, want the throwaway store removed", path, err)
+	if _, err := os.Stat(sa.stateDB); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat %s = %v, want the throwaway store removed", sa.stateDB, err)
 	}
 	if _, err := os.Stat(paths.StandaloneDir()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a dry run created %s", paths.StandaloneDir())
@@ -447,5 +447,151 @@ func TestSubmissionEnvironment_DeniesTheChildStoreVariables(t *testing.T) {
 		if envAllowed(name) {
 			t.Errorf("%s is captured into the submission snapshot", name)
 		}
+	}
+}
+
+// safety: two commit hooks firing together on a fresh box is ordinary, and
+// both used to believe they created the file, so either one's discard could
+// remove the other's live store.
+func TestOpenStandaloneStore_OnlyOneConcurrentOpenerCreatesTheFile(t *testing.T) {
+	paths := PathsAt(wingdTestHome(t))
+	const openers = 4
+
+	var wg sync.WaitGroup
+	created := make(chan bool, openers)
+	for range openers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			st, sa, release, err := openStandaloneStore(paths, false)
+			if err != nil {
+				t.Errorf("openStandaloneStore: %v", err)
+				return
+			}
+			created <- sa.created
+			_ = st.Close()
+			release()
+		}()
+	}
+	wg.Wait()
+	close(created)
+
+	claims := 0
+	for c := range created {
+		if c {
+			claims++
+		}
+	}
+	if claims != 1 {
+		t.Fatalf("%d of %d openers claimed to have created the store, want exactly 1", claims, openers)
+	}
+	if _, err := os.Stat(paths.StandaloneStateDB()); err != nil {
+		t.Fatalf("stat %s: %v, want one shared store", paths.StandaloneStateDB(), err)
+	}
+}
+
+// safety: a discard that ignored the lock unlinked a store another run was
+// writing to, and that run then wrote its rows to a deleted inode and reported
+// success with nothing on disk.
+func TestStandaloneRun_DiscardLeavesAStoreAnotherRunHolds(t *testing.T) {
+	paths := PathsAt(wingdTestHome(t))
+	held, holder, releaseHolder, err := openStandaloneStore(paths, false)
+	if err != nil {
+		t.Fatalf("openStandaloneStore: %v", err)
+	}
+	defer releaseHolder()
+	defer func() { _ = held.Close() }()
+	if !holder.created {
+		t.Fatal("the first opener did not create the store")
+	}
+
+	second, secondRun, releaseSecond, err := openStandaloneStore(paths, false)
+	if err != nil {
+		t.Fatalf("second openStandaloneStore: %v", err)
+	}
+	_ = second.Close()
+	// safety: a second run that wrongly believes it created the file is the
+	// exact shape the race produced, so the lock is asked to stop it.
+	secondRun.created, secondRun.refused = true, true
+	secondRun.settle()
+	releaseSecond()
+
+	if _, err := os.Stat(paths.StandaloneStateDB()); err != nil {
+		t.Fatalf("stat %s = %v; a discard removed a store another run holds", paths.StandaloneStateDB(), err)
+	}
+}
+
+func TestStandaloneRun_DiscardsOnlyWhatItCreatedAndOnlyOnARefusal(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		sa      standaloneRun
+		removed bool
+	}{
+		{"refused after creating", standaloneRun{created: true, refused: true}, true},
+		{"refused without creating", standaloneRun{refused: true}, false},
+		{"a setup failure keeps its run row", standaloneRun{created: true}, false},
+		{"already announced", standaloneRun{created: true, refused: true, announced: true}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			paths := PathsAt(wingdTestHome(t))
+			st, opened, release, err := openStandaloneStore(paths, false)
+			if err != nil {
+				t.Fatalf("openStandaloneStore: %v", err)
+			}
+			_ = st.Close()
+			defer release()
+
+			sa := tc.sa
+			sa.stateDB, sa.lock = opened.stateDB, opened.lock
+			sa.settle()
+
+			_, statErr := os.Stat(opened.stateDB)
+			if tc.removed && !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("stat = %v, want the store this run created and never started discarded", statErr)
+			}
+			if !tc.removed && statErr != nil {
+				t.Fatalf("stat = %v, want the store kept", statErr)
+			}
+		})
+	}
+}
+
+// safety: a run that fails while shaping its plan still wrote its row to the
+// standalone store, so it says where that row went. Only a refusal, which
+// never started, stays quiet.
+func TestRunLocal_ASetupFailureKeepsItsRowAndSaysItWasStandalone(t *testing.T) {
+	registerHostTestPipelines()
+	home := noDaemonHome(t)
+	paths := PathsAt(home)
+	warnings := captureStandaloneWarnings(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+	res, err := RunLocal(ctx, paths, Options{
+		Pipeline:  "host-implicit",
+		Only:      "no-such-node",
+		Admission: unhostedAdmission(home, &syncWriter{}),
+	})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("status = %q, want failed on an unknown --sw-only selector", res.Status)
+	}
+	if got := warnings.String(); got != standaloneNoDaemonBlock {
+		t.Fatalf("stderr block:\ngot  %q\nwant %q", got, standaloneNoDaemonBlock)
+	}
+
+	st, err := store.Open(paths.StandaloneStateDB())
+	if err != nil {
+		t.Fatalf("open the standalone store the failed run wrote to: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	run, err := st.GetRun(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("the setup failure deleted the store holding its own run row: %v", err)
+	}
+	if on, reason := runStandalone(run); !on || reason != standaloneNoDaemon {
+		t.Fatalf("start record standalone=%v reason=%q", on, reason)
 	}
 }

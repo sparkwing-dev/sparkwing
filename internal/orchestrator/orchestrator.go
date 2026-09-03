@@ -402,6 +402,12 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 				admitErr = cause
 			}
+			// safety: the one ending that never started, so it is the one that
+			// prints no block and gives back a store it created. Every other
+			// failure below wrote its run row and keeps both.
+			if opts.standalone != nil {
+				opts.standalone.refused = true
+			}
 			status := statusForRunError(admitErr)
 			_ = backends.State.FinishRun(context.WithoutCancel(ctx), runID, status, admitErr.Error())
 			if opts.Delegate != nil {
@@ -611,21 +617,23 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		// runs and the run opens nothing.
 		opts.State = hosted.State
 	} else if selection.standalone != "" {
-		st, path, fresh, discard, serr := openStandaloneStore(paths, opts.DryRun)
+		st, sa, release, serr := openStandaloneStore(paths, opts.DryRun)
 		if serr != nil {
 			return nil, serr
 		}
-		defer discard()
+		sa.reason = selection.standalone
+		sa.warning = standaloneWarning(selection, sparkwingModuleVersion())
+		sa.skew = selection.storeSkew
 		opts.State = st
-		opts.DefaultStateDB = path
-		opts.standalone = &standaloneRun{
-			reason:  selection.standalone,
-			stateDB: path,
-			warning: standaloneWarning(selection, sparkwingModuleVersion()),
-			skew:    selection.storeSkew,
-			created: fresh,
-		}
-		defer func() { opts.standalone.discardIfUnused() }()
+		opts.DefaultStateDB = sa.stateDB
+		opts.standalone = sa
+		// safety: registered so they unwind handle first, then the decision
+		// this run's ending settles, then the lock: a discard must never run
+		// while this run's own handle still holds the file it is removing.
+		defer release()
+		defer sa.settle()
+		defer func() { _ = st.Close() }()
+		ownsState = false
 	}
 	// safety: a standalone run holds the store the fallback already chose, so
 	// profile resolution must not reopen or replace it the way it would for a
