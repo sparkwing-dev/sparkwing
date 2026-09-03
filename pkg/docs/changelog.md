@@ -249,6 +249,15 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing secrets set` stores a value exactly as given. The local
+  dotenv writer quoted a value only when it looked like it needed quoting and
+  the reader never undid that quoting, so a secret holding a newline, a quote,
+  or a backslash -- an SSH key, a PEM block, a service-account JSON -- came back
+  mangled, and each later write to the same file added another layer of escaping
+  to every quoted entry already in it. Values are now written Go-quoted and
+  decoded on read, and the `filesystem` secrets backend decodes the same way.
+  Files written by hand still read as before; a value that an earlier write
+  already mangled has to be set again.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads

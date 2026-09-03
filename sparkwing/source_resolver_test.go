@@ -176,3 +176,35 @@ func TestFactory_EmptyTypeRejected(t *testing.T) {
 		t.Fatalf("expected type-required error, got %v", err)
 	}
 }
+
+func TestFactory_FileSource_UnescapesQuotedValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.env")
+	body := "PEM=\"-----BEGIN-----\\nabc\\n-----END-----\\n\"\n" +
+		"WINDOWS=\"C:\\\\path\\\\to\"\n" +
+		"SINGLE='raw \\n stays'\n" +
+		"BARE=plain\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := sparkwing.NewSecretResolverFromSpec(context.Background(),
+		backends.Spec{Type: backends.TypeFilesystem, Path: path})
+	if err != nil {
+		t.Fatalf("factory: %v", err)
+	}
+
+	want := map[string]string{
+		"PEM":     "-----BEGIN-----\nabc\n-----END-----\n",
+		"WINDOWS": `C:\path\to`,
+		"SINGLE":  `raw \n stays`,
+		"BARE":    "plain",
+	}
+	for name, w := range want {
+		v, _, err := r.Resolve(context.Background(), name)
+		if err != nil {
+			t.Fatalf("Resolve(%q): %v", name, err)
+		}
+		if v != w {
+			t.Errorf("%s = %q, want %q", name, v, w)
+		}
+	}
+}

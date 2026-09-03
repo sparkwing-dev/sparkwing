@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -159,19 +160,31 @@ func (f *fileResolver) load() {
 			continue
 		}
 		key := strings.TrimSpace(line[:eq])
-		val := strings.TrimSpace(line[eq+1:])
-		if n := len(val); n >= 2 {
-			if (val[0] == '"' && val[n-1] == '"') || (val[0] == '\'' && val[n-1] == '\'') {
-				val = val[1 : n-1]
-			}
-		}
-		out[key] = val
+		out[key] = unquoteDotenvValue(strings.TrimSpace(line[eq+1:]))
 	}
 	if err := sc.Err(); err != nil {
 		f.err = fmt.Errorf("secrets backend filesystem %s: scan: %w", f.spec.Path, err)
 		return
 	}
 	f.cache = out
+}
+
+// safety: the CLI's secrets writer emits Go-quoted values, so a double-quoted
+// token has to be decoded rather than merely stripped of its quotes.
+func unquoteDotenvValue(val string) string {
+	if len(val) < 2 {
+		return val
+	}
+	switch {
+	case val[0] == '"' && val[len(val)-1] == '"':
+		if unquoted, err := strconv.Unquote(val); err == nil {
+			return unquoted
+		}
+		return val[1 : len(val)-1]
+	case val[0] == '\'' && val[len(val)-1] == '\'':
+		return val[1 : len(val)-1]
+	}
+	return val
 }
 
 type envResolver struct {
