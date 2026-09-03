@@ -41,8 +41,10 @@ func (b *Backend) GetTrigger(ctx context.Context, triggerID string) (*store.Trig
 func (b *Backend) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
 func (b *Backend) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error)
 func (b *Backend) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error)
+func (b *Backend) ListNodes(ctx context.Context, runID string) ([]*store.Node, error)
 func (b *Backend) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error)
 func (b *Backend) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
+func (b *Backend) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
 func (b *Backend) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
 func (b *Backend) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (b *Backend) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error

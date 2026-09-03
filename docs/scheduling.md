@@ -131,7 +131,7 @@ local admission may happen after a claim.
 Schema 28 adds administrator-owned executor enrollment for the assisted
 scheduler. Enrollment binds an exact runner or service token prefix
 to trusted capabilities, a priority range, concurrency and resource ceilings,
-and a display-only location. Authenticated worker heartbeats can update only
+and a controller-trusted location. Authenticated worker heartbeats can update only
 liveness and finite nonnegative headroom. Idle enrollments remain visible;
 stale ones appear offline. Each enrollment also reports the exact number of
 live node claims as `active_slots`; legacy inferred rows omit that field because
@@ -139,6 +139,8 @@ their slot count is unknown. Rotating an enrollment to a different credential
 marks it offline until that exact credential sends a heartbeat. The scheduling
 summary and membership check apply hard capability, slot, headroom, and
 resource filters before bounded priority.
+Location does not widen initial eligibility. Once an executor wins a node, its
+coordinator and location become hard requirements for any agent-loss retry.
 
 Schema 29 adds durable offer rounds. A named or plural agent prepares the
 oldest node eligible for that membership, reserves the exact resource digest
@@ -156,6 +158,17 @@ never outside the administrator-owned range. Requirements and resource limits
 always filter before ranking. The winner consumes the same reservation; losers
 release theirs. Repeating an offer after a lost response recovers the same
 fenced claim.
+
+If the winning agent or gateway stops heartbeating, that node ends as
+`agent_lost`; the controller never reuses its row. When `.Retry(n)` still has
+budget, the controller creates a fresh linked run for the lost node and its
+descendants, reusing successful unrelated nodes and artifacts. Loss before the
+job-body acknowledgement is free. Each acknowledged body invocation spends one
+of the `n + 1` total invocations, including in-process and `RetryAuto` attempts.
+The replacement keeps the original coordinator and location, waits on durable
+bounded backoff, and briefly prefers another eligible executor. Coordinator
+fallback cannot relax that placement. This is bounded at-least-once execution,
+not exactly-once external effects.
 
 After the offer window, an unclaimed unlabeled node is
 atomically removed from the agent queue and sent to the configured Kubernetes

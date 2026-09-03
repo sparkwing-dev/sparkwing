@@ -82,12 +82,23 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 	if n.ClaimedBy != "pod-1" {
 		t.Fatalf("claimed_by: %q", n.ClaimedBy)
 	}
+	visible, err := c.GetNode(ctx, "run-1", "node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !visible.Claimed || visible.ClaimedBy != "" {
+		t.Fatalf("ordinary node response exposed holder or lost claim state: %+v", visible)
+	}
+	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	})
 
-	if err := c.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-1", 30*time.Second, nil); err != nil {
+	if err := c.HeartbeatNodeClaim(claimCtx, "run-1", "node-a", "pod-1", 30*time.Second, nil); err != nil {
 		t.Fatalf("HeartbeatNodeClaim (holder): %v", err)
 	}
 
-	err = c.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-2", 30*time.Second, nil)
+	err = c.HeartbeatNodeClaim(claimCtx, "run-1", "node-a", "pod-2", 30*time.Second, nil)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("expected ErrLockHeld, got %v", err)
 	}
@@ -121,18 +132,51 @@ func TestNodeClaim_ExecutionStartAcknowledgement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.AcknowledgeNodeExecutionStart(ctx, n.RunID, n.NodeID, n.ClaimedBy); err != nil {
+	if err := c.AcknowledgeNodeExecutionStart(ctx, n.RunID, n.NodeID, store.ExecutionStart{HolderID: n.ClaimedBy, ClaimGeneration: n.ClaimGeneration, AttemptOrdinal: 1}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := st.GetNode(ctx, n.RunID, n.NodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ExecutionStartedAt == nil || got.ExecutorKind != "gateway" || got.ExecutorID != "edge-a" || got.ReservationID != "downstream-17" {
+	if got.ExecutionStartedAt == nil || got.ExecutorKind != "" || got.ExecutorID != "" || got.ReservationID != "" || got.ExecutorLocation != "unknown" {
 		t.Fatalf("execution attempt = %+v", got)
 	}
-	if err := c.AcknowledgeNodeExecutionStart(ctx, n.RunID, n.NodeID, "gateway:edge-b:1"); !errors.Is(err, store.ErrLockHeld) {
+	if err := c.AcknowledgeNodeExecutionStart(ctx, n.RunID, n.NodeID, store.ExecutionStart{HolderID: "gateway:edge-b:1", ClaimGeneration: n.ClaimGeneration, AttemptOrdinal: 1}); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("wrong holder acknowledgement = %v, want ErrLockHeld", err)
+	}
+	invalid := store.ExecutionAttemptFinish{
+		HolderID: n.ClaimedBy, ClaimGeneration: n.ClaimGeneration, AttemptOrdinal: 1,
+		Outcome: "failed", FailureReason: "credential-shaped-free-text",
+	}
+	if err := c.FinishNodeExecutionAttempt(ctx, n.RunID, n.NodeID, invalid); err == nil || errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("unstructured execution finish = %v, want bad request", err)
+	}
+	finish := store.ExecutionAttemptFinish{
+		HolderID: n.ClaimedBy, ClaimGeneration: n.ClaimGeneration, AttemptOrdinal: 1,
+		Outcome: "failed", FailureReason: store.FailureVerify,
+	}
+	if err := c.FinishNodeExecutionAttempt(ctx, n.RunID, n.NodeID, finish); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.FinishNodeExecutionAttempt(ctx, n.RunID, n.NodeID, finish); err != nil {
+		t.Fatalf("idempotent execution finish: %v", err)
+	}
+	finish.Outcome = "success"
+	finish.FailureReason = ""
+	if err := c.FinishNodeExecutionAttempt(ctx, n.RunID, n.NodeID, finish); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("conflicting execution finish = %v, want ErrLockHeld", err)
+	}
+	if err := c.AcknowledgeNodeExecutionStart(ctx, n.RunID, n.NodeID, store.ExecutionStart{
+		HolderID: n.ClaimedBy, ClaimGeneration: n.ClaimGeneration, AttemptOrdinal: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.FinishNodeExecutionAttempt(ctx, n.RunID, n.NodeID, store.ExecutionAttemptFinish{
+		HolderID: n.ClaimedBy, ClaimGeneration: n.ClaimGeneration, AttemptOrdinal: 2,
+		Outcome: "cancelled",
+	}); err != nil {
+		t.Fatalf("cancelled execution finish: %v", err)
 	}
 }
 
@@ -309,6 +353,16 @@ func TestNodeClaimOffer_HTTPUsesEnrolledPriorityAndPreservesPendingState(t *test
 	}
 	if result.Node == nil || result.Pending {
 		t.Fatalf("ceiling offer = %+v", result)
+	}
+	if result.Node.ClaimedBy != "holder" || result.Node.ClaimMembershipID == "" || result.Node.ReservationID != "reservation" {
+		t.Fatalf("claim response omitted exact fence: %+v", result.Node)
+	}
+	if result.Node.ExecutorName != "desk" || result.Node.ExecutorKind != "gateway" || result.Node.ExecutorLocation != "local" {
+		t.Fatalf("claim response omitted public attribution: %+v", result.Node)
+	}
+	if result.Node.CoordinatorID != "" || result.Node.ExecutorID != "" || result.Node.RequiredCoordinatorID != "" ||
+		result.Node.ClaimWorkerID != "" || result.Node.ClaimExecutorKind != "" || result.Node.ClaimReservationID != "" {
+		t.Fatalf("claim response exposed redundant internal identity: %+v", result.Node)
 	}
 	var executorName, reservation string
 	var slot int

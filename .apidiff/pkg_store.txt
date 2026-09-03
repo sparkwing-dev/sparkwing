@@ -42,6 +42,13 @@ type AcquireSlotResponse struct {
 	QueueLength int
 	Holders     []ConcurrencyHolder
 }
+type AgentLossRecovery struct {
+	RunID       string
+	NodeID      string
+	RetryRunID  string
+	Started     bool
+	Invocations int
+}
 type Approval struct {
 	RunID       string
 	NodeID      string
@@ -63,13 +70,18 @@ const ApprovalResolutionTimedOut = "timed_out"
 func Argon2Concurrency(budget int64) int
 const Argon2HashBytes = int64(argonMemory) << 10
 func Argon2Slots() int
+const AttemptOrdinalHeader = "X-Sparkwing-Attempt-Ordinal"
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
+const ClaimGenerationHeader = "X-Sparkwing-Claim-Generation"
+const ClaimHolderHeader = "X-Sparkwing-Claim-Holder"
 type ClaimIdentity struct {
 	Principal   string
 	TokenPrefix string
 }
+const ClaimMembershipHeader = "X-Sparkwing-Claim-Membership"
+const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
 func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
 func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
 type ConcurrencyHolder struct {
@@ -182,6 +194,42 @@ type Event struct {
 	TS      time.Time
 	Payload json.RawMessage
 }
+type ExecutionAttempt struct {
+	RunID            string
+	NodeID           string
+	Attempt          int
+	ClaimGeneration  int64
+	CoordinatorID    string
+	MembershipID     string
+	ExecutorKind     string
+	ExecutorName     string
+	ExecutorID       string
+	ExecutorLocation string
+	HolderID         string
+	ReservationID    string
+	StartedAt        time.Time
+	FinishedAt       *time.Time
+	Outcome          string
+	FailureReason    string
+	RetryRunID       string
+}
+type ExecutionAttemptFinish struct {
+	HolderID        string
+	MembershipID    string
+	ReservationID   string
+	ClaimGeneration int64
+	AttemptOrdinal  int
+	Outcome         string
+	FailureReason   string
+}
+func ExecutionAttemptOrdinalFromContext(ctx context.Context) (int, bool)
+type ExecutionStart struct {
+	HolderID        string
+	MembershipID    string
+	ReservationID   string
+	ClaimGeneration int64
+	AttemptOrdinal  int
+}
 type Executor struct {
 	Name             string
 	TokenPrefix      string
@@ -225,6 +273,11 @@ type ExecutorClaimRoundResult struct {
 	Revoked bool
 	Pending bool
 }
+type ExecutorIdentity struct {
+	Kind          string
+	ID            string
+	ReservationID string
+}
 type ExecutorMembershipSnapshot struct {
 	MembershipID           string
 	WorkerID               string
@@ -250,6 +303,8 @@ type ExecutorSchedulingSummary struct {
 	ResourceDigest        string
 	Slots                 int
 	RunPriority           int
+	RequiredCoordinatorID string
+	RequiredLocation      string
 }
 func ExpectedSchemaVersion() int
 const FailureAgentLost = "agent_lost"
@@ -275,6 +330,7 @@ var Maintenance = storeMaintenanceFns{
 	FailNodesInRun:               (*Store).failNodesInRun,
 	FailStaleQueuedNodes:         (*Store).failStaleQueuedNodes,
 	FailExpiredNodeClaims:        (*Store).failExpiredNodeClaims,
+	RecoverExpiredNodeClaims:     (*Store).recoverExpiredNodeClaims,
 	ReconcileOrphanedLocalRuns:   (*Store).reconcileOrphanedLocalRuns,
 	ReapStaleConcurrencyHolders:  (*Store).reapStaleConcurrencyHolders,
 	ReapStaleConcurrencyWaiters:  (*Store).reapStaleConcurrencyWaiters,
@@ -306,16 +362,35 @@ type Node struct {
 	StartedAt  *time.Time
 	FinishedAt *time.Time
 
-	ReadyAt              *time.Time
-	ClaimedBy            string
-	LeaseExpiresAt       *time.Time
-	OfferStartedAt       *time.Time
-	OfferPriorityCeiling int
-	ClaimBasePriority    int
-	ClaimPriority        int
-	ClaimWorkerID        string
-	ClaimExecutorKind    string
-	ClaimReservationID   string
+	ReadyAt                  *time.Time
+	ClaimedBy                string
+	Claimed                  bool
+	LeaseExpiresAt           *time.Time
+	OfferStartedAt           *time.Time
+	OfferPriorityCeiling     int
+	ClaimBasePriority        int
+	ClaimPriority            int
+	ClaimWorkerID            string
+	ClaimExecutorKind        string
+	ClaimReservationID       string
+	CoordinatorID            string
+	ClaimGeneration          int64
+	ClaimMembershipID        string
+	ExecutorKind             string
+	ExecutorName             string
+	ExecutorID               string
+	ExecutorLocation         string
+	RequiredCoordinatorID    string
+	RequiredExecutorLocation string
+	ExecutionStartedAt       *time.Time
+	ReservationID            string
+	AttemptsConsumed         int
+	RetryRootRunID           string
+	ExecutionAttempts        []ExecutionAttempt
+	AvoidCoordinatorID       string
+	AvoidExecutorKind        string
+	AvoidExecutorID          string
+	AvoidUntil               *time.Time
 
 	NeedsLabels []string
 
@@ -353,6 +428,14 @@ type NodeBounce struct {
 	ConsumedAt  *time.Time
 	Outcome     string
 }
+type NodeClaimFence struct {
+	Claimant        ClaimIdentity
+	HolderID        string
+	MembershipID    string
+	ReservationID   string
+	ClaimGeneration int64
+}
+func NodeClaimFenceFromContext(ctx context.Context) (NodeClaimFence, bool)
 type NodeDispatch struct {
 	RunID            string
 	NodeID           string
@@ -504,7 +587,16 @@ type Run struct {
 	RetryOf   string
 	RetriedAs string
 
-	RetrySource string
+	RetrySource             string
+	RetryCauseNodeID        string
+	RetryAvoidCoordinatorID string
+	RetryAvoidExecutorKind  string
+	RetryAvoidExecutorID    string
+	RetryAvoidUntil         *time.Time
+	RetryCauseNodeIDs       []string
+	RetryAvailableAt        *time.Time
+	RetryDeadlineAt         *time.Time
+	AgentLossRetryCount     int
 
 	ReplayOfRunID  string
 	ReplayOfNodeID string
@@ -574,6 +666,7 @@ const StepRunning = "running"
 const StepSkipped = "skipped"
 type Store struct {
 }
+func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error
 func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)
 func (s *Store) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error)
@@ -586,6 +679,7 @@ func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error)
+func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string, executor ExecutorIdentity) (*Node, error)
 func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity, lease time.Duration, pipelines, sources []string) (*Trigger, error)
 func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, claimant ClaimIdentity, executorName, runID, nodeID, holderID string, lease time.Duration, reservationID string, slot int, resourceDigest string) (*Node, error)
@@ -593,6 +687,7 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 func (s *Store) Close() error
 func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
+func (s *Store) CoordinatorID(ctx context.Context) (string, error)
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
 func (s *Store) CountConcurrencyCache(ctx context.Context) (int, error)
 func (s *Store) CountDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
@@ -626,6 +721,7 @@ func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, pare
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
+func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, finish ExecutionAttemptFinish) error
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
 func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error
@@ -661,6 +757,7 @@ func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error)
 func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error)
 func (s *Store) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error)
+func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID string) ([]ExecutionAttempt, error)
 func (s *Store) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error)
 func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error)
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error)
@@ -682,6 +779,8 @@ func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts Concurren
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MarkNodeReadyWithPriorityCeiling(ctx context.Context, runID, nodeID string, ceiling int) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
+func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
+func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) OfferExecutorClaim(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) (ExecutorClaimOfferResult, error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error)
@@ -707,6 +806,7 @@ func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
 func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
+func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
 func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
@@ -727,7 +827,9 @@ func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
+func (s *Store) TriggerClaimFenceIsLive(ctx context.Context, runID string, claimant ClaimIdentity, generation int64, now time.Time) (bool, error)
 func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error)
+func (s *Store) TriggerExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
@@ -796,12 +898,18 @@ type Trigger struct {
 
 	WebhookReplayKey string
 }
+type TriggerClaimFence struct {
+	Claimant        ClaimIdentity
+	ClaimGeneration int64
+}
+func TriggerClaimFenceFromContext(ctx context.Context) (TriggerClaimFence, bool)
 type TriggerFilter struct {
 	Statuses  []string
 	Pipelines []string
 	Repo      string
 	Limit     int
 }
+const TriggerGenerationHeader = "X-Sparkwing-Trigger-Generation"
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
@@ -837,6 +945,10 @@ type WaiterResolution struct {
 }
 type WaiterStatus string
 const WaiterStillWaiting WaiterStatus = "still_waiting"
+func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context
+func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
+func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context
+func WithoutClaimFences(ctx context.Context) context.Context
 
 # methods on un-declared receiver types (likely a bug)
 func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)

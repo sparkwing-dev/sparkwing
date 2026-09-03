@@ -83,11 +83,10 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			if n.Status == "done" {
 				return resultFromNode(n)
 			}
-			if n.ClaimedBy != "" {
+			if n.Claimed {
 				if !claimedSeen {
 					stopHB()
-					_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID,
-						fmt.Sprintf("claimed by %s", n.ClaimedBy))
+					_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, "claimed by remote executor")
 				}
 				claimedSeen = true
 				continue

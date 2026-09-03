@@ -211,8 +211,8 @@ func TestSecrets_PlaintextRowFailsClosedOnceEncrypted(t *testing.T) {
 	if strings.Contains(body, "plain value") {
 		t.Fatalf("failed read leaked the stored value: %s", body)
 	}
-	if !strings.Contains(body, "stored value did not open") {
-		t.Fatalf("failed read body = %s, want the fixed message", body)
+	if body != "{\"error\":\"internal server error\"}\n" {
+		t.Fatalf("failed read body = %s, want stable internal error", body)
 	}
 	if strings.Contains(body, "not sealed") {
 		t.Fatalf("failed read body names the row's storage state: %s", body)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +13,10 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+var ErrClaimConflict = errors.New("logs append claim is no longer current")
 
 // Client is the HTTP client for the logs service. Workers use it to
 // post lines; dashboards and CLIs use it to fetch.
@@ -106,8 +110,8 @@ func (e *AuthError) Error() string {
 //
 // 401 / 403 responses are returned as *AuthError so callers can
 // distinguish auth misconfiguration (fatal) from transient
-// transport errors (retryable). Other non-204 responses come back
-// as a plain `logs append <code>: <body>` error.
+// transport errors (retryable). A stale claim returns ErrClaimConflict;
+// other non-204 responses return `logs append <code>: <body>`.
 func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) error {
 	u := fmt.Sprintf("%s/api/v1/logs/%s/%s", c.baseURL,
 		url.PathEscape(runID), url.PathEscape(nodeID))
@@ -116,6 +120,18 @@ func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) 
 		return err
 	}
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+	if fence, ok := store.NodeClaimFenceFromContext(ctx); ok {
+		req.Header.Set(store.ClaimHolderHeader, fence.HolderID)
+		req.Header.Set(store.ClaimMembershipHeader, fence.MembershipID)
+		req.Header.Set(store.ClaimReservationHeader, fence.ReservationID)
+		req.Header.Set(store.ClaimGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
+	}
+	if ordinal, ok := store.ExecutionAttemptOrdinalFromContext(ctx); ok {
+		req.Header.Set(store.AttemptOrdinalHeader, fmt.Sprint(ordinal))
+	}
+	if fence, ok := store.TriggerClaimFenceFromContext(ctx); ok {
+		req.Header.Set(store.TriggerGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -132,6 +148,9 @@ func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) 
 			Scope:   parseMissingScope(trimmed),
 			RawBody: trimmed,
 		}
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return fmt.Errorf("%w: %s", ErrClaimConflict, trimmed)
 	}
 	return fmt.Errorf("logs append %d: %s", resp.StatusCode, trimmed)
 }

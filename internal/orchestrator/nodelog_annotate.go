@@ -12,11 +12,11 @@ type annotatingNodeLog struct {
 	persistStep func(stepID, msg string)
 }
 
-func wrapNodeLogWithAnnotations(inner NodeLog, state StateBackend, runID, nodeID string) NodeLog {
+func wrapNodeLogWithAnnotations(ctx context.Context, inner NodeLog, state StateBackend, runID, nodeID string) NodeLog {
 	if inner == nil || state == nil {
 		return inner
 	}
-	ctx := context.Background()
+	ctx = context.WithoutCancel(ctx)
 	return &annotatingNodeLog{
 		inner: inner,
 		persistNode: func(msg string) {
@@ -50,6 +50,14 @@ func (l *annotatingNodeLog) Emit(rec sparkwing.LogRecord) {
 }
 
 func (l *annotatingNodeLog) Close() error { return l.inner.Close() }
+
+func (l *annotatingNodeLog) BindExecutionAttempt(ordinal int) error {
+	return bindNodeLogExecutionAttempt(l.inner, ordinal)
+}
+
+func (l *annotatingNodeLog) FlushExecutionAttempt() error {
+	return flushNodeLogExecutionAttempt(l.inner)
+}
 
 func (l *annotatingNodeLog) Fatal() error {
 	if f, ok := l.inner.(interface{ Fatal() error }); ok {

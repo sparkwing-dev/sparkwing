@@ -187,9 +187,11 @@ func TestAgents_AdminEnrollmentExactCredentialLivenessAndLegacyBoundary(t *testi
 		map[string]any{"headroom": map[string]any{"cores": 3, "memory_bytes": 6 << 30, "queue_depth": 1}}); status != http.StatusNoContent {
 		t.Fatalf("heartbeat = %d: %s", status, body)
 	}
-	if status, _ := agentRequest(t, http.MethodPost, srv.URL+"/api/v1/agents/desk/heartbeat", rotatedRaw,
+	if status, body := agentRequest(t, http.MethodPost, srv.URL+"/api/v1/agents/desk/heartbeat", rotatedRaw,
 		map[string]any{"headroom": map[string]any{"cores": 99, "memory_bytes": 0, "queue_depth": 0}}); status != http.StatusConflict {
 		t.Fatalf("same-principal different-token heartbeat = %d, want 409", status)
+	} else if body != "{\"error\":\"executor credential does not match enrollment\"}\n" || strings.Contains(body, rotated.Prefix) {
+		t.Fatalf("credential mismatch body = %q", body)
 	}
 	if status, _ := agentRequest(t, http.MethodPost, srv.URL+"/api/v1/agents/desk/heartbeat", runnerRaw,
 		map[string]any{"headroom": map[string]any{"cores": -1, "memory_bytes": 0, "queue_depth": 0}}); status != http.StatusBadRequest {
@@ -254,6 +256,8 @@ func TestAgents_AdminEnrollmentExactCredentialLivenessAndLegacyBoundary(t *testi
 	}
 	if _, err := client.NewWithToken(srv.URL, nil, runnerRaw).ClaimNode(ctx, "agent:desk:1", nil, time.Minute, nil); err == nil {
 		t.Fatal("enrolled credential fell back to legacy /nodes/claim")
+	} else if strings.Contains(err.Error(), runner.Prefix) || strings.Contains(err.Error(), "same-principal") {
+		t.Fatalf("legacy claim rejection exposed credential identity: %v", err)
 	}
 
 	enrollment["token_prefix"] = rotated.Prefix
@@ -273,9 +277,11 @@ func TestAgents_AdminEnrollmentExactCredentialLivenessAndLegacyBoundary(t *testi
 	if rotatedList.Agents[0].Status != "offline" || rotatedList.Agents[0].Headroom != nil {
 		t.Fatalf("rotated enrollment retained old credential liveness: %+v", rotatedList.Agents[0])
 	}
-	if status, _ := agentRequest(t, http.MethodPost, srv.URL+"/api/v1/agents/desk/heartbeat", runnerRaw,
+	if status, body := agentRequest(t, http.MethodPost, srv.URL+"/api/v1/agents/desk/heartbeat", runnerRaw,
 		map[string]any{"headroom": map[string]any{"cores": 1, "memory_bytes": 0, "queue_depth": 0}}); status != http.StatusConflict {
 		t.Fatalf("old credential after rotation = %d, want 409", status)
+	} else if body != "{\"error\":\"executor credential does not match enrollment\"}\n" || strings.Contains(body, runner.Prefix) {
+		t.Fatalf("rotated credential mismatch body = %q", body)
 	}
 	if status, body := agentRequest(t, http.MethodPost, srv.URL+"/api/v1/agents/desk/heartbeat", rotatedRaw,
 		map[string]any{"headroom": map[string]any{"cores": 2, "memory_bytes": 0, "queue_depth": 0}}); status != http.StatusNoContent {

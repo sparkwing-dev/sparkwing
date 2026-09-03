@@ -231,6 +231,156 @@ SELECT data_type FROM information_schema.columns
 	}
 }
 
+func TestSchemaV30_PostgresMigratesActualV29Shape(t *testing.T) {
+	scoped := pgTestSchemaDSN(t)
+	ctx := context.Background()
+	st, err := store.OpenPostgres(ctx, scoped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`DROP TABLE run_definition_plans`,
+		`DROP TABLE node_execution_attempts`,
+		`DROP TABLE agent_loss_retries`,
+		`DROP INDEX idx_triggers_pending`,
+		`ALTER TABLE triggers DROP COLUMN available_at`,
+		`CREATE INDEX idx_triggers_pending ON triggers(status, created_at) WHERE status = 'pending'`,
+		`ALTER TABLE nodes DROP COLUMN required_executor_location`,
+		`ALTER TABLE nodes DROP COLUMN required_coordinator_id`,
+		`ALTER TABLE nodes DROP COLUMN executor_location`,
+		`ALTER TABLE nodes DROP COLUMN retry_root_run_id`,
+		`ALTER TABLE nodes DROP COLUMN attempts_consumed`,
+		`ALTER TABLE nodes DROP COLUMN claim_membership_id`,
+		`ALTER TABLE nodes DROP COLUMN claim_generation`,
+		`ALTER TABLE nodes DROP COLUMN avoid_until`,
+		`ALTER TABLE nodes DROP COLUMN avoid_executor_id`,
+		`ALTER TABLE nodes DROP COLUMN avoid_executor_kind`,
+		`ALTER TABLE nodes DROP COLUMN avoid_coordinator_id`,
+		`ALTER TABLE nodes DROP COLUMN reservation_id`,
+		`ALTER TABLE nodes DROP COLUMN execution_started_at`,
+		`ALTER TABLE nodes DROP COLUMN executor_id`,
+		`ALTER TABLE nodes DROP COLUMN executor_kind`,
+		`ALTER TABLE nodes DROP COLUMN coordinator_id`,
+		`ALTER TABLE runs DROP COLUMN retry_avoid_until`,
+		`ALTER TABLE runs DROP COLUMN retry_avoid_executor_id`,
+		`ALTER TABLE runs DROP COLUMN retry_avoid_executor_kind`,
+		`ALTER TABLE runs DROP COLUMN retry_avoid_coordinator_id`,
+		`ALTER TABLE runs DROP COLUMN retry_cause_node_id`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 30`,
+	} {
+		if _, err := st.DB().ExecContext(ctx, stmt); err != nil {
+			_ = st.Close()
+			t.Fatalf("downgrade with %q: %v", stmt, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	up, err := store.OpenPostgres(ctx, scoped)
+	if err != nil {
+		t.Fatalf("open v29 shape at schema %d: %v", store.ExpectedSchemaVersion(), err)
+	}
+	defer up.Close()
+	if got, err := up.CurrentSchemaVersion(ctx); err != nil || got != 30 {
+		t.Fatalf("schema version = %d, err=%v, want 30", got, err)
+	}
+	for table, names := range map[string][]string{
+		"runs":     {"retry_cause_node_id", "retry_avoid_coordinator_id", "retry_avoid_executor_kind", "retry_avoid_executor_id", "retry_avoid_until"},
+		"nodes":    {"coordinator_id", "executor_kind", "executor_id", "execution_started_at", "reservation_id", "avoid_coordinator_id", "avoid_executor_kind", "avoid_executor_id", "avoid_until", "claim_generation", "claim_membership_id", "attempts_consumed", "retry_root_run_id", "executor_location", "required_coordinator_id", "required_executor_location"},
+		"triggers": {"available_at"},
+	} {
+		for _, name := range names {
+			var exists bool
+			if err := up.DB().QueryRowContext(ctx, `SELECT EXISTS (
+  SELECT 1 FROM information_schema.columns
+   WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2
+)`, table, name).Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if !exists {
+				t.Errorf("migrated schema missing %s.%s", table, name)
+			}
+		}
+	}
+	for _, table := range []string{"agent_loss_retries", "node_execution_attempts", "run_definition_plans"} {
+		var exists bool
+		if err := up.DB().QueryRowContext(ctx, `SELECT EXISTS (
+  SELECT 1 FROM information_schema.tables
+   WHERE table_schema = current_schema() AND table_name = $1
+)`, table).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if !exists {
+			t.Errorf("migrated schema missing table %s", table)
+		}
+	}
+	for column, want := range map[[2]string]string{
+		{"runs", "retry_avoid_until"}:                   "bigint",
+		{"nodes", "execution_started_at"}:               "bigint",
+		{"nodes", "claim_generation"}:                   "bigint",
+		{"nodes", "attempts_consumed"}:                  "bigint",
+		{"triggers", "available_at"}:                    "bigint",
+		{"agent_loss_retries", "cause_nodes_json"}:      "bytea",
+		{"agent_loss_retries", "deadline_at"}:           "bigint",
+		{"node_execution_attempts", "attempt_ordinal"}:  "bigint",
+		{"node_execution_attempts", "claim_generation"}: "bigint",
+		{"node_execution_attempts", "started_at"}:       "bigint",
+		{"node_execution_attempts", "finished_at"}:      "bigint",
+	} {
+		var got string
+		if err := up.DB().QueryRowContext(ctx, `SELECT data_type
+  FROM information_schema.columns
+ WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2`,
+			column[0], column[1]).Scan(&got); err != nil {
+			t.Fatalf("inspect %s.%s type: %v", column[0], column[1], err)
+		}
+		if got != want {
+			t.Errorf("%s.%s type = %q, want %q", column[0], column[1], got, want)
+		}
+	}
+}
+
+func TestSchemaV30_PostgresPersistsAttemptAndSchedulesAgentLossRetry(t *testing.T) {
+	st := openPGTestStore(t)
+	ctx := context.Background()
+	createRetryRunAndReadyNode(t, st, "run-pg-agent-loss", 1)
+	identity := enrollOfferExecutor(t, st, "pg-desktop", 100, 100)
+	result := executorOffer(t, st, identity, "pg-desktop", "agent:pg-desktop:0",
+		"pg-reservation", "run-pg-agent-loss", "build", 0)
+	if result.Node == nil {
+		t.Fatal("executor offer did not win")
+	}
+	ackNodeAttempt(t, st, result.Node, identity, 1)
+	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at = $1 WHERE run_id = $2 AND node_id = $3`,
+		time.Now().Add(-time.Second).UnixNano(), result.Node.RunID, result.Node.NodeID); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := store.Maintenance.RecoverExpiredNodeClaims(st, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recovered) != 1 || recovered[0].RetryRunID == "" || !recovered[0].Started || recovered[0].Invocations != 1 {
+		t.Fatalf("recovery = %+v", recovered)
+	}
+	source, err := st.GetNode(ctx, result.Node.RunID, result.Node.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.FailureReason != store.FailureAgentLost || len(source.ExecutionAttempts) != 1 ||
+		source.ExecutionAttempts[0].FinishedAt == nil || source.ExecutionAttempts[0].FailureReason != store.FailureAgentLost ||
+		source.ExecutionAttempts[0].RetryRunID != recovered[0].RetryRunID {
+		t.Fatalf("source attempt = %+v", source)
+	}
+	retry, err := st.GetRun(ctx, recovered[0].RetryRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.Status != "pending" || retry.RetryOf != result.Node.RunID || retry.RetryAvailableAt == nil || retry.RetryDeadlineAt == nil {
+		t.Fatalf("retry = %+v", retry)
+	}
+}
+
 func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 	st := openPGTestStore(t)
 	ctx := context.Background()

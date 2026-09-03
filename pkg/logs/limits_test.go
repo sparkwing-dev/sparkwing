@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func newLimitedServer(t *testing.T, l logs.Limits) (*logs.Server, *logs.Client, string, func()) {
@@ -318,6 +319,54 @@ func TestLogs_ConcurrentAppendsHoldTheByteCaps(t *testing.T) {
 					payload, writers, capBytes)
 			}
 		})
+	}
+}
+
+func TestLogs_ConcurrentAttemptSubstreamsShareTheNodeCap(t *testing.T) {
+	const (
+		capBytes = 1024
+		writers  = 64
+	)
+	_, client, dir, stop := newLimitedServer(t, logs.Limits{MaxNodeBytes: capBytes})
+	defer stop()
+	body := bytes.Repeat([]byte("x"), 4096)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			generation := int64(i%2 + 1)
+			ctx := store.WithNodeClaimFence(context.Background(), store.NodeClaimFence{
+				HolderID: "holder", ClaimGeneration: generation,
+			})
+			ctx = store.WithExecutionAttemptOrdinal(ctx, int(generation))
+			_ = client.Append(ctx, "run-1", "step-a", body)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	payload := 0
+	err := filepath.WalkDir(filepath.Join(dir, "runs", "run-1", ".attempts"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		payload += len(data) - strings.Count(string(data), logs.TruncationMarker)*len(logs.TruncationMarker)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload > capBytes {
+		t.Fatalf("stored %d payload bytes across attempt streams, want at most %d", payload, capBytes)
 	}
 }
 

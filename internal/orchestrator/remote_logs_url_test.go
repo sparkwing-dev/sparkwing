@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -89,7 +90,7 @@ func TestRemoteBackends_PrefersAnnouncedLogsURL(t *testing.T) {
 	c := client.NewWithToken(ctrlSrv.URL, nil, "")
 	backends := orchestrator.RemoteBackends(c, nil, nil, nil, 0)
 
-	nlog, err := backends.Logs.OpenNodeLog("run-x", "node-x", nil)
+	nlog, err := backends.Logs.OpenNodeLog(context.Background(), "run-x", "node-x", nil)
 	if err != nil {
 		t.Fatalf("OpenNodeLog: %v", err)
 	}

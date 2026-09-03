@@ -395,10 +395,12 @@ sparkwing cluster agents enroll --profile prod \
 ```
 
 The controller-owned enrollment is the trust envelope. Kind identifies an
-`agent` or `gateway` execution boundary; location is display-only and never
-affects placement. Capabilities, priority range, concurrency ceiling, and
-resource budget come only from enrollment. Worker traffic cannot add or widen
-them, and the agents API never returns the credential prefix or principal.
+`agent` or `gateway` execution boundary. Location records controller-owned
+attribution; it does not constrain the first assignment, but the awarded value
+becomes a hard requirement for an agent-loss retry. Capabilities, priority
+range, concurrency ceiling, and resource budget come only from enrollment.
+Worker traffic cannot add or widen them, and the agents API never returns the
+credential prefix or principal.
 
 Set `name` for one enrolled coordinator, or use `coordinators` for several.
 Every membership needs a distinct revocable token and its enrolled name;
@@ -443,6 +445,18 @@ name, slot, and holder. `Requires` and resource limits filter before ranking.
 Run priority and `Prefers` may reorder eligible executors only inside each
 administrator-owned priority range. A retry after a lost response recovers the
 same fenced claim. Legacy direct claims remain FIFO and do not use this ranking.
+
+The controller owns retries after an agent or gateway disappears. The source
+node becomes terminal `agent_lost` and is never resumed. Loss before the
+job-body start acknowledgement creates a fresh linked run without spending
+`.Retry(n)`; loss after acknowledgement spends the persisted invocation count.
+The same total budget covers local retry loops, `RetryAuto` dispatches, and
+fresh runs. A replacement keeps the captured source/plan and the original
+coordinator and location, rehydrates unrelated terminal work, and reruns only
+the lost work and its descendants after durable backoff. Another executor is
+preferred briefly, but the original may reclaim when it is the only eligible
+capacity. Coordinator fallback cannot relax the required placement. External
+effects remain at-least-once within the configured budget.
 
 With the Helm values `runner.triggerRunner.kind: warm` and
 `runner.automountServiceAccountToken: true`, a trigger worker offers each node

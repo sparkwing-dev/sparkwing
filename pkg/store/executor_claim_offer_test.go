@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -42,6 +43,48 @@ func executorOffer(t *testing.T, s *store.Store, identity store.ClaimIdentity, n
 		t.Fatalf("OfferExecutorClaim: %v", err)
 	}
 	return result
+}
+
+func TestExecutorSelectedEventUsesPublicAttribution(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	identity := enrollOfferExecutor(t, s, "desktop", 100, 100)
+	if err := s.CreateRun(ctx, store.Run{ID: "run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateNode(ctx, store.Node{RunID: "run", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkNodeReady(ctx, "run", "build"); err != nil {
+		t.Fatal(err)
+	}
+	result := executorOffer(t, s, identity, "desktop", "agent:desktop:0", "reservation-secret", "run", "build", 0)
+	if result.Node == nil {
+		t.Fatal("offer did not win")
+	}
+	events, err := s.ListEventsAfter(ctx, "run", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Kind != "executor_selected" {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["executor_name"] != "desktop" || payload["executor_kind"] != "agent" || payload["location"] != "local" {
+			t.Fatalf("public attribution = %v", payload)
+		}
+		for _, internal := range []string{"coordinator_id", "membership_id", "executor_id", "reservation_id", "holder_id", "token_prefix"} {
+			if _, exists := payload[internal]; exists {
+				t.Fatalf("executor_selected exposed %s: %v", internal, payload)
+			}
+		}
+		return
+	}
+	t.Fatal("missing executor_selected event")
 }
 
 func TestExecutorClaimPreparationScansPastSixtyFourIneligibleNodes(t *testing.T) {

@@ -15,7 +15,6 @@ import (
 
 const runnerHeadroomStale = time.Hour
 
-// Agent matches web/src/lib/api.ts:Agent. Location is display-only.
 type Agent struct {
 	Name            string            `json:"name"`
 	Type            string            `json:"type"` // "agent" | "gateway" | "pool" | "local"
@@ -156,7 +155,11 @@ func (s *Server) handleHeartbeatAgent(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.HeartbeatExecutor(r.Context(), claimIdentity(r), r.PathValue("name"),
 		store.ExecutorResource{Cores: body.Headroom.Cores, MemoryBytes: body.Headroom.MemoryBytes},
 		body.Headroom.QueueDepth, time.Now()); err != nil {
-		writeError(w, http.StatusConflict, err)
+		if errors.Is(err, store.ErrExecutorCredentialMismatch) {
+			writeError(w, http.StatusConflict, store.ErrExecutorCredentialMismatch)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

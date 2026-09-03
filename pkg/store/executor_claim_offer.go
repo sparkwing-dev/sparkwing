@@ -50,7 +50,12 @@ type ExecutorClaimRoundResult struct {
 // PrepareNextExecutorClaim returns the oldest eligible node without changing
 // queue or claim state. The exact resource digest is recomputed on award.
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error) {
-	if _, err := s.ExecutorForCredential(ctx, claimant, executorName); err != nil {
+	executor, err := s.ExecutorForCredential(ctx, claimant, executorName)
+	if err != nil {
+		return nil, err
+	}
+	coordinatorID, err := s.CoordinatorID(ctx)
+	if err != nil {
 		return nil, err
 	}
 	activeAfter := time.Now().Add(-executorOfferLiveness).UnixNano()
@@ -62,7 +67,7 @@ func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 	for {
 		rows, err := s.query(ctx, `
 SELECT n.run_id, n.node_id, n.ready_at
-  FROM nodes n
+ FROM nodes n
  WHERE n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.`+nodeNotDone+`
 	   AND NOT EXISTS (
 	       SELECT 1 FROM node_claim_offers o
@@ -70,7 +75,7 @@ SELECT n.run_id, n.node_id, n.ready_at
 	          AND o.executor_name = ? AND o.last_seen_at >= ?)
    AND (n.ready_at > ? OR (n.ready_at = ? AND (n.run_id > ? OR (n.run_id = ? AND n.node_id > ?))))
  ORDER BY n.ready_at, n.run_id, n.node_id
-	LIMIT 64`, executorName, activeAfter, after.readyAt, after.readyAt, after.runID, after.runID, after.nodeID)
+		LIMIT 64`, executorName, activeAfter, after.readyAt, after.readyAt, after.runID, after.runID, after.nodeID)
 		if err != nil {
 			return nil, err
 		}
@@ -103,6 +108,20 @@ SELECT n.run_id, n.node_id, n.ready_at
 			if !membership.Eligible {
 				continue
 			}
+			node, err := s.GetNode(ctx, item.runID, item.nodeID)
+			if err != nil {
+				return nil, err
+			}
+			if node.AvoidUntil != nil && node.AvoidUntil.After(time.Now()) &&
+				node.AvoidCoordinatorID == coordinatorID && node.AvoidExecutorKind == executor.Kind && node.AvoidExecutorID == executor.Name {
+				alternate, err := s.hasAlternateEligibleExecutor(ctx, executor.Name, summary)
+				if err != nil {
+					return nil, err
+				}
+				if alternate {
+					continue
+				}
+			}
 			preparation := &ExecutorClaimPreparation{Summary: summary, Membership: membership}
 			var opened sql.NullInt64
 			if err := s.queryRow(ctx, `SELECT offer_started_at FROM nodes WHERE run_id = ? AND node_id = ?`, item.runID, item.nodeID).Scan(&opened); err != nil {
@@ -119,6 +138,27 @@ SELECT n.run_id, n.node_id, n.ready_at
 		}
 		after = page[len(page)-1]
 	}
+}
+
+func (s *Store) hasAlternateEligibleExecutor(ctx context.Context, current string, summary ExecutorSchedulingSummary) (bool, error) {
+	executors, err := s.ListExecutors(ctx)
+	if err != nil {
+		return false, err
+	}
+	activeAfter := time.Now().Add(-ExecutorRegistrationActiveWindow)
+	for _, candidate := range executors {
+		if candidate.Name == current || candidate.LastSeen.Before(activeAfter) {
+			continue
+		}
+		_, eligible, err := s.executorEligible(ctx, candidate, summary)
+		if err != nil {
+			return false, err
+		}
+		if eligible {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // OfferExecutorClaim records one live reservation and awards immediately at
@@ -382,9 +422,11 @@ func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID 
 	defer func() { _ = tx.Rollback() }()
 	var readyAt, opened sql.NullInt64
 	var claimedBy sql.NullString
-	var status string
-	err = tx.QueryRowContext(ctx, `SELECT ready_at, claimed_by, status, offer_started_at FROM nodes
- WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&readyAt, &claimedBy, &status, &opened)
+	var status, requiredCoordinator, requiredLocation string
+	err = tx.QueryRowContext(ctx, `SELECT ready_at, claimed_by, status, offer_started_at,
+       required_coordinator_id, required_executor_location FROM nodes
+	 WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(
+		&readyAt, &claimedBy, &status, &opened, &requiredCoordinator, &requiredLocation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ExecutorClaimRoundResult{}, ErrNotFound
 	}
@@ -410,6 +452,12 @@ func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID 
 		return ExecutorClaimRoundResult{}, nil
 	} else if err != nil && !errors.Is(err, ErrNotFound) {
 		return ExecutorClaimRoundResult{}, err
+	}
+	if requiredCoordinator != "" || requiredLocation != "" {
+		if err := tx.Commit(); err != nil {
+			return ExecutorClaimRoundResult{}, err
+		}
+		return ExecutorClaimRoundResult{Pending: true}, nil
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes SET ready_at = NULL, offer_started_at = NULL
  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone, runID, nodeID)

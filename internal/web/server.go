@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/docsweb"
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -673,6 +674,7 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 		if err != nil {
 			return
 		}
+		events = api.PublicEvents(events)
 		for _, ev := range events {
 			if !writeEventSSE(w, ev) {
 				return

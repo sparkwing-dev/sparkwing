@@ -12,14 +12,15 @@ CHANGELOG links here.
   and `max_concurrent` was the only contribution limit. A helper could claim a
   node and then wait in local admission.
 - **After:** Run-store schema 28 persists administrator-owned executor
-  enrollments: exact credential binding, name, kind, display-only location,
+  enrollments: exact credential binding, name, kind, controller-trusted location,
   trusted capabilities, priority range, concurrency ceiling, and resource
   budget. An authenticated heartbeat can update only liveness and finite,
   nonnegative headroom. Node claims can persist the scheduling summary's exact
   resource charge and an opaque reservation/physical-slot binding. The local
   agent config can narrow concurrency and contribution but cannot grant trusted
   capabilities or raise an operator ceiling. Location never grants a capability
-  or affects placement.
+  or widens initial placement; schema 30 preserves the awarded location as a
+  hard agent-loss retry requirement.
 - **Migration:** Stop every controller that shares the run store, upgrade all
   of them, then restart them. An older controller refuses schema 28. Existing
   singular `agent.yaml` files without `name` or `coordinators` keep the legacy
@@ -76,6 +77,47 @@ CHANGELOG links here.
   queued work behind a local scheduler. Durable rounds let the controller
   select the best currently runnable executor without double-awarding a node,
   while reservation and holder fencing make retries safe across lost responses.
+
+## Agent-loss retry lineage and execution fencing
+
+- **Before:** An expired node claim ended the node as `agent_lost`. The
+  controller did not distinguish loss before the job body from loss after it
+  started, did not carry `.Retry(n)` across replacement runs, and authorized
+  remote writes with a live-claim check before a separate store write. Log
+  appends from different claim generations shared one node stream.
+- **After:** Schema 30 records a monotonic body-invocation ordinal for each node
+  retry lineage. The executor acknowledges that ordinal immediately before the
+  body call and finishes the attempt afterward. Loss before an acknowledgement
+  creates a fresh linked run without spending `.Retry(n)`; loss afterward
+  spends every acknowledged invocation. `.Retry(n)` remains `n` additional
+  invocations across in-process and fresh-run attempts. The retry preserves the
+  source plan and checkout provenance, unrelated terminal nodes and artifacts,
+  durable backoff and deadline, and the source coordinator and location as hard
+  placement. It briefly avoids the lost executor when another eligible one is
+  available. Every claim-scoped fleet node write is checked against the token, holder,
+  membership, reservation, and generation in the same transaction. Attempt
+  logs are stored separately, so a delayed accepted write remains attributed
+  to its old attempt.
+- **Migration:** Stop every controller sharing the run store, upgrade all of
+  them through schema 30, then upgrade custom runners and log services before
+  resuming assisted execution. Go integrations must replace
+  `AcknowledgeNodeExecutionStart(ctx, runID, nodeID, holderID)` with an
+  `ExecutionStart` carrying holder, membership, reservation, claim generation,
+  and attempt ordinal, and call `FinishNodeExecutionAttempt` after the body.
+  Custom HTTP executors must send the matching exact node-claim headers on
+  every node mutation. A source coordinator instead sends its exact trigger
+  generation. Execution-start and execution-finish bodies include holder,
+  membership, reservation, and generation for a node claim; trigger-owned
+  fallback bodies include only the global attempt ordinal and outcome. Node
+  log appends additionally carry that acknowledged ordinal. Existing nodes and
+  logs remain readable; missing legacy attempt attribution stays unknown.
+  A cancelled body closes its acknowledged attempt with outcome `cancelled`.
+- **Why:** A claim lease is both an execution fence and an ambiguity boundary.
+  Acknowledgement bounds at-least-once re-execution to the configured retry
+  budget without claiming exactly-once external effects. Transactional fences
+  stop a stale executor from overwriting its replacement, while immutable log
+  attribution keeps history truthful even when a request paused after
+  validation.
 
 ## (Breaking) Submitted runs carry an allow-listed environment
 

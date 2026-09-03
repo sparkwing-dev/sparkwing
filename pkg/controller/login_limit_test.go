@@ -246,8 +246,8 @@ func TestWriteLoginUnavailable_HashingBusyIs503(t *testing.T) {
 	if got := rec.Header().Get("Retry-After"); got != "1" {
 		t.Fatalf("Retry-After = %q, want %q", got, "1")
 	}
-	if !strings.Contains(rec.Body.String(), "busy") {
-		t.Fatalf("body = %q, want the busy message", rec.Body.String())
+	if body := rec.Body.String(); body != "{\"error\":\"internal server error\"}\n" {
+		t.Fatalf("body = %q, want stable internal error", body)
 	}
 }
 

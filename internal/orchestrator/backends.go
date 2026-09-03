@@ -48,12 +48,52 @@ type StateBackend interface {
 }
 
 type LogBackend interface {
-	OpenNodeLog(runID, nodeID string, delegate sparkwing.Logger) (NodeLog, error)
+	OpenNodeLog(ctx context.Context, runID, nodeID string, delegate sparkwing.Logger) (NodeLog, error)
 }
 
 type NodeLog interface {
 	sparkwing.Logger
 	Close() error
+}
+
+type autoRetryNodeResetter interface {
+	ResetNodeForAutoRetry(context.Context, string, string) error
+}
+
+type retryNodeLister interface {
+	ListNodes(context.Context, string) ([]*store.Node, error)
+}
+
+func listRetryNodes(ctx context.Context, state StateBackend, runID string) ([]*store.Node, error) {
+	lister, ok := state.(retryNodeLister)
+	if !ok {
+		return nil, errors.New("state backend does not support strict retry node listing")
+	}
+	return lister.ListNodes(ctx, runID)
+}
+
+func resetNodeForAutoRetry(ctx context.Context, state StateBackend, runID, nodeID string) error {
+	resetter, ok := state.(autoRetryNodeResetter)
+	if !ok {
+		return errors.New("state backend does not support whole-node retry reset")
+	}
+	return resetter.ResetNodeForAutoRetry(ctx, runID, nodeID)
+}
+
+func bindNodeLogExecutionAttempt(log NodeLog, ordinal int) error {
+	binder, ok := log.(interface{ BindExecutionAttempt(int) error })
+	if !ok {
+		return nil
+	}
+	return binder.BindExecutionAttempt(ordinal)
+}
+
+func flushNodeLogExecutionAttempt(log NodeLog) error {
+	flusher, ok := log.(interface{ FlushExecutionAttempt() error })
+	if !ok {
+		return nil
+	}
+	return flusher.FlushExecutionAttempt()
 }
 
 type ConcurrencyBackend interface {
@@ -89,6 +129,10 @@ func S3Backends(log storage.LogStore, state *s3state.Backend, art storage.Artifa
 
 type s3StateAdapter struct {
 	*s3state.Backend
+}
+
+func (s s3StateAdapter) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
+	return s.Backend.ResetNodeForAutoRetry(ctx, runID, nodeID)
 }
 
 var _ StateBackend = (*client.Client)(nil)
@@ -198,6 +242,20 @@ func (l localState) FinishNodeWithReason(ctx context.Context, runID, nodeID, out
 	return l.st.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, reason, exitCode)
 }
 
+func (l localState) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
+	return l.st.ResetNodeForAutoRetry(ctx, runID, nodeID)
+}
+
+func (l localState) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, start store.ExecutionStart) error {
+	fence, _ := store.NodeClaimFenceFromContext(ctx)
+	return l.st.AcknowledgeNodeExecutionStart(ctx, runID, nodeID, fence.Claimant, start)
+}
+
+func (l localState) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish store.ExecutionAttemptFinish) error {
+	fence, _ := store.NodeClaimFenceFromContext(ctx)
+	return l.st.FinishNodeExecutionAttempt(ctx, runID, nodeID, fence.Claimant, finish)
+}
+
 func (l localState) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	return l.st.UpdateNodeDeps(ctx, runID, nodeID, deps)
 }
@@ -264,6 +322,10 @@ func (l localState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]
 
 func (l localState) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {
 	return l.st.GetNode(ctx, runID, nodeID)
+}
+
+func (l localState) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
+	return l.st.ListNodes(ctx, runID)
 }
 
 func (l localState) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error {
@@ -495,7 +557,7 @@ type localLogs struct {
 	paths Paths
 }
 
-func (l localLogs) OpenNodeLog(runID, nodeID string, delegate sparkwing.Logger) (NodeLog, error) {
+func (l localLogs) OpenNodeLog(_ context.Context, runID, nodeID string, delegate sparkwing.Logger) (NodeLog, error) {
 	if err := l.paths.EnsureRunDir(runID); err != nil {
 		return nil, err
 	}

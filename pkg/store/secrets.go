@@ -188,11 +188,11 @@ func (s *Store) RepoForClaimedRun(ctx context.Context, runID string, claimant Cl
            AND (EXISTS (SELECT 1 FROM nodes
                          WHERE nodes.run_id = runs.id
                            AND nodes.claim_principal = ? AND nodes.claim_token_prefix = ?
-                           AND `+nodeClaimLiveSQL+`)
+		                   AND `+nodeClaimLiveSQL("")+`)
              OR EXISTS (SELECT 1 FROM triggers
                          WHERE triggers.id = runs.id
                            AND triggers.claim_principal = ? AND triggers.claim_token_prefix = ?
-                           AND `+triggerClaimLiveSQL+`))`,
+		                   AND `+triggerClaimLiveSQL("")+`))`,
 		runID,
 		claimant.Principal, claimant.TokenPrefix, now.UnixNano(),
 		claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&repo)
@@ -218,11 +218,11 @@ func (s *Store) ReposForClaimant(ctx context.Context, claimant ClaimIdentity, no
          WHERE EXISTS (SELECT 1 FROM nodes
                         WHERE nodes.run_id = runs.id
                           AND nodes.claim_principal = ? AND nodes.claim_token_prefix = ?
-                          AND `+nodeClaimLiveSQL+`)
+		                  AND `+nodeClaimLiveSQL("")+`)
             OR EXISTS (SELECT 1 FROM triggers
                         WHERE triggers.id = runs.id
                           AND triggers.claim_principal = ? AND triggers.claim_token_prefix = ?
-                          AND `+triggerClaimLiveSQL+`)`,
+		                  AND `+triggerClaimLiveSQL("")+`)`,
 		claimant.Principal, claimant.TokenPrefix, now.UnixNano(),
 		claimant.Principal, claimant.TokenPrefix, now.UnixNano())
 	if err != nil {

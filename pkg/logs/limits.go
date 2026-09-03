@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,7 +20,7 @@ const TruncationMarker = "[sparkwing-logs] truncated: byte cap reached\n"
 // independent and a zero field removes that bound; [DefaultLimits]
 // carries the values the shipped service uses.
 type Limits struct {
-	// MaxNodeBytes caps the stored size of one node's log file.
+	// MaxNodeBytes caps one node's legacy and attributed log substreams together.
 	MaxNodeBytes int64
 	// MaxRunBytes caps the stored size of all node logs in one run.
 	MaxRunBytes int64
@@ -188,10 +189,10 @@ type appendPlan struct {
 }
 
 // safety: room is the smaller of the node and run headroom, so one chatty node cannot spend the whole run budget.
-func (s *Server) planAppend(root *os.Root, runID, name string, rt *runTotal, body []byte) appendPlan {
+func (s *Server) planAppend(root *os.Root, runID, nodeID string, rt *runTotal, body []byte) appendPlan {
 	want := int64(len(body))
 	if limit := s.limits.MaxNodeBytes; limit > 0 {
-		if room := limit - nodeSize(root, name); room < want {
+		if room := limit - logicalNodeSize(root, runID, nodeID); room < want {
 			want = room
 		}
 	}
@@ -217,18 +218,7 @@ func nodeSize(root *os.Root, name string) int64 {
 }
 
 func runTotalBytes(root *os.Root, runID string) int64 {
-	entries, err := readRunDir(root, runID)
-	if err != nil {
-		return 0
-	}
-	var total int64
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		total += info.Size()
-	}
+	total, _ := logTreeUsage(root, runID)
 	return total
 }
 
@@ -365,22 +355,30 @@ func (s *Server) SweepOnce(now time.Time) (int, error) {
 }
 
 func newestWrite(root *os.Root, dir fs.DirEntry) time.Time {
-	newest := time.Time{}
-	if info, err := dir.Info(); err == nil {
-		newest = info.ModTime()
-	}
-	entries, err := readRunDir(root, dir.Name())
-	if err != nil {
-		return newest
-	}
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().After(newest) {
-			newest = info.ModTime()
-		}
-	}
+	_, newest := logTreeUsage(root, dir.Name())
 	return newest
+}
+
+func logTreeUsage(root *os.Root, path string) (int64, time.Time) {
+	info, err := root.Stat(path)
+	if err != nil {
+		return 0, time.Time{}
+	}
+	newest := info.ModTime()
+	if !info.IsDir() {
+		return info.Size(), newest
+	}
+	entries, err := readDirAt(root, path)
+	if err != nil {
+		return 0, newest
+	}
+	var total int64
+	for _, entry := range entries {
+		size, modified := logTreeUsage(root, filepath.Join(path, entry.Name()))
+		total += size
+		if modified.After(newest) {
+			newest = modified
+		}
+	}
+	return total, newest
 }

@@ -444,16 +444,20 @@ func executePooledNode(
 
 	execCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	heartbeatCtx := store.WithNodeClaimFence(execCtx, store.NodeClaimFence{
+		HolderID: holderID, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	})
 
 	var hbWG sync.WaitGroup
 	hbWG.Add(1)
 	go func() {
 		defer hbWG.Done()
-		runPoolHeartbeat(execCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
+		runPoolHeartbeat(heartbeatCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
 	}()
 
 	res, err := orchestrator.RunNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
-		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken), orchestrator.ClaimedNode())
+		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken), orchestrator.ClaimedNodeAttempt(n))
 	cancel()
 	hbWG.Wait()
 

@@ -25,8 +25,7 @@ type ExecutorResource struct {
 	MemoryBytes int64   `json:"memory_bytes" yaml:"memory_bytes"`
 }
 
-// Executor is one administrator-enrolled execution membership. Kind describes
-// the execution boundary, while Location is display-only.
+// Executor is one administrator-enrolled execution membership.
 type Executor struct {
 	Name             string           `json:"name"`
 	TokenPrefix      string           `json:"-"`
@@ -228,6 +227,8 @@ type ExecutorSchedulingSummary struct {
 	ResourceDigest        string           `json:"resource_digest"`
 	Slots                 int              `json:"slots"`
 	RunPriority           int              `json:"run_priority"`
+	RequiredCoordinatorID string           `json:"required_coordinator_id,omitempty"`
+	RequiredLocation      string           `json:"required_location,omitempty"`
 }
 
 // ExecutorMembershipSnapshot binds a registered executor to the exact
@@ -268,7 +269,8 @@ func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (Ex
 	return ExecutorSchedulingSummary{
 		RunID: runID, NodeID: nodeID, HardCapabilities: append([]string(nil), n.NeedsLabels...),
 		PreferredCapabilities: snapshotNodePrefers(plan, nodeID), Resources: charge, ResourceDigest: executorResourceDigest(charge), Slots: 1,
-		RunPriority: snapshotRunPriority(plan),
+		RunPriority: snapshotRunPriority(plan), RequiredCoordinatorID: n.RequiredCoordinatorID,
+		RequiredLocation: n.RequiredExecutorLocation,
 	}, nil
 }
 
@@ -342,6 +344,10 @@ func (s *Store) HighestActiveExecutorCeiling(ctx context.Context, summary Execut
 }
 
 func (s *Store) executorEligible(ctx context.Context, e Executor, summary ExecutorSchedulingSummary) (int, bool, error) {
+	coordinatorID, err := s.CoordinatorID(ctx)
+	if err != nil {
+		return 0, false, err
+	}
 	var active int
 	var usedCores float64
 	var usedMemory int64
@@ -355,7 +361,9 @@ SELECT COUNT(*), COALESCE(SUM(claim_cores), 0), COALESCE(SUM(claim_memory_bytes)
 	for _, capability := range e.Capabilities {
 		capSet[capability] = struct{}{}
 	}
-	eligible := summary.Slots == 1 && active+summary.Slots <= e.MaxConcurrent &&
+	placementEligible := (summary.RequiredCoordinatorID == "" || summary.RequiredCoordinatorID == coordinatorID) &&
+		(summary.RequiredLocation == "" || summary.RequiredLocation != "unknown" && summary.RequiredLocation == e.Location)
+	eligible := placementEligible && summary.Slots == 1 && active+summary.Slots <= e.MaxConcurrent &&
 		labelsSatisfied(summary.HardCapabilities, capSet) &&
 		executorResourcesFit(e, usedCores, usedMemory, summary.Resources)
 	return active, eligible, nil
@@ -504,19 +512,63 @@ SELECT COUNT(*), COALESCE(SUM(claim_cores), 0), COALESCE(SUM(claim_memory_bytes)
 	}
 
 	expires := now.Add(lease)
-	if _, err := tx.ExecContext(ctx, `
+	coordinatorID, err := coordinatorIDTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	membershipID := executorMembershipID(e.TokenPrefix, executorName)
+	result, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
        claim_executor = ?, claim_cores = ?, claim_memory_bytes = ?,
-       claim_reservation = ?, claim_slot = ?, lease_expires_at = ?
- WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`,
+       claim_reservation = ?, claim_slot = ?, lease_expires_at = ?,
+       coordinator_id = ?, claim_membership_id = ?, executor_kind = ?, executor_id = ?,
+	   executor_location = ?, reservation_id = ?, claim_generation = claim_generation + 1,
+	   required_coordinator_id = CASE WHEN required_coordinator_id = '' THEN ? ELSE required_coordinator_id END,
+	   required_executor_location = CASE WHEN required_executor_location = '' THEN ? ELSE required_executor_location END
+	 WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL
+	   AND (required_coordinator_id = '' OR required_coordinator_id = ?)
+	   AND (required_executor_location = '' OR (required_executor_location != 'unknown' AND required_executor_location = ?))`,
 		holderID, e.Principal, claimant.TokenPrefix,
 		executorName, charge.Cores, charge.MemoryBytes, reservationID, slot,
-		expires.UnixNano(), n.RunID, n.NodeID); err != nil {
+		expires.UnixNano(), coordinatorID, membershipID, e.Kind, executorName,
+		e.Location, reservationID, coordinatorID, e.Location, n.RunID, n.NodeID, coordinatorID, e.Location)
+	if err != nil {
 		return nil, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if changed != 1 {
+		return nil, ErrLockHeld
 	}
 	n.ClaimedBy = holderID
 	n.LeaseExpiresAt = &expires
+	n.CoordinatorID = coordinatorID
+	n.ClaimMembershipID = membershipID
+	n.ExecutorKind = e.Kind
+	n.ExecutorID = executorName
+	n.ExecutorLocation = e.Location
+	if n.RequiredCoordinatorID == "" {
+		n.RequiredCoordinatorID = coordinatorID
+	}
+	if n.RequiredExecutorLocation == "" {
+		n.RequiredExecutorLocation = e.Location
+	}
+	n.ReservationID = reservationID
+	n.ClaimGeneration++
+	event := executionAttributionEventFields(e.Kind, executorName, e.Location)
+	event["claim_generation"] = n.ClaimGeneration
+	if n.AvoidUntil != nil && n.AvoidUntil.After(now) {
+		event["avoided_executor_kind"] = n.AvoidExecutorKind
+		event["avoided_executor_name"] = n.AvoidExecutorID
+		event["avoid_until"] = n.AvoidUntil
+	}
+	payload, _ := json.Marshal(event)
+	if _, err := appendEventTx(ctx, tx, n.RunID, n.NodeID, "executor_selected", payload, now); err != nil {
+		return nil, err
+	}
 	return n, nil
 }
 

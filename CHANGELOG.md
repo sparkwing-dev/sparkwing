@@ -53,7 +53,7 @@ code change to unlock.
 
 - **controller + runner:** Controller administrators can enroll an executor by
   name and bind it to the exact prefix of a live runner or service token.
-  Enrollment owns its `agent` or `gateway` kind, display-only location, trusted
+  Enrollment owns its `agent` or `gateway` kind, controller-trusted location, trusted
   capabilities, priority range, concurrency ceiling, and resource budget;
   worker heartbeats update only last-seen and finite nonnegative headroom. Idle
   registrations appear in the fleet API, CLI, and dashboard, while stale ones
@@ -62,6 +62,8 @@ code change to unlock.
   count unknown. Scheduling summaries apply hard capability, slot, headroom,
   and resource filters before bounded priority. Rotating an enrollment's
   credential resets liveness until the new credential sends a heartbeat.
+  Location does not widen initial eligibility, but an awarded node keeps that
+  coordinator and location as a hard requirement for any agent-loss retry.
 - **runner + wingd:** An agent configuration with `name` or `coordinators`
   selects enrolled assisted-offer mode. It requires local admission, uses a
   distinct credential per coordinator, shares one machine slot ceiling, and
@@ -81,6 +83,18 @@ code change to unlock.
   ceiling, and may be reordered by run priority and `Prefers`. Retrying an offer
   recovers the same fenced claim after a lost response. If no live offer wins,
   the same transaction returns an unlabeled node to coordinator fallback.
+- **controller + runner:** A node whose agent or gateway lease expires now ends
+  as `agent_lost` and, when its pipeline retry budget allows, the source
+  controller creates one fresh linked run for the lost work and its descendants.
+  Loss before the job body starts does not spend `.Retry(n)`; every acknowledged
+  body invocation does, across in-process and fresh-run attempts. Retry backoff,
+  deadline, source snapshot, unrelated terminal work and artifacts, attempt
+  history, and the original coordinator/location requirement are durable. A
+  retry prefers another eligible executor briefly but may return to the
+  original when it is the only capacity; coordinator fallback cannot relax the
+  required placement.
+  This bounds at-least-once execution; it does not make external effects
+  exactly-once.
 
 - **ci:** The pre-commit formatters step and the em-dash and tracker-ID sweeps
   judge the whole change, not only what is staged. Each reads the staged files
@@ -122,6 +136,16 @@ code change to unlock.
   upgraded store; upgrade every controller sharing it before any opens it, and
   upgrade enrolled agents and wingd before resuming them. See the
   [migration guide](docs/migrations/_unreleased.md#enrolled-executor-offer-arbitration).
+- **store + controller client (Breaking):** Run-store schema 30 persists
+  generation-bound execution attempts, global invocation counts, agent-loss
+  retry lineage, and durable retry availability. Older controller binaries
+  refuse the upgraded store. `AcknowledgeNodeExecutionStart` now takes an
+  `ExecutionStart`, and custom remote executors must acknowledge each ordinal
+  immediately before invoking the job body and finish that attempt afterward.
+  Custom HTTP clients must also send the exact node-claim headers on node
+  writes, or the exact trigger-generation header for source-coordinator writes.
+  See the
+  [migration guide](docs/migrations/_unreleased.md#agent-loss-retry-lineage-and-execution-fencing).
 
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
@@ -164,6 +188,21 @@ code change to unlock.
 
 ### Security
 
+- **controller + logs:** Every claim-scoped remote node mutation now carries the exact live
+  claimant token, holder, membership, reservation, and claim generation in the
+  store transaction that writes it; stale writers receive `409 Conflict`.
+  Trigger-driven node writes and run-definition writes use the trigger's exact
+  run-bound generation. Remote node-log appends additionally require a started
+  attempt ordinal and land in immutable attempt/generation substreams, so an
+  append that passed validation before lease loss cannot contaminate its
+  replacement executor's log. Node read responses expose attribution and
+  attempt history with executor names, kinds, and controller-owned locations.
+  Node read responses, `state.ndjson` node records, and public executor/attempt
+  event payloads omit claim generations and coordinator, membership, internal
+  executor, holder, token, and reservation values; cancelled bodies close
+  their acknowledged attempt as `cancelled`. Controller JSON `5xx` responses
+  now use one stable error message instead of returning database, path,
+  token-prefix, or private-URL details.
 - **controller + cache:** Code scanning's open findings are triaged. A clone URL
   is refused when any component begins with `-` -- the whole string, the
   scp-like host or path, the ssh userinfo, or the parsed host -- where git would

@@ -109,6 +109,13 @@ func runNodeRemote(
 	)
 	if holderID, ok := nodeClaimHolder(ctx); ok {
 		childEnv = append(childEnv, "SPARKWING_NODE_CLAIM_HOLDER="+holderID)
+		if fence, ok := store.NodeClaimFenceFromContext(ctx); ok {
+			childEnv = append(childEnv,
+				fmt.Sprintf("SPARKWING_NODE_CLAIM_GENERATION=%d", fence.ClaimGeneration),
+				"SPARKWING_NODE_CLAIM_MEMBERSHIP="+fence.MembershipID,
+				"SPARKWING_NODE_CLAIM_RESERVATION="+fence.ReservationID,
+			)
+		}
 	}
 
 	// #nosec G702 -- the node runner binary this process resolved, run as argv without a shell

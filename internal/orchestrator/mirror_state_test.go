@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -121,6 +122,53 @@ func TestMirrorState_AppendEventTeed(t *testing.T) {
 		if len(evs) == 0 {
 			t.Fatalf("%s did not receive the teed event", name)
 		}
+	}
+}
+
+func TestMirrorState_LocalShadowDoesNotRequireCanonicalClaimRows(t *testing.T) {
+	ctx := context.Background()
+	canonical := openMirrorStore(t)
+	local := openMirrorStore(t)
+	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
+	if err := canonical.CreateTrigger(ctx, store.Trigger{
+		ID: "run-fenced", Pipeline: "demo", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := canonical.ClaimNextTriggerFor(ctx, identity, time.Minute, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{
+		Claimant: identity, ClaimGeneration: trigger.ClaimSeq,
+	})
+	m := newMirrorStateBackend(localState{st: canonical}, local, nil)
+	if err := m.CreateRun(fenced, mirrorSampleRun(trigger.ID)); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := m.CreateNode(fenced, store.Node{RunID: trigger.ID, NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if err := m.StartNode(fenced, trigger.ID, "build"); err != nil {
+		t.Fatalf("StartNode: %v", err)
+	}
+	if err := m.FinishNode(fenced, trigger.ID, "build", "failed", "retry", nil); err != nil {
+		t.Fatalf("FinishNode: %v", err)
+	}
+	if err := m.ResetNodeForAutoRetry(fenced, trigger.ID, "build"); err != nil {
+		t.Fatalf("ResetNodeForAutoRetry: %v", err)
+	}
+	for name, state := range map[string]*store.Store{"canonical": canonical, "local": local} {
+		node, err := state.GetNode(ctx, trigger.ID, "build")
+		if err != nil {
+			t.Fatalf("%s GetNode: %v", name, err)
+		}
+		if node.Status != "pending" || node.Outcome != "" {
+			t.Fatalf("%s node = status %q outcome %q, want pending with no outcome", name, node.Status, node.Outcome)
+		}
+	}
+	if _, err := local.GetTrigger(ctx, trigger.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("local mirror trigger = %v, want ErrNotFound", err)
 	}
 }
 

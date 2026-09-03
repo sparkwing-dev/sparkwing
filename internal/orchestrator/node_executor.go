@@ -29,7 +29,8 @@ func nodeClaimHolder(ctx context.Context) (string, bool) {
 }
 
 type executionStartAcknowledger interface {
-	AcknowledgeNodeExecutionStart(context.Context, string, string, string) error
+	AcknowledgeNodeExecutionStart(context.Context, string, string, store.ExecutionStart) error
+	FinishNodeExecutionAttempt(context.Context, string, string, store.ExecutionAttemptFinish) error
 }
 
 type NodeExecutor struct {
@@ -200,26 +201,17 @@ func (r *NodeExecutor) executeNodeElsewhere(ctx context.Context, runID string, n
 
 func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
 	writeCtx := context.WithoutCancel(ctx)
-	nlog, err := r.backends.Logs.OpenNodeLog(runID, node.ID(), delegate)
+	nlog, err := r.backends.Logs.OpenNodeLog(ctx, runID, node.ID(), delegate)
 	if err != nil {
 		return nil, err
 	}
 
-	nlog = wrapNodeLogWithAnnotations(nlog, r.backends.State, runID, node.ID())
-	nlog = wrapNodeLogWithSummary(nlog, r.backends.State, runID, node.ID())
-	nlog = wrapNodeLogWithStepState(nlog, r.backends.State, runID, node.ID())
+	nlog = wrapNodeLogWithAnnotations(ctx, nlog, r.backends.State, runID, node.ID())
+	nlog = wrapNodeLogWithSummary(ctx, nlog, r.backends.State, runID, node.ID())
+	nlog = wrapNodeLogWithStepState(ctx, nlog, r.backends.State, runID, node.ID())
 	nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
 	defer func() { _ = nlog.Close() }()
 
-	if holderID, ok := nodeClaimHolder(ctx); ok {
-		ack, supported := r.backends.State.(executionStartAcknowledger)
-		if !supported {
-			return nil, errors.New("claimed node backend does not support execution-start acknowledgement")
-		}
-		if err := ack.AcknowledgeNodeExecutionStart(ctx, runID, node.ID(), holderID); err != nil {
-			return nil, fmt.Errorf("acknowledge execution start: %w", err)
-		}
-	}
 	if err := r.backends.State.StartNode(ctx, runID, node.ID()); err != nil {
 		return nil, err
 	}
@@ -315,11 +307,45 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	}
 
 	retryCfg := node.RetryConfig()
+	invocationBudget := retryCfg.Attempts + 1
+	var claimFence store.NodeClaimFence
+	var triggerFence store.TriggerClaimFence
+	var attemptRecorder executionStartAcknowledger
+	if _, claimed := nodeClaimHolder(ctx); claimed {
+		var ok bool
+		claimFence, ok = store.NodeClaimFenceFromContext(ctx)
+		if !ok || claimFence.ClaimGeneration < 1 {
+			return nil, errors.New("claimed node is missing its execution fence")
+		}
+		attemptRecorder, ok = r.backends.State.(executionStartAcknowledger)
+		if !ok {
+			return nil, errors.New("claimed node backend does not support execution-attempt acknowledgement")
+		}
+	} else if fence, triggerOwned := store.TriggerClaimFenceFromContext(ctx); triggerOwned {
+		triggerFence = fence
+		var ok bool
+		attemptRecorder, ok = r.backends.State.(executionStartAcknowledger)
+		if !ok {
+			return nil, errors.New("trigger-owned node backend does not support execution-attempt acknowledgement")
+		}
+	}
+	consumed := 0
+	stored, err := r.backends.State.GetNode(ctx, runID, node.ID())
+	if err == nil {
+		consumed = stored.AttemptsConsumed
+		if consumed >= invocationBudget {
+			return nil, fmt.Errorf("node %s exhausted its %d execution-attempt budget", node.ID(), invocationBudget)
+		}
+	} else if attemptRecorder != nil || !errors.Is(err, store.ErrNotFound) {
+		return nil, fmt.Errorf("read execution attempt budget: %w", err)
+	}
 	attempts := retryCfg.Attempts
 	backoff := retryCfg.Backoff
 	if retryCfg.Auto {
 		attempts = 0
 		backoff = 0
+	} else if consumed > 0 {
+		attempts = invocationBudget - consumed - 1
 	}
 	timeout := node.TimeoutDuration()
 	noProgressTimeout := node.NoProgressTimeoutDuration()
@@ -330,18 +356,22 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	var lastNoProgressTimeout bool
 	total := attempts + 1
 	for attempt := range total {
+		ordinal := consumed + attempt + 1
+		if carried, ok := store.ExecutionAttemptOrdinalFromContext(nodeCtx); ok {
+			ordinal = carried + attempt
+		}
 		if attempt > 0 {
 			wait := scaledBackoff(backoff, attempt)
-			msg := fmt.Sprintf("retry attempt %d/%d", attempt+1, total)
+			msg := fmt.Sprintf("retry attempt %d/%d", ordinal, invocationBudget)
 			if wait > 0 {
-				msg = fmt.Sprintf("retry attempt %d/%d after %s", attempt+1, total, wait)
+				msg = fmt.Sprintf("retry attempt %d/%d after %s", ordinal, invocationBudget, wait)
 			}
 			nlog.Emit(sparkwing.LogRecord{
 				TS:    time.Now(),
 				Level: "info",
 				Event: "retry",
 				Msg:   msg,
-				Attrs: map[string]any{"attempt": attempt + 1, "total": total},
+				Attrs: map[string]any{"attempt": ordinal, "total": invocationBudget},
 			})
 			if wait > 0 {
 				select {
@@ -351,7 +381,8 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 					goto done
 				}
 			}
-			_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "attempt_retry", fmt.Appendf(nil, "attempt %d/%d", attempt+1, total))
+			_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "attempt_retry",
+				fmt.Appendf(nil, "attempt %d/%d", ordinal, invocationBudget))
 		}
 
 		attemptCtx := nodeCtx
@@ -371,6 +402,31 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 			attemptCtx, progressTimeout, cancel = newProgressTimeoutContext(attemptCtx, noProgressTimeout)
 			attemptCtx = sparkwingruntime.WithLogger(attemptCtx, progressLogger{delegate: nlog, progress: progressTimeout})
 			cancels = append(cancels, cancel)
+		}
+		if err := bindNodeLogExecutionAttempt(nlog, ordinal); err != nil {
+			for i := len(cancels) - 1; i >= 0; i-- {
+				cancels[i]()
+			}
+			return nil, fmt.Errorf("bind execution attempt %d log: %w", ordinal, err)
+		}
+		if attemptRecorder != nil {
+			start := store.ExecutionStart{
+				HolderID: claimFence.HolderID, MembershipID: claimFence.MembershipID,
+				ReservationID:   claimFence.ReservationID,
+				ClaimGeneration: claimFence.ClaimGeneration, AttemptOrdinal: ordinal,
+			}
+			if triggerFence.ClaimGeneration > 0 {
+				start = store.ExecutionStart{
+					ClaimGeneration: triggerFence.ClaimGeneration,
+					AttemptOrdinal:  ordinal,
+				}
+			}
+			if err := attemptRecorder.AcknowledgeNodeExecutionStart(attemptCtx, runID, node.ID(), start); err != nil {
+				for i := len(cancels) - 1; i >= 0; i-- {
+					cancels[i]()
+				}
+				return nil, fmt.Errorf("acknowledge execution attempt %d: %w", ordinal, err)
+			}
 		}
 		out, aerr := runJobBody(attemptCtx, node)
 		if aerr == nil {
@@ -396,6 +452,55 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 				aerr = context.DeadlineExceeded
 			}
 			aerr = fmt.Errorf("timeout exceeded (%s): %w", timeout, aerr)
+		}
+		var logFlushErr error
+		if err := flushNodeLogExecutionAttempt(nlog); err != nil {
+			logFlushErr = fmt.Errorf("flush execution attempt %d log: %w", ordinal, err)
+		}
+		if attemptRecorder != nil {
+			outcome := string(sparkwing.Success)
+			failureReason := ""
+			if logFlushErr != nil {
+				outcome = string(sparkwing.Failed)
+				failureReason = store.FailureLogsAuth
+			} else if aerr != nil {
+				switch {
+				case errors.Is(aerr, context.Canceled):
+					outcome = string(sparkwing.Cancelled)
+				case noProgressTimedOut:
+					outcome = string(sparkwing.Failed)
+					failureReason = store.FailureNoProgressTimeout
+				case absoluteTimedOut:
+					outcome = string(sparkwing.Failed)
+					failureReason = store.FailureTimeout
+				default:
+					outcome = string(sparkwing.Failed)
+					failureReason = store.FailureUnknown
+					var verifyErr *sparkwing.VerifyError
+					if errors.As(aerr, &verifyErr) {
+						failureReason = store.FailureVerify
+					}
+				}
+			}
+			finish := store.ExecutionAttemptFinish{
+				HolderID: claimFence.HolderID, MembershipID: claimFence.MembershipID,
+				ReservationID:   claimFence.ReservationID,
+				ClaimGeneration: claimFence.ClaimGeneration, AttemptOrdinal: ordinal,
+				Outcome: outcome, FailureReason: failureReason,
+			}
+			if triggerFence.ClaimGeneration > 0 {
+				finish.HolderID = ""
+				finish.MembershipID = ""
+				finish.ReservationID = ""
+				finish.ClaimGeneration = triggerFence.ClaimGeneration
+			}
+			if err := attemptRecorder.FinishNodeExecutionAttempt(context.WithoutCancel(ctx), runID, node.ID(), finish); err != nil {
+				return nil, fmt.Errorf("finish execution attempt %d: %w", ordinal, err)
+			}
+		}
+		if logFlushErr != nil {
+			lastErr = logFlushErr
+			break
 		}
 		if aerr == nil {
 			output = out

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"time"
 
@@ -36,7 +37,12 @@ func RunNodeOnce(
 		opt(&cfg)
 	}
 	if cfg.claimed {
+		if cfg.claimFence.ClaimGeneration < 1 {
+			return runner.Result{}, errors.New("claimed node is missing its claim-generation fence")
+		}
+		cfg.claimFence.HolderID = holderID
 		ctx = withNodeClaimHolder(ctx, holderID)
+		ctx = store.WithNodeClaimFence(ctx, cfg.claimFence)
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -508,7 +514,18 @@ func runNodeCLI(args []string) error {
 	var runOpts []RunNodeOption
 	if claimedHolder := os.Getenv("SPARKWING_NODE_CLAIM_HOLDER"); claimedHolder != "" {
 		holderID = claimedHolder
-		runOpts = append(runOpts, ClaimedNode())
+		generation, err := strconv.ParseInt(os.Getenv("SPARKWING_NODE_CLAIM_GENERATION"), 10, 64)
+		if err != nil || generation < 1 {
+			return errors.New("SPARKWING_NODE_CLAIM_GENERATION must name the awarded claim generation")
+		}
+		runOpts = append(runOpts, func(c *runNodeConfig) {
+			c.claimed = true
+			c.claimFence = store.NodeClaimFence{
+				ClaimGeneration: generation,
+				MembershipID:    os.Getenv("SPARKWING_NODE_CLAIM_MEMBERSHIP"),
+				ReservationID:   os.Getenv("SPARKWING_NODE_CLAIM_RESERVATION"),
+			}
+		})
 	}
 	if *coordinated {
 		holderID = fmt.Sprintf("node:%s:%s", runID, nodeID)

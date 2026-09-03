@@ -61,7 +61,7 @@ func (r *NodeExecutor) toolSlotProvider(runID, nodeID string, delegate sparkwing
 			}
 			lastDetail = detail
 			_ = r.backends.State.UpdateNodeActivity(ctx, runID, nodeID, detail)
-			r.emitToolSlotLog(runID, nodeID, delegate, detail)
+			r.emitToolSlotLog(ctx, runID, nodeID, delegate, detail)
 		}
 
 		resumeProgressTimeout := pauseProgressTimeout(ctx)
@@ -77,7 +77,7 @@ func (r *NodeExecutor) toolSlotProvider(runID, nodeID string, delegate sparkwing
 		if announced {
 			_ = r.backends.State.AppendEvent(ctx, runID, nodeID, "concurrency_promoted", nil)
 			_ = r.backends.State.UpdateNodeActivity(ctx, runID, nodeID, "")
-			r.emitToolSlotLog(runID, nodeID, delegate,
+			r.emitToolSlotLog(ctx, runID, nodeID, delegate,
 				fmt.Sprintf("admitted to %s after %s", key, time.Since(start).Round(time.Second)))
 		}
 
@@ -86,8 +86,8 @@ func (r *NodeExecutor) toolSlotProvider(runID, nodeID string, delegate sparkwing
 	}
 }
 
-func (r *NodeExecutor) emitToolSlotLog(runID, nodeID string, delegate sparkwing.Logger, detail string) {
-	nlog, err := r.backends.Logs.OpenNodeLog(runID, nodeID, delegate)
+func (r *NodeExecutor) emitToolSlotLog(ctx context.Context, runID, nodeID string, delegate sparkwing.Logger, detail string) {
+	nlog, err := r.backends.Logs.OpenNodeLog(ctx, runID, nodeID, delegate)
 	if err != nil {
 		return
 	}

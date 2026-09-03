@@ -2,11 +2,14 @@ package orchestrator_test
 
 import (
 	"context"
+	"io"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
@@ -119,9 +122,7 @@ UPDATE nodes SET
 	if len(wantNodes) != 1 {
 		t.Fatalf("ListNodes len = %d, want 1", len(wantNodes))
 	}
-
-	assertAllExportedNonZero(t, "Run", *wantRun)
-	assertAllExportedNonZero(t, "Node", *wantNodes[0])
+	wantNodes[0] = api.PublicNode(wantNodes[0])
 
 	art, err := fs.NewArtifactStore(filepath.Join(dir, "art"))
 	if err != nil {
@@ -160,18 +161,107 @@ UPDATE nodes SET
 	}
 }
 
-func assertAllExportedNonZero(t *testing.T, label string, v any) {
-	t.Helper()
-	rv := reflect.ValueOf(v)
-	rt := rv.Type()
-	for i := range rv.NumField() {
-		f := rt.Field(i)
-		if !f.IsExported() {
-			continue
+func TestDumpRunState_RedactsClaimIdentityAndRetainsAttemptLineage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	const runID = "run-dump-redaction"
+	const nodeID = "build"
+	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixNano()
+	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET
+ claimed_by='private-holder', claim_worker_id='desktop-public', claim_executor_kind='agent',
+ claim_reservation_id='private-claim-reservation', coordinator_id='private-coordinator',
+ claim_generation=7, claim_membership_id='private-membership', executor_kind='agent',
+ executor_id='private-executor', executor_location='local',
+ required_coordinator_id='private-required-coordinator', required_executor_location='local',
+ execution_started_at=?, reservation_id='private-reservation', attempts_consumed=2,
+ retry_root_run_id='run-lineage-root', lease_expires_at=?
+ WHERE run_id=? AND node_id=?`, now, now+int64(time.Minute), runID, nodeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(ctx, `INSERT INTO node_execution_attempts
+ (lineage_root_run_id, run_id, node_id, attempt_ordinal, claim_generation,
+  coordinator_id, membership_id, executor_kind, executor_name, executor_id, executor_location,
+  holder_id, reservation_id, started_at, finished_at, outcome, failure_reason, retry_run_id)
+ VALUES ('run-lineage-root', ?, ?, 2, 7,
+  'private-attempt-coordinator', 'private-attempt-membership', 'agent', 'desktop-public',
+  'private-attempt-executor', 'local', 'private-attempt-holder', 'private-attempt-reservation',
+  ?, ?, 'failed', 'agent_lost', 'run-retry-public')`, runID, nodeID, now, now+1); err != nil {
+		t.Fatal(err)
+	}
+
+	art, err := fs.NewArtifactStore(filepath.Join(dir, "art"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.DumpRunState(ctx, st, runID, art); err != nil {
+		t.Fatal(err)
+	}
+	r, err := art.Get(ctx, "runs/"+runID+"/state.ndjson")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dump := string(raw)
+	for _, banned := range []string{
+		`"claimed_by"`, `"claim_worker_id"`, `"claim_executor_kind"`, `"claim_reservation_id"`,
+		`"coordinator_id"`, `"claim_generation"`, `"claim_membership_id"`, `"executor_id"`,
+		`"required_coordinator_id"`, `"reservation_id"`,
+		"private-holder", "private-claim-reservation", "private-coordinator", "private-membership",
+		"private-executor", "private-required-coordinator", "private-reservation",
+		"private-attempt-coordinator", "private-attempt-membership", "private-attempt-executor",
+		"private-attempt-holder", "private-attempt-reservation",
+	} {
+		if strings.Contains(dump, banned) {
+			t.Errorf("state dump contains private claim identity %q:\n%s", banned, dump)
 		}
-		if rv.Field(i).IsZero() {
-			t.Errorf("%s.%s is the zero value; populate it in the fixture so the round-trip diff covers this field", label, f.Name)
+	}
+	for _, retained := range []string{
+		`"claimed":true`, `"executor_kind":"agent"`, `"executor_name":"desktop-public"`,
+		`"executor_location":"local"`, `"required_executor_location":"local"`,
+		`"run_id":"run-dump-redaction"`, `"attempt":2`,
+		`"outcome":"failed"`, `"failure_reason":"agent_lost"`, `"retry_run_id":"run-retry-public"`,
+	} {
+		if !strings.Contains(dump, retained) {
+			t.Errorf("state dump does not retain public execution field %q:\n%s", retained, dump)
 		}
+	}
+
+	reader := backend.NewS3Backend(art, nil)
+	nodes, err := reader.ListNodes(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 || len(nodes[0].ExecutionAttempts) != 1 {
+		t.Fatalf("dump nodes = %+v", nodes)
+	}
+	got := nodes[0]
+	if got.ExecutorName != "desktop-public" || !got.Claimed || got.ClaimedBy != "" || got.ExecutorID != "" || got.CoordinatorID != "" {
+		t.Errorf("public node attribution = %+v", got)
+	}
+	attempt := got.ExecutionAttempts[0]
+	if attempt.RunID != runID || attempt.NodeID != nodeID || attempt.RetryRunID != "run-retry-public" ||
+		attempt.Attempt != 2 || attempt.ExecutorKind != "agent" || attempt.ExecutorName != "desktop-public" ||
+		attempt.ExecutorLocation != "local" || attempt.Outcome != "failed" ||
+		attempt.FailureReason != store.FailureAgentLost || attempt.StartedAt.IsZero() ||
+		attempt.FinishedAt == nil || attempt.ClaimGeneration != 0 {
+		t.Errorf("attempt lineage = %+v", attempt)
 	}
 }
 

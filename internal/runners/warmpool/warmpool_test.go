@@ -313,6 +313,7 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 	go func() {
 		done <- r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
 	}()
+	claimDeadline := time.After(time.Second)
 	for {
 		node, err := st.ClaimNextReadyNode(context.Background(), store.ClaimIdentity{
 			Principal:   "offline-server",
@@ -327,17 +328,26 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 		if err != store.ErrNotFound {
 			t.Fatal(err)
 		}
-		time.Sleep(time.Millisecond)
+		select {
+		case <-claimDeadline:
+			t.Fatal("node did not become ready for the remote executor")
+		case <-time.After(time.Millisecond):
+		}
 	}
+	observedDeadline := time.After(time.Second)
 	for {
 		node, err := st.GetNode(context.Background(), "run-1", "build")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if node.StatusDetail == "claimed by agent:offline-server" {
+		if node.StatusDetail == "claimed by remote executor" {
 			break
 		}
-		time.Sleep(time.Millisecond)
+		select {
+		case <-observedDeadline:
+			t.Fatal("warm runner did not observe the active remote claim")
+		case <-time.After(time.Millisecond):
+		}
 	}
 	time.Sleep(20 * time.Millisecond)
 	pairs, err := store.Maintenance.FailExpiredNodeClaims(st, context.Background())
