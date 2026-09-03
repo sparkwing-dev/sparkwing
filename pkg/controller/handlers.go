@@ -1064,22 +1064,38 @@ func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request
 }
 
 type claimNodeReq struct {
-	HolderID      string         `json:"holder_id"`
-	RunID         string         `json:"run_id,omitempty"`
-	NodeID        string         `json:"node_id,omitempty"`
-	WorkerID      string         `json:"worker_id,omitempty"`
-	ExecutorKind  string         `json:"executor_kind,omitempty"`
-	ReservationID string         `json:"reservation_id,omitempty"`
-	ClaimPriority *int           `json:"claim_priority,omitempty"`
-	LeaseSecs     int            `json:"lease_secs,omitempty"`
-	Labels        []string       `json:"labels,omitempty"`
-	Headroom      *claimHeadroom `json:"headroom,omitempty"`
+	HolderID       string         `json:"holder_id"`
+	RunID          string         `json:"run_id,omitempty"`
+	NodeID         string         `json:"node_id,omitempty"`
+	ExecutorName   string         `json:"executor_name,omitempty"`
+	ReservationID  string         `json:"reservation_id,omitempty"`
+	ResourceDigest string         `json:"resource_digest,omitempty"`
+	Slot           int            `json:"slot,omitempty"`
+	LeaseSecs      int            `json:"lease_secs,omitempty"`
+	Labels         []string       `json:"labels,omitempty"`
+	Headroom       *claimHeadroom `json:"headroom,omitempty"`
 }
 
 type claimHeadroom struct {
 	Cores       float64 `json:"cores"`
 	MemoryBytes int64   `json:"memory_bytes"`
 	QueueDepth  int     `json:"queue_depth"`
+}
+
+func (s *Server) rejectEnrolledLegacyClaim(r *http.Request) error {
+	claimant := claimIdentity(r)
+	if claimant.TokenPrefix == "" {
+		return nil
+	}
+	name, err := s.store.ExecutorNameForTokenPrefix(r.Context(), claimant.TokenPrefix)
+	switch {
+	case err == nil:
+		return fmt.Errorf("credential is enrolled for executor %q; assisted offer protocol is required", name)
+	case errors.Is(err, store.ErrNotFound):
+		return nil
+	default:
+		return err
+	}
 }
 
 func (s *Server) recordAdvertisedHeadroom(holderID string, h *claimHeadroom) {
@@ -1105,28 +1121,27 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
-	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	if body.ClaimPriority != nil {
-		if body.RunID == "" || body.NodeID == "" || body.ReservationID == "" {
-			writeError(w, http.StatusBadRequest, errors.New("run_id, node_id, and reservation_id are required for a claim offer"))
+	if body.ExecutorName != "" {
+		if body.RunID == "" || body.NodeID == "" || body.ReservationID == "" || body.ResourceDigest == "" || body.Slot < 0 {
+			writeError(w, http.StatusBadRequest, errors.New("run_id, node_id, reservation_id, resource_digest, and non-negative slot are required for an executor offer"))
 			return
 		}
-		resolver, err := s.nodeClaimPolicy.Resolver(r.Context(), claimIdentity(r), NodeClaimRequest{
-			HolderID:      body.HolderID,
-			WorkerID:      body.WorkerID,
-			ExecutorKind:  body.ExecutorKind,
-			ReservationID: body.ReservationID,
-			ClaimPriority: *body.ClaimPriority,
-			Labels:        body.Labels,
+		result, err := s.store.OfferExecutorClaim(r.Context(), claimIdentity(r), store.ExecutorClaimOffer{
+			ExecutorName: body.ExecutorName, HolderID: body.HolderID,
+			RunID: body.RunID, NodeID: body.NodeID, ReservationID: body.ReservationID,
+			ResourceDigest: body.ResourceDigest, Slot: body.Slot, Lease: lease,
 		})
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		result, err := s.store.OfferNodeClaim(r.Context(), claimIdentity(r), body.HolderID,
-			body.RunID, body.NodeID, lease, resolver)
-		if err != nil {
+			if errors.Is(err, store.ErrExecutorCredentialMismatch) {
+				writeError(w, http.StatusForbidden, err)
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
+				w.Header().Set("X-Sparkwing-Claim-Offer-State", "empty")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -1142,6 +1157,11 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeClaimedNode(w, r, s, result.Node)
 		return
 	}
+	if err := s.rejectEnrolledLegacyClaim(r); err != nil {
+		writeError(w, http.StatusForbidden, err)
+		return
+	}
+	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	n, err := s.store.ClaimNextReadyNode(r.Context(), claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -1172,37 +1192,30 @@ func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if body.HolderID == "" || body.ClaimPriority == nil {
-		writeError(w, http.StatusBadRequest, errors.New("holder_id and claim_priority are required"))
+	if body.ExecutorName == "" {
+		writeError(w, http.StatusBadRequest, errors.New("executor_name is required"))
 		return
 	}
-	resolver, err := s.nodeClaimPolicy.Resolver(r.Context(), claimIdentity(r), NodeClaimRequest{
-		HolderID:      body.HolderID,
-		WorkerID:      body.WorkerID,
-		ExecutorKind:  body.ExecutorKind,
-		ClaimPriority: *body.ClaimPriority,
-		Labels:        body.Labels,
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	summary, err := s.store.PrepareNextNodeClaim(r.Context(), resolver)
+	preparation, err := s.store.PrepareNextExecutorClaim(r.Context(), claimIdentity(r), body.ExecutorName)
 	if errors.Is(err, store.ErrNotFound) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if err != nil {
+		if errors.Is(err, store.ErrExecutorCredentialMismatch) {
+			writeError(w, http.StatusForbidden, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, summary)
+	writeJSON(w, http.StatusOK, preparation)
 }
 
 func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	node, err := s.store.GetNode(r.Context(), runID, nodeID)
+	summary, err := s.store.SchedulingSummary(r.Context(), runID, nodeID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -1211,7 +1224,7 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	ceiling, err := s.nodeClaimPolicy.HighestEligiblePriority(r.Context(), node)
+	ceiling, err := s.store.HighestActiveExecutorCeiling(r.Context(), summary, time.Now().Add(-store.ExecutorRegistrationActiveWindow))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1230,7 +1243,7 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleFinalizeNodeReady(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	ok, err := s.store.FinalizeNodeReady(r.Context(), runID, nodeID)
+	result, err := s.store.FinalizeExecutorClaimRound(r.Context(), runID, nodeID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -1239,7 +1252,10 @@ func (s *Server) handleFinalizeNodeReady(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, revokeResp{Revoked: ok})
+	writeJSON(w, http.StatusOK, struct {
+		Revoked bool `json:"revoked"`
+		Pending bool `json:"pending,omitempty"`
+	}{Revoked: result.Revoked, Pending: result.Pending})
 }
 
 type revokeResp struct {

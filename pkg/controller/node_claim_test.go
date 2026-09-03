@@ -1,8 +1,11 @@
 package controller_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -54,7 +57,7 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	defer srv.Close()
 	c := client.New(srv.URL, nil)
 	ctx := context.Background()
@@ -188,28 +191,7 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 	}
 }
 
-type fixedNodeClaimPolicy struct {
-	ceiling   int
-	effective int
-}
-
-func (p fixedNodeClaimPolicy) HighestEligiblePriority(context.Context, *store.Node) (int, error) {
-	return p.ceiling, nil
-}
-
-func (p fixedNodeClaimPolicy) Resolver(_ context.Context, _ store.ClaimIdentity, req controller.NodeClaimRequest) (store.NodeClaimResolver, error) {
-	return store.NodeClaimResolverFunc(func(*store.Node) (store.NodeClaimResolution, bool) {
-		return store.NodeClaimResolution{
-			WorkerID:          "registered-worker",
-			ExecutorKind:      "gateway",
-			ReservationID:     req.ReservationID,
-			BasePriority:      40,
-			EffectivePriority: p.effective,
-		}, true
-	}), nil
-}
-
-func TestNodeClaimOffer_HTTPUsesTrustedPolicyAndPreservesPendingState(t *testing.T) {
+func TestNodeClaimOffer_HTTPUsesEnrolledPriorityAndPreservesPendingState(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -217,23 +199,64 @@ func TestNodeClaimOffer_HTTPUsesTrustedPolicyAndPreservesPendingState(t *testing
 	}
 	defer func() { _ = st.Close() }()
 
-	srv := httptest.NewServer(controller.New(st, nil).WithNodeClaimPolicy(fixedNodeClaimPolicy{ceiling: 100, effective: 75}).Handler())
-	defer srv.Close()
-	c := client.New(srv.URL, nil)
-	ctx := context.Background()
-	seedRunNode(t, st, "run-1", "node-a")
-	if err := c.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
+	now := time.Now().UTC()
+	raw, token, err := st.CreateToken("registered-worker", store.TokenKindRunner, []string{controller.ScopeNodesClaim}, 0, now)
+	if err != nil {
 		t.Fatal(err)
 	}
-	executor := client.NodeClaimExecutor{
-		HolderID: "holder", WorkerID: "untrusted-worker", ExecutorKind: "direct",
-		ReservationID: "reservation", ClaimPriority: 100,
+	if err := st.EnrollExecutor(context.Background(), token.Prefix, store.Executor{
+		Name: "desk", Kind: "gateway", Location: "local", BasePriority: 40, PriorityCeiling: 75,
+		MaxConcurrent: 1, Principal: token.Principal, Budget: store.ExecutorResource{Cores: 4},
+	}); err != nil {
+		t.Fatal(err)
 	}
-	summary, err := c.PrepareNodeClaim(ctx, executor)
-	if err != nil || summary == nil || summary.RunID != "run-1" || summary.NodeID != "node-a" {
-		t.Fatalf("PrepareNodeClaim = %+v, %v", summary, err)
+	claimant := store.ClaimIdentity{Principal: token.Principal, TokenPrefix: token.Prefix}
+	if err := st.HeartbeatExecutor(context.Background(), claimant, "desk", store.ExecutorResource{Cores: 4}, 0, now); err != nil {
+		t.Fatal(err)
 	}
-	result, err := c.OfferNodeClaim(ctx, executor, summary.RunID, summary.NodeID)
+
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	defer srv.Close()
+	c := client.NewWithToken(srv.URL, nil, raw)
+	ctx := context.Background()
+	seedRunNode(t, st, "run-1", "node-a")
+	if err := st.MarkNodeReadyWithPriorityCeiling(ctx, "run-1", "node-a", 100); err != nil {
+		t.Fatal(err)
+	}
+	preparation, err := c.PrepareExecutorClaim(ctx, "desk")
+	if err != nil || preparation == nil || preparation.Summary.RunID != "run-1" || preparation.Summary.NodeID != "node-a" {
+		t.Fatalf("PrepareExecutorClaim = %+v, %v", preparation, err)
+	}
+	if preparation.Membership.EffectivePriority != 40 || preparation.Membership.WorkerID != "desk" {
+		t.Fatalf("trusted membership = %+v", preparation.Membership)
+	}
+	executor := client.ExecutorClaim{
+		ExecutorName: "desk", HolderID: "holder", ReservationID: "reservation",
+		ResourceDigest: preparation.Summary.ResourceDigest, Slot: 0, Lease: time.Minute,
+	}
+	untrusted, err := json.Marshal(map[string]any{
+		"executor_name": "desk", "holder_id": "holder", "run_id": "run-1", "node_id": "node-a",
+		"reservation_id": "reservation", "resource_digest": preparation.Summary.ResourceDigest,
+		"slot": 0, "claim_priority": 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/api/v1/nodes/claim", bytes.NewReader(untrusted))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+raw)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("self-reported priority status = %d, want 400", resp.StatusCode)
+	}
+	result, err := c.OfferExecutorClaim(ctx, executor, preparation.Summary.RunID, preparation.Summary.NodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,15 +268,20 @@ func TestNodeClaimOffer_HTTPUsesTrustedPolicyAndPreservesPendingState(t *testing
 		time.Now().Add(-6*time.Second).UnixNano(), "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
-	result, err = c.OfferNodeClaim(ctx, executor, summary.RunID, summary.NodeID)
+	result, err = c.OfferExecutorClaim(ctx, executor, preparation.Summary.RunID, preparation.Summary.NodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Node == nil || result.Pending {
 		t.Fatalf("ceiling offer = %+v", result)
 	}
-	if result.Node.ClaimPriority != 75 || result.Node.ClaimBasePriority != 40 ||
-		result.Node.ClaimWorkerID != "registered-worker" || result.Node.ClaimExecutorKind != "gateway" {
-		t.Fatalf("trusted claim metadata = %+v", result.Node)
+	var executorName, reservation string
+	var slot int
+	if err := st.DB().QueryRow(`SELECT claim_executor, claim_reservation, claim_slot FROM nodes WHERE run_id = ? AND node_id = ?`,
+		"run-1", "node-a").Scan(&executorName, &reservation, &slot); err != nil {
+		t.Fatal(err)
+	}
+	if executorName != "desk" || reservation != "reservation" || slot != 0 {
+		t.Fatalf("claim binding = executor %q reservation %q slot %d", executorName, reservation, slot)
 	}
 }

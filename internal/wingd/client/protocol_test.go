@@ -79,9 +79,27 @@ func TestMatchingProtocolRejectsAnUnorderedCrossBuildHandshake(t *testing.T) {
 }
 
 func TestMatchingProtocolAcceptsTheExactSameBuild(t *testing.T) {
-	ack := wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "v1.0.0"}
+	ack := wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "v1.0.0", BuildIdentity: wingwire.BuildIdentity}
 	if err := buildMismatch("v1.0.0", ack); err != nil {
 		t.Fatalf("exact build rejected: %v", err)
+	}
+}
+
+func TestMatchingProtocolRejectsOldOrMissingNonBlockingBuildIdentityAtSameDisplayVersion(t *testing.T) {
+	for _, buildIdentity := range []string{"wingwire-v1-liveness", ""} {
+		t.Run(buildIdentity, func(t *testing.T) {
+			ack := wingwire.HelloAck{
+				ProtocolMajor: wingd.ProtocolMajor,
+				BinaryVersion: "v1.0.0",
+				BuildIdentity: buildIdentity,
+			}
+			if err := buildMismatch("v1.0.0", ack); !errors.Is(err, ErrBuildMismatch) {
+				t.Fatalf("old build identity error = %v, want ErrBuildMismatch", err)
+			}
+			if !sameVersionBuildReplacement("v1.0.0", ack) {
+				t.Fatal("same-version daemon without nonblocking admission was not replaceable")
+			}
+		})
 	}
 }
 

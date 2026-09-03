@@ -524,6 +524,11 @@ CREATE TABLE IF NOT EXISTS nodes (
     -- claim_token_prefix: the claiming token's prefix segment. Unique
     -- per token, so this is what the ownership predicates match on.
     claim_token_prefix TEXT NOT NULL DEFAULT '',
+    claim_executor   TEXT NOT NULL DEFAULT '',
+    claim_cores      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    claim_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    claim_reservation TEXT NOT NULL DEFAULT '',
+    claim_slot       INTEGER NOT NULL DEFAULT -1,
     lease_expires_at INTEGER,
     -- needs_labels: JSON []string from RunsOn; AND semantics.
     needs_labels     BLOB,
@@ -567,9 +572,13 @@ CREATE TABLE IF NOT EXISTS node_claim_offers (
     holder_id          TEXT NOT NULL,
     run_id             TEXT NOT NULL,
     node_id            TEXT NOT NULL,
+    executor_name      TEXT NOT NULL DEFAULT '',
+    membership_id      TEXT NOT NULL DEFAULT '',
     worker_id          TEXT NOT NULL,
     executor_kind      TEXT NOT NULL DEFAULT '',
     reservation_id     TEXT NOT NULL,
+    resource_digest    TEXT NOT NULL DEFAULT '',
+    slot                INTEGER NOT NULL DEFAULT -1,
     base_priority      INTEGER NOT NULL,
     effective_priority INTEGER NOT NULL,
     offered_at         INTEGER NOT NULL,
@@ -579,7 +588,31 @@ CREATE TABLE IF NOT EXISTS node_claim_offers (
     FOREIGN KEY (run_id, node_id) REFERENCES nodes(run_id, node_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_node_claim_offers_award
-    ON node_claim_offers(run_id, node_id, effective_priority DESC, offered_at, worker_id, holder_id);
+    ON node_claim_offers(run_id, node_id, effective_priority DESC, offered_at, executor_name, slot, holder_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_reservation
+    ON node_claim_offers(reservation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_slot
+    ON node_claim_offers(executor_name, slot);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_node
+    ON node_claim_offers(executor_name, run_id, node_id);
+CREATE TABLE IF NOT EXISTS executors (
+    name                  TEXT PRIMARY KEY,
+    token_prefix          TEXT NOT NULL UNIQUE,
+    kind                  TEXT NOT NULL,
+    location              TEXT NOT NULL,
+    capabilities_json     BLOB,
+    base_priority         INTEGER NOT NULL DEFAULT 0,
+    priority_ceiling      INTEGER NOT NULL DEFAULT 0,
+    max_concurrent        INTEGER NOT NULL,
+    budget_cores          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    budget_memory_bytes   INTEGER NOT NULL DEFAULT 0,
+    principal             TEXT NOT NULL,
+    last_seen             INTEGER NOT NULL,
+    headroom_reported     INTEGER NOT NULL DEFAULT 0,
+    headroom_cores        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    headroom_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    queue_depth           INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS events (
     run_id   TEXT NOT NULL,
@@ -886,7 +919,31 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 28
+const expectedSchemaVersion = 29
+
+const executorsTableSQLite = `CREATE TABLE IF NOT EXISTS executors (
+    name                  TEXT PRIMARY KEY,
+    token_prefix          TEXT NOT NULL UNIQUE,
+    kind                  TEXT NOT NULL,
+    location              TEXT NOT NULL,
+    capabilities_json     BLOB,
+    base_priority         INTEGER NOT NULL DEFAULT 0,
+    priority_ceiling      INTEGER NOT NULL DEFAULT 0,
+    max_concurrent        INTEGER NOT NULL,
+    budget_cores          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    budget_memory_bytes   INTEGER NOT NULL DEFAULT 0,
+    principal             TEXT NOT NULL,
+    last_seen             INTEGER NOT NULL,
+    headroom_reported     INTEGER NOT NULL DEFAULT 0,
+    headroom_cores        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    headroom_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    queue_depth           INTEGER NOT NULL DEFAULT 0
+);`
+
+var executorsTablePostgres = strings.NewReplacer(
+	"INTEGER", "BIGINT",
+	"BLOB", "BYTEA",
+).Replace(executorsTableSQLite)
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1033,9 +1090,13 @@ const nodeClaimOffersTableSQLite = `CREATE TABLE IF NOT EXISTS node_claim_offers
     holder_id          TEXT NOT NULL,
     run_id             TEXT NOT NULL,
     node_id            TEXT NOT NULL,
+    executor_name      TEXT NOT NULL DEFAULT '',
+    membership_id      TEXT NOT NULL DEFAULT '',
     worker_id          TEXT NOT NULL,
     executor_kind      TEXT NOT NULL DEFAULT '',
     reservation_id     TEXT NOT NULL,
+    resource_digest    TEXT NOT NULL DEFAULT '',
+    slot                INTEGER NOT NULL DEFAULT -1,
     base_priority      INTEGER NOT NULL,
     effective_priority INTEGER NOT NULL,
     offered_at         INTEGER NOT NULL,
@@ -1045,7 +1106,13 @@ const nodeClaimOffersTableSQLite = `CREATE TABLE IF NOT EXISTS node_claim_offers
     FOREIGN KEY (run_id, node_id) REFERENCES nodes(run_id, node_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_node_claim_offers_award
-    ON node_claim_offers(run_id, node_id, effective_priority DESC, offered_at, worker_id, holder_id);`
+    ON node_claim_offers(run_id, node_id, effective_priority DESC, offered_at, executor_name, slot, holder_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_reservation
+    ON node_claim_offers(reservation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_slot
+    ON node_claim_offers(executor_name, slot);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_node
+    ON node_claim_offers(executor_name, run_id, node_id);`
 
 var nodeClaimOffersTablePostgres = strings.NewReplacer(
 	"INTEGER", "BIGINT",
@@ -1330,7 +1397,17 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 27:
 		return rewriteLegacyInheritedHolderMarkers(ctx, tx)
 	case 28:
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodeExecutorClaimCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, executorsTableSQLite)
+		return err
+	case 29:
 		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesOfferCols); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET offer_started_at = ready_at
+ WHERE ready_at IS NOT NULL AND offer_started_at IS NULL`); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, nodeClaimOffersTableSQLite)
@@ -1440,7 +1517,17 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		// would only bind a NUL that Postgres rejects again.
 		return nil
 	case 28:
+		if err := addColumnsTx(ctx, tx, "nodes", nodeExecutorClaimColsPostgres); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, executorsTablePostgres)
+		return err
+	case 29:
 		if err := addColumnsTx(ctx, tx, "nodes", nodesOfferCols); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET offer_started_at = ready_at
+ WHERE ready_at IS NOT NULL AND offer_started_at IS NULL`); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, nodeClaimOffersTablePostgres)
@@ -1561,6 +1648,11 @@ var columnMigrations = []columnSpec{
 		"claim_worker_id":        "TEXT NOT NULL DEFAULT ''",
 		"claim_executor_kind":    "TEXT NOT NULL DEFAULT ''",
 		"claim_reservation_id":   "TEXT NOT NULL DEFAULT ''",
+		"claim_executor":         "TEXT NOT NULL DEFAULT ''",
+		"claim_cores":            "DOUBLE PRECISION NOT NULL DEFAULT 0",
+		"claim_memory_bytes":     "INTEGER NOT NULL DEFAULT 0",
+		"claim_reservation":      "TEXT NOT NULL DEFAULT ''",
+		"claim_slot":             "INTEGER NOT NULL DEFAULT -1",
 	}},
 	{"runs", map[string]string{
 		"parent_run_id":     "TEXT",
@@ -1665,6 +1757,22 @@ var nodesOfferCols = map[string]string{
 	"claim_worker_id":        "TEXT NOT NULL DEFAULT ''",
 	"claim_executor_kind":    "TEXT NOT NULL DEFAULT ''",
 	"claim_reservation_id":   "TEXT NOT NULL DEFAULT ''",
+}
+
+var nodeExecutorClaimCols = map[string]string{
+	"claim_executor":     "TEXT NOT NULL DEFAULT ''",
+	"claim_cores":        "DOUBLE PRECISION NOT NULL DEFAULT 0",
+	"claim_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
+	"claim_reservation":  "TEXT NOT NULL DEFAULT ''",
+	"claim_slot":         "INTEGER NOT NULL DEFAULT -1",
+}
+
+var nodeExecutorClaimColsPostgres = map[string]string{
+	"claim_executor":     "TEXT NOT NULL DEFAULT ''",
+	"claim_cores":        "DOUBLE PRECISION NOT NULL DEFAULT 0",
+	"claim_memory_bytes": "BIGINT NOT NULL DEFAULT 0",
+	"claim_reservation":  "TEXT NOT NULL DEFAULT ''",
+	"claim_slot":         "BIGINT NOT NULL DEFAULT -1",
 }
 
 var nodeDispatchRedactionCols = map[string]string{
@@ -3471,7 +3579,8 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-		        lease_expires_at = NULL
+		        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
+		        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone,
 		now); err != nil {
@@ -3522,7 +3631,8 @@ UPDATE nodes
        error = 'runner heartbeat expired',
        failure_reason = ?, finished_at = ?,
        claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-       lease_expires_at = NULL
+       claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
+       claim_reservation = '', claim_slot = -1, lease_expires_at = NULL
  WHERE run_id = ? AND node_id = ? AND `+nodeNotDone,
 			FailureAgentLost, now, p[0], p[1]); err != nil {
 			return nil, err

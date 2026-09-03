@@ -1005,42 +1005,34 @@ func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byt
 	}
 }
 
-// Headroom is a registered runner's live free capacity, advertised to
-// the controller on each node claim and heartbeat so the scheduler can
-// see whose box has room. It is the local admission daemon's grantable
-// cores and memory after subtracting the operator's local reserve, plus
-// the daemon's current queue depth. A nil *Headroom means the runner is
-// not advertising (it engages no local daemon).
+// Headroom is a runner's live free capacity after its local reserve.
 type Headroom struct {
 	Cores       float64 `json:"cores"`
 	MemoryBytes int64   `json:"memory_bytes"`
 	QueueDepth  int     `json:"queue_depth"`
 }
 
-// NodeClaimExecutor identifies one locally reserved executor slot.
-type NodeClaimExecutor struct {
-	HolderID      string
-	WorkerID      string
-	ExecutorKind  string
-	ReservationID string
-	ClaimPriority int
-	Labels        []string
-	Lease         time.Duration
-	Headroom      *Headroom
+// ExecutorClaim identifies one locally reserved slot in an enrolled executor.
+type ExecutorClaim struct {
+	ExecutorName   string
+	HolderID       string
+	ReservationID  string
+	ResourceDigest string
+	Slot           int
+	Lease          time.Duration
 }
 
-// NodeClaimOfferResult distinguishes a pending priority round from an empty
+// ExecutorClaimOfferResult distinguishes a pending priority round from an empty
 // queue so a reserved slot stays pinned to one coordinator until resolution.
-type NodeClaimOfferResult struct {
+type ExecutorClaimOfferResult struct {
 	Node    *store.Node
 	Pending bool
 }
 
-// PrepareNodeClaim returns the oldest eligible node's admission demand before
-// the executor commits a capacity reservation.
-func (c *Client) PrepareNodeClaim(ctx context.Context, executor NodeClaimExecutor) (*store.NodeSchedulingSummary, error) {
-	body := nodeClaimExecutorBody(executor)
-	delete(body, "reservation_id")
+// PrepareExecutorClaim returns the controller-owned admission contract for the
+// oldest node eligible for the enrolled executor.
+func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) (*store.ExecutorClaimPreparation, error) {
+	body := map[string]any{"executor_name": executorName}
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+"/api/v1/nodes/claim/prepare", bytes.NewReader(buf))
@@ -1055,11 +1047,11 @@ func (c *Client) PrepareNodeClaim(ctx context.Context, executor NodeClaimExecuto
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
-		var summary store.NodeSchedulingSummary
-		if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		var preparation store.ExecutorClaimPreparation
+		if err := json.NewDecoder(resp.Body).Decode(&preparation); err != nil {
 			return nil, err
 		}
-		return &summary, nil
+		return &preparation, nil
 	case http.StatusNoContent:
 		return nil, nil
 	default:
@@ -1067,54 +1059,48 @@ func (c *Client) PrepareNodeClaim(ctx context.Context, executor NodeClaimExecuto
 	}
 }
 
-// OfferNodeClaim submits a capacity-backed offer for a prepared node.
-func (c *Client) OfferNodeClaim(ctx context.Context, executor NodeClaimExecutor, runID, nodeID string) (NodeClaimOfferResult, error) {
-	body := nodeClaimExecutorBody(executor)
+// OfferExecutorClaim submits one locally reserved slot for a prepared node.
+func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim, runID, nodeID string) (ExecutorClaimOfferResult, error) {
+	body := executorClaimBody(executor)
 	body["run_id"] = runID
 	body["node_id"] = nodeID
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+"/api/v1/nodes/claim", bytes.NewReader(buf))
 	if err != nil {
-		return NodeClaimOfferResult{}, err
+		return ExecutorClaimOfferResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return NodeClaimOfferResult{}, err
+		return ExecutorClaimOfferResult{}, err
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var n store.Node
 		if err := json.NewDecoder(resp.Body).Decode(&n); err != nil {
-			return NodeClaimOfferResult{}, err
+			return ExecutorClaimOfferResult{}, err
 		}
-		return NodeClaimOfferResult{Node: &n}, nil
+		return ExecutorClaimOfferResult{Node: &n}, nil
 	case http.StatusNoContent:
-		return NodeClaimOfferResult{Pending: resp.Header.Get("X-Sparkwing-Claim-Offer-State") == "pending"}, nil
+		return ExecutorClaimOfferResult{Pending: resp.Header.Get("X-Sparkwing-Claim-Offer-State") == "pending"}, nil
 	default:
-		return NodeClaimOfferResult{}, readHTTPError(resp)
+		return ExecutorClaimOfferResult{}, readHTTPError(resp)
 	}
 }
 
-func nodeClaimExecutorBody(executor NodeClaimExecutor) map[string]any {
+func executorClaimBody(executor ExecutorClaim) map[string]any {
 	body := map[string]any{
-		"holder_id":      executor.HolderID,
-		"worker_id":      executor.WorkerID,
-		"executor_kind":  executor.ExecutorKind,
-		"reservation_id": executor.ReservationID,
-		"claim_priority": executor.ClaimPriority,
+		"executor_name":   executor.ExecutorName,
+		"holder_id":       executor.HolderID,
+		"reservation_id":  executor.ReservationID,
+		"resource_digest": executor.ResourceDigest,
+		"slot":            executor.Slot,
 	}
 	if executor.Lease > 0 {
 		secs := max(int(executor.Lease.Seconds()), 1)
 		body["lease_secs"] = secs
-	}
-	if len(executor.Labels) > 0 {
-		body["labels"] = executor.Labels
-	}
-	if executor.Headroom != nil {
-		body["headroom"] = executor.Headroom
 	}
 	return body
 }
@@ -1166,6 +1152,13 @@ func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string
 	}
 }
 
+// HeartbeatExecutor reports live capacity for an administrator-enrolled
+// executor. The controller authenticates the exact enrollment credential.
+func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom Headroom) error {
+	path := fmt.Sprintf("/api/v1/agents/%s/heartbeat", url.PathEscape(name))
+	return c.post(ctx, path, map[string]any{"headroom": headroom}, http.StatusNoContent, nil)
+}
+
 // MarkNodeReady sets ready_at on a node so pool runners can claim it.
 // Idempotent; first call wins (stable FIFO ordering).
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
@@ -1191,16 +1184,14 @@ func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 
 // FinalizeNodeReady atomically awards the best pending offer or transfers an
 // unclaimed node to the coordinator's local or cloud fallback.
-func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
+func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error) {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/finalize-ready",
 		url.PathEscape(runID), url.PathEscape(nodeID))
-	var resp struct {
-		Revoked bool `json:"revoked"`
-	}
+	var resp store.ExecutorClaimRoundResult
 	if err := c.post(ctx, path, nil, http.StatusOK, &resp); err != nil {
-		return false, err
+		return store.ExecutorClaimRoundResult{}, err
 	}
-	return resp.Revoked, nil
+	return resp, nil
 }
 
 // HeartbeatNodeClaim extends the claim lease for holderID, optionally

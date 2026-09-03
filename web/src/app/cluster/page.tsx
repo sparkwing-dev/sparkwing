@@ -1,6 +1,5 @@
 "use client";
 
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -64,6 +63,8 @@ function typeBadge(kind: string): { label: string; cls: string } {
   switch (kind) {
     case "agent":
       return { label: "agent", cls: "bg-indigo-400/15 text-indigo-300" };
+    case "gateway":
+      return { label: "gateway", cls: "bg-cyan-400/15 text-cyan-300" };
     case "pool":
       return { label: "pool", cls: "bg-emerald-400/15 text-emerald-300" };
     case "local":
@@ -76,7 +77,7 @@ function typeBadge(kind: string): { label: string; cls: string } {
 function sortAgents(a: Agent, b: Agent): number {
   if (a.status !== b.status) return a.status === "busy" ? -1 : 1;
   if (a.type !== b.type) {
-    const order = ["agent", "pool", "local"];
+    const order = ["agent", "gateway", "pool", "local"];
     const ai = order.indexOf(a.type);
     const bi = order.indexOf(b.type);
     return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
@@ -122,7 +123,7 @@ export default function ClusterPage() {
     for (const a of agents) {
       byType[a.type] = (byType[a.type] || 0) + 1;
       if (a.status === "busy") busy++;
-      claims += a.active_jobs?.length || 0;
+      claims += a.active_slots ?? a.active_jobs?.length ?? 0;
     }
     return { total: agents.length, byType, busy, claims };
   }, [agents]);
@@ -350,7 +351,7 @@ function FleetCards({
     { label: "busy", value: totals.busy },
     { label: "in-flight claims", value: totals.claims },
   ];
-  const typeOrder = ["agent", "pool", "local"];
+  const typeOrder = ["agent", "gateway", "pool", "local"];
   for (const k of typeOrder) {
     if (totals.byType[k]) cards.push({ label: k, value: totals.byType[k] });
   }
@@ -377,9 +378,8 @@ function FleetEmpty() {
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 text-xs text-[var(--muted)] space-y-2">
       <p>
-        No runners have claimed a node in the last hour. The controller derives
-        fleet state from claim activity, so idle runners show up only when they
-        take work.
+        No executors are registered and no legacy runners have claimed a node in
+        the last hour.
       </p>
       <p>
         Start a laptop agent:{" "}
@@ -406,7 +406,7 @@ function AgentRow({
   onToggle: () => void;
 }) {
   const badge = typeBadge(agent.type);
-  const active = agent.active_jobs?.length || 0;
+  const active = agent.active_slots ?? agent.active_jobs?.length ?? 0;
   const labels = Object.entries(agent.labels || {});
 
   return (
@@ -439,9 +439,34 @@ function AgentRow({
         <div className="border-t border-[var(--border)] px-3 py-3 space-y-3 text-xs">
           <div className="grid grid-cols-2 gap-3">
             <KV label="type" value={agent.type} />
+            <KV label="location" value={agent.location || "unknown"} />
             <KV label="max concurrent" value={agent.max_concurrent || "-"} />
+            <KV
+              label="active slots"
+              value={`${active}/${agent.max_concurrent || "-"}`}
+            />
             <KV label="last seen" value={relativeTime(agent.last_seen)} />
             <KV label="status" value={agent.status} />
+            <KV
+              label="priority"
+              value={
+                agent.max_concurrent > 0
+                  ? `${agent.base_priority} (ceiling ${agent.priority_ceiling})`
+                  : "-"
+              }
+            />
+            <KV
+              label="budget"
+              value={
+                agent.max_concurrent > 0
+                  ? formatExecutorResources(agent.budget, true)
+                  : "-"
+              }
+            />
+            <KV
+              label="headroom"
+              value={formatExecutorResources(agent.headroom, false)}
+            />
           </div>
           {labels.length > 0 && (
             <div>
@@ -499,6 +524,20 @@ function AgentStatusPill({ status }: { status: string }) {
       {status || "idle"}
     </span>
   );
+}
+
+function formatExecutorResources(
+  resources?: { cores: number; memory_bytes: number },
+  zeroIsUncapped = false,
+): string {
+  if (!resources) return "-";
+  const memory =
+    resources.memory_bytes || !zeroIsUncapped
+      ? `${(resources.memory_bytes / 1024 ** 3).toFixed(1)} GiB`
+      : "uncapped";
+  const cores =
+    resources.cores === 0 && zeroIsUncapped ? "uncapped" : resources.cores;
+  return `${cores} cores / ${memory}`;
 }
 
 function KV({ label, value }: { label: string; value: string | number }) {

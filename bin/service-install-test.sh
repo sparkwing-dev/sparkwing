@@ -72,5 +72,9 @@ grep -qx 'cache_token: "swc_good"' "$config" \
   || fail "clean install did not record the cache token" "$config"
 grep -qx 'holder_prefix: "test-runner"' "$config" \
   || fail "clean install did not record the runner name" "$config"
+grep -qx 'contribution: "50%,50%"' "$config" \
+  || fail "clean install did not record the resource ceiling" "$config"
+grep -qx 'local_admission: true' "$config" \
+  || fail "clean install did not require local admission" "$config"
 
 echo "service-install-test: ok"

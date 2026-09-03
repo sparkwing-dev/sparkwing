@@ -6,15 +6,13 @@ controller hands each job to a runner whose labels satisfy it.**
 
 ## The model in one paragraph
 
-Each controller-connected runner advertises a set of **labels** (opaque equality
-strings like `arm64`, `os=linux`, `gpu`). A job declares the labels it
-needs -- per node via the Go SDK (`.Requires(...)`) or for the whole
-pipeline via `requires:` in `sparkwing.yaml`. The controller's claim
-query matches a job to a runner when the runner's advertised labels
-satisfy the job's needed labels. A node whose labels no eligible polling
-runner advertises is never claimed: it waits in the queue and the controller
-fails it with `queue_timeout` once the queue deadline (default 15m)
-passes.
+Each job declares the labels it needs, per node through the Go SDK
+(`.Requires(...)`) or for the whole pipeline through `requires:` in
+`sparkwing.yaml`. Legacy runners self-report labels when they poll. Enrolled
+executors use only administrator-owned capabilities; agent traffic cannot add
+them. The controller filters incompatible runners before claim ordering. A node
+with no eligible runner waits until the queue deadline, then fails with
+`queue_timeout` (default 15m).
 
 ## Label-match semantics
 
@@ -47,8 +45,7 @@ sw.Job(plan, "train", &Train{}).Requires("gpu")
 sw.Job(plan, "package", &Package{}).Requires("arch=arm64", "trusted")
 sw.Job(plan, "build", &Build{}).Requires("os=linux,macos", "amd64") // (linux OR macos) AND amd64
 
-// Placement preference recorded on the plan; the claim queue does not
-// rank on it.
+// Enrolled executors use this to adjust priority within their operator ceiling.
 sw.Job(plan, "integration", &Integration{}).
     Requires("os=linux").
     Prefers("cloud-linux")
@@ -64,9 +61,9 @@ sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
   naming the missing labels and the node waits; the controller's sweep
   fails it with `queue_timeout` at the queue deadline (default 15m).
 - **`Prefers`** -- runner-label preferences recorded in plan-snapshot
-  metadata. Preferences do not affect runner selection: the claim queue
-  is FIFO by readiness and filters only on the labels a job requires, so
-  the first eligible runner to poll claims the job.
+  metadata. They raise an eligible enrolled executor's effective priority
+  within its administrator-owned ceiling. Legacy name-less claims remain FIFO
+  and do not rank on preferences.
 - **`WhenRunner`** -- conditional execution. A runner that advertises
   labels evaluates the terms up front and skips the node when they are
   not satisfied (downstream `Needs` treats a skip as satisfied); a runner
@@ -124,18 +121,43 @@ which claims nodes.
 
 ## Agent-first execution with Kubernetes overflow
 
-The `warm` trigger runner offers nodes to remote agents first. An agent is the
-same `sparkwing-runner agent` process on a Windows, macOS, or Linux developer
-machine, workstation, home server, build server, or cloud server. It polls the
-controller over outbound HTTP(S), so the machine needs no inbound listener or
-mandatory private-network product. A LAN, VPN, or tailnet may still provide a
-direct cache path.
+The `warm` trigger runner still sends nodes through the legacy name-less
+`sparkwing-runner agent` FIFO claim loop. That process opens no listener and
+polls the controller over outbound HTTP(S). A LAN, VPN, or tailnet may provide
+a direct cache path, but discovery grants no execution trust. Legacy `labels`
+are self-asserted placement terms. `Prefers` does not affect claim order, and
+local admission may happen after a claim.
 
-Every claim attempt carries the agent's labels. Local admission also reports
-available CPU and memory with claims and heartbeats. The controller's agent
-view derives from active or completed claims; an idle agent that has never
-claimed a node is not registered. Saturated and offline agents stop claiming.
-After a short internal window, an unclaimed unlabeled node is
+Schema 28 adds administrator-owned executor enrollment for the assisted
+scheduler. Enrollment binds an exact runner or service token prefix
+to trusted capabilities, a priority range, concurrency and resource ceilings,
+and a display-only location. Authenticated worker heartbeats can update only
+liveness and finite nonnegative headroom. Idle enrollments remain visible;
+stale ones appear offline. Each enrollment also reports the exact number of
+live node claims as `active_slots`; legacy inferred rows omit that field because
+their slot count is unknown. Rotating an enrollment to a different credential
+marks it offline until that exact credential sends a heartbeat. The scheduling
+summary and membership check apply hard capability, slot, headroom, and
+resource filters before bounded priority.
+
+Schema 29 adds durable offer rounds. A named or plural agent prepares the
+oldest node eligible for that membership, reserves the exact resource digest
+and physical slot through wingd, then offers that reservation. One shared local
+slot ledger covers every configured coordinator, so two controllers cannot
+award the same physical capacity. A gateway must make an equivalent downstream
+admission reservation before offering.
+
+The round lasts at most five seconds. An offer at priority 100 or at the
+highest eligible ceiling recorded when the round opened wins immediately.
+Otherwise the deadline winner is the highest effective priority, then the
+earliest offer, executor name, physical slot, and holder. Effective priority
+starts at the enrolled base and may move for run priority and `Prefers`, but
+never outside the administrator-owned range. Requirements and resource limits
+always filter before ranking. The winner consumes the same reservation; losers
+release theirs. Repeating an offer after a lost response recovers the same
+fenced claim.
+
+After the offer window, an unclaimed unlabeled node is
 atomically removed from the agent queue and sent to the configured Kubernetes
 runner. A claim that wins that handoff owns the node, so the Kubernetes
 fallback cannot execute it a second time. Labeled nodes never use this
@@ -201,8 +223,9 @@ sw.Job(plan, "deploy", &Deploy{}).Requires("warm-runner")
 sw.Job(plan, "build-image", &BuildImage{}).Prefers("arch=arm64")
 ```
 
-Any runner whose labels satisfy the job's `Requires` can claim it -- the
-preference is visible on the plan, not applied at claim time.
+Any runner whose labels satisfy the job's `Requires` can claim it. An enrolled
+executor applies the preference inside its trusted priority range; a legacy
+runner ignores it.
 
 ### A local-only preflight before a remote build
 

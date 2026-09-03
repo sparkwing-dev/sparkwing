@@ -51,6 +51,37 @@ code change to unlock.
 
 ### Changed
 
+- **controller + runner:** Controller administrators can enroll an executor by
+  name and bind it to the exact prefix of a live runner or service token.
+  Enrollment owns its `agent` or `gateway` kind, display-only location, trusted
+  capabilities, priority range, concurrency ceiling, and resource budget;
+  worker heartbeats update only last-seen and finite nonnegative headroom. Idle
+  registrations appear in the fleet API, CLI, and dashboard, while stale ones
+  remain visible as offline. The API reports each enrollment's exact live claim
+  count separately from its distinct active run IDs; legacy rows leave that
+  count unknown. Scheduling summaries apply hard capability, slot, headroom,
+  and resource filters before bounded priority. Rotating an enrollment's
+  credential resets liveness until the new credential sends a heartbeat.
+- **runner + wingd:** An agent configuration with `name` or `coordinators`
+  selects enrolled assisted-offer mode. It requires local admission, uses a
+  distinct credential per coordinator, shares one machine slot ceiling, and
+  lets membership settings only narrow the global contribution. Coordinator
+  loops restart independently; a failed wingd probe withholds the heartbeat
+  without erasing the last report. Wingd now supports the nonblocking exact-node,
+  resource, and physical-slot reservation lifecycle used by assisted offers.
+  An agent reserves capacity before it offers, keeps that reservation pinned
+  while the controller arbitrates, consumes the same reservation on an award,
+  and releases it after a loss. Name-less agents keep legacy FIFO claims.
+- **controller + runner:** Enrolled agents now compete for each eligible node in
+  a durable five-second offer round. Hard capabilities and resource limits
+  filter first; the controller then awards immediately at the round's recorded
+  priority ceiling or at priority 100, otherwise by effective priority,
+  earliest offer, executor name, physical slot, and holder at the deadline.
+  Effective priority starts from the administrator-owned base, stays within its
+  ceiling, and may be reordered by run priority and `Prefers`. Retrying an offer
+  recovers the same fenced claim after a lost response. If no live offer wins,
+  the same transaction returns an unlabeled node to coordinator fallback.
+
 - **ci:** The pre-commit formatters step and the em-dash and tracker-ID sweeps
   judge the whole change, not only what is staged. Each reads the staged files
   when something is staged and the files changed since `origin/main` otherwise,
@@ -78,6 +109,19 @@ code change to unlock.
   The full gates keep their existing coverage.
 
 ### Fixed
+
+- **store (Breaking):** Run-store schema 28 persists executor registrations,
+  resource charges, and opaque reservation/slot bindings on node claims. Older
+  controller binaries refuse the upgraded store; upgrade every controller that
+  shares it before any opens it. Enrolled helpers also require matching runner
+  and local-daemon builds for nonblocking admission. See the
+  [migration guide](docs/migrations/_unreleased.md#executor-registration-and-contribution-budgets).
+- **store (Breaking):** Run-store schema 29 persists enrolled executor offer
+  rounds and their credential, reservation, resource-digest, physical-slot,
+  priority, and liveness bindings. Older controller binaries refuse the
+  upgraded store; upgrade every controller sharing it before any opens it, and
+  upgrade enrolled agents and wingd before resuming them. See the
+  [migration guide](docs/migrations/_unreleased.md#enrolled-executor-offer-arbitration).
 
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,

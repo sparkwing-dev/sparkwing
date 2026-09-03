@@ -64,6 +64,13 @@ func newWarmPoolFixture(
 	return st, client.New(srv.URL, nil), cleanup
 }
 
+func TestRunnerCapsOfferWindowAtFiveSeconds(t *testing.T) {
+	r := New(nil, nil, Config{ClaimWaitTimeout: time.Minute}, quietTestLogger())
+	if r.cfg.ClaimWaitTimeout != 5*time.Second {
+		t.Fatalf("claim wait = %s", r.cfg.ClaimWaitTimeout)
+	}
+}
+
 func TestRunnerUsesRemoteClaimBeforeFallback(t *testing.T) {
 	_, ctrl, cleanup := newWarmPoolFixture(t, nil, nil)
 	defer cleanup()

@@ -31,7 +31,7 @@ func New(ctrl *client.Client, fallback runner.Runner, cfg Config, logger *slog.L
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 500 * time.Millisecond
 	}
-	if cfg.ClaimWaitTimeout <= 0 {
+	if cfg.ClaimWaitTimeout <= 0 || cfg.ClaimWaitTimeout > 5*time.Second {
 		cfg.ClaimWaitTimeout = 5 * time.Second
 	}
 	if cfg.HeartbeatInterval <= 0 {
@@ -104,14 +104,17 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				continue
 			}
 			if !claimedSeen && time.Now().After(waitDeadline) {
-				revoked, rerr := r.ctrl.FinalizeNodeReady(ctx, req.RunID, req.NodeID)
+				resolution, rerr := r.ctrl.FinalizeNodeReady(ctx, req.RunID, req.NodeID)
 				if rerr != nil {
-					r.logger.Warn("warmpool: revoke failed",
+					r.logger.Warn("warmpool: offer finalization failed",
 						"run_id", req.RunID, "node_id", req.NodeID, "err", rerr)
 					continue
 				}
-				if !revoked {
-					// safety: an agent claimed between GetNode and RevokeNodeReady; let it finish
+				if resolution.Pending {
+					continue
+				}
+				if !resolution.Revoked {
+					// safety: fallback must yield after the controller awards an offer
 					stopHB()
 					claimedSeen = true
 					continue
