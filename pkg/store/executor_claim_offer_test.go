@@ -29,6 +29,11 @@ func enrollOfferExecutor(t *testing.T, s *store.Store, name string, base, ceilin
 	return identity
 }
 
+func enrollOfferPriorityTarget(t *testing.T, s *store.Store) {
+	t.Helper()
+	_ = enrollOfferExecutor(t, s, "priority-target", 100, 100, "linux")
+}
+
 func executorOffer(t *testing.T, s *store.Store, identity store.ClaimIdentity, name, holder, reservation, runID, nodeID string, slot int) store.ExecutorClaimOfferResult {
 	t.Helper()
 	summary, err := s.SchedulingSummary(context.Background(), runID, nodeID)
@@ -113,12 +118,13 @@ func TestExecutorClaimPreparationScansPastSixtyFourIneligibleNodes(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preparation.Summary.NodeID != "linux" || preparation.Summary.ResourceDigest == "" || !preparation.Membership.Eligible {
+	if preparation.Summary.NodeID != "linux" || preparation.Summary.ResourceDigest == "" || !preparation.Membership.Eligible ||
+		preparation.Membership.HighestEligiblePriority != 50 {
 		t.Fatalf("preparation = %+v", preparation)
 	}
 }
 
-func TestExecutorClaimOfferAwardsImmediatelyAtRecordedCeiling(t *testing.T) {
+func TestExecutorClaimOfferAwardsImmediatelyAtRecordedTarget(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 80, 80, "linux")
@@ -135,10 +141,10 @@ func TestExecutorClaimOfferAwardsImmediatelyAtRecordedCeiling(t *testing.T) {
 	if err := s.CreateNode(ctx, store.Node{RunID: "run", NodeID: "work", Status: "pending", NeedsLabels: []string{"linux"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkNodeReadyWithPriorityCeiling(ctx, "run", "work", 80); err != nil {
+	if err := s.MarkNodeReady(ctx, "run", "work"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkNodeReadyWithPriorityCeiling(ctx, "run", "work", 100); err != nil {
+	if err := s.MarkNodeReady(ctx, "run", "work"); err != nil {
 		t.Fatal(err)
 	}
 	result := executorOffer(t, s, identity, "desk", "holder", "reservation", "run", "work", 0)
@@ -162,12 +168,97 @@ func TestExecutorClaimOfferAwardsImmediatelyAtRecordedCeiling(t *testing.T) {
 	if retry.Node == nil || retry.Node.ClaimedBy != "holder" {
 		t.Fatalf("lost response retry = %+v", retry)
 	}
+	events, err := s.ListEventsAfter(ctx, "run", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awards := 0
+	for _, event := range events {
+		if event.Kind != "executor_offer_awarded" {
+			continue
+		}
+		awards++
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["reason"] != "priority_target" || payload["executor_name"] != "desk" || payload["slot"] != float64(0) {
+			t.Fatalf("award payload = %s", event.Payload)
+		}
+		if _, exists := payload["membership_id"]; exists {
+			t.Fatalf("award payload exposes membership identity: %s", event.Payload)
+		}
+	}
+	if awards != 1 {
+		t.Fatalf("award events = %d, want one across lost-response retry", awards)
+	}
+}
+
+func TestExecutorClaimOfferAwardsOnlyHelperAtExactEffectivePriority(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	identity := enrollOfferExecutor(t, s, "desk", 50, 100, "linux")
+	seedExecutorNode(t, s, "run", 1, "linux")
+	summary, err := s.SchedulingSummary(ctx, "run", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := s.HighestActiveExecutorPriority(ctx, summary, time.Now().Add(-store.ExecutorRegistrationActiveWindow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != 50 {
+		t.Fatalf("priority target = %d, want exact attainable score 50", target)
+	}
+	if revoked, err := s.RevokeNodeReady(ctx, "run", "work"); err != nil || !revoked {
+		t.Fatalf("reset offer round = %v, %v", revoked, err)
+	}
+	if err := s.MarkNodeReady(ctx, "run", "work"); err != nil {
+		t.Fatal(err)
+	}
+	result := executorOffer(t, s, identity, "desk", "holder", "reservation", "run", "work", 0)
+	if result.Pending || result.Node == nil || result.Node.ClaimPriority != 50 {
+		t.Fatalf("only eligible offer = %+v, want immediate award at 50", result)
+	}
+}
+
+func TestExecutorClaimOfferAwardsPreferredHelperAtExactEffectivePriority(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	plain := enrollOfferExecutor(t, s, "plain", 50, 100, "linux")
+	preferred := enrollOfferExecutor(t, s, "preferred", 50, 100, "linux", "fast")
+	seedExecutorNode(t, s, "run", 1, "linux")
+	summary, err := s.SchedulingSummary(ctx, "run", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := s.HighestActiveExecutorPriority(ctx, summary, time.Now().Add(-store.ExecutorRegistrationActiveWindow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != 51 {
+		t.Fatalf("priority target = %d, want preferred score 51", target)
+	}
+	if revoked, err := s.RevokeNodeReady(ctx, "run", "work"); err != nil || !revoked {
+		t.Fatalf("reset offer round = %v, %v", revoked, err)
+	}
+	if err := s.MarkNodeReady(ctx, "run", "work"); err != nil {
+		t.Fatal(err)
+	}
+	if result := executorOffer(t, s, plain, "plain", "holder-plain", "reservation-plain", "run", "work", 0); !result.Pending {
+		t.Fatalf("plain offer = %+v, want pending below target", result)
+	}
+	result := executorOffer(t, s, preferred, "preferred", "holder-preferred", "reservation-preferred", "run", "work", 0)
+	if result.Pending || result.Node == nil || result.Node.ClaimedBy != "holder-preferred" || result.Node.ClaimPriority != 51 {
+		t.Fatalf("preferred offer = %+v, want immediate preferred award", result)
+	}
 }
 
 func TestExecutorClaimOfferDeadlineUsesPriorityAndRecoversLostWinnerResponse(t *testing.T) {
 	s := newStoreT(t)
 	low := enrollOfferExecutor(t, s, "low", 20, 20, "linux")
 	high := enrollOfferExecutor(t, s, "high", 80, 80, "linux")
+	enrollOfferPriorityTarget(t, s)
 	seedExecutorNode(t, s, "run", 1, "linux")
 	if got := executorOffer(t, s, low, "low", "holder-low", "reservation-low", "run", "work", 0); !got.Pending {
 		t.Fatalf("low offer = %+v", got)
@@ -187,11 +278,127 @@ func TestExecutorClaimOfferDeadlineUsesPriorityAndRecoversLostWinnerResponse(t *
 	}
 }
 
+func TestExecutorClaimOfferFinalizationReresolvesNarrowedEnrollment(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		labels []string
+		update store.Executor
+	}{
+		{
+			name: "priority",
+			update: store.Executor{Name: "high", Kind: "agent", Location: "local", Principal: "principal-high",
+				Capabilities: []string{"linux"}, BasePriority: 10, PriorityCeiling: 10, MaxConcurrent: 2,
+				Budget: store.ExecutorResource{Cores: 8, MemoryBytes: 16 << 30}},
+		},
+		{
+			name: "capability",
+			update: store.Executor{Name: "high", Kind: "agent", Location: "local", Principal: "principal-high",
+				Capabilities: []string{"gpu"}, BasePriority: 80, PriorityCeiling: 80, MaxConcurrent: 2,
+				Budget: store.ExecutorResource{Cores: 8, MemoryBytes: 16 << 30}},
+		},
+		{
+			name:   "location",
+			labels: []string{"linux", "location=local"},
+			update: store.Executor{Name: "high", Kind: "agent", Location: "cloud", Principal: "principal-high",
+				Capabilities: []string{"linux"}, BasePriority: 80, PriorityCeiling: 80, MaxConcurrent: 2,
+				Budget: store.ExecutorResource{Cores: 8, MemoryBytes: 16 << 30}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := newStoreT(t)
+			ctx := context.Background()
+			low := enrollOfferExecutor(t, s, "low", 20, 20, "linux")
+			high := enrollOfferExecutor(t, s, "high", 80, 80, "linux")
+			enrollOfferPriorityTarget(t, s)
+			labels := test.labels
+			if len(labels) == 0 {
+				labels = []string{"linux"}
+			}
+			seedExecutorNode(t, s, "run", 1, labels...)
+			if got := executorOffer(t, s, low, "low", "holder-low", "reservation-low", "run", "work", 0); !got.Pending {
+				t.Fatalf("low offer = %+v", got)
+			}
+			if got := executorOffer(t, s, high, "high", "holder-high", "reservation-high", "run", "work", 0); !got.Pending {
+				t.Fatalf("high offer = %+v", got)
+			}
+			if err := s.EnrollExecutor(ctx, high.TokenPrefix, test.update); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`, time.Now().Add(-6*time.Second).UnixNano()); err != nil {
+				t.Fatal(err)
+			}
+			result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work")
+			if err != nil || result.Revoked || result.Pending {
+				t.Fatalf("finalize = %+v, %v", result, err)
+			}
+			node, err := s.GetNode(ctx, "run", "work")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if node.ClaimedBy != "holder-low" || node.ClaimPriority != 20 {
+				t.Fatalf("winner after enrollment narrowing = %+v", node)
+			}
+		})
+	}
+}
+
+func TestExecutorClaimOfferLocationPolicyFiltersBeforePriority(t *testing.T) {
+	for _, test := range []struct {
+		name, required, winnerLocation string
+	}{
+		{name: "cloud only", required: "location=cloud", winnerLocation: "cloud"},
+		{name: "local only", required: "location=local", winnerLocation: "local"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := newStoreT(t)
+			ctx := context.Background()
+			local := enrollOfferExecutor(t, s, "local", 100, 100, "linux")
+			cloud := enrollOfferExecutor(t, s, "cloud", 10, 10, "linux")
+			if err := s.EnrollExecutor(ctx, cloud.TokenPrefix, store.Executor{
+				Name: "cloud", Kind: "agent", Location: "cloud", Principal: cloud.Principal,
+				Capabilities: []string{"linux"}, BasePriority: 10, PriorityCeiling: 10,
+				MaxConcurrent: 2, Budget: store.ExecutorResource{Cores: 8, MemoryBytes: 16 << 30},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			seedExecutorNode(t, s, "run", 1, "linux", test.required)
+			summary, err := s.SchedulingSummary(ctx, "run", "work")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if revoked, err := s.RevokeNodeReady(ctx, "run", "work"); err != nil || !revoked {
+				t.Fatalf("reset offer round = %v, %v", revoked, err)
+			}
+			if err := s.MarkNodeReady(ctx, "run", "work"); err != nil {
+				t.Fatal(err)
+			}
+			identities := map[string]store.ClaimIdentity{"local": local, "cloud": cloud}
+			loserLocation := "local"
+			if test.winnerLocation == "local" {
+				loserLocation = "cloud"
+			}
+			_, err = s.OfferExecutorClaim(ctx, identities[loserLocation], store.ExecutorClaimOffer{
+				ExecutorName: loserLocation, HolderID: "holder-loser", RunID: "run", NodeID: "work",
+				ReservationID: "reservation-loser", ResourceDigest: summary.ResourceDigest, Slot: 0, Lease: time.Minute,
+			})
+			if !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("%s executor offer = %v, want ineligible", loserLocation, err)
+			}
+			result := executorOffer(t, s, identities[test.winnerLocation], test.winnerLocation,
+				"holder-winner", "reservation-winner", "run", "work", 0)
+			if result.Pending || result.Node == nil || result.Node.ClaimedBy != "holder-winner" {
+				t.Fatalf("%s offer = %+v, want immediate award", test.winnerLocation, result)
+			}
+		})
+	}
+}
+
 func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
 	first := enrollOfferExecutor(t, s, "zeta", 50, 50, "linux")
 	second := enrollOfferExecutor(t, s, "alpha", 50, 50, "linux")
+	enrollOfferPriorityTarget(t, s)
 	seedExecutorNode(t, s, "run", 1, "linux")
 	if got := executorOffer(t, s, first, "zeta", "holder-z", "reservation-z", "run", "work", 0); !got.Pending {
 		t.Fatalf("first offer = %+v", got)
@@ -219,6 +426,7 @@ func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testin
 	s2 := newStoreT(t)
 	alpha := enrollOfferExecutor(t, s2, "alpha", 50, 50, "linux")
 	zeta := enrollOfferExecutor(t, s2, "zeta", 50, 50, "linux")
+	enrollOfferPriorityTarget(t, s2)
 	seedExecutorNode(t, s2, "run", 1, "linux")
 	executorOffer(t, s2, zeta, "zeta", "holder-z", "reservation-z", "run", "work", 0)
 	executorOffer(t, s2, alpha, "alpha", "holder-a", "reservation-a", "run", "work", 0)
@@ -245,6 +453,7 @@ func TestExecutorClaimOfferRejectsWrongCredentialDigestAndReservationReuse(t *te
 	s := newStoreT(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 40, 80, "linux")
+	enrollOfferPriorityTarget(t, s)
 	seedExecutorNode(t, s, "run", 1, "linux")
 	preparation, err := s.PrepareNextExecutorClaim(ctx, identity, "desk")
 	if err != nil {
@@ -275,6 +484,7 @@ func TestExecutorClaimPreparationUsesOneExecutorSlotPerNode(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 40, 80, "linux")
+	enrollOfferPriorityTarget(t, s)
 	seedExecutorNode(t, s, "run", 1, "linux")
 	if err := s.CreateNode(ctx, store.Node{RunID: "run", NodeID: "work-2", Status: "pending", NeedsLabels: []string{"linux"}}); err != nil {
 		t.Fatal(err)
@@ -313,6 +523,7 @@ func TestExecutorClaimExpiredOfferCanBeReplaced(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 40, 80, "linux")
+	enrollOfferPriorityTarget(t, s)
 	seedExecutorNode(t, s, "run", 1, "linux")
 	if got := executorOffer(t, s, identity, "desk", "old-holder", "old-reservation", "run", "work", 0); !got.Pending {
 		t.Fatalf("old offer = %+v", got)
@@ -345,6 +556,7 @@ func TestExecutorClaimFinalizationIgnoresExpiredOffersAndTransfersFallbackOnce(t
 	s := newStoreT(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 50, 80, "linux")
+	enrollOfferPriorityTarget(t, s)
 	seedExecutorNode(t, s, "run", 1, "linux")
 	if got := executorOffer(t, s, identity, "desk", "holder", "reservation", "run", "work", 0); !got.Pending {
 		t.Fatalf("offer = %+v", got)
@@ -370,6 +582,68 @@ func TestExecutorClaimFinalizationIgnoresExpiredOffersAndTransfersFallbackOnce(t
 	}
 	if offers != 0 {
 		t.Fatalf("offers after fallback = %d", offers)
+	}
+}
+
+func TestExecutorClaimOfferLifecycleEventsAreTransitionOnlyAndRedacted(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	identity := enrollOfferExecutor(t, s, "desk", 50, 80, "linux")
+	enrollOfferPriorityTarget(t, s)
+	seedExecutorNode(t, s, "run", 1, "linux")
+	if got := executorOffer(t, s, identity, "desk", "holder-secret", "reservation-secret", "run", "work", 0); !got.Pending {
+		t.Fatalf("first offer = %+v", got)
+	}
+	if got := executorOffer(t, s, identity, "desk", "holder-secret", "reservation-secret", "run", "work", 0); !got.Pending {
+		t.Fatalf("offer refresh = %+v", got)
+	}
+	if _, err := s.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`, time.Now().Add(-6*time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().Exec(`UPDATE node_claim_offers SET last_seen_at = ?`, time.Now().Add(-3*time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work"); err != nil || !result.Revoked {
+		t.Fatalf("finalize = %+v, %v", result, err)
+	}
+	events, err := s.ListEventsAfter(ctx, "run", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{
+		"executor_offer_round_opened": 1,
+		"executor_offer_received":     1,
+		"executor_offer_expired":      1,
+		"executor_offer_round_empty":  1,
+	}
+	got := map[string]int{}
+	for _, event := range events {
+		if _, tracked := want[event.Kind]; !tracked {
+			continue
+		}
+		got[event.Kind]++
+		var payload map[string]any
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode %s payload: %v", event.Kind, err)
+		}
+		for _, forbidden := range []string{"token", "token_prefix", "principal", "holder", "holder_id", "reservation", "reservation_id", "executor_id", "membership_id", "executor"} {
+			if _, exists := payload[forbidden]; exists {
+				t.Errorf("%s exposes %q in payload %s", event.Kind, forbidden, event.Payload)
+			}
+		}
+		if event.Kind == "executor_offer_received" || event.Kind == "executor_offer_expired" {
+			if payload["executor_name"] != "desk" {
+				t.Errorf("%s lacks executor name: %s", event.Kind, event.Payload)
+			}
+		}
+		if event.Kind == "executor_offer_expired" && payload["priority_target"] != float64(100) {
+			t.Errorf("expired offer priority target = %v, want 100: %s", payload["priority_target"], event.Payload)
+		}
+	}
+	for kind, count := range want {
+		if got[kind] != count {
+			t.Errorf("%s events = %d, want %d; all events = %+v", kind, got[kind], count, events)
+		}
 	}
 }
 
@@ -426,5 +700,47 @@ func TestExecutorClaimOfferAndFallbackHaveOneWinner(t *testing.T) {
 	}
 	if fallback.Revoked && (n.ClaimedBy != "" || n.ReadyAt != nil) {
 		t.Fatalf("fallback node = %+v", n)
+	}
+}
+
+func TestExecutorClaimOfferDifferentClaimantsCompleteConcurrently(t *testing.T) {
+	s := newStoreT(t)
+	alpha := enrollOfferExecutor(t, s, "alpha", 50, 50, "linux")
+	zeta := enrollOfferExecutor(t, s, "zeta", 50, 50, "linux")
+	seedExecutorNode(t, s, "alpha-run", 1, "linux")
+	seedExecutorNode(t, s, "zeta-run", 1, "linux")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	summaryAlpha, err := s.SchedulingSummary(ctx, "alpha-run", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaryZeta, err := s.SchedulingSummary(ctx, "zeta-run", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := s.OfferExecutorClaim(ctx, alpha, store.ExecutorClaimOffer{
+			ExecutorName: "alpha", HolderID: "holder-alpha", RunID: "alpha-run", NodeID: "work",
+			ReservationID: "reservation-alpha", ResourceDigest: summaryAlpha.ResourceDigest, Slot: 0, Lease: time.Minute,
+		})
+		errs <- err
+	}()
+	go func() {
+		<-start
+		_, err := s.OfferExecutorClaim(ctx, zeta, store.ExecutorClaimOffer{
+			ExecutorName: "zeta", HolderID: "holder-zeta", RunID: "zeta-run", NodeID: "work",
+			ReservationID: "reservation-zeta", ResourceDigest: summaryZeta.ResourceDigest, Slot: 0, Lease: time.Minute,
+		})
+		errs <- err
+	}()
+	close(start)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
 	}
 }

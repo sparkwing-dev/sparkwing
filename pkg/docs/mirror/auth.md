@@ -484,8 +484,13 @@ signs in again. An embedder changes the cap with
   `secrets.read` carved the runner's work out of `admin`. What remains can be
   split further into `cache.write`, `locks.admin`, and similar when a real
   caller needs that narrower trust.
-- **Keeping the bearer away from the pipeline body**: a runner's token still
-  sits in the environment of the process that executes pipeline code, so that
-  code can call every route the token unlocks. Brokering secret and node-state
-  calls through a supervisor process the body cannot reach is the remaining
-  design step.
+- **Execution capabilities beyond assisted nodes**: workstation and gateway
+  agents keep their enrollment bearer in the supervisor and give each
+  job-body child a process-lifetime loopback capability for its exact run,
+  node, and acknowledged attempt log/lifecycle. Schema 30 is the internal
+  current-node dependency; schema 31 adds the current-attempt mutation fence and
+  durable grants for `Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`,
+  cross-pipeline references, and dynamic `SpawnNode` before this path can ship.
+  Other execution modes retain their documented credential boundary. A future
+  capability service could make the same split portable across container and
+  process boundaries that do not share one supervisor.

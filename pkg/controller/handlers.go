@@ -1397,21 +1397,7 @@ func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	summary, err := s.store.SchedulingSummary(r.Context(), runID, nodeID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	ceiling, err := s.store.HighestActiveExecutorCeiling(r.Context(), summary, time.Now().Add(-store.ExecutorRegistrationActiveWindow))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if err := s.store.MarkNodeReadyWithPriorityCeiling(r.Context(), runID, nodeID, ceiling); err != nil {
+	if err := s.store.MarkNodeReady(r.Context(), runID, nodeID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return

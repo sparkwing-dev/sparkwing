@@ -57,6 +57,21 @@ func TestEnrollAgentErrorNeverEchoesCredentialPrefix(t *testing.T) {
 	}
 }
 
+func TestEnrollAgentPreservesEnrollmentLimitError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"error":"executor enrollment limit reached: maximum 256 per controller"}`))
+	}))
+	defer server.Close()
+
+	err := enrollAgent(context.Background(), server.URL, "admin-secret", "overflow",
+		agentEnrollment{TokenPrefix: "swr_overflow"})
+	if err == nil || !strings.Contains(err.Error(), "executor enrollment limit reached: maximum 256 per controller") {
+		t.Fatalf("enrollment limit error = %v", err)
+	}
+}
+
 func TestAgentActiveSlotsUsesClaimCountWhenKnown(t *testing.T) {
 	slots := 3
 	if got := agentActiveSlots(agentView{ActiveJobs: []string{"run-a"}, ActiveSlots: &slots}); got != 3 {

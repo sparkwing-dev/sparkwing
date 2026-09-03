@@ -61,9 +61,14 @@ sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
   naming the missing labels and the node waits; the controller's sweep
   fails it with `queue_timeout` at the queue deadline (default 15m).
 - **`Prefers`** -- runner-label preferences recorded in plan-snapshot
-  metadata. They raise an eligible enrolled executor's effective priority
-  within its administrator-owned ceiling. Legacy name-less claims remain FIFO
-  and do not rank on preferences.
+  metadata. They raise an eligible enrolled-executor offer's effective
+  priority within its administrator-owned priority ceiling during one
+  controller's offer round.
+  The first matching term adds `len(Prefers) - index`, so preferences break
+  nearby scores rather than overriding administrator-owned base priority. For
+  example, a base-50 generic executor still outranks a base-0 executor that
+  matches one preference. Legacy name-less claims remain FIFO and do not rank
+  on preferences.
 - **`WhenRunner`** -- conditional execution. A runner that advertises
   labels evaluates the terms up front and skips the node when they are
   not satisfied (downstream `Needs` treats a skip as satisfied); a runner
@@ -84,9 +89,10 @@ pipelines:
 ```
 
 `requires` is a flat list of label terms. When set it wholesale replaces
-the project `defaults.requires`. The reserved label **`local`** pins
-execution to this machine -- the same effect as the `--sw-local-only`
-flag:
+the project `defaults.requires`. The reserved label **`local`** is the
+compatibility spelling of `location=coordinator`: enrolled and legacy fleet
+helpers cannot claim that node. `--sw-local-only` is different; it selects
+local secrets, state, cache, and log backends, not fleet placement.
 
 ```yaml
 pipelines:
@@ -131,33 +137,58 @@ local admission may happen after a claim.
 Schema 28 adds administrator-owned executor enrollment for the assisted
 scheduler. Enrollment binds an exact runner or service token prefix
 to trusted capabilities, a priority range, concurrency and resource ceilings,
-and a controller-trusted location. Authenticated worker heartbeats can update only
+and a trusted placement location. `location=local` and `location=cloud` hard
+requirements match only that enrollment field. `unknown` fails either selector,
+while `location=coordinator` and its compatibility alias `local` cannot be
+granted to any helper. Authenticated worker heartbeats can update only
 liveness and finite nonnegative headroom. Idle enrollments remain visible;
 stale ones appear offline. Each enrollment also reports the exact number of
 live node claims as `active_slots`; legacy inferred rows omit that field because
 their slot count is unknown. Rotating an enrollment to a different credential
 marks it offline until that exact credential sends a heartbeat. The scheduling
 summary and membership check apply hard capability, slot, headroom, and
-resource filters before bounded priority.
-Location does not widen initial eligibility. Once an executor wins a node, its
-coordinator and location become hard requirements for any agent-loss retry.
+resource filters before bounded priority. Each controller accepts at most 256
+enrolled executors. The fixed safety bound keeps one scheduling snapshot and
+offer round finite; adding the 257th returns
+`executor enrollment limit reached: maximum 256 per controller`.
+Once an executor wins a node, its coordinator and location become hard
+requirements for any agent-loss retry.
 
 Schema 29 adds durable offer rounds. A named or plural agent prepares the
 oldest node eligible for that membership, reserves the exact resource digest
 and physical slot through wingd, then offers that reservation. One shared local
 slot ledger covers every configured coordinator, so two controllers cannot
-award the same physical capacity. A gateway must make an equivalent downstream
-admission reservation before offering.
+award the same physical capacity. wingd also enforces machine-wide and
+per-membership CPU and memory contribution ceilings at reservation time. A
+gateway must make an equivalent downstream admission reservation before
+offering. Schema 29 also persists separate random internal identities for the
+controller and each enrollment. Membership IDs derive from those two values,
+so credential rotation does not split execution history and the same display
+name on another controller cannot merge it. A membership ID is a non-secret
+journal identity, not proof that a network endpoint is trusted.
 
-The round lasts at most five seconds. An offer at priority 100 or at the
-highest eligible ceiling recorded when the round opened wins immediately.
+The round lasts at most five seconds. On PostgreSQL, opening the round takes an
+exclusive eligibility fence while ordinary allocation, release, expiry,
+claim-heartbeat, and plan mutations take a shared fence. Its recorded highest
+eligible effective priority therefore describes one exact eligibility instant,
+while a deadline award cannot stall an unrelated claim heartbeat. Target and
+award paths load active executor occupancy once; award locks candidate executor
+rows in one canonical batch. A late heartbeat cannot revive an expired claim
+after its capacity is reusable. An offer at priority 100 or at that priority wins
+immediately.
 Otherwise the deadline winner is the highest effective priority, then the
 earliest offer, executor name, physical slot, and holder. Effective priority
-starts at the enrolled base and may move for run priority and `Prefers`, but
-never outside the administrator-owned range. Requirements and resource limits
-always filter before ranking. The winner consumes the same reservation; losers
-release theirs. Repeating an offer after a lost response recovers the same
-fenced claim.
+starts at the enrolled base. Run priority and the first matching `Prefers` term
+are added, then clamped to zero and the administrator-owned ceiling.
+Requirements and resource limits always filter before ranking. The winner
+consumes the same reservation; losers release theirs. Repeating an offer after
+a lost response recovers the same fenced claim.
+
+Each controller owns its own offer rounds. Multiple configured controller
+memberships share the machine's physical slot ledger, but v29 does not compare
+their run priorities before one membership reserves a free slot. Simultaneous
+work from different controllers is therefore selected by which membership
+prepares and reserves first, not by a global cross-controller priority order.
 
 If the winning agent or gateway stops heartbeating, that node ends as
 `agent_lost`; the controller never reuses its row. When `.Retry(n)` still has
@@ -191,8 +222,8 @@ no claim step, so label matching against remote runners does not apply
 (`.Requires()` is not enforced here -- there is no claim step to filter
 on -- while `WhenRunner` evaluates against the local runner, which
 advertises `local` unless the caller overrides its label set). Use
-`requires: [local]` or `--sw-local-only` to force local execution
-explicitly.
+`requires: [local]` keeps a fleet helper from claiming a dispatched node.
+`--sw-local-only` selects local backends but does not add a placement rule.
 
 `sparkwing pipeline trigger <pipeline> --profile prod` hands the run to a
 controller, which schedules each node onto a runner whose labels satisfy

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -18,10 +19,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const remoteChildMarker = "SPARKWING_REMOTE_CHILD"
+const (
+	remoteExecutionCapabilityInputEnv = "SPARKWING_EXECUTION_CAPABILITY_STDIN"
+	remoteBrokeredArtifactEnv         = "SPARKWING_BROKERED_ARTIFACTS"
+)
 
-func shouldRunRemote(trigger *store.Trigger) bool {
-	if os.Getenv(remoteChildMarker) == "1" {
+func shouldRunRemote(trigger *store.Trigger, brokeredChild bool) bool {
+	if brokeredChild {
 		return false
 	}
 	if trigger == nil {
@@ -99,29 +103,72 @@ func runNodeRemote(
 	defer binary.release()
 	logger.Info("runNodeRemote: binary ready",
 		"run_id", runID, "node_id", nodeID, "bin", binary.path)
+	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, logsURL, token, runID, nodeID, logger)
+}
 
-	childEnv := append(
-		os.Environ(),
-		"SPARKWING_CONTROLLER_URL="+controllerURL,
-		"SPARKWING_LOGS_URL="+logsURL,
-		"SPARKWING_AGENT_TOKEN="+token,
-		remoteChildMarker+"=1",
-	)
-	if holderID, ok := nodeClaimHolder(ctx); ok {
-		childEnv = append(childEnv, "SPARKWING_NODE_CLAIM_HOLDER="+holderID)
-		if fence, ok := store.NodeClaimFenceFromContext(ctx); ok {
-			childEnv = append(childEnv,
-				fmt.Sprintf("SPARKWING_NODE_CLAIM_GENERATION=%d", fence.ClaimGeneration),
-				"SPARKWING_NODE_CLAIM_MEMBERSHIP="+fence.MembershipID,
-				"SPARKWING_NODE_CLAIM_RESERVATION="+fence.ReservationID,
-			)
+func runNodeIsolated(
+	ctx context.Context,
+	controllerURL, logsURL, runID, nodeID, token string,
+	logger *slog.Logger,
+) (runner.Result, error) {
+	binary, err := os.Executable()
+	if err != nil {
+		return runner.Result{}, fmt.Errorf("resolve runner executable: %w", err)
+	}
+	dir := sparkwing.CurrentRuntime().WorkDir
+	if dir == "" {
+		dir, err = os.Getwd()
+		if err != nil {
+			return runner.Result{}, fmt.Errorf("resolve runner work directory: %w", err)
 		}
+	}
+	return runNodeChild(ctx, binary, dir, controllerURL, logsURL, token, runID, nodeID, logger)
+}
+
+var runNodeIsolatedFn = runNodeIsolated
+
+func runNodeChild(
+	ctx context.Context,
+	binary, dir, controllerURL, logsURL, token, runID, nodeID string,
+	logger *slog.Logger,
+) (runner.Result, error) {
+
+	fence, _ := store.NodeClaimFenceFromContext(ctx)
+	artifact, err := resolveArtifactStoreFromEnv(ctx)
+	if err != nil {
+		return runner.Result{}, fmt.Errorf("open supervisor artifact store: %w", err)
+	}
+	broker, err := startRemoteExecutionBroker(controllerURL, logsURL, token, runID, nodeID, fence, artifact, logger)
+	if err != nil {
+		return runner.Result{}, err
+	}
+	defer broker.Close()
+	childLogsURL := ""
+	if logsURL != "" {
+		childLogsURL = broker.URL()
+	}
+	childBaseEnv, err := remoteExecutionChildEnvironment(os.Environ())
+	if err != nil {
+		return runner.Result{}, err
+	}
+	childEnv := append(
+		childBaseEnv,
+		"SPARKWING_CONTROLLER_URL="+broker.URL(),
+		"SPARKWING_LOGS_URL="+childLogsURL,
+		remoteExecutionCapabilityInputEnv+"=1",
+	)
+	if fence.ClaimGeneration > 0 {
+		childEnv = append(childEnv, remoteBrokeredClaimEnv+"=1")
+	}
+	if artifact != nil {
+		childEnv = append(childEnv, remoteBrokeredArtifactEnv+"=1")
 	}
 
 	// #nosec G702 -- the node runner binary this process resolved, run as argv without a shell
-	cmd := exec.CommandContext(ctx, binary.path, "run-node", runID, nodeID)
-	cmd.Dir = filepath.Dir(sparkwingDir)
+	cmd := exec.CommandContext(ctx, binary, "run-node", runID, nodeID)
+	cmd.Dir = dir
 	cmd.Env = childEnv
+	cmd.Stdin = strings.NewReader(broker.capability + "\n")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -134,6 +181,53 @@ func runNodeRemote(
 		}, nil
 	}
 	return runner.Result{Outcome: sparkwing.Success}, nil
+}
+
+func remoteExecutionChildEnvironment(env []string) ([]string, error) {
+	names, prefixes, err := submissionEnvironmentAllowList(env)
+	if err != nil {
+		return nil, fmt.Errorf("remote execution environment allowlist: %w", err)
+	}
+	out := make([]string, 0, len(env))
+	for _, item := range env {
+		name, value, ok := strings.Cut(item, "=")
+		if !ok || remoteExecutionPrivateEnv[name] || name == submissionEnvironmentAllowKey {
+			continue
+		}
+		if !remoteExecutionRuntimeEnv[name] && !submissionEnvironmentAllowed(name, names, prefixes) {
+			continue
+		}
+		if envredact.CredentialName(name) || envredact.CredentialValue(value) || envredact.RedactValue(value) != value {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+var remoteExecutionRuntimeEnv = map[string]bool{
+	"PATH": true, "HOME": true, "TMPDIR": true, "TMP": true, "TEMP": true,
+	"LANG": true, "LC_ALL": true, "SYSTEMROOT": true, "COMSPEC": true,
+	"PATHEXT": true, "USERPROFILE": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true,
+}
+
+var remoteExecutionPrivateEnv = map[string]bool{
+	"SPARKWING_AGENT_TOKEN":              true,
+	"SPARKWING_CONTROLLER_URL":           true,
+	"SPARKWING_LOGS_URL":                 true,
+	ArtifactStoreEnvVar:                  true,
+	"SPARKWING_CACHE_TOKEN":              true,
+	remoteExecutionCapabilityEnv:         true,
+	remoteExecutionCapabilityInputEnv:    true,
+	remoteBrokeredArtifactEnv:            true,
+	remoteBrokeredClaimEnv:               true,
+	"SPARKWING_NODE_CLAIM_HOLDER":        true,
+	"SPARKWING_NODE_CLAIM_GENERATION":    true,
+	"SPARKWING_NODE_CLAIM_MEMBERSHIP":    true,
+	"SPARKWING_NODE_CLAIM_RESERVATION":   true,
+	"SPARKWING_TRIGGER_CLAIM_GENERATION": true,
+	"SPARKWING_TRIGGER_GENERATION":       true,
+	"SPARKWING_ATTEMPT_ORDINAL":          true,
 }
 
 func remoteTriggerSourceURL(trigger *store.Trigger) (string, error) {

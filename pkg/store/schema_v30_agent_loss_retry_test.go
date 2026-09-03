@@ -930,11 +930,15 @@ func TestSchemaV30SoftAvoidancePrefersAnotherEnrolledExecutor(t *testing.T) {
 	}
 	a := enrollOfferExecutor(t, s, "desk-a", 50, 50)
 	b := enrollOfferExecutor(t, s, "desk-b", 50, 50)
+	var avoidedExecutorID string
+	if err := s.DB().QueryRowContext(ctx, `SELECT executor_id FROM executors WHERE name = 'desk-a'`).Scan(&avoidedExecutorID); err != nil {
+		t.Fatal(err)
+	}
 	until := time.Now().Add(time.Minute)
 	if err := s.CreateRun(ctx, store.Run{
 		ID: "run-avoid", Pipeline: "p", Status: "running", StartedAt: time.Now(),
 		RetryAvoidCoordinatorID: coordinatorID, RetryAvoidExecutorKind: "agent",
-		RetryAvoidExecutorID: "desk-a", RetryAvoidUntil: &until,
+		RetryAvoidExecutorID: avoidedExecutorID, RetryAvoidUntil: &until,
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -543,6 +543,13 @@ CREATE TABLE IF NOT EXISTS nodes (
     executor_id       TEXT NOT NULL DEFAULT '',
     execution_started_at INTEGER,
     reservation_id   TEXT NOT NULL DEFAULT '',
+    claim_generation INTEGER NOT NULL DEFAULT 0,
+    claim_membership_id TEXT NOT NULL DEFAULT '',
+    attempts_consumed INTEGER NOT NULL DEFAULT 0,
+    retry_root_run_id TEXT NOT NULL DEFAULT '',
+    executor_location TEXT NOT NULL DEFAULT 'unknown',
+    required_coordinator_id TEXT NOT NULL DEFAULT '',
+    required_executor_location TEXT NOT NULL DEFAULT '',
     avoid_coordinator_id TEXT NOT NULL DEFAULT '',
     avoid_executor_kind TEXT NOT NULL DEFAULT '',
     avoid_executor_id TEXT NOT NULL DEFAULT '',
@@ -551,11 +558,11 @@ CREATE TABLE IF NOT EXISTS nodes (
     needs_labels     BLOB,
     -- prefers_labels: ordered soft executor preferences.
     prefers_labels   BLOB,
-    requested_cores  REAL NOT NULL DEFAULT 0,
+    requested_cores  DOUBLE PRECISION NOT NULL DEFAULT 0,
     requested_memory_bytes INTEGER NOT NULL DEFAULT 0,
     requested_slots  INTEGER NOT NULL DEFAULT 1,
     offer_started_at INTEGER,
-    offer_priority_ceiling INTEGER NOT NULL DEFAULT 100,
+    offer_priority_target INTEGER NOT NULL DEFAULT 100,
     claim_base_priority INTEGER NOT NULL DEFAULT 0,
     claim_priority    INTEGER NOT NULL DEFAULT 0,
     claim_worker_id   TEXT NOT NULL DEFAULT '',
@@ -613,6 +620,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_slot
 CREATE UNIQUE INDEX IF NOT EXISTS idx_node_claim_offers_executor_node
     ON node_claim_offers(executor_name, run_id, node_id);
 CREATE TABLE IF NOT EXISTS executors (
+    executor_id           TEXT NOT NULL,
     name                  TEXT PRIMARY KEY,
     token_prefix          TEXT NOT NULL UNIQUE,
     kind                  TEXT NOT NULL,
@@ -630,6 +638,7 @@ CREATE TABLE IF NOT EXISTS executors (
     headroom_memory_bytes INTEGER NOT NULL DEFAULT 0,
     queue_depth           INTEGER NOT NULL DEFAULT 0
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_executors_executor_id ON executors(executor_id);
 
 CREATE TABLE IF NOT EXISTS events (
     run_id   TEXT NOT NULL,
@@ -1255,15 +1264,22 @@ func (e *SkewError) Error() string {
 
 func (s *Store) migrate() error {
 	ctx := context.Background()
+	var err error
 	if s.dialect == DialectPostgres {
-		return s.migratePostgres(ctx)
+		err = s.migratePostgres(ctx)
+	} else {
+		err = retryOnBusy(func() error {
+			if _, err := s.exec(ctx, schemaVersionTable); err != nil {
+				return fmt.Errorf("create sparkwing_schema_version table: %w", err)
+			}
+			return s.migrateSQLite(ctx)
+		})
 	}
-	return retryOnBusy(func() error {
-		if _, err := s.exec(ctx, schemaVersionTable); err != nil {
-			return fmt.Errorf("create sparkwing_schema_version table: %w", err)
-		}
-		return s.migrateSQLite(ctx)
-	})
+	if err != nil {
+		return err
+	}
+	_, err = s.ensureControllerAuthority(ctx)
+	return err
 }
 
 func retryOnBusy(fn func() error) error {
@@ -1501,6 +1517,15 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesOfferCols); err != nil {
 			return err
 		}
+		if err := ensureColumnsSQLite(ctx, tx, "executors", executorIdentityCols); err != nil {
+			return err
+		}
+		if err := backfillExecutorIDsTx(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_executors_executor_id ON executors(executor_id)`); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET offer_started_at = ready_at
  WHERE ready_at IS NOT NULL AND offer_started_at IS NULL`); err != nil {
 			return err
@@ -1649,7 +1674,16 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		_, err := tx.ExecContext(ctx, executorsTablePostgres)
 		return err
 	case 29:
-		if err := addColumnsTx(ctx, tx, "nodes", nodesOfferCols); err != nil {
+		if err := addColumnsTx(ctx, tx, "nodes", nodesOfferColsPostgres); err != nil {
+			return err
+		}
+		if err := addColumnsTx(ctx, tx, "executors", executorIdentityCols); err != nil {
+			return err
+		}
+		if err := backfillExecutorIDsTx(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_executors_executor_id ON executors(executor_id)`); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET offer_started_at = ready_at
@@ -1799,7 +1833,7 @@ var columnMigrations = []columnSpec{
 		"requested_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
 		"requested_slots":        "INTEGER NOT NULL DEFAULT 1",
 		"offer_started_at":       "INTEGER",
-		"offer_priority_ceiling": "INTEGER NOT NULL DEFAULT 100",
+		"offer_priority_target":  "INTEGER NOT NULL DEFAULT 100",
 		"claim_base_priority":    "INTEGER NOT NULL DEFAULT 0",
 		"claim_priority":         "INTEGER NOT NULL DEFAULT 0",
 		"claim_worker_id":        "TEXT NOT NULL DEFAULT ''",
@@ -1896,6 +1930,10 @@ const pipelineProfilesSustainedBackfill = `UPDATE pipeline_profiles
    SET sustained_cores = peak_cores, prev_sustained_cores = prev_peak_cores
  WHERE sustained_cores = 0`
 
+var executorIdentityCols = map[string]string{
+	"executor_id": "TEXT NOT NULL DEFAULT ''",
+}
+
 var nodesUsageCols = map[string]string{
 	"cpu_nanos":          "INTEGER NOT NULL DEFAULT 0",
 	"max_rss_bytes":      "INTEGER NOT NULL DEFAULT 0",
@@ -1959,9 +1997,23 @@ var nodesOfferCols = map[string]string{
 	"requested_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
 	"requested_slots":        "INTEGER NOT NULL DEFAULT 1",
 	"offer_started_at":       "INTEGER",
-	"offer_priority_ceiling": "INTEGER NOT NULL DEFAULT 100",
+	"offer_priority_target":  "INTEGER NOT NULL DEFAULT 100",
 	"claim_base_priority":    "INTEGER NOT NULL DEFAULT 0",
 	"claim_priority":         "INTEGER NOT NULL DEFAULT 0",
+	"claim_worker_id":        "TEXT NOT NULL DEFAULT ''",
+	"claim_executor_kind":    "TEXT NOT NULL DEFAULT ''",
+	"claim_reservation_id":   "TEXT NOT NULL DEFAULT ''",
+}
+
+var nodesOfferColsPostgres = map[string]string{
+	"prefers_labels":         "BYTEA",
+	"requested_cores":        "DOUBLE PRECISION NOT NULL DEFAULT 0",
+	"requested_memory_bytes": "BIGINT NOT NULL DEFAULT 0",
+	"requested_slots":        "BIGINT NOT NULL DEFAULT 1",
+	"offer_started_at":       "BIGINT",
+	"offer_priority_target":  "BIGINT NOT NULL DEFAULT 100",
+	"claim_base_priority":    "BIGINT NOT NULL DEFAULT 0",
+	"claim_priority":         "BIGINT NOT NULL DEFAULT 0",
 	"claim_worker_id":        "TEXT NOT NULL DEFAULT ''",
 	"claim_executor_kind":    "TEXT NOT NULL DEFAULT ''",
 	"claim_reservation_id":   "TEXT NOT NULL DEFAULT ''",
@@ -2428,6 +2480,9 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if r.Status == runStatusRunning {
 		heartbeat = sql.NullInt64{Int64: time.Now().UnixNano(), Valid: true}
 	}
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at)
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -2542,6 +2597,9 @@ func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot [
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return err
+	}
 	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
 		return err
 	}
@@ -2834,6 +2892,9 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE id = ?`, runID); err != nil {
 		return err
 	}
@@ -2956,7 +3017,7 @@ type Node struct {
 	Claimed                  bool               `json:"claimed,omitempty"`
 	LeaseExpiresAt           *time.Time         `json:"lease_expires_at,omitempty"`
 	OfferStartedAt           *time.Time         `json:"offer_started_at,omitempty"`
-	OfferPriorityCeiling     int                `json:"offer_priority_ceiling,omitempty"`
+	OfferPriorityTarget      int                `json:"offer_priority_target,omitempty"`
 	ClaimBasePriority        int                `json:"claim_base_priority,omitempty"`
 	ClaimPriority            int                `json:"claim_priority,omitempty"`
 	ClaimWorkerID            string             `json:"claim_worker_id,omitempty"`
@@ -3145,12 +3206,41 @@ UPDATE nodes SET status = ?, started_at = ?
 
 // SetNodeStatus updates only the status column.
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error {
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET status = ? WHERE run_id = ? AND node_id = ?`, status, runID, nodeID)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
-	return fencedRows(res, fenced)
+	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return err
+	}
+	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		return err
+	}
+	var executorName, currentStatus string
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&executorName, &currentStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if executorName != "" {
+		if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
+			return err
+		}
+		if currentStatus == nodeStatusDone && status != nodeStatusDone {
+			return ErrLockHeld
+		}
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ? WHERE run_id = ? AND node_id = ?`, status, runID, nodeID)
+	if err != nil {
+		return err
+	}
+	if err := fencedRows(res, hasClaimFence(ctx)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateNodeDeps rewrites a node's stored dependency list.
@@ -3175,7 +3265,31 @@ func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome
 	if exitCode != nil {
 		code = *exitCode
 	}
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID, `
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return err
+	}
+	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		return err
+	}
+	var executorName string
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&executorName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if executorName != "" {
+		if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
+			return err
+		}
+	}
+	res, err := tx.ExecContext(ctx, `
 UPDATE nodes
 	   SET status = ?, outcome = ?, error = ?, output_json = ?, finished_at = ?,
 	       failure_reason = ?, exit_code = ?
@@ -3185,7 +3299,10 @@ UPDATE nodes
 	if err != nil {
 		return err
 	}
-	return fencedRows(res, fenced)
+	if err := fencedRows(res, hasClaimFence(ctx)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SetNodeArtifactManifest records the content-addressed digest of a
@@ -3296,7 +3413,7 @@ func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error
 const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, prefers_labels,
        requested_cores, requested_memory_bytes, requested_slots,
-       offer_started_at, offer_priority_ceiling, claim_base_priority, claim_priority,
+       offer_started_at, offer_priority_target, claim_base_priority, claim_priority,
        claim_worker_id, claim_executor_kind, claim_reservation_id,
 	   status_detail, last_heartbeat, failure_reason, exit_code, annotations_json, summary,
 	   artifact_manifest, cpu_nanos, max_rss_bytes, process_wall_nanos,
@@ -3314,7 +3431,7 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&depsJSON, &n.Error, &outputJSON, &startedNS, &finishedNS,
 		&readyNS, &claimedBy, &leaseNS, &labelsJSON, &prefersJSON,
 		&n.RequestedCores, &n.RequestedMemoryBytes, &n.RequestedSlots,
-		&offerStartedNS, &n.OfferPriorityCeiling, &n.ClaimBasePriority, &n.ClaimPriority,
+		&offerStartedNS, &n.OfferPriorityTarget, &n.ClaimBasePriority, &n.ClaimPriority,
 		&n.ClaimWorkerID, &n.ClaimExecutorKind, &n.ClaimReservationID,
 		&n.StatusDetail, &heartbeatNS,
 		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary, &n.ArtifactManifest,
@@ -3685,9 +3802,80 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 	return tx.Commit()
 }
 
-// MarkNodeReady opens the node's offer round with the absolute priority ceiling.
+// MarkNodeReady opens the node's offer round with the highest attainable
+// executor priority from the same transaction that snapshots its requirements.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	return s.MarkNodeReadyWithPriorityCeiling(ctx, runID, nodeID, 100)
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, true); err != nil {
+		return err
+	}
+	var opened sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT offer_started_at FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&opened); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	var summary ExecutorSchedulingSummary
+	target := 0
+	var now time.Time
+	if !opened.Valid {
+		if err := lockExecutorRegistryTx(ctx, tx, false); err != nil {
+			return err
+		}
+		if err := lockAllExecutorRowsCanonicalTx(ctx, tx); err != nil {
+			return err
+		}
+		now = time.Now()
+		summary, err = s.schedulingSummaryTx(ctx, tx, runID, nodeID)
+		if err != nil {
+			return err
+		}
+		target, err = s.highestActiveExecutorPriorityTx(
+			ctx, tx, summary, now.Add(-ExecutorRegistrationActiveWindow), now,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	res, err := tx.ExecContext(
+		ctx,
+		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?),
+		                  offer_started_at = COALESCE(offer_started_at, ?),
+		                  offer_priority_target = CASE WHEN offer_started_at IS NULL THEN ? ELSE offer_priority_target END
+		  WHERE run_id = ? AND node_id = ?`,
+		now.UnixNano(), now.UnixNano(), target, runID, nodeID,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	if !opened.Valid {
+		if _, err := appendEventTx(ctx, tx, runID, nodeID, "executor_offer_round_opened", map[string]any{
+			"deadline":               now.Add(nodeClaimOfferWindow),
+			"priority_target":        target,
+			"hard_capabilities":      summary.HardCapabilities,
+			"preferred_capabilities": summary.PreferredCapabilities,
+			"resources":              summary.Resources,
+			"slots":                  summary.Slots,
+			"run_priority":           summary.RunPriority,
+		}, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
@@ -3696,6 +3884,9 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return err
+	}
 	if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 		return ErrLockHeld
 	}
@@ -3704,15 +3895,20 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 			return err
 		}
 	}
-	var status, outcome, failureReason string
+	var status, outcome, failureReason, executorName string
 	var claimedBy sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT status, outcome, failure_reason, claimed_by
+	if err := tx.QueryRowContext(ctx, `SELECT status, outcome, failure_reason, claimed_by, claim_executor
   FROM nodes WHERE run_id = ? AND node_id = ?`+s.forUpdate(), runID, nodeID).Scan(
-		&status, &outcome, &failureReason, &claimedBy); err != nil {
+		&status, &outcome, &failureReason, &claimedBy, &executorName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
+	}
+	if executorName != "" {
+		if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
+			return err
+		}
 	}
 	if status == nodeStatusPending && outcome == "" && !claimedBy.Valid {
 		return tx.Commit()
@@ -3729,12 +3925,12 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
    SET status = ?, outcome = '', error = '', output_json = NULL,
        started_at = NULL, finished_at = NULL, ready_at = NULL, offer_started_at = NULL,
-       offer_priority_ceiling = 0, claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
+       offer_priority_target = 0, claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
        claim_base_priority = 0, claim_priority = 0, claim_worker_id = '', claim_executor_kind = '',
        claim_reservation_id = '', claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
-		coordinator_id = '', claim_membership_id = '', executor_kind = '', executor_id = '',
-		executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
+       coordinator_id = '', claim_membership_id = '', executor_kind = '', executor_id = '',
+       executor_location = '', execution_started_at = NULL, reservation_id = '', status_detail = '', last_heartbeat = NULL,
        failure_reason = '', exit_code = NULL, annotations_json = '[]', summary = '', artifact_manifest = ''
  WHERE run_id = ? AND node_id = ? AND status = ? AND outcome = ? AND failure_reason != ?`,
 		nodeStatusPending, runID, nodeID, nodeStatusDone, "failed", FailureAgentLost)
@@ -3749,34 +3945,6 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 		return ErrLockHeld
 	}
 	return tx.Commit()
-}
-
-// MarkNodeReadyWithPriorityCeiling opens an idempotent offer round with the
-// highest effective priority among eligible executors at that instant.
-func (s *Store) MarkNodeReadyWithPriorityCeiling(ctx context.Context, runID, nodeID string, ceiling int) error {
-	if ceiling < 0 || ceiling > 100 {
-		return fmt.Errorf("node offer priority ceiling %d: expected 0 through 100", ceiling)
-	}
-	now := time.Now().UnixNano()
-	res, err := s.exec(
-		ctx,
-		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?),
-		                  offer_started_at = COALESCE(offer_started_at, ?),
-		                  offer_priority_ceiling = CASE WHEN offer_started_at IS NULL THEN ? ELSE offer_priority_ceiling END
-		  WHERE run_id = ? AND node_id = ?`,
-		now, now, ceiling, runID, nodeID,
-	)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 // RevokeNodeReady cancels an unclaimed offer round.
@@ -3840,7 +4008,7 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	}
 	labelSet := make(map[string]struct{}, len(runnerLabels))
 	for _, l := range runnerLabels {
-		if l != "" {
+		if l != "" && l != "local" && !strings.HasPrefix(l, "location=") {
 			labelSet[l] = struct{}{}
 		}
 	}
@@ -3849,6 +4017,10 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	for range maxCandidates {
 		tx, err := s.beginTx(ctx)
 		if err != nil {
+			return nil, err
+		}
+		if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+			_ = tx.Rollback()
 			return nil, err
 		}
 		n := &Node{}
@@ -3968,35 +4140,60 @@ func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) er
 }
 
 // HeartbeatNodeClaim extends the exact claim generation carried by ctx.
-// lease is clamped to [MaxLeaseDuration], so a heartbeat cannot outrun
-// the claim cap.
+// The lease cannot outrun the claim cap or revive expired capacity.
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error {
 	fence, ok := NodeClaimFenceFromContext(ctx)
 	if !ok || fence.HolderID != holderID || fence.Claimant != claimant || fence.ClaimGeneration < 1 {
 		return ErrLockHeld
 	}
-	expires := time.Now().Add(clampNodeLease(lease)).UnixNano()
-	res, err := s.exec(
-		ctx,
-		`UPDATE nodes SET lease_expires_at = ?
+	var updated int64
+	err := s.withExecutorEligibilityTx(ctx, func(tx *storeTx) error {
+		var executorName string
+		var currentLease int64
+		err := tx.QueryRowContext(ctx, `SELECT claim_executor, COALESCE(lease_expires_at, 0) FROM nodes
 		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
 		    AND COALESCE(claim_principal, '') = ?
 		    AND COALESCE(claim_token_prefix, '') = ?
 		    AND COALESCE(claim_membership_id, '') = ?
 		    AND COALESCE(reservation_id, '') = ?
-		    AND claim_generation = ?
-		    AND `+nodeClaimLiveSQL(""),
-		expires, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
-		fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, time.Now().UnixNano(),
-	)
+		    AND claim_generation = ?`+tx.forUpdate(),
+			runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
+			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration).Scan(&executorName, &currentLease)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrLockHeld
+		}
+		if err != nil {
+			return err
+		}
+		if executorName != "" {
+			if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
+				return err
+			}
+		}
+		now := time.Now()
+		if currentLease < now.UnixNano() {
+			return ErrLockHeld
+		}
+		expires := now.Add(clampNodeLease(lease)).UnixNano()
+		res, err := tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ?
+		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
+		    AND COALESCE(claim_principal, '') = ?
+		    AND COALESCE(claim_token_prefix, '') = ?
+		    AND COALESCE(claim_membership_id, '') = ?
+		    AND COALESCE(reservation_id, '') = ?
+		    AND claim_generation = ? AND `+nodeClaimLiveSQL(""),
+			expires, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
+			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, now.UnixNano())
+		if err != nil {
+			return err
+		}
+		updated, err = res.RowsAffected()
+		return err
+	})
 	if err != nil {
 		return err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
+	if updated == 0 {
 		return ErrLockHeld
 	}
 	return nil
@@ -4086,12 +4283,15 @@ func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
 // claims; ready_at is left intact. Returns reaped pairs.
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
-	now := time.Now().UnixNano()
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return nil, err
+	}
+	now := time.Now().UnixNano()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id FROM nodes
@@ -4150,6 +4350,9 @@ func (s *Store) failNodesInRun(ctx context.Context, runID, errMsg, failureReason
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return nil, err
+	}
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT node_id FROM nodes WHERE run_id = ? AND `+nodeNotDone, runID)
@@ -4318,15 +4521,40 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 	return seq, nil
 }
 
-func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string, payload []byte, at time.Time) (int64, error) {
+func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string, payload any, at time.Time) (int64, error) {
+	var raw []byte
+	var err error
+	switch value := payload.(type) {
+	case []byte:
+		raw = value
+	case json.RawMessage:
+		raw = value
+	default:
+		raw, err = json.Marshal(value)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if err := lockEventSequenceTx(ctx, tx, runID); err != nil {
+		return 0, err
+	}
 	var seq int64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?`, runID).Scan(&seq); err != nil {
 		return 0, err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO events (run_id, seq, node_id, kind, ts, payload)
-VALUES (?,?,?,?,?,?)`, runID, seq, nodeID, kind, at.UnixNano(), payload)
+	_, err = tx.ExecContext(ctx, `
+INSERT INTO events (run_id, seq, node_id, kind, ts, payload)
+VALUES (?,?,?,?,?,?)`, runID, seq, nodeID, kind, at.UnixNano(), raw)
 	return seq, err
+}
+
+func lockEventSequenceTx(ctx context.Context, tx *storeTx, runID string) error {
+	if tx.dialect != DialectPostgres {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, runID)
+	return err
 }
 
 // ErrNotFound is returned when a lookup misses.
@@ -5442,17 +5670,18 @@ SELECT id FROM runs
 }
 
 func (s *Store) cascadeOrphanedNodes(ctx context.Context, runID, errMsg string, nowNS int64) error {
-	if _, err := s.exec(ctx, `
+	return s.withExecutorEligibilityTx(ctx, func(tx *storeTx) error {
+		if _, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET `+nodeFailSet+`,
        error          = ?,
        failure_reason = 'orphaned',
        finished_at    = ?
  WHERE run_id = ? AND status = ?`,
-		errMsg, nowNS, runID, nodeStatusRunning); err != nil {
-		return err
-	}
-	_, err := s.exec(ctx, `
+			errMsg, nowNS, runID, nodeStatusRunning); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET status         = ?,
        outcome        = 'cancelled',
@@ -5460,8 +5689,9 @@ UPDATE nodes
        failure_reason = 'orphaned',
        finished_at    = ?
  WHERE run_id = ? AND status = ?`,
-		nodeStatusDone, nowNS, runID, nodeStatusPending)
-	return err
+			nodeStatusDone, nowNS, runID, nodeStatusPending)
+		return err
+	})
 }
 
 func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
@@ -5506,7 +5736,8 @@ SELECT r.id
 		}
 	}
 
-	if _, err := s.exec(ctx, `
+	if err := s.withExecutorEligibilityTx(ctx, func(tx *storeTx) error {
+		_, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET status         = ?,
        outcome        = 'cancelled',
@@ -5515,7 +5746,9 @@ UPDATE nodes
        finished_at    = ?
  WHERE status = ?
    AND run_id IN (SELECT id FROM runs WHERE `+runTerminalIn+`)`,
-		nodeStatusDone, time.Now().UnixNano(), nodeStatusPending); err != nil {
+			nodeStatusDone, time.Now().UnixNano(), nodeStatusPending)
+		return err
+	}); err != nil {
 		return len(orphanIDs), err
 	}
 
@@ -5892,6 +6125,22 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return err
+	}
+	var executorName, currentStatus string
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor, status FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), a.RunID, a.NodeID).Scan(&executorName, &currentStatus)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil && executorName != "" {
+		if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
+			return err
+		}
+		if currentStatus == nodeStatusDone {
+			return ErrLockHeld
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO approvals (run_id, node_id, requested_at, message, timeout_ms, on_timeout)
 VALUES (?,?,?,?,?,?)

@@ -12,15 +12,23 @@ CHANGELOG links here.
   and `max_concurrent` was the only contribution limit. A helper could claim a
   node and then wait in local admission.
 - **After:** Run-store schema 28 persists administrator-owned executor
-  enrollments: exact credential binding, name, kind, controller-trusted location,
+  enrollments: exact credential binding, name, kind, trusted placement location,
   trusted capabilities, priority range, concurrency ceiling, and resource
   budget. An authenticated heartbeat can update only liveness and finite,
   nonnegative headroom. Node claims can persist the scheduling summary's exact
   resource charge and an opaque reservation/physical-slot binding. The local
   agent config can narrow concurrency and contribution but cannot grant trusted
-  capabilities or raise an operator ceiling. Location never grants a capability
-  or widens initial placement; schema 30 preserves the awarded location as a
-  hard agent-loss retry requirement.
+  capabilities or raise an operator ceiling. `location=local` and
+  `location=cloud` are matched only from enrollment; `unknown` fails closed.
+  The reserved `location=coordinator` selector and compatibility alias `local`
+  cannot be granted to a helper. The eligibility preview uses the same matcher
+  as award revalidation and gives excluded enrollments stable offline,
+  placement, capability, slot, budget, or headroom reasons without scores.
+  A controller accepts at most 256 enrolled executors. Attempting to add the
+  257th returns `executor enrollment limit reached: maximum 256 per controller`.
+  This is a fixed scheduling safety bound, not a configurable resource limit.
+  Schema 30 preserves the awarded coordinator and location as hard agent-loss
+  retry requirements.
 - **Migration:** Stop every controller that shares the run store, upgrade all
   of them, then restart them. An older controller refuses schema 28. Existing
   singular `agent.yaml` files without `name` or `coordinators` keep the legacy
@@ -53,17 +61,37 @@ CHANGELOG links here.
 - **After:** Schema 29 persists a five-second offer round per ready node and one
   live offer per credential-bound holder. The controller filters hard
   capabilities, exact resource demand, concurrency, headroom, and budget before
-  priority. It awards immediately when an offer reaches the highest eligible
-  ceiling recorded as the round opened, or reaches priority 100. At the
+  priority. Schema 29 also gives the controller and each enrollment stable
+  random internal identities; the derived membership ID survives credential
+  rotation without treating a mutable display name as identity. It awards
+  immediately when an offer reaches the exact highest
+  eligible effective priority recorded as the round opened, or reaches
+  priority 100. At the
   deadline it orders remaining live offers by effective priority, earliest
   offer, executor name, physical slot, and holder. Run priority and `Prefers`
   can reorder eligible executors only inside each administrator-owned priority
-  range. A losing or expired offer releases its local reservation; an award
-  consumes that exact reservation and binds its digest and slot to the claim.
+  range. A losing or expired offer releases its local reservation; a wingd
+  restart reattaches the same lease, and an unrecoverable reattach cancels
+  execution before lease shedding. An award consumes that exact reservation
+  and binds its digest and slot to the claim.
   If no live offer wins, the same controller transaction transfers an unlabeled
   node to the configured fallback. Repeating an awarded offer after a lost
   response returns the original fenced claim. A node already ready during the
   schema upgrade keeps its original readiness timestamp as the round start.
+  Lifecycle events record `executor_name`, safe kind and location fields,
+  scores, requirements, and outcomes, never credentials, principals, holders,
+  membership IDs, internal controller or executor IDs, or reservation IDs.
+  Store integrations call `MarkNodeReady`; the controller now snapshots node
+  requirements and computes the exact attainable priority target inside that
+  transaction. PostgreSQL gives round opening an exclusive eligibility fence;
+  ordinary allocation, release, expiry, claim-heartbeat, and plan mutations use
+  a shared fence, so unrelated lease heartbeats keep progressing during deadline
+  arbitration. Target calculation and award load active occupancy once, and
+  award batch-locks at most 256 executor rows in canonical order. An expired
+  claim cannot be revived by a late heartbeat after its capacity is reusable.
+  `MarkNodeReadyWithPriorityCeiling` is
+  removed so a caller cannot inject a stale target between those reads and
+  opening the round.
 - **Migration:** Stop every controller sharing the run store, upgrade all of
   them through schema 29, and restart them before starting enrolled agents.
   Upgrade each enrolled agent and its wingd together; the agent must reserve
@@ -73,6 +101,7 @@ CHANGELOG links here.
   slot cannot back simultaneous offers to two controllers. A gateway needs the
   equivalent downstream admission reservation before it offers. Name-less
   agents remain on the legacy FIFO route and need no configuration change.
+  Replace `MarkNodeReadyWithPriorityCeiling` calls with `MarkNodeReady`.
 - **Why:** A claim must mean the executor can start immediately, not that it has
   queued work behind a local scheduler. Durable rounds let the controller
   select the best currently runnable executor without double-awarding a node,
@@ -112,6 +141,20 @@ CHANGELOG links here.
   log appends additionally carry that acknowledged ordinal. Existing nodes and
   logs remain readable; missing legacy attempt attribution stays unknown.
   A cancelled body closes its acknowledged attempt with outcome `cancelled`.
+  Assisted executors now run even locally registered pipeline bodies in a child
+  process. The supervisor retains its enrollment token and internal claim
+  identity; the child receives a process-lifetime loopback capability limited
+  to the awarded run and node. Attempt start, finish, and logs require the
+  acknowledged ordinal. It inherits only minimal runtime variables and safe
+  names explicitly allowed by `SPARKWING_SUBMIT_ENV_ALLOW`.
+  Do not depend on ambient agent-service cloud, cache, or controller
+  credentials. Enrollment authorizes repository code to execute with the
+  helper's OS-user permissions; it does not provide an OS sandbox. Sparkwing
+  never joins a tailnet or changes host networking. Schema 30 is an internal
+  dependency and must not ship alone: schema 31 adds the current-attempt fence
+  and durable grants for `Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`,
+  cross-pipeline references, and dynamic `SpawnNode` before assisted execution
+  is compatible with those APIs.
 - **Why:** A claim lease is both an execution fence and an ambiguity boundary.
   Acknowledgement bounds at-least-once re-execution to the configured retry
   budget without claiming exactly-once external effects. Transactional fences
@@ -192,8 +235,9 @@ CHANGELOG links here.
   falling back to an unscoped row only when that row is shared. `admin` remains
   a superset, so existing tokens keep working, and an `admin` read may pass
   `?repo=` or `?run=` to reach a repository's own row. Neither the trigger loop
-  nor `sparkwing worker` puts `--token` on the child process argv; the child
-  reads `SPARKWING_AGENT_TOKEN` from its environment.
+  nor `sparkwing worker` puts `--token` on the child process argv. Before schema
+  30, the child read `SPARKWING_AGENT_TOKEN` from its environment; assisted
+  executors now use the scoped loopback capability described above.
 - **Migration:** Upgrade the controller before the runners so the schema-23
   tables exist; older binaries refuse the upgraded SQL store. Re-mint each
   runner token with `nodes.claim`, `triggers.claim`, `runs.state`,
@@ -216,12 +260,12 @@ CHANGELOG links here.
   `ReposForClaimant`, and `store.ClaimNextTriggerFor` takes a
   `store.ClaimIdentity` after the context. `client.CreateSecretForRepo` takes a
   trailing `shared bool`; `client.GetSecretForRun` is the read a runner makes.
-- **Why:** Every pool replica and laptop agent holds a runner token, and the
-  process that executes pipeline code holds it too. A token scoped to run work
-  should not be able to mint an admin bearer, finish a stranger's run, or read
-  another repository's deploy key with one `os.Getenv`. Keeping the bearer out
-  of the pipeline body's reach entirely, by brokering these calls through a
-  supervisor process, is the remaining design step.
+- **Why:** Every pool replica and laptop agent holds a runner token, and before
+  schema 30 the process that executed pipeline code held it too. A token scoped
+  to run work should not be able to mint an admin bearer, finish a stranger's
+  run, or read another repository's deploy key with one `os.Getenv`. Assisted
+  executors now broker these calls through their supervisor; other execution
+  modes keep their documented boundary.
 
 ## Session rows are hashed and the CSRF column is dropped
 

@@ -144,13 +144,16 @@ func TestTakeoverBudgetRestartsForADifferentDaemon(t *testing.T) {
 					return
 				}
 				version := "v9.9.9"
+				buildIdentity := wingwire.BuildIdentity
 				if seen <= predecessors {
 					version = fmt.Sprintf("v0.%d.0", seen)
+					buildIdentity = ""
 				}
 				line, _ := wingwire.Encode(&wingwire.HelloAck{
 					ProtocolMajor:       wingd.ProtocolMajor,
 					NativeProtocolMajor: wingd.ProtocolMajor,
 					BinaryVersion:       version,
+					BuildIdentity:       buildIdentity,
 				})
 				if _, err := nc.Write(line); err != nil {
 					return

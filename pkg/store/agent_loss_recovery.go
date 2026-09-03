@@ -146,6 +146,9 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return nil, err
+	}
 
 	rows, err := tx.QueryContext(ctx, `SELECT run_id, node_id, coordinator_id, executor_kind, claim_worker_id, executor_id, executor_location,
 	       claim_membership_id, reservation_id, required_coordinator_id, required_executor_location,

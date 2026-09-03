@@ -2682,7 +2682,11 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409":
-          description: The name or exact credential prefix conflicts with another enrollment.
+          description: |
+            The name or exact credential prefix conflicts with another
+            enrollment, or the controller already has 256 enrolled executors.
+            The limit response is exactly
+            `executor enrollment limit reached: maximum 256 per controller`.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
@@ -3078,7 +3082,7 @@ components:
           description: True while a claim exists; does not disclose holder identity.
         lease_expires_at: {type: string, format: date-time, nullable: true}
         offer_started_at: {type: string, format: date-time, nullable: true}
-        offer_priority_ceiling: {type: integer, minimum: 0, maximum: 100}
+        offer_priority_target: {type: integer, minimum: 0, maximum: 100}
         claim_base_priority: {type: integer, minimum: 0, maximum: 100}
         claim_priority: {type: integer, minimum: 0, maximum: 100}
         executor_kind: {type: string, enum: [agent, gateway]}
@@ -3428,7 +3432,7 @@ components:
         location:
           type: string
           enum: [local, cloud, unknown]
-          description: Controller-owned attribution and hard retry-placement policy.
+          description: Controller-owned placement and retry-attribution policy; legacy rows report unknown.
         labels:
           type: object
           additionalProperties: {type: string}
@@ -3482,7 +3486,7 @@ components:
           type: string
           enum: [local, cloud, unknown]
           default: unknown
-          description: Controller-owned attribution and hard retry-placement policy.
+          description: Controller-owned placement and retry-attribution policy. Unknown fails location-specific requirements.
         capabilities:
           type: array
           items: {type: string}
@@ -3527,7 +3531,7 @@ components:
               enum: [local, cloud, unknown]
         membership:
           type: object
-          required: [membership_id, worker_id, kind, registered_base_priority, eligible, effective_priority, highest_eligible_ceiling, active_slots, max_concurrent]
+          required: [membership_id, worker_id, kind, registered_base_priority, eligible, effective_priority, highest_eligible_priority, active_slots, max_concurrent]
           properties:
             membership_id: {type: string}
             worker_id: {type: string}
@@ -3535,7 +3539,7 @@ components:
             registered_base_priority: {type: integer, minimum: 0, maximum: 100}
             eligible: {type: boolean}
             effective_priority: {type: integer, minimum: 0, maximum: 100}
-            highest_eligible_ceiling: {type: integer, minimum: 0, maximum: 100}
+            highest_eligible_priority: {type: integer, minimum: 0, maximum: 100}
             active_slots: {type: integer, minimum: 0}
             max_concurrent: {type: integer, minimum: 1}
         offer_deadline: {type: string, format: date-time}

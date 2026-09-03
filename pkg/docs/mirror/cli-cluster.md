@@ -80,7 +80,9 @@ with the same credential updates trusted scheduling fields without changing
 live headroom. Changing the prefix requires a new heartbeat.
 
 Use a distinct revocable token for every coordinator membership. The
-prefix is accepted as input but is never returned by the agents API.
+prefix is accepted as input but is never returned by the agents API. A
+controller accepts at most 256 enrolled executors. Adding another returns
+`executor enrollment limit reached: maximum 256 per controller`.
 
 ### Flags
 
@@ -89,7 +91,7 @@ prefix is accepted as input but is never returned by the agents API.
 | `--name NAME` | Executor name (required) |
 | `--token-prefix PREFIX` | Exact runner or service token prefix (required) |
 | `--kind KIND` | Executor kind (agent\|gateway) (default: agent) |
-| `--location WHERE` | Display location (local\|cloud\|unknown) (default: unknown) |
+| `--location WHERE` | Trusted placement location (local\|cloud\|unknown) (default: unknown) |
 | `--capability LABEL` | Trusted capability (repeatable) |
 | `--base-priority N` | Base scheduling priority (0-100) (default: 0) |
 | `--priority-ceiling N` | Highest effective priority (0-100) (default: 100) |
@@ -114,7 +116,7 @@ Print the controller's known agents
 
 Fetches /api/v1/agents and renders a table of fleet members.
 Registered executors report their operator-assigned identity,
-kind, display location, capabilities, concurrency limit, and
+kind, trusted placement location, capabilities, concurrency limit, and
 measured resource headroom. A stale registration remains visible
 as offline; recent legacy claim-only runners remain visible too.
 

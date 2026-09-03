@@ -71,24 +71,7 @@ func advertisedCapacity(qs wingwire.QueueState, rv, contribution, membershipCont
 		}
 	}
 	reserveCores, reserveMem := rv.resolve(machineCores, machineMem)
-	budgetCores, budgetMem := contribution.resolve(machineCores, machineMem)
-	if budgetCores <= 0 {
-		budgetCores = machineCores - reserveCores
-	}
-	if budgetMem <= 0 {
-		budgetMem = machineMem - reserveMem
-	}
-	membershipCores, membershipMem := membershipContribution.resolve(machineCores, machineMem)
-	if membershipCores > 0 {
-		budgetCores = min(budgetCores, membershipCores)
-	}
-	if membershipMem > 0 {
-		budgetMem = min(budgetMem, membershipMem)
-	}
-	budgetCores = min(budgetCores, machineCores-reserveCores)
-	budgetMem = min(budgetMem, machineMem-reserveMem)
-	budgetCores = max(budgetCores, 0)
-	budgetMem = max(budgetMem, 0)
+	_, membershipBudget := resolvedContributionBudgets(machineCores, machineMem, rv, contribution, membershipContribution)
 	var controllerCores float64
 	var controllerMem int64
 	for _, holder := range qs.Holders {
@@ -98,19 +81,46 @@ func advertisedCapacity(qs wingwire.QueueState, rv, contribution, membershipCont
 		}
 	}
 	cores := availCores - reserveCores
-	cores = min(cores, budgetCores-controllerCores)
+	cores = min(cores, membershipBudget.Cores-controllerCores)
 	if cores < 0 {
 		cores = 0
 	}
 	mem := availMem - reserveMem
-	mem = min(mem, budgetMem-controllerMem)
+	mem = min(mem, membershipBudget.MemoryBytes-controllerMem)
 	if mem < 0 {
 		mem = 0
 	}
 	return capacityReport{
 		headroom: &client.Headroom{Cores: cores, MemoryBytes: mem, QueueDepth: len(qs.Waiters)},
-		budget:   resourceBudget{Cores: budgetCores, MemoryBytes: budgetMem},
+		budget:   membershipBudget,
 	}
+}
+
+func resolvedContributionBudgets(machineCores float64, machineMemoryBytes int64, localReserve, globalContribution, membershipContribution reserve) (resourceBudget, resourceBudget) {
+	reserveCores, reserveMemory := localReserve.resolve(machineCores, machineMemoryBytes)
+	globalCores, globalMemory := globalContribution.resolve(machineCores, machineMemoryBytes)
+	if globalCores <= 0 {
+		globalCores = machineCores - reserveCores
+	}
+	if globalMemory <= 0 {
+		globalMemory = machineMemoryBytes - reserveMemory
+	}
+	global := resourceBudget{
+		Cores:       max(min(globalCores, machineCores-reserveCores), 0),
+		MemoryBytes: max(min(globalMemory, machineMemoryBytes-reserveMemory), 0),
+	}
+	membershipCores, membershipMemory := membershipContribution.resolve(machineCores, machineMemoryBytes)
+	if membershipCores <= 0 {
+		membershipCores = global.Cores
+	}
+	if membershipMemory <= 0 {
+		membershipMemory = global.MemoryBytes
+	}
+	membership := resourceBudget{
+		Cores:       max(min(membershipCores, global.Cores), 0),
+		MemoryBytes: max(min(membershipMemory, global.MemoryBytes), 0),
+	}
+	return global, membership
 }
 
 func grantable(r wingwire.ResourceState) float64 {

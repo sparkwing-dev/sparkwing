@@ -60,6 +60,12 @@ func TriggerClaimFenceFromContext(ctx context.Context) (TriggerClaimFence, bool)
 	return fence, ok
 }
 
+func hasClaimFence(ctx context.Context) bool {
+	_, node := NodeClaimFenceFromContext(ctx)
+	_, trigger := TriggerClaimFenceFromContext(ctx)
+	return node || trigger
+}
+
 func WithoutClaimFences(ctx context.Context) context.Context {
 	ctx = context.WithValue(ctx, nodeClaimFenceKey{}, struct{}{})
 	return context.WithValue(ctx, triggerClaimFenceKey{}, struct{}{})

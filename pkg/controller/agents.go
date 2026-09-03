@@ -89,6 +89,12 @@ func normalizeEnrollment(name string, in enrollAgentReq) (store.Executor, error)
 	capabilities := make([]string, 0, len(in.Capabilities))
 	for _, capability := range in.Capabilities {
 		capability = strings.TrimSpace(capability)
+		for _, value := range strings.Split(capability, ",") {
+			value = strings.TrimSpace(value)
+			if value == "local" || strings.HasPrefix(value, "location=") {
+				return store.Executor{}, fmt.Errorf("executor capability %q uses reserved placement vocabulary", capability)
+			}
+		}
 		if capability != "" && !seen[capability] {
 			seen[capability] = true
 			capabilities = append(capabilities, capability)
@@ -123,6 +129,10 @@ func (s *Server) handleEnrollAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	executor.Principal = token.Principal
 	if err := s.store.EnrollExecutor(r.Context(), token.Prefix, executor); err != nil {
+		if errors.Is(err, store.ErrExecutorEnrollmentLimit) {
+			writeError(w, http.StatusConflict, store.ErrExecutorEnrollmentLimit)
+			return
+		}
 		// safety: PostgreSQL constraint errors can expose credential prefixes
 		writeError(w, http.StatusConflict, errors.New("executor enrollment conflicts with an existing name or credential"))
 		return

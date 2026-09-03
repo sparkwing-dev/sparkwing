@@ -656,6 +656,7 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (int
 	}
 	u := strings.TrimRight(s.controllerURL, "/") + "/api/v1/runs/" + url.PathEscape(runID) +
 		"/nodes/" + url.PathEscape(nodeID) + "/claim/validate"
+	// #nosec G704 -- the origin is operator configuration; caller values are escaped path segments
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, u, nil)
 	if err != nil {
 		return http.StatusBadGateway, err
@@ -671,6 +672,7 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (int
 	} {
 		req.Header.Set(name, r.Header.Get(name))
 	}
+	// #nosec G704 -- the validated request retains the same operator-configured origin
 	resp, err := s.authHTTP.Do(req)
 	if err != nil {
 		return http.StatusBadGateway, fmt.Errorf("validate log claim: %w", err)

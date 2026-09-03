@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -31,17 +32,27 @@ func TestSchemaV29MigratesActualV28SQLiteShape(t *testing.T) {
 		`ALTER TABLE nodes DROP COLUMN requested_memory_bytes`,
 		`ALTER TABLE nodes DROP COLUMN requested_slots`,
 		`ALTER TABLE nodes DROP COLUMN offer_started_at`,
-		`ALTER TABLE nodes DROP COLUMN offer_priority_ceiling`,
+		`ALTER TABLE nodes DROP COLUMN offer_priority_target`,
 		`ALTER TABLE nodes DROP COLUMN claim_base_priority`,
 		`ALTER TABLE nodes DROP COLUMN claim_priority`,
 		`ALTER TABLE nodes DROP COLUMN claim_worker_id`,
 		`ALTER TABLE nodes DROP COLUMN claim_executor_kind`,
 		`ALTER TABLE nodes DROP COLUMN claim_reservation_id`,
+		`DROP INDEX idx_executors_executor_id`,
+		`ALTER TABLE executors DROP COLUMN executor_id`,
+		`DELETE FROM sparkwing_meta WHERE key = 'controller_authority_id'`,
 		`DELETE FROM sparkwing_schema_version WHERE version >= 29`,
 	} {
 		if _, err := st.DB().ExecContext(ctx, stmt); err != nil {
 			t.Fatalf("downgrade with %q: %v", stmt, err)
 		}
+	}
+	if _, err := st.DB().ExecContext(ctx, `INSERT INTO executors
+    (name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling,
+     max_concurrent, budget_cores, budget_memory_bytes, principal, last_seen,
+     headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth)
+VALUES ('legacy-worker', 'swr_legacy', 'agent', 'unknown', '[]', 0, 0, 1, 0, 0, 'legacy', 0, 0, 0, 0, 0)`); err != nil {
+		t.Fatalf("seed v28 executor: %v", err)
 	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
@@ -57,8 +68,9 @@ func TestSchemaV29MigratesActualV28SQLiteShape(t *testing.T) {
 		t.Fatalf("v28 executors table was not preserved: %v", err)
 	}
 	for table, names := range map[string][]string{
+		"executors": {"executor_id"},
 		"nodes": {
-			"offer_started_at", "offer_priority_ceiling", "prefers_labels",
+			"offer_started_at", "offer_priority_target", "prefers_labels",
 			"requested_cores", "requested_memory_bytes", "requested_slots",
 		},
 		"node_claim_offers": {
@@ -79,6 +91,7 @@ func TestSchemaV29MigratesActualV28SQLiteShape(t *testing.T) {
 		}
 	}
 	for _, name := range []string{
+		"idx_executors_executor_id",
 		"idx_node_claim_offers_reservation",
 		"idx_node_claim_offers_executor_slot",
 		"idx_node_claim_offers_executor_node",
@@ -91,6 +104,16 @@ func TestSchemaV29MigratesActualV28SQLiteShape(t *testing.T) {
 		if count != 1 {
 			t.Errorf("migrated schema missing %s", name)
 		}
+	}
+	var executorID, authorityID string
+	if err := up.DB().QueryRowContext(ctx, `SELECT executor_id FROM executors WHERE name = 'legacy-worker'`).Scan(&executorID); err != nil {
+		t.Fatal(err)
+	}
+	if err := up.DB().QueryRowContext(ctx, `SELECT value FROM sparkwing_meta WHERE key = 'controller_authority_id'`).Scan(&authorityID); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(executorID, "swex_") || !strings.HasPrefix(authorityID, "swfa_") {
+		t.Fatalf("migrated identities executor=%q authority=%q", executorID, authorityID)
 	}
 	var readyAt, offerStartedAt int64
 	if err := up.DB().QueryRowContext(ctx,

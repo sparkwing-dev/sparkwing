@@ -3,6 +3,23 @@
 Sparkwing tracks run health, failure reasons, and resource usage so you
 can debug failures fast and right-size containers.
 
+## Assisted-offer lifecycle
+
+Enrolled-executor arbitration writes transition events to the run stream. The
+events carry node requirements, the round priority target, safe executor
+display fields (`executor_name`, `executor_kind`, and `executor_location`), and
+effective scores. Events never carry a credential, token prefix, principal,
+holder, membership ID, internal controller or executor ID, or reservation ID.
+
+| Event | Meaning |
+|---|---|
+| `executor_offer_round_opened` | The controller opened a five-second round and recorded its exact highest attainable effective priority. |
+| `executor_offer_received` | An eligible executor supplied a new capacity-backed offer. Refreshing the same offer does not append another event. |
+| `executor_offer_expired` | The offer stopped refreshing for two seconds and was removed. |
+| `executor_offer_declined` | Current enrollment or claim validation rejected the offer, or a higher-ranked offer won. The safe `reason` field distinguishes those cases. |
+| `executor_offer_awarded` | The offer won at the recorded priority target or at the deadline. |
+| `executor_offer_round_empty` | The deadline had no live eligible offer, so the existing coordinator fallback took ownership. |
+
 ## Failure reasons
 
 A failed node carries a `failure_reason` when the controller could
