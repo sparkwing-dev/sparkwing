@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -36,34 +37,54 @@ const (
 	hostedRetryCreate
 )
 
-// safety: the last path segment of every POST whose effect is a value, not
-// an increment. A route absent from it is repeated only when it provably
-// never arrived. Concurrency is here because the store upserts a holder on
-// (key, holder_id) and a waiter on (key, run_id, node_id).
-var hostedRepeatableWrites = map[string]bool{
-	"finish":            true,
-	"heartbeat":         true,
-	"plan":              true,
-	"cancel":            true,
-	"start":             true,
-	"status":            true,
-	"deps":              true,
-	"touch":             true,
-	"activity":          true,
-	"summary":           true,
-	"artifact-manifest": true,
-	"mark-ready":        true,
-	"revoke-ready":      true,
-	"release":           true,
-	"skip":              true,
-	"acquire":           true,
-	"resolve":           true,
-	"cancel-waiter":     true,
-	"force-release":     true,
-	"done":              true,
-	"claim":             true,
-	"reconcile-orphans": true,
+// safety: keyed by the pattern the controller registers and matched through a
+// mux, because a policy belongs to a route: matching by path segment let a
+// node named for a keyword borrow that keyword's policy. Creates carry the
+// caller's ids; the rest write a value, or a claim the store upserts by key.
+var hostedRoutePolicies = map[string]hostedRetryPolicy{
+	"POST /api/v1/runs":            hostedRetryCreate,
+	"POST /api/v1/runs/{id}/nodes": hostedRetryCreate,
+
+	"POST /api/v1/runs/{id}/cancel":                           hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/finish":                           hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/heartbeat":                        hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/plan":                             hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/activity":          hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest": hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/deps":              hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/finish":            hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat":         hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/mark-ready":        hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/release":           hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready":      hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/start":             hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/status":            hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/summary":           hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/touch":             hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/finish":      hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/skip":        hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/start":       hostedRetryRepeatable,
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/steps/summary":     hostedRetryRepeatable,
+	"POST /api/v1/maintenance/reconcile-orphans":              hostedRetryRepeatable,
+	"POST /api/v1/triggers/{id}/claim":                        hostedRetryRepeatable,
+	"POST /api/v1/triggers/{id}/done":                         hostedRetryRepeatable,
+	"POST /api/v1/triggers/{id}/heartbeat":                    hostedRetryRepeatable,
+
+	"POST /api/v1/concurrency/{key}/acquire":       hostedRetryRepeatable,
+	"POST /api/v1/concurrency/{key}/cancel-waiter": hostedRetryRepeatable,
+	"POST /api/v1/concurrency/{key}/force-release": hostedRetryRepeatable,
+	"POST /api/v1/concurrency/{key}/heartbeat":     hostedRetryRepeatable,
+	"POST /api/v1/concurrency/{key}/release":       hostedRetryRepeatable,
 }
+
+var hostedRouteMux = sync.OnceValue(func() *http.ServeMux {
+	mux := http.NewServeMux()
+	marker := http.NotFoundHandler()
+	for pattern := range hostedRoutePolicies {
+		mux.Handle(pattern, marker)
+	}
+	return mux
+})
 
 func hostedRetryPolicyFor(req *http.Request) hostedRetryPolicy {
 	switch req.Method {
@@ -73,12 +94,8 @@ func hostedRetryPolicyFor(req *http.Request) hostedRetryPolicy {
 	default:
 		return hostedRetryUnsent
 	}
-	path := strings.TrimSuffix(req.URL.Path, "/")
-	if path == "/api/v1/runs" || strings.HasSuffix(path, "/nodes") {
-		return hostedRetryCreate
-	}
-	if i := strings.LastIndexByte(path, '/'); i >= 0 && hostedRepeatableWrites[path[i+1:]] {
-		return hostedRetryRepeatable
+	if _, pattern := hostedRouteMux().Handler(req); pattern != "" {
+		return hostedRoutePolicies[pattern]
 	}
 	return hostedRetryUnsent
 }
@@ -109,7 +126,7 @@ func (t *hostedRetryTransport) RoundTrip(req *http.Request) (*http.Response, err
 			return hostedSettleCreate(policy, attempt, resp), nil
 		}
 		if !hostedRetryAllowed(policy, err) {
-			return resp, err
+			return hostedFinalAnswer(resp), err
 		}
 		if !t.now().Before(deadline) {
 			return hostedFinalAnswer(resp), err

@@ -23,9 +23,10 @@ import (
 // syntactically whole URL.
 const HostedAPIBaseURL = "http://sparkwing-api"
 
-// safety: the daemon bounds a request at [APIRequestTimeout] and answers,
-// so the client's own bound only has to outlast that answer; a shorter one
-// would turn the daemon's error into a client timeout that names nothing.
+// safety: outlasts the answer the daemon bounds at [APIRequestTimeout], since
+// shorter would abandon a request it is about to answer. Longer than
+// [HostedRestartBudget] on purpose: that budget buys back a daemon that
+// refuses or restarts, while one that accepts and never answers ends here.
 const hostedAPITimeout = APIRequestTimeout + 15*time.Second
 
 const hostedAPIProbeTimeout = 3 * time.Second

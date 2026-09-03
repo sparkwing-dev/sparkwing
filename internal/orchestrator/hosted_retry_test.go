@@ -306,3 +306,26 @@ func TestHostedRetry_AWedgedDaemonDoesNotInviteASecondBudget(t *testing.T) {
 		t.Fatalf("err = %v, want it to name the daemon", err)
 	}
 }
+
+func TestHostedRetryPolicy_ANodeIDCannotBorrowAPolicy(t *testing.T) {
+	cases := []struct {
+		path string
+		want hostedRetryPolicy
+	}{
+		{"/api/v1/runs/r1/approvals/nodes", hostedRetryUnsent},
+		{"/api/v1/runs/r1/approvals/finish", hostedRetryUnsent},
+		{"/api/v1/runs/r1/approvals/acquire", hostedRetryUnsent},
+		{"/api/v1/runs/r1/nodes/nodes/start", hostedRetryRepeatable},
+		{"/api/v1/runs/r1/nodes/finish/events", hostedRetryUnsent},
+		{"/api/v1/runs/r1/nodes/release/dispatch", hostedRetryUnsent},
+	}
+	for _, tc := range cases {
+		req, err := http.NewRequest(http.MethodPost, HostedAPIBaseURL+tc.path, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.path, err)
+		}
+		if got := hostedRetryPolicyFor(req); got != tc.want {
+			t.Errorf("POST %s policy = %d, want %d", tc.path, got, tc.want)
+		}
+	}
+}
