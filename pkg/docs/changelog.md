@@ -503,6 +503,15 @@ code change to unlock.
   `WithReadCacheTTL`), a read that found no run is not cached at all, and
   `GetLatestRun` reads each run envelope without retaining it, so scanning a
   bucket no longer pins every run in it for the life of the process.
+- **ci:** The `commentcheck` gate tells an agent what to do instead of implying
+  the comment should go. `--help` now names the `<root>` positional -- one
+  directory to walk, not a list of files -- and the caps a tagged comment obeys
+  (four lines, 120 characters each). The failure text says to tag the comment
+  rather than delete it and names the tag ordinary rationale belongs under, so a
+  why-comment survives the gate. A `#nosec` annotation sharing a group with
+  another line now names the rule it broke and why, and `-base` charges
+  untracked `.go` files to the branch, so a new test file no longer reports
+  clean before the commit and fails after it.
 
 ### Security
 

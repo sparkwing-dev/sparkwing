@@ -41,13 +41,35 @@ type violation struct {
 	text string
 }
 
+const usageText = `usage: commentcheck [-staged | -base ref] [-allow-no-diff] <root>
+
+<root> is one directory to walk, normally the repository root; commentcheck
+takes no list of files. It parses every .go file under <root> and skips
+vendor, testdata, node_modules, .git and .claude-scratch. -staged and -base
+narrow the report to the lines those diffs add; -base also reads untracked
+.go files, which git diff alone leaves out.
+
+Allowed: GoDoc on exported API declarations and fields, body comments tagged
+hack:, safety:, bug: or perf:, and #nosec GNNN -- reason annotations.
+Caps: a tagged comment runs at most 4 lines, each at most 120 characters; a
+#nosec annotation is one line standing alone in its comment group.
+
+flags:
+`
+
+func usage() {
+	fmt.Fprint(flag.CommandLine.Output(), usageText)
+	flag.PrintDefaults()
+}
+
 func main() {
 	staged := flag.Bool("staged", false, "only report comments in the staged diff (the pre-commit gate)")
 	base := flag.String("base", "", "only report comments added vs the fork point from this git ref")
 	allowNoDiff := flag.Bool("allow-no-diff", false, "pass instead of failing when the diff cannot be computed; the run gates nothing")
+	flag.Usage = usage
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: commentcheck [-staged | -base ref] [-allow-no-diff] <root>")
+		usage()
 		os.Exit(2)
 	}
 	root := flag.Arg(0)
@@ -198,11 +220,13 @@ func checkFile(path string) ([]violation, error) {
 
 func nosecGroupViolation(cg *ast.CommentGroup) string {
 	if len(cg.List) != 1 || strings.Contains(cg.List[0].Text, "\n") {
-		return "a nosec annotation stands alone on one line"
+		return "nosec adjacency: a nosec annotation stands alone on one line, " +
+			"because every other line of its group rides past this gate unread; " +
+			"put a blank line between the annotation and the tagged comment above it"
 	}
 	text := cg.List[0].Text
 	if !nosecRE.MatchString(text) {
-		return "a nosec annotation reads #nosec GNNN -- reason"
+		return "nosec form: a nosec annotation reads #nosec GNNN -- reason"
 	}
 	if utf8.RuneCountInString(text) > 120 {
 		return "tagged comment lines are limited to 120 characters"
@@ -356,7 +380,41 @@ func scopedAdds(root string, staged bool, base string) (map[string]map[int]bool,
 	if err != nil {
 		return nil, err
 	}
-	return parseAddedLines(diff), nil
+	added := parseAddedLines(diff)
+	if !staged {
+		if err := addUntracked(root, added); err != nil {
+			return nil, err
+		}
+	}
+	return added, nil
+}
+
+func addUntracked(root string, added map[string]map[int]bool) error {
+	out, err := git(root, "ls-files", "--others", "--exclude-standard", "-z", "--", "*.go")
+	if err != nil {
+		return err
+	}
+	for rel := range strings.SplitSeq(out, "\x00") {
+		if rel == "" {
+			continue
+		}
+		data, rerr := os.ReadFile(filepath.Join(root, rel))
+		if rerr != nil {
+			if os.IsNotExist(rerr) {
+				continue
+			}
+			return rerr
+		}
+		set := added[rel]
+		if set == nil {
+			set = map[int]bool{}
+			added[rel] = set
+		}
+		for line := 1; line <= strings.Count(string(data), "\n")+1; line++ {
+			set[line] = true
+		}
+	}
+	return nil
 }
 
 func stagedIndex() string {
@@ -440,11 +498,20 @@ func report(violations []violation) {
 		fmt.Println(l)
 	}
 	fmt.Printf("\ncommentcheck: %d disallowed comment(s).\n\n", len(violations))
-	fmt.Println("Allowed: GoDoc on exported API declarations and fields, plus")
-	fmt.Println("  // hack:   a necessary deviation from the obvious approach")
-	fmt.Println("  // safety: an invariant that isn't visible locally")
-	fmt.Println("  // bug:    a known defect that remains unresolved")
-	fmt.Println("  // perf:   a non-obvious optimization")
-	fmt.Println("  // #nosec GNNN -- why the scanner finding is not a defect (one line, alone in its group)")
-	fmt.Println("Fix: delete the comment, document the exported API, or tag the invariant.")
+	fmt.Print(advice)
 }
+
+const advice = `Allowed: GoDoc on exported API declarations and fields, plus
+  // hack:   a necessary deviation from the obvious approach
+  // safety: an invariant that isn't visible locally
+  // bug:    a known defect that remains unresolved
+  // perf:   a non-obvious optimization
+  // #nosec GNNN -- why the scanner finding is not a defect (one line, alone in its group)
+A tagged comment runs at most 4 lines, each at most 120 characters.
+Fix: tag the comment, do not delete it. A body comment must start with one of
+  hack:/safety:/bug:/perf: and say why in one short line. Rationale for a
+  non-obvious choice is a why-comment and belongs under hack: or safety:,
+  whichever fits; that knowledge is worth keeping. Delete only narration that
+  restates what the code already says, and give an exported declaration a
+  GoDoc comment rather than a tag.
+`
