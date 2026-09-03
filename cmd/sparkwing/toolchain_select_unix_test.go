@@ -17,9 +17,6 @@ import (
 
 const toolchainExecHelperEnv = "SPARKWING_TOOLCHAIN_EXEC_HELPER"
 
-// releaseFixture is a stand-in release asset. It answers `version -o json` with
-// the version it was published as, which is what the store's writer checks, and
-// echoes anything else so a test can see the argv the exec handed it.
 func releaseFixture(version string) []byte {
 	return []byte("#!/bin/sh\n" +
 		`if [ "$1" = "version" ]; then printf '{"cli":{"installed":"` + version + `"}}\n'; exit 0; fi` + "\n" +
@@ -251,5 +248,76 @@ func TestRunToolchainExecsTheStoredCLI(t *testing.T) {
 	}
 	if strings.Contains(string(out), "sparkwing: running") {
 		t.Error("the switch notice reached stdout")
+	}
+}
+
+func TestEnsureToolchainBinaryAnnouncesARejectedStoreBeforeRefetching(t *testing.T) {
+	asset := releaseFixture("v9.9.9")
+	_, binPath, _ := seedToolchainStore(t, "v9.9.9", asset)
+	if err := os.WriteFile(binPath, []byte("TAMPERED"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if _, err := ensureToolchainBinary(&out, "v9.9.9"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "stored toolchain v9.9.9 failed verification (") {
+		t.Errorf("a rejected store was replaced silently: %q", out.String())
+	}
+	if !strings.Contains(out.String(), "fetching again") {
+		t.Errorf("notice %q does not say what it did about it", out.String())
+	}
+}
+
+func TestToolchainFetchErrorCarriesTheRejectedStoresReason(t *testing.T) {
+	_, binPath, _ := seedToolchainStore(t, "v9.9.9", releaseFixture("v9.9.9"))
+	if err := os.WriteFile(binPath, []byte("TAMPERED"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cutTheNetwork(t)
+
+	_, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
+	if err == nil {
+		t.Fatal("a tampered store with no network produced no error")
+	}
+	for _, want := range []string{"already in the store was rejected", "digest", "sparkwing update --version v9.9.9"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err.Error(), want)
+		}
+	}
+}
+
+func TestEnsureToolchainBinaryDropsAPreFixDigestSidecar(t *testing.T) {
+	_, binPath, _ := seedToolchainStore(t, "v9.9.9", releaseFixture("v9.9.9"))
+	orphan := binPath + ".sha256"
+	if err := os.WriteFile(orphan, []byte("deadbeef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cutTheNetwork(t)
+
+	if _, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("the pre-fix digest sidecar survived: %v", err)
+	}
+}
+
+func TestAssertToolchainVersionReportsWhatTheChildPrinted(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "fresh-home")
+	t.Setenv("SPARKWING_HOME", home)
+	priv := withTestUpdateKey(t)
+	rejecting := []byte("#!/bin/sh\necho \"unknown flag: --offline\" >&2\nexit 2\n")
+	newReleaseServer(t, "v9.9.9", rejecting, priv, releaseServerOpts{})
+
+	_, err := ensureToolchainBinary(&bytes.Buffer{}, "v9.9.9")
+	if err == nil {
+		t.Fatal("a release that rejects the version query was cached")
+	}
+	for _, want := range []string{"version -o json --offline", "unknown flag: --offline", "exit status 2"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err.Error(), want)
+		}
 	}
 }

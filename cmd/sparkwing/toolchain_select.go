@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,9 +27,6 @@ const (
 	releaseManifestName = "SHA256SUMS"
 )
 
-// toolchainActive carries the version this process was switched to, read once at
-// startup. main() clears the variable from the environment so the pipeline binary
-// and the daemon it spawns do not inherit a guard meant for this process.
 var toolchainActive string
 
 var toolchainExecFn = execToolchain
@@ -58,9 +56,6 @@ type sdkPin struct {
 	replace string
 }
 
-// switchToolchain runs the CLI this repo's SDK pin names when the installed CLI
-// is older than that pin. On unix a switch replaces this process and never
-// returns; on Windows it runs the pinned CLI as a child and exits with its code.
 func switchToolchain(sparkwingDir string) error {
 	if err := checkToolchainIdentity(); err != nil {
 		return err
@@ -83,11 +78,6 @@ func switchToolchain(sparkwingDir string) error {
 	return runToolchain(os.Stderr, decision)
 }
 
-// checkToolchainIdentity refuses to keep running when the release the parent
-// switched to does not identify as the version the parent announced, which is
-// the one way a poisoned store can put a mislabelled release behind the notice.
-// A build that is not a release did not come out of the store, so the value came
-// from somewhere else and the ordinary comparison decides.
 func checkToolchainIdentity() error {
 	if toolchainActive == "" {
 		return nil
@@ -95,10 +85,18 @@ func checkToolchainIdentity() error {
 	if installed := installedVersion(); isReleaseTag(installed) && installed != toolchainActive {
 		return fmt.Errorf(
 			"switched to sparkwing %s but this binary reports %s; the toolchain store entry for %s holds another release. "+
-				"Delete $SPARKWING_HOME/toolchains/%s and re-run",
-			toolchainActive, installed, toolchainActive, toolchainActive)
+				"Delete %s and re-run",
+			toolchainActive, installed, toolchainActive, tildePath(toolchainStorePath(toolchainActive)))
 	}
 	return nil
+}
+
+func toolchainStorePath(version string) string {
+	p, err := paths.DefaultPaths()
+	if err != nil {
+		return filepath.Join("$SPARKWING_HOME", "toolchains", version)
+	}
+	return p.ToolchainDir(version)
 }
 
 func toolchainMode(raw string) (string, error) {
@@ -113,9 +111,6 @@ func toolchainMode(raw string) (string, error) {
 	}
 }
 
-// planToolchainSwitch decides whether the pin outranks the installed CLI. A
-// source build on either side wins, because a checkout is what its author is
-// testing; only a release tag on both sides can order them.
 func planToolchainSwitch(installed string, pin sdkPin, mode, active string) toolchainDecision {
 	d := toolchainDecision{installed: installed, pin: pin.version}
 	switch {
@@ -179,9 +174,6 @@ func runToolchain(w io.Writer, d toolchainDecision) error {
 	return toolchainExecFn(binPath, os.Args[1:], setEnv(os.Environ(), toolchainActiveEnv, d.pin))
 }
 
-// ensureToolchainBinary returns the store path of the pinned CLI. A stored
-// release is used only when the signed release manifest beside it still vouches
-// for its bytes; anything else fetches the release again.
 func ensureToolchainBinary(w io.Writer, version string) (string, error) {
 	p, err := paths.DefaultPaths()
 	if err != nil {
@@ -189,12 +181,17 @@ func ensureToolchainBinary(w io.Writer, version string) (string, error) {
 	}
 	dir := p.ToolchainDir(version)
 	binPath := p.ToolchainBinary(version)
-	if err := verifyStoredToolchain(dir, binPath); err == nil {
+	stale := ""
+	if verifyErr := verifyStoredToolchain(dir, binPath); verifyErr == nil {
+		removeLegacyDigestSidecar(binPath)
 		return binPath, nil
+	} else if _, statErr := os.Stat(binPath); statErr == nil {
+		stale = verifyErr.Error()
+		fmt.Fprintf(w, "sparkwing: stored toolchain %s failed verification (%s); fetching again\n", version, stale)
 	}
 	verified, err := fetchVerifiedRelease(version)
 	if err != nil {
-		return "", toolchainFetchError(version, err)
+		return "", toolchainFetchError(version, stale, err)
 	}
 	if err := prepareToolchainStore(p, dir); err != nil {
 		return "", err
@@ -217,9 +214,14 @@ func ensureToolchainBinary(w io.Writer, version string) (string, error) {
 	if err := writeToolchainFile(dir, filepath.Join(dir, releaseManifestName+".sig"), verified.manifestSig); err != nil {
 		return "", err
 	}
+	removeLegacyDigestSidecar(binPath)
 	fmt.Fprintf(w, "sparkwing: fetched and verified sparkwing %s from %s (sha256 %s)\n",
 		version, releaseBaseURL(version), verified.digest)
 	return binPath, nil
+}
+
+func removeLegacyDigestSidecar(binPath string) {
+	_ = os.Remove(binPath + ".sha256")
 }
 
 func prepareToolchainStore(p paths.Paths, dir string) error {
@@ -235,10 +237,6 @@ func prepareToolchainStore(p paths.Paths, dir string) error {
 	return nil
 }
 
-// verifyStoredToolchain re-runs the release check offline: a trust-set key must
-// have signed the manifest beside the binary, and the manifest must name the
-// binary's own digest. It repairs an executable bit a permission sweep clamped,
-// which is cheaper than refetching the release over it.
 func verifyStoredToolchain(dir, binPath string) error {
 	manifest, err := os.ReadFile(filepath.Join(dir, releaseManifestName))
 	if err != nil {
@@ -283,13 +281,13 @@ func ensureToolchainExecutable(binPath string) error {
 	return nil
 }
 
-// assertToolchainVersion refuses to cache a release that does not identify as the
-// pin, so a retagged manifest or a poisoned mirror cannot hide behind the notice.
 func assertToolchainVersion(binPath, version string) error {
+	args := []string{"version", "-o", "json", "--offline"}
 	// #nosec G702 -- the release binary this process just verified against its signed manifest, asked only for its version
-	out, err := exec.Command(binPath, "version", "-o", "json", "--offline").Output()
+	out, err := exec.Command(binPath, args...).Output()
 	if err != nil {
-		return fmt.Errorf("ask the fetched sparkwing %s for its version: %w", version, err)
+		return fmt.Errorf("ask the fetched sparkwing %s for its version: `%s %s`: %w%s",
+			version, binPath, strings.Join(args, " "), err, childStderr(err))
 	}
 	var report VersionReport
 	if err := json.Unmarshal(out, &report); err != nil {
@@ -303,8 +301,19 @@ func assertToolchainVersion(binPath, version string) error {
 	return nil
 }
 
-// writeToolchainFile stages beside the destination and renames, so a concurrent
-// reader either sees the previous file or the complete new one.
+func childStderr(err error) string {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return ""
+	}
+	text := strings.TrimSpace(string(exitErr.Stderr))
+	if text == "" {
+		return ""
+	}
+	return "\n  it printed: " + text
+}
+
+// safety: rename is the only atomic step; a concurrent reader must never see a partial file.
 func writeToolchainFile(dir, dest string, body []byte) error {
 	tmp, err := writeInstallTemp(dir, ".sparkwing-toolchain-*", body, fssecure.FileMode)
 	if err != nil {
@@ -324,12 +333,16 @@ func toolchainLocalRefusal(d toolchainDecision) error {
 		d.pin, d.installed, toolchainModeEnv, toolchainModeLocal, d.pin, d.pin, toolchainModeEnv)
 }
 
-func toolchainFetchError(version string, cause error) error {
+func toolchainFetchError(version, stale string, cause error) error {
+	reason := ""
+	if stale != "" {
+		reason = "\n  the copy already in the store was rejected: " + stale
+	}
 	return fmt.Errorf(
-		"fetch sparkwing %s, the SDK version this repo pins: %w\n"+
+		"fetch sparkwing %s, the SDK version this repo pins: %w%s\n"+
 			"  tried %s\n"+
 			"  install it by hand with `sparkwing update --version %s` and re-run",
-		version, cause, releaseBaseURL(version), version)
+		version, cause, reason, releaseBaseURL(version), version)
 }
 
 func tildePath(path string) string {
