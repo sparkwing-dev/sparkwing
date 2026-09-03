@@ -311,6 +311,12 @@ code change to unlock.
 
 ### Fixed
 
+- **orchestrator:** A run cancelled while a node was still waiting on a
+  dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
+  that node as cancelled. The terminal write used the run context that had just
+  been cancelled, so it never reached the store and the node's row stayed at
+  `status=pending` under a finished run -- visible in `sparkwing runs status`
+  and the receipt until a `doctor`/`jobs` sweep reconciled it.
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
