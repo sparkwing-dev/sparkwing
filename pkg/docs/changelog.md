@@ -51,6 +51,22 @@ code change to unlock.
 
 ### Changed
 
+- **store:** The runs store opens by requirements set rather than by exact
+  schema version. The database records the features its schema relies on in a
+  new `sparkwing_requirements` table, each stamped with the binary version that
+  introduced it, and a binary opens the database when it knows every
+  requirement listed, whatever version number the schema table holds. An
+  additive migration -- a new table, a column with a default, an index older
+  writers cannot violate -- therefore no longer strands every older binary on
+  the machine; only a migration that declares a requirement does. The refusal
+  now names what is missing and the release that has it: `sparkwing: this state
+  database uses unique-token-prefix, which needs sparkwing >= v0.40.0; you have
+  v0.38.2. Run sparkwing update to upgrade.` A database migrated before this
+  release is backfilled with the requirements its applied versions declare on
+  first open, the daemon handshake carries the requirements the daemon knows so
+  a client refuses it only on a real gap, and the release gate demands a
+  `(Breaking)` changelog entry only for a bump that adds a requirement.
+
 - **ci:** The pre-commit formatters step and the em-dash and tracker-ID sweeps
   judge the whole change, not only what is staged. Each reads the staged files
   when something is staged and the files changed since `origin/main` otherwise,

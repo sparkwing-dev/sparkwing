@@ -468,6 +468,7 @@ func (d *Daemon) serveConn(c *conn) {
 		BuildIdentity:       wingwire.BuildIdentity,
 		Draining:            draining,
 		StoreSchemaVersion:  d.cfg.StoreSchemaVersion,
+		StoreRequirements:   d.cfg.StoreRequirements,
 	}
 	if err := c.send(ack); err != nil {
 		return

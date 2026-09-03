@@ -61,10 +61,21 @@ func CheckChangelogLint(ctx context.Context, repoRoot string) error {
 	return fmt.Errorf("%s", b.String())
 }
 
-const schemaBreakCategory = "unmarked-schema-break"
+const (
+	schemaBreakCategory  = "unmarked-schema-break"
+	schemaChangeCategory = "unlogged-schema-change"
+)
 
-func LintSchemaBreak(body, version string, prevSchema, curSchema int) []ChangelogIssue {
-	if prevSchema == curSchema {
+// LintSchemaBreak checks that a runs-store schema change is described in the
+// changelog section being cut. addedRequirements names the schema requirements
+// this release introduces: adding one strands every older binary and needs a
+// `(Breaking)` entry plus a migration guide, while a purely additive bump keeps
+// older binaries reading and writing and needs only a plain `**store:**` entry.
+// A release that adds a requirement is checked even when the schema number
+// does not move, because reclassifying an already-released migration strands
+// binaries just as thoroughly as a bump does.
+func LintSchemaBreak(body, version string, prevSchema, curSchema int, addedRequirements []string) []ChangelogIssue {
+	if prevSchema == curSchema && len(addedRequirements) == 0 {
 		return nil
 	}
 	sections := parseChangelogSections(body)
@@ -77,8 +88,13 @@ func LintSchemaBreak(body, version string, prevSchema, curSchema int) []Changelo
 			unreleasedSec = &sections[i]
 		}
 	}
+	breaking := len(addedRequirements) > 0
+	satisfied := sectionHasStoreEntry
+	if breaking {
+		satisfied = sectionHasSchemaBreakEntry
+	}
 	for _, s := range []*changelogSection{versionSec, unreleasedSec} {
-		if s != nil && sectionHasSchemaBreakEntry(*s) {
+		if s != nil && satisfied(*s) {
 			return nil
 		}
 	}
@@ -92,18 +108,43 @@ func LintSchemaBreak(body, version string, prevSchema, curSchema int) []Changelo
 		line = unreleasedSec.startLine
 		label = unreleasedSec.version
 	}
+	if breaking {
+		return []ChangelogIssue{{
+			Line:     line,
+			Category: schemaBreakCategory,
+			Message: fmt.Sprintf(
+				"%s and adds requirement(s) %s, so a binary without them refuses the database, but [%s] has no `(Breaking)` entry naming the schema; mark the change `(Breaking)` and ship a docs/migrations/%s.md schema section",
+				describeSchemaDelta(prevSchema, curSchema), strings.Join(addedRequirements, ", "), label, version),
+		}}
+	}
 	return []ChangelogIssue{{
 		Line:     line,
-		Category: schemaBreakCategory,
+		Category: schemaChangeCategory,
 		Message: fmt.Sprintf(
-			"runs-store schema changed %d -> %d but [%s] has no `(Breaking)` entry naming the schema; mark the change `(Breaking)` and ship a docs/migrations/%s.md schema section",
-			prevSchema, curSchema, label, version),
+			"%s and adds no requirement, so older binaries keep opening the database, but [%s] has no `**store:**` entry describing it; add one",
+			describeSchemaDelta(prevSchema, curSchema), label),
 	}}
+}
+
+func describeSchemaDelta(prevSchema, curSchema int) string {
+	if prevSchema == curSchema {
+		return fmt.Sprintf("runs-store schema stays at %d", curSchema)
+	}
+	return fmt.Sprintf("runs-store schema changed %d -> %d", prevSchema, curSchema)
 }
 
 func sectionHasSchemaBreakEntry(s changelogSection) bool {
 	for _, e := range s.entries {
 		if breakingScopeRe.MatchString(e.body) && strings.Contains(strings.ToLower(e.body), "schema") {
+			return true
+		}
+	}
+	return false
+}
+
+func sectionHasStoreEntry(s changelogSection) bool {
+	for _, e := range s.entries {
+		if storeScopeRe.MatchString(e.body) {
 			return true
 		}
 	}
@@ -131,6 +172,7 @@ var (
 	sectionHeadingRe    = regexp.MustCompile(`^##\s+(.+)$`)
 	subHeadingRe        = regexp.MustCompile(`^###\s+(.+)$`)
 	breakingScopeRe     = regexp.MustCompile(`(?m)^-\s+\*\*([^*]+?)\s*\(Breaking\)\s*:\*\*`)
+	storeScopeRe        = regexp.MustCompile(`(?m)^-\s+\*\*[^*]*store[^*]*:\*\*`)
 	migrationLinkRe     = regexp.MustCompile(`\(docs/migrations/([^)]+)\)`)
 	sectionVersionLabel = regexp.MustCompile(`\[?(Unreleased|v\d+\.\d+\.\d+)\]?`)
 )

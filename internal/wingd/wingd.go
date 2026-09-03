@@ -100,6 +100,12 @@ type Config struct {
 	// opaque terminal-check failure.
 	StoreSchemaVersion int
 
+	// StoreRequirements names the runs-store schema requirements this
+	// daemon's binary understands. It is advertised alongside
+	// StoreSchemaVersion so a client refuses only when the store carries a
+	// requirement this daemon lacks.
+	StoreRequirements []string
+
 	Logf func(format string, args ...any)
 }
 

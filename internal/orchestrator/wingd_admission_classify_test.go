@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -75,7 +76,7 @@ func TestAdmissionFailureNeverCallsAnUnclaimedKeyExhaustedCapacity(t *testing.T)
 }
 
 func TestDaemonStoreSchemaSkewRefusesADaemonBehindTheStore(t *testing.T) {
-	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 17, 26)
+	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 17, nil, 26)
 	if !errors.Is(err, ErrDaemonStoreSchemaTooOld) {
 		t.Fatalf("skew error = %v, want ErrDaemonStoreSchemaTooOld", err)
 	}
@@ -110,10 +111,41 @@ func TestDaemonStoreSchemaSkewAcceptsMatchingAndUnknownDaemons(t *testing.T) {
 		{"daemon is ahead", 27},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := daemonStoreSchemaSkew("v0.39.0", "v0.39.0", tc.daemonSchema, 26); err != nil {
+			if err := daemonStoreSchemaSkew("v0.39.0", "v0.39.0", tc.daemonSchema, nil, 26); err != nil {
 				t.Fatalf("skew error = %v, want none", err)
 			}
 		})
+	}
+}
+
+func TestDaemonStoreSchemaSkewAcceptsADaemonBehindByAdditiveMigrationsOnly(t *testing.T) {
+	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 17, store.KnownRequirements(), 26)
+	if err != nil {
+		t.Fatalf("skew error = %v, want none: the daemon knows every requirement this binary stamps", err)
+	}
+}
+
+func TestDaemonStoreSchemaSkewNamesTheRequirementTheDaemonLacks(t *testing.T) {
+	known := store.KnownRequirements()
+	behind := known[1:]
+	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 26, behind, 27)
+	if !errors.Is(err, ErrDaemonStoreSchemaTooOld) {
+		t.Fatalf("skew error = %v, want ErrDaemonStoreSchemaTooOld", err)
+	}
+	want := ErrDaemonStoreSchemaTooOld.Error() + ": daemon v0.38.2 does not understand runs-store requirement(s) " +
+		known[0] + ", which this binary (v0.39.0) stamps into the store they share. " +
+		"Install a sparkwing that understands schema 27, or set " + wingdclient.HostBinEnv +
+		" to a binary that does and stop the daemon so the next run brings it up. " +
+		"`sparkwing daemon restart` respawns the same build, and a fresh SPARKWING_HOME still hosts the daemon from the sparkwing on PATH"
+	if got := err.Error(); got != want {
+		t.Fatalf("skew error =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestDaemonStoreSchemaSkewRendersAnUnknownSelfVersion(t *testing.T) {
+	err := daemonStoreSchemaSkew("", "", 26, store.KnownRequirements()[1:], 27)
+	if !strings.Contains(err.Error(), "which this binary ((unknown)) stamps into the store they share") {
+		t.Fatalf("skew error = %q, want a readable clause for an unknown self version", err)
 	}
 }
 

@@ -197,6 +197,7 @@ func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
 const InvocationSecretArgsKey = "secret_args"
 func IsProtocolErr(err error) bool
 func JoinProfileKey(repo, pipeline string) string
+func KnownRequirements() []string
 var Maintenance = storeMaintenanceFns{
 	ReapExpiredTriggers:          (*Store).reapExpiredTriggers,
 	ReapStalePendingRuns:         (*Store).reapStalePendingRuns,
@@ -223,6 +224,7 @@ type MetricSample struct {
 	CPUTime time.Duration
 }
 func (m MetricSample) OneShot() bool
+func MissingRequirements(known, listed []string) []string
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 type Node struct {
@@ -448,6 +450,10 @@ type RunFilter struct {
 	ParentRunID    string
 	RootOnly       bool
 }
+type SchemaRequirement struct {
+	Name    string
+	AddedBy string
+}
 type Secret struct {
 	Name      string
 	Value     string
@@ -476,6 +482,7 @@ type SkewError struct {
 	BinaryVersion    int
 	MinVersion       string
 	InstalledVersion string
+	Requirements     []string
 }
 func (e *SkewError) Error() string
 type SpawnedChild struct {
@@ -611,6 +618,8 @@ func (s *Store) ReposForClaimant(ctx context.Context, claimant ClaimIdentity, no
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
+func (s *Store) RequirementStamps(ctx context.Context) ([]SchemaRequirement, error)
+func (s *Store) Requirements(ctx context.Context) ([]string, error)
 func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
@@ -707,6 +716,7 @@ type TriggerFilter struct {
 const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
+func UnknownRequirements(listed []string) []string
 type User struct {
 	Name        string
 	PWHash      string
@@ -742,6 +752,7 @@ const WaiterStillWaiting WaiterStatus = "still_waiting"
 
 # methods on un-declared receiver types (likely a bug)
 func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
+func (e storeExecer) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
 func (t *storeTx) Commit() error
 func (t *storeTx) Exec(q string, args ...any) (sql.Result, error)
 func (t *storeTx) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)

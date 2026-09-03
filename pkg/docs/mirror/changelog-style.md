@@ -133,11 +133,13 @@ Two layers, with deliberately separate concerns:
   version section, missing or wrong migration-guide links on
   `(Breaking)` entries (file must exist, anchor must resolve to an
   H2 in the file, version in the link path must match the section's
-  version), and, at release time, an unmarked runs-store schema change:
-  when the embedded schema version differs from the previous release,
-  the section being cut -- or `[Unreleased]` before the rename -- must
-  carry a `(Breaking)` entry naming the schema, or the release is
-  refused (`unmarked-schema-break`). Output shape:
+  version), and, at release time, an undescribed runs-store schema
+  change: when the embedded schema version differs from the previous
+  release, the section being cut -- or `[Unreleased]` before the rename
+  -- must describe it. A bump that adds a schema requirement needs a
+  `(Breaking)` entry naming the schema, or the release is refused
+  (`unmarked-schema-break`); a bump that adds none needs a plain
+  `**store:**` entry (`unlogged-schema-change`). Output shape:
   `CHANGELOG.md:<line>: <category>: <message>`, one issue per violation,
   exit non-zero with a final `<N> issue(s)` summary. Always-on; no
   env-var gate.
@@ -146,6 +148,42 @@ Two layers, with deliberately separate concerns:
   generating the migration-guide bodies, pulling internal-cleanup
   entries that don't belong in adopter-facing notes. The linter
   surfaces *what's wrong*; the agent decides *how to fix it*.
+
+## Additive versus breaking migrations
+
+Which changelog entry a runs-store migration needs follows from one
+decision in the code, so make that decision first.
+
+A migration is **additive** when a binary that predates it keeps reading
+and writing the migrated database: a new table, a column with a default,
+an index whose partial predicate excludes every row an older binary
+writes. It declares nothing, and it needs a plain `**store:**` entry.
+
+A migration is **breaking** when an older binary reads a row it can no
+longer parse, writes one that now violates a constraint, or selects a
+column that is gone. It declares one or more requirements in
+`migrationRequirements` in `pkg/store/store.go`, keyed by the schema
+version that introduces them, and needs a `(Breaking)` entry plus a
+section in `docs/migrations/_unreleased.md`.
+
+A requirement name is a short kebab-case noun for the feature --
+`repo-scoped-secrets`, `unique-token-prefix` -- never a version number
+and never a ticket id. The name reaches operators verbatim in the
+refusal message, so name the feature, not the change.
+
+The two tests worth knowing: `pkg/store` fails any non-declaring version
+that adds a `NOT NULL` column with no default, because an older binary's
+insert cannot satisfy it. Neither that test nor the gate catches a
+*semantic* break -- a defaulted column whose empty value the newer binary
+misreads when an older binary writes a row without it -- so ask that
+question by hand before declaring a migration additive.
+
+The release gate reads the registry out of the source, so a bump that
+declares a requirement and ships only a plain entry fails, and so does a
+bump that declares none and ships nothing. It also diffs the registry
+against the previous tag, so declaring a requirement on an
+already-released version without bumping the schema needs the same
+`(Breaking)` entry.
 
 ## Pre-release manicuring (what the agent does)
 

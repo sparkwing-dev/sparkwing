@@ -1157,6 +1157,69 @@ const storeSchemaSourcePath = "pkg/store/store.go"
 
 var storeSchemaConstRe = regexp.MustCompile(`(?m)^const\s+expectedSchemaVersion\s*=\s*(\d+)\b`)
 
+var (
+	migrationRequirementsDeclRe  = regexp.MustCompile(`(?m)^var\s+migrationRequirements\s*=`)
+	migrationRequirementsBlockRe = regexp.MustCompile(`(?s)^var\s+migrationRequirements\s*=\s*map\[int\]\[\]string\{(|.*?\n)\}`)
+	migrationRequirementsEntryRe = regexp.MustCompile(`(?m)^\s*(\d+)\s*:\s*\{([^}]*)\}`)
+	migrationRequirementNameRe   = regexp.MustCompile(`"([^"]+)"`)
+)
+
+// safety: distinct from a registry the parser cannot read, which fails the gate;
+// a tag cut before requirements shipped carries none at all.
+var errNoRequirementRegistry = errors.New("no `var migrationRequirements = map[int][]string{...}`")
+
+// safety: parses the source rather than importing the package, so the gate can read
+// the registry at a released tag as well as the one being cut.
+func parseMigrationRequirements(goSource string) (map[int][]string, error) {
+	loc := migrationRequirementsDeclRe.FindStringIndex(goSource)
+	if loc == nil {
+		return nil, fmt.Errorf("%w in %s", errNoRequirementRegistry, storeSchemaSourcePath)
+	}
+	block := migrationRequirementsBlockRe.FindStringSubmatch(goSource[loc[0]:])
+	if block == nil {
+		return nil, fmt.Errorf("unterminated migrationRequirements registry in %s", storeSchemaSourcePath)
+	}
+	out := map[int][]string{}
+	for _, entry := range migrationRequirementsEntryRe.FindAllStringSubmatch(block[1], -1) {
+		version, err := strconv.Atoi(entry[1])
+		if err != nil {
+			return nil, fmt.Errorf("parse %s requirement version %q: %w", storeSchemaSourcePath, entry[1], err)
+		}
+		for _, name := range migrationRequirementNameRe.FindAllStringSubmatch(entry[2], -1) {
+			out[version] = append(out[version], name[1])
+		}
+	}
+	return out, nil
+}
+
+func requirementsAddedBetween(registry map[int][]string, prevSchema, curSchema int) []string {
+	var added []string
+	for v := prevSchema + 1; v <= curSchema; v++ {
+		added = append(added, registry[v]...)
+	}
+	sort.Strings(added)
+	return added
+}
+
+func requirementsAddedSince(prev, cur map[int][]string) []string {
+	had := map[string]bool{}
+	for _, names := range prev {
+		for _, name := range names {
+			had[name] = true
+		}
+	}
+	var added []string
+	for _, names := range cur {
+		for _, name := range names {
+			if !had[name] {
+				added = append(added, name)
+			}
+		}
+	}
+	sort.Strings(added)
+	return added
+}
+
 func parseStoreSchemaVersion(goSource string) (int, error) {
 	m := storeSchemaConstRe.FindStringSubmatch(goSource)
 	if m == nil {
@@ -1206,25 +1269,52 @@ func (j *checkSchemaBreakJob) run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release: schema at %s: %w", prevTag, err)
 	}
-	if prevSchema == curSchema {
-		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d); gate passes", prevTag, curSchema)
+	curRegistry, err := parseMigrationRequirements(string(curSrc))
+	if err != nil {
+		return fmt.Errorf("release: current schema requirements: %w", err)
+	}
+	added, err := requirementsAdded(prevSrc, curRegistry, prevSchema, curSchema)
+	if err != nil {
+		return fmt.Errorf("release: schema requirements at %s: %w", prevTag, err)
+	}
+	if prevSchema == curSchema && len(added) == 0 {
+		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d) and no requirement added; gate passes", prevTag, curSchema)
 		return nil
 	}
 	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
-	issues := LintSchemaBreak(string(body), version, prevSchema, curSchema)
+	issues := LintSchemaBreak(string(body), version, prevSchema, curSchema, added)
 	if len(issues) > 0 {
 		var b strings.Builder
 		for _, i := range issues {
 			b.WriteString(i.Format())
 			b.WriteByte('\n')
 		}
-		return fmt.Errorf("release: unmarked runs-store schema change blocks %s:\n%s", version, b.String())
+		return fmt.Errorf("release: undescribed runs-store schema change blocks %s:\n%s", version, b.String())
 	}
-	sparkwing.Info(ctx, "runs-store schema %d -> %d is marked (Breaking) in the changelog; gate passes", prevSchema, curSchema)
+	if len(added) > 0 {
+		sparkwing.Info(ctx, "runs-store schema %d -> %d adds requirement(s) %s and is marked (Breaking) in the changelog; gate passes",
+			prevSchema, curSchema, strings.Join(added, ", "))
+		return nil
+	}
+	sparkwing.Info(ctx, "runs-store schema %d -> %d adds no requirement and carries a store changelog entry; gate passes", prevSchema, curSchema)
 	return nil
+}
+
+// safety: a tag cut before the registry existed has no prior classification to diff,
+// so only the versions this release adds count; diffing against it would demand a
+// (Breaking) entry for the initial population.
+func requirementsAdded(prevSrc string, curRegistry map[int][]string, prevSchema, curSchema int) ([]string, error) {
+	prevRegistry, err := parseMigrationRequirements(prevSrc)
+	if errors.Is(err, errNoRequirementRegistry) {
+		return requirementsAddedBetween(curRegistry, prevSchema, curSchema), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return requirementsAddedSince(prevRegistry, curRegistry), nil
 }
 
 func init() {

@@ -38,7 +38,7 @@ func TestVersionHandler_ReportsVersionAndSchema(t *testing.T) {
 	}
 }
 
-func TestSchemaGuard_ExitsWhenDatabaseAdvances(t *testing.T) {
+func TestSchemaGuard_ExitsOnUnknownRequirement(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guard.db")
 	st, err := store.Open(path)
 	if err != nil {
@@ -57,18 +57,17 @@ func TestSchemaGuard_ExitsWhenDatabaseAdvances(t *testing.T) {
 	default:
 	}
 
-	future := store.ExpectedSchemaVersion() + 1
 	if _, err := st.DB().Exec(
-		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,
-		future, 1); err != nil {
-		t.Fatalf("seed future version: %v", err)
+		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version)
+		 VALUES ('webhook-replay-keys', 1, 'v0.41.0')`); err != nil {
+		t.Fatalf("seed future requirement: %v", err)
 	}
 
 	guard.check(ctx)
 	select {
 	case <-ctx.Done():
 	default:
-		t.Fatal("guard did not cancel after the database advanced")
+		t.Fatal("guard did not cancel after the database gained an unknown requirement")
 	}
 }
 
@@ -80,11 +79,10 @@ func TestSchemaGuard_MiddlewareChecksOn5xx(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 
-	future := store.ExpectedSchemaVersion() + 1
 	if _, err := st.DB().Exec(
-		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,
-		future, 1); err != nil {
-		t.Fatalf("seed future version: %v", err)
+		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version)
+		 VALUES ('webhook-replay-keys', 1, 'v0.41.0')`); err != nil {
+		t.Fatalf("seed future requirement: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -104,7 +102,7 @@ func TestSchemaGuard_MiddlewareChecksOn5xx(t *testing.T) {
 	select {
 	case <-ctx.Done():
 	default:
-		t.Fatal("middleware did not trigger shutdown on a 5xx with an advanced schema")
+		t.Fatal("middleware did not trigger shutdown on a 5xx with an unknown requirement")
 	}
 }
 

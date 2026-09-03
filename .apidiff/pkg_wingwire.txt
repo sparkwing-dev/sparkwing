@@ -181,6 +181,8 @@ type HelloAck struct {
 	Draining            bool
 
 	StoreSchemaVersion int
+
+	StoreRequirements []string
 }
 type Holder struct {
 	RunID string

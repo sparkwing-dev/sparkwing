@@ -995,28 +995,35 @@ var nodeBouncesTablePostgres = strings.NewReplacer(
 	"INTEGER", "BIGINT",
 ).Replace(nodeBouncesTableSQLite)
 
-// SkewError is returned by Open when the database is at a schema
-// version newer than the binary understands. Callers can use
-// errors.As to detect the condition (e.g. for surfacing a custom
-// upgrade prompt in the CLI); the wrapped message is plain English
-// and suitable for direct display.
+// SkewError is returned by Open when the database lists a schema
+// requirement this binary does not know. Callers can use errors.As to
+// detect the condition (e.g. for surfacing a custom upgrade prompt in
+// the CLI); the wrapped message is plain English and suitable for
+// direct display. A schema version above the binary's own is not skew
+// on its own: an additive migration leaves every listed requirement
+// known, and the store opens read/write without migrating.
 //
-// MinVersion and InstalledVersion carry the human-readable version
-// strings when they are known: MinVersion is the minimum binary
-// version the database records for its schema (the sparkwing_meta
-// row a migrating binary stamps), and InstalledVersion is the
-// running binary's own version. When both are present Error() names
-// them and the upgrade command; when MinVersion is absent (a database
-// migrated before version stamping shipped) it falls back to the
-// raw schema numbers.
+// Requirements names the unknown requirements. When it is set,
+// MinVersion is the highest binary version that stamped one of them and
+// Error() names both; when that stamp is a development build MinVersion
+// is empty and Error() says only that a newer build is needed.
+//
+// DBVersion and BinaryVersion carry the two schema numbers for
+// diagnostics. A zero-valued Requirements means the error came from a
+// caller constructing it directly, and Error() falls back to the
+// version-stamp and raw-number messages.
 type SkewError struct {
 	DBVersion        int
 	BinaryVersion    int
 	MinVersion       string
 	InstalledVersion string
+	Requirements     []string
 }
 
 func (e *SkewError) Error() string {
+	if len(e.Requirements) > 0 {
+		return e.requirementMessage()
+	}
 	if e.MinVersion != "" && e.MinVersion != "(devel)" {
 		installed := e.InstalledVersion
 		if installed == "" || installed == "(devel)" {
@@ -1043,6 +1050,9 @@ func (s *Store) migrate() error {
 	return retryOnBusy(func() error {
 		if _, err := s.exec(ctx, schemaVersionTable); err != nil {
 			return fmt.Errorf("create sparkwing_schema_version table: %w", err)
+		}
+		if _, err := s.exec(ctx, requirementsTable); err != nil {
+			return fmt.Errorf("create sparkwing_requirements table: %w", err)
 		}
 		return s.migrateSQLite(ctx)
 	})
@@ -1098,18 +1108,40 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 	).Scan(&current); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
+	listed, err := listRequirements(ctx, storeExecer{s: s})
+	if err != nil {
+		return fmt.Errorf("read schema requirements: %w", err)
+	}
+	if skew := requirementSkew(current, listed); skew != nil {
+		return skew
+	}
 	if current > expectedSchemaVersion {
-		return &SkewError{
-			DBVersion:        current,
-			BinaryVersion:    expectedSchemaVersion,
-			MinVersion:       s.readMinVersion(ctx),
-			InstalledVersion: resolveBinaryVersion(),
+		return nil
+	}
+	if backfill := requirementsToBackfill(listed, current); len(backfill) > 0 {
+		if err := s.backfillRequirementsSQLite(ctx, backfill); err != nil {
+			return err
 		}
 	}
 	for v := current + 1; v <= expectedSchemaVersion; v++ {
 		if err := s.applyVersionSQLite(ctx, v); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (s *Store) backfillRequirementsSQLite(ctx context.Context, names []string) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin schema requirement backfill: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertRequirements(ctx, tx, names); err != nil {
+		return fmt.Errorf("record schema requirements: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit schema requirement backfill: %w", err)
 	}
 	return nil
 }
@@ -1128,6 +1160,9 @@ func (s *Store) applyVersionSQLite(ctx context.Context, version int) error {
 		 ON CONFLICT (version) DO NOTHING`,
 		version, time.Now().UnixNano()); err != nil {
 		return fmt.Errorf("record schema version v%d: %w", version, err)
+	}
+	if err := insertRequirements(ctx, tx, migrationRequirements[version]); err != nil {
+		return fmt.Errorf("record schema requirements for v%d: %w", version, err)
 	}
 	if version == expectedSchemaVersion {
 		if err := stampMinVersionTx(ctx, tx); err != nil {
@@ -1153,18 +1188,28 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, schemaVersionTable); err != nil {
 		return fmt.Errorf("create sparkwing_schema_version table: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, requirementsTable); err != nil {
+		return fmt.Errorf("create sparkwing_requirements table: %w", err)
+	}
 	var current int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(version), 0) FROM sparkwing_schema_version`,
 	).Scan(&current); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
+	listed, err := listRequirements(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("read schema requirements: %w", err)
+	}
+	if skew := requirementSkew(current, listed); skew != nil {
+		return skew
+	}
 	if current > expectedSchemaVersion {
-		return &SkewError{
-			DBVersion:        current,
-			BinaryVersion:    expectedSchemaVersion,
-			MinVersion:       readMinVersionTx(ctx, tx),
-			InstalledVersion: resolveBinaryVersion(),
+		return tx.Commit()
+	}
+	if backfill := requirementsToBackfill(listed, current); len(backfill) > 0 {
+		if err := insertRequirements(ctx, tx, backfill); err != nil {
+			return fmt.Errorf("record schema requirements: %w", err)
 		}
 	}
 	if current == expectedSchemaVersion {
@@ -1180,6 +1225,9 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 			v, time.Now().UnixNano()); err != nil {
 			return fmt.Errorf("record schema version v%d: %w", v, err)
 		}
+		if err := insertRequirements(ctx, tx, migrationRequirements[v]); err != nil {
+			return fmt.Errorf("record schema requirements for v%d: %w", v, err)
+		}
 	}
 	if err := stampMinVersionTx(ctx, tx); err != nil {
 		return fmt.Errorf("stamp min version: %w", err)
@@ -1188,6 +1236,17 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 		return err
 	}
 	return backfillRunAnnotationRollup(ctx, storeExecer{s: s})
+}
+
+// safety: a version absent from this map must leave an older binary reading and
+// writing the migrated database; a version present here does not, so its names are
+// stamped and that binary refuses the store rather than corrupting it. Nothing below
+// 21 needs an entry: no binary that reads requirements knows fewer than 27 versions.
+var migrationRequirements = map[int][]string{
+	21: {"session-token-digest"},
+	22: {"repo-scoped-secrets"},
+	26: {"unique-token-prefix"},
+	27: {"inherited-holder-marker"},
 }
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
