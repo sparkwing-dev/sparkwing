@@ -1158,19 +1158,26 @@ const storeSchemaSourcePath = "pkg/store/store.go"
 var storeSchemaConstRe = regexp.MustCompile(`(?m)^const\s+expectedSchemaVersion\s*=\s*(\d+)\b`)
 
 var (
-	migrationRequirementsBlockRe = regexp.MustCompile(`(?s)^var\s+migrationRequirements\s*=\s*map\[int\]\[\]string\{(.*?)\n\}`)
+	migrationRequirementsDeclRe  = regexp.MustCompile(`(?m)^var\s+migrationRequirements\s*=`)
+	migrationRequirementsBlockRe = regexp.MustCompile(`(?s)^var\s+migrationRequirements\s*=\s*map\[int\]\[\]string\{(|.*?\n)\}`)
 	migrationRequirementsEntryRe = regexp.MustCompile(`(?m)^\s*(\d+)\s*:\s*\{([^}]*)\}`)
 	migrationRequirementNameRe   = regexp.MustCompile(`"([^"]+)"`)
 )
+
+// errNoRequirementRegistry reports that the source carries no requirement
+// registry at all, which is what a release tag cut before requirements shipped
+// looks like. It is distinct from a registry the parser cannot read, which
+// fails the gate.
+var errNoRequirementRegistry = errors.New("no `var migrationRequirements = map[int][]string{...}`")
 
 // parseMigrationRequirements reads the per-version requirement registry out of
 // the store source. The release gate reads the source rather than importing
 // the package so it can compare the registry at a released tag with the one on
 // the branch being cut.
 func parseMigrationRequirements(goSource string) (map[int][]string, error) {
-	loc := regexp.MustCompile(`(?m)^var\s+migrationRequirements\s*=`).FindStringIndex(goSource)
+	loc := migrationRequirementsDeclRe.FindStringIndex(goSource)
 	if loc == nil {
-		return nil, fmt.Errorf("no `var migrationRequirements = map[int][]string{...}` in %s", storeSchemaSourcePath)
+		return nil, fmt.Errorf("%w in %s", errNoRequirementRegistry, storeSchemaSourcePath)
 	}
 	block := migrationRequirementsBlockRe.FindStringSubmatch(goSource[loc[0]:])
 	if block == nil {
@@ -1195,6 +1202,30 @@ func requirementsAddedBetween(registry map[int][]string, prevSchema, curSchema i
 	var added []string
 	for v := prevSchema + 1; v <= curSchema; v++ {
 		added = append(added, registry[v]...)
+	}
+	sort.Strings(added)
+	return added
+}
+
+// requirementsAddedSince returns every requirement name the current registry
+// declares that the previous one did not, sorted. It catches the correction a
+// maintainer is most likely to make: reclassifying an already-released
+// migration as breaking without bumping the schema number, which strands every
+// released binary the moment a store is backfilled.
+func requirementsAddedSince(prev, cur map[int][]string) []string {
+	had := map[string]bool{}
+	for _, names := range prev {
+		for _, name := range names {
+			had[name] = true
+		}
+	}
+	var added []string
+	for _, names := range cur {
+		for _, name := range names {
+			if !had[name] {
+				added = append(added, name)
+			}
+		}
 	}
 	sort.Strings(added)
 	return added
@@ -1249,15 +1280,18 @@ func (j *checkSchemaBreakJob) run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release: schema at %s: %w", prevTag, err)
 	}
-	if prevSchema == curSchema {
-		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d); gate passes", prevTag, curSchema)
-		return nil
-	}
-	registry, err := parseMigrationRequirements(string(curSrc))
+	curRegistry, err := parseMigrationRequirements(string(curSrc))
 	if err != nil {
 		return fmt.Errorf("release: current schema requirements: %w", err)
 	}
-	added := requirementsAddedBetween(registry, prevSchema, curSchema)
+	added, err := requirementsAdded(prevSrc, curRegistry, prevSchema, curSchema)
+	if err != nil {
+		return fmt.Errorf("release: schema requirements at %s: %w", prevTag, err)
+	}
+	if prevSchema == curSchema && len(added) == 0 {
+		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d) and no requirement added; gate passes", prevTag, curSchema)
+		return nil
+	}
 	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
@@ -1278,6 +1312,22 @@ func (j *checkSchemaBreakJob) run(ctx context.Context) error {
 	}
 	sparkwing.Info(ctx, "runs-store schema %d -> %d adds no requirement and carries a store changelog entry; gate passes", prevSchema, curSchema)
 	return nil
+}
+
+// requirementsAdded names the requirements this release introduces. Against a
+// tag that already carries a registry it is the full name diff, so a
+// reclassification without a schema bump is caught. Against a tag cut before
+// requirements shipped there is no prior classification to diff, so only the
+// versions this release actually adds count.
+func requirementsAdded(prevSrc string, curRegistry map[int][]string, prevSchema, curSchema int) ([]string, error) {
+	prevRegistry, err := parseMigrationRequirements(prevSrc)
+	if errors.Is(err, errNoRequirementRegistry) {
+		return requirementsAddedBetween(curRegistry, prevSchema, curSchema), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return requirementsAddedSince(prevRegistry, curRegistry), nil
 }
 
 func init() {

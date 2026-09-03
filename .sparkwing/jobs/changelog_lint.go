@@ -66,14 +66,16 @@ const (
 	schemaChangeCategory = "unlogged-schema-change"
 )
 
-// LintSchemaBreak checks that a runs-store schema bump is described in the
-// changelog section being cut. addedRequirements names the schema
-// requirements the new versions declare: a bump that adds one strands every
-// older binary and needs a `(Breaking)` entry plus a migration guide, while a
-// purely additive bump keeps older binaries reading and writing and needs only
-// a plain `**store:**` entry.
+// LintSchemaBreak checks that a runs-store schema change is described in the
+// changelog section being cut. addedRequirements names the schema requirements
+// this release introduces: adding one strands every older binary and needs a
+// `(Breaking)` entry plus a migration guide, while a purely additive bump keeps
+// older binaries reading and writing and needs only a plain `**store:**` entry.
+// A release that adds a requirement is checked even when the schema number
+// does not move, because reclassifying an already-released migration strands
+// binaries just as thoroughly as a bump does.
 func LintSchemaBreak(body, version string, prevSchema, curSchema int, addedRequirements []string) []ChangelogIssue {
-	if prevSchema == curSchema {
+	if prevSchema == curSchema && len(addedRequirements) == 0 {
 		return nil
 	}
 	sections := parseChangelogSections(body)
@@ -111,17 +113,24 @@ func LintSchemaBreak(body, version string, prevSchema, curSchema int, addedRequi
 			Line:     line,
 			Category: schemaBreakCategory,
 			Message: fmt.Sprintf(
-				"runs-store schema changed %d -> %d and adds requirement(s) %s, so a binary without them refuses the database, but [%s] has no `(Breaking)` entry naming the schema; mark the change `(Breaking)` and ship a docs/migrations/%s.md schema section",
-				prevSchema, curSchema, strings.Join(addedRequirements, ", "), label, version),
+				"%s and adds requirement(s) %s, so a binary without them refuses the database, but [%s] has no `(Breaking)` entry naming the schema; mark the change `(Breaking)` and ship a docs/migrations/%s.md schema section",
+				describeSchemaDelta(prevSchema, curSchema), strings.Join(addedRequirements, ", "), label, version),
 		}}
 	}
 	return []ChangelogIssue{{
 		Line:     line,
 		Category: schemaChangeCategory,
 		Message: fmt.Sprintf(
-			"runs-store schema changed %d -> %d and adds no requirement, so older binaries keep opening the database, but [%s] has no `**store:**` entry describing it; add one",
-			prevSchema, curSchema, label),
+			"%s and adds no requirement, so older binaries keep opening the database, but [%s] has no `**store:**` entry describing it; add one",
+			describeSchemaDelta(prevSchema, curSchema), label),
 	}}
+}
+
+func describeSchemaDelta(prevSchema, curSchema int) string {
+	if prevSchema == curSchema {
+		return fmt.Sprintf("runs-store schema stays at %d", curSchema)
+	}
+	return fmt.Sprintf("runs-store schema changed %d -> %d", prevSchema, curSchema)
 }
 
 func sectionHasSchemaBreakEntry(s changelogSection) bool {

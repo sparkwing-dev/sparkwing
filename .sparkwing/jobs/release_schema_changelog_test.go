@@ -192,3 +192,85 @@ func other() {}
 		t.Error("a source without the registry should fail the gate")
 	}
 }
+
+func TestLintSchemaBreak_ReclassificationWithoutABumpNeedsBreaking(t *testing.T) {
+	body := `## [Unreleased]
+
+### Changed
+
+- **store:** migration 25 turned out to change the trigger key shape.
+`
+	issues := LintSchemaBreak(body, "v0.10.0", 27, 27, []string{"webhook-replay-keys"})
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d: %v", len(issues), formatAllIssues(issues))
+	}
+	if issues[0].Category != schemaBreakCategory {
+		t.Errorf("category: got %q want %q", issues[0].Category, schemaBreakCategory)
+	}
+	if !strings.Contains(issues[0].Message, "runs-store schema stays at 27") {
+		t.Errorf("message should say the schema did not move: %q", issues[0].Message)
+	}
+	marked := `## [Unreleased]
+
+### Changed
+
+- **store (Breaking):** migration 25 now declares a runs-store schema requirement.
+`
+	if issues := LintSchemaBreak(marked, "v0.10.0", 27, 27, []string{"webhook-replay-keys"}); len(issues) != 0 {
+		t.Fatalf("a marked reclassification should pass, got %v", formatAllIssues(issues))
+	}
+}
+
+func TestLintSchemaBreak_NoBumpAndNoNewRequirementPasses(t *testing.T) {
+	if issues := LintSchemaBreak("## [Unreleased]\n", "v0.10.0", 27, 27, nil); len(issues) != 0 {
+		t.Fatalf("an unchanged schema with no new requirement should pass, got %v", formatAllIssues(issues))
+	}
+}
+
+func TestRequirementsAddedSince_DiffsByName(t *testing.T) {
+	prev := map[int][]string{21: {"session-token-digest"}, 22: {"repo-scoped-secrets"}}
+	cur := map[int][]string{
+		21: {"session-token-digest"},
+		22: {"repo-scoped-secrets"},
+		25: {"webhook-replay-keys"},
+		28: {"agent-enrollment"},
+	}
+	got := requirementsAddedSince(prev, cur)
+	if strings.Join(got, ",") != "agent-enrollment,webhook-replay-keys" {
+		t.Fatalf("requirementsAddedSince = %v", got)
+	}
+	if got := requirementsAddedSince(cur, cur); len(got) != 0 {
+		t.Fatalf("an unchanged registry adds nothing, got %v", got)
+	}
+}
+
+func TestRequirementsAdded_PreRegistryTagCountsOnlyNewVersions(t *testing.T) {
+	cur := map[int][]string{21: {"session-token-digest"}, 27: {"inherited-holder-marker"}}
+	// A tag cut before requirements shipped carries no registry, so the
+	// initial population of already-released versions is not a
+	// reclassification and must not demand a (Breaking) entry.
+	got, err := requirementsAdded("package store\n\nconst expectedSchemaVersion = 27\n", cur, 27, 27)
+	if err != nil {
+		t.Fatalf("requirementsAdded: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("pre-registry tag: added = %v, want none", got)
+	}
+	got, err = requirementsAdded("package store\n\nconst expectedSchemaVersion = 26\n", cur, 26, 27)
+	if err != nil {
+		t.Fatalf("requirementsAdded: %v", err)
+	}
+	if strings.Join(got, ",") != "inherited-holder-marker" {
+		t.Fatalf("pre-registry tag with a bump: added = %v", got)
+	}
+}
+
+func TestParseMigrationRequirements_EmptyRegistryParses(t *testing.T) {
+	got, err := parseMigrationRequirements("package store\n\nvar migrationRequirements = map[int][]string{}\n")
+	if err != nil {
+		t.Fatalf("an empty registry should parse, got %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("registry = %v, want empty", got)
+	}
+}
