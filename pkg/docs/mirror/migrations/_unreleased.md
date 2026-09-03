@@ -50,7 +50,7 @@ CHANGELOG links here.
 
 - **Before:** A clone URL was checked against the loopback, private,
   link-local, carrier-grade-NAT, and metadata rules only when its host parsed
-  as an IP address. Any name passed: `git.internal`, a `.local` box on the
+  as an IP address. Any name passed: a forge under `.internal`, a `.local` box on the
   LAN, `ip6-localhost`. An scp-like URL carrying a second `@`
   (`git@a@127.0.0.1:repo.git`) was checked as a host named `a@127.0.0.1`,
   which parses as no address at all, while ssh split the destination at the
@@ -61,7 +61,7 @@ CHANGELOG links here.
   refused outright. `POST /api/v1/triggers` answers 400 for these, as do the
   `sparkwing-cache` routes `/git/register`, `/archive`, and `/sync/seed`.
 - **Migration:** A deployment that clones from an internal forge under one of
-  those suffixes -- `git.corp.internal`, `forge.local` -- stops being able to
+  those suffixes -- a forge named under `.internal` or `.local` -- stops being able to
   submit triggers or register repositories for it. Give the forge a name
   outside those name spaces, which is what a name resolvable off the LAN
   already needs.

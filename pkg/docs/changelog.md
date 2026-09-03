@@ -849,7 +849,7 @@ code change to unlock.
   beside the `localhost` and cloud metadata names already refused and the
   `ip6-localhost` and `ip6-loopback` aliases the standard `/etc/hosts` ships.
   The loopback, private, and link-local checks fired only on an IP literal, so
-  `db.internal` walked straight past them. `sparkwing-cache` drops any
+  a database host named under `.internal` walked straight past them. `sparkwing-cache` drops any
   `repo-names.json` entry it can no longer validate when it starts; see the
   [migration guide](docs/migrations/_unreleased.md#breaking-clone-hosts-in-inward-only-name-spaces-are-refused).
   This is a name check and not a complete SSRF guard: a name that resolves to
