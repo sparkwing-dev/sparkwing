@@ -151,29 +151,39 @@ code change to unlock.
 
 ### Changed
 
-- **orchestrator:** A run the admission daemon cannot serve now runs standalone
-  against `~/.sparkwing/standalone/schema-<N>/state.db`, where `N` is the
-  runs-store schema the pipeline binary was built with, and says so once on
-  stderr before its first node. Three cases reach it and nothing else does: no
-  daemon is running and no sparkwing is installed to host one; the daemon
-  predates something the run needs, such as an `api.sock` it does not serve or
-  a route it answers 404 on; or the daemon's protocol floor is above this
-  pipeline's SDK. Each prints its own block naming the remedy, and the exit
-  code is unchanged. A plan-level or node-level `.Resources()` pin no longer
-  fails a run on a box with no daemon, and neither does a daemon older than the
-  pipeline; both degrade with the warning, and `SPARKWING_ALLOW_UNADMITTED=1`
-  takes the same path on purpose. A daemon whose runs store its own binary is
-  too old to open is the second case, not a failure: the daemon now reports
-  that as `store: skew: ...` on its health endpoint and `daemon_store_skew` in
+- **orchestrator (Breaking):** A run the admission daemon cannot serve now runs
+  standalone against `~/.sparkwing/standalone/state.db` instead of the shared
+  `state.db`, and says so once on stderr before its first node. Five cases
+  reach it: no daemon is running and none can be started; the daemon predates
+  something the run needs, such as an `api.sock` it never advertised, a route
+  it answers 404 on, or a runs store its own binary is too old to open; the
+  daemon's protocol floor is above this pipeline's SDK; the daemon advertised
+  `api.sock` and cannot serve it, which carries the daemon's own reason and
+  points at `sparkwing daemon status`; and `SPARKWING_ALLOW_UNADMITTED=1`.
+  Each prints its own block naming the remedy, and the exit code is unchanged.
+  Two refusals are gone: a plan-level or node-level `.Resources()` pin no
+  longer fails a run on a box with no daemon, and neither does a daemon older
+  than the pipeline; both degrade with the warning. Standalone runs, including
+  the ones `SPARKWING_ALLOW_UNADMITTED=1` produces, are invisible to
+  `sparkwing runs`, `sparkwing jobs`, and the dashboard, which is what the
+  block says; see the
+  [migration guide](docs/migrations/_unreleased.md#two-refusals-became-warnings-and-those-runs-leave-sparkwing-runs).
+  Their start record and `sparkwing runs status` carry `standalone` and
+  `standalone_reason` (`no-daemon`, `daemon-older`, `daemon-fault`, `floor`,
+  `forced`), and `sparkwing doctor` lists each standalone store with its run
+  count and the oldest run's age. Nothing prunes them. Binaries share that one
+  standalone file under the store's requirements rule; one the file refuses
+  falls back to `~/.sparkwing/standalone/schema-<N>/state.db`. A child run a
+  standalone run dispatches lands in the store its parent chose, named through
+  `SPARKWING_STATE_DB` and `SPARKWING_STANDALONE_REASON`. A daemon whose runs
+  store is unreadable for a reason that is not age still fails the run, as do a
+  daemon that never answers, a build mismatch, and an unsettled version
+  conflict; the daemon now reports a store it is merely too old to open as
+  `store: skew: ...` on its health endpoint and `daemon_store_skew` in
   `sparkwing daemon status`, distinct from the `store: error: ...` of a store
-  that is unreadable for a reason age cannot explain, which is the one fault
-  that still fails the run outright. Standalone runs are
-  invisible to `sparkwing runs` and to the dashboard, which is
-  what the block says; their start record and `sparkwing runs status` carry
-  `standalone` and `standalone_reason` (`no-daemon`, `daemon-older`, `floor`),
-  and `sparkwing doctor` lists each standalone store with its run count and the
-  oldest run's age. Nothing prunes them. Pipeline binaries built before this
-  release still open the shared store directly; see the
+  no upgrade fixes. Dry runs write to a throwaway store and leave none behind.
+  Pipeline binaries built before this release still open the shared store
+  directly; see the
   [migration note](docs/migrations/_unreleased.md#pipeline-binaries-built-before-the-daemon-owned-the-runs-store).
 
 - **orchestrator:** A local run now reaches this machine's runs store through
@@ -190,7 +200,7 @@ code change to unlock.
   artifacts are unchanged, still this machine's own files. A run that finds no
   daemon, a daemon that serves no API socket, or a socket that does not answer
   runs standalone against a store of its own, and says so once on stderr; the
-  entry below says where those runs live and what they lose. A daemon whose own
+  entry above says where those runs live and what they lose. A daemon whose own
   store handle is broken is not one of those reasons. The child runs a hosted run dispatches, and any node replayed from
   one, choose the same way. Once the run's rows exist on the daemon it does not
   switch back: a write the daemon can be shown not to have applied, because it

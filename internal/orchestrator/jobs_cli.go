@@ -330,7 +330,7 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 		if reason != "" {
 			line = "yes (" + reason + ")"
 		}
-		fmt.Fprintf(out, "%s %s\n", label("standalone"), line)
+		fmt.Fprintf(out, "%s %s\n", label("standalone:"), line)
 	}
 	if runCanDisplayAdmissionWait(run) {
 		if detail, ok := latestAdmissionWait(ctx, b, runID); ok {
