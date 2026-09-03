@@ -2118,13 +2118,14 @@ WHERE runs.status = '`+runStatusPending+`'`,
 	return err
 }
 
-// FinishRun marks a run terminal with the given status and optional error.
-func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	_, err := s.exec(ctx, `
+const finishRunStmt = `
 UPDATE runs
    SET status = ?, error = ?, finished_at = ?
- WHERE id = ?`,
-		status, errMsg, time.Now().UnixNano(), runID)
+ WHERE id = ?`
+
+// FinishRun marks a run terminal with the given status and optional error.
+func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
+	_, err := s.exec(ctx, finishRunStmt, status, errMsg, time.Now().UnixNano(), runID)
 	return err
 }
 
@@ -4107,17 +4108,33 @@ func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq in
 // is producing. Reports false without writing when the generation has
 // moved on.
 func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
-	current, err := s.TriggerClaimGeneration(ctx, runID)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return true, s.FinishRun(ctx, runID, status, errMsg)
-		}
 		return false, err
 	}
-	if current != seq {
+	defer func() { _ = tx.Rollback() }()
+
+	// safety: the trigger row stays held from the generation read through the
+	// run write. Read them apart and a re-claim lands between the two, which
+	// is the one interleaving this fence exists to refuse.
+	var current int64
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT claim_seq FROM triggers WHERE id = ?`+tx.forUpdate(), runID).Scan(&current); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return false, err
+	case current != seq:
 		return false, nil
 	}
-	return true, s.FinishRun(ctx, runID, status, errMsg)
+
+	if _, err := tx.ExecContext(ctx, finishRunStmt,
+		status, errMsg, time.Now().UnixNano(), runID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ListExpiredClaims returns the ids of claimed triggers whose lease has

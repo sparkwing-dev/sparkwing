@@ -311,6 +311,14 @@ code change to unlock.
 
 ### Fixed
 
+- **store:** A superseded dispatch can no longer stamp its outcome over the
+  run the current claim is producing. `FinishRunAtGeneration` read the
+  trigger's claim generation and wrote the run in two separate statements
+  with nothing held between them, so a re-claim landing in that window let
+  the old dispatch write anyway -- the exact interleaving the generation
+  fence exists to refuse. Both now happen in one transaction that holds the
+  trigger row.
+
 - **store:** `ListNodes` returns nodes in creation order on Postgres again.
   It ordered by `ctid`, the physical tuple location, which Postgres rewrites
   on every update -- and a node row is updated on every start, status change,
