@@ -179,8 +179,11 @@ code change to unlock.
   the daemon ignores both, and both are denied from a submitted run's captured
   environment and from what the trigger consumer hands a child, so a stale
   shell value cannot redirect an unrelated run. The block prints only once
-  admission has answered, and a refused run removes a standalone store it
-  created rather than leaving one for `sparkwing doctor` to report. A daemon whose runs
+  admission has answered, and a run refused by admission removes a standalone
+  store it created rather than leaving one for `sparkwing doctor` to report; a
+  run that fails later keeps its row and its block. Standalone runs share a
+  lock on `standalone/state.lock` so concurrent runs cannot discard each
+  other's store. A daemon whose runs
   store is unreadable for a reason that is not age still fails the run, as do a
   daemon that never answers, a build mismatch, and an unsettled version
   conflict; the daemon now reports a store it is merely too old to open as

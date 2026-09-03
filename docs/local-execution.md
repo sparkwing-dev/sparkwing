@@ -699,9 +699,15 @@ exit code it would have had. Five cases reach it.
 
 The block prints once admission has answered, not when the store is
 chosen, so a run that is refused never reads a paragraph ending
-"everything else works" immediately above its own failure. A refused run
-also leaves no standalone store behind: if it was the run that created the
-file, the file is removed again.
+"everything else works" immediately above its own failure. A run refused
+by admission also leaves no standalone store behind: if it was the run
+that created the file, the file is removed again. That is the only ending
+that discards anything -- a run that fails later, while shaping its plan
+or resolving a secret, has already written its row and keeps both the row
+and the block. Every standalone run holds a shared lock on
+`standalone/state.lock` for the life of its handle, and a discard runs
+only when it can take that lock exclusively, so two runs starting together
+cannot delete each other's store.
 
 **No daemon is running and none can be started** -- no sparkwing
 installed to host one. The run says:
