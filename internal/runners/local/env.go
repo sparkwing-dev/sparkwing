@@ -21,9 +21,15 @@ var tokenEnvNames = []string{"SPARKWING_AGENT_TOKEN", "SPARKWING_TOKEN"}
 
 func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request) []string {
 	env := make([]string, 0, len(base)+16)
+	// safety: the dispatcher decides where this node's controller calls go, so
+	// an inherited socket is dropped whichever way it decided. A pipeline run
+	// from inside another run's node inherits that run's socket otherwise, and
+	// dials a daemon that has never heard of it.
+	drop := []string{APISocketEnv}
 	if cfg.APISocket != "" {
-		base = withoutEnv(base, tokenEnvNames)
+		drop = append(drop, tokenEnvNames...)
 	}
+	base = withoutEnv(base, drop)
 	env = append(env, base...)
 
 	set := func(k, v string) {

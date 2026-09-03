@@ -151,3 +151,14 @@ func TestChildEnv_LoopbackKeepsItsBearer(t *testing.T) {
 		t.Fatalf("%s = %q, want it unset without an API socket", APISocketEnv, got)
 	}
 }
+
+func TestChildEnv_DropsAnInheritedAPISocket(t *testing.T) {
+	base := []string{APISocketEnv + "=/tmp/another-run/api.sock"}
+
+	env := childEnv(context.Background(), base, testConfig(),
+		runner.Request{RunID: "run-1", NodeID: "build"})
+
+	if got, ok := lastValue(env, APISocketEnv); ok {
+		t.Fatalf("%s = %q, want the inherited socket dropped", APISocketEnv, got)
+	}
+}
