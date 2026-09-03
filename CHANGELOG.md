@@ -300,6 +300,15 @@ code change to unlock.
   socket, leaving clients spinning until they failed with "predecessor daemon
   still holds the election lock". It now redials and confirms the path still
   carries the same file before unlinking.
+- **cli:** `sparkwing secrets set` stores a value exactly as given. The local
+  dotenv writer quoted a value only when it looked like it needed quoting and
+  the reader never undid that quoting, so a secret holding a newline, a quote,
+  or a backslash -- an SSH key, a PEM block, a service-account JSON -- came back
+  mangled, and each later write to the same file added another layer of escaping
+  to every quoted entry already in it. Values are now written Go-quoted and
+  decoded on read, and the `filesystem` secrets backend decodes the same way.
+  Files written by hand still read as before; a value that an earlier write
+  already mangled has to be set again.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads
@@ -396,6 +405,14 @@ code change to unlock.
   `EXTRA_ENV=GITHUB_TOKEN=...` are dropped from the dispatch and submission
   snapshots instead of persisted verbatim.
 
+- **logs:** Secrets are masked longest-first, so a registered secret that is a
+  prefix of another registered secret no longer leaks the longer one's tail.
+  Registering `abc` and then `abcdef` used to log `abcdef` as `***def`.
+- **logs:** Structured log attributes of every type are masked. `error` and
+  `[]byte` values used to pass through untouched, so an error string carrying a
+  resolved secret was logged in the clear beside a masked message. A masked
+  error keeps its unwrap chain; an attribute of any other type is masked by its
+  rendered form and only replaced when a secret was found in it.
 - **store:** A trigger returned to the pending queue no longer keeps the
   principal that held it. A release, a generation-guarded release, and the
   expired-claim reaper all clear `claim_principal` and `claim_token_prefix`,
