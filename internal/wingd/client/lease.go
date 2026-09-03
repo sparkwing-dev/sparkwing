@@ -207,6 +207,8 @@ func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingw
 				onComplete()
 			}
 			return nil
+		case *wingwire.Unsupported:
+			return daemonLacksOperation(m.Type, l.cl.ack.BinaryVersion)
 		case *wingwire.LivenessProbe:
 			if err := l.cl.write(&wingwire.LivenessAck{Nonce: m.Nonce}); err != nil {
 				continue

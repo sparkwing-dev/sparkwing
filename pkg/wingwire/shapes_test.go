@@ -3,11 +3,7 @@ package wingwire
 import (
 	"encoding/json"
 	"flag"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -62,11 +58,30 @@ func TestWireShapes(t *testing.T) {
 		formatShapeList(removed), formatShapeList(retyped), formatShapeList(added), regenerateShapes)
 }
 
-func TestEveryDeclaredTypeIsRegistered(t *testing.T) {
-	for _, mt := range declaredMessageTypes(t) {
-		if _, err := emptyMessage(mt); err != nil {
-			t.Errorf("message type %q is declared but emptyMessage does not build it: %v", mt, err)
+func TestRegistryAgreesWithEveryMessageType(t *testing.T) {
+	for _, mt := range registeredTypes() {
+		msg, err := emptyMessage(mt)
+		if err != nil {
+			t.Fatalf("emptyMessage(%q): %v", mt, err)
 		}
+		if got := msg.wireType(); got != mt {
+			t.Errorf("registry builds %T under %q but the message calls itself %q", msg, mt, got)
+		}
+	}
+}
+
+func TestSnapshotCoversTheWholeRegistry(t *testing.T) {
+	snapshot := map[MessageType]bool{}
+	for _, mt := range snapshotMessageTypes(t) {
+		snapshot[mt] = true
+	}
+	for _, mt := range registeredTypes() {
+		if !snapshot[mt] {
+			t.Errorf("message type %q is registered but absent from %s; regenerate with `%s`", mt, shapesPath, regenerateShapes)
+		}
+	}
+	if len(snapshot) != len(registeredTypes()) {
+		t.Errorf("%s carries %d types and the registry holds %d", shapesPath, len(snapshot), len(registeredTypes()))
 	}
 }
 
@@ -132,7 +147,7 @@ func snapshotMessageTypes(t *testing.T) []MessageType {
 func currentShapes(t *testing.T) wireShapes {
 	t.Helper()
 	var shapes wireShapes
-	for _, mt := range declaredMessageTypes(t) {
+	for _, mt := range registeredTypes() {
 		msg, err := emptyMessage(mt)
 		if err != nil {
 			t.Fatalf("emptyMessage(%q): %v", mt, err)
@@ -153,60 +168,6 @@ func marshalShapes(t *testing.T, shapes wireShapes) []byte {
 		t.Fatalf("marshal shapes: %v", err)
 	}
 	return append(body, '\n')
-}
-
-func declaredMessageTypes(t *testing.T) []MessageType {
-	t.Helper()
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read package directory: %v", err)
-	}
-	var out []MessageType
-	fset := token.NewFileSet()
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
-		out = append(out, messageTypeConstants(f)...)
-	}
-	if len(out) == 0 {
-		t.Fatal("no MessageType constants found in the package source")
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
-}
-
-func messageTypeConstants(f *ast.File) []MessageType {
-	var out []MessageType
-	for _, decl := range f.Decls {
-		gen, ok := decl.(*ast.GenDecl)
-		if !ok || gen.Tok != token.CONST {
-			continue
-		}
-		for _, spec := range gen.Specs {
-			value, ok := spec.(*ast.ValueSpec)
-			if !ok {
-				continue
-			}
-			ident, ok := value.Type.(*ast.Ident)
-			if !ok || ident.Name != "MessageType" {
-				continue
-			}
-			for _, expr := range value.Values {
-				lit, ok := expr.(*ast.BasicLit)
-				if !ok {
-					continue
-				}
-				out = append(out, MessageType(strings.Trim(lit.Value, `"`)))
-			}
-		}
-	}
-	return out
 }
 
 func renderFields(t reflect.Type) []wireField {

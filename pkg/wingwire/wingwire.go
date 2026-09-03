@@ -32,6 +32,7 @@ package wingwire
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 )
 
 // BuildIdentity changes whenever same-major wire behavior changes. It lets
@@ -225,6 +226,11 @@ func Decode(line []byte) (Message, error) {
 	if err := json.Unmarshal(line, &env); err != nil {
 		return nil, fmt.Errorf("wingwire: Decode envelope: %w", err)
 	}
+	// safety: a frame with no type is malformed rather than a type from another
+	// generation, so it must not be answerable as an unknown type.
+	if env.Type == "" {
+		return nil, fmt.Errorf("wingwire: Decode envelope: no message type")
+	}
 	m, err := emptyMessage(env.Type)
 	if err != nil {
 		return nil, err
@@ -248,51 +254,45 @@ func (e *UnknownTypeError) Error() string {
 	return fmt.Sprintf("wingwire: unknown message type %q (peer speaks a different protocol major than %d)", e.Type, ProtocolMajor)
 }
 
+// safety: the wire shape snapshot is generated from this map, so a type reaches
+// the wire only by being registered here and cannot escape the snapshot.
+var messageRegistry = map[MessageType]func() Message{
+	TypeHello:            func() Message { return &Hello{} },
+	TypeHelloAck:         func() Message { return &HelloAck{} },
+	TypeAdmissionRequest: func() Message { return &AdmissionRequest{} },
+	TypeGrant:            func() Message { return &Grant{} },
+	TypeQueued:           func() Message { return &Queued{} },
+	TypeEvicted:          func() Message { return &Evicted{} },
+	TypeRelease:          func() Message { return &Release{} },
+	TypeGuardComplete:    func() Message { return &GuardComplete{} },
+	TypeGuardCompleteAck: func() Message { return &GuardCompleteAck{} },
+	TypeReattach:         func() Message { return &Reattach{} },
+	TypeDrainRequest:     func() Message { return &DrainRequest{} },
+	TypeDrainAck:         func() Message { return &DrainAck{} },
+	TypeQueueState:       func() Message { return &QueueState{} },
+	TypeCancelLease:      func() Message { return &CancelLease{} },
+	TypeCancelLeaseAck:   func() Message { return &CancelLeaseAck{} },
+	TypeCancel:           func() Message { return &Cancel{} },
+	TypeStatsReset:       func() Message { return &StatsReset{} },
+	TypeStatsResetAck:    func() Message { return &StatsResetAck{} },
+	TypeLivenessProbe:    func() Message { return &LivenessProbe{} },
+	TypeLivenessAck:      func() Message { return &LivenessAck{} },
+	TypeUnsupported:      func() Message { return &Unsupported{} },
+}
+
+func registeredTypes() []MessageType {
+	out := make([]MessageType, 0, len(messageRegistry))
+	for t := range messageRegistry {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
 func emptyMessage(t MessageType) (Message, error) {
-	switch t {
-	case TypeHello:
-		return &Hello{}, nil
-	case TypeHelloAck:
-		return &HelloAck{}, nil
-	case TypeAdmissionRequest:
-		return &AdmissionRequest{}, nil
-	case TypeGrant:
-		return &Grant{}, nil
-	case TypeQueued:
-		return &Queued{}, nil
-	case TypeEvicted:
-		return &Evicted{}, nil
-	case TypeRelease:
-		return &Release{}, nil
-	case TypeGuardComplete:
-		return &GuardComplete{}, nil
-	case TypeGuardCompleteAck:
-		return &GuardCompleteAck{}, nil
-	case TypeReattach:
-		return &Reattach{}, nil
-	case TypeDrainRequest:
-		return &DrainRequest{}, nil
-	case TypeDrainAck:
-		return &DrainAck{}, nil
-	case TypeQueueState:
-		return &QueueState{}, nil
-	case TypeCancelLease:
-		return &CancelLease{}, nil
-	case TypeCancelLeaseAck:
-		return &CancelLeaseAck{}, nil
-	case TypeCancel:
-		return &Cancel{}, nil
-	case TypeStatsReset:
-		return &StatsReset{}, nil
-	case TypeStatsResetAck:
-		return &StatsResetAck{}, nil
-	case TypeLivenessProbe:
-		return &LivenessProbe{}, nil
-	case TypeLivenessAck:
-		return &LivenessAck{}, nil
-	case TypeUnsupported:
-		return &Unsupported{}, nil
-	default:
+	build, ok := messageRegistry[t]
+	if !ok {
 		return nil, &UnknownTypeError{Type: t}
 	}
+	return build(), nil
 }

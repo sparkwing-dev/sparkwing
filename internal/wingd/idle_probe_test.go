@@ -230,9 +230,12 @@ func TestHealthProbeConnectionMayOnlyReadQueueState(t *testing.T) {
 	if err := writeRawMessage(nc, &wingwire.AdmissionRequest{RunID: "sneak", Resources: wingwire.HostResources{Cores: 1}}); err != nil {
 		t.Fatalf("write admission request: %v", err)
 	}
-	_ = nc.SetReadDeadline(time.Now().Add(2 * time.Second))
-	buf := make([]byte, 256)
-	if n, err := nc.Read(buf); err == nil {
-		t.Fatalf("daemon answered an admission request on a probe connection with %q; want the connection dropped", buf[:n])
+	msg := readRawMessage(t, nc)
+	unsupported, ok := msg.(*wingwire.Unsupported)
+	if !ok {
+		t.Fatalf("daemon answered an admission request on a probe connection with %T; want it refused", msg)
+	}
+	if unsupported.Type != string(wingwire.TypeAdmissionRequest) {
+		t.Errorf("refusal names %q, want %q", unsupported.Type, wingwire.TypeAdmissionRequest)
 	}
 }

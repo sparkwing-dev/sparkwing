@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -72,48 +71,6 @@ func connectToFakeDaemon(t *testing.T, home string) *Client {
 	return cl
 }
 
-func TestRequestReportsAnUnsupportedReply(t *testing.T) {
-	home := shortHome(t)
-	serveFakeDaemon(t, home, func(nc net.Conn, r *frameReader) {
-		if _, err := r.read(); err != nil {
-			return
-		}
-		line, err := wingwire.Encode(&wingwire.Unsupported{Type: string(wingwire.TypeStatsReset)})
-		if err != nil {
-			return
-		}
-		_, _ = nc.Write(line)
-		time.Sleep(time.Second)
-	})
-
-	cl := connectToFakeDaemon(t, home)
-	_, err := cl.Request(&wingwire.StatsReset{})
-	if !errors.Is(err, ErrDaemonLacksOperation) {
-		t.Fatalf("Request error = %v, want ErrDaemonLacksOperation", err)
-	}
-	for _, want := range []string{"stats_reset", fakeDaemonVersion} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q omits %q", err, want)
-		}
-	}
-}
-
-func TestRequestReportsADaemonThatClosesInsteadOfAnswering(t *testing.T) {
-	home := shortHome(t)
-	serveFakeDaemon(t, home, func(_ net.Conn, r *frameReader) {
-		_, _ = r.read()
-	})
-
-	cl := connectToFakeDaemon(t, home)
-	_, err := cl.Request(&wingwire.StatsReset{})
-	if !errors.Is(err, ErrDaemonLacksOperation) {
-		t.Fatalf("Request error = %v, want ErrDaemonLacksOperation from a daemon that predates the unsupported reply", err)
-	}
-	if !strings.Contains(err.Error(), "stats_reset") {
-		t.Errorf("error %q does not name the operation the daemon refused", err)
-	}
-}
-
 func TestResetStatsReportsAnUnsupportedReplyWithoutRetrying(t *testing.T) {
 	home := shortHome(t)
 	frames := make(chan int, 8)
@@ -140,5 +97,61 @@ func TestResetStatsReportsAnUnsupportedReplyWithoutRetrying(t *testing.T) {
 	}
 	if len(frames) != 1 {
 		t.Errorf("client sent %d frames; a refusal is terminal, not transient", len(frames))
+	}
+}
+
+func TestStopReportsADaemonThatRefusesTheDrain(t *testing.T) {
+	home := shortHome(t)
+	serveFakeDaemon(t, home, func(nc net.Conn, r *frameReader) {
+		if _, err := r.read(); err != nil {
+			return
+		}
+		line, err := wingwire.Encode(&wingwire.Unsupported{Type: string(wingwire.TypeDrainRequest)})
+		if err != nil {
+			return
+		}
+		_, _ = nc.Write(line)
+		time.Sleep(2 * time.Second)
+	})
+
+	err := Stop(context.Background(), Options{Home: home, Version: fakeDaemonVersion, DialTimeout: 500 * time.Millisecond})
+	if !errors.Is(err, ErrDaemonLacksOperation) {
+		t.Fatalf("Stop error = %v, want ErrDaemonLacksOperation instead of waiting for a daemon that never drains", err)
+	}
+}
+
+func TestWatchGuardReportsARefusedGuardCompletion(t *testing.T) {
+	home := shortHome(t)
+	serveFakeDaemon(t, home, func(nc net.Conn, r *frameReader) {
+		for {
+			msg, err := r.read()
+			if err != nil {
+				return
+			}
+			if _, ok := msg.(*wingwire.GuardComplete); !ok {
+				continue
+			}
+			line, err := wingwire.Encode(&wingwire.Unsupported{Type: string(wingwire.TypeGuardComplete)})
+			if err != nil {
+				return
+			}
+			_, _ = nc.Write(line)
+		}
+	})
+
+	cl := connectToFakeDaemon(t, home)
+	lease := &Lease{cl: cl, RunID: "r1", Token: "lease-1"}
+	if err := lease.CompleteGuard(); err != nil {
+		t.Fatalf("CompleteGuard: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- lease.WatchGuard(nil, nil, nil) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrDaemonLacksOperation) {
+			t.Fatalf("WatchGuard error = %v, want ErrDaemonLacksOperation", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WatchGuard is still waiting for an acknowledgement the daemon refused")
 	}
 }

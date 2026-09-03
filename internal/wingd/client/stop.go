@@ -33,8 +33,12 @@ func Stop(ctx context.Context, opts Options) error {
 	if err := cl.write(&wingwire.DrainRequest{}); err != nil {
 		return fmt.Errorf("wingd/client: stop daemon: %w", err)
 	}
-	if _, err := cl.dec.read(); err != nil {
+	msg, err := cl.dec.read()
+	if err != nil {
 		return fmt.Errorf("wingd/client: stop daemon: drain not acknowledged: %w", err)
+	}
+	if refusal := cl.lacksOperation(msg); refusal != nil {
+		return fmt.Errorf("wingd/client: stop daemon: %w", refusal)
 	}
 	if err := waitSocketQuiet(ctx, sock, opts.dialTimeout()); err != nil {
 		return err

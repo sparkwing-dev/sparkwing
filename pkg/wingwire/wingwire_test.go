@@ -3,6 +3,7 @@ package wingwire
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -199,5 +200,18 @@ func TestLeaseTokenEnv_IsStable(t *testing.T) {
 	}
 	if ChildLeaseTokenEnv != "SPARKWING_CHILD_LEASE_TOKEN" {
 		t.Fatalf("ChildLeaseTokenEnv = %q", ChildLeaseTokenEnv)
+	}
+}
+
+func TestDecode_RejectsAFrameWithNoType(t *testing.T) {
+	for _, line := range []string{`{}`, `{"payload":{}}`, `{"type":"","payload":{}}`} {
+		_, err := Decode([]byte(line))
+		if err == nil {
+			t.Fatalf("Decode accepted %s", line)
+		}
+		var unknown *UnknownTypeError
+		if errors.As(err, &unknown) {
+			t.Errorf("Decode(%s) reported a missing type as an unknown one: %v", line, err)
+		}
 	}
 }
