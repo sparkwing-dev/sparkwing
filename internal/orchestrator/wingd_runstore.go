@@ -202,7 +202,7 @@ func (h *HeldRunStore) beginOpenLocked() chan struct{} {
 	return done
 }
 
-func stillOpening(elapsed time.Duration, pending error, cause error) error {
+func stillOpening(elapsed time.Duration, pending, cause error) error {
 	if pending != nil && !errors.Is(pending, errRunStoreAbsent) {
 		return fmt.Errorf("the runs store is still opening (%s so far, last failure: %v): %w",
 			elapsed.Round(100*time.Millisecond), pending, cause)
