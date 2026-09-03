@@ -41,14 +41,7 @@ func CheckChangelogLint(ctx context.Context, repoRoot string) error {
 		}
 		return fmt.Errorf("read CHANGELOG.md: %w", err)
 	}
-	migrationsDir := filepath.Join(repoRoot, "docs", "migrations")
-	var migrations fs.FS
-	if info, statErr := os.Stat(migrationsDir); statErr == nil && info.IsDir() {
-		migrations = os.DirFS(migrationsDir)
-	} else {
-		migrations = emptyFS{}
-	}
-	issues := LintChangelog(string(body), migrations)
+	issues := LintChangelog(string(body), migrationsFS(repoRoot))
 	if len(issues) == 0 {
 		return nil
 	}
@@ -124,6 +117,145 @@ func LintSchemaBreak(body, version string, prevSchema, curSchema int, addedRequi
 			"%s and adds no requirement, so older binaries keep opening the database, but [%s] has no `**store:**` entry describing it; add one",
 			describeSchemaDelta(prevSchema, curSchema), label),
 	}}
+}
+
+const (
+	wireBreakCategory     = "unmarked-wire-break"
+	wireMigrationCategory = "missing-wire-migration"
+)
+
+var wireSurfaceRe = regexp.MustCompile(`(?i)\b(wire|protocol|route|endpoint|api)\b`)
+
+var markdownLinkTargetRe = regexp.MustCompile(`\]\([^)]*\)`)
+
+func namesWireSurface(entryBody string) bool {
+	return wireSurfaceRe.MatchString(markdownLinkTargetRe.ReplaceAllString(entryBody, "]"))
+}
+
+// LintWireBreak checks that a cut in the daemon's wire surface is declared in
+// the changelog section being cut. cuts names what the release removes,
+// retypes, or locks out; growth passes with nothing. A cut needs a
+// `(Breaking)` entry that names the surface and links a migration section,
+// because a pinned pipeline binary finds out at run time and its operator has
+// only the release notes to go on.
+func LintWireBreak(body, version string, cuts []string, migrations fs.FS) []ChangelogIssue {
+	if len(cuts) == 0 {
+		return nil
+	}
+	section := changelogSectionFor(body, version)
+	if section == nil {
+		return []ChangelogIssue{{
+			Line:     1,
+			Category: wireBreakCategory,
+			Message: fmt.Sprintf("%s, but the changelog has no [%s] or [Unreleased] section to declare it in",
+				describeWireCuts(cuts), version),
+		}}
+	}
+	isUnreleased := strings.EqualFold(section.version, "Unreleased")
+	for _, e := range section.entries {
+		if !breakingScopeRe.MatchString(e.body) || !namesWireSurface(e.body) {
+			continue
+		}
+		links := migrationLinkRe.FindAllStringSubmatch(e.body, -1)
+		if len(links) == 0 {
+			return []ChangelogIssue{{
+				Line:     e.titleLine,
+				Category: wireMigrationCategory,
+				Message: fmt.Sprintf("%s and the `(Breaking)` entry in [%s] links no migration section; link %s",
+					describeWireCuts(cuts), section.version, expectedMigrationPath(section.version, isUnreleased)),
+			}}
+		}
+		if issues := wireMigrationIssues(*section, e, links, migrations, isUnreleased); len(issues) > 0 {
+			return issues
+		}
+		return nil
+	}
+	return []ChangelogIssue{{
+		Line:     section.startLine,
+		Category: wireBreakCategory,
+		Message: fmt.Sprintf("%s, but [%s] has no `(Breaking)` entry naming the wire surface; mark the cut `(Breaking)` and link a section in docs/migrations/%s",
+			describeWireCuts(cuts), section.version, expectedMigrationPath(section.version, isUnreleased)),
+	}}
+}
+
+func wireMigrationIssues(s changelogSection, e changelogEntry, links [][]string, migrations fs.FS, isUnreleased bool) []ChangelogIssue {
+	var issues []ChangelogIssue
+	for _, link := range links {
+		path, anchor, _ := strings.Cut(link[1], "#")
+		path, anchor = strings.TrimSpace(path), strings.TrimSpace(anchor)
+		if want := expectedMigrationPath(s.version, isUnreleased); path != want {
+			issues = append(issues, ChangelogIssue{
+				Line:     e.titleLine,
+				Category: "version-mismatch",
+				Message:  fmt.Sprintf("(Breaking) entry in [%s] links to docs/migrations/%s but should link to docs/migrations/%s", s.version, path, want),
+			})
+			continue
+		}
+		headings, exists := readMigrationHeadings(migrations, path)
+		if !exists {
+			issues = append(issues, ChangelogIssue{
+				Line:     e.titleLine,
+				Category: "missing-migration-file",
+				Message:  fmt.Sprintf("(Breaking) entry links to docs/migrations/%s but the file does not exist", path),
+			})
+			continue
+		}
+		if !headingExists(headings, anchor) {
+			issues = append(issues, ChangelogIssue{
+				Line:     e.titleLine,
+				Category: "missing-migration-anchor",
+				Message: fmt.Sprintf("(Breaking) entry links to docs/migrations/%s#%s but that anchor matches no H2 in the file; available headings: %s",
+					path, anchor, formatAnchorList(headings)),
+			})
+		}
+	}
+	return issues
+}
+
+func headingExists(headings []string, anchor string) bool {
+	if anchor == "" {
+		return false
+	}
+	for _, h := range headings {
+		if slugifyHeading(h) == anchor {
+			return true
+		}
+	}
+	return false
+}
+
+func expectedMigrationPath(version string, isUnreleased bool) string {
+	if isUnreleased {
+		return "_unreleased.md"
+	}
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
+	return version + ".md"
+}
+
+func changelogSectionFor(body, version string) *changelogSection {
+	sections := parseChangelogSections(body)
+	var versionSec, unreleasedSec *changelogSection
+	for i := range sections {
+		switch {
+		case strings.EqualFold(sections[i].version, version):
+			versionSec = &sections[i]
+		case strings.EqualFold(sections[i].version, "Unreleased"):
+			unreleasedSec = &sections[i]
+		}
+	}
+	if versionSec != nil {
+		return versionSec
+	}
+	return unreleasedSec
+}
+
+func describeWireCuts(cuts []string) string {
+	if len(cuts) == 1 {
+		return "the daemon's wire surface cuts " + cuts[0]
+	}
+	return fmt.Sprintf("the daemon's wire surface cuts %d entries (%s)", len(cuts), strings.Join(cuts, "; "))
 }
 
 func describeSchemaDelta(prevSchema, curSchema int) string {
@@ -397,6 +529,14 @@ func sortIssues(issues []ChangelogIssue) {
 		}
 		return issues[i].Category < issues[j].Category
 	})
+}
+
+func migrationsFS(repoRoot string) fs.FS {
+	dir := filepath.Join(repoRoot, "docs", "migrations")
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		return os.DirFS(dir)
+	}
+	return emptyFS{}
 }
 
 type emptyFS struct{}
