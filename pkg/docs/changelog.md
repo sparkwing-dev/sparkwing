@@ -249,6 +249,17 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing doctor` no longer deletes run directories whose run row
+  lives in a remote state backend. The dangling-run sweep now unlinks a
+  directory only when the local SQLite store is where that run would have been
+  recorded -- no profile keeps run state in S3, Postgres, or a controller, and
+  the store has recorded at least one run -- and only once nothing has written
+  to the directory for ten minutes, which also closes the window between a
+  starting run creating its directory and its row landing. Directories it
+  cannot account for are reported as `unknown_run_dirs` and left in place.
+  Under `mirror_local: false`, the setting the docs recommend for automated
+  workers, a plain `sparkwing doctor` previously removed every run directory in
+  the home, taking `_envelope.ndjson` and the node logs with it.
 - **ci:** The `security-scan` gitleaks job says what it found. It writes
   `gitleaks.json` beside the gosec reports, names every redacted finding (rule,
   file, line, fingerprint) in the step log, and the Security workflow uploads

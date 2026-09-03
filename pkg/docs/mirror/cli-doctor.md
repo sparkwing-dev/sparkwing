@@ -22,6 +22,13 @@ files from older binaries (a file whose owner is still alive is reported,
 never removed); local-scope concurrency rows whose run has ended; and
 run directories on disk whose run row no longer exists.
 
+That last sweep only unlinks what the local state database can account
+for. It leaves a run directory alone for ten minutes after anything last
+wrote to it, and when a profile keeps run state in S3, Postgres, or a
+controller, or the local store has never recorded a run, it reports the
+directories it found and removes none of them: a missing local row is not
+evidence that the run is gone.
+
 On POSIX systems, doctor removes group, other, and special permission bits
 without granting new owner access; cached executables retain any existing
 owner execute bit. The walk never follows symlinks. Windows access

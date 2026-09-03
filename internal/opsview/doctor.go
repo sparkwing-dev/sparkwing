@@ -24,14 +24,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 const doctorRunOrphanGrace = 2 * time.Minute
+
+const doctorRunDirGrace = 10 * time.Minute
 
 const doctorRejectionPatternThreshold = 3
 
@@ -52,6 +56,8 @@ type DoctorReport struct {
 	DeadConcurrencyWaiters int `json:"dead_concurrency_waiters"`
 
 	DanglingRunDirs []string `json:"dangling_run_dirs,omitempty"`
+
+	UnknownRunDirs []string `json:"unknown_run_dirs,omitempty"`
 
 	AdmissionRejections []DoctorRejection `json:"admission_rejections,omitempty"`
 
@@ -327,7 +333,7 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 		if err := diagnoseDeadConcurrency(ctx, st, dryRun, &report); err != nil {
 			return report, err
 		}
-		if err := diagnoseDanglingRunDirs(ctx, st, runsRoot, dryRun, &report); err != nil {
+		if err := diagnoseDanglingRunDirs(ctx, st, runsRoot, localStoreOwnsRunRows(ctx, st), dryRun, &report); err != nil {
 			return report, err
 		}
 		if err := diagnosePoisonedProfiles(ctx, st, queueState, queueRead, &report); err != nil {
@@ -1036,7 +1042,77 @@ func diagnoseDeadConcurrency(ctx context.Context, st *store.Store, dryRun bool, 
 	return nil
 }
 
-func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, runsRoot *os.Root, dryRun bool, report *DoctorReport) error {
+// safety: a run directory with no row in this store is evidence the run is
+// gone only when this store is where the row would have been written. A
+// profile that keeps run state off this machine, and a store that has never
+// recorded a run, both leave that absence proving nothing.
+func localStoreOwnsRunRows(ctx context.Context, st *store.Store) bool {
+	if !profilesKeepRunRowsLocal() {
+		return false
+	}
+	runs, err := st.ListRuns(ctx, store.RunFilter{Limit: 1})
+	return err == nil && len(runs) > 0
+}
+
+func profilesKeepRunRowsLocal() bool {
+	path, err := profile.DefaultPath()
+	if err != nil {
+		return false
+	}
+	cfg, err := profile.Load(path)
+	if err != nil {
+		return false
+	}
+	for _, p := range cfg.Profiles {
+		if p == nil {
+			continue
+		}
+		if p.State != nil {
+			if p.State.Type != backends.TypeSQLite {
+				return false
+			}
+			continue
+		}
+		if p.HasController() {
+			return false
+		}
+	}
+	return true
+}
+
+// safety: a run writes its envelope log as it goes, so the newest mtime in
+// the directory separates one a starting or live run is still filling from
+// one nothing owns.
+func runDirSettled(runsRoot *os.Root, name string) (time.Time, error) {
+	info, err := runsRoot.Stat(name)
+	if err != nil {
+		return time.Time{}, err
+	}
+	newest := info.ModTime()
+	dir, err := runsRoot.Open(name)
+	if err != nil {
+		return newest, err
+	}
+	entries, readErr := dir.ReadDir(-1)
+	if cerr := dir.Close(); cerr != nil && readErr == nil {
+		readErr = cerr
+	}
+	if readErr != nil {
+		return newest, readErr
+	}
+	for _, e := range entries {
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if fi.ModTime().After(newest) {
+			newest = fi.ModTime()
+		}
+	}
+	return newest, nil
+}
+
+func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, runsRoot *os.Root, localOwnsRows, dryRun bool, report *DoctorReport) error {
 	if runsRoot == nil {
 		return nil
 	}
@@ -1061,6 +1137,20 @@ func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, runsRoot *os.
 		}
 		if !errors.Is(err, store.ErrNotFound) {
 			return err
+		}
+		settled, err := runDirSettled(runsRoot, e.Name())
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		if time.Since(settled) < doctorRunDirGrace {
+			continue
+		}
+		if !localOwnsRows {
+			report.UnknownRunDirs = append(report.UnknownRunDirs, e.Name())
+			continue
 		}
 		report.DanglingRunDirs = append(report.DanglingRunDirs, e.Name())
 		if dryRun {
@@ -1100,6 +1190,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "dead_concurrency_holders\t%d\n", r.DeadConcurrencyHolders)
 	fmt.Fprintf(w, "dead_concurrency_waiters\t%d\n", r.DeadConcurrencyWaiters)
 	fmt.Fprintf(w, "dangling_run_dirs\t%d\n", len(r.DanglingRunDirs))
+	fmt.Fprintf(w, "unknown_run_dirs\t%d\n", len(r.UnknownRunDirs))
 	rejections := 0
 	for _, rej := range r.AdmissionRejections {
 		rejections += rej.Count
@@ -1188,6 +1279,9 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	if n := len(r.DanglingRunDirs); n > 0 {
 		fmt.Fprintf(tw, "dangling run directories %s\t%d\n", verb, n)
 	}
+	if n := len(r.UnknownRunDirs); n > 0 {
+		fmt.Fprintf(tw, "run directories left in place\t%d\n", n)
+	}
 	_ = tw.Flush()
 	if len(r.PermissionRepairs) > 0 {
 		fmt.Fprintln(w, "\npermissions:")
@@ -1197,6 +1291,13 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	if r.PermissionAuditUnverified {
 		fmt.Fprintln(w, "\nwarning: local file permissions were not verified -- Windows access is governed by DACLs, which this doctor check cannot inspect or repair")
+	}
+	if n := len(r.UnknownRunDirs); n > 0 {
+		noun := "directories"
+		if n == 1 {
+			noun = "directory"
+		}
+		fmt.Fprintf(w, "\nnotice: doctor left %d run %s under runs/ in place, with no row in this home's state database\n  a run directory is unlinked only when the local store is where its run would be recorded; a profile that keeps run state in S3, Postgres, or a controller, and a store that has never recorded a run, both leave a missing row proving nothing\n", n, noun)
 	}
 
 	for _, rej := range r.AdmissionRejections {
