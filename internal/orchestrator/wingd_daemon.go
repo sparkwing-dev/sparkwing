@@ -15,6 +15,11 @@ import (
 // while the daemon serves. It matches the controller's reaper cadence.
 const RunStoreReapInterval = 10 * time.Second
 
+// safety: a pass shares the writing handle's single connection with finalize,
+// so it is bounded rather than left to the store's busy timeout, and the next
+// tick retries whatever it dropped.
+const runStoreReapTimeout = 30 * time.Second
+
 // WingdOptions are the host's choices when it runs the admission daemon in
 // this process. Zero values take the daemon's own defaults.
 type WingdOptions struct {
@@ -89,17 +94,22 @@ func maintainRunStore(ctx context.Context, runs *HeldRunStore, ready <-chan stru
 		return
 	}
 	reconciled := false
+	fault := ""
 	pass := func(force bool) {
 		st, err := runs.Store(force)
 		if err != nil {
-			if force && ctx.Err() == nil && !errors.Is(err, errRunStoreAbsent) {
+			if ctx.Err() == nil && !errors.Is(err, errRunStoreAbsent) && err.Error() != fault {
+				fault = err.Error()
 				logf("runs store unavailable: %v", err)
 			}
 			return
 		}
+		fault = ""
+		passCtx, cancel := context.WithTimeout(ctx, runStoreReapTimeout)
+		defer cancel()
 		if !reconciled {
 			reconciled = true
-			if n, err := ReconcileOrphanedLocalRuns(ctx, st, 0); err != nil {
+			if n, err := ReconcileOrphanedLocalRuns(passCtx, st, 0); err != nil {
 				if ctx.Err() == nil {
 					logf("reconcile orphaned local runs: %v", err)
 				}
@@ -107,7 +117,7 @@ func maintainRunStore(ctx context.Context, runs *HeldRunStore, ready <-chan stru
 				logf("reconciled %d orphaned local run(s)", n)
 			}
 		}
-		res, err := st.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{})
+		res, err := st.MaintainConcurrency(passCtx, store.ConcurrencyMaintenanceOptions{})
 		if err != nil && ctx.Err() == nil {
 			logf("concurrency maintenance: %v", err)
 		}

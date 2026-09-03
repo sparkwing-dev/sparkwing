@@ -5,8 +5,9 @@ package wingd
 // package and the handle's lifetime is the host's business.
 //
 // Implementations must be safe for concurrent use and must not assume the
-// store is open: a daemon whose store is unreadable keeps admitting work and
-// reports the reason through Ready.
+// store is open: a daemon whose store is unreadable keeps serving, evicts
+// every run whose terminal state it cannot check, and reports the reason
+// through Ready.
 type RunStore interface {
 	// IsRunTerminal reports whether the run has already finished. An error
 	// means the store could not answer, and admission evicts the run with
@@ -18,7 +19,8 @@ type RunStore interface {
 	// FinalizeCancelledRuns marks every named run cancelled with reason.
 	FinalizeCancelledRuns(runIDs []string, reason string) error
 	// Ready returns nil when the store is open and usable, else the reason
-	// it is not. It never blocks on the store.
+	// it is not. It is called on the handshake path, so it must bound its
+	// own work rather than wait on the store.
 	Ready() error
 }
 

@@ -250,3 +250,137 @@ func TestWingdDaemonReapsWhileServingAndClosesTheStoreOnIdleExit(t *testing.T) {
 		t.Fatal("the daemon served a whole lifetime without reaping a lapsed holder")
 	}
 }
+
+func TestHeldRunStoreReadsWhileTheReaperWaitsOnAForeignWriter(t *testing.T) {
+	home := t.TempDir()
+	createStore(t, home)
+	runs, err := NewHeldRunStore(home)
+	if err != nil {
+		t.Fatalf("new held run store: %v", err)
+	}
+	t.Cleanup(func() { _ = runs.Close() })
+	rw, err := runs.Store(true)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	ctx := context.Background()
+	if err := rw.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	foreign, err := store.Open(PathsAt(home).StateDB())
+	if err != nil {
+		t.Fatalf("foreign open: %v", err)
+	}
+	defer func() { _ = foreign.Close() }()
+	tx, err := foreign.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("foreign begin: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES ('held-store-probe', '1', ?)`,
+		time.Now().UnixNano()); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("foreign write: %v", err)
+	}
+	rolled := false
+	defer func() {
+		if !rolled {
+			_ = tx.Rollback()
+		}
+	}()
+
+	reaped := make(chan struct{})
+	go func() {
+		defer close(reaped)
+		_, _ = rw.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{})
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	answered := make(chan error, 1)
+	go func() {
+		_, err := runs.IsRunTerminal("r1")
+		answered <- err
+	}()
+	select {
+	case err := <-answered:
+		if err != nil {
+			t.Fatalf("terminal check while the reaper waits on a foreign writer: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the terminal check queued behind the reaper; one contended store stalls admission for the box")
+	}
+	select {
+	case <-reaped:
+		t.Fatal("the reaper pass finished, so the terminal check never had to pass a busy writing handle")
+	default:
+	}
+
+	rolled = true
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("foreign rollback: %v", err)
+	}
+	select {
+	case <-reaped:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the reaper pass never finished after the foreign writer released")
+	}
+}
+
+func TestHeldRunStoreFollowsAReplacedStoreFile(t *testing.T) {
+	home := t.TempDir()
+	createStore(t, home)
+	runs, err := NewHeldRunStore(home)
+	if err != nil {
+		t.Fatalf("new held run store: %v", err)
+	}
+	t.Cleanup(func() { _ = runs.Close() })
+	if _, err := runs.Store(true); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	db := PathsAt(home).StateDB()
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(db + suffix); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove %s: %v", db+suffix, err)
+		}
+	}
+	replacement, err := store.Open(db)
+	if err != nil {
+		t.Fatalf("replacement open: %v", err)
+	}
+	ctx := context.Background()
+	if err := replacement.CreateRun(ctx, store.Run{ID: "r2", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := replacement.Close(); err != nil {
+		t.Fatalf("close the replacement: %v", err)
+	}
+
+	terminal, err := runs.IsRunTerminal("r2")
+	if err != nil {
+		t.Fatalf("terminal check after the store was replaced: %v", err)
+	}
+	if !terminal {
+		t.Fatal("the daemon answered from the replaced store file instead of the one on disk")
+	}
+	if err := runs.Ready(); err != nil {
+		t.Fatalf("Ready after following the replacement = %v, want nil", err)
+	}
+}
+
+func TestHeldRunStoreOpensAStoreThatAppearsWithoutWaitingOutTheRetry(t *testing.T) {
+	home := t.TempDir()
+	runs, err := NewHeldRunStore(home)
+	if err != nil {
+		t.Fatalf("new held run store: %v", err)
+	}
+	t.Cleanup(func() { _ = runs.Close() })
+	if runs.Ready() == nil {
+		t.Fatal("Ready reported an absent store as ready")
+	}
+	createStore(t, home)
+	if err := runs.Ready(); err != nil {
+		t.Fatalf("Ready one call after the store appeared = %v, want nil", err)
+	}
+}
