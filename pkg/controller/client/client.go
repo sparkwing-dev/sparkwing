@@ -1411,12 +1411,28 @@ func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStat
 	return nil
 }
 
+const unsupportedRouteError = "unsupported"
+
+// ErrControllerLacksRoute reports a controller that does not register the
+// route a call used. The API grows by default, so this means the controller
+// is older than the operation rather than the row being absent, and the
+// caller degrades instead of reporting the resource missing.
+var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
+
 func readHTTPError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
 	var payload struct {
 		Error string `json:"error"`
+		Route string `json:"route"`
 	}
 	if len(body) > 0 && json.Unmarshal(body, &payload) == nil && payload.Error != "" {
+		if resp.StatusCode == http.StatusNotFound && payload.Error == unsupportedRouteError {
+			route := payload.Route
+			if route == "" {
+				route = "(unnamed)"
+			}
+			return fmt.Errorf("%w: %s", ErrControllerLacksRoute, route)
+		}
 		return fmt.Errorf("controller %d: %s", resp.StatusCode, payload.Error)
 	}
 	if len(body) > 0 {
