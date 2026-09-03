@@ -249,6 +249,12 @@ code change to unlock.
 
 ### Fixed
 
+- **orchestrator:** Runners that lose the same S3 concurrency CAS back off to
+  different times. The jitter added to each retry came from a single hash byte
+  of the key, so it was under a microsecond and identical for every contender:
+  N runners on one hot key retried in lockstep, burning retries against each
+  other until one exhausted its 200 attempts and failed the acquire. Each
+  attempt now draws its own wait.
 - **orchestrator:** S3-shared-state concurrency again recognizes the
   inherited-holder marker earlier releases wrote. The marker inside a
   `concurrency/` slot object changed shape and nothing rewrites those objects,

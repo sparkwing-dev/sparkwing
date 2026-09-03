@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"sync"
@@ -222,18 +223,22 @@ func (c *s3Concurrency) mutate(ctx context.Context, key string, fn func(doc *s3S
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(casBackoff(attempt, key)):
+		case <-time.After(casBackoff(attempt)):
 		}
 	}
 }
 
-func casBackoff(attempt int, key string) time.Duration {
+func casBackoff(attempt int) time.Duration {
 	d := time.Duration(attempt+1) * s3CASBackoffStep
 	if d > s3CASBackoffCap {
 		d = s3CASBackoffCap
 	}
-	jitter := time.Duration(sha256.Sum256([]byte(key))[0]) % s3CASBackoffStep
-	return d + jitter
+	// safety: contenders that lost the same CAS have to wake at different
+	// times, so the spread is drawn per attempt rather than from the key
+	// every one of them shares.
+
+	// #nosec G404 -- retry jitter, not a security decision
+	return d + time.Duration(rand.Int64N(int64(d/2)+1))
 }
 
 func liveHolderCost(holders []s3Holder, nowNS int64) int {
