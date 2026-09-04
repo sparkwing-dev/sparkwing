@@ -408,16 +408,22 @@ code change to unlock.
   drops -- plausible whenever the fold is slow, which it is, since it walks
   every node's metric series before the status call. Nothing else produces a
   finished run's status, so the check on the pull request stayed `pending`
-  forever. The follow-ups now run detached from the request, under a bound of
-  their own.
-- **controller:** A chunked request body is no longer ignored on the two routes
-  whose body is optional. `POST /api/v1/triggers/claim` and
-  `POST /api/v1/tokens/{prefix}/rotate` decoded only when the request carried a
-  positive `Content-Length`, so a client that streams its body -- which Go's
+  forever. The follow-ups now run detached from the request, under a bound
+  that sits inside the shutdown budget, and the commit-status queue's drain
+  at shutdown gets a budget of its own instead of whatever the HTTP
+  listener's own shutdown left of one.
+- **controller:** A chunked request body is no longer ignored on the five
+  routes whose body is optional: `POST /api/v1/triggers/claim`,
+  `/triggers/{id}/claim` (on both the hosted controller and the loopback one a
+  local run mounts), `/tokens/{prefix}/rotate`, and
+  `/maintenance/reconcile-orphans`. Each decoded only when the request carried
+  a positive `Content-Length`, so a client that streams its body -- which Go's
   own `http.Client` does for any body it cannot size, and most non-Go clients
   do -- got a normal success with every field defaulted: a trigger worker
-  asking for one pipeline was handed a trigger for any pipeline, and a rotation
-  asking for an hour of grace got the 24-hour default.
+  asking for one pipeline was handed a trigger for any pipeline, a claim asking
+  for an hour of lease got the three-minute default, and a rotation asking for
+  an hour of grace got the 24-hour default. The orphan reconcile refused its
+  own request instead, since it rejects a zero threshold.
 - **controller:** A run's detail read no longer drops the connection when the
   run has an approval gate or a spawned child pipeline but no plan snapshot.
   The decorations the snapshot supplies are absent in that case, and joining
@@ -916,6 +922,12 @@ code change to unlock.
   now honours the set it is given, and refuses one that omits `admin` with a
   `400` rather than widening it; omitting `scopes` still grants `admin`.
 
+  worker's trigger alive forever by heartbeating it. Both routes now answer
+  `403 claim_required` when another principal holds the trigger's claim, and
+  `404` when the row records no claimant at all -- a trigger that never
+  existed, or one the reaper requeued, which is the answer a worker's
+  heartbeat loop already reads as "claim lost, stop". An `admin` token still
+  bypasses, and a controller serving without auth is unchanged.
 - **store:** A SQLite state-database path containing `#` or `?` no longer opens
   a different file. The path was interpolated into a `file:` URI without
   escaping, so SQLite ended the filename at the first such character and opened

@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -113,12 +114,18 @@ func TestTriggerClaim_HolderFinishesAndRetries(t *testing.T) {
 	}
 }
 
-func TestTriggerClaim_UnclaimedTriggerHasNoHolder(t *testing.T) {
+// A trigger nobody holds reads as not-found rather than forbidden: a
+// worker's heartbeat loop stops on not-found, and answering forbidden
+// would keep it retrying until its silence window kills the consumer.
+func TestTriggerClaim_UnclaimedTriggerAnswersNotFound(t *testing.T) {
 	f := newTriggerOwnershipFixture(t)
 	seedRepoTrigger(t, f.store, "run-pending", "acme/web")
 
-	if got := f.post(t, f.holder, "/api/v1/triggers/run-pending/done"); got != http.StatusForbidden {
-		t.Errorf("done on an unclaimed trigger status=%d want 403", got)
+	if got := f.post(t, f.holder, "/api/v1/triggers/run-pending/done"); got != http.StatusNotFound {
+		t.Errorf("done on an unclaimed trigger status=%d want 404", got)
+	}
+	if got := f.post(t, f.holder, "/api/v1/triggers/run-missing/heartbeat"); got != http.StatusNotFound {
+		t.Errorf("heartbeat on a trigger that does not exist status=%d want 404", got)
 	}
 	trig, err := f.store.GetTrigger(context.Background(), "run-pending")
 	if err != nil {
@@ -126,5 +133,27 @@ func TestTriggerClaim_UnclaimedTriggerHasNoHolder(t *testing.T) {
 	}
 	if trig.Status != "pending" {
 		t.Errorf("unclaimed trigger status=%q, want pending", trig.Status)
+	}
+}
+
+// The reaped-claim contract the in-tree heartbeat loops key on: once the
+// claim is requeued, the former holder's own heartbeat is not-found, and
+// the client surfaces that as store.ErrNotFound so the loop stops the
+// child instead of retrying until its silence window terminates it.
+func TestTriggerClaim_RequeuedClaimAnswersNotFoundToItsFormerHolder(t *testing.T) {
+	f := newTriggerOwnershipFixture(t)
+	ctx := context.Background()
+
+	requeued, err := f.store.RequeueUnstartedClaim(ctx, "run-owned")
+	if err != nil || !requeued {
+		t.Fatalf("RequeueUnstartedClaim = (%v, %v), want (true, nil)", requeued, err)
+	}
+
+	if got := f.post(t, f.holder, "/api/v1/triggers/run-owned/heartbeat"); got != http.StatusNotFound {
+		t.Errorf("former holder heartbeat status=%d want 404", got)
+	}
+	if _, err := client.NewWithToken(f.url, nil, f.holder).
+		HeartbeatTrigger(ctx, "run-owned"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("client HeartbeatTrigger err=%v, want store.ErrNotFound", err)
 	}
 }

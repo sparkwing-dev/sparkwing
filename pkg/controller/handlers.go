@@ -167,8 +167,9 @@ type finishRunReq struct {
 
 // safety: the run row is terminal before the follow-ups run, and nothing else
 // produces the terminal commit status for a finished run, so a client that
-// goes away must not take them with it; the bound stands in for the request's.
-const finishRunFollowUpTimeout = 30 * time.Second
+// goes away must not take them with it. Staying under the shutdown budget
+// keeps a drain that starts mid-handler from ending one.
+const finishRunFollowUpTimeout = controllerShutdownBudget - time.Second
 
 func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
@@ -798,16 +799,27 @@ func (s *Server) claimedTrigger(next http.Handler) http.Handler {
 			return
 		}
 		id := r.PathValue("id")
-		held, err := s.store.PrincipalIsTriggerClaimant(r.Context(), id, claimIdentity(r))
+		holder, err := s.store.TriggerClaimant(r.Context(), id)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		if !held {
+		// safety: a row nobody holds is a reaped claim, and a worker's heartbeat
+		// loop stops on not-found; answering forbidden there would keep it
+		// retrying until its silence window terminates the whole consumer.
+		if holder.TokenPrefix == "" {
+			writeError(w, http.StatusNotFound, store.ErrNotFound)
+			return
+		}
+		if holder != claimIdentity(r) {
 			writeAuthError(w, http.StatusForbidden, authErrorBody{
 				Code:      "claim_required",
 				Principal: p.label(),
-				Message:   "trigger " + id + " is not claimed by this principal",
+				Message:   "trigger " + id + " is claimed by another principal",
 			})
 			return
 		}
@@ -907,11 +919,9 @@ type claimSpecificTriggerReq struct {
 
 func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Request) {
 	var body claimSpecificTriggerReq
-	if r.ContentLength > 0 {
-		if err := decodeJSON(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
+	if err := decodeOptionalJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	lease := time.Duration(body.LeaseNanos)
 	if lease <= 0 {

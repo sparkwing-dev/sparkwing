@@ -1218,6 +1218,8 @@ paths:
       x-sparkwing-scope: triggers.claim
       tags: [triggers]
       summary: Extend the worker lease on a claimed trigger.
+      description: >-
+        Bound to the claimant the trigger row records, so only the worker that claimed the trigger may renew it.
       responses:
         "200":
           description: Heartbeat. Body signals whether cancel was requested.
@@ -1229,7 +1231,15 @@ paths:
                 required: [cancel_requested]
                 properties:
                   cancel_requested: {type: boolean}
-        "404": {description: Trigger missing -- worker should stop.}
+        "403":
+          description: >-
+            Another principal holds the trigger's claim. The caller keeps working; it does not own this trigger.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AuthError"}
+        "404":
+          description: >-
+            Trigger missing, or its claim was reaped or requeued and the row now records no claimant -- worker should stop.
 
   /api/v1/triggers/{id}/done:
     parameters: [{$ref: "#/components/parameters/TriggerID"}]
@@ -1237,8 +1247,18 @@ paths:
       x-sparkwing-scope: triggers.claim
       tags: [triggers]
       summary: Mark a trigger `done`. Idempotent.
+      description: >-
+        Bound to the claimant the trigger row records. The record survives the trigger's own completion, so the claimant's retry of a done whose response was lost still succeeds.
       responses:
         "204": {description: Done.}
+        "403":
+          description: Another principal holds the trigger's claim.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AuthError"}
+        "404":
+          description: >-
+            Trigger missing, or its claim was reaped or requeued and the row now records no claimant.
 
   /api/v1/triggers/spawned-child:
     get:

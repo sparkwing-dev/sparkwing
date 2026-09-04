@@ -1162,11 +1162,9 @@ func (l *Loopback) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var body claimSpecificTriggerReq
-	if r.ContentLength > 0 {
-		if err := decodeJSON(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
+	if err := decodeOptionalJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	lease := time.Duration(body.LeaseNanos)
 	if lease <= 0 {

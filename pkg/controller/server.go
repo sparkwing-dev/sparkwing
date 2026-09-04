@@ -728,6 +728,11 @@ func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logge
 // AttachPool) at addr. Split from Serve so the controller pod main can
 // wire in an in-cluster k8s client without passing options through
 // Serve.
+// safety: the HTTP drain and the commit-status drain each get this whole
+// budget, so a request still folding a run's profiles is not cut off by
+// time the listener's own shutdown already spent.
+const controllerShutdownBudget = 5 * time.Second
+
 func ServeWith(ctx context.Context, s *Server, addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
@@ -781,17 +786,15 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), controllerShutdownBudget)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			s.logger.Warn("controller HTTP shutdown incomplete", "err", err)
 		}
-		s.shutdownGitHubCommitStatuses(shutdownCtx)
+		s.drainGitHubCommitStatuses()
 		return nil
 	case err := <-errCh:
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		s.shutdownGitHubCommitStatuses(shutdownCtx)
+		s.drainGitHubCommitStatuses()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -799,7 +802,12 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 }
 
-func (s *Server) shutdownGitHubCommitStatuses(ctx context.Context) {
+// safety: the queue holds the terminal status a finished run has no other
+// producer for, so its drain owns a budget rather than inheriting whatever
+// the listener's shutdown left of one.
+func (s *Server) drainGitHubCommitStatuses() {
+	ctx, cancel := context.WithTimeout(context.Background(), controllerShutdownBudget)
+	defer cancel()
 	if err := s.Shutdown(ctx); err != nil {
 		s.logger.Warn("github commit status shutdown incomplete", "err", err)
 	}

@@ -3425,26 +3425,26 @@ func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string
 	return held > 0, nil
 }
 
-// PrincipalIsTriggerClaimant reports whether claimant is the identity
-// recorded on the trigger row, whatever state that claim is in now.
-// [Store.PrincipalHoldsTriggerClaim] is the live-lease question; this is
-// the "was it you who took it" question, so the holder can still close
-// out or retry a close on a lease that has just lapsed or a trigger it
-// already finished. A requeue clears the recorded claimant, so a trigger
-// nobody holds matches nobody, and neither does an unbound claimant.
-func (s *Store) PrincipalIsTriggerClaimant(ctx context.Context, triggerID string, claimant ClaimIdentity) (bool, error) {
-	if !claimant.bound() {
-		return false, nil
-	}
-	var held int
+// TriggerClaimant returns the claimant recorded on the trigger row,
+// whatever state that claim is in now. [Store.PrincipalHoldsTriggerClaim]
+// is the live-lease question; this is the "who took it" question, so the
+// holder is still recognisable on a lease that has just lapsed and on a
+// trigger it already finished, which is what lets it retry a close.
+// Every requeue path clears the record, so a reaped trigger comes back
+// with the zero identity -- nobody holds it -- and a trigger that does
+// not exist comes back ErrNotFound.
+func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error) {
+	var claimant ClaimIdentity
 	err := s.queryRow(ctx,
-		`SELECT COUNT(*) FROM triggers
-		  WHERE id = ? AND claim_principal = ? AND claim_token_prefix = ?`,
-		triggerID, claimant.Principal, claimant.TokenPrefix).Scan(&held)
-	if err != nil {
-		return false, err
+		`SELECT claim_principal, claim_token_prefix FROM triggers WHERE id = ?`,
+		triggerID).Scan(&claimant.Principal, &claimant.TokenPrefix)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ClaimIdentity{}, ErrNotFound
 	}
-	return held > 0, nil
+	if err != nil {
+		return ClaimIdentity{}, err
+	}
+	return claimant, nil
 }
 
 // PrincipalHoldsNodeClaim reports whether claimant holds the node's

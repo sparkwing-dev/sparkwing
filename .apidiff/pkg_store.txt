@@ -610,7 +610,6 @@ func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string
 func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
-func (s *Store) PrincipalIsTriggerClaimant(ctx context.Context, triggerID string, claimant ClaimIdentity) (bool, error)
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
@@ -652,6 +651,7 @@ func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string)
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error)
+func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error)
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
