@@ -311,6 +311,14 @@ code change to unlock.
 
 ### Fixed
 
+- **store:** A lapsed claim whose run has already started is no longer
+  requeued on Postgres. `RequeueUnstartedClaim` read the run's status and
+  then updated the trigger as two statements against two tables, so at READ
+  COMMITTED a run that started in between was requeued anyway and a second
+  copy of live work went back on the pending queue. The run status is now a
+  correlated subquery in the requeue's own WHERE, leaving no window between
+  the check and the write.
+
 - **store:** Concurrent `sparkwing.Annotate` calls no longer lose entries on
   Postgres. The node, step and run annotation appends are read-modify-write
   inside a transaction, which is not enough at READ COMMITTED: two appenders

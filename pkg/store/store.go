@@ -4178,34 +4178,19 @@ func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
 // A run that reached `running` has a process behind it that the lease
 // alone cannot see, so requeueing it would put a second copy of live
 // work on the queue; that case belongs to the orphan reaper, which
-// judges by heartbeat. Both conditions are checked inside one
-// transaction so a run that starts concurrently cannot slip between the
-// check and the requeue.
+// judges by heartbeat. The run's status is a correlated subquery inside
+// the requeue's own WHERE rather than a read before it, so there is no
+// window between the check and the write for a run to start in. A run
+// with no row at all reads as not started, which is what an unclaimed
+// trigger looks like before its consumer gets that far.
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var status string
-	err = tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE id = ?`, id).Scan(&status)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		status = runStatusPending
-	case err != nil:
-		return false, err
-	}
-	if status != runStatusPending {
-		return false, nil
-	}
-
-	res, err := tx.ExecContext(ctx,
+	res, err := s.exec(ctx,
 		`UPDATE triggers
 		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
 		        claim_principal = '', claim_token_prefix = ''
-		  WHERE id = ? AND status = ?`,
-		triggerStatusPending, id, triggerStatusClaimed)
+		  WHERE id = ? AND status = ?
+		    AND COALESCE((SELECT status FROM runs WHERE runs.id = triggers.id), ?) = ?`,
+		triggerStatusPending, id, triggerStatusClaimed, runStatusPending, runStatusPending)
 	if err != nil {
 		return false, err
 	}
@@ -4213,13 +4198,7 @@ func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	if n == 0 {
-		return false, nil
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
+	return n > 0, nil
 }
 
 // ReleaseClaimAtGeneration returns a claimed trigger to the pending
