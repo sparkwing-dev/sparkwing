@@ -806,10 +806,12 @@ code change to unlock.
   any token carrying that scope -- every trigger worker in a fleet, or one
   stolen from any of them -- could close out another worker's in-flight
   trigger, hiding it from the reaper's lease-expiry cascade, or hold a dead
-  worker's trigger alive forever by heartbeating it. Both routes answer `403
-  claim_required` unless the caller is the claimant the trigger row records; an
-  `admin` token still bypasses, and a controller serving without auth is
-  unchanged.
+  worker's trigger alive forever by heartbeating it. Both routes now answer
+  `403 claim_required` when another principal holds the trigger's claim, and
+  `404` when the row records no claimant at all -- a trigger that never
+  existed, or one the reaper requeued, which is the answer a worker's
+  heartbeat loop already reads as "claim lost, stop". An `admin` token still
+  bypasses, and a controller serving without auth is unchanged.
 - **store:** A SQLite state-database path containing `#` or `?` no longer opens
   a different file. The path was interpolated into a `file:` URI without
   escaping, so SQLite ended the filename at the first such character and opened

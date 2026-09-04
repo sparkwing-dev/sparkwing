@@ -798,16 +798,27 @@ func (s *Server) claimedTrigger(next http.Handler) http.Handler {
 			return
 		}
 		id := r.PathValue("id")
-		held, err := s.store.PrincipalIsTriggerClaimant(r.Context(), id, claimIdentity(r))
+		holder, err := s.store.TriggerClaimant(r.Context(), id)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		if !held {
+		// safety: a row nobody holds is a reaped claim, and a worker's heartbeat
+		// loop stops on not-found; answering forbidden there would keep it
+		// retrying until its silence window terminates the whole consumer.
+		if holder.TokenPrefix == "" {
+			writeError(w, http.StatusNotFound, store.ErrNotFound)
+			return
+		}
+		if holder != claimIdentity(r) {
 			writeAuthError(w, http.StatusForbidden, authErrorBody{
 				Code:      "claim_required",
 				Principal: p.label(),
-				Message:   "trigger " + id + " is not claimed by this principal",
+				Message:   "trigger " + id + " is claimed by another principal",
 			})
 			return
 		}
