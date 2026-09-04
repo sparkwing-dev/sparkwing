@@ -457,9 +457,12 @@ code change to unlock.
   `GET /api/v1/triggers?repo=` now find matches that are not on the newest
   page. The repository is read out of each trigger's environment, which ran
   after the SQL limit, so a caller asking for 20 triggers of one repository got
-  only those among the newest 20 overall -- commonly none. The store now reads
-  pages until the limit is filled, over the newest 5,000 triggers matching the
-  other filters.
+  only those among the newest 20 overall -- commonly none. The store now walks
+  pages by keyset cursor until the limit is filled, over the newest 5,000
+  triggers matching the other filters. That search horizon is stated in
+  `--repo`'s help and in the CLI reference, an empty `--repo` listing names it,
+  and the store logs a warning when it stops there short of the limit, so a
+  match older than the horizon is not reported as a plain empty result.
 - **store + controller:** A run created without a start time now starts when it
   was created. `POST /api/v1/runs` requires only an id, a pipeline and a
   status, and a body omitting `started_at` stored the zero `time.Time`'s

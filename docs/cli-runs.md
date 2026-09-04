@@ -1205,7 +1205,9 @@ Useful when the queue looks stuck ("why isn't my trigger being
 claimed?"): --status pending shows unclaimed work, --status
 claimed shows what a worker has in-flight. The repo filter
 matches GITHUB_REPOSITORY on the trigger env so webhook-driven
-entries narrow cleanly.
+entries narrow cleanly; that value is not indexed, so the search
+covers the newest 5,000 triggers matching the other filters and
+an older entry is not reported.
 
 ### Flags
 
@@ -1213,7 +1215,7 @@ entries narrow cleanly.
 |---|---|
 | `--status STATUS` | Filter by status: pending \| claimed \| done |
 | `--pipeline NAME` | Filter by pipeline name |
-| `--repo OWNER/NAME` | Match GITHUB_REPOSITORY on the trigger env |
+| `--repo OWNER/NAME` | Match GITHUB_REPOSITORY on the trigger env, over the newest 5,000 triggers |
 | `--limit N` | Max triggers to show (default: 20) |
 | `-q, --quiet` | Print only trigger ids, newline-separated |
 | `-o, --output FORMAT` | Output format: json emits the raw triggers array |

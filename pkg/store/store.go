@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -4998,7 +4999,12 @@ const (
 //
 // Repo lives in a blob no dialect can filter on, so rows are read in
 // pages and matched in Go until the limit is filled, over at most the
-// newest 5,000 triggers that pass the other fields.
+// newest 5,000 triggers that pass the other fields. Pages walk a keyset
+// cursor on (created_at, id) rather than an offset, so a trigger created
+// or deleted while the walk is in flight cannot shift a later page onto
+// a row already read or past one not yet read. Stopping at the horizon
+// with the limit unfilled is logged, since the caller cannot tell that
+// from a genuinely empty result.
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
 	limit := f.Limit
 	if limit <= 0 {
@@ -5008,6 +5014,13 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 
 	where := ""
 	args := []any{}
+	addClause := func(clause string) {
+		if where == "" {
+			where = " WHERE " + clause
+		} else {
+			where += " AND " + clause
+		}
+	}
 	addIn := func(col string, values []string) {
 		if len(values) == 0 {
 			return
@@ -5017,33 +5030,43 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 			placeholders[i] = "?"
 			args = append(args, v)
 		}
-		clause := col + " IN (" + strings.Join(placeholders, ",") + ")"
-		if where == "" {
-			where = " WHERE " + clause
-		} else {
-			where += " AND " + clause
-		}
+		addClause(col + " IN (" + strings.Join(placeholders, ",") + ")")
 	}
 	addIn("status", f.Statuses)
 	addIn("pipeline", f.Pipelines)
 
-	query := `
+	selectTriggers := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at,
        claimed_at, lease_expires_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
        idempotency_key, claim_seq, webhook_delivery
-  FROM triggers` + where + `
- ORDER BY created_at DESC
- LIMIT ? OFFSET ?`
+  FROM triggers`
+	const orderAndLimit = `
+ ORDER BY created_at DESC, id DESC
+ LIMIT ?`
 
 	batch := limit
 	if f.Repo != "" {
 		batch = max(limit, triggerRepoScanBatch)
 	}
 	var out []*Trigger
-	for offset := 0; ; offset += batch {
-		page, err := s.listTriggerPage(ctx, query, args, batch, offset)
+	var cursor *Trigger
+	scanned := 0
+	for {
+		pageWhere, pageArgs := where, append([]any{}, args...)
+		if cursor != nil {
+			cursorNS := cursor.CreatedAt.UnixNano()
+			clause := "(created_at < ? OR (created_at = ? AND id < ?))"
+			if pageWhere == "" {
+				pageWhere = " WHERE " + clause
+			} else {
+				pageWhere += " AND " + clause
+			}
+			pageArgs = append(pageArgs, cursorNS, cursorNS, cursor.ID)
+		}
+		pageArgs = append(pageArgs, batch)
+		page, err := s.listTriggerPage(ctx, selectTriggers+pageWhere+orderAndLimit, pageArgs)
 		if err != nil {
 			return nil, err
 		}
@@ -5056,17 +5079,21 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 				return out, nil
 			}
 		}
-		if f.Repo == "" || len(page) < batch || offset+batch >= triggerRepoScanCap {
+		scanned += len(page)
+		if f.Repo == "" || len(page) < batch {
 			return out, nil
 		}
+		if scanned >= triggerRepoScanCap {
+			slog.Warn("trigger repo filter stopped at its search horizon",
+				"repo", f.Repo, "scanned", scanned, "matched", len(out), "limit", limit)
+			return out, nil
+		}
+		cursor = page[len(page)-1]
 	}
 }
 
-func (s *Store) listTriggerPage(ctx context.Context, query string, args []any, limit, offset int) ([]*Trigger, error) {
-	pageArgs := make([]any, 0, len(args)+2)
-	pageArgs = append(pageArgs, args...)
-	pageArgs = append(pageArgs, limit, offset)
-	rows, err := s.query(ctx, query, pageArgs...)
+func (s *Store) listTriggerPage(ctx context.Context, query string, args []any) ([]*Trigger, error) {
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
