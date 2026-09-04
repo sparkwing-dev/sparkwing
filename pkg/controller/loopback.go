@@ -238,7 +238,8 @@ func (l *Loopback) Handler() http.Handler {
 	router.Handle("/", l.authenticate(mux))
 	// safety: preserve the server wrapper order while the Warn-level loopback
 	// logger suppresses per-request Info lines from node state writes.
-	return otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, l.logger))
+	return otelutil.WrapHandler("sparkwing-controller",
+		withRequestLog(router, l.logger, muxRouteLabeler(router, mux)))
 }
 
 func (l *Loopback) authenticate(next http.Handler) http.Handler {

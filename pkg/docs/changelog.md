@@ -360,6 +360,13 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** HTTP request metrics label the `route` with the pattern the
+  request matched rather than a hand-maintained regex table, so the ten
+  `/api/v1/concurrency/{key}/...` routes, `/api/v1/artifacts/{key}`, the
+  `{nodeID}` in the approval routes and the `{path...}` in the Git cache proxy
+  routes stop minting a permanent Prometheus series per distinct key. An
+  unrouted path is now labeled `other` instead of carrying the raw path.
+
 - **controller:** The warm-PVC pool binding is published atomically, so the
   pool routes no longer race the goroutine that builds it. The router went
   live before `LoadConfig` and `NewPool` had run, and the handlers read the

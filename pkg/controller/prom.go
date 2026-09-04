@@ -2,8 +2,8 @@ package controller
 
 import (
 	"net/http"
-	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -135,42 +135,30 @@ func observeHTTPRequest(route, method string, status int, d time.Duration) {
 	}
 }
 
-var (
-	rxRunSegment        = regexp.MustCompile(`/runs/[^/]+`)
-	rxNodeSegment       = regexp.MustCompile(`/nodes/[^/]+`)
-	rxTokenSegment      = regexp.MustCompile(`/tokens/[^/]+`)
-	rxUserSegment       = regexp.MustCompile(`/users/[^/]+`)
-	rxSecretSegment     = regexp.MustCompile(`/secrets/[^/]+`)
-	rxTriggerSegment    = regexp.MustCompile(`/triggers/[^/]+`)
-	rxLockSegment       = regexp.MustCompile(`/locks/[^/]+`)
-	rxPipelineSegment   = regexp.MustCompile(`/pipelines/[^/]+`)
-	rxWebhookGithubSeg  = regexp.MustCompile(`^/webhooks/github/[^/]+`)
-	rxMultiSlashCleanup = regexp.MustCompile(`/{2,}`)
-)
+const unroutedLabel = "other"
 
-func normalizeRoute(path string) string {
-	if path == "" {
-		return "unknown"
+// safety: a request that matches no route is labeled with a constant, because
+// any caller could otherwise mint a permanent time series per path they invent.
+func muxRouteLabeler(muxes ...*http.ServeMux) func(*http.Request) string {
+	return func(r *http.Request) string {
+		for _, m := range muxes {
+			if _, pattern := m.Handler(r); pattern != "" {
+				if route := routeFromPattern(pattern); route != "" {
+					return route
+				}
+			}
+		}
+		return unroutedLabel
 	}
-	if len(path) >= 7 && path[:7] == "/api/v1" {
-		p := path
-		p = rxRunSegment.ReplaceAllString(p, "/runs/{id}")
-		p = rxNodeSegment.ReplaceAllString(p, "/nodes/{nodeID}")
-		p = rxTokenSegment.ReplaceAllString(p, "/tokens/{prefix}")
-		p = rxUserSegment.ReplaceAllString(p, "/users/{name}")
-		p = rxSecretSegment.ReplaceAllString(p, "/secrets/{name}")
-		p = rxTriggerSegment.ReplaceAllString(p, "/triggers/{id}")
-		p = rxLockSegment.ReplaceAllString(p, "/locks/{key}")
-		p = rxPipelineSegment.ReplaceAllString(p, "/pipelines/{name}")
-		p = rxMultiSlashCleanup.ReplaceAllString(p, "/")
-		return p
+}
+
+// safety: a mux answers a path it wants cleaned with that path as the pattern,
+// and answers the catch-all registration with "/", so only a pattern carrying a
+// method is a route this server named and is safe to use as a label.
+func routeFromPattern(pattern string) string {
+	method, rest, ok := strings.Cut(pattern, " ")
+	if !ok || method == "" || !strings.HasPrefix(rest, "/") {
+		return ""
 	}
-	if rxWebhookGithubSeg.MatchString(path) {
-		return "/webhooks/github/{pipeline}"
-	}
-	switch path {
-	case "/metrics", "/":
-		return path
-	}
-	return "other"
+	return rest
 }
