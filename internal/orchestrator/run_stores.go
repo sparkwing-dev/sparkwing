@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -56,13 +57,13 @@ func OpenStandaloneStores(ctx context.Context, paths Paths) *StandaloneStores {
 		label := standaloneLabel(paths, entry.Path)
 		st, err := store.OpenReadOnly(entry.Path)
 		if err != nil {
-			s.notes = append(s.notes, fmt.Sprintf("standalone store %s cannot be opened: %v", label, err))
+			s.notes = append(s.notes, unopenableNote(label, err))
 			continue
 		}
 		skew, err := st.RequirementSkew(ctx)
 		if err != nil {
 			_ = st.Close()
-			s.notes = append(s.notes, fmt.Sprintf("standalone store %s cannot be read: %v", label, err))
+			s.notes = append(s.notes, unopenableNote(label, err))
 			continue
 		}
 		if skew != nil {
@@ -90,8 +91,12 @@ func OpenStandaloneStores(ctx context.Context, paths Paths) *StandaloneStores {
 // whether this build's SELECT matches its columns, so a store at an older
 // store schema passes it and still lacks a column a later migration added.
 func unreadableNote(ctx context.Context, st *store.Store, label string) (string, bool) {
-	if _, err := st.ListRuns(ctx, store.RunFilter{Limit: 1}); err == nil {
+	_, err := st.ListRuns(ctx, store.RunFilter{Limit: 1})
+	if err == nil {
 		return "", false
+	}
+	if store.IsBusyErr(err) || store.IsProtocolErr(err) {
+		return fmt.Sprintf("standalone store %s is busy; it was skipped this time", label), true
 	}
 	runs := standaloneRunCount(ctx, st)
 	if runs < 0 {
@@ -100,6 +105,13 @@ func unreadableNote(ctx context.Context, st *store.Store, label string) (string,
 	return fmt.Sprintf(
 		"%s holds %s written by an older sparkwing; read them with that release",
 		label, pluralRuns(runs)), true
+}
+
+func unopenableNote(label string, err error) string {
+	if store.IsBusyErr(err) || store.IsProtocolErr(err) {
+		return fmt.Sprintf("standalone store %s is busy; it was skipped this time", label)
+	}
+	return fmt.Sprintf("standalone store %s is not a runs store this sparkwing can read", label)
 }
 
 func standaloneRunCount(ctx context.Context, st *store.Store) int {
@@ -234,27 +246,29 @@ func TagShared(runs []*store.Run) []TaggedRun {
 // on run id so two stores that stamped the same instant still list stably.
 //
 // An id present in more than one store lists once, from the shared store when
-// it is one of them, so a merged listing agrees with the single-id verbs,
-// which resolve the shared store first.
+// it is one of them, whatever the copies say about when they started, so a
+// merged listing agrees with the single-id verbs, which resolve the shared
+// store first.
 func MergeTaggedRuns(rows []TaggedRun) []TaggedRun {
-	sort.SliceStable(rows, func(i, j int) bool {
-		if !rows[i].StartedAt.Equal(rows[j].StartedAt) {
-			return rows[i].StartedAt.After(rows[j].StartedAt)
-		}
-		if rows[i].ID != rows[j].ID {
-			return rows[i].ID < rows[j].ID
-		}
-		return rows[i].Store == SharedStoreLabel && rows[j].Store != SharedStoreLabel
-	})
-	seen := make(map[string]bool, len(rows))
+	at := make(map[string]int, len(rows))
 	out := rows[:0:0]
 	for _, r := range rows {
-		if seen[r.ID] {
+		i, seen := at[r.ID]
+		if !seen {
+			at[r.ID] = len(out)
+			out = append(out, r)
 			continue
 		}
-		seen[r.ID] = true
-		out = append(out, r)
+		if out[i].Store != SharedStoreLabel && r.Store == SharedStoreLabel {
+			out[i] = r
+		}
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].StartedAt.Equal(out[j].StartedAt) {
+			return out[i].StartedAt.After(out[j].StartedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 
@@ -296,6 +310,7 @@ func OpenStoreForRun(ctx context.Context, paths Paths, runID string) (*store.Sto
 		closeShared()
 		return st, label, func() { _ = standalone.Close() }, nil
 	}
+	WriteStandaloneNotes(os.Stderr, standalone.Notes())
 	_ = standalone.Close()
 	return shared, SharedStoreLabel, closeShared, nil
 }
@@ -327,6 +342,7 @@ func OpenStoreForRunWrite(
 	standalone := OpenStandaloneStores(ctx, paths)
 	held, label, _, ok := standalone.Find(ctx, runID)
 	if !ok {
+		WriteStandaloneNotes(os.Stderr, standalone.Notes())
 		_ = standalone.Close()
 		return shared, SharedStoreLabel, closeShared, nil
 	}

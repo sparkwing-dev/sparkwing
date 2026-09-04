@@ -301,17 +301,110 @@ func TestOpenStoreForRunWrite_RefusesWhenWritingWouldAddARequirement(t *testing.
 
 func TestMergeTaggedRuns_SharedWinsOnADuplicateID(t *testing.T) {
 	at := time.Now().UTC()
-	rows := []orchestrator.TaggedRun{
-		{Run: &store.Run{ID: "dup", Status: "cancelled", StartedAt: at}, Store: "standalone/state.db"},
-		{Run: &store.Run{ID: "dup", Status: "failed", StartedAt: at}, Store: orchestrator.SharedStoreLabel},
+	newer := at.Add(time.Hour)
+	cases := []struct {
+		name  string
+		rows  []orchestrator.TaggedRun
+		start time.Time
+	}{
+		{
+			name: "same instant",
+			rows: []orchestrator.TaggedRun{
+				{Run: &store.Run{ID: "dup", Status: "cancelled", StartedAt: at}, Store: "standalone/state.db"},
+				{Run: &store.Run{ID: "dup", Status: "failed", StartedAt: at}, Store: orchestrator.SharedStoreLabel},
+			},
+			start: at,
+		},
+		{
+			name: "the standalone copy is newer",
+			rows: []orchestrator.TaggedRun{
+				{Run: &store.Run{ID: "dup", Status: "cancelled", StartedAt: newer}, Store: "standalone/state.db"},
+				{Run: &store.Run{ID: "dup", Status: "failed", StartedAt: at}, Store: orchestrator.SharedStoreLabel},
+			},
+			start: at,
+		},
+		{
+			name: "the standalone copy is older and sorts first",
+			rows: []orchestrator.TaggedRun{
+				{Run: &store.Run{ID: "dup", Status: "failed", StartedAt: newer}, Store: orchestrator.SharedStoreLabel},
+				{Run: &store.Run{ID: "dup", Status: "cancelled", StartedAt: at}, Store: "standalone/state.db"},
+			},
+			start: newer,
+		},
 	}
-	got := orchestrator.MergeTaggedRuns(rows)
-	if len(got) != 1 {
-		t.Fatalf("a duplicate id listed %d times", len(got))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := orchestrator.MergeTaggedRuns(tc.rows)
+			if len(got) != 1 {
+				t.Fatalf("a duplicate id listed %d times", len(got))
+			}
+			if got[0].Store != orchestrator.SharedStoreLabel || got[0].Status != "failed" {
+				t.Fatalf("the shared row did not win: %+v", got[0])
+			}
+			if !got[0].StartedAt.Equal(tc.start) {
+				t.Fatalf("kept the wrong row's instant: %s", got[0].StartedAt)
+			}
+		})
 	}
-	if got[0].Store != orchestrator.SharedStoreLabel || got[0].Status != "failed" {
-		t.Fatalf("the shared row did not win: %+v", got[0])
+}
+
+func TestMergeTaggedRuns_OrdersDistinctRunsNewestFirst(t *testing.T) {
+	at := time.Now().UTC()
+	rows := orchestrator.MergeTaggedRuns([]orchestrator.TaggedRun{
+		{Run: &store.Run{ID: "old", StartedAt: at.Add(-time.Hour)}, Store: orchestrator.SharedStoreLabel},
+		{Run: &store.Run{ID: "new", StartedAt: at}, Store: "standalone/state.db"},
+	})
+	if len(rows) != 2 || rows[0].ID != "new" || rows[1].ID != "old" {
+		t.Fatalf("merge is not newest first: %+v", rows)
 	}
+}
+
+func TestOpenStoreForRunWrite_RefusesWhenStampsLagTheSchema(t *testing.T) {
+	p := homeWithBothStores(t)
+	clearRequirementStamps(t, p.StandaloneStateDB())
+
+	_, _, _, err := orchestrator.OpenStoreForRunWrite(
+		context.Background(), p, "alone-mid", "runs annotations add")
+	if err == nil {
+		t.Fatal("a store whose stamps lag its version must refuse the write")
+	}
+	for _, want := range []string{"session-token-digest", "inherited-holder-marker"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("refusal does not name %q: %s", want, err)
+		}
+	}
+	if got := stampedRequirements(t, p.StandaloneStateDB()); len(got) != 0 {
+		t.Fatalf("the refused write stamped %v", got)
+	}
+}
+
+func clearRequirementStamps(t *testing.T, path string) {
+	t.Helper()
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	_, err = st.DB().Exec(`DELETE FROM sparkwing_requirements`)
+	if cerr := st.Close(); cerr != nil {
+		t.Fatalf("close %s: %v", path, cerr)
+	}
+	if err != nil {
+		t.Fatalf("clear stamps: %v", err)
+	}
+}
+
+func stampedRequirements(t *testing.T, path string) []string {
+	t.Helper()
+	st, err := store.OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer func() { _ = st.Close() }()
+	names, err := st.Requirements(context.Background())
+	if err != nil {
+		t.Fatalf("read stamps: %v", err)
+	}
+	return names
 }
 
 func TestOpenStandaloneStores_OlderSchemaBecomesACountedNote(t *testing.T) {
