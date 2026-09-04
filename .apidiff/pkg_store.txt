@@ -195,6 +195,7 @@ const FailureVerify = "verify"
 const IncludeSecretValues = "secret_values"
 func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
 const InvocationSecretArgsKey = "secret_args"
+func IsBusyErr(err error) bool
 func IsProtocolErr(err error) bool
 func JoinProfileKey(repo, pipeline string) string
 func KnownRequirements() []string

@@ -204,11 +204,20 @@ func (s *Store) RequirementsWritingWouldAdd(ctx context.Context) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	listed, err := s.Requirements(ctx)
+	stamps, err := s.RequirementStamps(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return MissingRequirements(listed, requirementsBetween(version, expectedSchemaVersion)), nil
+	listed := make([]string, 0, len(stamps))
+	for _, r := range stamps {
+		listed = append(listed, r.Name)
+	}
+	// safety: a read-write open stamps the backfill for the schema the database
+	// already records as well as every requirement above it, so a store whose
+	// stamps lag its own version costs both sets.
+	would := append(requirementsBetween(version, expectedSchemaVersion),
+		requirementsToBackfill(stamps, version)...)
+	return MissingRequirements(listed, would), nil
 }
 
 func requirementsBetween(from, to int) []string {

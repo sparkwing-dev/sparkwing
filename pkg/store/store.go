@@ -1085,6 +1085,12 @@ func isBusyErr(err error) bool {
 		strings.Contains(msg, "database table is locked")
 }
 
+// IsBusyErr reports whether err is a SQLite busy or locked condition, which
+// another connection clears by finishing its write. A caller that must tell a
+// store it cannot read apart from one it merely cannot read *now* asks this
+// before blaming the file.
+func IsBusyErr(err error) bool { return isBusyErr(err) }
+
 // IsProtocolErr reports whether err is a SQLite "locking protocol" /
 // SQLITE_PROTOCOL condition: the WAL shared-memory lock range is
 // saturated by another live connection. Unlike SQLITE_BUSY it is not
