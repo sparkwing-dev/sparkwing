@@ -220,3 +220,50 @@ func TestUsersSchema_ExistingRowsDefaultToAdmin(t *testing.T) {
 		t.Fatalf("legacy user scopes = %+v, want [%s]", users, controller.ScopeAdmin)
 	}
 }
+
+func TestBootstrapUser_RejectsAScopeSetWithoutAdmin(t *testing.T) {
+	ts := userScopesServer(t)
+	status, body := postUserJSON(t, ts.URL+"/api/v1/users", map[string]any{
+		"name": "readonly", "password": "correct-horse",
+		"scopes": []string{controller.ScopeRunsRead},
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("bootstrap with a non-admin scope set = %d: %s", status, body)
+	}
+	if !bytes.Contains(body, []byte(controller.ScopeAdmin)) {
+		t.Errorf("error should name the admin scope; got %s", body)
+	}
+}
+
+func TestBootstrapUser_HonorsScopesNamedBesideAdmin(t *testing.T) {
+	ts := userScopesServer(t)
+	want := []string{controller.ScopeAdmin, controller.ScopeLogsRead}
+	status, body := postUserJSON(t, ts.URL+"/api/v1/users", map[string]any{
+		"name": "root", "password": "correct-horse", "scopes": want,
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("bootstrap admin = %d: %s", status, body)
+	}
+	var created struct {
+		Scopes []string `json:"scopes"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("decode created user %s: %v", body, err)
+	}
+	if !slices.Equal(created.Scopes, want) {
+		t.Errorf("bootstrap scopes = %v, want %v", created.Scopes, want)
+	}
+}
+
+func TestBootstrapUser_RejectsUnknownScope(t *testing.T) {
+	ts := userScopesServer(t)
+	status, body := postUserJSON(t, ts.URL+"/api/v1/users", map[string]any{
+		"name": "typo", "password": "correct-horse", "scopes": []string{"runs.reed"},
+	})
+	if status != http.StatusBadRequest {
+		t.Fatalf("bootstrap with an unknown scope = %d: %s", status, body)
+	}
+	if !bytes.Contains(body, []byte("runs.reed")) {
+		t.Errorf("error should name the offending scope; got %s", body)
+	}
+}

@@ -769,6 +769,13 @@ code change to unlock.
 
 ### Security
 
+- **controller:** `POST /api/v1/users` no longer discards the requested scopes
+  when it takes the bootstrap path. Creating the first account with an explicit
+  scope set returned a full `admin` account instead, so an operator who asked
+  for `runs.read` got a superuser and never learned of it. The bootstrap path
+  now honours the set it is given, and refuses one that omits `admin` with a
+  `400` rather than widening it; omitting `scopes` still grants `admin`.
+
 - **store:** A SQLite state-database path containing `#` or `?` no longer opens
   a different file. The path was interpolated into a `file:` URI without
   escaping, so SQLite ended the filename at the first such character and opened

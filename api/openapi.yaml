@@ -1917,7 +1917,7 @@ paths:
                 scopes:
                   type: array
                   description: >-
-                    Scopes this account's dashboard sessions carry. Omit to grant admin. Ignored on the bootstrap path, which always creates an admin.
+                    Scopes this account's dashboard sessions carry. Omit to grant admin. The bootstrap path honours the set it is given but rejects one that omits admin, so the first account can always reach the rest of the API.
                   items: {type: string}
       responses:
         "201":

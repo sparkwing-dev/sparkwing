@@ -217,8 +217,10 @@ A browser session carries the scopes of the user who signed in. The proxy
 checks them against the target route before forwarding, so an account holding
 only `runs.read` reads runs and gets `403` on cancel. Create narrower accounts
 with `sparkwing cluster users add --scope runs.read,logs.read`; omitting
-`--scope` grants `admin`. The first-visit bootstrap admin is always `admin`,
-and `sparkwing cluster users list` prints the scope set of every account.
+`--scope` grants `admin`. The first-visit bootstrap account defaults to
+`admin` and may carry more scopes beside it, but a scope set that omits
+`admin` is rejected with `400`, and `sparkwing cluster users list` prints the
+scope set of every account.
 
 The web pod's own service token needs `runs.read` plus `logs.read`. Add
 `runs.write` where the UI cancels, retries, or releases a debug pause, and
