@@ -307,6 +307,11 @@ func printAgentBlock() {
 	if !info.Toolchain.Go.Found {
 		fmt.Println("- No Go toolchain on PATH. Pipelines are Go programs; authoring one needs it.")
 	}
+	if cwd, err := os.Getwd(); err == nil {
+		if note := goWorkNote(cwd); note != "" {
+			fmt.Println("- " + note)
+		}
+	}
 	fmt.Printf("- CLI %s, running from %s. Docs shipped in this binary match it exactly.\n",
 		info.Version.Installed, info.Executable.Path)
 	if line := sdkPinLine(info.SDKPin); line != "" {

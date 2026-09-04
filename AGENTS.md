@@ -7,7 +7,7 @@ Sparkwing is standalone. Do not assume any other local service or machine-specif
 - Use `sparkwing pipeline list -o json` to discover repository pipelines.
 - Treat the README, embedded docs, CLI help, and tests as product truth. Run the relevant pipeline with `sparkwing run <name>`.
 - Read `DELIVERY.md` before landing a change; it names the cheap checks and the decisions that must not be skipped.
-- In a git worktree of this repo (including agent worktrees under `.claude/worktrees/`), the checked-in `go.work` resolves the main checkout's modules and breaks every plain `go` command with "does not contain modules listed in go.work". Prefix Go commands with `GOWORK=off`; the check scripts inherit the same requirement.
+- `go.work` is gitignored, so it is whatever the developer left in the tree. One sitting above a worktree -- the main checkout's own, which `.claude/worktrees/` sits under -- lists that checkout's modules, not the worktree's, and every plain `go` command in the worktree fails with "does not contain modules listed in go.work". Run `GOWORK=off go -C <worktree> build ./...`: `-C` on its own still fails, because go reads the workspace from the directory it lands in, so `GOWORK=off` has to travel with it. `sparkwing info --for-agent` prints that line with the paths filled in whenever it applies, and the check scripts inherit the same requirement.
 - Update source documentation and its drift check when behavior changes.
 - Compile-check with `go build -o /dev/null ./cmd/...` or `go vet ./...`. Building one command on its own drops a binary in the repo root, and `go build ./cmd/sparkwing` refuses outright because the output name collides with the `sparkwing/` SDK directory.
 

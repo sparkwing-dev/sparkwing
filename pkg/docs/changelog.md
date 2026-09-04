@@ -155,6 +155,14 @@ code change to unlock.
 - **s3state:** `WithReadCacheTTL` bounds how stale a read of a run this process
   does not write may be, `DefaultDrainTimeout` bounds a synchronous outbox
   drain, and `DefaultOutboxMaxRows` caps the outbox queue.
+- **cli:** `sparkwing info --for-agent` names the command that works when a
+  `go.work` above the working directory does not list this repo's module, the
+  case that makes `go build`, `go test`, and `go run` fail with "does not
+  contain modules listed in go.work" inside a git worktree. The line carries the
+  workspace file and `GOWORK=off go -C <module root> build ./...` with the paths
+  filled in, and says why `-C` on its own is not enough: go reads the workspace
+  from the directory it lands in. It appears only when a workspace in scope
+  leaves the module out.
 
 ### Changed
 
