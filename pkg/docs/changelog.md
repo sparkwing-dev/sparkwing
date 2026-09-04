@@ -1066,7 +1066,7 @@ code change to unlock.
   `Concurrency`, `ToolSlot`, `RunAndAwait`, cross-pipeline references, and
   dynamic `SpawnNode`; it is not a complete assisted-node compatibility
   boundary by itself.
-- **controller + logs:** Every claim-scoped remote node mutation now carries the
+- **controller + logs (Breaking):** Every claim-scoped remote node mutation now carries the
   exact live claimant token, holder, membership, reservation, and claim
   generation in the store transaction that writes it; stale writers receive
   `409 Conflict`. Trigger-driven node writes and run-definition writes use the
@@ -1080,7 +1080,24 @@ code change to unlock.
   coordinator, membership, internal executor, holder, token, and reservation
   values; cancelled bodies close their acknowledged attempt as `cancelled`.
   Controller JSON `5xx` responses now use one stable error message instead of
-  returning database, path, token-prefix, or private-URL details.
+  returning database, path, token-prefix, or private-URL details. The OpenAPI
+  contract now matches those public projections: it cuts stale private or
+  unsupported members from `components.schemas.Agent`,
+  `components.schemas.ConcurrencyState`,
+  `components.schemas.CreateTokenRequest`,
+  `components.schemas.CreateTokenResponse`,
+  `components.schemas.MetricSample`, `components.schemas.Node`,
+  `components.schemas.Receipt`, `components.schemas.TriggerPlanAdmission`, and
+  `components.schemas.TriggerRequest`. It also corrects the documented request
+  or response bodies under `/api/v1/runs/{id}/cancel`,
+  `/api/v1/runs/{id}/nodes/{nodeID}/annotations`,
+  `/api/v1/runs/{id}/nodes/{nodeID}/metrics`,
+  `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations`,
+  `/api/v1/runs/{id}/nodes/{nodeID}/steps/skip`,
+  `/api/v1/runs/{id}/nodes/{nodeID}/steps/summary`, and
+  `/api/v1/runs/{id}/nodes/{nodeID}/summary`. Regenerate clients and use the
+  public replacement fields described in the
+  [migration guide](docs/migrations/_unreleased.md#public-controller-schema-cuts).
 - **cache:** A pipeline binary fetched from a shared artifact store must carry
   its `.sha256` sidecar. When the sidecar was missing the fetch accepted
   whatever bytes were there, computed a digest from those same bytes, wrote it

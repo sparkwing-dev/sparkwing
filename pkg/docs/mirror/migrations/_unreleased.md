@@ -182,6 +182,38 @@ CHANGELOG links here.
   attribution keeps history truthful even when a request paused after
   validation.
 
+## Public controller schema cuts
+
+- **Before:** The OpenAPI components `components.schemas.Agent`,
+  `components.schemas.ConcurrencyState`,
+  `components.schemas.CreateTokenRequest`,
+  `components.schemas.CreateTokenResponse`,
+  `components.schemas.MetricSample`, `components.schemas.Node`,
+  `components.schemas.Receipt`, `components.schemas.TriggerPlanAdmission`, and
+  `components.schemas.TriggerRequest` advertised private, unsupported, or
+  obsolete members. Several inline node-operation bodies likewise used stale
+  names.
+- **After:** Public responses expose only their supported projections. The
+  controller omits internal claim, coordinator, reservation, membership,
+  executor, and token metadata. Annotation bodies use `message`; summary bodies
+  use `markdown`; metric lists use `points`. Node-step skip and run cancellation
+  take no documented reason field. The affected operations sit under
+  `/api/v1/runs/{id}/cancel`,
+  `/api/v1/runs/{id}/nodes/{nodeID}/annotations`,
+  `/api/v1/runs/{id}/nodes/{nodeID}/metrics`,
+  `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations`,
+  `/api/v1/runs/{id}/nodes/{nodeID}/steps/skip`,
+  `/api/v1/runs/{id}/nodes/{nodeID}/steps/summary`, and
+  `/api/v1/runs/{id}/nodes/{nodeID}/summary`.
+- **Migration:** Regenerate clients from this release's OpenAPI document.
+  Replace annotation fields with `message`, summary fields with `markdown`, and
+  metric response `metrics` with `points`. Stop sending the removed
+  cancellation and step-skip reason fields. Treat the removed component fields
+  as unavailable rather than reconstructing private controller identities.
+- **Why:** A public schema must not promise internal identities or fields the
+  handler never accepted or returned. Generated clients otherwise depend on a
+  contract the controller cannot safely satisfy.
+
 ## (Breaking) Two refusals became warnings, and those runs leave `sparkwing runs`
 
 - **Before:** two conditions failed a run outright. A pipeline with a
