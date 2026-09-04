@@ -553,6 +553,10 @@ CREATE TABLE IF NOT EXISTS nodes (
     -- artifact_manifest: content-addressed digest of the node's
     -- published-artifact manifest; empty when it produced none.
     artifact_manifest TEXT NOT NULL DEFAULT '',
+    -- seq: creation order within the run, assigned by CreateNode. The
+    -- physical row order is not this on Postgres, where an UPDATE moves
+    -- the tuple, so the order ListNodes promises needs its own column.
+    seq              INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (run_id, node_id),
     FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
@@ -872,7 +876,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 28
+const expectedSchemaVersion = 29
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1356,6 +1360,12 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		}
 		_, err := tx.ExecContext(ctx, concurrencyCacheOriginRunIndex)
 		return err
+	case 29:
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesOrderCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, nodesOrderBackfillSQLite)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1467,6 +1477,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			}
 		}
 		return nil
+	case 29:
+		return addColumnsTx(ctx, tx, "nodes", nodesOrderCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1664,6 +1676,15 @@ var nodesUsageCols = map[string]string{
 	"process_wall_nanos": "INTEGER NOT NULL DEFAULT 0",
 }
 
+var nodesOrderCols = map[string]string{
+	"seq": "INTEGER NOT NULL DEFAULT 0",
+}
+
+// safety: rowid rises with every insert, so ordering by it within a run is the
+// insertion order the pre-v29 column-free query returned; Postgres has no such
+// value to recover, and its rows keep the default until CreateNode assigns one.
+const nodesOrderBackfillSQLite = `UPDATE nodes SET seq = rowid WHERE seq = 0`
+
 var nodeDispatchRedactionCols = map[string]string{
 	"redacted_keys": "BLOB",
 }
@@ -1840,7 +1861,8 @@ SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS
 
 func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	var blob []byte
-	err := tx.QueryRow(`SELECT annotations_json FROM runs WHERE id = ?`, runID).Scan(&blob)
+	err := tx.QueryRow(
+		`SELECT annotations_json FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&blob)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -2194,13 +2216,14 @@ WHERE runs.status = '`+runStatusPending+`'`,
 	return err
 }
 
-// FinishRun marks a run terminal with the given status and optional error.
-func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
-	_, err := s.exec(ctx, `
+const finishRunStmt = `
 UPDATE runs
    SET status = ?, error = ?, finished_at = ?
- WHERE id = ?`,
-		status, errMsg, time.Now().UnixNano(), runID)
+ WHERE id = ?`
+
+// FinishRun marks a run terminal with the given status and optional error.
+func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
+	_, err := s.exec(ctx, finishRunStmt, status, errMsg, time.Now().UnixNano(), runID)
 	return err
 }
 
@@ -2688,8 +2711,9 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		labelsJSON, _ = json.Marshal(n.NeedsLabels)
 	}
 	_, err := s.exec(ctx, `
-INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels)
-VALUES (?,?,?,?,?)`, n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON)
+INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels, seq)
+VALUES (?,?,?,?,?,(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE run_id = ?))`,
+		n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, n.RunID)
 	return err
 }
 
@@ -2808,7 +2832,10 @@ UPDATE nodes
 	return err
 }
 
-// ListNodes returns the nodes for a run in insertion order.
+// ListNodes returns the nodes for a run in insertion order, which the
+// nodes.seq column records because no physical row order survives an
+// update on Postgres. Rows a pre-v29 Postgres store wrote carry no
+// sequence and fall back to node id.
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	rows, err := s.query(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
@@ -2817,7 +2844,7 @@ SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_
        cpu_nanos, max_rss_bytes, process_wall_nanos
   FROM nodes
  WHERE run_id = ?
- ORDER BY `+s.insertionOrderColumn(), runID)
+ ORDER BY seq, node_id`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -2906,7 +2933,9 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 
 // AppendNodeAnnotation appends one annotation string to the node's
 // annotations list. Implemented as read-modify-write inside a single
-// transaction so concurrent appenders don't lose entries.
+// transaction that holds the rows it rewrites, which is what keeps
+// concurrent appenders from losing entries: the transaction alone does
+// not, since Postgres runs it at READ COMMITTED.
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -2915,7 +2944,7 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 	defer func() { _ = tx.Rollback() }()
 	var current []byte
 	row := tx.QueryRowContext(ctx,
-		`SELECT annotations_json FROM nodes WHERE run_id = ? AND node_id = ?`,
+		`SELECT annotations_json FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
 		runID, nodeID)
 	if err := row.Scan(&current); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -3083,8 +3112,9 @@ ORDER BY node_id, started_at`, runID)
 // AppendStepAnnotation appends one summary string to a step's
 // annotations list. Inserts a placeholder row if the step doesn't
 // yet exist (annotations may fire before step_start lands in the
-// rare reorder case). Read-modify-write inside one txn to keep
-// concurrent appenders from losing entries.
+// rare reorder case). Read-modify-write inside one transaction that
+// holds the rows it rewrites, which is what keeps concurrent
+// appenders from losing entries.
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -3101,7 +3131,7 @@ ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
 	var current []byte
 	row := tx.QueryRowContext(ctx, `
 SELECT annotations_json FROM node_steps
-WHERE run_id = ? AND node_id = ? AND step_id = ?`,
+WHERE run_id = ? AND node_id = ? AND step_id = ?`+tx.forUpdate(),
 		runID, nodeID, stepID)
 	if err := row.Scan(&current); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -3751,6 +3781,19 @@ SELECT run_id, seq, node_id, kind, ts, payload
 	return out, rows.Err()
 }
 
+// safety: holding the run row is what serializes callers that allocate a
+// per-run sequence number from MAX(seq)+1. A run with no row leaves nothing
+// to lock; the caller's own insert then fails its foreign key, as before.
+func lockRunRow(ctx context.Context, tx *storeTx, runID string) error {
+	var id string
+	err := tx.QueryRowContext(ctx,
+		`SELECT id FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&id)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return nil
+}
+
 // AppendEvent writes an ordered event; returns the assigned seq.
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error) {
 	tx, err := s.beginTx(ctx)
@@ -3758,6 +3801,14 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// safety: seq is half the events primary key, so the run row is held
+	// while it is chosen. Postgres runs this transaction at READ COMMITTED,
+	// where two appenders otherwise read the same MAX and the second insert
+	// dies on the duplicate key.
+	if err := lockRunRow(ctx, tx, runID); err != nil {
+		return 0, err
+	}
 
 	var seq int64
 	err = tx.QueryRowContext(ctx,
@@ -4168,17 +4219,33 @@ func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq in
 // is producing. Reports false without writing when the generation has
 // moved on.
 func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
-	current, err := s.TriggerClaimGeneration(ctx, runID)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return true, s.FinishRun(ctx, runID, status, errMsg)
-		}
 		return false, err
 	}
-	if current != seq {
+	defer func() { _ = tx.Rollback() }()
+
+	// safety: the trigger row stays held from the generation read through the
+	// run write. Read them apart and a re-claim lands between the two, which
+	// is the one interleaving this fence exists to refuse.
+	var current int64
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT claim_seq FROM triggers WHERE id = ?`+tx.forUpdate(), runID).Scan(&current); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return false, err
+	case current != seq:
 		return false, nil
 	}
-	return true, s.FinishRun(ctx, runID, status, errMsg)
+
+	if _, err := tx.ExecContext(ctx, finishRunStmt,
+		status, errMsg, time.Now().UnixNano(), runID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ListExpiredClaims returns the ids of claimed triggers whose lease has
@@ -4218,34 +4285,19 @@ func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
 // A run that reached `running` has a process behind it that the lease
 // alone cannot see, so requeueing it would put a second copy of live
 // work on the queue; that case belongs to the orphan reaper, which
-// judges by heartbeat. Both conditions are checked inside one
-// transaction so a run that starts concurrently cannot slip between the
-// check and the requeue.
+// judges by heartbeat. The run's status is a correlated subquery inside
+// the requeue's own WHERE rather than a read before it, so there is no
+// window between the check and the write for a run to start in. A run
+// with no row at all reads as not started, which is what an unclaimed
+// trigger looks like before its consumer gets that far.
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var status string
-	err = tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE id = ?`, id).Scan(&status)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		status = runStatusPending
-	case err != nil:
-		return false, err
-	}
-	if status != runStatusPending {
-		return false, nil
-	}
-
-	res, err := tx.ExecContext(ctx,
+	res, err := s.exec(ctx,
 		`UPDATE triggers
 		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
 		        claim_principal = '', claim_token_prefix = ''
-		  WHERE id = ? AND status = ?`,
-		triggerStatusPending, id, triggerStatusClaimed)
+		  WHERE id = ? AND status = ?
+		    AND COALESCE((SELECT status FROM runs WHERE runs.id = triggers.id), ?) = ?`,
+		triggerStatusPending, id, triggerStatusClaimed, runStatusPending, runStatusPending)
 	if err != nil {
 		return false, err
 	}
@@ -4253,13 +4305,7 @@ func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	if n == 0 {
-		return false, nil
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
+	return n > 0, nil
 }
 
 // ReleaseClaimAtGeneration returns a claimed trigger to the pending

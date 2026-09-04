@@ -57,13 +57,6 @@ func (s *Store) forUpdateSkipLocked() string {
 	return ""
 }
 
-func (s *Store) insertionOrderColumn() string {
-	if s.dialect == DialectPostgres {
-		return "ctid"
-	}
-	return "rowid"
-}
-
 // safety: SQLite's variadic max() is a scalar function; Postgres spells that
 // GREATEST and reserves max for an aggregate, which no WHERE clause accepts.
 func (s *Store) greatest() string {

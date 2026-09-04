@@ -37,6 +37,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	// node_metrics row for a run that does not exist, so the constraint it
 	// has never heard of cannot refuse one of its inserts.
 	28: nil,
+	29: {nodesOrderCols},
 }
 
 func columnSpecMaps() []map[string]string {

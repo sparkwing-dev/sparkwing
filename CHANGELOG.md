@@ -379,6 +379,52 @@ code change to unlock.
   and `--tree`, which needs local state and on-disk logs both, says so when it
   cannot run.
 
+- **store:** A lapsed claim whose run has already started is no longer
+  requeued on Postgres. `RequeueUnstartedClaim` read the run's status and
+  then updated the trigger as two statements against two tables, so at READ
+  COMMITTED a run that started in between was requeued anyway and a second
+  copy of live work went back on the pending queue. The run status is now a
+  correlated subquery in the requeue's own WHERE, leaving no window between
+  the check and the write.
+
+- **store:** Concurrent `sparkwing.Annotate` calls no longer lose entries on
+  Postgres. The node, step and run annotation appends are read-modify-write
+  inside a transaction, which is not enough at READ COMMITTED: two appenders
+  read the same list and the second write is computed from the stale copy,
+  while `annotation_count` -- a real atomic increment -- counts both, leaving
+  a run whose counter exceeds the annotations it can show. The reads now take
+  the row lock they always needed.
+
+- **store:** A superseded dispatch can no longer stamp its outcome over the
+  run the current claim is producing. `FinishRunAtGeneration` read the
+  trigger's claim generation and wrote the run in two separate statements
+  with nothing held between them, so a re-claim landing in that window let
+  the old dispatch write anyway -- the exact interleaving the generation
+  fence exists to refuse. Both now happen in one transaction that holds the
+  trigger row.
+
+- **store:** `ListNodes` returns nodes in creation order on Postgres again.
+  It ordered by `ctid`, the physical tuple location, which Postgres rewrites
+  on every update -- and a node row is updated on every start, status change,
+  heartbeat and usage report -- so `sparkwing job status`, `runs timeline`,
+  `runs summary`, the receipt writer and the dashboard node list rendered
+  whatever order the heap happened to be in. Runs-store schema 29 adds a
+  `nodes.seq` column that `CreateNode` fills, and both dialects order by it.
+  The migration is additive: an older binary keeps reading and writing the
+  store, and existing SQLite rows are backfilled from their rowid so their
+  order is unchanged. Rows an older Postgres store wrote carry no sequence
+  and order by node id.
+
+- **store:** Event appends no longer collide on Postgres. `AppendEvent` chose
+  its sequence number with an unlocked `MAX(seq)+1` and then inserted it as
+  half the primary key, so two nodes of one run emitting at the same moment
+  both picked the same number and one insert failed -- and because nearly
+  every caller discards the error, the run's event stream lost the record
+  silently. The run row is now held while the number is chosen.
+  `RequestNodeBounce` allocated its sequence the same way and holds the node
+  row for the same reason. SQLite was never affected: its immediate
+  transactions already serialized the pair.
+
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
