@@ -133,3 +133,39 @@ func TestSchemaV29_UpgradeIsSafeToReplay(t *testing.T) {
 		}
 	}
 }
+
+// TestSchemaV29_ReplayLeavesTheV28CascadeIntact guards the seam the two
+// migrations share. v29 rebuilds nothing v28 built, so a store that has
+// replayed it must still drop a deleted run's metric rows -- the invariant
+// v28 exists for.
+func TestSchemaV29_ReplayLeavesTheV28CascadeIntact(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cascade29.db")
+	seedV28Nodes(t, path)
+
+	upgraded, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("Open (upgrade): %v", err)
+	}
+	if _, err := upgraded.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 29`); err != nil {
+		t.Fatalf("reset version: %v", err)
+	}
+	_ = upgraded.Close()
+
+	replayed, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("Open (replay of v29): %v", err)
+	}
+	defer func() { _ = replayed.Close() }()
+
+	ctx := context.Background()
+	seedRunWithMetricSample(t, replayed, "doomed", time.Now())
+	if got := countNodeMetrics(t, replayed.DB()); got != 1 {
+		t.Fatalf("seeded node_metrics = %d, want 1", got)
+	}
+	if err := replayed.DeleteRun(ctx, "doomed"); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+	if got := countNodeMetrics(t, replayed.DB()); got != 0 {
+		t.Errorf("node_metrics after DeleteRun = %d, want 0: replaying v29 lost v28's cascade", got)
+	}
+}
