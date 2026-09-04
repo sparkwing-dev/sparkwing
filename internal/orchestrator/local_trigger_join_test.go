@@ -34,8 +34,8 @@ func TestRunLocal_TriggerLoopFinishesBeforeTheStoreCloses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The child's .sparkwing/ compiles rather than resolving from a path, so the
-	// dispatch is still running when the parent's own work is done.
+	// safety: the child's .sparkwing/ has to compile, which is what keeps the
+	// dispatch running past the point where the parent's own work is done.
 	childRepo := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(childRepo, ".sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
