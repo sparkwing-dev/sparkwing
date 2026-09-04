@@ -19,6 +19,7 @@ func ExampleOpen() {
 		fmt.Println("open:", err)
 		return
 	}
+	defer s.Close()
 
 	ctx := context.Background()
 	if err := s.CreateRun(ctx, store.Run{
