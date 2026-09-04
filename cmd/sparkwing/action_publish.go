@@ -182,32 +182,6 @@ func overlayModfilePath(sparkwingDir string) string {
 	return ""
 }
 
-func goWorkInScope(sparkwingDir string) (string, bool) {
-	switch env := os.Getenv("GOWORK"); env {
-	case "off":
-		return "", false
-	case "":
-	default:
-		// #nosec G703 -- the path comes from this user's own environment
-		if fi, err := os.Stat(env); err == nil && fi.Mode().IsRegular() {
-			return env, true
-		}
-		return "", false
-	}
-	dir := sparkwingDir
-	for {
-		candidate := filepath.Join(dir, "go.work")
-		if fi, err := os.Stat(candidate); err == nil && fi.Mode().IsRegular() {
-			return candidate, true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
-		}
-		dir = parent
-	}
-}
-
 func resolveArtifactStoreURL(_, urlFlag string) (string, error) {
 	return urlFlag, nil
 }
