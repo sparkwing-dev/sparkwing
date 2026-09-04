@@ -439,7 +439,8 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 func (s *Server) Handler() http.Handler {
 	mux, router := s.routers()
 	router.Handle("/", s.authenticated(unsupportedRouteFallback(mux)))
-	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
+	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
+		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
 }
 
 // safety: neither mux is wired to the other and no handler runs, so a caller
@@ -936,17 +937,17 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func withRequestLog(next http.Handler, logger *slog.Logger) http.Handler {
+func withRequestLog(next http.Handler, logger *slog.Logger, routeLabel func(*http.Request) string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		writer := http.ResponseWriter(rw)
 		if _, ok := w.(http.Flusher); ok {
 			writer = &flushingStatusRecorder{statusRecorder: rw}
 		}
+		route := routeLabel(r)
 		start := time.Now()
 		next.ServeHTTP(writer, r)
 		elapsed := time.Since(start)
-		route := normalizeRoute(r.URL.Path)
 		observeHTTPRequest(route, r.Method, rw.status, elapsed)
 		logger.Info(
 			"http",

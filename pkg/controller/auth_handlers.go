@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -259,7 +260,19 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	u, err := s.store.CreateFirstUser(req.Name, req.Password, []string{ScopeAdmin}, time.Now().UTC())
+	scopes, err := requestedUserScopes(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	// safety: the first account is the only way to reach every other route once
+	// auth is on, so a scope set that would lock the operator out is refused
+	// rather than widened behind their back.
+	if !slices.Contains(scopes, ScopeAdmin) {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("the first account must hold the %s scope", ScopeAdmin))
+		return
+	}
+	u, err := s.store.CreateFirstUser(req.Name, req.Password, scopes, time.Now().UTC())
 	if err != nil {
 		if errors.Is(err, store.ErrBootstrapClosed) {
 			s.markBootstrapClosed()

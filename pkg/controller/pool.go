@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
@@ -50,29 +51,40 @@ func (s *Server) AttachPool(cfg PoolConfig) *Server {
 }
 
 type poolBinding struct {
-	cfg  PoolConfig
+	cfg   PoolConfig
+	bound atomic.Pointer[boundPool]
+}
+
+type boundPool struct {
 	pool *pool.Pool
 	pcfg *pool.Config
 }
 
 func (p *poolBinding) run(ctx context.Context, logger *slog.Logger) {
-	p.pcfg = pool.LoadConfig(ctx, p.cfg.Client, p.cfg.Namespace)
-	p.pool = pool.NewPool(p.cfg.Client, p.cfg.Namespace, p.pcfg.PoolSize, p.pcfg.PVCSize)
+	pcfg := pool.LoadConfig(ctx, p.cfg.Client, p.cfg.Namespace)
+	// safety: the router is already serving when this runs, so the pool and its
+	// config are published as one pointer after both are built; a handler that
+	// reads the pointer either sees nothing or sees a finished binding.
+	b := &boundPool{
+		pool: pool.NewPool(p.cfg.Client, p.cfg.Namespace, pcfg.PoolSize, pcfg.PVCSize),
+		pcfg: pcfg,
+	}
+	p.bound.Store(b)
 	pool.InitMetrics()
 	logger.Info(
 		"controller pool: starting",
 		"namespace", p.cfg.Namespace,
-		"pool_size", p.pcfg.PoolSize,
-		"pvc_size", p.pcfg.PVCSize,
-		"warm_images", len(p.pcfg.WarmImages),
+		"pool_size", pcfg.PoolSize,
+		"pvc_size", pcfg.PVCSize,
+		"warm_images", len(pcfg.WarmImages),
 	)
 
-	go p.reconcileLoop(ctx, logger)
-	go pool.WarmingLoop(ctx, p.cfg.Client, p.pool, p.cfg.Namespace, p.cfg.WarmerServiceAccount)
+	go p.reconcileLoop(ctx, logger, b)
+	go pool.WarmingLoop(ctx, p.cfg.Client, b.pool, p.cfg.Namespace, p.cfg.WarmerServiceAccount)
 	<-ctx.Done()
 }
 
-func (p *poolBinding) reconcileLoop(ctx context.Context, logger *slog.Logger) {
+func (p *poolBinding) reconcileLoop(ctx context.Context, logger *slog.Logger, b *boundPool) {
 	t := time.NewTicker(p.cfg.ReconcileEvery)
 	defer t.Stop()
 	for {
@@ -80,23 +92,27 @@ func (p *poolBinding) reconcileLoop(ctx context.Context, logger *slog.Logger) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := p.pool.Reconcile(ctx, p.pcfg.HeartbeatTimeout, p.pcfg.StartupGrace); err != nil {
+			if err := b.pool.Reconcile(ctx, b.pcfg.HeartbeatTimeout, b.pcfg.StartupGrace); err != nil {
 				logger.Error("pool reconcile", "err", err)
 			}
 		}
 	}
 }
 
-func (p *poolBinding) ready() bool {
-	return p != nil && p.pool != nil
+func (p *poolBinding) binding() *boundPool {
+	if p == nil {
+		return nil
+	}
+	return p.bound.Load()
 }
 
 func (s *Server) handlePoolList(w http.ResponseWriter, r *http.Request) {
-	if !s.pool.ready() {
+	bound := s.pool.binding()
+	if bound == nil {
 		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("pool not ready"))
 		return
 	}
-	list, err := s.pool.pool.List(r.Context())
+	list, err := bound.pool.List(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -123,14 +139,15 @@ func (s *Server) handlePoolList(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"pool_size": s.pool.pcfg.PoolSize,
-		"pvc_size":  s.pool.pcfg.PVCSize,
+		"pool_size": bound.pcfg.PoolSize,
+		"pvc_size":  bound.pcfg.PVCSize,
 		"pvcs":      out,
 	})
 }
 
 func (s *Server) handlePoolCheckout(w http.ResponseWriter, r *http.Request) {
-	if !s.pool.ready() {
+	bound := s.pool.binding()
+	if bound == nil {
 		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("pool not ready"))
 		return
 	}
@@ -139,7 +156,7 @@ func (s *Server) handlePoolCheckout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("job_id is required"))
 		return
 	}
-	name, err := s.pool.pool.Checkout(r.Context(), jobID)
+	name, err := bound.pool.Checkout(r.Context(), jobID)
 	if err != nil {
 		writeError(w, http.StatusConflict, err)
 		return
@@ -148,7 +165,8 @@ func (s *Server) handlePoolCheckout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePoolReturn(w http.ResponseWriter, r *http.Request) {
-	if !s.pool.ready() {
+	bound := s.pool.binding()
+	if bound == nil {
 		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("pool not ready"))
 		return
 	}
@@ -157,7 +175,7 @@ func (s *Server) handlePoolReturn(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("pvc is required"))
 		return
 	}
-	if err := s.pool.pool.Return(r.Context(), name); err != nil {
+	if err := bound.pool.Return(r.Context(), name); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -165,7 +183,8 @@ func (s *Server) handlePoolReturn(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePoolHeartbeat(w http.ResponseWriter, r *http.Request) {
-	if !s.pool.ready() {
+	bound := s.pool.binding()
+	if bound == nil {
 		writeError(w, http.StatusServiceUnavailable, fmt.Errorf("pool not ready"))
 		return
 	}
@@ -175,7 +194,7 @@ func (s *Server) handlePoolHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("pvc and job_id are required"))
 		return
 	}
-	if err := s.pool.pool.Heartbeat(r.Context(), name, jobID); err != nil {
+	if err := bound.pool.Heartbeat(r.Context(), name, jobID); err != nil {
 		writeError(w, http.StatusConflict, err)
 		return
 	}

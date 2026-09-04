@@ -417,6 +417,30 @@ code change to unlock.
   the approval and spawned-pipeline rows onto them panicked, so
   `GET /api/v1/runs/{id}?include=nodes` -- the dashboard's run page -- failed
   for that run on every retry.
+- **controller:** The concurrency waiter stream at
+  `GET /api/v1/concurrency/{key}/notify` keeps its documented 30-minute
+  budget. The listener's 30-second write timeout covers the whole
+  connection, and the handler never pushed it back, so a waiter promoted
+  more than 30 seconds after connecting -- the normal case for a queue --
+  got the `: open` preamble and then an EOF, and the `ready` event was lost
+  with nothing logged. The handler now extends the connection deadline on
+  every poll and logs an event it could not write.
+
+- **controller:** HTTP request metrics label the `route` with the pattern the
+  request matched rather than a hand-maintained regex table, so the ten
+  `/api/v1/concurrency/{key}/...` routes, `/api/v1/artifacts/{key}`, the
+  `{nodeID}` in the approval routes and the `{path...}` in the Git cache proxy
+  routes stop minting a permanent Prometheus series per distinct key. An
+  unrouted path is now labeled `other` instead of carrying the raw path.
+
+- **controller:** The warm-PVC pool binding is published atomically, so the
+  pool routes no longer race the goroutine that builds it. The router went
+  live before `LoadConfig` and `NewPool` had run, and the handlers read the
+  pool and its config with no synchronization, which the race detector flags
+  and which could hand a request a half-built pool during the first seconds
+  after a controller with `--pool` starts. Requests in that window still
+  answer `503 pool not ready`.
+
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
   that node as cancelled, and an `OnFailure` child skipped because its cancelled
@@ -836,6 +860,13 @@ code change to unlock.
   claim_required` unless the caller is the claimant the trigger row records; an
   `admin` token still bypasses, and a controller serving without auth is
   unchanged.
+- **controller:** `POST /api/v1/users` no longer discards the requested scopes
+  when it takes the bootstrap path. Creating the first account with an explicit
+  scope set returned a full `admin` account instead, so an operator who asked
+  for `runs.read` got a superuser and never learned of it. The bootstrap path
+  now honours the set it is given, and refuses one that omits `admin` with a
+  `400` rather than widening it; omitting `scopes` still grants `admin`.
+
 - **store:** A SQLite state-database path containing `#` or `?` no longer opens
   a different file. The path was interpolated into a `file:` URI without
   escaping, so SQLite ended the filename at the first such character and opened

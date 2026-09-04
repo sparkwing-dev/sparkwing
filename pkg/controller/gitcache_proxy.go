@@ -224,7 +224,13 @@ func withStreamDeadlineControl(next http.Handler) http.Handler {
 }
 
 func extendGitcacheStreamDeadline(w http.ResponseWriter, r *http.Request) {
-	deadline := time.Now().Add(30 * time.Minute)
+	extendStreamDeadline(w, r, 30*time.Minute)
+}
+
+// safety: the listener's WriteTimeout covers a whole connection, so a handler
+// that streams for longer than one loses the write it was waiting to make.
+func extendStreamDeadline(w http.ResponseWriter, r *http.Request, window time.Duration) {
+	deadline := time.Now().Add(window)
 	if set, ok := r.Context().Value(streamDeadlineKey{}).(func(time.Time)); ok {
 		set(deadline)
 		return

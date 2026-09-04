@@ -1,7 +1,9 @@
 package controller_test
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -115,5 +117,53 @@ func TestGitcacheStreamDeadline_CoversTheRegisterRoute(t *testing.T) {
 					extended, rec.reads, rec.writes, tc.wantExtends)
 			}
 		})
+	}
+}
+
+func TestWaiterNotifyStreamDeadline_SurvivesTheServerWriteTimeout(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	for _, holder := range []string{"leader", "waiter"} {
+		if _, aerr := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+			Key: "slow-slot", HolderID: holder, RunID: holder, NodeID: "n",
+			Capacity: 1, Policy: store.OnLimitQueue,
+		}); aerr != nil {
+			t.Fatalf("acquire %s: %v", holder, aerr)
+		}
+	}
+
+	srv := httptest.NewUnstartedServer(controller.New(st, nil).Handler())
+	srv.Config.WriteTimeout = time.Second
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	promoted := make(chan error, 1)
+	go func() {
+		time.Sleep(2 * time.Second)
+		_, derr := st.DB().ExecContext(ctx,
+			`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`, "slow-slot", "leader")
+		promoted <- derr
+	}()
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(srv.URL + "/api/v1/concurrency/slow-slot/notify?run_id=waiter&node_id=n")
+	if err != nil {
+		t.Fatalf("notify: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if derr := <-promoted; derr != nil {
+		t.Fatalf("release leader: %v", derr)
+	}
+	if err != nil {
+		t.Fatalf("stream ended early after %q: %v", body, err)
+	}
+	if !bytes.Contains(body, []byte("event: ready")) {
+		t.Fatalf("notify body = %q, want the ready event", body)
 	}
 }
