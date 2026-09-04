@@ -193,8 +193,8 @@ var uniqCounter struct {
 	n int
 }
 
-// schemaName keeps the whole name inside Postgres's 63-byte identifier
-// limit with the uniquifier last, because Postgres truncates the tail.
+// safety: Postgres truncates an over-long identifier at the tail, which
+// is where the uniquifier sits, so the whole name stays under 63 bytes.
 func schemaName(testName string) string {
 	const prefix = "sw_test_"
 	const identifierLimit = 63

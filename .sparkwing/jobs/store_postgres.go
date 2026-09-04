@@ -63,8 +63,8 @@ const (
 	// bind, so one fresh port is tried before the step fails.
 	storePostgresStartAttempts = 2
 	storePostgresLogLines      = 40
-	// storePostgresPrePushTimeout mirrors the Plan timeout, which pre-push
-	// does not inherit because it calls the step directly.
+	// safety: pre-push calls the step directly, so the Plan's timeout does
+	// not reach it; both read this.
 	storePostgresPrePushTimeout = 30 * time.Minute
 )
 
