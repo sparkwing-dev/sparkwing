@@ -32,11 +32,11 @@ func RunTimeline(ctx context.Context, paths Paths, runID string, opts TimelineOp
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, label, done, err := OpenStoreForRun(ctx, paths, runID)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer done()
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {
 		return err
@@ -46,7 +46,7 @@ func RunTimeline(ctx context.Context, paths Paths, runID string, opts TimelineOp
 		return err
 	}
 	steps, _ := st.ListNodeSteps(ctx, runID)
-	return renderTimeline(run, nodes, steps, opts, out)
+	return renderTimeline(run, label, nodes, steps, opts, out)
 }
 
 func RunTimelineRemote(ctx context.Context, controllerURL, token, runID string, opts TimelineOpts, out io.Writer) error {
@@ -63,10 +63,17 @@ func RunTimelineRemote(ctx context.Context, controllerURL, token, runID string, 
 		return err
 	}
 	steps, _ := c.ListNodeSteps(ctx, runID)
-	return renderTimeline(run, nodes, steps, opts, out)
+	return renderTimeline(run, SharedStoreLabel, nodes, steps, opts, out)
 }
 
-func renderTimeline(run *store.Run, nodes []*store.Node, steps []*store.NodeStep, opts TimelineOpts, out io.Writer) error {
+func renderTimeline(
+	run *store.Run,
+	storeLabel string,
+	nodes []*store.Node,
+	steps []*store.NodeStep,
+	opts TimelineOpts,
+	out io.Writer,
+) error {
 	if opts.Width <= 0 {
 		opts.Width = 60
 	}
@@ -94,6 +101,7 @@ func renderTimeline(run *store.Run, nodes []*store.Node, steps []*store.NodeStep
 			"finished_at": run.FinishedAt,
 			"duration_ms": span.Milliseconds(),
 			"rows":        rows,
+			"store":       storeLabel,
 		})
 	}
 	finishedNote := "(running)"

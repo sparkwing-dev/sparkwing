@@ -56,7 +56,7 @@ func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []s
 
 	var got *store.Approval
 	if *on == "" {
-		got, err = resolveLocalApproval(ctx, paths, runID, nodeID, resolution, approver, *comment)
+		got, err = resolveLocalApproval(ctx, paths, runID, nodeID, resolution, approver, *comment, cmd.Path)
 	} else {
 		prof, perr := resolveProfile(*on)
 		if perr != nil {
@@ -75,15 +75,19 @@ func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []s
 	return nil
 }
 
-func resolveLocalApproval(ctx context.Context, paths orchestrator.Paths, runID, nodeID, resolution, approver, comment string) (*store.Approval, error) {
+func resolveLocalApproval(
+	ctx context.Context,
+	paths orchestrator.Paths,
+	runID, nodeID, resolution, approver, comment, verb string,
+) (*store.Approval, error) {
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, _, done, err := orchestrator.OpenStoreForRunWrite(ctx, paths, runID, verb)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = st.Close() }()
+	defer done()
 	return st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
 }
 
@@ -136,14 +140,19 @@ func listLocalApprovals(ctx context.Context, paths orchestrator.Paths, runID str
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
 	}
+	if runID != "" {
+		st, _, done, err := orchestrator.OpenStoreForRun(ctx, paths, runID)
+		if err != nil {
+			return nil, err
+		}
+		defer done()
+		return st.ListApprovalsForRun(ctx, runID)
+	}
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = st.Close() }()
-	if runID != "" {
-		return st.ListApprovalsForRun(ctx, runID)
-	}
 	return st.ListPendingApprovals(ctx)
 }
 

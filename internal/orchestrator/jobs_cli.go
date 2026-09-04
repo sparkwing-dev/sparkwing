@@ -79,19 +79,35 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	if err != nil {
 		return err
 	}
-	runs = applyClientFilters(runs, clientFilter)
-	if opts.Limit > 0 && len(runs) > opts.Limit {
-		runs = runs[:opts.Limit]
+	rows := TagShared(runs)
+	var notes []string
+	if mergesStandalone(b, paths, opts.Profile) {
+		standalone := OpenStandaloneStores(ctx, paths)
+		defer func() { _ = standalone.Close() }()
+		rows = MergeTaggedRuns(append(rows, standalone.ListRuns(ctx, filter)...))
+		notes = standalone.Notes()
+	}
+	rows = applyClientFiltersTagged(rows, clientFilter)
+	if opts.Limit > 0 && len(rows) > opts.Limit {
+		rows = rows[:opts.Limit]
 	}
 	if opts.ByPipeline {
 		opts.Pivot.JSON = opts.JSON
 		opts.Pivot.Quiet = opts.Quiet
-		return RenderPipelinePivot(runs, opts.Pivot, out)
+		if err := RenderPipelinePivot(untagRuns(rows), opts.Pivot, out); err != nil {
+			return err
+		}
+		WriteStandaloneNotes(os.Stderr, notes)
+		return nil
 	}
 	admissionStatus := func(runID string) (admissionWaitDetail, bool) {
 		return latestAdmissionWait(ctx, b, runID)
 	}
-	return renderRunList(runs, opts, out, admissionStatus)
+	if err := renderRunList(rows, opts, out, admissionStatus); err != nil {
+		return err
+	}
+	WriteStandaloneNotes(os.Stderr, notes)
+	return nil
 }
 
 func listFetchLimitForFilter(limit int, filter CompiledFilter) int {
@@ -103,51 +119,98 @@ func listFetchLimitForFilter(limit int, filter CompiledFilter) int {
 }
 
 func renderRunList(
-	runs []*store.Run,
+	rows []TaggedRun,
 	opts ListOpts,
 	out io.Writer,
 	admissionStatus func(runID string) (admissionWaitDetail, bool),
 ) error {
 	if opts.Quiet {
 		if opts.JSON {
-			ids := make([]string, 0, len(runs))
-			for _, r := range runs {
+			ids := make([]string, 0, len(rows))
+			for _, r := range rows {
 				ids = append(ids, r.ID)
 			}
 
 			return writeNDJSON(out, ids)
 		}
-		for _, r := range runs {
+		for _, r := range rows {
 			fmt.Fprintln(out, r.ID)
 		}
 		return nil
 	}
 
 	if opts.JSON {
-		return writeNDJSON(out, store.RedactedRuns(runs))
+		return writeNDJSON(out, redactTaggedRuns(rows))
 	}
 
-	if len(runs) == 0 {
+	if len(rows) == 0 {
 		fmt.Fprintln(out, "no runs yet -- invoke one via `sparkwing run <pipeline>`")
 		return nil
 	}
+	header := "RUN\tPIPELINE\tSTATUS\tSTARTED\tDURATION"
+	showStore := anyStandalone(rows)
+	if showStore {
+		header += "\tSTORE"
+	}
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "RUN\tPIPELINE\tSTATUS\tSTARTED\tDURATION")
-	for _, r := range runs {
+	fmt.Fprintln(tw, header)
+	for _, r := range rows {
 		status := r.Status
-		if admissionStatus != nil && runCanDisplayAdmissionWait(r) {
+		if admissionStatus != nil && r.Store == SharedStoreLabel && runCanDisplayAdmissionWait(r.Run) {
 			if detail, ok := admissionStatus(r.ID); ok {
 				status = detail.listStatus()
 			}
 		}
-		fmt.Fprintf(
-			tw, "%s\t%s\t%s\t%s\t%s\n",
+		line := fmt.Sprintf(
+			"%s\t%s\t%s\t%s\t%s",
 			r.ID, r.Pipeline, status,
 			formatStartedAt(r.StartedAt),
-			formatRunDuration(r),
+			formatRunDuration(r.Run),
 		)
+		if showStore {
+			line += "\t" + r.Store
+		}
+		fmt.Fprintln(tw, line)
 	}
 	return tw.Flush()
+}
+
+func anyStandalone(rows []TaggedRun) bool {
+	for _, r := range rows {
+		if r.Store != SharedStoreLabel {
+			return true
+		}
+	}
+	return false
+}
+
+func untagRuns(rows []TaggedRun) []*store.Run {
+	out := make([]*store.Run, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.Run)
+	}
+	return out
+}
+
+func redactTaggedRuns(rows []TaggedRun) []TaggedRun {
+	out := make([]TaggedRun, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, TaggedRun{Run: store.RedactedRun(r.Run), Store: r.Store})
+	}
+	return out
+}
+
+func applyClientFiltersTagged(rows []TaggedRun, f CompiledFilter) []TaggedRun {
+	if !f.HasAny() {
+		return rows
+	}
+	out := rows[:0:0]
+	for _, r := range rows {
+		if f.Matches(r.Run) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 type StatusOpts struct {
@@ -220,9 +283,22 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 		}
 	}
 
+	storeLabel := SharedStoreLabel
+	if mergesStandalone(b, paths, opts.Profile) {
+		if _, gerr := localStore(b).GetRun(ctx, runID); gerr != nil {
+			standalone := OpenStandaloneStores(ctx, paths)
+			defer func() { _ = standalone.Close() }()
+			if held, label, _, ok := standalone.Find(ctx, runID); ok {
+				b = backend.NewStoreBackend(held, paths, nil)
+				storeLabel = label
+			}
+			defer func() { WriteStandaloneNotes(os.Stderr, standalone.Notes()) }()
+		}
+	}
+
 	if opts.JSON {
 		if st := localStore(b); st != nil {
-			return writeRunDetailJSON(ctx, st, runID, out)
+			return writeRunDetailJSON(ctx, st, runID, storeLabel, out)
 		}
 		run, err := b.GetRun(ctx, runID)
 		if err != nil {
@@ -234,7 +310,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 		}
 		wrapped := withFailureExcerpts(joinStepsByNode(nodes, nil),
 			failureExcerptsFor(ctx, b, runID, failedNodeIDs(nodes)))
-		payload := map[string]any{"run": store.RedactedRun(run), "nodes": wrapped}
+		payload := map[string]any{"run": store.RedactedRun(run), "nodes": wrapped, "store": storeLabel}
 		if p := runLogPath(run); p != "" {
 			payload["log_path"] = p
 		}
@@ -243,7 +319,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	}
 
 	if !opts.Follow {
-		return renderStatus(ctx, b, runID, out, false, opts.Steps)
+		return renderStatus(ctx, b, runID, storeLabel, out, false, opts.Steps)
 	}
 
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -254,7 +330,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 			fmt.Fprint(out, "\033[H\033[J")
 		}
 		first = false
-		if err := renderStatus(ctx, b, runID, out, true, opts.Steps); err != nil {
+		if err := renderStatus(ctx, b, runID, storeLabel, out, true, opts.Steps); err != nil {
 			return err
 		}
 		run, err := b.GetRun(ctx, runID)
@@ -272,7 +348,13 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 	}
 }
 
-func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.Writer, followBanner, includeSteps bool) error {
+func renderStatus(
+	ctx context.Context,
+	b backend.Backend,
+	runID, storeLabel string,
+	out io.Writer,
+	followBanner, includeSteps bool,
+) error {
 	run, err := b.GetRun(ctx, runID)
 	if err != nil {
 		return err
@@ -328,6 +410,9 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 			line = "yes (" + reason + ")"
 		}
 		fmt.Fprintf(out, "%s %s\n", label("standalone:"), line)
+	}
+	if storeLabel != "" && storeLabel != SharedStoreLabel {
+		fmt.Fprintf(out, "%s %s\n", label("store:    "), storeLabel)
 	}
 	if runCanDisplayAdmissionWait(run) {
 		if detail, ok := latestAdmissionWait(ctx, b, runID); ok {
@@ -1301,12 +1386,15 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, _, done, err := OpenStoreForRun(ctx, paths, runID)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer done()
 
+	if _, err := st.GetRun(ctx, runID); err != nil {
+		return err
+	}
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {
 		return err
@@ -1497,7 +1585,7 @@ func writeNDJSON[T any](out io.Writer, records []T) error {
 	return ndjson.Write(out, records)
 }
 
-func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out io.Writer) error {
+func writeRunDetailJSON(ctx context.Context, st *store.Store, runID, storeLabel string, out io.Writer) error {
 	run, err := st.GetRun(ctx, runID)
 	if err != nil {
 		return err
@@ -1509,7 +1597,7 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out 
 	steps, _ := st.ListNodeSteps(ctx, runID)
 	wrapped := withFailureExcerpts(joinStepsByNode(nodes, steps),
 		failureExcerptsFor(ctx, st, runID, failedNodeIDs(nodes)))
-	payload := map[string]any{"run": store.RedactedRun(run), "nodes": wrapped}
+	payload := map[string]any{"run": store.RedactedRun(run), "nodes": wrapped, "store": storeLabel}
 	if p := runLogPath(run); p != "" {
 		payload["log_path"] = p
 	}
@@ -1530,8 +1618,16 @@ func RunStatus(ctx context.Context, paths Paths, p *profile.Profile, runID strin
 	}
 	defer func() { _ = closer.Close() }()
 	run, err := b.GetRun(ctx, runID)
-	if err != nil {
+	if err == nil {
+		return run.Status, nil
+	}
+	if !mergesStandalone(b, paths, p) {
 		return "", err
 	}
-	return run.Status, nil
+	standalone := OpenStandaloneStores(ctx, paths)
+	defer func() { _ = standalone.Close() }()
+	if _, _, held, ok := standalone.Find(ctx, runID); ok {
+		return held.Status, nil
+	}
+	return "", err
 }

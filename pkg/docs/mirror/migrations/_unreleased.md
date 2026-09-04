@@ -18,9 +18,9 @@ CHANGELOG links here.
 - **After:** neither condition refuses. Both run standalone against
   `~/.sparkwing/standalone/state.db`, print one block on stderr naming the
   remedy, and exit as they would have. `SPARKWING_ALLOW_UNADMITTED=1` keeps its
-  meaning and takes the same path, with its own block. Because those runs are
-  in a different store, none of them appears in `sparkwing runs`,
-  `sparkwing jobs`, or the dashboard.
+  meaning and takes the same path, with its own block. Those runs are in a
+  different store: `sparkwing runs` and `sparkwing jobs` list them marked with
+  that store, and the dashboard does not show them.
 - **Migration:** a script that relied on either refusal as a gate -- treating a
   non-zero exit as "no daemon, do not proceed" -- no longer gets one. Check for
   a daemon explicitly instead:
@@ -29,12 +29,17 @@ CHANGELOG links here.
   sparkwing daemon status -o json | jq -e '.running and .healthy'
   ```
 
-  A script that reads a run back by id after launching it should read it from
-  the store the run actually used. `standalone/` is itself a Sparkwing home:
+  A script that reads a run back by id after launching it needs no change:
+  `sparkwing runs status --run "$RUN_ID"` searches the shared store and then
+  every standalone store, and its `store` field says which one answered.
+  `runs bounce`, `runs annotations add`, `runs approvals approve` and
+  `deny`, `debug rerun`, and `debug replay` write in whichever store answered.
 
-  ```bash
-  SPARKWING_HOME=~/.sparkwing/standalone sparkwing runs status --run "$RUN_ID"
-  ```
+  A script that cancels or retries a run it launched needs a different answer
+  for a standalone one: neither is possible. Cancel needs a daemon arbitrating
+  the run and retry needs one to admit the new run, and a standalone run has
+  neither, so both name the store and say so instead of reporting the run
+  missing. Check `standalone` on the start record before relying on either.
 
   The run's own start record says which it was: `standalone` and
   `standalone_reason` are on the invocation and on `sparkwing runs status`

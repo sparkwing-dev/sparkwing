@@ -10,7 +10,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runDebugReplay(args []string) error {
@@ -35,7 +34,7 @@ func runDebugReplay(args []string) error {
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, _, done, err := orchestrator.OpenStoreForRunWrite(ctx, paths, t.run, cmdDebugReplay.Path)
 	if err != nil {
 		return err
 	}
@@ -43,23 +42,23 @@ func runDebugReplay(args []string) error {
 	if t.on != "" {
 		prof, err := resolveProfile(t.on)
 		if err != nil {
-			_ = st.Close()
+			done()
 			return err
 		}
 		if err := requireController(prof, "debug replay"); err != nil {
-			_ = st.Close()
+			done()
 			return err
 		}
 		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 		fmt.Fprintf(os.Stderr, "fetching dispatch state from %s for replay...\n", prof.Name)
 		if err := orchestrator.SideloadRemoteForReplay(ctx, st, c, t.run, t.node); err != nil {
-			_ = st.Close()
+			done()
 			return fmt.Errorf("sideload from %s: %w", prof.Name, err)
 		}
 	}
 
 	newRunID, err := orchestrator.MintReplayRun(ctx, st, t.run, t.node)
-	_ = st.Close()
+	done()
 	if err != nil {
 		return fmt.Errorf("mint replay run: %w", err)
 	}

@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/receipt"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string) error {
@@ -62,11 +61,11 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, label, done, err := orchestrator.OpenStoreForRun(ctx, paths, *runID)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer done()
 	run, err := st.GetRun(ctx, *runID)
 	if err != nil {
 		return err
@@ -77,6 +76,7 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	}
 	rate, source := localCostRate()
 	rec := receipt.BuildReceipt(run, nodes, rate, source)
+	rec.Store = label
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(rec)

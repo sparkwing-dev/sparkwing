@@ -175,6 +175,29 @@ code change to unlock.
 
 ### Changed
 
+- **cli:** The read verbs see runs that went standalone. `runs list`, `jobs`,
+  `runs find`, and `runs failures` merge this home's own store with every
+  standalone store under it, newest first, and tag each row with the store it
+  came from: `shared`, or the store's path under the home. An id in both stores
+  lists once, from the shared store. `runs status`, `runs get`, `runs receipt`,
+  `runs summary`, `runs timeline`, `runs errors`, `runs tree`, and `runs wait`
+  look an id up in the shared store and then in each standalone store, and
+  report which one answered. Every standalone store is opened read-only, so a
+  read never migrates one; a store this sparkwing cannot open is named on
+  stderr with the release that can, and one written at an older store schema is
+  named with its run count.
+- **cli:** `runs errors` on a run id no store holds now exits 1 with `not found`, where it
+  printed `no failing nodes` and exited 0. It resolves the run before reading its nodes, so a
+  missing id and a run with no failures are no longer the same answer.
+- **cli:** The write verbs act on a standalone run in its own store.
+  `runs bounce`, `runs annotations add`, `runs approvals approve` and `deny`,
+  `debug rerun`, and `debug replay` open that store read-write only when
+  catching it up to this build's schema would stamp no requirement it does not
+  already list; otherwise they refuse and name the requirement, because
+  stamping it puts the file out of reach of the pipeline binary that owns it.
+  `runs cancel` and `runs retry` cannot act on a standalone run at all -- one
+  needs a daemon arbitrating the run, the other needs one to admit a new run --
+  and now say so, naming the store, instead of reporting the run missing.
 - **orchestrator:** A concurrency operation in S3-shared-state mode whose
   conditional-write probe fails now returns that error instead of quietly
   proceeding without a reservation, so a node that used to run unreserved can

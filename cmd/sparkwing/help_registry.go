@@ -2198,6 +2198,15 @@ fetches from the named profile's controller. Filters compose with
 AND semantics across flag types (pipeline=X AND status=Y), OR
 semantics within a repeated flag (pipeline=X OR pipeline=Y).
 
+A local listing merges this home's own store with every standalone
+store under it -- the ones runs that could not reach the admission
+daemon wrote -- newest first. Each row carries the store it came
+from: 'shared', or the store's path under the home. An id in both
+stores lists once, from the shared store. The STORE column appears
+only when a standalone run is in the table; -o json always carries
+the field. A standalone store this build cannot read is named on
+stderr after the table rather than listed.
+
 With -q / --quiet the output is just run ids, one per line, for
 shell piping:
 
@@ -2244,6 +2253,14 @@ var cmdJobsStatus = Command{
 	Description: `Prints a summary of the run (pipeline, status, node states).
 With --follow, polls until the run reaches a terminal status. Pass
 --profile NAME to read from a remote controller.
+
+A local read looks the id up in this home's own store first and then
+in each standalone store, and reports which one held it. The verbs
+that write to a run -- bounce, annotations add, approvals approve
+and deny, debug rerun, debug replay -- write in whichever store held
+it. Cancel and retry cannot act on a standalone run at all, because
+no daemon arbitrates one, and say so rather than reporting it
+missing.
 
 Runs that wrote their logs to a filesystem also report log_path: the
 directory holding the run's per-node .log files, on the machine that

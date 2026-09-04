@@ -14,7 +14,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type annotationEntry struct {
@@ -100,11 +99,11 @@ func listLocalAnnotations(ctx context.Context, paths orchestrator.Paths, runID, 
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, _, done, err := orchestrator.OpenStoreForRun(ctx, paths, runID)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = st.Close() }()
+	defer done()
 
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {
@@ -241,11 +240,11 @@ func addLocalAnnotation(ctx context.Context, paths orchestrator.Paths, runID, no
 	if err := paths.EnsureRoot(); err != nil {
 		return err
 	}
-	st, err := store.Open(paths.StateDB())
+	st, _, done, err := orchestrator.OpenStoreForRunWrite(ctx, paths, runID, cmdAnnotationsAdd.Path)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer done()
 	if stepID != "" {
 		if err := st.AppendStepAnnotation(ctx, runID, nodeID, stepID, msg); err != nil {
 			return err

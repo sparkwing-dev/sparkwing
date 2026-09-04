@@ -114,7 +114,7 @@ func TestRenderTimeline_JSONHasRows(t *testing.T) {
 		{NodeID: "build", Status: "done", StartedAt: &start, FinishedAt: &end},
 	}
 	var buf bytes.Buffer
-	if err := renderTimeline(run, nodes, nil, TimelineOpts{JSON: true}, &buf); err != nil {
+	if err := renderTimeline(run, SharedStoreLabel, nodes, nil, TimelineOpts{JSON: true}, &buf); err != nil {
 		t.Fatal(err)
 	}
 	var payload struct {
@@ -138,7 +138,7 @@ func TestRenderTimeline_TextHasBarAndRange(t *testing.T) {
 		{NodeID: "build", Status: "done", StartedAt: &start, FinishedAt: &end},
 	}
 	var buf bytes.Buffer
-	if err := renderTimeline(run, nodes, nil, TimelineOpts{Width: 20}, &buf); err != nil {
+	if err := renderTimeline(run, SharedStoreLabel, nodes, nil, TimelineOpts{Width: 20}, &buf); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
