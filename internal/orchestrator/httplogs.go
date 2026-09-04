@@ -137,8 +137,8 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 
 	payload, err := json.Marshal(&rec)
 	if err != nil {
-		// A record no encoder will take is a line the store never gets, which is
-		// the same loss as an append that never lands.
+		// safety: a record no encoder will take never reaches the store, the same
+		// loss as an append that never lands.
 		l.mu.Lock()
 		l.dropCount++
 		if l.dropReason == "" {

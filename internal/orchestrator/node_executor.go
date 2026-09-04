@@ -473,8 +473,8 @@ done:
 
 	emitNodeEnd(sparkwing.Success, "")
 
-	// The write that hands the last lines to the store is the close, so the node
-	// cannot be called successful until the log is shut and its losses counted.
+	// safety: the close is the write that hands over the last lines, so its
+	// failures have to be counted before the node is called successful.
 	if cerr := nlog.Close(); cerr != nil {
 		sparkwing.Debug(nodeCtx, "close node log: %v", cerr)
 	}
