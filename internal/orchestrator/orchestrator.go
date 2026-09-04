@@ -365,12 +365,20 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			profileName = opts.Profile.Name
 		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
-		defer cancelConsumer()
 		child := childStoreEnv{}
 		if opts.standalone != nil {
 			child = childStoreEnv{path: opts.standalone.stateDB, reason: opts.standalone.reason}
 		}
-		go runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget, child)
+		// safety: the loop's last writes race the caller's deferred store
+		// close, so this run stops it and waits for it before returning.
+		var triggerLoop sync.WaitGroup
+		triggerLoop.Add(1)
+		defer triggerLoop.Wait()
+		defer cancelConsumer()
+		go func() {
+			defer triggerLoop.Done()
+			runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget, child)
+		}()
 	}
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout

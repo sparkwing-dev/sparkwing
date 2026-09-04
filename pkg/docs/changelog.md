@@ -325,7 +325,10 @@ code change to unlock.
   which fires at the end of every parent run, not only on Ctrl-C -- so the
   trigger stayed `claimed` with no run row and `sparkwing runs status <child>`
   reported it as not found. A dispatch that fails for its own reasons still
-  records a failed run, now on a context that outlives the parent.
+  records a failed run, now on a context that outlives the parent, and the run
+  waits for the loop to stop before closing the store. A requeued child is
+  re-run from the start, so a child that had already done part of its work
+  repeats it -- the same trade the resident trigger consumer already makes.
 - **orchestrator:** The local trigger consumer now honours a cancel request that
   arrives after dispatch has started. Its claim heartbeat asks the store whether
   cancel was requested on every beat but discarded the answer, so only the
