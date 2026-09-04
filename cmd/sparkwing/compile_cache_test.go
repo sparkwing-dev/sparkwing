@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -89,7 +90,7 @@ func TestTryRemoteBinary_Hit(t *testing.T) {
 	defer srv.Close()
 
 	dest := filepath.Join(t.TempDir(), "bin", "pipeline")
-	if err := bincache.TryBinary(srv.URL, "", "aaaaaaaa-bbbbbbbb", dest); err != nil {
+	if err := bincache.TryBinary(context.Background(), srv.URL, "", "aaaaaaaa-bbbbbbbb", dest); err != nil {
 		t.Fatalf("hit path returned err: %v", err)
 	}
 
@@ -115,7 +116,7 @@ func TestTryRemoteBinary_Miss(t *testing.T) {
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
-	err := bincache.TryBinary(srv.URL, "", "cafecafe-deadbeef", filepath.Join(t.TempDir(), "bin"))
+	err := bincache.TryBinary(context.Background(), srv.URL, "", "cafecafe-deadbeef", filepath.Join(t.TempDir(), "bin"))
 	if !errors.Is(err, bincache.ErrMiss) {
 		t.Errorf("want bincache.ErrMiss, got %v", err)
 	}
@@ -132,7 +133,7 @@ func TestUploadRemoteBinary_Authenticated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := bincache.UploadBinary(srv.URL, "test-token-123", "feedbeef-deadc0de", srcPath); err != nil {
+	if err := bincache.UploadBinary(context.Background(), srv.URL, "test-token-123", "feedbeef-deadc0de", srcPath); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 	if !fake.has("feedbeef-deadc0de") {

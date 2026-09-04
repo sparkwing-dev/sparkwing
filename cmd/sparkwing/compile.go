@@ -51,7 +51,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 			}
 		}
 		if gcURL := bincache.CacheURL(); gcURL != "" {
-			if fetchErr := bincache.TryBinary(gcURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
+			if fetchErr := bincache.TryBinary(ctx, gcURL, bincache.CacheToken(), key, tempPath); fetchErr == nil {
 				source = "gitcache"
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
@@ -59,7 +59,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 			}
 		}
 		announceCompile()
-		if compileErr := bincache.CompilePipeline(sparkwingDir, tempPath); compileErr != nil {
+		if compileErr := bincache.CompilePipeline(ctx, sparkwingDir, tempPath); compileErr != nil {
 			if !errors.Is(compileErr, bincache.ErrMissingGoSum) {
 				return compileErr
 			}
@@ -67,7 +67,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 			if dlErr := runGo(sparkwingDir, []string{"mod", "download"}, env); dlErr != nil {
 				return fmt.Errorf("recovery `go mod download` failed: %w", dlErr)
 			}
-			if compileErr := bincache.CompilePipeline(sparkwingDir, tempPath); compileErr != nil {
+			if compileErr := bincache.CompilePipeline(ctx, sparkwingDir, tempPath); compileErr != nil {
 				return compileErr
 			}
 		}
@@ -80,7 +80,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 	defer func() { _ = lease.Release() }()
 	if published && source == "compiled" {
 		if gcURL := bincache.CacheURL(); gcURL != "" {
-			if err := bincache.UploadBinary(gcURL, bincache.CacheToken(), key, lease.Path()); err != nil {
+			if err := bincache.UploadBinary(ctx, gcURL, bincache.CacheToken(), key, lease.Path()); err != nil {
 				slog.Default().Warn("bin cache upload failed", "err", err, "hash", key)
 			}
 		}

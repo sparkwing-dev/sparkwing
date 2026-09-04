@@ -1,6 +1,7 @@
 package bincache
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -105,7 +106,7 @@ func TestCompilePipeline_NoOverlay_PlainGoBuild(t *testing.T) {
 	log := installFakeGo(t)
 	dir := newPipelineDir(t)
 	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
-	if err := CompilePipeline(dir, dest); err != nil {
+	if err := CompilePipeline(context.Background(), dir, dest); err != nil {
 		t.Fatalf("CompilePipeline: %v", err)
 	}
 	raw, err := os.ReadFile(log)
@@ -129,7 +130,7 @@ func TestCompilePipeline_WithOverlay_UsesModfile(t *testing.T) {
 		t.Fatalf("write overlay: %v", err)
 	}
 	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
-	if err := CompilePipeline(dir, dest); err != nil {
+	if err := CompilePipeline(context.Background(), dir, dest); err != nil {
 		t.Fatalf("CompilePipeline: %v", err)
 	}
 	raw, err := os.ReadFile(log)
@@ -156,7 +157,7 @@ func TestCompilePipeline_WithOverlayAndGoWork_SkipsModfile(t *testing.T) {
 		t.Fatalf("write go.work: %v", err)
 	}
 	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
-	if err := CompilePipeline(dir, dest); err != nil {
+	if err := CompilePipeline(context.Background(), dir, dest); err != nil {
 		t.Fatalf("CompilePipeline: %v", err)
 	}
 	raw, err := os.ReadFile(log)
@@ -182,7 +183,7 @@ func TestCompilePipeline_WithGoWorkAndGoworkOff_UsesModfile(t *testing.T) {
 		t.Fatalf("write go.work: %v", err)
 	}
 	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
-	if err := CompilePipeline(dir, dest); err != nil {
+	if err := CompilePipeline(context.Background(), dir, dest); err != nil {
 		t.Fatalf("CompilePipeline: %v", err)
 	}
 	raw, err := os.ReadFile(log)
@@ -241,7 +242,7 @@ func TestCompilePipeline_NonCoveringGoWork_IgnoredAndModfileHonored(t *testing.T
 	}
 
 	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
-	if err := CompilePipeline(pipelineDir, dest); err != nil {
+	if err := CompilePipeline(context.Background(), pipelineDir, dest); err != nil {
 		t.Fatalf("CompilePipeline: %v", err)
 	}
 	got := strings.TrimSpace(string(mustReadFile(t, log)))
@@ -276,7 +277,7 @@ func TestCompilePipeline_CoveringGoWork_Honored(t *testing.T) {
 	}
 
 	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
-	if err := CompilePipeline(pipelineDir, dest); err != nil {
+	if err := CompilePipeline(context.Background(), pipelineDir, dest); err != nil {
 		t.Fatalf("CompilePipeline: %v", err)
 	}
 	got := strings.TrimSpace(string(mustReadFile(t, log)))
@@ -320,7 +321,7 @@ func TestCompilePipeline_FailureCapturesStdoutAndStderr(t *testing.T) {
 	dir := newPipelineDir(t)
 	dest := filepath.Join(t.TempDir(), "bin", "pipelines")
 
-	err := CompilePipeline(dir, dest)
+	err := CompilePipeline(context.Background(), dir, dest)
 	if err == nil {
 		t.Fatal("expected CompilePipeline to fail")
 	}

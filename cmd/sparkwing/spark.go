@@ -619,7 +619,7 @@ func runSparksWarmup(args []string) error {
 	}
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
 		fmt.Fprintf(os.Stdout, "compiling %s\n", sparkwingDir)
-		return bincache.CompilePipeline(sparkwingDir, tempPath)
+		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath)
 	})
 	if err != nil {
 		return fmt.Errorf("spark warmup: %w", err)
@@ -630,7 +630,7 @@ func runSparksWarmup(args []string) error {
 	}
 
 	if gcURL := bincache.CacheURL(); gcURL != "" {
-		if err := bincache.UploadBinary(gcURL, bincache.CacheToken(), key, lease.Path()); err != nil {
+		if err := bincache.UploadBinary(ctx, gcURL, bincache.CacheToken(), key, lease.Path()); err != nil {
 			fmt.Fprintf(os.Stderr, "warn: gitcache upload failed: %v\n", err)
 		} else {
 			fmt.Fprintf(os.Stdout, "uploaded to %s/bin/%s\n", gcURL, key)
