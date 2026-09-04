@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// silentAfterReconnect answers one handshake, drops the connection once the
-// admission request arrives, then answers a second handshake and goes silent,
-// which is the shape of a daemon restart under a queued run.
 func silentAfterReconnect(t *testing.T, home string) (queuedAgain <-chan struct{}) {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)
