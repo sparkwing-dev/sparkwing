@@ -2,16 +2,15 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestMetrics_RoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	st, err := store.Open(filepath.Join(dir, "s.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}

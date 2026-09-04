@@ -2,25 +2,15 @@ package store_test
 
 import (
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
-func secretStore(t *testing.T) *store.Store {
-	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "secrets.db"))
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
-}
-
 func TestSecretsCRUD(t *testing.T) {
-	s := secretStore(t)
+	s := storetest.Open(t)
 	now := time.Date(2026, 4, 22, 10, 0, 0, 0, time.UTC)
 
 	if _, err := s.GetSecret("missing"); !errors.Is(err, store.ErrNotFound) {

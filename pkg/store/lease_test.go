@@ -3,22 +3,12 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
-
-func newStoreT(t *testing.T) *store.Store {
-	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
-}
 
 func seedPending(t *testing.T, s *store.Store, id string) {
 	t.Helper()
@@ -32,7 +22,7 @@ func seedPending(t *testing.T, s *store.Store, id string) {
 }
 
 func TestLease_ClaimSetsExpiry(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	seedPending(t, s, "trig-a")
 
 	got, err := s.ClaimNextTrigger(context.Background(), 5*time.Second)
@@ -49,7 +39,7 @@ func TestLease_ClaimSetsExpiry(t *testing.T) {
 }
 
 func TestLease_HeartbeatExtends(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	seedPending(t, s, "trig-b")
 
 	claimed, err := s.ClaimNextTrigger(context.Background(), 100*time.Millisecond)
@@ -72,7 +62,7 @@ func TestLease_HeartbeatExtends(t *testing.T) {
 }
 
 func TestLease_HeartbeatMissingReturnsNotFound(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	_, err := s.HeartbeatTrigger(context.Background(), "nope", 5*time.Second)
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("err=%v want ErrNotFound", err)
@@ -80,7 +70,7 @@ func TestLease_HeartbeatMissingReturnsNotFound(t *testing.T) {
 }
 
 func TestLease_ReaperRequeuesExpired(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	seedPending(t, s, "trig-c")
 
 	_, err := s.ClaimNextTrigger(context.Background(), 50*time.Millisecond)
@@ -96,7 +86,7 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 	}
 
 	started := time.Now()
-	if _, err := s.DB().Exec(`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`,
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE triggers SET lease_expires_at = ? WHERE id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), "trig-c"); err != nil {
 		t.Fatalf("expire lease: %v", err)
 	}
@@ -132,7 +122,7 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 }
 
 func TestLease_ReaperSkipsNonExpired(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	seedPending(t, s, "trig-healthy")
 
 	claimed, err := s.ClaimNextTrigger(context.Background(), 1*time.Hour)

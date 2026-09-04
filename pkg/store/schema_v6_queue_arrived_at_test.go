@@ -2,17 +2,17 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV6_UpgradeAddsQueueArrivedAtColumn(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "schema5.db")
+	target := storetest.New(t)
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestSchemaV6_UpgradeAddsQueueArrivedAtColumn(t *testing.T) {
 	}
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (upgrade): %v", err)
 	}
@@ -66,6 +66,16 @@ func TestSchemaV6_UpgradeAddsQueueArrivedAtColumn(t *testing.T) {
 
 func hasColumn(t *testing.T, s *store.Store, table, column string) bool {
 	t.Helper()
+	if s.Dialect() == store.DialectPostgres {
+		var exists bool
+		if err := s.DB().QueryRow(`SELECT EXISTS (
+  SELECT 1 FROM information_schema.columns
+   WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2
+)`, table, column).Scan(&exists); err != nil {
+			t.Fatalf("information_schema.columns(%s): %v", table, err)
+		}
+		return exists
+	}
 	rows, err := s.DB().Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		t.Fatalf("PRAGMA table_info(%s): %v", table, err)
@@ -83,4 +93,15 @@ func hasColumn(t *testing.T, s *store.Store, table, column string) bool {
 		}
 	}
 	return false
+}
+
+func indexDefinition(t *testing.T, s *store.Store, name string) (string, error) {
+	t.Helper()
+	query := `SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`
+	if s.Dialect() == store.DialectPostgres {
+		query = `SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1`
+	}
+	var ddl string
+	err := s.DB().QueryRow(storetest.Rebind(s, query), name).Scan(&ddl)
+	return ddl, err
 }

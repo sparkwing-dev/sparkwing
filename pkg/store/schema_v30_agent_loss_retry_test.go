@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV30CompositeRestoresAgentLossFieldsSQLite(t *testing.T) {
@@ -83,7 +84,7 @@ func TestSchemaV30CompositeRestoresAgentLossFieldsSQLite(t *testing.T) {
 	} {
 		for _, name := range names {
 			var count int
-			if err := up.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, name).Scan(&count); err != nil {
+			if err := up.DB().QueryRowContext(ctx, storetest.Rebind(up, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`), table, name).Scan(&count); err != nil {
 				t.Fatalf("inspect %s.%s: %v", table, name, err)
 			}
 			if count != 1 {
@@ -93,7 +94,7 @@ func TestSchemaV30CompositeRestoresAgentLossFieldsSQLite(t *testing.T) {
 	}
 	for _, table := range []string{"agent_loss_retries", "node_execution_attempts", "run_definition_plans"} {
 		var count int
-		if err := up.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+		if err := up.DB().QueryRowContext(ctx, storetest.Rebind(up, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`), table).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 1 {
@@ -116,7 +117,7 @@ func TestSchemaV30CompositeRestoresAgentLossFieldsSQLite(t *testing.T) {
 
 func TestSchemaV30ExecutionAttemptOrdinalIsClaimBoundAndIdempotent(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	createRetryRunAndReadyNode(t, s, "run-ordinal", 2)
 	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
 	n := claimNode(t, s, "run-ordinal", identity, "agent:a:1")
@@ -204,7 +205,7 @@ func TestSchemaV30ExecutionAttemptOrdinalIsClaimBoundAndIdempotent(t *testing.T)
 
 func TestSchemaV30TriggerOwnedAttemptUsesTheGlobalOrdinal(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
 	if err := s.CreateTrigger(ctx, store.Trigger{
 		ID: "run-trigger-attempt", Pipeline: "p", Status: "pending", CreatedAt: time.Now(),
@@ -274,7 +275,7 @@ func TestSchemaV30TriggerOwnedAttemptUsesTheGlobalOrdinal(t *testing.T) {
 
 func TestSchemaV30FallbackThenAssistedLossCannotExceedRetryBudget(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	triggerIdentity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
 	if err := s.CreateTrigger(ctx, store.Trigger{
 		ID: "run-mixed-budget", Pipeline: "p", Status: "pending", CreatedAt: time.Now(),
@@ -349,7 +350,7 @@ func TestSchemaV30FallbackThenAssistedLossCannotExceedRetryBudget(t *testing.T) 
 
 func TestSchemaV30DefinitionPlanHashSurvivesRuntimeExpansionSnapshot(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	if err := s.CreateRun(ctx, store.Run{ID: "run-plan", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +381,7 @@ func TestSchemaV30DefinitionPlanHashSurvivesRuntimeExpansionSnapshot(t *testing.
 
 func TestSchemaV30PreStartLossSchedulesWithoutConsumingBudgetAndHonorsAvailability(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	createRetryRunAndReadyNode(t, s, "run-prestart", 0)
 	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
 	claimRetryNode(t, s, "run-prestart", identity, "agent:a:1")
@@ -469,7 +470,7 @@ func TestSchemaV30RetryAvailabilitySurvivesReopen(t *testing.T) {
 	if count, err := s.CountPendingTriggers(ctx); err != nil || count != 1 {
 		t.Fatalf("pending count during backoff = %d, err=%v, want 1", count, err)
 	}
-	if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET available_at = ? WHERE id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE triggers SET available_at = ? WHERE id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), retryID); err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +500,7 @@ func TestSchemaV30RetryAvailabilitySurvivesReopen(t *testing.T) {
 
 func TestSchemaV30SequentialLossesJoinPendingRetryAfterSourceQuiesces(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	plan, _ := json.Marshal(map[string]any{
 		"pipeline": "p", "run_id": "run-sequential-loss",
 		"nodes": []any{
@@ -529,7 +530,7 @@ func TestSchemaV30SequentialLossesJoinPendingRetryAfterSourceQuiesces(t *testing
 		t.Fatalf("first recovery = %+v, err=%v", first, err)
 	}
 	retryID := first[0].RetryRunID
-	if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET available_at = ? WHERE id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE triggers SET available_at = ? WHERE id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), retryID); err != nil {
 		t.Fatal(err)
 	}
@@ -589,7 +590,7 @@ func TestSchemaV30OverduePendingRetryTerminatesBeforeEveryClaimPath(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			s := openTestStore(t)
+			s := storetest.Open(t)
 			if err := s.CreateRun(ctx, store.Run{ID: "source", Pipeline: "p", Status: "failed", StartedAt: time.Now()}); err != nil {
 				t.Fatal(err)
 			}
@@ -602,9 +603,9 @@ func TestSchemaV30OverduePendingRetryTerminatesBeforeEveryClaimPath(t *testing.T
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.DB().ExecContext(ctx, `INSERT INTO agent_loss_retries
+			if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `INSERT INTO agent_loss_retries
     (run_id, source_run_id, root_run_id, cause_nodes_json, available_at, deadline_at, retry_count)
-VALUES (?, ?, ?, ?, ?, ?, ?)`, "retry", "source", "source", []byte(`["build"]`),
+VALUES (?, ?, ?, ?, ?, ?, ?)`), "retry", "source", "source", []byte(`["build"]`),
 				time.Now().Add(-time.Hour).UnixNano(), time.Now().Add(-time.Second).UnixNano(), 1); err != nil {
 				t.Fatal(err)
 			}
@@ -639,7 +640,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, "retry", "source", "source", []byte(`["build"]`),
 
 func TestSchemaV30RetryOneSecondLossCannotExceedTwoInvocations(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	createRetryRunAndReadyNode(t, s, "run-budget", 1)
 	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
 	replacementIdentity := enrollOfferExecutor(t, s, "budget-replacement", 100, 100)
@@ -654,7 +655,7 @@ func TestSchemaV30RetryOneSecondLossCannotExceedTwoInvocations(t *testing.T) {
 	if retryID == "" {
 		t.Fatalf("first recovery = %+v", firstRecovery)
 	}
-	if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET status = 'running' WHERE id = ?`, retryID); err != nil {
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE runs SET status = 'running' WHERE id = ?`), retryID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateNode(ctx, store.Node{RunID: retryID, NodeID: "build", Status: "pending"}); err != nil {
@@ -690,7 +691,7 @@ func TestSchemaV30RetryOneSecondLossCannotExceedTwoInvocations(t *testing.T) {
 
 func TestSchemaV30RetryAutoResetMakesTheNextUnstartedLossPreStart(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	createRetryRunAndReadyNode(t, s, "run-reset-prestart", 1)
 	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
 	replacementIdentity := enrollOfferExecutor(t, s, "reset-replacement", 100, 100)
@@ -730,7 +731,7 @@ func TestSchemaV30RetryAutoResetMakesTheNextUnstartedLossPreStart(t *testing.T) 
 	if second.AttemptsConsumed != 1 || second.ExecutionStartedAt != nil {
 		t.Fatalf("reset claim state = %+v", second)
 	}
-	if _, err := s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), second.RunID, second.NodeID); err != nil {
 		t.Fatal(err)
 	}
@@ -758,7 +759,7 @@ func TestSchemaV30RetryAutoResetMakesTheNextUnstartedLossPreStart(t *testing.T) 
 
 func TestSchemaV30StaleClaimCannotMutateAfterRetryAward(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	createRetryRunAndReadyNode(t, s, "run-fence", 1)
 	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
 	replacementIdentity := enrollOfferExecutor(t, s, "fence-replacement", 100, 100)
@@ -773,7 +774,7 @@ func TestSchemaV30StaleClaimCannotMutateAfterRetryAward(t *testing.T) {
 		t.Fatal(err)
 	}
 	retryID := recovered[0].RetryRunID
-	if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET status = 'running' WHERE id = ?`, retryID); err != nil {
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE runs SET status = 'running' WHERE id = ?`), retryID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateNode(ctx, store.Node{RunID: retryID, NodeID: "build", Status: "pending"}); err != nil {
@@ -844,7 +845,7 @@ func TestSchemaV30StaleClaimCannotMutateAfterRetryAward(t *testing.T) {
 
 func TestSchemaV30TriggerMutationFenceIsAtomicAndRunBound(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	identity := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_runner_a"}
 	if err := s.CreateTrigger(ctx, store.Trigger{
 		ID: "trigger-run", Pipeline: "p", Status: "pending", CreatedAt: time.Now(),
@@ -872,7 +873,7 @@ func TestSchemaV30TriggerMutationFenceIsAtomicAndRunBound(t *testing.T) {
 	if err := s.SetNodeSummary(fenced, "other-run", "build", "cross-run"); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("cross-run mutation = %v, want ErrLockHeld", err)
 	}
-	if _, err := s.DB().ExecContext(ctx, `UPDATE triggers SET lease_expires_at = ? WHERE id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE triggers SET lease_expires_at = ? WHERE id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), trigger.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -890,7 +891,7 @@ func TestSchemaV30TriggerMutationFenceIsAtomicAndRunBound(t *testing.T) {
 
 func TestSchemaV30AgentLossEventsAreOrderedAndCredentialSafe(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	createRetryRunAndReadyNode(t, s, "run-events", 1)
 	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_secret_prefix"}
 	n := claimRetryNode(t, s, "run-events", identity, "agent:a:secret-holder")
@@ -924,7 +925,7 @@ func TestSchemaV30AgentLossEventsAreOrderedAndCredentialSafe(t *testing.T) {
 
 func TestSchemaV30SoftAvoidancePrefersAnotherEnrolledExecutor(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	coordinatorID, err := s.CoordinatorID(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -959,7 +960,7 @@ func TestSchemaV30SoftAvoidancePrefersAnotherEnrolledExecutor(t *testing.T) {
 	if preparation.Membership.WorkerID != "desk-b" || preparation.Summary.NodeID != "build" {
 		t.Fatalf("alternate preparation = %+v", preparation)
 	}
-	if _, err := s.DB().ExecContext(ctx, `UPDATE executors SET last_seen = ? WHERE name = 'desk-b'`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE executors SET last_seen = ? WHERE name = 'desk-b'`),
 		time.Now().Add(-2*store.ExecutorRegistrationActiveWindow).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
@@ -974,7 +975,7 @@ func TestSchemaV30SoftAvoidancePrefersAnotherEnrolledExecutor(t *testing.T) {
 
 func TestSchemaV30RetryPreservesControllerOwnedPlacement(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	local := enrollOfferExecutor(t, s, "local-box", 100, 100)
 	cloud := enrollOfferExecutor(t, s, "cloud-box", 100, 100)
 	if err := s.EnrollExecutor(ctx, cloud.TokenPrefix, store.Executor{
@@ -996,7 +997,7 @@ func TestSchemaV30RetryPreservesControllerOwnedPlacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	retryID := recovered[0].RetryRunID
-	if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET status = 'running' WHERE id = ?`, retryID); err != nil {
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE runs SET status = 'running' WHERE id = ?`), retryID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.CreateNode(ctx, store.Node{RunID: retryID, NodeID: "build", Status: "pending"}); err != nil {
@@ -1018,7 +1019,7 @@ func TestSchemaV30RetryPreservesControllerOwnedPlacement(t *testing.T) {
 	if preparation.Summary.RequiredLocation != "local" || preparation.Summary.RequiredCoordinatorID != first.RequiredCoordinatorID {
 		t.Fatalf("retry placement = %+v", preparation.Summary)
 	}
-	if _, err := s.DB().ExecContext(ctx, `UPDATE nodes SET offer_started_at = ? WHERE run_id = ? AND node_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE nodes SET offer_started_at = ? WHERE run_id = ? AND node_id = ?`),
 		time.Now().Add(-time.Minute).UnixNano(), retryID, "build"); err != nil {
 		t.Fatal(err)
 	}
@@ -1040,7 +1041,7 @@ func TestSchemaV30RetryPreservesControllerOwnedPlacement(t *testing.T) {
 
 func TestSchemaV30UnknownRequiredPlacementFailsClosed(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	identity := enrollOfferExecutor(t, s, "mystery", 100, 100)
 	if err := s.EnrollExecutor(ctx, identity.TokenPrefix, store.Executor{
 		Name: "mystery", Kind: "agent", Location: "unknown", Principal: identity.Principal,
@@ -1074,7 +1075,7 @@ func TestSchemaV30UnknownRequiredPlacementFailsClosed(t *testing.T) {
 
 func TestSchemaV30LegacyClaimWithoutTrustedPlacementDoesNotRetry(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	createRetryRunAndReadyNode(t, s, "run-legacy-placement", 1)
 	identity := store.ClaimIdentity{Principal: "legacy-runner", TokenPrefix: "swr_legacy"}
 	n := claimNode(t, s, "run-legacy-placement", identity, "legacy-holder")
@@ -1101,7 +1102,7 @@ func TestSchemaV30LegacyClaimWithoutTrustedPlacementDoesNotRetry(t *testing.T) {
 
 func TestSchemaV30ConcurrentLossCoalescesRetryAndRecordsMixedBudgetDecision(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	plan, _ := json.Marshal(map[string]any{
 		"pipeline": "p", "run_id": "run-mixed",
 		"nodes": []any{
@@ -1158,7 +1159,7 @@ func TestSchemaV30ConcurrentLossCoalescesRetryAndRecordsMixedBudgetDecision(t *t
 
 func TestSchemaV30InvalidPlanIsNotReportedAsBudgetExhaustion(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	if err := s.CreateRun(ctx, store.Run{
 		ID: "run-invalid-plan", Pipeline: "p", Status: "running", StartedAt: time.Now(), PlanSnapshot: []byte(`{"nodes":`),
 	}); err != nil {
@@ -1192,7 +1193,7 @@ func TestSchemaV30InvalidPlanIsNotReportedAsBudgetExhaustion(t *testing.T) {
 
 func TestSchemaV30MissingRetryProvenanceIsExplicit(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	plan, _ := json.Marshal(map[string]any{
 		"pipeline": "p", "run_id": "run-missing-provenance",
 		"nodes": []any{map[string]any{"id": "build", "modifiers": map[string]any{"retry": 1}}},
@@ -1233,7 +1234,7 @@ func TestSchemaV30MissingRetryProvenanceIsExplicit(t *testing.T) {
 
 func TestSchemaV30WorkingTreeRetryKeepsImmutableProvenance(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	plan, _ := json.Marshal(map[string]any{
 		"pipeline": "p", "run_id": "run-workspace",
 		"nodes": []any{map[string]any{"id": "build", "modifiers": map[string]any{"retry": 1}}},
@@ -1321,9 +1322,9 @@ func claimRetryNode(t *testing.T, s *store.Store, runID string, identity store.C
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().ExecContext(context.Background(), `UPDATE nodes
+	if _, err := s.DB().ExecContext(context.Background(), storetest.Rebind(s, `UPDATE nodes
    SET required_coordinator_id = ?, required_executor_location = 'local', executor_location = 'local'
- WHERE run_id = ? AND node_id = ?`, coordinatorID, n.RunID, n.NodeID); err != nil {
+ WHERE run_id = ? AND node_id = ?`), coordinatorID, n.RunID, n.NodeID); err != nil {
 		t.Fatal(err)
 	}
 	n.RequiredCoordinatorID = coordinatorID
@@ -1345,7 +1346,7 @@ func ackNodeAttempt(t *testing.T, s *store.Store, n *store.Node, identity store.
 
 func forceExpireNodeClaim(t *testing.T, s *store.Store, runID, nodeID string) {
 	t.Helper()
-	if _, err := s.DB().ExecContext(context.Background(), `UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ?`,
+	if _, err := s.DB().ExecContext(context.Background(), storetest.Rebind(s, `UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), runID, nodeID); err != nil {
 		t.Fatal(err)
 	}

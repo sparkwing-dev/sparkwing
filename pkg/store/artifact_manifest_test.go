@@ -3,10 +3,12 @@ package store_test
 import (
 	"context"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSetNodeArtifactManifest_RoundTrips(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
@@ -23,7 +25,7 @@ func TestSetNodeArtifactManifest_RoundTrips(t *testing.T) {
 }
 
 func TestSetNodeArtifactManifest_SurvivesFinishNode(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
@@ -43,7 +45,7 @@ func TestSetNodeArtifactManifest_SurvivesFinishNode(t *testing.T) {
 }
 
 func TestNode_DefaultsToEmptyManifest(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 	n, _ := s.GetNode(ctx, "run-1", "node-a")

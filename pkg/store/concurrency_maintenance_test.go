@@ -1,18 +1,20 @@
 package store_test
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func holderExists(t *testing.T, s *store.Store, key, holderID string) bool {
 	t.Helper()
 	var n int
-	if err := s.DB().QueryRow(
-		`SELECT COUNT(*) FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+	if err := s.DB().QueryRow(storetest.Rebind(s,
+		`SELECT COUNT(*) FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
 		key, holderID,
 	).Scan(&n); err != nil {
 		t.Fatalf("count holder: %v", err)
@@ -23,8 +25,8 @@ func holderExists(t *testing.T, s *store.Store, key, holderID string) bool {
 func waiterCount(t *testing.T, s *store.Store, key string) int {
 	t.Helper()
 	var n int
-	if err := s.DB().QueryRow(
-		`SELECT COUNT(*) FROM concurrency_waiters WHERE key = ?`, key,
+	if err := s.DB().QueryRow(storetest.Rebind(s,
+		`SELECT COUNT(*) FROM concurrency_waiters WHERE key = ?`), key,
 	).Scan(&n); err != nil {
 		t.Fatalf("count waiters: %v", err)
 	}
@@ -33,8 +35,8 @@ func waiterCount(t *testing.T, s *store.Store, key string) int {
 
 func expireHolderLease(t *testing.T, s *store.Store, key, holderID string) {
 	t.Helper()
-	result, err := s.DB().Exec(
-		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`,
+	result, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`),
 		time.Now().Add(-time.Minute).UnixNano(), key, holderID,
 	)
 	if err != nil {
@@ -58,10 +60,10 @@ func seedCacheRow(t *testing.T, s *store.Store, key, hash string, expiresAt, las
 func seedCacheRowFor(t *testing.T, s *store.Store, key, hash, originRun string, expiresAt, lastHitAt time.Time) {
 	t.Helper()
 	now := time.Now()
-	if _, err := s.DB().Exec(
+	if _, err := s.DB().Exec(storetest.Rebind(s,
 		`INSERT INTO concurrency_cache
 		   (key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 		key, hash, "out", originRun, "n0", now.UnixNano(), expiresAt.UnixNano(), lastHitAt.UnixNano(),
 	); err != nil {
 		t.Fatalf("seed cache row: %v", err)
@@ -69,7 +71,7 @@ func seedCacheRowFor(t *testing.T, s *store.Store, key, hash, originRun string, 
 }
 
 func TestMaintainConcurrency_ReapsExpiredHolderAndPromotesWaiter(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -102,7 +104,7 @@ func TestMaintainConcurrency_ReapsExpiredHolderAndPromotesWaiter(t *testing.T) {
 }
 
 func TestMaintainConcurrency_SweepsExpiredCacheRows(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	past := time.Now().Add(-time.Hour)
 	seedCacheRow(t, s, "memo:k", "h1", past, past)
 
@@ -121,7 +123,7 @@ func TestMaintainConcurrency_SweepsExpiredCacheRows(t *testing.T) {
 }
 
 func TestMaintainConcurrency_EvictsOverCapCacheRows(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	future := time.Now().Add(time.Hour)
 	base := time.Now().Add(-time.Hour)
 	for i := range 5 {
@@ -143,7 +145,7 @@ func TestMaintainConcurrency_EvictsOverCapCacheRows(t *testing.T) {
 }
 
 func TestMaintainConcurrency_DropsAgedWaiter(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -171,7 +173,7 @@ func TestMaintainConcurrency_DropsAgedWaiter(t *testing.T) {
 }
 
 func TestMaintainConcurrency_DoesNotPromoteAbandonedWaiterAfterHolderReap(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
@@ -183,8 +185,8 @@ func TestMaintainConcurrency_DoesNotPromoteAbandonedWaiterAfterHolderReap(t *tes
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("queued run: want Queued, got %s", r.Kind)
 	}
-	if _, err := s.DB().Exec(
-		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`),
 		time.Now().Add(-10*time.Minute).UnixNano(), "k", "queued", "",
 	); err != nil {
 		t.Fatalf("age waiter: %v", err)
@@ -207,7 +209,7 @@ func TestMaintainConcurrency_DoesNotPromoteAbandonedWaiterAfterHolderReap(t *tes
 }
 
 func TestMaintainConcurrency_DropsAgedWaiterForTerminalRun(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
@@ -230,8 +232,8 @@ func TestMaintainConcurrency_DropsAgedWaiterForTerminalRun(t *testing.T) {
 	if err := s.FinishRun(ctx, "queued", "failed", "test terminal run"); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
-	if _, err := s.DB().Exec(
-		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`),
 		time.Now().Add(-10*time.Minute).UnixNano(), "k", "queued", "",
 	); err != nil {
 		t.Fatalf("age waiter: %v", err)
@@ -253,7 +255,7 @@ func TestMaintainConcurrency_DropsAgedWaiterForTerminalRun(t *testing.T) {
 }
 
 func TestMaintainConcurrency_PreservesAgedWaiterForLiveRun(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
@@ -276,8 +278,8 @@ func TestMaintainConcurrency_PreservesAgedWaiterForLiveRun(t *testing.T) {
 	if err := s.TouchRunHeartbeat(ctx, "queued"); err != nil {
 		t.Fatalf("TouchRunHeartbeat: %v", err)
 	}
-	if _, err := s.DB().Exec(
-		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`),
 		time.Now().Add(-10*time.Minute).UnixNano(), "k", "queued", "",
 	); err != nil {
 		t.Fatalf("age waiter: %v", err)
@@ -303,7 +305,7 @@ func TestMaintainConcurrency_PreservesAgedWaiterForLiveRun(t *testing.T) {
 }
 
 func TestMaintainConcurrency_DropsAgedWaiterForStaleRun(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
@@ -324,14 +326,14 @@ func TestMaintainConcurrency_DropsAgedWaiterForStaleRun(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	stale := time.Now().Add(-10 * time.Minute).UnixNano()
-	if _, err := s.DB().Exec(
-		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`),
 		stale, "queued",
 	); err != nil {
 		t.Fatalf("stale run heartbeat: %v", err)
 	}
-	if _, err := s.DB().Exec(
-		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`),
 		stale, "k", "queued", "",
 	); err != nil {
 		t.Fatalf("age waiter: %v", err)
@@ -353,7 +355,7 @@ func TestMaintainConcurrency_DropsAgedWaiterForStaleRun(t *testing.T) {
 }
 
 func TestMaintainConcurrency_DropsAgedWaiterWhenHeartbeatGraceExpiresBeforeWaiterAge(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
@@ -374,14 +376,14 @@ func TestMaintainConcurrency_DropsAgedWaiterWhenHeartbeatGraceExpiresBeforeWaite
 		t.Fatalf("CreateRun: %v", err)
 	}
 	staleHeartbeat := time.Now().Add(-(store.DefaultLeaseDuration + time.Minute)).UnixNano()
-	if _, err := s.DB().Exec(
-		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`),
 		staleHeartbeat, "queued",
 	); err != nil {
 		t.Fatalf("stale run heartbeat: %v", err)
 	}
-	if _, err := s.DB().Exec(
-		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`,
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ? AND node_id = ?`),
 		time.Now().Add(-20*time.Minute).UnixNano(), "k", "queued", "",
 	); err != nil {
 		t.Fatalf("age waiter: %v", err)
@@ -403,7 +405,7 @@ func TestMaintainConcurrency_DropsAgedWaiterWhenHeartbeatGraceExpiresBeforeWaite
 }
 
 func TestMaintainConcurrencyThrottled_RespectsInterval(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 
 	if _, ran, err := s.MaintainConcurrencyThrottled(ctxT(t), store.ConcurrencyMaintenanceOptions{}, time.Hour); err != nil {
 		t.Fatalf("first throttled pass: %v", err)
@@ -425,11 +427,11 @@ func TestMaintainConcurrencyThrottled_RespectsInterval(t *testing.T) {
 }
 
 func TestMaintainConcurrencyThrottled_InProgressClaimSuppressesStampede(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	nowNS := time.Now().UnixNano()
-	if _, err := s.DB().Exec(
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)`,
-		"concurrency_sweep_claimed_at", nowNS, nowNS,
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)`),
+		"concurrency_sweep_claimed_at", strconv.FormatInt(nowNS, 10), nowNS,
 	); err != nil {
 		t.Fatalf("insert claim: %v", err)
 	}
@@ -440,9 +442,9 @@ func TestMaintainConcurrencyThrottled_InProgressClaimSuppressesStampede(t *testi
 	}
 
 	oldNS := time.Now().Add(-time.Hour).UnixNano()
-	if _, err := s.DB().Exec(
-		`UPDATE sparkwing_meta SET value = ?, updated_at = ? WHERE key = ?`,
-		oldNS, oldNS, "concurrency_sweep_claimed_at",
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE sparkwing_meta SET value = ?, updated_at = ? WHERE key = ?`),
+		strconv.FormatInt(oldNS, 10), oldNS, "concurrency_sweep_claimed_at",
 	); err != nil {
 		t.Fatalf("expire claim: %v", err)
 	}
@@ -454,7 +456,7 @@ func TestMaintainConcurrencyThrottled_InProgressClaimSuppressesStampede(t *testi
 }
 
 func TestMaintainConcurrencyThrottled_ConcurrentCallersShareOneClaim(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	const callers = 8
 	var wg sync.WaitGroup
 	start := make(chan struct{})
@@ -487,7 +489,7 @@ func TestMaintainConcurrencyThrottled_ConcurrentCallersShareOneClaim(t *testing.
 }
 
 func TestMigration_V4CreatesMetaTable(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	if store.ExpectedSchemaVersion() < 4 {
 		t.Fatalf("ExpectedSchemaVersion = %d, want >= 4", store.ExpectedSchemaVersion())
 	}
@@ -501,7 +503,7 @@ func TestMigration_V4CreatesMetaTable(t *testing.T) {
 // it, and entries written before deletes cleaned them up outlive the run
 // by their whole TTL.
 func TestMaintainConcurrency_SweepsCacheRowsWhoseOriginRunIsGone(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	future := time.Now().Add(time.Hour)
 	createLiveRunT(t, s, "live")

@@ -59,6 +59,8 @@ func (PrePush) ShortHelp() string {
 func (PrePush) Help() string {
 	return "Explicit release-boundary verification. Runs the full golangci-lint set, " +
 		"`go test -race ./...` in the .sparkwing pipeline module, " +
+		"the pkg/store suite against an embedded Postgres (the store-postgres " +
+		"pipeline, which needs no Docker), " +
 		"binary-mode govulncheck against every shipped Go executable, the " +
 		"sparkwing-ecosystem version-freshness check (deps must be at " +
 		"the latest released tag, or replaced with a not-behind local " +
@@ -153,6 +155,12 @@ func (p *PrePush) run(ctx context.Context) error {
 		failures = append(failures, fmt.Sprintf("go test -race: %v", err))
 	} else {
 		sparkwing.Info(ctx, "go test -race: passed")
+	}
+
+	if err := (&StorePostgres{}).run(ctx); err != nil {
+		failures = append(failures, fmt.Sprintf("store postgres suite: %v", err))
+	} else {
+		sparkwing.Info(ctx, "store postgres suite: passed against postgres")
 	}
 
 	if _, err := sparkwing.Bash(ctx, "go test -count=1 -run TestChaos_CI ./internal/chaos").Run(); err != nil {

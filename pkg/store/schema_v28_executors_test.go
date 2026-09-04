@@ -2,17 +2,17 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV30CompositeRestoresExecutorEnrollmentSQLite(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "schema-v29.db")
+	target := storetest.NewSQLite(t)
 	ctx := context.Background()
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestSchemaV30CompositeRestoresExecutorEnrollmentSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("open v29 enrollment-free shape at schema %d: %v", store.ExpectedSchemaVersion(), err)
 	}

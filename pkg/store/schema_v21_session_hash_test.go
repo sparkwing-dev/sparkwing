@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV21_DropsPlaintextSessions(t *testing.T) {
@@ -23,9 +24,9 @@ func TestSchemaV21_DropsPlaintextSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	if _, err := st.DB().Exec(`
+	if _, err := st.DB().Exec(storetest.Rebind(st, `
         INSERT INTO sessions (hash, principal, scopes, csrf_token, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?)`),
 		"legacy-raw-session", "legacy", "admin", "legacy-raw-csrf",
 		now.Unix(), now.Add(time.Hour).Unix(),
 	); err != nil {

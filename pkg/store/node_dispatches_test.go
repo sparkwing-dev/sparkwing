@@ -3,23 +3,13 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
-
-func openDispatchStore(t *testing.T) *store.Store {
-	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
-}
 
 func seedDispatchRun(t *testing.T, s *store.Store, id string) {
 	t.Helper()
@@ -34,7 +24,7 @@ func seedDispatchRun(t *testing.T, s *store.Store, id string) {
 }
 
 func TestDispatch_RoundTrip(t *testing.T) {
-	s := openDispatchStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedDispatchRun(t, s, "run-1")
 
@@ -83,7 +73,7 @@ func TestDispatch_RoundTrip(t *testing.T) {
 }
 
 func TestDispatch_AutoSeq(t *testing.T) {
-	s := openDispatchStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedDispatchRun(t, s, "run-1")
 
@@ -111,7 +101,7 @@ func TestDispatch_AutoSeq(t *testing.T) {
 }
 
 func TestDispatch_GetLatest(t *testing.T) {
-	s := openDispatchStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedDispatchRun(t, s, "run-1")
 	for i := range 4 {
@@ -134,7 +124,7 @@ func TestDispatch_GetLatest(t *testing.T) {
 }
 
 func TestDispatch_NotFound(t *testing.T) {
-	s := openDispatchStore(t)
+	s := storetest.Open(t)
 	_, err := s.GetNodeDispatch(context.Background(), "run-x", "node-x", 0)
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
@@ -142,7 +132,7 @@ func TestDispatch_NotFound(t *testing.T) {
 }
 
 func TestDispatch_Cascade(t *testing.T) {
-	s := openDispatchStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedDispatchRun(t, s, "run-1")
 	if err := s.WriteNodeDispatch(ctx, store.NodeDispatch{
@@ -150,7 +140,7 @@ func TestDispatch_Cascade(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := s.DB().ExecContext(ctx, `DELETE FROM runs WHERE id = ?`, "run-1"); err != nil {
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `DELETE FROM runs WHERE id = ?`), "run-1"); err != nil {
 		t.Fatalf("delete run: %v", err)
 	}
 	rows, err := s.ListNodeDispatches(ctx, "run-1", "build")
@@ -163,7 +153,7 @@ func TestDispatch_Cascade(t *testing.T) {
 }
 
 func TestDispatch_TruncationCap(t *testing.T) {
-	s := openDispatchStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedDispatchRun(t, s, "run-1")
 
@@ -190,7 +180,7 @@ func TestDispatch_TruncationCap(t *testing.T) {
 }
 
 func TestDispatch_RequiresIDs(t *testing.T) {
-	s := openDispatchStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	if err := s.WriteNodeDispatch(ctx, store.NodeDispatch{NodeID: "build"}); err == nil {
 		t.Fatalf("expected error on missing run_id")
@@ -201,18 +191,18 @@ func TestDispatch_RequiresIDs(t *testing.T) {
 }
 
 func TestDispatch_ReplayOfColumns(t *testing.T) {
-	s := openDispatchStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
-	if _, err := s.DB().ExecContext(ctx, `
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `
 		INSERT INTO runs (id, pipeline, status, started_at, replay_of_run_id, replay_of_node_id)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, "replay-1", "test", "running", time.Now().UnixNano(), "orig-run", "build"); err != nil {
+	`), "replay-1", "test", "running", time.Now().UnixNano(), "orig-run", "build"); err != nil {
 		t.Fatalf("insert with replay_of: %v", err)
 	}
 	var rro, rno string
-	if err := s.DB().QueryRowContext(ctx, `
+	if err := s.DB().QueryRowContext(ctx, storetest.Rebind(s, `
 		SELECT replay_of_run_id, replay_of_node_id FROM runs WHERE id = ?
-	`, "replay-1").Scan(&rro, &rno); err != nil {
+	`), "replay-1").Scan(&rro, &rno); err != nil {
 		t.Fatalf("read back: %v", err)
 	}
 	if rro != "orig-run" || rno != "build" {

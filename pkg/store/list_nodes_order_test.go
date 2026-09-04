@@ -2,11 +2,11 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 var orderedNodeIDs = []string{"zulu", "yankee", "xray", "whiskey", "victor"}
@@ -57,7 +57,7 @@ func checkNodeOrder(t *testing.T, st *store.Store) {
 // TestListNodesKeepsInsertionOrderAcrossUpdates is the SQLite half of the
 // same promise, where rowid ordering already held it.
 func TestListNodesKeepsInsertionOrderAcrossUpdates(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "nodes.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

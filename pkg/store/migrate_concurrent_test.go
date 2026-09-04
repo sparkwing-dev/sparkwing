@@ -1,15 +1,15 @@
 package store_test
 
 import (
-	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestMigrate_ConcurrentColdStartConverges(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.db")
+	target := storetest.New(t)
 
 	const openers = 8
 	errs := make([]error, openers)
@@ -18,7 +18,7 @@ func TestMigrate_ConcurrentColdStartConverges(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			s, err := store.Open(path)
+			s, err := target.TryOpen()
 			if err != nil {
 				errs[i] = err
 				return
@@ -34,7 +34,7 @@ func TestMigrate_ConcurrentColdStartConverges(t *testing.T) {
 		}
 	}
 
-	s, err := store.Open(path)
+	s, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen after concurrent cold start: %v", err)
 	}

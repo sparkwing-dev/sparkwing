@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestReapStalePendingRuns_FlipsDoneTriggerPendingRunsToFailed(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	stuckID := "run-stuck"
@@ -57,7 +58,7 @@ func TestReapStalePendingRuns_FlipsDoneTriggerPendingRunsToFailed(t *testing.T) 
 }
 
 func TestReapStalePendingRuns_LeavesRunsWithLiveTriggerAlone(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	pendingTriggerID := "run-pending-trigger"
@@ -94,7 +95,7 @@ func TestReapStalePendingRuns_LeavesRunsWithLiveTriggerAlone(t *testing.T) {
 }
 
 func TestReapStalePendingRuns_RespectsGracePeriod(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	freshID := "run-fresh"

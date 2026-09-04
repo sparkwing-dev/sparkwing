@@ -3,15 +3,15 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSetNodeSummary_OverwritesLatestValue(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	mustCreateRunWithNode(t, s, "run-1", "node-a")
@@ -33,7 +33,7 @@ func TestSetNodeSummary_OverwritesLatestValue(t *testing.T) {
 }
 
 func TestSetNodeSummary_IdempotentRepeat(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	mustCreateRunWithNode(t, s, "run-1", "node-a")
 
@@ -53,7 +53,7 @@ func TestSetNodeSummary_IdempotentRepeat(t *testing.T) {
 }
 
 func TestSetNodeSummary_MissingNodeReturnsNotFound(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	err := s.SetNodeSummary(context.Background(), "run-x", "node-x", "## hi")
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
@@ -61,11 +61,10 @@ func TestSetNodeSummary_MissingNodeReturnsNotFound(t *testing.T) {
 }
 
 func TestSetNodeSummary_SurvivesReopen(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.db")
+	target := storetest.New(t)
 	ctx := context.Background()
 
-	s, err := store.Open(path)
+	s, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -80,7 +79,7 @@ func TestSetNodeSummary_SurvivesReopen(t *testing.T) {
 	}
 	_ = s.Close()
 
-	s2, err := store.Open(path)
+	s2, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -96,7 +95,7 @@ func TestSetNodeSummary_SurvivesReopen(t *testing.T) {
 }
 
 func TestSetStepSummary_OverwritesLatestValue(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	mustCreateRunWithNode(t, s, "run-1", "node-a")
 	if err := s.StartNodeStep(ctx, "run-1", "node-a", "step-x"); err != nil {
@@ -123,7 +122,7 @@ func TestSetStepSummary_OverwritesLatestValue(t *testing.T) {
 }
 
 func TestSetStepSummary_InsertsPlaceholderRowBeforeStart(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	mustCreateRunWithNode(t, s, "run-1", "node-a")
 
@@ -146,7 +145,7 @@ func TestSetStepSummary_InsertsPlaceholderRowBeforeStart(t *testing.T) {
 }
 
 func TestSetStepSummary_IdempotentRepeat(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	mustCreateRunWithNode(t, s, "run-1", "node-a")
 	if err := s.StartNodeStep(ctx, "run-1", "node-a", "step-x"); err != nil {
@@ -168,11 +167,10 @@ func TestSetStepSummary_IdempotentRepeat(t *testing.T) {
 }
 
 func TestSetStepSummary_SurvivesReopen(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.db")
+	target := storetest.New(t)
 	ctx := context.Background()
 
-	s, err := store.Open(path)
+	s, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -190,7 +188,7 @@ func TestSetStepSummary_SurvivesReopen(t *testing.T) {
 	}
 	_ = s.Close()
 
-	s2, err := store.Open(path)
+	s2, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

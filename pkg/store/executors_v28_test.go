@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func enrollTestExecutor(t *testing.T, s *store.Store, name string, maxConcurrent int, cores float64) store.ClaimIdentity {
@@ -48,7 +49,7 @@ func seedExecutorNode(t *testing.T, s *store.Store, runID string, cores float64,
 }
 
 func TestExecutorEnrollmentOwnsTrustAndHeartbeatOnlyNarrowsLiveness(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollTestExecutor(t, s, "worker-a", 2, 4)
 
@@ -137,7 +138,7 @@ func TestExecutorEnrollmentOwnsTrustAndHeartbeatOnlyNarrowsLiveness(t *testing.T
 }
 
 func TestProvisionExecutorRollbackRevokesCredentialAndRemovesExactEnrollment(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	raw, tok, err := s.ProvisionExecutor(ctx, "desk-owner", store.Executor{
@@ -159,7 +160,7 @@ func TestProvisionExecutorRollbackRevokesCredentialAndRemovesExactEnrollment(t *
 }
 
 func TestResetExecutorLivenessPreventsStaleTrustFromRemainingEligible(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	identity := enrollTestExecutor(t, s, "removed-worker", 1, 2)
 	if err := s.ResetExecutorLiveness(context.Background()); err != nil {
 		t.Fatal(err)
@@ -174,7 +175,7 @@ func TestResetExecutorLivenessPreventsStaleTrustFromRemainingEligible(t *testing
 }
 
 func TestExecutorEnrollmentRejectsReservedPlacementCapabilities(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	replacer := strings.NewReplacer("=", "_", ",", "_")
 	for _, capability := range []string{"local", "location=local", "gpu,location=cloud", "location=coordinator"} {
 		name := replacer.Replace(capability)
@@ -189,7 +190,7 @@ func TestExecutorEnrollmentRejectsReservedPlacementCapabilities(t *testing.T) {
 }
 
 func TestCoordinatorLocationIsReservedForTheDirectExecutor(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	if err := s.EnrollExecutor(ctx, "swr_agent", store.Executor{
 		Name: "agent", Kind: "agent", Location: "coordinator", MaxConcurrent: 1,
@@ -204,7 +205,7 @@ func TestCoordinatorLocationIsReservedForTheDirectExecutor(t *testing.T) {
 }
 
 func TestUnknownExecutorLocationFailsClosedForPlacementSelectors(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := store.ClaimIdentity{Principal: "principal", TokenPrefix: "swr_unknown"}
 	if err := s.EnrollExecutor(ctx, identity.TokenPrefix, store.Executor{
@@ -229,7 +230,7 @@ func TestUnknownExecutorLocationFailsClosedForPlacementSelectors(t *testing.T) {
 }
 
 func TestExecutorSchedulingSummaryAndMembershipUseTrustedLocation(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollTestExecutor(t, s, "worker-a", 2, 4)
 	seedExecutorNode(t, s, "run-summary", 2, "linux")
@@ -268,7 +269,7 @@ func TestExecutorSchedulingSummaryAndMembershipUseTrustedLocation(t *testing.T) 
 }
 
 func TestPreviewExecutorEligibilitySharesAwardFiltersAndSafeReasons(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
 	identity := store.ClaimIdentity{Principal: "preview-principal", TokenPrefix: "swr_preview"}
@@ -338,7 +339,7 @@ func TestPreviewExecutorEligibilitySharesAwardFiltersAndSafeReasons(t *testing.T
 }
 
 func TestExecutorClaimBindsExactPreparedNodeCredentialSlotAndDigest(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollTestExecutor(t, s, "worker-a", 2, 4)
 	seedExecutorNode(t, s, "older-other", 1, "linux")
@@ -387,7 +388,7 @@ func TestExecutorClaimBindsExactPreparedNodeCredentialSlotAndDigest(t *testing.T
 }
 
 func TestExecutorClaimPersistsSummaryChargeAndRejectsProfileDrift(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollTestExecutor(t, s, "worker-a", 2, 2.5)
 	seedExecutorNode(t, s, "run-charge", 1.5, "linux")
@@ -396,7 +397,7 @@ func TestExecutorClaimPersistsSummaryChargeAndRejectsProfileDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	changed := []byte(`{"nodes":[{"id":"work","modifiers":{"res_cores":2}}]}`)
-	if _, err := s.DB().ExecContext(ctx, `UPDATE runs SET plan_json = ? WHERE id = ?`, changed, "run-charge"); err != nil {
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE runs SET plan_json = ? WHERE id = ?`), changed, "run-charge"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ClaimReadyNodeForExecutorWithReservation(ctx, identity, "worker-a", "run-charge", "work", "executor:worker-a:claim", time.Minute, "reservation-a", 0, summary.ResourceDigest); !errors.Is(err, store.ErrLockHeld) {
@@ -412,7 +413,7 @@ func TestExecutorClaimPersistsSummaryChargeAndRejectsProfileDrift(t *testing.T) 
 	}
 	var cores float64
 	var memory int64
-	if err := s.DB().QueryRowContext(ctx, `SELECT claim_cores, claim_memory_bytes FROM nodes WHERE run_id = ? AND node_id = ?`, n.RunID, n.NodeID).Scan(&cores, &memory); err != nil {
+	if err := s.DB().QueryRowContext(ctx, storetest.Rebind(s, `SELECT claim_cores, claim_memory_bytes FROM nodes WHERE run_id = ? AND node_id = ?`), n.RunID, n.NodeID).Scan(&cores, &memory); err != nil {
 		t.Fatal(err)
 	}
 	if cores != summary.Resources.Cores || memory != summary.Resources.MemoryBytes {

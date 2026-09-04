@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV18_ScrubsSecretInputHashes(t *testing.T) {
@@ -59,10 +60,10 @@ func TestSchemaV18_ScrubsSecretInputHashes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`UPDATE runs SET invocation_json = ? WHERE id = 'secret'`, legacy); err != nil {
+	if _, err := st.DB().Exec(storetest.Rebind(st, `UPDATE runs SET invocation_json = ? WHERE id = 'secret'`), legacy); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`UPDATE runs SET invocation_json = ? WHERE id = 'malformed-classification'`,
+	if _, err := st.DB().Exec(storetest.Rebind(st, `UPDATE runs SET invocation_json = ? WHERE id = 'malformed-classification'`),
 		[]byte(`{"inputs_hash":"sha256:malformed","secret_args":"token"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +156,7 @@ func TestSchemaV18_FailsClosedOnMalformedInvocationJSON(t *testing.T) {
 }
 
 func TestCreateRun_RejectsSecretInputHash(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}

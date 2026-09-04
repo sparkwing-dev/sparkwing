@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestListRunsFiltersGitIdentityBeforeLimit(t *testing.T) {
-	st, err := store.Open(t.TempDir() + "/state.db")
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +58,7 @@ func TestParseRunFilterGitIdentity(t *testing.T) {
 }
 
 func TestListRunsRejectsNonHexGitSHAPrefix(t *testing.T) {
-	st, err := store.Open(t.TempDir() + "/state.db")
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestParseRunFilterClampsLimit(t *testing.T) {
 }
 
 func TestListRunsClampsLimitToTheCap(t *testing.T) {
-	st, err := store.Open(t.TempDir() + "/state.db")
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,7 @@ func TestListRunsClampsLimitToTheCap(t *testing.T) {
 }
 
 func TestListTriggersClampsLimitToTheCap(t *testing.T) {
-	st, err := store.Open(t.TempDir() + "/state.db")
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +144,7 @@ func TestListTriggersClampsLimitToTheCap(t *testing.T) {
 }
 
 func TestListEventsAfterClampsLimitToTheCap(t *testing.T) {
-	st, err := store.Open(t.TempDir() + "/state.db")
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}

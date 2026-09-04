@@ -48,6 +48,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **pipelines:** `sparkwing run store-postgres` runs the `pkg/store` suite
+  against Postgres without Docker. It uses `SPARKWING_TEST_PG_URL` when that
+  is set and otherwise starts an embedded Postgres on a free port, tearing it
+  down afterwards. `pre-push` runs it after the race gate.
 
 ## [v0.41.0] - 2026-09-04
 ### Added

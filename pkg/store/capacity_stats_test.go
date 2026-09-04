@@ -3,16 +3,16 @@ package store_test
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestRecordWaitObservation_PersistsWindowedPercentiles(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "waits.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestRecordWaitObservation_PersistsWindowedPercentiles(t *testing.T) {
 }
 
 func TestRecordWaitObservation_AgesOutOldSamples(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "waits.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestRecordWaitObservation_AgesOutOldSamples(t *testing.T) {
 }
 
 func TestRecordWaitObservation_CoexistsWithProfileUpserts(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "waits.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestRecordWaitObservation_CoexistsWithProfileUpserts(t *testing.T) {
 }
 
 func TestPipelineProfile_ResourcePercentilesFromSamples(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestPipelineProfile_ResourcePercentilesFromSamples(t *testing.T) {
 }
 
 func TestRecordProfileObservation_DropsPreviousCPUSampleSchema(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -167,10 +167,10 @@ func TestRecordProfileObservation_DropsPreviousCPUSampleSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`
+	if _, err := st.DB().Exec(storetest.Rebind(st, `
 INSERT INTO pipeline_profiles
     (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		"schema-shift", "", time.Minute.Milliseconds(), time.Minute.Milliseconds(), 14.0, int64(1<<30), 3, 1,
 		time.Now().UnixNano(), oldWindow); err != nil {
 		t.Fatalf("seed old profile window: %v", err)

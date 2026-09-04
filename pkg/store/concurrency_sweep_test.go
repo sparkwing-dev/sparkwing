@@ -6,17 +6,18 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
 	})
 	started := time.Now()
-	if _, err := s.DB().Exec(
-		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`,
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), "k", "rA/n",
 	); err != nil {
 		t.Fatalf("expire holder: %v", err)
@@ -42,7 +43,7 @@ func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
 }
 
 func TestConcurrency_BudgetOverflowDoesNotOverAdmit(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	big := math.MaxInt/3 + 1
 	holders := []string{"r1/n", "r2/n", "r3/n"}
 	granted := 0
@@ -68,13 +69,13 @@ func TestConcurrency_BudgetOverflowDoesNotOverAdmit(t *testing.T) {
 }
 
 func TestConcurrency_ZeroDeclaredCapacityHolderConstrainsFloor(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
 	})
-	if _, err := s.DB().Exec(
-		`UPDATE concurrency_holders SET declared_capacity = 0 WHERE key = ? AND holder_id = ?`,
+	if _, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE concurrency_holders SET declared_capacity = 0 WHERE key = ? AND holder_id = ?`),
 		"k", "rA/n",
 	); err != nil {
 		t.Fatalf("inject zero-cap holder: %v", err)
@@ -91,7 +92,7 @@ func TestConcurrency_ZeroDeclaredCapacityHolderConstrainsFloor(t *testing.T) {
 }
 
 func TestConcurrency_CancelWaiterReclaimsPromotedHolder(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -125,12 +126,12 @@ func TestConcurrency_CancelWaiterReclaimsPromotedHolder(t *testing.T) {
 }
 
 func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	now := time.Now()
-	if _, err := s.DB().Exec(
+	if _, err := s.DB().Exec(storetest.Rebind(s,
 		`INSERT INTO concurrency_cache
 		   (key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 		"memo:k", "h1", "out-ref", "r0", "n0", now.UnixNano(), now.Add(time.Hour).UnixNano(), now.UnixNano(),
 	); err != nil {
 		t.Fatalf("seed cache: %v", err)
@@ -148,7 +149,7 @@ func TestConcurrency_ResolveWaiterBypassReadSkipsCache(t *testing.T) {
 }
 
 func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
@@ -160,8 +161,8 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 		t.Fatalf("W: want Queued, got %s", r.Kind)
 	}
 	started := time.Now()
-	updated, err := s.DB().Exec(
-		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`,
+	updated, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`),
 		time.Now().Add(-time.Second).UnixNano(), "k", "rA/n",
 	)
 	if err != nil {
@@ -194,7 +195,7 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 }
 
 func TestConcurrency_ResolveWaiterRejectsFailedLeaderOutcome(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	seedRunAndNode(t, s, "rLeader", "n")
 	if err := s.FinishNodeWithReason(ctxT(t), "rLeader", "n",
 		"failed", "boom", nil, store.FailureOOMKilled, nil); err != nil {
@@ -210,7 +211,7 @@ func TestConcurrency_ResolveWaiterRejectsFailedLeaderOutcome(t *testing.T) {
 }
 
 func TestConcurrency_BypassReadNodeQueuesInsteadOfCoalescing(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "memo:k", HolderID: "rL/n", RunID: "rL", NodeID: "n",
 		Capacity: 1, Cost: 1, CacheKeyHash: "h1", Policy: store.OnLimitCoalesce,
@@ -232,7 +233,7 @@ func TestConcurrency_BypassReadNodeQueuesInsteadOfCoalescing(t *testing.T) {
 }
 
 func TestConcurrency_CancelOthersGrantsAndReservesBudget(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,

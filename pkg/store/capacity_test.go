@@ -2,25 +2,15 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
-func openTestStore(t *testing.T) *store.Store {
-	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	return st
-}
-
 func TestPipelineProfile_RoundTripsPercentilesAndPeaks(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	ctx := context.Background()
 
 	for _, obs := range []store.ProfileObservation{
@@ -61,7 +51,7 @@ func TestPipelineProfile_RoundTripsPercentilesAndPeaks(t *testing.T) {
 }
 
 func TestPipelineProfile_AbsentReturnsNil(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	prof, err := st.GetPipelineProfile(context.Background(), "never-run", "")
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +62,7 @@ func TestPipelineProfile_AbsentReturnsNil(t *testing.T) {
 }
 
 func TestPipelineProfile_WindowAgesOutOldSamples(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	ctx := context.Background()
 
 	for i := 0; i < 80; i++ {
@@ -96,7 +86,7 @@ func TestPipelineProfile_WindowAgesOutOldSamples(t *testing.T) {
 }
 
 func TestPipelineProfile_ListReturnsRollupAndNodeRows(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	ctx := context.Background()
 
 	obs := store.ProfileObservation{Duration: time.Second, PeakCores: 1}

@@ -2,16 +2,16 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
-func seedV28Nodes(t *testing.T, path string) {
+func seedV28Nodes(t *testing.T, target *storetest.Target) {
 	t.Helper()
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -43,10 +43,10 @@ func seedV28Nodes(t *testing.T, path string) {
 // file shaped the way a v28 binary left it and checks the backfill kept the
 // order that store returned.
 func TestSchemaV29_UpgradeOfARealV28ShapeKeepsSQLiteInsertionOrder(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "real28.db")
-	seedV28Nodes(t, path)
+	target := storetest.NewSQLite(t)
+	seedV28Nodes(t, target)
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (upgrade): %v", err)
 	}
@@ -78,10 +78,10 @@ func TestSchemaV29_UpgradeOfARealV28ShapeKeepsSQLiteInsertionOrder(t *testing.T)
 // after the upgrade sorts after the backfilled ones, which holds only while
 // the backfilled values and the newly assigned ones share one scale.
 func TestSchemaV29_NodeCreatedAfterUpgradeSortsLast(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "append28.db")
-	seedV28Nodes(t, path)
+	target := storetest.New(t)
+	seedV28Nodes(t, target)
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (upgrade): %v", err)
 	}
@@ -101,17 +101,17 @@ func TestSchemaV29_NodeCreatedAfterUpgradeSortsLast(t *testing.T) {
 }
 
 func TestSchemaV29_UpgradeIsSafeToReplay(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "replay29.db")
-	seedV28Nodes(t, path)
+	target := storetest.NewSQLite(t)
+	seedV28Nodes(t, target)
 
 	for i := 0; i < 2; i++ {
-		replay, err := store.Open(path)
+		replay, err := target.TryOpen()
 		if err != nil {
 			t.Fatalf("Open (upgrade pass %d): %v", i, err)
 		}
 		_ = replay.Close()
 	}
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open (final): %v", err)
 	}
@@ -122,7 +122,7 @@ func TestSchemaV29_UpgradeIsSafeToReplay(t *testing.T) {
 	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
-	replayed, err := store.Open(path)
+	replayed, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open (replay of v29): %v", err)
 	}
@@ -143,10 +143,10 @@ func TestSchemaV29_UpgradeIsSafeToReplay(t *testing.T) {
 // replayed it must still drop a deleted run's metric rows -- the invariant
 // v28 exists for.
 func TestSchemaV29_ReplayLeavesTheV28CascadeIntact(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cascade29.db")
-	seedV28Nodes(t, path)
+	target := storetest.New(t)
+	seedV28Nodes(t, target)
 
-	upgraded, err := store.Open(path)
+	upgraded, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open (upgrade): %v", err)
 	}
@@ -156,7 +156,7 @@ func TestSchemaV29_ReplayLeavesTheV28CascadeIntact(t *testing.T) {
 	deleteFleetRequirements(t, upgraded.DB())
 	_ = upgraded.Close()
 
-	replayed, err := store.Open(path)
+	replayed, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open (replay of v29): %v", err)
 	}

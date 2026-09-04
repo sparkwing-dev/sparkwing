@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestCreateApproval_FlipsNodeStatus(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "gate")
 
@@ -46,7 +47,7 @@ func TestCreateApproval_FlipsNodeStatus(t *testing.T) {
 }
 
 func TestResolveApproval_Approve(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "gate")
 	if err := s.CreateApproval(ctx, store.Approval{
@@ -72,7 +73,7 @@ func TestResolveApproval_Approve(t *testing.T) {
 }
 
 func TestResolveApproval_SecondResolveIsConflict(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "gate")
 	if err := s.CreateApproval(ctx, store.Approval{
@@ -92,7 +93,7 @@ func TestResolveApproval_SecondResolveIsConflict(t *testing.T) {
 }
 
 func TestResolveApproval_NotFound(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	_, err := s.ResolveApproval(ctx, "nope", "nope",
 		store.ApprovalResolutionApproved, "alice", "")
@@ -102,7 +103,7 @@ func TestResolveApproval_NotFound(t *testing.T) {
 }
 
 func TestListPendingApprovals_OrdersByRequestedAsc(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	if err := s.CreateRun(ctx, store.Run{
 		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
@@ -140,7 +141,7 @@ func TestListPendingApprovals_OrdersByRequestedAsc(t *testing.T) {
 }
 
 func TestListApprovalsForRun_IncludesResolved(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "gate")
 	if err := s.CreateApproval(ctx, store.Approval{
@@ -162,7 +163,7 @@ func TestListApprovalsForRun_IncludesResolved(t *testing.T) {
 }
 
 func TestCreateApproval_OverwritesPreviousRow(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "gate")
 	_ = s.CreateApproval(ctx, store.Approval{RunID: "run-1", NodeID: "gate", RequestedAt: time.Now()})

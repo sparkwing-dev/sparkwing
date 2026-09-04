@@ -4,17 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "schema13.db")
+	target := storetest.New(t)
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
 	}
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (upgrade): %v", err)
 	}
@@ -74,7 +74,7 @@ func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
 }
 
 func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -97,8 +97,8 @@ func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(
-		`UPDATE pipeline_profiles SET samples_json = ?, sample_count = 3 WHERE pipeline = 'legacy' AND node_id = ''`,
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`UPDATE pipeline_profiles SET samples_json = ?, sample_count = 3 WHERE pipeline = 'legacy' AND node_id = ''`),
 		raw); err != nil {
 		t.Fatalf("rewrite window as schema 3: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
 }
 
 func TestProfileWindow_WriterWithoutSustainedStoresThePeak(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -154,8 +154,8 @@ func TestProfileWindow_WriterWithoutSustainedStoresThePeak(t *testing.T) {
 }
 
 func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "real13.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -176,8 +176,8 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(
-		`UPDATE pipeline_profiles SET samples_json = ?, sample_count = 3, peak_cores = 6, prev_peak_cores = 4`,
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`UPDATE pipeline_profiles SET samples_json = ?, sample_count = 3, peak_cores = 6, prev_peak_cores = 4`),
 		raw); err != nil {
 		t.Fatalf("write v13 window shape: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (upgrade): %v", err)
 	}
@@ -225,8 +225,8 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 }
 
 func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "replay.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
 	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (replay): %v", err)
 	}
@@ -258,7 +258,7 @@ func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
 }
 
 func TestRecordProfileObservation_PlanHashChangeCarriesSustained(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestRecordProfileObservation_PlanHashChangeCarriesSustained(t *testing.T) {
 }
 
 func TestProfileFromWindow_SustainedTakesTheSameAcrossRunRankAsThePeak(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestProfileFromWindow_SustainedTakesTheSameAcrossRunRankAsThePeak(t *testin
 }
 
 func TestProfileObservation_SustainedRoundTripsPerRun(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

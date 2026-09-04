@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestFinishNodeWithReason_PersistsStructuredMetadata(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
@@ -36,7 +37,7 @@ func TestFinishNodeWithReason_PersistsStructuredMetadata(t *testing.T) {
 }
 
 func TestFinishNodeWithReason_DoesNotOverwriteTerminalNode(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
@@ -71,7 +72,7 @@ func TestFinishNodeWithReason_DoesNotOverwriteTerminalNode(t *testing.T) {
 }
 
 func TestFinishNodeWithReason_FinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	if err := s.CreateRun(ctx, store.Run{
 		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
@@ -98,7 +99,7 @@ func TestFinishNodeWithReason_FinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 }
 
 func TestFinishNode_LeavesReasonEmpty(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
@@ -115,7 +116,7 @@ func TestFinishNode_LeavesReasonEmpty(t *testing.T) {
 }
 
 func TestFailExpiredNodeClaims_TerminatesWithAgentLost(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
@@ -147,15 +148,15 @@ func TestFailExpiredNodeClaims_TerminatesWithAgentLost(t *testing.T) {
 }
 
 func TestFailStaleQueuedNodes_TerminatesWithQueueTimeout(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
 	past := time.Now().Add(-1 * time.Hour).UnixNano()
-	if _, err := s.DB().ExecContext(ctx,
-		`UPDATE nodes SET ready_at = ? WHERE run_id = ? AND node_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`UPDATE nodes SET ready_at = ? WHERE run_id = ? AND node_id = ?`),
 		past, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +181,7 @@ func TestFailStaleQueuedNodes_TerminatesWithQueueTimeout(t *testing.T) {
 }
 
 func TestFailStaleQueuedNodes_SkipsClaimedAndFresh(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	if err := s.CreateRun(ctx, store.Run{
 		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),

@@ -3,16 +3,16 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV25_AddsWebhookReplayKeyConstraintToAnOlderDatabase(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "webhook-replay-key.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,16 +30,13 @@ func TestSchemaV25_AddsWebhookReplayKeyConstraintToAnOlderDatabase(t *testing.T)
 		t.Fatal(err)
 	}
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen at schema %d: %v", store.ExpectedSchemaVersion(), err)
 	}
 	defer func() { _ = up.Close() }()
 
-	var indexName string
-	if err := up.DB().QueryRow(
-		`SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,
-		store.TriggerWebhookReplayKeyIndexName).Scan(&indexName); err != nil {
+	if _, err := indexDefinition(t, up, store.TriggerWebhookReplayKeyIndexName); err != nil {
 		t.Fatalf("migrated database has no %s index: %v", store.TriggerWebhookReplayKeyIndexName, err)
 	}
 
@@ -61,7 +58,7 @@ func TestSchemaV25_AddsWebhookReplayKeyConstraintToAnOlderDatabase(t *testing.T)
 }
 
 func TestCreateTrigger_WebhookReplayKeyUniqueness(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +117,7 @@ func TestCreateTrigger_WebhookReplayKeyUniqueness(t *testing.T) {
 }
 
 func TestFindTriggerByWebhookReplay(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}

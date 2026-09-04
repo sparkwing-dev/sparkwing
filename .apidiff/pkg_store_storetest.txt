@@ -1,0 +1,25 @@
+# pkg/store/storetest
+
+func Dialect() store.Dialect
+const DialectEnv = "SPARKWING_TEST_STORE"
+func IsPostgres() bool
+func New(t *testing.T) *Target
+func NewPostgres(t *testing.T) *Target
+func NewSQLite(t *testing.T) *Target
+func Open(t *testing.T) *store.Store
+func OpenPostgres(t *testing.T) *store.Store
+func OpenSQLite(t *testing.T) *store.Store
+func PostgresURL(t *testing.T) string
+func Rebind(st *store.Store, query string) string
+const RequireEnv = "SPARKWING_REQUIRE_PG"
+func SkipOnPostgres(t *testing.T, why string)
+type Target struct {
+}
+func (tg *Target) DSN() string
+func (tg *Target) Dialect() store.Dialect
+func (tg *Target) Open(t *testing.T) *store.Store
+func (tg *Target) Path() string
+func (tg *Target) TryOpen() (*store.Store, error)
+const URLEnv = "SPARKWING_TEST_PG_URL"
+func Unique() string
+func WithSearchPath(dsn, schema string) string

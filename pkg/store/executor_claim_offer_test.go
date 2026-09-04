@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func enrollOfferExecutor(t *testing.T, s *store.Store, name string, base, ceiling int, capabilities ...string) store.ClaimIdentity {
@@ -51,7 +52,7 @@ func executorOffer(t *testing.T, s *store.Store, identity store.ClaimIdentity, n
 }
 
 func TestExecutorSelectedEventUsesPublicAttribution(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desktop", 100, 100)
 	if err := s.CreateRun(ctx, store.Run{ID: "run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
@@ -93,7 +94,7 @@ func TestExecutorSelectedEventUsesPublicAttribution(t *testing.T) {
 }
 
 func TestExecutorClaimPreparationScansPastSixtyFourIneligibleNodes(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 50, 80, "linux")
 	if err := s.CreateRun(ctx, store.Run{ID: "run", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
@@ -125,7 +126,7 @@ func TestExecutorClaimPreparationScansPastSixtyFourIneligibleNodes(t *testing.T)
 }
 
 func TestExecutorClaimOfferAwardsImmediatelyAtRecordedTarget(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 80, 80, "linux")
 	if err := s.EnrollExecutor(context.Background(), identity.TokenPrefix, store.Executor{
@@ -195,7 +196,7 @@ func TestExecutorClaimOfferAwardsImmediatelyAtRecordedTarget(t *testing.T) {
 }
 
 func TestExecutorClaimOfferAwardsOnlyHelperAtExactEffectivePriority(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 50, 100, "linux")
 	seedExecutorNode(t, s, "run", 1, "linux")
@@ -223,7 +224,7 @@ func TestExecutorClaimOfferAwardsOnlyHelperAtExactEffectivePriority(t *testing.T
 }
 
 func TestExecutorClaimOfferAwardsPreferredHelperAtExactEffectivePriority(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	plain := enrollOfferExecutor(t, s, "plain", 50, 100, "linux")
 	preferred := enrollOfferExecutor(t, s, "preferred", 50, 100, "linux", "fast")
@@ -255,7 +256,7 @@ func TestExecutorClaimOfferAwardsPreferredHelperAtExactEffectivePriority(t *test
 }
 
 func TestExecutorClaimOfferDeadlineUsesPriorityAndRecoversLostWinnerResponse(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	low := enrollOfferExecutor(t, s, "low", 20, 20, "linux")
 	high := enrollOfferExecutor(t, s, "high", 80, 80, "linux")
 	enrollOfferPriorityTarget(t, s)
@@ -266,7 +267,7 @@ func TestExecutorClaimOfferDeadlineUsesPriorityAndRecoversLostWinnerResponse(t *
 	if got := executorOffer(t, s, high, "high", "holder-high", "reservation-high", "run", "work", 0); !got.Pending {
 		t.Fatalf("high offer = %+v", got)
 	}
-	if _, err := s.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`, time.Now().Add(-6*time.Second).UnixNano()); err != nil {
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`), time.Now().Add(-6*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if got := executorOffer(t, s, low, "low", "holder-low", "reservation-low", "run", "work", 0); got.Node != nil || got.Pending {
@@ -311,7 +312,7 @@ func TestExecutorClaimOfferFinalizationReresolvesNarrowedEnrollment(t *testing.T
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			s := newStoreT(t)
+			s := storetest.Open(t)
 			ctx := context.Background()
 			low := enrollOfferExecutor(t, s, "low", 20, 20, "linux")
 			high := enrollOfferExecutor(t, s, "high", 80, 80, "linux")
@@ -330,7 +331,7 @@ func TestExecutorClaimOfferFinalizationReresolvesNarrowedEnrollment(t *testing.T
 			if err := s.EnrollExecutor(ctx, high.TokenPrefix, test.update); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`, time.Now().Add(-6*time.Second).UnixNano()); err != nil {
+			if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`), time.Now().Add(-6*time.Second).UnixNano()); err != nil {
 				t.Fatal(err)
 			}
 			result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work")
@@ -356,7 +357,7 @@ func TestExecutorClaimOfferLocationPolicyFiltersBeforePriority(t *testing.T) {
 		{name: "local only", required: "location=local", winnerLocation: "local"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			s := newStoreT(t)
+			s := storetest.Open(t)
 			ctx := context.Background()
 			local := enrollOfferExecutor(t, s, "local", 100, 100, "linux")
 			cloud := enrollOfferExecutor(t, s, "cloud", 10, 10, "linux")
@@ -400,7 +401,7 @@ func TestExecutorClaimOfferLocationPolicyFiltersBeforePriority(t *testing.T) {
 }
 
 func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	first := enrollOfferExecutor(t, s, "zeta", 50, 50, "linux")
 	second := enrollOfferExecutor(t, s, "alpha", 50, 50, "linux")
@@ -414,7 +415,7 @@ func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testin
 		t.Fatalf("second offer = %+v", got)
 	}
 	stamp := time.Now().Add(-6 * time.Second).UnixNano()
-	if _, err := s.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`, stamp); err != nil {
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`), stamp); err != nil {
 		t.Fatal(err)
 	}
 	result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work")
@@ -429,7 +430,7 @@ func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testin
 		t.Fatalf("earliest winner = %q", n.ClaimedBy)
 	}
 
-	s2 := newStoreT(t)
+	s2 := storetest.Open(t)
 	alpha := enrollOfferExecutor(t, s2, "alpha", 50, 50, "linux")
 	zeta := enrollOfferExecutor(t, s2, "zeta", 50, 50, "linux")
 	enrollOfferPriorityTarget(t, s2)
@@ -437,10 +438,10 @@ func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testin
 	executorOffer(t, s2, zeta, "zeta", "holder-z", "reservation-z", "run", "work", 0)
 	executorOffer(t, s2, alpha, "alpha", "holder-a", "reservation-a", "run", "work", 0)
 	stamp = time.Now().Add(-6 * time.Second).UnixNano()
-	if _, err := s2.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`, stamp); err != nil {
+	if _, err := s2.DB().Exec(storetest.Rebind(s2, `UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`), stamp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s2.DB().Exec(`UPDATE node_claim_offers SET offered_at = ?`, stamp); err != nil {
+	if _, err := s2.DB().Exec(storetest.Rebind(s2, `UPDATE node_claim_offers SET offered_at = ?`), stamp); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s2.FinalizeExecutorClaimRound(ctx, "run", "work"); err != nil {
@@ -456,7 +457,7 @@ func TestExecutorClaimOfferEqualPriorityUsesEarliestThenStableIdentity(t *testin
 }
 
 func TestExecutorClaimOfferRejectsWrongCredentialDigestAndReservationReuse(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 40, 80, "linux")
 	enrollOfferPriorityTarget(t, s)
@@ -487,7 +488,7 @@ func TestExecutorClaimOfferRejectsWrongCredentialDigestAndReservationReuse(t *te
 }
 
 func TestExecutorClaimPreparationUsesOneExecutorSlotPerNode(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 40, 80, "linux")
 	enrollOfferPriorityTarget(t, s)
@@ -526,7 +527,7 @@ func TestExecutorClaimPreparationUsesOneExecutorSlotPerNode(t *testing.T) {
 }
 
 func TestExecutorClaimExpiredOfferCanBeReplaced(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 40, 80, "linux")
 	enrollOfferPriorityTarget(t, s)
@@ -534,7 +535,7 @@ func TestExecutorClaimExpiredOfferCanBeReplaced(t *testing.T) {
 	if got := executorOffer(t, s, identity, "desk", "old-holder", "old-reservation", "run", "work", 0); !got.Pending {
 		t.Fatalf("old offer = %+v", got)
 	}
-	if _, err := s.DB().Exec(`UPDATE node_claim_offers SET last_seen_at = ?`, time.Now().Add(-3*time.Second).UnixNano()); err != nil {
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE node_claim_offers SET last_seen_at = ?`), time.Now().Add(-3*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	preparation, err := s.TestOnlyPrepareNextExecutorClaim(ctx, identity, "desk")
@@ -559,7 +560,7 @@ func TestExecutorClaimExpiredOfferCanBeReplaced(t *testing.T) {
 }
 
 func TestExecutorClaimFinalizationIgnoresExpiredOffersAndTransfersFallbackOnce(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 50, 80, "linux")
 	enrollOfferPriorityTarget(t, s)
@@ -568,10 +569,10 @@ func TestExecutorClaimFinalizationIgnoresExpiredOffersAndTransfersFallbackOnce(t
 		t.Fatalf("offer = %+v", got)
 	}
 	stamp := time.Now().Add(-6 * time.Second).UnixNano()
-	if _, err := s.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`, stamp); err != nil {
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`), stamp); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().Exec(`UPDATE node_claim_offers SET last_seen_at = ?`, time.Now().Add(-3*time.Second).UnixNano()); err != nil {
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE node_claim_offers SET last_seen_at = ?`), time.Now().Add(-3*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work")
@@ -592,7 +593,7 @@ func TestExecutorClaimFinalizationIgnoresExpiredOffersAndTransfersFallbackOnce(t
 }
 
 func TestExecutorClaimOfferLifecycleEventsAreTransitionOnlyAndRedacted(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 50, 80, "linux")
 	enrollOfferPriorityTarget(t, s)
@@ -603,10 +604,10 @@ func TestExecutorClaimOfferLifecycleEventsAreTransitionOnlyAndRedacted(t *testin
 	if got := executorOffer(t, s, identity, "desk", "holder-secret", "reservation-secret", "run", "work", 0); !got.Pending {
 		t.Fatalf("offer refresh = %+v", got)
 	}
-	if _, err := s.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`, time.Now().Add(-6*time.Second).UnixNano()); err != nil {
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`), time.Now().Add(-6*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().Exec(`UPDATE node_claim_offers SET last_seen_at = ?`, time.Now().Add(-3*time.Second).UnixNano()); err != nil {
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE node_claim_offers SET last_seen_at = ?`), time.Now().Add(-3*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if result, err := s.FinalizeExecutorClaimRound(ctx, "run", "work"); err != nil || !result.Revoked {
@@ -654,7 +655,7 @@ func TestExecutorClaimOfferLifecycleEventsAreTransitionOnlyAndRedacted(t *testin
 }
 
 func TestExecutorClaimOfferAndFallbackHaveOneWinner(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	identity := enrollOfferExecutor(t, s, "desk", 50, 80, "linux")
 	seedExecutorNode(t, s, "run", 1, "linux")
@@ -662,7 +663,7 @@ func TestExecutorClaimOfferAndFallbackHaveOneWinner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`, time.Now().Add(-6*time.Second).UnixNano()); err != nil {
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE nodes SET offer_started_at = ? WHERE run_id = 'run' AND node_id = 'work'`), time.Now().Add(-6*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -710,7 +711,7 @@ func TestExecutorClaimOfferAndFallbackHaveOneWinner(t *testing.T) {
 }
 
 func TestExecutorClaimOfferDifferentClaimantsCompleteConcurrently(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	alpha := enrollOfferExecutor(t, s, "alpha", 50, 50, "linux")
 	zeta := enrollOfferExecutor(t, s, "zeta", 50, 50, "linux")
 	seedExecutorNode(t, s, "alpha-run", 1, "linux")

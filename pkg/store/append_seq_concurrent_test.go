@@ -3,12 +3,12 @@ package store_test
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 const (
@@ -65,7 +65,7 @@ func checkAppendedSeqs(t *testing.T, st *store.Store, runID string, seqs []int64
 }
 
 func TestAppendEventConcurrentAppendsAllLand(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "events.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

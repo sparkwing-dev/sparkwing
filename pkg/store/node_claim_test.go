@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func seedRunAndNode(t *testing.T, s *store.Store, runID, nodeID string) {
@@ -31,8 +32,8 @@ func seedRunAndNode(t *testing.T, s *store.Store, runID, nodeID string) {
 
 func setNodeReadyAt(t *testing.T, s *store.Store, runID, nodeID string, at time.Time) {
 	t.Helper()
-	res, err := s.DB().Exec(
-		`UPDATE nodes SET ready_at = ? WHERE run_id = ? AND node_id = ?`,
+	res, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE nodes SET ready_at = ? WHERE run_id = ? AND node_id = ?`),
 		at.UnixNano(), runID, nodeID,
 	)
 	if err != nil {
@@ -49,8 +50,8 @@ func setNodeReadyAt(t *testing.T, s *store.Store, runID, nodeID string, at time.
 
 func expireNodeClaim(t *testing.T, s *store.Store, runID, nodeID string) {
 	t.Helper()
-	res, err := s.DB().Exec(
-		`UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ? AND claimed_by IS NOT NULL`,
+	res, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ? AND claimed_by IS NOT NULL`),
 		time.Now().Add(-time.Second).UnixNano(), runID, nodeID,
 	)
 	if err != nil {
@@ -66,7 +67,7 @@ func expireNodeClaim(t *testing.T, s *store.Store, runID, nodeID string) {
 }
 
 func TestNodeClaim_MarkReadyIsIdempotent(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
@@ -93,7 +94,7 @@ func TestNodeClaim_MarkReadyIsIdempotent(t *testing.T) {
 }
 
 func TestNodeClaim_ClaimReturnsReadyNodeOnly(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 
@@ -129,7 +130,7 @@ func TestNodeClaim_ClaimReturnsReadyNodeOnly(t *testing.T) {
 }
 
 func TestNodeClaim_FIFOOrdering(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "older")
 	seedRunAndNode(t, s, "run-2", "newer")
@@ -153,7 +154,7 @@ func TestNodeClaim_FIFOOrdering(t *testing.T) {
 }
 
 func TestNodeClaim_HeartbeatExtendsLeaseForHolder(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
@@ -185,7 +186,7 @@ func TestNodeClaim_HeartbeatExtendsLeaseForHolder(t *testing.T) {
 }
 
 func TestNodeClaim_HeartbeatRejectsPriorGenerationWithSameHolder(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}
 	seedRunAndNode(t, s, "run-1", "node-a")
@@ -200,9 +201,9 @@ func TestNodeClaim_HeartbeatRejectsPriorGenerationWithSameHolder(t *testing.T) {
 		Claimant: claimant, HolderID: first.ClaimedBy, MembershipID: first.ClaimMembershipID,
 		ReservationID: first.ReservationID, ClaimGeneration: first.ClaimGeneration,
 	})
-	if _, err := s.DB().ExecContext(ctx, `UPDATE nodes
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE nodes
 SET claim_generation = claim_generation + 1, lease_expires_at = ?
-WHERE run_id = 'run-1' AND node_id = 'node-a'`, time.Now().Add(time.Minute).UnixNano()); err != nil {
+WHERE run_id = 'run-1' AND node_id = 'node-a'`), time.Now().Add(time.Minute).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.HeartbeatNodeClaim(staleCtx, "run-1", "node-a", claimant, "pod-1", time.Minute); !errors.Is(err, store.ErrLockHeld) {
@@ -218,7 +219,7 @@ WHERE run_id = 'run-1' AND node_id = 'node-a'`, time.Now().Add(time.Minute).Unix
 }
 
 func TestNodeClaim_HeartbeatCannotReviveExpiredLease(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}
 	seedRunAndNode(t, s, "run-1", "node-a")
@@ -233,7 +234,7 @@ func TestNodeClaim_HeartbeatCannotReviveExpiredLease(t *testing.T) {
 		Claimant: claimant, HolderID: node.ClaimedBy, MembershipID: node.ClaimMembershipID,
 		ReservationID: node.ReservationID, ClaimGeneration: node.ClaimGeneration,
 	})
-	if _, err := s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ? WHERE run_id = 'run-1' AND node_id = 'node-a'`, time.Now().Add(-time.Second).UnixNano()); err != nil {
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE nodes SET lease_expires_at = ? WHERE run_id = 'run-1' AND node_id = 'node-a'`), time.Now().Add(-time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.HeartbeatNodeClaim(heartbeatCtx, "run-1", "node-a", claimant, "pod-1", time.Minute); !errors.Is(err, store.ErrLockHeld) {
@@ -242,7 +243,7 @@ func TestNodeClaim_HeartbeatCannotReviveExpiredLease(t *testing.T) {
 }
 
 func TestNodeClaim_PrincipalBindingGatesClaimOwnership(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
@@ -294,7 +295,7 @@ func TestNodeClaim_PrincipalBindingGatesClaimOwnership(t *testing.T) {
 }
 
 func TestNodeClaim_ReapReleasesExpiredClaim(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
@@ -323,7 +324,7 @@ func TestNodeClaim_ReapReleasesExpiredClaim(t *testing.T) {
 }
 
 func TestNodeClaim_RevokeOnlyWhenUnclaimed(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
@@ -358,7 +359,7 @@ func TestNodeClaim_RevokeOnlyWhenUnclaimed(t *testing.T) {
 }
 
 func TestNodeClaim_DoneNodesNotClaimable(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
@@ -392,7 +393,7 @@ func seedNodeWithLabels(t *testing.T, s *store.Store, runID, nodeID string, labe
 }
 
 func TestNodeClaim_LabelsExactMatch(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedNodeWithLabels(t, s, "run-1", "build", []string{"arm64", "laptop"})
 
@@ -409,7 +410,7 @@ func TestNodeClaim_LabelsExactMatch(t *testing.T) {
 }
 
 func TestNodeClaim_LabelsSupersetClaims(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedNodeWithLabels(t, s, "run-1", "build", []string{"arm64"})
 
@@ -423,7 +424,7 @@ func TestNodeClaim_LabelsSupersetClaims(t *testing.T) {
 }
 
 func TestNodeClaim_LabelsUnmatchedSkipped(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	seedNodeWithLabels(t, s, "run-1", "gpu-only", []string{"gpu"})
@@ -449,7 +450,7 @@ func TestNodeClaim_LabelsUnmatchedSkipped(t *testing.T) {
 }
 
 func TestNodeClaim_UnlabeledNodeAlwaysClaimable(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
@@ -467,7 +468,7 @@ func TestNodeClaim_UnlabeledNodeAlwaysClaimable(t *testing.T) {
 func TestNodeClaim_LegacyRunnerCannotSelfAssertReservedLocation(t *testing.T) {
 	for _, selector := range []string{"local", "location=coordinator", "location=local", "location=cloud"} {
 		t.Run(selector, func(t *testing.T) {
-			s := newStoreT(t)
+			s := storetest.Open(t)
 			ctx := context.Background()
 			seedNodeWithLabels(t, s, "run", "work", []string{selector})
 			node, err := s.ClaimNextReadyNode(ctx,
@@ -481,7 +482,7 @@ func TestNodeClaim_LegacyRunnerCannotSelfAssertReservedLocation(t *testing.T) {
 }
 
 func TestNodeClaim_LeaseIsClampedToTheServerCap(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-1", "node-a")
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {

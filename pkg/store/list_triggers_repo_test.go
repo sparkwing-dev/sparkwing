@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 // The repo filter reads GITHUB_REPOSITORY out of each row, so it has to
 // keep reading past the newest page to fill the caller's limit.
 func TestListTriggers_RepoFilterLooksPastTheFirstPage(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	base := time.Now().Add(-time.Hour)
 
@@ -50,7 +51,7 @@ func TestListTriggers_RepoFilterLooksPastTheFirstPage(t *testing.T) {
 }
 
 func TestListTriggers_RepoFilterHonoursLimit(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	base := time.Now().Add(-time.Hour)
 
@@ -89,7 +90,7 @@ func TestListTriggers_RepoFilterHonoursLimit(t *testing.T) {
 // One page is 200 rows, so a match older than that is only reachable if
 // the walk carries its cursor across the page boundary.
 func TestListTriggers_RepoFilterCrossesAPageBoundary(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	base := time.Now().Add(-24 * time.Hour)
 
@@ -127,7 +128,7 @@ func TestListTriggers_RepoFilterCrossesAPageBoundary(t *testing.T) {
 // Triggers sharing a created_at must not be dropped or repeated at a page
 // boundary, which is what the id half of the cursor is for.
 func TestListTriggers_RepoFilterTiedTimestampsAcrossPages(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	tied := time.Now().Add(-time.Hour)
 
@@ -162,7 +163,7 @@ func TestListTriggers_RepoFilterTiedTimestampsAcrossPages(t *testing.T) {
 // A caller cannot tell an empty result from a search that gave up, so the
 // store says so in the log when it stops at the horizon short of the limit.
 func TestListTriggers_RepoFilterWarnsWhenItStopsAtTheHorizon(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	base := time.Now().Add(-24 * time.Hour)
 

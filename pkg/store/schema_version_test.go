@@ -5,16 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaVersion_FreshSQLiteRecordsExpected(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "fresh.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -27,15 +27,15 @@ func TestSchemaVersion_FreshSQLiteRecordsExpected(t *testing.T) {
 }
 
 func TestSchemaVersion_ReopenSQLiteIsNoOp(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "reopen.db")
+	target := storetest.New(t)
 
-	st1, err := store.Open(path)
+	st1, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
 	_ = st1.Close()
 
-	st2, err := store.Open(path)
+	st2, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2: %v", err)
 	}
@@ -49,28 +49,28 @@ func TestSchemaVersion_ReopenSQLiteIsNoOp(t *testing.T) {
 }
 
 func TestSchemaVersion_SQLiteUnknownRequirementRefuses(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "skew.db")
+	target := storetest.New(t)
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
 	future := store.ExpectedSchemaVersion() + 1
-	if _, err := st.DB().Exec(
-		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`),
 		future, 1,
 	); err != nil {
 		t.Fatalf("seed future version: %v", err)
 	}
-	if _, err := st.DB().Exec(
-		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES (?, ?, ?)`,
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES (?, ?, ?)`),
 		"webhook-replay-keys", 1, "v0.41.0",
 	); err != nil {
 		t.Fatalf("seed future requirement: %v", err)
 	}
 	_ = st.Close()
 
-	_, err = store.Open(path)
+	_, err = target.TryOpen()
 	if err == nil {
 		t.Fatal("Open against a DB listing an unknown requirement should fail")
 	}
@@ -139,7 +139,7 @@ func TestSchemaVersion_PostgresUnknownRequirementRefuses(t *testing.T) {
 
 func TestSchemaVersion_ConcurrentPostgresOpens(t *testing.T) {
 	dsn := pgTestDSN(t)
-	schema := "sw_test_concurrent_" + uniq()
+	schema := "sw_test_concurrent_" + storetest.Unique()
 	admin, err := store.OpenPostgres(context.Background(), dsn)
 	if err != nil {
 		t.Fatalf("admin open: %v", err)

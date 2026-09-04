@@ -3,16 +3,16 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV22_KeepsLegacySecretsAndAdmitsARepoScopedTwin(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "secret-repo.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,9 +31,9 @@ func TestSchemaV22_KeepsLegacySecretsAndAdmitsARepoScopedTwin(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Unix()
-	if _, err := st.DB().Exec(`
+	if _, err := st.DB().Exec(storetest.Rebind(st, `
         INSERT INTO secrets (name, value, principal, created_at, updated_at, masked)
-        VALUES (?, ?, ?, ?, ?, 1)`,
+        VALUES (?, ?, ?, ?, ?, 1)`),
 		"DEPLOY_KEY", "legacy-value", "alice", now, now,
 	); err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestSchemaV22_KeepsLegacySecretsAndAdmitsARepoScopedTwin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen at schema %d: %v", store.ExpectedSchemaVersion(), err)
 	}
@@ -81,7 +81,7 @@ func TestSchemaV22_KeepsLegacySecretsAndAdmitsARepoScopedTwin(t *testing.T) {
 }
 
 func TestSecrets_RepoScopeResolution(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "secrets.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestSecrets_RepoScopeResolution(t *testing.T) {
 }
 
 func TestSecrets_UnscopedRowAnswersARunOnlyWhenShared(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "shared.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,8 +171,8 @@ func TestSecrets_UnscopedRowAnswersARunOnlyWhenShared(t *testing.T) {
 }
 
 func TestSchemaV23_ExistingSecretsDefaultToUnshared(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "shared-migration.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,9 +180,9 @@ func TestSchemaV23_ExistingSecretsDefaultToUnshared(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Unix()
-	if _, err := st.DB().Exec(`
+	if _, err := st.DB().Exec(storetest.Rebind(st, `
         INSERT INTO secrets (name, value, principal, created_at, updated_at, masked, repo)
-        VALUES (?, ?, ?, ?, ?, 1, '')`,
+        VALUES (?, ?, ?, ?, ?, 1, '')`),
 		"LEGACY", "legacy-value", "alice", now, now,
 	); err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestSchemaV23_ExistingSecretsDefaultToUnshared(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen at schema %d: %v", store.ExpectedSchemaVersion(), err)
 	}
@@ -214,7 +214,7 @@ func TestSchemaV23_ExistingSecretsDefaultToUnshared(t *testing.T) {
 }
 
 func TestRepoForClaimedRun_NamesTheRepoOfTheRunTheCallerIsExecuting(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "claims.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestRepoForClaimedRun_NamesTheRepoOfTheRunTheCallerIsExecuting(t *testing.T
 }
 
 func TestRepoForClaimedRun_AcceptsTheTriggerClaim(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "trigger-claims.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
