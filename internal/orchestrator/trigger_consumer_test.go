@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func quietLogger() *slog.Logger {
@@ -752,5 +754,82 @@ func TestHeartbeat_OperatorCancelStopsTheDispatch(t *testing.T) {
 	case <-dispatchCtx.Done():
 	case <-time.After(10 * time.Second):
 		t.Fatal("a cancel request the claim heartbeat saw never reached the dispatch context")
+	}
+}
+
+func claimedRunWithNodes(t *testing.T, st *store.Store, id string) *store.Trigger {
+	t.Helper()
+	ctx := context.Background()
+	seedSubmission(t, st, id, "deploy", "")
+	claimed, err := st.ClaimNextTrigger(ctx, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []store.Node{
+		{RunID: id, NodeID: "build", Status: "pending"},
+		{RunID: id, NodeID: "deploy", Status: "pending"},
+	} {
+		if err := st.CreateNode(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.StartNode(ctx, id, "build"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, id, "build", string(sparkwing.Success), "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.StartNode(ctx, id, "deploy"); err != nil {
+		t.Fatal(err)
+	}
+	return claimed
+}
+
+func TestConsumer_OperatorCancelLeavesRunAndNodesTerminal(t *testing.T) {
+	st := consumerTestStore(t, t.TempDir())
+	ctx := context.Background()
+	claimed := claimedRunWithNodes(t, st, "run-cancel-settle")
+
+	settleClaimedTriggerDispatch(ctx, st, claimed,
+		fmt.Errorf("child exec: %w", context.Canceled), true, false, quietLogger())
+
+	run, err := st.GetRun(ctx, "run-cancel-settle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "cancelled" {
+		t.Fatalf("run status = %q, want cancelled", run.Status)
+	}
+	deploy, err := st.GetNode(ctx, "run-cancel-settle", "deploy")
+	if err != nil || deploy == nil {
+		t.Fatalf("get deploy node: %v", err)
+	}
+	if deploy.Outcome != string(sparkwing.Cancelled) {
+		t.Fatalf("deploy outcome = %q, status = %q, want cancelled: the SIGKILLed child never finished its own rows",
+			deploy.Outcome, deploy.Status)
+	}
+	build, err := st.GetNode(ctx, "run-cancel-settle", "build")
+	if err != nil || build == nil {
+		t.Fatalf("get build node: %v", err)
+	}
+	if build.Outcome != string(sparkwing.Success) {
+		t.Fatalf("build outcome = %q, want its own success preserved", build.Outcome)
+	}
+}
+
+func TestConsumer_FailureRacingACancelStaysFailed(t *testing.T) {
+	st := consumerTestStore(t, t.TempDir())
+	ctx := context.Background()
+	claimed := claimedRunWithNodes(t, st, "run-cancel-race")
+
+	settleClaimedTriggerDispatch(ctx, st, claimed,
+		errors.New("child exec: exit status 1"), true, false, quietLogger())
+
+	run, err := st.GetRun(ctx, "run-cancel-race")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "failed" {
+		t.Fatalf("run status = %q, want failed: the child reached its own failure, the cancel did not kill it", run.Status)
 	}
 }

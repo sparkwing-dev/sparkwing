@@ -313,17 +313,22 @@ code change to unlock.
 
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
-  that node as cancelled. The terminal write used the run context that had just
-  been cancelled, so it never reached the store and the node's row stayed at
-  `status=pending` under a finished run -- visible in `sparkwing runs status`
-  and the receipt until a `doctor`/`jobs` sweep reconciled it.
+  that node as cancelled, and an `OnFailure` child skipped because its cancelled
+  parent did not fail is recorded as skipped. Both terminal writes used the run
+  context that had just been cancelled, so they never reached the store and the
+  node's row stayed at `status=pending` under a finished run -- visible in
+  `sparkwing runs status` and the receipt until a `doctor`/`jobs` sweep
+  reconciled it.
 - **orchestrator:** A local child trigger that a parent run's shutdown
   interrupts now goes back on the queue instead of vanishing. The loop wrote the
   child's run and trigger rows on the context that had just killed the child --
   which fires at the end of every parent run, not only on Ctrl-C -- so the
   trigger stayed `claimed` with no run row and `sparkwing runs status <child>`
   reported it as not found. A dispatch that fails for its own reasons still
-  records a failed run, now on a context that outlives the parent.
+  records a failed run, now on a context that outlives the parent, and the run
+  waits for the loop to stop before closing the store. A requeued child is
+  re-run from the start, so a child that had already done part of its work
+  repeats it -- the same trade the resident trigger consumer already makes.
 - **orchestrator:** The local trigger consumer now honours a cancel request that
   arrives after dispatch has started. Its claim heartbeat asks the store whether
   cancel was requested on every beat but discarded the answer, so only the
@@ -425,6 +430,10 @@ code change to unlock.
   row for the same reason. SQLite was never affected: its immediate
   transactions already serialized the pair.
 
+  heartbeat now cancels the dispatch and records the run as `cancelled`, along
+  with every node the killed child left unfinished, the way the
+  controller-backed worker already did. A dispatch that reaches its own failure
+  in the same moment keeps that failure.
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
