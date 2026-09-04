@@ -360,6 +360,11 @@ code change to unlock.
 
 ### Fixed
 
+- **wingd:** The supervisor no longer signals a daemon it has already reaped.
+  `stopChild` sent SIGTERM before looking at the exit channel, so a daemon that
+  exited on its own -- the routine idle-exit path -- in the same moment the
+  supervisor decided to stop it got a signal delivered to whatever process the
+  kernel had since handed that pid to.
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
   that node as cancelled, and an `OnFailure` child skipped because its cancelled

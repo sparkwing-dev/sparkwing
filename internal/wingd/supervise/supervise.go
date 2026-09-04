@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -129,6 +130,11 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (bool, 
 
 func stopChild(child Child, grace time.Duration) error {
 	done := child.Wait()
+	select {
+	case waitErr := <-done:
+		return waitErr
+	default:
+	}
 	if err := child.Terminate(); err != nil {
 		select {
 		case waitErr := <-done:
@@ -168,8 +174,9 @@ func killAndWaitChild(child Child, done <-chan error, grace time.Duration) error
 }
 
 type execChild struct {
-	cmd  *exec.Cmd
-	done chan error
+	cmd    *exec.Cmd
+	done   chan error
+	reaped atomic.Bool
 }
 
 func startExecChild(self string, args []string) (Child, error) {
@@ -182,13 +189,31 @@ func startExecChild(self string, args []string) (Child, error) {
 		return nil, err
 	}
 	child := &execChild{cmd: cmd, done: make(chan error, 1)}
-	go func() { child.done <- cmd.Wait() }()
+	go func() {
+		err := cmd.Wait()
+		// safety: the kernel can hand this pid to an unrelated process the moment
+		// Wait returns, so mark it unsignallable before announcing the exit.
+		child.reaped.Store(true)
+		child.done <- err
+	}()
 	return child, nil
 }
 
 func (c *execChild) Wait() <-chan error { return c.done }
-func (c *execChild) Terminate() error   { return signalTerminate(c.cmd.Process.Pid) }
-func (c *execChild) Kill() error        { return signalKill(c.cmd.Process.Pid) }
+
+func (c *execChild) Terminate() error {
+	if c.reaped.Load() {
+		return nil
+	}
+	return signalTerminate(c.cmd.Process.Pid)
+}
+
+func (c *execChild) Kill() error {
+	if c.reaped.Load() {
+		return nil
+	}
+	return signalKill(c.cmd.Process.Pid)
+}
 
 func Run(args []string) error {
 	fs := flag.NewFlagSet("wingd supervise", flag.ContinueOnError)
