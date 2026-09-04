@@ -281,15 +281,21 @@ func (cl *Client) readCancelLease(runID string) (found bool, terminal, transient
 
 func (cl *Client) cancelOnDone(ctx context.Context) (stop func()) {
 	done := make(chan struct{})
+	exited := make(chan struct{})
 	go func() {
+		defer close(exited)
 		select {
 		case <-ctx.Done():
 			cl.wakeWaiter()
 		case <-done:
 		}
 	}()
+	// safety: both channels are ready once a cancelled wait ends, so the wake
+	// can still be chosen here; clearing the deadlines before it lands would
+	// leave the connection permanently past its deadline.
 	return func() {
 		close(done)
+		<-exited
 		cl.resumeWaiter()
 	}
 }
