@@ -38,6 +38,25 @@ func EnsureDir(path string) error {
 	return nil
 }
 
+// SecurePrivateDir restricts an existing directory to the current user and
+// rejects links or replacements while applying the platform policy.
+func SecurePrivateDir(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refuse to secure private directory through symlink %q", path)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("private path %q is not a directory", path)
+	}
+	if err := securePrivateDir(path, info); err != nil {
+		return fmt.Errorf("secure private directory %s: %w", path, err)
+	}
+	return nil
+}
+
 func OpenFile(path string, flag int) (*os.File, error) {
 	f, err := os.OpenFile(path, flag, FileMode)
 	if err != nil {

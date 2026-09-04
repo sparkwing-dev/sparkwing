@@ -11,6 +11,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	sharedtoolchain "github.com/sparkwing-dev/sparkwing/internal/toolchain"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -22,22 +23,14 @@ type versionHold struct {
 }
 
 func resolveVersionHold() versionHold {
-	if v := strings.TrimSpace(os.Getenv(versionHoldEnv)); v != "" {
-		return versionHold{Value: v, Source: versionHoldEnv}
-	}
 	path, err := versionHoldPath()
 	if err != nil {
 		return versionHold{}
 	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return versionHold{}
-	}
-	v := strings.TrimSpace(string(body))
-	if v == "" {
-		return versionHold{}
-	}
-	return versionHold{Value: v, Source: path}
+	hold := sharedtoolchain.ResolveHold(sharedtoolchain.Hold{
+		Value: os.Getenv(versionHoldEnv), Source: versionHoldEnv,
+	}, path)
+	return versionHold{Value: hold.Value, Source: hold.Source}
 }
 
 func versionHoldPath() (string, error) {
@@ -67,15 +60,7 @@ func holdHasPatch(hold string) bool {
 }
 
 func exceedsHold(target, hold string) bool {
-	t := strings.TrimSpace(target)
-	h := strings.TrimSpace(hold)
-	if h == "" || !semver.IsValid(t) || !semver.IsValid(h) {
-		return false
-	}
-	if holdHasPatch(h) {
-		return semver.Compare(t, h) > 0
-	}
-	return semver.Compare(semver.MajorMinor(t), semver.MajorMinor(h)) > 0
+	return sharedtoolchain.ExceedsHold(target, hold)
 }
 
 func holdRefusal(target string, hold versionHold) error {

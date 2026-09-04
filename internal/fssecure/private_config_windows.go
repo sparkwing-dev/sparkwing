@@ -79,10 +79,6 @@ func SecurePrivateConfig(path string) error {
 	return securePrivateDACL(path, windows.NO_INHERITANCE)
 }
 
-func securePrivateDir(path string) error {
-	return securePrivateDACL(path, windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT)
-}
-
 func securePrivateDACL(path string, inheritance uint32) error {
 	current, system, admins, err := privateConfigSIDs()
 	if err != nil {

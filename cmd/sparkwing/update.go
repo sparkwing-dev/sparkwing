@@ -12,14 +12,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
 const (
@@ -213,15 +214,7 @@ func runVersionUpdate(args []string) error {
 }
 
 func installedVersion() string {
-	if Version != "" {
-		return Version
-	}
-	if info, ok := debug.ReadBuildInfo(); ok {
-		if v := info.Main.Version; v != "" {
-			return v
-		}
-	}
-	return "(unknown)"
+	return buildinfo.Read("sparkwing", Version).Version
 }
 
 var Version string
@@ -244,17 +237,28 @@ func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 }
 
 func releaseAssetName() string {
-	ext := ""
-	if runtime.GOOS == "windows" {
-		ext = ".exe"
+	name, err := currentReleaseTarget(releaseasset.Sparkwing).Name()
+	if err != nil {
+		panic(err)
 	}
-	return "sparkwing-" + runtime.GOOS + "-" + runtime.GOARCH + ext
+	return name
+}
+
+func currentReleaseTarget(binary releaseasset.Binary) releaseasset.Target {
+	return releaseasset.Target{Binary: binary, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 }
 
 func releaseBaseURL(version string) string { return updateBaseURL + "/" + version }
 
 func fetchVerifiedRelease(version string) (verifiedReleaseAsset, error) {
-	asset := releaseAssetName()
+	return fetchVerifiedReleaseTarget(version, currentReleaseTarget(releaseasset.Sparkwing))
+}
+
+func fetchVerifiedReleaseTarget(version string, target releaseasset.Target) (verifiedReleaseAsset, error) {
+	asset, err := target.Name()
+	if err != nil {
+		return verifiedReleaseAsset{}, err
+	}
 	base := releaseBaseURL(version)
 
 	tmpDir, err := os.MkdirTemp("", "sparkwing-update-")
@@ -299,11 +303,11 @@ func fetchVerifiedRelease(version string) (verifiedReleaseAsset, error) {
 	if err != nil {
 		return verifiedReleaseAsset{}, err
 	}
-	verified, err := verifyReleaseAssetWithTrustSet(publicKeys, manifest, manifestSig, asset, assetBody, assetSig)
+	verified, err := releaseasset.Verify(publicKeys, manifest, manifestSig, target, assetBody, assetSig)
 	if err != nil {
 		return verifiedReleaseAsset{}, err
 	}
-	return verified, nil
+	return fromSharedVerified(verified), nil
 }
 
 func cleanupStaleUpdate() {

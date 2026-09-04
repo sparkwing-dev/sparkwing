@@ -12,10 +12,6 @@ func OpenPrivateConfig(path string) (*os.File, error) {
 	return openPrivateConfig(path, openPrivateConfigFile)
 }
 
-// SecurePrivateDir gives credential-bearing temporary trees an owner-only
-// boundary before any child files are created.
-func SecurePrivateDir(path string) error { return securePrivateDir(path) }
-
 func openPrivateConfig(path string, open func(string) (*os.File, error)) (*os.File, error) {
 	info, err := os.Lstat(path)
 	if err != nil {

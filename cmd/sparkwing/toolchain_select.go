@@ -11,10 +11,11 @@ import (
 	"strings"
 
 	"golang.org/x/mod/modfile"
-	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	sharedtoolchain "github.com/sparkwing-dev/sparkwing/internal/toolchain"
 )
 
 const (
@@ -100,39 +101,31 @@ func toolchainStorePath(version string) string {
 }
 
 func toolchainMode(raw string) (string, error) {
-	switch strings.TrimSpace(raw) {
-	case "", toolchainModeAuto:
-		return toolchainModeAuto, nil
-	case toolchainModeLocal:
-		return toolchainModeLocal, nil
-	default:
+	mode, err := sharedtoolchain.ParseMode(raw)
+	if err != nil {
 		return "", exitErrorf(2, "%s=%q is not a valid value: use %s (fetch and run the CLI this repo pins) or %s (never fetch)",
 			toolchainModeEnv, raw, toolchainModeAuto, toolchainModeLocal)
 	}
+	return string(mode), nil
 }
 
 func planToolchainSwitch(installed string, pin sdkPin, mode, active string) toolchainDecision {
 	d := toolchainDecision{installed: installed, pin: pin.version}
-	switch {
-	case active != "" && active == pin.version:
-		return d
-	case pin.replace != "" || pin.version == "":
-		return d
-	case !isReleaseTag(installed) || !isReleaseTag(pin.version):
-		return d
-	case semver.Compare(installed, pin.version) >= 0:
-		return d
-	case mode == toolchainModeLocal:
+	action := sharedtoolchain.Select(sharedtoolchain.Selection{
+		Installed: installed, Required: pin.version, Replacement: pin.replace,
+		Active: active, Mode: sharedtoolchain.Mode(mode),
+	})
+	switch action {
+	case sharedtoolchain.Refuse:
 		d.action = toolchainRefuse
-		return d
+	case sharedtoolchain.Switch:
+		d.action = toolchainSwitch
 	}
-	d.action = toolchainSwitch
 	return d
 }
 
 func isReleaseTag(v string) bool {
-	return semver.IsValid(v) && semver.Canonical(v) == v &&
-		semver.Prerelease(v) == "" && semver.Build(v) == ""
+	return buildinfo.IsReleaseVersion(v)
 }
 
 func readSDKPin(sparkwingDir string) (sdkPin, error) {

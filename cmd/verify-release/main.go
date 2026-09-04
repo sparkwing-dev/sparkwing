@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 )
 
@@ -139,19 +140,7 @@ func verifyManifestDigests(manifestPath string, assets []string) error {
 }
 
 func expectedReleaseAssets() []string {
-	var names []string
-	for _, binary := range []string{"sparkwing", "sparkwing-cache", "sparkwing-controller", "sparkwing-logs", "sparkwing-runner", "sparkwing-web"} {
-		for _, goos := range []string{"darwin", "linux"} {
-			for _, arch := range []string{"amd64", "arm64"} {
-				names = append(names, binary+"-"+goos+"-"+arch)
-			}
-		}
-	}
-	for _, arch := range []string{"amd64", "arm64"} {
-		names = append(names, "sparkwing-windows-"+arch+".exe")
-	}
-	sort.Strings(names)
-	return names
+	return releaseasset.Names()
 }
 
 func validateReleaseAssets(dist string) error {
