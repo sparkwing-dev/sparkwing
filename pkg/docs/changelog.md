@@ -311,6 +311,14 @@ code change to unlock.
 
 ### Fixed
 
+- **store:** Concurrent `sparkwing.Annotate` calls no longer lose entries on
+  Postgres. The node, step and run annotation appends are read-modify-write
+  inside a transaction, which is not enough at READ COMMITTED: two appenders
+  read the same list and the second write is computed from the stale copy,
+  while `annotation_count` -- a real atomic increment -- counts both, leaving
+  a run whose counter exceeds the annotations it can show. The reads now take
+  the row lock they always needed.
+
 - **store:** A superseded dispatch can no longer stamp its outcome over the
   run the current claim is producing. `FinishRunAtGeneration` read the
   trigger's claim generation and wrote the run in two separate statements

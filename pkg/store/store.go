@@ -1830,7 +1830,8 @@ SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS
 
 func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	var blob []byte
-	err := tx.QueryRow(`SELECT annotations_json FROM runs WHERE id = ?`, runID).Scan(&blob)
+	err := tx.QueryRow(
+		`SELECT annotations_json FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&blob)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -2825,7 +2826,9 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 
 // AppendNodeAnnotation appends one annotation string to the node's
 // annotations list. Implemented as read-modify-write inside a single
-// transaction so concurrent appenders don't lose entries.
+// transaction that holds the rows it rewrites, which is what keeps
+// concurrent appenders from losing entries: the transaction alone does
+// not, since Postgres runs it at READ COMMITTED.
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -2834,7 +2837,7 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 	defer func() { _ = tx.Rollback() }()
 	var current []byte
 	row := tx.QueryRowContext(ctx,
-		`SELECT annotations_json FROM nodes WHERE run_id = ? AND node_id = ?`,
+		`SELECT annotations_json FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
 		runID, nodeID)
 	if err := row.Scan(&current); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -3002,8 +3005,9 @@ ORDER BY node_id, started_at`, runID)
 // AppendStepAnnotation appends one summary string to a step's
 // annotations list. Inserts a placeholder row if the step doesn't
 // yet exist (annotations may fire before step_start lands in the
-// rare reorder case). Read-modify-write inside one txn to keep
-// concurrent appenders from losing entries.
+// rare reorder case). Read-modify-write inside one transaction that
+// holds the rows it rewrites, which is what keeps concurrent
+// appenders from losing entries.
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -3020,7 +3024,7 @@ ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
 	var current []byte
 	row := tx.QueryRowContext(ctx, `
 SELECT annotations_json FROM node_steps
-WHERE run_id = ? AND node_id = ? AND step_id = ?`,
+WHERE run_id = ? AND node_id = ? AND step_id = ?`+tx.forUpdate(),
 		runID, nodeID, stepID)
 	if err := row.Scan(&current); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
