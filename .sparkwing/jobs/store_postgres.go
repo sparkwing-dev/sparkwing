@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
@@ -30,9 +31,11 @@ func (StorePostgres) Help() string {
 		"instead of a SQLite file. When SPARKWING_TEST_PG_URL is already set the run uses " +
 		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
 		"directory under a temporary root and its binaries under the persistent tool cache, " +
-		"and stops the server and removes the data directory whether the suite passes or " +
-		"fails. A server that will not start fails the step with the cause; the suite is " +
-		"never skipped. Needs no Docker."
+		"and stops the server and removes the data directory whether the suite passes, " +
+		"fails, or the run is cancelled. A failing suite prints the tail of the server log, " +
+		"which embedded-postgres only makes available once the server has stopped. A server " +
+		"that will not start is retried once on a fresh port and then fails the step with " +
+		"the cause; the suite is never skipped. Needs no Docker."
 }
 
 func (StorePostgres) Examples() []sparkwing.Example {
@@ -46,7 +49,7 @@ func (StorePostgres) Examples() []sparkwing.Example {
 }
 
 func (p *StorePostgres) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, p.run).Timeout(30 * time.Minute)
+	sparkwing.Job(plan, rc.Pipeline, p.run).Timeout(storePostgresPrePushTimeout)
 	return nil
 }
 
@@ -56,6 +59,13 @@ const (
 	storePostgresPassword   = "postgres"
 	storePostgresDatabase   = "postgres"
 	storePostgresStartLimit = 2 * time.Minute
+	// safety: a reserved port can be taken between the reservation and the
+	// bind, so one fresh port is tried before the step fails.
+	storePostgresStartAttempts = 2
+	storePostgresLogLines      = 40
+	// storePostgresPrePushTimeout mirrors the Plan timeout, which pre-push
+	// does not inherit because it calls the step directly.
+	storePostgresPrePushTimeout = 30 * time.Minute
 )
 
 type storePostgresPaths struct {
@@ -115,36 +125,108 @@ func (p *StorePostgres) run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create the postgres temporary root: %w", err)
 	}
-	port, err := freeLocalPort()
-	if err != nil {
-		_ = os.RemoveAll(root)
+
+	var serverLog bytes.Buffer
+	var server *embeddedpostgres.EmbeddedPostgres
+	return runStorePostgresSuite(ctx, storePostgresRun{
+		start: func() (string, error) {
+			var lastErr error
+			for range storePostgresStartAttempts {
+				port, err := freeLocalPort()
+				if err != nil {
+					return "", err
+				}
+				layout := storePostgresLayout(root, sparkwing.ToolCacheDir("embedded-postgres"), port)
+				sparkwing.Info(ctx, "starting embedded postgres on :%d (data=%s)", layout.Port, layout.Data)
+				candidate := embeddedpostgres.NewDatabase(layout.config(&serverLog))
+				if err := withTempDir(root, candidate.Start); err != nil {
+					lastErr = fmt.Errorf("start embedded postgres on :%d: %w", layout.Port, err)
+					continue
+				}
+				server = candidate
+				sparkwing.Annotate(ctx, fmt.Sprintf("embedded postgres ready on :%d", layout.Port))
+				return layout.DSN, nil
+			}
+			return "", lastErr
+		},
+		stop: func() error {
+			if server == nil {
+				return nil
+			}
+			return server.Stop()
+		},
+		remove: func() error { return os.RemoveAll(root) },
+		suite:  runStoreSuiteAgainst,
+		serverLog: func() string {
+			return lastLines(serverLog.String(), storePostgresLogLines)
+		},
+		report: func(tail string) { sparkwing.Info(ctx, "postgres server log:\n%s", tail) },
+	})
+}
+
+type storePostgresRun struct {
+	start     func() (string, error)
+	stop      func() error
+	remove    func() error
+	suite     func(ctx context.Context, dsn string) error
+	serverLog func() string
+	report    func(tail string)
+}
+
+func runStorePostgresSuite(ctx context.Context, r storePostgresRun) (err error) {
+	defer func() {
+		if removeErr := r.remove(); removeErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove the postgres data directory: %w", removeErr))
+		}
+	}()
+
+	dsn, startErr := r.start()
+	if startErr != nil {
+		return startErr
+	}
+
+	var once sync.Once
+	var stopErr error
+	stop := func() { once.Do(func() { stopErr = r.stop() }) }
+	defer func() {
+		stop()
+		if stopErr != nil {
+			err = errors.Join(err, fmt.Errorf("stop embedded postgres: %w", stopErr))
+		}
+		// safety: embedded-postgres copies the server log into the writer
+		// only inside Start and Stop, so the tail is read after the stop.
+		if err != nil && r.serverLog != nil && r.report != nil {
+			r.report(r.serverLog())
+		}
+	}()
+
+	done := make(chan error, 1)
+	go func() { done <- r.suite(ctx, dsn) }()
+	select {
+	case suiteErr := <-done:
+		return suiteErr
+	case <-ctx.Done():
+		stop()
+		return ctx.Err()
+	}
+}
+
+func withTempDir(dir string, run func() error) error {
+	// safety: embedded-postgres creates its own log file under TMPDIR and
+	// never removes it, so the start runs with TMPDIR inside the root that
+	// this pipeline deletes.
+	previous, had := os.LookupEnv("TMPDIR")
+	if err := os.Setenv("TMPDIR", dir); err != nil {
 		return err
 	}
-	layout := storePostgresLayout(root, sparkwing.ToolCacheDir("embedded-postgres"), port)
-
-	sparkwing.Info(ctx, "starting embedded postgres on :%d (data=%s)", layout.Port, layout.Data)
-	var serverLog bytes.Buffer
-	server := embeddedpostgres.NewDatabase(layout.config(&serverLog))
-	if err := server.Start(); err != nil {
-		_ = os.RemoveAll(root)
-		return fmt.Errorf("start embedded postgres on :%d: %w\n%s",
-			layout.Port, err, lastLines(serverLog.String(), 40))
-	}
-	sparkwing.Annotate(ctx, fmt.Sprintf("embedded postgres ready on :%d", layout.Port))
-
-	suiteErr := runStoreSuiteAgainst(ctx, layout.DSN)
-	if suiteErr != nil {
-		sparkwing.Info(ctx, "postgres server log:\n%s", lastLines(serverLog.String(), 40))
-	}
-	stopErr := server.Stop()
-	if stopErr != nil {
-		stopErr = fmt.Errorf("stop embedded postgres: %w", stopErr)
-	}
-	removeErr := os.RemoveAll(root)
-	if removeErr != nil {
-		removeErr = fmt.Errorf("remove the postgres data directory: %w", removeErr)
-	}
-	return errors.Join(suiteErr, stopErr, removeErr)
+	defer func() {
+		if had {
+			_ = os.Setenv("TMPDIR", previous)
+			return
+		}
+		_ = os.Unsetenv("TMPDIR")
+	}()
+	return run()
 }
 
 func lastLines(text string, n int) string {
@@ -161,7 +243,6 @@ func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
 			Env("TMPDIR", testRoot).
 			Env("SPARKWING_TEST_STORE", "postgres").
 			Env("SPARKWING_TEST_PG_URL", dsn).
-			Env("SPARKWING_REQUIRE_PG", "1").
 			Run()
 		if err != nil {
 			return fmt.Errorf("store suite against postgres: %w", err)

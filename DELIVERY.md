@@ -104,10 +104,14 @@ this file is a menu and checklist, not a command that every change must run.
   store test that opens through `pkg/store/storetest` exercises the Postgres
   dialect instead of a SQLite file. It reuses `SPARKWING_TEST_PG_URL` when
   that is set and otherwise starts an embedded Postgres on a free port (data
-  under a temporary root, binaries cached), then stops it and removes the
-  data directory. No Docker. A server that will not start fails the step.
-  `pre-push` runs it after the race gate. Roughly 80 seconds on a warm
-  cache; the first run downloads the Postgres binaries.
+  under a temporary root, binaries cached in `$TMPDIR`), then stops it and
+  removes the data directory whether the suite passes, fails, or the run is
+  cancelled. No Docker. A failing suite prints the tail of the server log,
+  which embedded-postgres only makes available once the server has stopped.
+  A server that will not start is retried once on a fresh port and then
+  fails the step. `pre-push` runs it after the race gate, under a
+  thirty-minute timeout. Roughly 80 seconds on a warm cache and an idle box;
+  the first run downloads the Postgres binaries.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is
