@@ -30,7 +30,8 @@ func (noProgressDiagnosticPipeline) Plan(_ context.Context, plan *sparkwing.Plan
 			Env("SPARKWING_NO_PROGRESS_DIAGNOSTIC_HELPER", "1").
 			Run()
 		return err
-	}).NoProgressTimeout(100 * time.Millisecond)
+		// safety: the window must outlast a cold child start, or SIGQUIT lands before the Go runtime can dump
+	}).NoProgressTimeout(2 * time.Second)
 	return nil
 }
 

@@ -127,7 +127,7 @@ type absoluteTimeoutWithProgressPipe struct{ sparkwing.Base }
 
 func (absoluteTimeoutWithProgressPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "chatty", func(ctx context.Context) error {
-		ticker := time.NewTicker(20 * time.Millisecond)
+		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {
@@ -137,7 +137,8 @@ func (absoluteTimeoutWithProgressPipe) Plan(ctx context.Context, plan *sparkwing
 				return ctx.Err()
 			}
 		}
-	}).NoProgressTimeout(60 * time.Millisecond).Timeout(180 * time.Millisecond)
+		// safety: the progress window must absorb a scheduling stall, or the node fails no-progress instead of timeout
+	}).NoProgressTimeout(400 * time.Millisecond).Timeout(time.Second)
 	return nil
 }
 
