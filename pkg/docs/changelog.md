@@ -376,6 +376,16 @@ code change to unlock.
   `-0` deleted it re-attempted `sparkwing-cache-pool-2`, which already existed,
   and logged a creation that never happened on every tick. It now allocates the
   lowest free member index and says when a PVC already existed.
+- **wingd:** A run no longer hangs indefinitely when the admission daemon
+  accepts its connection and then stalls. Client frames now carry the same
+  bounded write deadline the daemon applies to its own side, so a full socket
+  buffer fails the exchange into the existing retry path instead of blocking
+  admission, release, cancel and queue-state writes with no diagnostic.
+- **wingd:** Ctrl-C again ends a queued run after the admission daemon has
+  restarted under it. The waiter armed cancellation against the connection it
+  held when the wait began, so once a reconnect replaced that socket the
+  interrupt reached a dead one and the run stayed blocked until the daemon
+  happened to send a frame.
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
   that node as cancelled, and an `OnFailure` child skipped because its cancelled
