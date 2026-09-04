@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestNodeClaim_CommaORTermClaimableByEitherAlternative(t *testing.T) {
@@ -22,7 +23,7 @@ func TestNodeClaim_CommaORTermClaimableByEitherAlternative(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newStoreT(t)
+			s := storetest.Open(t)
 			seedNodeWithLabels(t, s, "run-1", "build", []string{"os=linux,os=macos"})
 
 			n, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-1", 30*time.Second, tc.runner)
@@ -56,7 +57,7 @@ func TestNodeClaim_MixedAndOrTerms(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newStoreT(t)
+			s := storetest.Open(t)
 			seedNodeWithLabels(t, s, "run-1", "build", []string{"os=linux,os=macos", "arch=amd64"})
 
 			n, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-1", 30*time.Second, tc.runner)
@@ -78,7 +79,7 @@ func TestNodeClaim_MixedAndOrTerms(t *testing.T) {
 
 func TestNodeClaim_BareLabelCommaOR(t *testing.T) {
 	ctx := context.Background()
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	seedNodeWithLabels(t, s, "run-1", "accel", []string{"gpu,fpga"})
 
 	n, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-fpga", 30*time.Second, []string{"fpga"})

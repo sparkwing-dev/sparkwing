@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV22_KeepsLegacySecretsAndAdmitsARepoScopedTwin(t *testing.T) {
@@ -31,9 +32,9 @@ func TestSchemaV22_KeepsLegacySecretsAndAdmitsARepoScopedTwin(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Unix()
-	if _, err := st.DB().Exec(`
+	if _, err := st.DB().Exec(storetest.Rebind(st, `
         INSERT INTO secrets (name, value, principal, created_at, updated_at, masked)
-        VALUES (?, ?, ?, ?, ?, 1)`,
+        VALUES (?, ?, ?, ?, ?, 1)`),
 		"DEPLOY_KEY", "legacy-value", "alice", now, now,
 	); err != nil {
 		t.Fatal(err)
@@ -180,9 +181,9 @@ func TestSchemaV23_ExistingSecretsDefaultToUnshared(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Unix()
-	if _, err := st.DB().Exec(`
+	if _, err := st.DB().Exec(storetest.Rebind(st, `
         INSERT INTO secrets (name, value, principal, created_at, updated_at, masked, repo)
-        VALUES (?, ?, ?, ?, ?, 1, '')`,
+        VALUES (?, ?, ?, ?, ?, 1, '')`),
 		"LEGACY", "legacy-value", "alice", now, now,
 	); err != nil {
 		t.Fatal(err)

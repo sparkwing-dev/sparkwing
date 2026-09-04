@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 var fleetRequirementNames = []string{
@@ -188,8 +189,8 @@ func seedLegacyFleetSQLite(t *testing.T, path string, stage int) {
 			t.Fatalf("seed old Fleet v%d with %q: %v", stage, statement, err)
 		}
 	}
-	if _, err := st.DB().ExecContext(ctx,
-		`DELETE FROM sparkwing_schema_version WHERE version > ?`, stage); err != nil {
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
+		`DELETE FROM sparkwing_schema_version WHERE version > ?`), stage); err != nil {
 		t.Fatalf("record old Fleet v%d: %v", stage, err)
 	}
 	deleteFleetRequirements(t, st.DB())
@@ -197,8 +198,8 @@ func seedLegacyFleetSQLite(t *testing.T, path string, stage int) {
 		if i+28 > stage {
 			break
 		}
-		if _, err := st.DB().ExecContext(ctx,
-			`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES (?, 1, 'v0.0.0-old-fleet')`,
+		if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
+			`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES (?, 1, 'v0.0.0-old-fleet')`),
 			name); err != nil {
 			t.Fatalf("record old Fleet requirement %s: %v", name, err)
 		}

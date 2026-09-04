@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV30CompositeRestoresClaimOffersSQLite(t *testing.T) {
@@ -82,8 +83,8 @@ VALUES ('legacy-worker', 'swr_legacy', 'agent', 'unknown', '[]', 0, 0, 1, 0, 0, 
 	} {
 		for _, name := range names {
 			var count int
-			if err := up.DB().QueryRowContext(ctx,
-				`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, name).Scan(&count); err != nil {
+			if err := up.DB().QueryRowContext(ctx, storetest.Rebind(up,
+				`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`), table, name).Scan(&count); err != nil {
 				t.Fatalf("inspect %s.%s: %v", table, name, err)
 			}
 			if count != 1 {
@@ -98,8 +99,8 @@ VALUES ('legacy-worker', 'swr_legacy', 'agent', 'unknown', '[]', 0, 0, 1, 0, 0, 
 		"idx_node_claim_offers_executor_node",
 	} {
 		var count int
-		if err := up.DB().QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&count); err != nil {
+		if err := up.DB().QueryRowContext(ctx, storetest.Rebind(up,
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`), name).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 1 {

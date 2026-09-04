@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -49,7 +50,7 @@ func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
 }
 
 func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -61,8 +62,8 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
 	createLiveRunT(t, s, "r1")
-	if _, err := s.DB().ExecContext(ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
 		"k", "leader"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 }
 
 func TestConcurrency_ResolveWaiterPromotesOrphanedQueue(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -98,8 +99,8 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedQueue(t *testing.T) {
 		Key: "k", HolderID: "w1", RunID: "r1", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	if _, err := s.DB().ExecContext(ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
 		"k", "leader"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedQueue(t *testing.T) {
 }
 
 func TestConcurrency_ResolveWaiterSkipsAbandonedFIFOHead(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -136,8 +137,8 @@ func TestConcurrency_ResolveWaiterSkipsAbandonedFIFOHead(t *testing.T) {
 		Key: "k", HolderID: "live", RunID: "live", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	if _, err := s.DB().ExecContext(ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
 		"k", "leader"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
@@ -159,7 +160,7 @@ func TestConcurrency_ResolveWaiterSkipsAbandonedFIFOHead(t *testing.T) {
 }
 
 func TestConcurrency_PromoteUsesRunningRunCreatedBeforeHeartbeatLoop(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -181,8 +182,8 @@ func TestConcurrency_PromoteUsesRunningRunCreatedBeforeHeartbeatLoop(t *testing.
 		t.Fatalf("queued run: want Queued, got %s", r.Kind)
 	}
 
-	if _, err := s.DB().ExecContext(ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
 		"k", "leader"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
@@ -196,7 +197,7 @@ func TestConcurrency_PromoteUsesRunningRunCreatedBeforeHeartbeatLoop(t *testing.
 }
 
 func TestConcurrency_PromotePreservesFreshRunningRunWithNullHeartbeat(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -211,8 +212,8 @@ func TestConcurrency_PromotePreservesFreshRunningRunWithNullHeartbeat(t *testing
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if _, err := s.DB().ExecContext(ctx,
-		`UPDATE runs SET last_heartbeat_at = NULL WHERE id = ?`, "queued"); err != nil {
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`UPDATE runs SET last_heartbeat_at = NULL WHERE id = ?`), "queued"); err != nil {
 		t.Fatalf("clear heartbeat: %v", err)
 	}
 	if r := acquireBareT(t, s, store.AcquireSlotRequest{
@@ -222,8 +223,8 @@ func TestConcurrency_PromotePreservesFreshRunningRunWithNullHeartbeat(t *testing
 		t.Fatalf("queued run: want Queued, got %s", r.Kind)
 	}
 
-	if _, err := s.DB().ExecContext(ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
 		"k", "leader"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
@@ -237,7 +238,7 @@ func TestConcurrency_PromotePreservesFreshRunningRunWithNullHeartbeat(t *testing
 }
 
 func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -248,8 +249,8 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
 		Key: "k", HolderID: "waiter/-", RunID: "waiter", NodeID: "",
 		Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	if _, err := s.DB().ExecContext(ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
 		"k", "leader/-"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
@@ -268,7 +269,7 @@ func TestConcurrency_ResolveWaiterPromotesOrphanedPlanQueue(t *testing.T) {
 }
 
 func TestConcurrency_ResolveWaiterSeesAlreadyPromotedHolder(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -286,7 +287,7 @@ func TestConcurrency_ResolveWaiterSeesAlreadyPromotedHolder(t *testing.T) {
 }
 
 func TestConcurrency_CoalesceFollowerPromotesWhenLeaderRunEndsWithoutNodeVerdict(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	leader := acquireT(t, s, store.AcquireSlotRequest{
@@ -328,7 +329,7 @@ func TestConcurrency_CoalesceFollowerPromotesWhenLeaderRunEndsWithoutNodeVerdict
 }
 
 func TestConcurrency_CoalesceFollowerWaitsForLiveLeaderWithoutNodeVerdict(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	leader := acquireT(t, s, store.AcquireSlotRequest{
@@ -367,7 +368,7 @@ func TestConcurrency_CoalesceFollowerWaitsForLiveLeaderWithoutNodeVerdict(t *tes
 }
 
 func TestConcurrency_CoalesceFollowerPromotesAfterCancelledLeaderRelease(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	leader := acquireT(t, s, store.AcquireSlotRequest{
@@ -417,7 +418,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterCancelledLeaderRelease(t *test
 }
 
 func TestConcurrency_CoalesceFollowerPromotesAfterFailedLeaderRelease(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	leader := acquireT(t, s, store.AcquireSlotRequest{
@@ -472,7 +473,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterFailedLeaderRelease(t *testing
 }
 
 func TestConcurrency_CoalesceFollowerPromotesAfterSkippedLeaderRelease(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	leader := acquireT(t, s, store.AcquireSlotRequest{
@@ -527,7 +528,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterSkippedLeaderRelease(t *testin
 }
 
 func TestConcurrency_CoalesceFollowerSurvivesMaintenanceAfterCancelledLeaderRelease(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	leader := acquireT(t, s, store.AcquireSlotRequest{
@@ -584,7 +585,7 @@ func TestConcurrency_CoalesceFollowerSurvivesMaintenanceAfterCancelledLeaderRele
 }
 
 func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLost(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	leader := acquireT(t, s, store.AcquireSlotRequest{
@@ -618,8 +619,8 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLost(t *testing.T) 
 	if err := s.FinishNodeWithReason(ctx, "leader", "node", "failed", "runner heartbeat expired", nil, store.FailureAgentLost, nil); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
 	}
-	if _, err := s.DB().ExecContext(ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
 		"cache-agent-lost-leader", "leader/node"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
@@ -634,7 +635,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLost(t *testing.T) 
 }
 
 func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLostRelease(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	leader := acquireT(t, s, store.AcquireSlotRequest{
@@ -691,7 +692,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLostRelease(t *test
 func TestConcurrency_CoalesceFollowerRejectsNonReusableCompletedOutcomes(t *testing.T) {
 	for _, outcome := range []string{"satisfied", "skipped-concurrent"} {
 		t.Run(outcome, func(t *testing.T) {
-			s := newStoreT(t)
+			s := storetest.Open(t)
 			ctx := ctxT(t)
 			seedRunAndNode(t, s, "leader", "node")
 			if err := s.FinishNode(ctx, "leader", "node", outcome, "", nil); err != nil {
@@ -710,7 +711,7 @@ func TestConcurrency_CoalesceFollowerRejectsNonReusableCompletedOutcomes(t *test
 }
 
 func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -725,8 +726,8 @@ func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 		t.Fatalf("follower: want Coalesced got %s", resp.Kind)
 	}
 
-	if _, err := s.DB().ExecContext(ctx,
-		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`DELETE FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
 		"k", "leader"); err != nil {
 		t.Fatalf("manual drop: %v", err)
 	}
@@ -745,7 +746,7 @@ func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 }
 
 func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -758,8 +759,8 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 	})
 
 	oneHourAgo := time.Now().Add(-time.Hour).UnixNano()
-	if _, err := s.DB().ExecContext(ctx,
-		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`UPDATE concurrency_waiters SET arrived_at = ? WHERE key = ? AND run_id = ?`),
 		oneHourAgo, "k", "r1"); err != nil {
 		t.Fatalf("rewrite arrived_at: %v", err)
 	}
@@ -783,7 +784,7 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 }
 
 func TestConcurrency_WaiterReaperZeroAgeIsNoop(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "leader", RunID: "r0", NodeID: "n",

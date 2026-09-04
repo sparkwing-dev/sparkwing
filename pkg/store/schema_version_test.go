@@ -57,14 +57,14 @@ func TestSchemaVersion_SQLiteUnknownRequirementRefuses(t *testing.T) {
 		t.Fatalf("Open#1: %v", err)
 	}
 	future := store.ExpectedSchemaVersion() + 1
-	if _, err := st.DB().Exec(
-		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`,
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (?, ?)`),
 		future, 1,
 	); err != nil {
 		t.Fatalf("seed future version: %v", err)
 	}
-	if _, err := st.DB().Exec(
-		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES (?, ?, ?)`,
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES (?, ?, ?)`),
 		"webhook-replay-keys", 1, "v0.41.0",
 	); err != nil {
 		t.Fatalf("seed future requirement: %v", err)

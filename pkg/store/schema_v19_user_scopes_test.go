@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV19_ExistingUsersDefaultToAdmin(t *testing.T) {
@@ -18,8 +19,8 @@ func TestSchemaV19_ExistingUsersDefaultToAdmin(t *testing.T) {
 	if _, err := st.DB().Exec(`ALTER TABLE users DROP COLUMN scopes`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(
-		`INSERT INTO users (name, pw_hash, created_at) VALUES (?, ?, ?)`,
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`INSERT INTO users (name, pw_hash, created_at) VALUES (?, ?, ?)`),
 		"legacy", "argon2id$00$00", time.Now().Unix(),
 	); err != nil {
 		t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV24_AddsWebhookDeliveryConstraintToAnOlderDatabase(t *testing.T) {
@@ -37,8 +38,8 @@ func TestSchemaV24_AddsWebhookDeliveryConstraintToAnOlderDatabase(t *testing.T) 
 	defer func() { _ = up.Close() }()
 
 	var indexName string
-	if err := up.DB().QueryRow(
-		`SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,
+	if err := up.DB().QueryRow(storetest.Rebind(up,
+		`SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`),
 		store.TriggerWebhookDeliveryIndexName).Scan(&indexName); err != nil {
 		t.Fatalf("migrated database has no %s index: %v", store.TriggerWebhookDeliveryIndexName, err)
 	}

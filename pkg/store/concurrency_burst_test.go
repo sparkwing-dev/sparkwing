@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	const N = 20
@@ -89,7 +90,7 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 }
 
 func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	createLiveRunT(t, s, "r1")
 	createLiveRunT(t, s, "r2")
@@ -123,7 +124,7 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 }
 
 func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	const N = 20

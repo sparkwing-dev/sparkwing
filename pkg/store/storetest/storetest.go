@@ -68,6 +68,19 @@ func New(t *testing.T) *Target {
 	return &Target{dialect: store.DialectPostgres, dsn: newSchema(t, dsn)}
 }
 
+// NewSQLite reserves a SQLite file whatever the suite's dialect is, for
+// the few tests that name both dialects themselves.
+func NewSQLite(t *testing.T) *Target {
+	t.Helper()
+	return &Target{dialect: store.DialectSQLite, path: filepath.Join(t.TempDir(), "state.db")}
+}
+
+// OpenSQLite opens a SQLite store whatever the suite's dialect is.
+func OpenSQLite(t *testing.T) *store.Store {
+	t.Helper()
+	return NewSQLite(t).Open(t)
+}
+
 // NewPostgres reserves a Postgres schema whatever the suite's dialect is,
 // skipping the test when no server is configured and RequireEnv is unset.
 func NewPostgres(t *testing.T) *Target {
@@ -123,6 +136,12 @@ func (tg *Target) Open(t *testing.T) *store.Store {
 	return st
 }
 
+// TryOpen opens the target and hands back the failure instead of ending
+// the test, for the tests whose subject is a refused open.
+func (tg *Target) TryOpen() (*store.Store, error) {
+	return tg.open()
+}
+
 func (tg *Target) open() (*store.Store, error) {
 	if tg.dialect == store.DialectPostgres {
 		return store.OpenPostgres(context.Background(), tg.dsn)
@@ -157,6 +176,25 @@ func newSchema(t *testing.T, baseDSN string) string {
 	return WithSearchPath(baseDSN, schema)
 }
 
+// Rebind translates a query written with SQLite's "?" placeholders into
+// the dialect the store speaks, so one raw statement seeds both.
+func Rebind(st *store.Store, query string) string {
+	if st.Dialect() != store.DialectPostgres {
+		return query
+	}
+	var out strings.Builder
+	n := 0
+	for _, r := range query {
+		if r == '?' {
+			n++
+			fmt.Fprintf(&out, "$%d", n)
+			continue
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
 // WithSearchPath points a connection string at one schema.
 func WithSearchPath(dsn, schema string) string {
 	sep := "?"
@@ -181,10 +219,17 @@ var uniqCounter struct {
 }
 
 func sanitize(s string) string {
-	r := strings.NewReplacer("/", "_", " ", "_", "-", "_", ".", "_", "#", "_", "(", "_", ")", "_")
-	out := r.Replace(s)
+	out := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r + ('a' - 'A')
+		}
+		return '_'
+	}, s)
 	if len(out) > 40 {
 		out = out[:40]
 	}
-	return strings.ToLower(out)
+	return out
 }

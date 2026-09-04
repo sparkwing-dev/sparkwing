@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
@@ -97,8 +98,8 @@ func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(
-		`UPDATE pipeline_profiles SET samples_json = ?, sample_count = 3 WHERE pipeline = 'legacy' AND node_id = ''`,
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`UPDATE pipeline_profiles SET samples_json = ?, sample_count = 3 WHERE pipeline = 'legacy' AND node_id = ''`),
 		raw); err != nil {
 		t.Fatalf("rewrite window as schema 3: %v", err)
 	}
@@ -176,8 +177,8 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(
-		`UPDATE pipeline_profiles SET samples_json = ?, sample_count = 3, peak_cores = 6, prev_peak_cores = 4`,
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`UPDATE pipeline_profiles SET samples_json = ?, sample_count = 3, peak_cores = 6, prev_peak_cores = 4`),
 		raw); err != nil {
 		t.Fatalf("write v13 window shape: %v", err)
 	}

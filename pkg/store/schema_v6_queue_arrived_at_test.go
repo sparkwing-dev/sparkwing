@@ -66,6 +66,16 @@ func TestSchemaV6_UpgradeAddsQueueArrivedAtColumn(t *testing.T) {
 
 func hasColumn(t *testing.T, s *store.Store, table, column string) bool {
 	t.Helper()
+	if s.Dialect() == store.DialectPostgres {
+		var exists bool
+		if err := s.DB().QueryRow(`SELECT EXISTS (
+  SELECT 1 FROM information_schema.columns
+   WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2
+)`, table, column).Scan(&exists); err != nil {
+			t.Fatalf("information_schema.columns(%s): %v", table, err)
+		}
+		return exists
+	}
 	rows, err := s.DB().Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		t.Fatalf("PRAGMA table_info(%s): %v", table, err)

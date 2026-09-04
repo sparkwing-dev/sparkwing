@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func downgradeTokenPrefixIndex(t *testing.T, path string, seed ...[2]string) {
@@ -59,8 +60,8 @@ func TestSchemaV26_MakesTheTokenPrefixIndexUniqueOnAnOlderDatabase(t *testing.T)
 	defer func() { _ = up.Close() }()
 
 	var indexSQL string
-	if err := up.DB().QueryRow(
-		`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`,
+	if err := up.DB().QueryRow(storetest.Rebind(up,
+		`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`),
 		store.TokenPrefixIndexName).Scan(&indexSQL); err != nil {
 		t.Fatalf("migrated database has no %s index: %v", store.TokenPrefixIndexName, err)
 	}

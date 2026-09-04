@@ -12,10 +12,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestConcurrency_GrantClearsOwnStaleWaiterRow(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n", RunID: "r1", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -48,7 +49,7 @@ func TestConcurrency_GrantClearsOwnStaleWaiterRow(t *testing.T) {
 }
 
 func TestConcurrency_ReacquireKeepsQueuedArrivalOrder(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "holder/n", RunID: "holder", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -269,27 +270,27 @@ func runConcurrentPropertySuite(t *testing.T, newStore func(*testing.T) *store.S
 }
 
 func TestConcurrency_PropertyRandomOpsHoldInvariants(t *testing.T) {
-	runSequentialPropertySuite(t, newStoreT)
+	runSequentialPropertySuite(t, storetest.OpenSQLite)
 }
 
 func TestConcurrency_PropertyConcurrentOpsHoldInvariants(t *testing.T) {
-	runConcurrentPropertySuite(t, newStoreT)
+	runConcurrentPropertySuite(t, storetest.OpenSQLite)
 }
 
 func TestConcurrency_PropertyRandomOpsHoldInvariants_Postgres(t *testing.T) {
-	runSequentialPropertySuite(t, openPGTestStore)
+	runSequentialPropertySuite(t, storetest.OpenPostgres)
 }
 
 func TestConcurrency_PropertyConcurrentOpsHoldInvariants_Postgres(t *testing.T) {
-	runConcurrentPropertySuite(t, openPGTestStore)
+	runConcurrentPropertySuite(t, storetest.OpenPostgres)
 }
 
 func TestConcurrency_PropertyFIFOPromotionOrder(t *testing.T) {
-	runFIFOPropertySuite(t, newStoreT)
+	runFIFOPropertySuite(t, storetest.OpenSQLite)
 }
 
 func TestConcurrency_PropertyFIFOPromotionOrder_Postgres(t *testing.T) {
-	runFIFOPropertySuite(t, openPGTestStore)
+	runFIFOPropertySuite(t, storetest.OpenPostgres)
 }
 
 func runFIFOPropertySuite(t *testing.T, newStore func(*testing.T) *store.Store) {

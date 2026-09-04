@@ -9,6 +9,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestRecordWaitObservation_PersistsWindowedPercentiles(t *testing.T) {
@@ -167,10 +168,10 @@ func TestRecordProfileObservation_DropsPreviousCPUSampleSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`
+	if _, err := st.DB().Exec(storetest.Rebind(st, `
 INSERT INTO pipeline_profiles
     (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		"schema-shift", "", time.Minute.Milliseconds(), time.Minute.Milliseconds(), 14.0, int64(1<<30), 3, 1,
 		time.Now().UnixNano(), oldWindow); err != nil {
 		t.Fatalf("seed old profile window: %v", err)

@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestNodeExecutionStartAcknowledgementIsClaimBound(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	createRunAndReadyNode(t, s, "run-ack", "build")
 	claimant := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
 	n, err := s.ClaimNextReadyNodeAs(ctx, claimant, "agent:box-a:1", time.Minute, nil, store.ExecutorIdentity{
@@ -43,7 +44,7 @@ func TestNodeExecutionStartAcknowledgementIsClaimBound(t *testing.T) {
 
 func TestExpiredNodeClaimCannotBeRevivedOrStarted(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	createRunAndReadyNode(t, s, "run-expired", "build")
 	claimant := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
 	n, err := s.ClaimNextReadyNode(ctx, claimant, "agent:box-a:1", time.Millisecond, nil)
@@ -65,7 +66,7 @@ func TestExpiredNodeClaimCannotBeRevivedOrStarted(t *testing.T) {
 
 func TestLegacyClaimCannotSelfReportExecutorIdentity(t *testing.T) {
 	ctx := context.Background()
-	s := openTestStore(t)
+	s := storetest.Open(t)
 	coordinatorID, err := s.CoordinatorID(ctx)
 	if err != nil {
 		t.Fatalf("coordinator id: %v", err)

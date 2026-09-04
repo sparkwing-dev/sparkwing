@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV13_UpgradeAddsIdempotencyKeyAndItsConstraint(t *testing.T) {
@@ -58,7 +59,7 @@ func TestSchemaV13_UpgradeAddsIdempotencyKeyAndItsConstraint(t *testing.T) {
 }
 
 func TestCreateTrigger_EmptyIdempotencyKeyNeverCollides(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	for _, id := range []string{"a", "b", "c"} {
 		if err := s.CreateTrigger(ctx, store.Trigger{
@@ -70,7 +71,7 @@ func TestCreateTrigger_EmptyIdempotencyKeyNeverCollides(t *testing.T) {
 }
 
 func TestFindTriggerByIdempotencyKey_EmptyKeyIsNotAMatch(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	if err := s.CreateTrigger(ctx, store.Trigger{
 		ID: "keyless", Pipeline: "build", CreatedAt: time.Now(),
@@ -83,7 +84,7 @@ func TestFindTriggerByIdempotencyKey_EmptyKeyIsNotAMatch(t *testing.T) {
 }
 
 func TestCreateTrigger_ConcurrentSubmissionsOfOneKeyProduceOneRun(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	const racers = 8
@@ -133,7 +134,7 @@ func TestCreateTrigger_ConcurrentSubmissionsOfOneKeyProduceOneRun(t *testing.T) 
 }
 
 func TestCancelPendingTrigger_TerminatesTheQueuedRun(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedSubmittedRun(t, s, "run-queued", "deploy")
 
@@ -165,7 +166,7 @@ func TestCancelPendingTrigger_TerminatesTheQueuedRun(t *testing.T) {
 }
 
 func TestCancelPendingTrigger_DoesNotStealAClaimedTrigger(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedSubmittedRun(t, s, "run-claimed", "deploy")
 	if _, err := s.ClaimNextTrigger(ctx, time.Minute); err != nil {
@@ -189,7 +190,7 @@ func TestCancelPendingTrigger_DoesNotStealAClaimedTrigger(t *testing.T) {
 }
 
 func TestCancelPendingTrigger_CannotReachAReplacementRun(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedSubmittedRun(t, s, "run-original", "deploy")
 	seedSubmittedRun(t, s, "run-replacement", "deploy")
@@ -215,7 +216,7 @@ func TestCancelPendingTrigger_CannotReachAReplacementRun(t *testing.T) {
 }
 
 func TestCancelPendingTrigger_UnknownRunIsANoOpNotAnError(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	cancelled, err := s.CancelPendingTrigger(context.Background(), "run-never-existed")
 	if err != nil {
 		t.Fatalf("CancelPendingTrigger on unknown id: %v", err)
@@ -226,7 +227,7 @@ func TestCancelPendingTrigger_UnknownRunIsANoOpNotAnError(t *testing.T) {
 }
 
 func TestCountPendingTriggers_TracksTheClaimableQueue(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	if n, err := s.CountPendingTriggers(ctx); err != nil || n != 0 {
 		t.Fatalf("empty queue: n=%d err=%v, want 0", n, err)
@@ -262,7 +263,7 @@ func seedSubmittedRun(t *testing.T, s *store.Store, id, pipeline string) {
 }
 
 func TestSchemaV13_StampsVersionAndCreatesTheNamedIndex(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.OpenSQLite(t)
 	ctx := context.Background()
 
 	got, err := s.CurrentSchemaVersion(ctx)
@@ -275,8 +276,8 @@ func TestSchemaV13_StampsVersionAndCreatesTheNamedIndex(t *testing.T) {
 	}
 
 	var sqlText string
-	if err := s.DB().QueryRowContext(ctx,
-		`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`,
+	if err := s.DB().QueryRowContext(ctx, storetest.Rebind(s,
+		`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`),
 		store.TriggerIdempotencyIndexName).Scan(&sqlText); err != nil {
 		t.Fatalf("index %s absent from sqlite_master: %v", store.TriggerIdempotencyIndexName, err)
 	}
@@ -334,7 +335,7 @@ func TestSchemaV13_PostgresCarriesTheSameConstraint(t *testing.T) {
 }
 
 func TestIdempotencyKeysAreScopedToTheirPipeline(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
 
@@ -373,8 +374,8 @@ func TestIdempotencyKeysAreScopedToTheirPipeline(t *testing.T) {
 
 func expireTriggerClaim(t *testing.T, s *store.Store, id string) {
 	t.Helper()
-	res, err := s.DB().Exec(
-		`UPDATE triggers SET lease_expires_at = ? WHERE id = ? AND status = 'claimed' AND lease_expires_at IS NOT NULL`,
+	res, err := s.DB().Exec(storetest.Rebind(s,
+		`UPDATE triggers SET lease_expires_at = ? WHERE id = ? AND status = 'claimed' AND lease_expires_at IS NOT NULL`),
 		time.Now().Add(-time.Second).UnixNano(), id,
 	)
 	if err != nil {
@@ -390,7 +391,7 @@ func expireTriggerClaim(t *testing.T, s *store.Store, id string) {
 }
 
 func TestClaimGeneration_AdvancesOnEveryClaim(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedSubmittedRun(t, s, "run-gen", "deploy")
 
@@ -415,7 +416,7 @@ func TestClaimGeneration_AdvancesOnEveryClaim(t *testing.T) {
 }
 
 func TestFinishAtGeneration_RefusesASupersededDispatch(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedSubmittedRun(t, s, "run-fence", "deploy")
 
@@ -461,7 +462,7 @@ func TestFinishAtGeneration_RefusesASupersededDispatch(t *testing.T) {
 }
 
 func TestRequeueUnstartedClaim_LeavesARunningRunAlone(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedSubmittedRun(t, s, "run-live", "deploy")
 	if _, err := s.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
@@ -486,7 +487,7 @@ func TestRequeueUnstartedClaim_LeavesARunningRunAlone(t *testing.T) {
 }
 
 func TestRequeueUnstartedClaim_RecoversARunThatNeverStarted(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedSubmittedRun(t, s, "run-neverstarted", "deploy")
 	if _, err := s.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
