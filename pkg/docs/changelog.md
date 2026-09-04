@@ -360,6 +360,15 @@ code change to unlock.
 
 ### Fixed
 
+- **local admission:** `sparkwing runs cancel` no longer strands the run queued
+  behind the one it cancels when the cancelled run's own process is already
+  gone. The daemon promoted the waiter in the ledger, then abandoned the whole
+  batch of pending frames -- the promoted run's grant included -- and its own
+  acknowledgement the moment the wind-down signal to the dead run failed to
+  send. It now drops that connection the way every other delivery does and
+  finishes the flush, so the promoted run learns it holds the lease and the
+  cancelling command gets its answer instead of retrying into `Found: false`.
+
 - **local admission:** The extra concurrency lease a nested run takes for a
   `.Concurrency()` group its parent does not already hold now records the run
   that owns it. A child attaches to its parent's lease and is handed that

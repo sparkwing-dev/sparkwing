@@ -1455,8 +1455,9 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	for owner, runID := range current {
 		d.cfg.logf("cancel: signalling run %s to wind down", runID)
 		if err := owner.send(&wingwire.Cancel{RunID: runID, Reason: reason}); err != nil {
-			c.close()
-			return
+			// safety: the promotions below are already committed to the ledger, so a
+			// dead cancel target must not cost the promoted waiters their grants.
+			go d.handleDisconnect(owner)
 		}
 	}
 	if persistErr != nil {
