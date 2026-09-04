@@ -466,6 +466,11 @@ func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string
 			}
 		})
 		body.Close()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
 }
 

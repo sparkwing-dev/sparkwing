@@ -311,6 +311,13 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing runs logs --follow` against a controller no longer spins
+  reconnecting to a node whose log stream closes at once. The per-node reader
+  paused only when the connection failed, so an already-terminal node -- or any
+  mid-stream read error -- reopened the stream as fast as the network allowed,
+  one goroutine per node, until the run reached a terminal status. It now waits
+  250ms between reconnects, the same as the reader for every other backend.
+
 - **cli:** `sparkwing runs logs --events-only` against a profile whose state
   lives in a shared database or an object store no longer stops at the first
   500 events. It made one unpaginated call, and every backend caps that at 500,
