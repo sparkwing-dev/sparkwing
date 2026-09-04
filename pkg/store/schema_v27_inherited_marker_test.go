@@ -1,7 +1,6 @@
 package store_test
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,10 +9,10 @@ import (
 )
 
 func TestSchemaV27_RewritesTheNULInheritedHolderMarker(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "inherited-marker.db")
+	target := storetest.NewSQLite(t)
 	ctx := ctxT(t)
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +38,7 @@ func TestSchemaV27_RewritesTheNULInheritedHolderMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen at schema %d: %v", store.ExpectedSchemaVersion(), err)
 	}

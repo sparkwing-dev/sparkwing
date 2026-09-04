@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,9 +12,9 @@ import (
 )
 
 func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "schema13.db")
+	target := storetest.New(t)
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -45,7 +44,7 @@ func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
 	}
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (upgrade): %v", err)
 	}
@@ -75,7 +74,7 @@ func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
 }
 
 func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -122,7 +121,7 @@ func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
 }
 
 func TestProfileWindow_WriterWithoutSustainedStoresThePeak(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -155,8 +154,8 @@ func TestProfileWindow_WriterWithoutSustainedStoresThePeak(t *testing.T) {
 }
 
 func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "real13.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -193,7 +192,7 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (upgrade): %v", err)
 	}
@@ -226,8 +225,8 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 }
 
 func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "replay.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -243,7 +242,7 @@ func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
 	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (replay): %v", err)
 	}
@@ -259,7 +258,7 @@ func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
 }
 
 func TestRecordProfileObservation_PlanHashChangeCarriesSustained(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -294,7 +293,7 @@ func TestRecordProfileObservation_PlanHashChangeCarriesSustained(t *testing.T) {
 }
 
 func TestProfileFromWindow_SustainedTakesTheSameAcrossRunRankAsThePeak(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -327,7 +326,7 @@ func TestProfileFromWindow_SustainedTakesTheSameAcrossRunRankAsThePeak(t *testin
 }
 
 func TestProfileObservation_SustainedRoundTripsPerRun(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

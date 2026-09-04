@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,7 +14,7 @@ import (
 )
 
 func TestSchemaVersion_FreshSQLiteRecordsExpected(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "fresh.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -28,15 +27,15 @@ func TestSchemaVersion_FreshSQLiteRecordsExpected(t *testing.T) {
 }
 
 func TestSchemaVersion_ReopenSQLiteIsNoOp(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "reopen.db")
+	target := storetest.New(t)
 
-	st1, err := store.Open(path)
+	st1, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
 	_ = st1.Close()
 
-	st2, err := store.Open(path)
+	st2, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2: %v", err)
 	}
@@ -50,9 +49,9 @@ func TestSchemaVersion_ReopenSQLiteIsNoOp(t *testing.T) {
 }
 
 func TestSchemaVersion_SQLiteUnknownRequirementRefuses(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "skew.db")
+	target := storetest.New(t)
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -71,7 +70,7 @@ func TestSchemaVersion_SQLiteUnknownRequirementRefuses(t *testing.T) {
 	}
 	_ = st.Close()
 
-	_, err = store.Open(path)
+	_, err = target.TryOpen()
 	if err == nil {
 		t.Fatal("Open against a DB listing an unknown requirement should fail")
 	}

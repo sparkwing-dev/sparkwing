@@ -2,17 +2,17 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV5_UpgradeAddsArtifactManifestColumn(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "schema4.db")
+	target := storetest.New(t)
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -26,12 +26,12 @@ func TestSchemaV5_UpgradeAddsArtifactManifestColumn(t *testing.T) {
 	if v := readSchemaVersion(t, st.DB()); v != 4 {
 		t.Fatalf("seeded version = %d, want 4", v)
 	}
-	if hasArtifactManifestColumn(t, st) {
+	if hasColumn(t, st, "nodes", "artifact_manifest") {
 		t.Fatal("artifact_manifest should be absent before upgrade")
 	}
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (upgrade): %v", err)
 	}
@@ -40,7 +40,7 @@ func TestSchemaV5_UpgradeAddsArtifactManifestColumn(t *testing.T) {
 	if v := readSchemaVersion(t, up.DB()); v != store.ExpectedSchemaVersion() {
 		t.Errorf("version after upgrade = %d, want %d", v, store.ExpectedSchemaVersion())
 	}
-	if !hasArtifactManifestColumn(t, up) {
+	if !hasColumn(t, up, "nodes", "artifact_manifest") {
 		t.Fatal("artifact_manifest should be present after upgrade")
 	}
 
@@ -66,25 +66,4 @@ func TestSchemaV5_UpgradeAddsArtifactManifestColumn(t *testing.T) {
 	if n.ArtifactManifest != digest {
 		t.Errorf("ArtifactManifest = %q, want %q", n.ArtifactManifest, digest)
 	}
-}
-
-func hasArtifactManifestColumn(t *testing.T, s *store.Store) bool {
-	t.Helper()
-	rows, err := s.DB().Query(`PRAGMA table_info(nodes)`)
-	if err != nil {
-		t.Fatalf("PRAGMA table_info(nodes): %v", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var cid, notnull, pk int
-		var name, ctype string
-		var dflt any
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
-			t.Fatalf("scan table_info: %v", err)
-		}
-		if name == "artifact_manifest" {
-			return true
-		}
-	}
-	return false
 }

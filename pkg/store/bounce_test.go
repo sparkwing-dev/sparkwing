@@ -4,18 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func bounceFixture(t *testing.T) (*store.Store, context.Context) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

@@ -36,7 +36,7 @@ func requirementNames(t *testing.T, db *sql.DB) []string {
 }
 
 func TestRequirements_FreshSQLiteRecordsDeclaredSet(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "fresh.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -71,8 +71,8 @@ func TestRequirements_AdditiveFutureVersionOpensReadWrite(t *testing.T) {
 	store.SetBinaryVersion("v0.38.2")
 	t.Cleanup(func() { store.SetBinaryVersion("") })
 
-	path := filepath.Join(t.TempDir(), "additive.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestRequirements_AdditiveFutureVersionOpensReadWrite(t *testing.T) {
 	}
 	_ = st.Close()
 
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 against an additively migrated database: %v", err)
 	}
@@ -116,8 +116,8 @@ func TestRequirements_AdditiveFutureVersionOpensReadWrite(t *testing.T) {
 }
 
 func TestRequirements_BackfilledOnPreRequirementsDatabase(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestRequirements_BackfilledOnPreRequirementsDatabase(t *testing.T) {
 	}
 	_ = st.Close()
 
-	reopened, err := store.Open(path)
+	reopened, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestRequirements_BackfilledOnPreRequirementsDatabase(t *testing.T) {
 }
 
 func TestRequirements_ConcurrentColdStartLeavesOneRowEach(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.db")
+	target := storetest.New(t)
 
 	const openers = 8
 	errs := make([]error, openers)
@@ -152,7 +152,7 @@ func TestRequirements_ConcurrentColdStartLeavesOneRowEach(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			s, err := store.Open(path)
+			s, err := target.TryOpen()
 			if err != nil {
 				errs[i] = err
 				return
@@ -167,7 +167,7 @@ func TestRequirements_ConcurrentColdStartLeavesOneRowEach(t *testing.T) {
 		}
 	}
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen after concurrent cold start: %v", err)
 	}

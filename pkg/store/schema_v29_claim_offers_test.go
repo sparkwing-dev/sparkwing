@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,9 +10,9 @@ import (
 )
 
 func TestSchemaV30CompositeRestoresClaimOffersSQLite(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "schema-v29.db")
+	target := storetest.NewSQLite(t)
 	ctx := context.Background()
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +59,7 @@ VALUES ('legacy-worker', 'swr_legacy', 'agent', 'unknown', '[]', 0, 0, 1, 0, 0, 
 		t.Fatal(err)
 	}
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("open v29 offer-free shape at schema %d: %v", store.ExpectedSchemaVersion(), err)
 	}

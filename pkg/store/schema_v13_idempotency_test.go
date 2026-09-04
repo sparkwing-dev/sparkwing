@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,8 +13,8 @@ import (
 )
 
 func TestSchemaV13_UpgradeAddsIdempotencyKeyAndItsConstraint(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "schema12.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +30,7 @@ func TestSchemaV13_UpgradeAddsIdempotencyKeyAndItsConstraint(t *testing.T) {
 	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("upgrade v12 store: %v", err)
 	}

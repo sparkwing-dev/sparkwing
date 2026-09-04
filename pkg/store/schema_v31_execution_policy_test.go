@@ -11,10 +11,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV31FreshSQLiteExecutionPolicyShape(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "fresh.db"))
+	st, err := storetest.NewSQLite(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -62,11 +61,10 @@ func TestSetNodeSummary_MissingNodeReturnsNotFound(t *testing.T) {
 }
 
 func TestSetNodeSummary_SurvivesReopen(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.db")
+	target := storetest.New(t)
 	ctx := context.Background()
 
-	s, err := store.Open(path)
+	s, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -81,7 +79,7 @@ func TestSetNodeSummary_SurvivesReopen(t *testing.T) {
 	}
 	_ = s.Close()
 
-	s2, err := store.Open(path)
+	s2, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -169,11 +167,10 @@ func TestSetStepSummary_IdempotentRepeat(t *testing.T) {
 }
 
 func TestSetStepSummary_SurvivesReopen(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.db")
+	target := storetest.New(t)
 	ctx := context.Background()
 
-	s, err := store.Open(path)
+	s, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -191,7 +188,7 @@ func TestSetStepSummary_SurvivesReopen(t *testing.T) {
 	}
 	_ = s.Close()
 
-	s2, err := store.Open(path)
+	s2, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

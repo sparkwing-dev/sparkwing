@@ -156,7 +156,7 @@ func TestSchemaV18_FailsClosedOnMalformedInvocationJSON(t *testing.T) {
 }
 
 func TestCreateRun_RejectsSecretInputHash(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}

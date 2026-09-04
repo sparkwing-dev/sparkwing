@@ -256,7 +256,7 @@ func assertSQLiteNodeMetricsRunCascade(t *testing.T, db *sql.DB) {
 }
 
 func TestSchemaV30FreshSQLiteHasWave2AndFleetShape(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "fresh.db"))
+	st, err := storetest.NewSQLite(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,7 +12,7 @@ import (
 )
 
 func TestRecordWaitObservation_PersistsWindowedPercentiles(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "waits.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -41,7 +40,7 @@ func TestRecordWaitObservation_PersistsWindowedPercentiles(t *testing.T) {
 }
 
 func TestRecordWaitObservation_AgesOutOldSamples(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "waits.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -71,7 +70,7 @@ func TestRecordWaitObservation_AgesOutOldSamples(t *testing.T) {
 }
 
 func TestRecordWaitObservation_CoexistsWithProfileUpserts(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "waits.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -103,7 +102,7 @@ func TestRecordWaitObservation_CoexistsWithProfileUpserts(t *testing.T) {
 }
 
 func TestPipelineProfile_ResourcePercentilesFromSamples(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -150,7 +149,7 @@ func TestPipelineProfile_ResourcePercentilesFromSamples(t *testing.T) {
 }
 
 func TestRecordProfileObservation_DropsPreviousCPUSampleSchema(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

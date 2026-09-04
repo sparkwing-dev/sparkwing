@@ -1,18 +1,16 @@
 package store_test
 
 import (
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaV19_ExistingUsersDefaultToAdmin(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "user-scopes.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +31,7 @@ func TestSchemaV19_ExistingUsersDefaultToAdmin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
