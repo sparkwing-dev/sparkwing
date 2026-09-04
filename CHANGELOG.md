@@ -365,6 +365,11 @@ code change to unlock.
   bounded write deadline the daemon applies to its own side, so a full socket
   buffer fails the exchange into the existing retry path instead of blocking
   admission, release, cancel and queue-state writes with no diagnostic.
+- **wingd:** A client no longer wedges after an exchange that ends on an
+  expired or cancelled context. The wake that interrupts the wait could land
+  after the caller had already stood it down, leaving the connection past its
+  deadline for good, so every later exchange on that client failed instantly
+  and reported the daemon as unreachable.
 - **wingd:** Ctrl-C again ends a queued run after the admission daemon has
   restarted under it. The waiter armed cancellation against the connection it
   held when the wait began, so once a reconnect replaced that socket the
