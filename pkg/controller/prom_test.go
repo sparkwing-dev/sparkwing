@@ -349,3 +349,31 @@ func TestMetrics_HTTPRouteCollapsesEveryPathParameter(t *testing.T) {
 		}
 	}
 }
+
+func TestMetrics_HTTPMethodLabelClampsInventedMethods(t *testing.T) {
+	base, _, cleanup := newTestServer(t)
+	defer cleanup()
+
+	for _, method := range []string{"PROMMETHODA", "PROMMETHODB", "PROMMETHODC"} {
+		req, err := http.NewRequest(method, base+"/api/v1/runs", nil)
+		if err != nil {
+			t.Fatalf("build %s request: %v", method, err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s /api/v1/runs: %v", method, err)
+		}
+		resp.Body.Close()
+	}
+
+	body := scrape(t, base)
+
+	if !strings.Contains(body, `method="other"`) {
+		t.Errorf("/metrics missing the clamped method label:\n%s", body)
+	}
+	for _, method := range []string{"PROMMETHODA", "PROMMETHODB", "PROMMETHODC"} {
+		if strings.Contains(body, method) {
+			t.Errorf("invented method %q leaked into a metric label", method)
+		}
+	}
+}

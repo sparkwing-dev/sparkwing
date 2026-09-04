@@ -374,7 +374,9 @@ code change to unlock.
   `/api/v1/concurrency/{key}/...` routes, `/api/v1/artifacts/{key}`, the
   `{nodeID}` in the approval routes and the `{path...}` in the Git cache proxy
   routes stop minting a permanent Prometheus series per distinct key. An
-  unrouted path is now labeled `other` instead of carrying the raw path.
+  unrouted path is now labeled `other` instead of carrying the raw path, and
+  so is any request method outside the seven the controller answers, which an
+  unauthenticated caller could otherwise invent one series at a time.
 
 - **controller:** The warm-PVC pool binding is published atomically, so the
   pool routes no longer race the goroutine that builds it. The router went

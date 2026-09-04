@@ -287,8 +287,9 @@ The `route` label is the pattern the controller registered the request
 against, so every path parameter reaches Prometheus in its declared form
 (`/api/v1/concurrency/{key}/state`, `/api/v1/runs/{id}`) and a run id,
 concurrency key or artifact digest never becomes a label value. A request
-that matches no route is labeled `other`, so an unrecognized path cannot
-grow the series count either.
+that matches no route is labeled `other`, and so is any `method` outside
+the seven the controller answers, so neither an unrecognized path nor an
+invented request method can grow the series count.
 
 **Cache** (`sparkwing-cache`, OTEL meter):
 
