@@ -40,6 +40,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := checkSchemaDrift(string(data), root); err != nil {
+		fmt.Fprintf(os.Stderr, "apispec: %s: %s\n", specPath, err)
+		os.Exit(1)
+	}
+
 	out, err := rewrite(string(data), routes, scopeValues(scopes))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apispec: %s: %s\n", specPath, err)

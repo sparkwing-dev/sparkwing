@@ -21,7 +21,13 @@ every ` + scopeKey + ` value are read from the route registrations in
 pkg/controller/server.go; summaries, schemas, and examples are hand-written
 here. Rewrite this file with ` + "`bash bin/gen-api-docs.sh`" + ` and prove it current
 with ` + "`bash bin/check-api-spec.sh`" + `. Give a route's authorization as
-` + scopeKey + `, never as prose, so no two sentences can disagree.`
+` + scopeKey + `, never as prose, so no two sentences can disagree.
+
+Every object shape names the Go type it mirrors as ` + goTypeKey + `, and the
+check holds its members to that type's JSON tags: a renamed, dropped, or
+retyped field fails rather than leaving the document quietly untrue. Use
+` + goTypeKey + `: none only where the controller writes the shape without a
+struct behind it.`
 
 const stubSummary = "Registered route awaiting a description."
 
