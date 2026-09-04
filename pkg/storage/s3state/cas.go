@@ -3,6 +3,7 @@ package s3state
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,10 @@ import (
 )
 
 const casMaxRetries = 16
+
+// maxTriggerIDAttempts bounds how many ids a single enqueue will mint
+// before giving up on finding one no trigger already holds.
+const maxTriggerIDAttempts = 8
 
 const maxAncestorDepth = 64
 
@@ -673,15 +678,25 @@ func (b *Backend) EnqueueTriggerWithEnv(
 		}
 	}
 
-	body, err := json.Marshal(tg)
-	if err != nil {
-		return "", err
-	}
 	// safety: the record goes first because the index is itself a PutIfAbsent and
 	// cannot be rewritten, so an index naming a record that failed to land would
 	// hand every retry of this spawn the same id of a trigger that never exists.
-	if _, err := cw.PutIfAbsent(ctx, triggerKey(runID), bytes.NewReader(body)); err != nil {
-		return "", err
+	// An id another enqueue already took is re-minted rather than reported, since
+	// two callers can mint the same one.
+	for attempt := 1; ; attempt++ {
+		tg.ID = runID
+		body, err := json.Marshal(tg)
+		if err != nil {
+			return "", err
+		}
+		_, err = cw.PutIfAbsent(ctx, triggerKey(runID), bytes.NewReader(body))
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, storage.ErrPreconditionFailed) || attempt == maxTriggerIDAttempts {
+			return "", err
+		}
+		runID = triggerRunID()
 	}
 
 	if parentRunID != "" && parentNodeID != "" {
@@ -731,8 +746,10 @@ func (b *Backend) ancestorPipelines(ctx context.Context, runID string) ([]string
 }
 
 func triggerRunID() string {
-	now := time.Now().UTC()
-	return fmt.Sprintf("run-%s-%08x", now.Format("20060102-150405"), now.UnixNano()&0xFFFFFFFF)
+	ts := time.Now().UTC().Format("20060102-150405")
+	var suffix [4]byte
+	_, _ = rand.Read(suffix[:])
+	return fmt.Sprintf("run-%s-%s", ts, hex.EncodeToString(suffix[:]))
 }
 
 func firstNonEmpty(a, b string) string {
