@@ -41,3 +41,65 @@ func TestTriggerClaim_ReclaimDropsPreviousClaimant(t *testing.T) {
 		t.Fatal("runner-a still holds the claim after another consumer re-claimed the trigger")
 	}
 }
+
+func TestTriggerClaim_RequeueUnstartedClaimDropsClaimant(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
+
+	seedPending(t, s, "t1")
+	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Hour, nil, nil); err != nil {
+		t.Fatalf("ClaimNextTriggerFor: %v", err)
+	}
+	requeued, err := s.RequeueUnstartedClaim(ctx, "t1")
+	if err != nil {
+		t.Fatalf("RequeueUnstartedClaim: %v", err)
+	}
+	if !requeued {
+		t.Fatal("RequeueUnstartedClaim returned false for an unstarted claim")
+	}
+	if _, err := s.ClaimSpecificTrigger(ctx, "t1", time.Hour); err != nil {
+		t.Fatalf("ClaimSpecificTrigger: %v", err)
+	}
+
+	held, err := s.PrincipalHoldsTriggerClaim(ctx, "t1", runnerA, time.Now())
+	if err != nil {
+		t.Fatalf("PrincipalHoldsTriggerClaim: %v", err)
+	}
+	if held {
+		t.Fatal("runner-a still holds the claim after its unstarted claim was requeued and taken")
+	}
+}
+
+func TestTriggerClaim_ReleaseAtGenerationDropsClaimant(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
+
+	seedPending(t, s, "t1")
+	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Hour, nil, nil); err != nil {
+		t.Fatalf("ClaimNextTriggerFor: %v", err)
+	}
+	seq, err := s.TriggerClaimGeneration(ctx, "t1")
+	if err != nil {
+		t.Fatalf("TriggerClaimGeneration: %v", err)
+	}
+	released, err := s.ReleaseClaimAtGeneration(ctx, "t1", seq)
+	if err != nil {
+		t.Fatalf("ReleaseClaimAtGeneration: %v", err)
+	}
+	if !released {
+		t.Fatal("ReleaseClaimAtGeneration returned false at the current generation")
+	}
+	if _, err := s.ClaimSpecificTrigger(ctx, "t1", time.Hour); err != nil {
+		t.Fatalf("ClaimSpecificTrigger: %v", err)
+	}
+
+	held, err := s.PrincipalHoldsTriggerClaim(ctx, "t1", runnerA, time.Now())
+	if err != nil {
+		t.Fatalf("PrincipalHoldsTriggerClaim: %v", err)
+	}
+	if held {
+		t.Fatal("runner-a still holds the claim after releasing it at its generation")
+	}
+}

@@ -51,12 +51,18 @@ func expireHolderLease(t *testing.T, s *store.Store, key, holderID string) {
 
 func seedCacheRow(t *testing.T, s *store.Store, key, hash string, expiresAt, lastHitAt time.Time) {
 	t.Helper()
+	createLiveRunT(t, s, "r0")
+	seedCacheRowFor(t, s, key, hash, "r0", expiresAt, lastHitAt)
+}
+
+func seedCacheRowFor(t *testing.T, s *store.Store, key, hash, originRun string, expiresAt, lastHitAt time.Time) {
+	t.Helper()
 	now := time.Now()
 	if _, err := s.DB().Exec(
 		`INSERT INTO concurrency_cache
 		   (key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		key, hash, "out", "r0", "n0", now.UnixNano(), expiresAt.UnixNano(), lastHitAt.UnixNano(),
+		key, hash, "out", originRun, "n0", now.UnixNano(), expiresAt.UnixNano(), lastHitAt.UnixNano(),
 	); err != nil {
 		t.Fatalf("seed cache row: %v", err)
 	}
@@ -488,5 +494,43 @@ func TestMigration_V4CreatesMetaTable(t *testing.T) {
 	var n int
 	if err := s.DB().QueryRow(`SELECT COUNT(*) FROM sparkwing_meta`).Scan(&n); err != nil {
 		t.Fatalf("sparkwing_meta not queryable after open: %v", err)
+	}
+}
+
+// A memo entry whose origin run is gone can only fail the node that hits
+// it, and entries written before deletes cleaned them up outlive the run
+// by their whole TTL.
+func TestMaintainConcurrency_SweepsCacheRowsWhoseOriginRunIsGone(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+	future := time.Now().Add(time.Hour)
+	createLiveRunT(t, s, "live")
+	seedCacheRowFor(t, s, "memo:live", "h1", "live", future, time.Now())
+	seedCacheRowFor(t, s, "memo:gone", "h2", "gone", future, time.Now())
+
+	res, err := s.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{})
+	if err != nil {
+		t.Fatalf("MaintainConcurrency: %v", err)
+	}
+	if res.CacheOrphaned != 1 {
+		t.Fatalf("CacheOrphaned = %d, want 1", res.CacheOrphaned)
+	}
+	if n, err := s.CountConcurrencyCache(ctx); err != nil {
+		t.Fatalf("count cache: %v", err)
+	} else if n != 1 {
+		t.Fatalf("cache rows = %d, want 1 (the live run's entry kept)", n)
+	}
+
+	again, err := s.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{})
+	if err != nil {
+		t.Fatalf("MaintainConcurrency (second pass): %v", err)
+	}
+	if again.CacheOrphaned != 0 {
+		t.Fatalf("second pass CacheOrphaned = %d, want 0", again.CacheOrphaned)
+	}
+	if n, err := s.CountConcurrencyCache(ctx); err != nil {
+		t.Fatalf("count cache: %v", err)
+	} else if n != 1 {
+		t.Fatalf("cache rows after second pass = %d, want 1", n)
 	}
 }

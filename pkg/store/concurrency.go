@@ -2546,6 +2546,17 @@ func (s *Store) sweepExpiredConcurrencyCache(ctx context.Context) (int64, error)
 	return res.RowsAffected()
 }
 
+func (s *Store) sweepOrphanedConcurrencyCache(ctx context.Context) (int64, error) {
+	res, err := s.exec(ctx,
+		`DELETE FROM concurrency_cache
+		  WHERE origin_run_id <> ''
+		    AND origin_run_id NOT IN (SELECT id FROM runs)`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (int64, error) {
 	if keepCount <= 0 {
 		return 0, nil
