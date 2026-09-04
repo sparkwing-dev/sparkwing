@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestControllerAuthorityIdentityIsDurableAndInternal(t *testing.T) {

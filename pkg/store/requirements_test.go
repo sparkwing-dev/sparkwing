@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func requirementNames(t *testing.T, db *sql.DB) []string {
@@ -35,7 +35,7 @@ func requirementNames(t *testing.T, db *sql.DB) []string {
 	return names
 }
 
-func TestRequirements_FreshSQLiteRecordsDeclaredSet(t *testing.T) {
+func TestRequirements_FreshDatabaseRecordsDeclaredSet(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)

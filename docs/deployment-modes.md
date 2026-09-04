@@ -226,6 +226,18 @@ mixed-version fleets briefly during a rollout. Mode 4 (hosted
 controller) is the alternative that decouples client and schema
 versions entirely.
 
+### Testing against Postgres
+
+The store's own test suite runs against either dialect.
+`SPARKWING_TEST_STORE=postgres` points every test that opens through the
+store's test helper at Postgres instead of a local SQLite file, and
+`SPARKWING_TEST_PG_URL` names the server each test creates a schema of its
+own on. With the dialect selected and no URL the suite fails rather than
+skipping, so a misconfigured run cannot look like a pass. `sparkwing run
+store-postgres` sets both against an embedded Postgres it starts and stops
+itself, so proving a store change on this mode's dialect needs neither
+Docker nor a database of your own.
+
 ### One-click provisioning
 
 A Terraform module under `install/terraform/mode3-postgres` stands up the

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestSetNodeArtifactManifest_RoundTrips(t *testing.T) {

@@ -64,6 +64,10 @@ func discoverPackagePaths(root string) ([]string, error) {
 			return err
 		}
 		importPath := filepath.ToSlash(rel)
+		if importPath == "internal" || strings.Contains(importPath, "/internal/") ||
+			strings.HasSuffix(importPath, "/internal") {
+			return nil
+		}
 		packages[importPath] = struct{}{}
 		return nil
 	})

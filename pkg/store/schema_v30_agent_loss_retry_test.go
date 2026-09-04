@@ -14,7 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestSchemaV30CompositeRestoresAgentLossFieldsSQLite(t *testing.T) {

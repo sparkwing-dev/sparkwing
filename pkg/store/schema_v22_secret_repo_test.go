@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestSchemaV22_KeepsLegacySecretsAndAdmitsARepoScopedTwin(t *testing.T) {

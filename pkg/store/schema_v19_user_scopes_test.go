@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestSchemaV19_ExistingUsersDefaultToAdmin(t *testing.T) {
