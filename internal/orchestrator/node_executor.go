@@ -420,7 +420,9 @@ done:
 		return nil, lastErr
 	}
 
+	reportedDrops := 0
 	if count, reason := nodeLogDrops(nlog); count > 0 {
+		reportedDrops = count
 		payload, _ := json.Marshal(map[string]any{"count": count, "reason": reason})
 		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "logs_drop", payload)
 		if logsDropIsFatal() {
@@ -470,6 +472,26 @@ done:
 	}
 
 	emitNodeEnd(sparkwing.Success, "")
+
+	// The write that hands the last lines to the store is the close, so the node
+	// cannot be called successful until the log is shut and its losses counted.
+	if cerr := nlog.Close(); cerr != nil {
+		sparkwing.Debug(nodeCtx, "close node log: %v", cerr)
+	}
+	if count, reason := nodeLogDrops(nlog); count > reportedDrops {
+		payload, _ := json.Marshal(map[string]any{"count": count, "reason": reason})
+		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "logs_drop", payload)
+		if logsDropIsFatal() {
+			dropped := droppedLogsError(count, reason)
+			text := boundedFailureText(ctx, runID, node.ID(), dropped)
+			fctx := failureWriteCtx(ctx, dropped)
+			_ = r.backends.State.FinishNodeWithReason(fctx, runID, node.ID(), string(sparkwing.Failed), text, nil, store.FailureLogsDropped, nil)
+			_ = r.backends.State.AppendEvent(fctx, runID, node.ID(), "node_failed", []byte(text))
+			appendFailureExcerptEvent(fctx, r.backends.State, runID, node.ID(), dropped)
+			return nil, dropped
+		}
+	}
+
 	_ = r.backends.State.FinishNode(writeCtx, runID, node.ID(), string(sparkwing.Success), "", outBytes)
 	_ = r.backends.State.AppendEvent(writeCtx, runID, node.ID(), "node_succeeded", nil)
 
