@@ -454,7 +454,9 @@ is a TTY (the password is not shown on-screen or recorded in
 shell history). Passing --password skips the prompt -- useful
 for CI seed flows but leaks via shell history if used
 interactively. --scope sets what the account's dashboard
-sessions may reach; omitting it grants admin.
+sessions may reach; omitting it grants admin. The first account
+on a controller must be an admin, so a --scope list that omits
+admin is refused until one exists.
 
 ### Flags
 
@@ -462,16 +464,16 @@ sessions may reach; omitting it grants admin.
 |---|---|
 | `--name NAME` | Dashboard username (required) |
 | `--password PASSWORD` | Password (omit to prompt interactively) |
-| `--scope LIST` | Comma-separated scopes (omit to grant admin) |
+| `--scope LIST` | Comma-separated scopes (omit to grant admin; the first account must include admin) |
 | `--profile NAME` | Profile name (required) |
 
 ### Examples
 
 ```sh
-# Interactive add
+# Interactive add of the first admin
 sparkwing cluster users add --name alice --profile prod
 
-# Read-only dashboard account
+# Read-only account, once an admin exists
 sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod
 
 # Non-interactive add for CI
