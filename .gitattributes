@@ -1,0 +1,6 @@
+# Every landing touches the changelog, so parallel branches conflict on it and
+# on the mirror pkg/docs embeds. Union merge keeps both sides' [Unreleased]
+# bullets and resolves the merge unattended. DELIVERY.md names the two cases it
+# gets wrong.
+CHANGELOG.md merge=union
+pkg/docs/changelog.md merge=union

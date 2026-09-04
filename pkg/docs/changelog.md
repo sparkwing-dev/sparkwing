@@ -317,6 +317,15 @@ code change to unlock.
   removing one fails the release rather than quietly shrinking the preflight.
   The full gates keep their existing coverage.
 
+- **release:** `CHANGELOG.md` and the `pkg/docs/changelog.md` mirror carry
+  `merge=union` in `.gitattributes`, so branches that each add `[Unreleased]`
+  bullets merge without a conflict and without a hand resolution. Union merge
+  keeps both sides of a hunk, which gets two cases wrong: two branches
+  rewording one bullet produce both wordings, and two branches renaming
+  `[Unreleased]` to different versions stack both headings on adjacent lines.
+  `bin/check-changelog.sh` now fails on that stacked pair rather than letting a
+  release ship it.
+
 ### Fixed
 
 - **web:** ESLint no longer reads Playwright's output. `playwright-report/` and

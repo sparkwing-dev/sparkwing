@@ -54,6 +54,7 @@ vulnerabilities privately through the process in [SECURITY.md](./SECURITY.md).
 - Entry format: bold scope prefix, `(Breaking)` inline for breaks, link to migration guide. See [docs/changelog-style.md](./docs/changelog-style.md) for the rubric the pre-release manicuring agent applies.
 - Every breaking change in a release gets a corresponding H2 in `docs/migrations/v<X.Y.Z>.md`; releases with no breaking changes have no guide file.
 - CI fails if a commit touches `pkg/`, `sparkwing/`, or any `cmd/<binary>/*.go` without including a `CHANGELOG.md` entry. Tests, testdata, `internal/`, `docs/`, `examples/`, `web/`, `charts/`, `install/`, `build/`, and `bench/` are exempt. The gate lives in `bin/check-changelog.sh` and runs as part of `sparkwing run lint`.
+- `pkg/docs/changelog.md` is a byte-identical copy of `CHANGELOG.md`, written by `bin/sync-docs.sh` and checked by `bin/sync-docs.sh --check`. It is committed because `go:embed` reads only the package's own directory, so a fresh clone and the module proxy both need the file present to build. Both files carry `merge=union` in `.gitattributes`, which resolves the changelog conflict every parallel landing would otherwise raise; the same inputs on both sides keep the pair byte-identical through the merge.
 - The release pipeline (`sparkwing run release --version vX.Y.Z`) renames `[Unreleased]` to `[vX.Y.Z] - YYYY-MM-DD` and commits before tagging. The GH-Actions release workflow extracts that section verbatim as the GitHub Release body via `bin/extract-changelog-section.sh`.
 
 ## Wire protocol
