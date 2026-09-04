@@ -367,6 +367,16 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** Finishing a run no longer loses the terminal GitHub commit
+  status and the run's capacity measurements when the client goes away.
+  `POST /api/v1/runs/{id}/finish` writes the terminal run row and then folds
+  the run's profiles and posts the commit status, and both follow-ups ran on
+  the request's context, which net/http cancels the moment the connection
+  drops -- plausible whenever the fold is slow, which it is, since it walks
+  every node's metric series before the status call. Nothing else produces a
+  finished run's status, so the check on the pull request stayed `pending`
+  forever. The follow-ups now run detached from the request, under a bound of
+  their own.
 - **controller:** A chunked request body is no longer ignored on the two routes
   whose body is optional. `POST /api/v1/triggers/claim` and
   `POST /api/v1/tokens/{prefix}/rotate` decoded only when the request carried a

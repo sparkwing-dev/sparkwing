@@ -165,6 +165,11 @@ type finishRunReq struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// safety: the run row is terminal before the follow-ups run, and nothing else
+// produces the terminal commit status for a finished run, so a client that
+// goes away must not take them with it; the bound stands in for the request's.
+const finishRunFollowUpTimeout = 30 * time.Second
+
 func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	var body finishRunReq
@@ -188,14 +193,16 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	follow, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), finishRunFollowUpTimeout)
+	defer cancel()
 	if runErr == nil && run != nil {
 		observeRunFinish(run.Pipeline, body.Status, time.Since(run.StartedAt))
-		refreshed, rerr := s.store.GetRun(r.Context(), runID)
+		refreshed, rerr := s.store.GetRun(follow, runID)
 		if rerr == nil {
-			s.foldRunProfiles(r.Context(), refreshed)
+			s.foldRunProfiles(follow, refreshed)
 		}
 	}
-	s.reportGitHubCommitStatus(r.Context(), runID, body.Status)
+	s.reportGitHubCommitStatus(follow, runID, body.Status)
 	w.WriteHeader(http.StatusNoContent)
 }
 
