@@ -965,11 +965,9 @@ type claimTriggerReq struct {
 
 func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 	var body claimTriggerReq
-	if r.ContentLength > 0 {
-		if err := decodeJSON(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
+	if err := decodeOptionalJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	t, err := s.store.ClaimNextTriggerFor(r.Context(), claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
 	if err != nil {
@@ -1003,6 +1001,19 @@ const (
 
 func decodeJSON(r *http.Request, v any) error {
 	return decodeJSONLimit(r, v, maxJSONBody)
+}
+
+// safety: a chunked body reports no content length, so a route whose body is
+// optional reads it whenever there is one and treats only an empty body as
+// absent; gating on a positive length dropped what a streaming client sent.
+func decodeOptionalJSON(r *http.Request, v any) error {
+	if r.Body == nil || r.ContentLength == 0 {
+		return nil
+	}
+	if err := decodeJSON(r, v); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 func decodeJSONLimit(r *http.Request, v any, limit int64) error {

@@ -367,6 +367,14 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** A chunked request body is no longer ignored on the two routes
+  whose body is optional. `POST /api/v1/triggers/claim` and
+  `POST /api/v1/tokens/{prefix}/rotate` decoded only when the request carried a
+  positive `Content-Length`, so a client that streams its body -- which Go's
+  own `http.Client` does for any body it cannot size, and most non-Go clients
+  do -- got a normal success with every field defaulted: a trigger worker
+  asking for one pipeline was handed a trigger for any pipeline, and a rotation
+  asking for an hour of grace got the 24-hour default.
 - **controller:** A run's detail read no longer drops the connection when the
   run has an approval gate or a spawned child pipeline but no plan snapshot.
   The decorations the snapshot supplies are absent in that case, and joining
