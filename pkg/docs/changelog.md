@@ -335,7 +335,10 @@ code change to unlock.
   over-fetch, and the rollup counted the whole over-fetch, so the RUNS and FAIL
   columns and the JSON changed fiftyfold depending on whether an unrelated flag
   was present. The over-fetch is now trimmed back to `--limit` before the
-  rollup, in local and controller mode both.
+  rollup, in local and controller mode both. `--sparkline N` is bounded by
+  `--limit` as a result -- it drew on up to 1000 runs in the filtered case, and
+  now draws on the same window the RUNS column counts, which is what it already
+  did with no filter set.
 
 - **cli:** `sparkwing runs logs --profile <name>` now reads the run and its
   nodes from that profile's state store. It listed nodes from the default local
