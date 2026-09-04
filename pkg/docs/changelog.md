@@ -360,6 +360,14 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** The warm-PVC pool binding is published atomically, so the
+  pool routes no longer race the goroutine that builds it. The router went
+  live before `LoadConfig` and `NewPool` had run, and the handlers read the
+  pool and its config with no synchronization, which the race detector flags
+  and which could hand a request a half-built pool during the first seconds
+  after a controller with `--pool` starts. Requests in that window still
+  answer `503 pool not ready`.
+
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
   that node as cancelled, and an `OnFailure` child skipped because its cancelled
