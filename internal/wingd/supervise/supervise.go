@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -174,9 +173,8 @@ func killAndWaitChild(child Child, done <-chan error, grace time.Duration) error
 }
 
 type execChild struct {
-	cmd    *exec.Cmd
-	done   chan error
-	reaped atomic.Bool
+	cmd  *exec.Cmd
+	done chan error
 }
 
 func startExecChild(self string, args []string) (Child, error) {
@@ -189,30 +187,28 @@ func startExecChild(self string, args []string) (Child, error) {
 		return nil, err
 	}
 	child := &execChild{cmd: cmd, done: make(chan error, 1)}
-	go func() {
-		err := cmd.Wait()
-		// safety: the kernel can hand this pid to an unrelated process the moment
-		// Wait returns, so mark it unsignallable before announcing the exit.
-		child.reaped.Store(true)
-		child.done <- err
-	}()
+	go func() { child.done <- cmd.Wait() }()
 	return child, nil
 }
 
 func (c *execChild) Wait() <-chan error { return c.done }
 
 func (c *execChild) Terminate() error {
-	if c.reaped.Load() {
-		return nil
-	}
-	return signalTerminate(c.cmd.Process.Pid)
+	return signalExited(signalTerminate(c.cmd.Process))
 }
 
 func (c *execChild) Kill() error {
-	if c.reaped.Load() {
+	return signalExited(signalKill(c.cmd.Process))
+}
+
+// safety: signalling the handle rather than the pid means a child the kernel
+// has already reaped answers ErrProcessDone instead of letting the signal reach
+// whichever process inherited its pid.
+func signalExited(err error) error {
+	if errors.Is(err, os.ErrProcessDone) {
 		return nil
 	}
-	return signalKill(c.cmd.Process.Pid)
+	return err
 }
 
 func Run(args []string) error {
