@@ -152,7 +152,7 @@ func newSchema(t *testing.T, baseDSN string) string {
 	t.Cleanup(func() {
 		// safety: t.Context is cancelled before Cleanup runs, so the drop
 		// needs a context of its own.
-		cleanup, err := store.OpenPostgres(context.Background(), baseDSN) //nolint:contextcheck // t.Context is already cancelled inside Cleanup
+		cleanup, err := store.OpenPostgres(context.Background(), baseDSN)
 		if err != nil {
 			t.Errorf("open postgres to drop schema %s: %v", schema, err)
 			return
