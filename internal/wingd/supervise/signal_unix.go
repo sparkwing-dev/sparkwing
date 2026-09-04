@@ -2,12 +2,15 @@
 
 package supervise
 
-import "syscall"
+import (
+	"os"
+	"syscall"
+)
 
-func signalTerminate(pid int) error {
-	return syscall.Kill(pid, syscall.SIGTERM)
+func signalTerminate(p *os.Process) error {
+	return p.Signal(syscall.SIGTERM)
 }
 
-func signalKill(pid int) error {
-	return syscall.Kill(pid, syscall.SIGKILL)
+func signalKill(p *os.Process) error {
+	return p.Kill()
 }

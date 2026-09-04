@@ -2,21 +2,12 @@
 
 package supervise
 
-import (
-	"fmt"
+import "os"
 
-	"golang.org/x/sys/windows"
-)
-
-func signalTerminate(pid int) error {
-	return signalKill(pid)
+func signalTerminate(p *os.Process) error {
+	return signalKill(p)
 }
 
-func signalKill(pid int) error {
-	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, uint32(pid))
-	if err != nil {
-		return fmt.Errorf("OpenProcess: %w", err)
-	}
-	defer windows.CloseHandle(h)
-	return windows.TerminateProcess(h, 1)
+func signalKill(p *os.Process) error {
+	return p.Kill()
 }
