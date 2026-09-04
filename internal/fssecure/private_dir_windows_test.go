@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"golang.org/x/sys/windows"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 func TestSecurePrivateDirAppliesProtectedCurrentUserDACL(t *testing.T) {
