@@ -455,8 +455,10 @@ code change to unlock.
   disconnected guard now gets the same bounded grace an unreclaimed lease gets
   after a daemon restart (30 seconds by default, `GraceWindow`); when it closes,
   the daemon terminates the session, releases the lease and finalizes the run.
-  A client that reattaches inside the window keeps its session running, and a
-  tree that ends on its own is still released the moment the sweep sees it.
+  A client that reattaches inside the window keeps its session running, a
+  reattach once termination has begun is refused rather than handed a lease over
+  a dying tree, and a tree that ends on its own is still released the moment the
+  sweep sees it.
 
 - **local admission:** A daemon restart no longer hands one connection every
   member of a lease a nested run shares. A parent and its child present the
@@ -475,6 +477,9 @@ code change to unlock.
   send. It now drops that connection the way every other delivery does and
   finishes the flush, so the promoted run learns it holds the lease and the
   cancelling command gets its answer instead of retrying into `Found: false`.
+  A failed tombstone write flushes those promotions too; it still withholds the
+  acknowledgement, which is how the caller learns the cancellation is not
+  durable.
 
 - **local admission:** The extra concurrency lease a nested run takes for a
   `.Concurrency()` group its parent does not already hold now records the run
