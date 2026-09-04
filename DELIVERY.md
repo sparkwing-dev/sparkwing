@@ -27,7 +27,10 @@ this file is a menu and checklist, not a command that every change must run.
 - **Normal broad check:** `sparkwing run pre-commit` covers every committed Go
   module, the dashboard TypeScript unit, full ESLint, production build,
   and browser smoke suites, formatting, vet, build, tests, documentation
-  mirrors, and source policy. Unit and ESLint run in parallel; the production
+  mirrors, and source policy. It also runs `go test -race` on the packages
+  whose Go files changed (staged, or since origin/main when nothing is
+  staged), so a change never reaches main without the race detector having
+  seen its own package. Unit and ESLint run in parallel; the production
   build then feeds the browser suite.
 - **Gating a branch beside a released daemon:** when the branch's pipeline
   binary carries a newer runs-store schema than the sparkwing hosting this

@@ -61,6 +61,7 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	buildStep := sparkwing.Step(w, "build", runBuild).Needs(vetStep)
 	testStep := sparkwing.Step(w, "test", runTest).Needs(buildStep)
 	sparkwing.Step(w, "lint", runGolangciLint).Needs(testStep)
+	sparkwing.Step(w, "race-touched", runRaceTouched).Needs(testStep)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
