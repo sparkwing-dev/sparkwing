@@ -194,7 +194,7 @@ func windowsProcessChildren(processes map[int]windowsProc) map[int][]int {
 	children := map[int][]int{}
 	for processID, proc := range processes {
 		parent, parentPresent := processes[proc.parentPID]
-		// Toolhelp retains the numeric parent after it exits. Birth order keeps
+		// safety: Toolhelp retains the numeric parent after it exits. Birth order keeps
 		// an orphan from becoming the child of a later process that reused the PID.
 		if parentPresent && parent.measured && proc.measured && proc.startTicks < parent.startTicks {
 			continue

@@ -163,7 +163,7 @@ func (asset Verified) stageProbe(name string) (string, func(), error) {
 		_ = os.Remove(directory)
 		return "", nil, fmt.Errorf("inspect private %s probe directory: %w", name, err)
 	}
-	// Cleanup touches the child only while its secured parent retains the same
+	// safety: Cleanup touches the child only while its secured parent retains the same
 	// identity, then uses non-recursive removes so replacements are never walked.
 	cleanup := func() {
 		current, currentErr := os.Lstat(directory)
