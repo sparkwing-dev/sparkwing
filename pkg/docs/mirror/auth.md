@@ -343,7 +343,10 @@ freshly emptied database.
 When controller authentication is enabled, the bootstrap probe reports
 `{"needed": false}` and `POST /api/v1/users` requires an admin token even
 if the users table is empty. An operator can use that token with
-`sparkwing cluster users add` to create the first dashboard user.
+`sparkwing cluster users add` to create the first dashboard user. That
+first account has to be an admin, so leave `--scope` off, or name a list
+that contains `admin`; a narrower list is refused with `400` while the
+users table is empty.
 
 After the first admin is created, additional users are added via
 `sparkwing cluster users add`. Pass `--scope` to bound what that account's

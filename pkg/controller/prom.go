@@ -129,13 +129,25 @@ func observeHTTPRequest(route, method string, status int, d time.Duration) {
 	if route == "" {
 		route = "unknown"
 	}
+	method = methodLabel(method)
 	httpRequestsTotal.WithLabelValues(route, method, strconv.Itoa(status)).Inc()
 	if d > 0 {
 		httpRequestDurationSeconds.WithLabelValues(route, method).Observe(d.Seconds())
 	}
 }
 
-const unroutedLabel = "other"
+// safety: a request line carries any token the caller cares to invent, so the
+// method reaches Prometheus only when it is one this server can be asked for.
+func methodLabel(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodOptions:
+		return method
+	}
+	return otherLabel
+}
+
+const otherLabel = "other"
 
 // safety: a request that matches no route is labeled with a constant, because
 // any caller could otherwise mint a permanent time series per path they invent.
@@ -148,7 +160,7 @@ func muxRouteLabeler(muxes ...*http.ServeMux) func(*http.Request) string {
 				}
 			}
 		}
-		return unroutedLabel
+		return otherLabel
 	}
 }
 
