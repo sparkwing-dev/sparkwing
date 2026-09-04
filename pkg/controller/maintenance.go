@@ -18,11 +18,9 @@ type reconcileOrphansResp struct {
 
 func (s *Server) handleReconcileOrphans(w http.ResponseWriter, r *http.Request) {
 	var body reconcileOrphansReq
-	if r.ContentLength > 0 {
-		if err := decodeJSON(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
+	if err := decodeOptionalJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	// safety: the store reads a zero threshold as "everything running is
 	// orphaned", so the caller names the age rather than inheriting one here.

@@ -258,6 +258,11 @@ func DecorationsFromSnapshot(snapshot []byte) map[string]*Decorations {
 // .SpawnedPipelines so the dashboard can render a corner pill.
 func DecorateNodes(nodes []*store.Node, snapshot []byte, steps []*store.NodeStep, approvals []*store.Approval, spawned []store.SpawnedChild) []*NodeWithDecorations {
 	dmap := DecorationsFromSnapshot(snapshot)
+	if dmap == nil {
+		// bug: the joins below write into dmap, and an empty or unparseable
+		// snapshot yields a nil map, which panics on assignment.
+		dmap = map[string]*Decorations{}
+	}
 	if len(steps) > 0 {
 		populateStepRuntime(dmap, steps)
 	}

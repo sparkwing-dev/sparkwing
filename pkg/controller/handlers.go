@@ -165,6 +165,12 @@ type finishRunReq struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// safety: the run row is terminal before the follow-ups run, and nothing else
+// produces the terminal commit status for a finished run, so a client that
+// goes away must not take them with it. Staying under the shutdown budget
+// keeps a drain that starts mid-handler from ending one.
+const finishRunFollowUpTimeout = controllerShutdownBudget - time.Second
+
 func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	var body finishRunReq
@@ -188,21 +194,23 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	follow, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), finishRunFollowUpTimeout)
+	defer cancel()
 	if runErr == nil && run != nil {
 		observeRunFinish(run.Pipeline, body.Status, time.Since(run.StartedAt))
-		refreshed, rerr := s.store.GetRun(r.Context(), runID)
+		refreshed, rerr := s.store.GetRun(follow, runID)
 		if rerr == nil {
-			s.foldRunProfiles(r.Context(), refreshed)
+			s.foldRunProfiles(follow, refreshed)
 		}
 	}
-	s.reportGitHubCommitStatus(r.Context(), runID, body.Status)
+	s.reportGitHubCommitStatus(follow, runID, body.Status)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	defer r.Body.Close()
-	snapshot, err := io.ReadAll(r.Body)
+	snapshot, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPlanSnapshotBody))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -780,6 +788,45 @@ type heartbeatResp struct {
 	CancelRequested bool `json:"cancel_requested"`
 }
 
+// safety: scope alone says a principal may work triggers, not which trigger,
+// so ending or renewing one is bound to the claimant its row records. Admin
+// bypasses, and an unauthenticated server has no claimant to bind to.
+func (s *Server) claimedTrigger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFromContext(r.Context())
+		if !ok || p.HasScope(ScopeAdmin) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		id := r.PathValue("id")
+		holder, err := s.store.TriggerClaimant(r.Context(), id)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		// safety: a row nobody holds is a reaped claim, and a worker's heartbeat
+		// loop stops on not-found; answering forbidden there would keep it
+		// retrying until its silence window terminates the whole consumer.
+		if holder.TokenPrefix == "" {
+			writeError(w, http.StatusNotFound, store.ErrNotFound)
+			return
+		}
+		if holder != claimIdentity(r) {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:      "claim_required",
+				Principal: p.label(),
+				Message:   "trigger " + id + " is claimed by another principal",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	cancelled, err := s.store.HeartbeatTrigger(r.Context(), id, 0)
@@ -872,11 +919,9 @@ type claimSpecificTriggerReq struct {
 
 func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Request) {
 	var body claimSpecificTriggerReq
-	if r.ContentLength > 0 {
-		if err := decodeJSON(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
+	if err := decodeOptionalJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	lease := time.Duration(body.LeaseNanos)
 	if lease <= 0 {
@@ -937,11 +982,9 @@ type claimTriggerReq struct {
 
 func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 	var body claimTriggerReq
-	if r.ContentLength > 0 {
-		if err := decodeJSON(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
+	if err := decodeOptionalJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	t, err := s.store.ClaimNextTriggerFor(r.Context(), claimIdentity(r), 0, body.Pipelines, body.TriggerSources)
 	if err != nil {
@@ -967,10 +1010,27 @@ const (
 	// safety: a secret value is caller data, so it gets its own ceiling
 	// rather than an exemption from the shared decode path.
 	maxSecretJSONBody = 8 << 20
+	// safety: a plan snapshot is stored verbatim rather than decoded, so it
+	// needs a ceiling of its own; it matches the store's envelope ceiling
+	// because both bound one blob on a run's row.
+	maxPlanSnapshotBody = store.MaxNodeDispatchEnvelope
 )
 
 func decodeJSON(r *http.Request, v any) error {
 	return decodeJSONLimit(r, v, maxJSONBody)
+}
+
+// safety: a chunked body reports no content length, so a route whose body is
+// optional reads it whenever there is one and treats only an empty body as
+// absent; gating on a positive length dropped what a streaming client sent.
+func decodeOptionalJSON(r *http.Request, v any) error {
+	if r.Body == nil || r.ContentLength == 0 {
+		return nil
+	}
+	if err := decodeJSON(r, v); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 func decodeJSONLimit(r *http.Request, v any, limit int64) error {

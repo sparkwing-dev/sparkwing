@@ -3425,6 +3425,28 @@ func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string
 	return held > 0, nil
 }
 
+// TriggerClaimant returns the claimant recorded on the trigger row,
+// whatever state that claim is in now. [Store.PrincipalHoldsTriggerClaim]
+// is the live-lease question; this is the "who took it" question, so the
+// holder is still recognisable on a lease that has just lapsed and on a
+// trigger it already finished, which is what lets it retry a close.
+// Every requeue path clears the record, so a reaped trigger comes back
+// with the zero identity -- nobody holds it -- and a trigger that does
+// not exist comes back ErrNotFound.
+func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error) {
+	var claimant ClaimIdentity
+	err := s.queryRow(ctx,
+		`SELECT claim_principal, claim_token_prefix FROM triggers WHERE id = ?`,
+		triggerID).Scan(&claimant.Principal, &claimant.TokenPrefix)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ClaimIdentity{}, ErrNotFound
+	}
+	if err != nil {
+		return ClaimIdentity{}, err
+	}
+	return claimant, nil
+}
+
 // PrincipalHoldsNodeClaim reports whether claimant holds the node's
 // unexpired claim. An unbound claimant holds nothing, so an
 // unauthenticated caller never passes this check.

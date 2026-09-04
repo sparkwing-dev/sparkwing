@@ -28,7 +28,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
-| `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run |
+| `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
@@ -217,8 +217,10 @@ A browser session carries the scopes of the user who signed in. The proxy
 checks them against the target route before forwarding, so an account holding
 only `runs.read` reads runs and gets `403` on cancel. Create narrower accounts
 with `sparkwing cluster users add --scope runs.read,logs.read`; omitting
-`--scope` grants `admin`. The first-visit bootstrap admin is always `admin`,
-and `sparkwing cluster users list` prints the scope set of every account.
+`--scope` grants `admin`. The first-visit bootstrap account defaults to
+`admin` and may carry more scopes beside it, but a scope set that omits
+`admin` is rejected with `400`, and `sparkwing cluster users list` prints the
+scope set of every account.
 
 The web pod's own service token needs `runs.read` plus `logs.read`. Add
 `runs.write` where the UI cancels, retries, or releases a debug pause, and
@@ -341,7 +343,10 @@ freshly emptied database.
 When controller authentication is enabled, the bootstrap probe reports
 `{"needed": false}` and `POST /api/v1/users` requires an admin token even
 if the users table is empty. An operator can use that token with
-`sparkwing cluster users add` to create the first dashboard user.
+`sparkwing cluster users add` to create the first dashboard user. That
+first account has to be an admin, so leave `--scope` off, or name a list
+that contains `admin`; a narrower list is refused with `400` while the
+users table is empty.
 
 After the first admin is created, additional users are added via
 `sparkwing cluster users add`. Pass `--scope` to bound what that account's

@@ -238,7 +238,8 @@ func (l *Loopback) Handler() http.Handler {
 	router.Handle("/", l.authenticate(mux))
 	// safety: preserve the server wrapper order while the Warn-level loopback
 	// logger suppresses per-request Info lines from node state writes.
-	return otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, l.logger))
+	return otelutil.WrapHandler("sparkwing-controller",
+		withRequestLog(router, l.logger, muxRouteLabeler(router, mux)))
 }
 
 func (l *Loopback) authenticate(next http.Handler) http.Handler {
@@ -379,7 +380,7 @@ func (l *Loopback) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 
 func (l *Loopback) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.Body.Close() }()
-	snapshot, err := io.ReadAll(r.Body)
+	snapshot, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPlanSnapshotBody))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -1161,11 +1162,9 @@ func (l *Loopback) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var body claimSpecificTriggerReq
-	if r.ContentLength > 0 {
-		if err := decodeJSON(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
+	if err := decodeOptionalJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	lease := time.Duration(body.LeaseNanos)
 	if lease <= 0 {

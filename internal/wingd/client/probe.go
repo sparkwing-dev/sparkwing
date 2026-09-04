@@ -62,8 +62,9 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 	defer func() { _ = nc.Close() }()
 	// safety: bound reads because a probe has no lease or reconnect path if the
 	// daemon accepts but never responds.
-	_ = nc.SetDeadline(time.Now().Add(probeTimeout))
-	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true}
+	deadline := time.Now().Add(probeTimeout)
+	_ = nc.SetDeadline(deadline)
+	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true, connDeadline: deadline}
 	ack, err := cl.handshake("")
 	if err != nil {
 		return DaemonInfo{}, fmt.Errorf("wingd/client: probe %s: %w", sock, err)
@@ -101,7 +102,7 @@ func ProbeQueue(ctx context.Context, sock string) (wingwire.QueueState, error) {
 		deadline = ctxDeadline
 	}
 	_ = nc.SetDeadline(deadline)
-	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true}
+	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true, connDeadline: deadline}
 	ack, err := cl.handshake("")
 	if err != nil {
 		return wingwire.QueueState{}, fmt.Errorf("wingd/client: queue probe %s: %w", sock, err)
@@ -163,7 +164,7 @@ func healthProbeOnce(ctx context.Context, sock string) error {
 		deadline = d
 	}
 	_ = nc.SetDeadline(deadline)
-	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true}
+	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true, connDeadline: deadline}
 	ack, err := cl.handshake("")
 	if err != nil {
 		return fmt.Errorf("wingd/client: health probe %s: %w", sock, err)

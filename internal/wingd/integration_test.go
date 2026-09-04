@@ -1967,11 +1967,11 @@ func TestGrantedSubmitReconnectRejectsRestoredMultiMemberLease(t *testing.T) {
 	}
 
 	waiterClient := ensure(t, home, "")
-	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	waiter, err := waiterClient.Acquire(ctx, semReq("waiter", "lock", 1, 1, wingwire.PolicyQueue), nil)
 	if err != nil {
-		t.Fatalf("waiter acquire after reattached release: %v", err)
+		t.Fatalf("waiter acquire after reattached release and grace expiry: %v", err)
 	}
 	if err := waiter.Release(); err != nil {
 		t.Fatalf("waiter release: %v", err)

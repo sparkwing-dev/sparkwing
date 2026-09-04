@@ -2133,16 +2133,18 @@ is a TTY (the password is not shown on-screen or recorded in
 shell history). Passing --password skips the prompt -- useful
 for CI seed flows but leaks via shell history if used
 interactively. --scope sets what the account's dashboard
-sessions may reach; omitting it grants admin.`,
+sessions may reach; omitting it grants admin. The first account
+on a controller must be an admin, so a --scope list that omits
+admin is refused until one exists.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Dashboard username", Required: true, Group: "Input"},
 		{Name: "password", Argument: "PASSWORD", Desc: "Password (omit to prompt interactively)", Group: "Input"},
-		{Name: "scope", Argument: "LIST", Desc: "Comma-separated scopes (omit to grant admin)", Group: "Input"},
+		{Name: "scope", Argument: "LIST", Desc: "Comma-separated scopes (omit to grant admin; the first account must include admin)", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Interactive add", "sparkwing cluster users add --name alice --profile prod"},
-		{"Read-only dashboard account", "sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod"},
+		{"Interactive add of the first admin", "sparkwing cluster users add --name alice --profile prod"},
+		{"Read-only account, once an admin exists", "sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod"},
 		{"Non-interactive add for CI", `sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod`},
 	},
 }

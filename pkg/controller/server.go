@@ -439,7 +439,8 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 func (s *Server) Handler() http.Handler {
 	mux, router := s.routers()
 	router.Handle("/", s.authenticated(unsupportedRouteFallback(mux)))
-	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
+	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
+		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
 }
 
 // safety: neither mux is wired to the other and no handler runs, so a caller
@@ -471,8 +472,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
 	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleClaimTrigger)))
-	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleHeartbeat)))
-	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, http.HandlerFunc(s.handleFinishTrigger)))
+	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.claimedTrigger(http.HandlerFunc(s.handleHeartbeat))))
+	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, s.claimedTrigger(http.HandlerFunc(s.handleFinishTrigger))))
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
@@ -727,6 +728,11 @@ func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logge
 // AttachPool) at addr. Split from Serve so the controller pod main can
 // wire in an in-cluster k8s client without passing options through
 // Serve.
+// safety: the HTTP drain and the commit-status drain each get this whole
+// budget, so a request still folding a run's profiles is not cut off by
+// time the listener's own shutdown already spent.
+const controllerShutdownBudget = 5 * time.Second
+
 func ServeWith(ctx context.Context, s *Server, addr string) error {
 	srv := &http.Server{
 		Addr:              addr,
@@ -780,17 +786,15 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), controllerShutdownBudget)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			s.logger.Warn("controller HTTP shutdown incomplete", "err", err)
 		}
-		s.shutdownGitHubCommitStatuses(shutdownCtx)
+		s.drainGitHubCommitStatuses()
 		return nil
 	case err := <-errCh:
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		s.shutdownGitHubCommitStatuses(shutdownCtx)
+		s.drainGitHubCommitStatuses()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -798,7 +802,12 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 }
 
-func (s *Server) shutdownGitHubCommitStatuses(ctx context.Context) {
+// safety: the queue holds the terminal status a finished run has no other
+// producer for, so its drain owns a budget rather than inheriting whatever
+// the listener's shutdown left of one.
+func (s *Server) drainGitHubCommitStatuses() {
+	ctx, cancel := context.WithTimeout(context.Background(), controllerShutdownBudget)
+	defer cancel()
 	if err := s.Shutdown(ctx); err != nil {
 		s.logger.Warn("github commit status shutdown incomplete", "err", err)
 	}
@@ -936,17 +945,17 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func withRequestLog(next http.Handler, logger *slog.Logger) http.Handler {
+func withRequestLog(next http.Handler, logger *slog.Logger, routeLabel func(*http.Request) string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		writer := http.ResponseWriter(rw)
 		if _, ok := w.(http.Flusher); ok {
 			writer = &flushingStatusRecorder{statusRecorder: rw}
 		}
+		route := routeLabel(r)
 		start := time.Now()
 		next.ServeHTTP(writer, r)
 		elapsed := time.Since(start)
-		route := normalizeRoute(r.URL.Path)
 		observeHTTPRequest(route, r.Method, rw.status, elapsed)
 		logger.Info(
 			"http",

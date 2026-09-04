@@ -175,6 +175,13 @@ code change to unlock.
 
 ### Changed
 
+- **controller:** A plan snapshot upload is capped at 4 MiB, the same ceiling
+  the store puts on a node's dispatch envelope. `POST /api/v1/runs/{id}/plan`
+  is the one write path that stores its body verbatim rather than decoding it,
+  and it read the body whole with no limit, so a caller holding a claim on a
+  run could make the controller buffer and persist a body of any size. An
+  over-cap body is now refused with 400 and the stored snapshot is left alone.
+  The same cap applies on the loopback controller a local run talks to.
 - **cli:** The read verbs see runs that went standalone. `runs list`, `jobs`,
   `runs find`, and `runs failures` merge this home's own store with every
   standalone store under it, newest first, and tag each row with the store it
@@ -359,6 +366,135 @@ code change to unlock.
   release ship it.
 
 ### Fixed
+
+- **runner:** Cancelling or bouncing a node now takes effect while its process
+  group is still being cleaned up. The cleanup held the lock the termination
+  path needs, so the SIGTERM never reached the group and the call never
+  returned, despite the deadline the runner gives it -- the group's final
+  descendant wait has no bound, and a descendant that survives SIGKILL, as one
+  in uninterruptible sleep on a hung mount does, parks it indefinitely.
+  Termination now signals straight away and leaves on its own deadline.
+- **wingd:** The supervisor no longer signals a daemon it has already reaped.
+  `stopChild` sent SIGTERM before looking at the exit channel, so a daemon that
+  exited on its own -- the routine idle-exit path -- in the same moment the
+  supervisor decided to stop it got a signal delivered to whatever process the
+  kernel had since handed that pid to.
+- **controller:** The warm cache PVC pool refills a gap left by a deleted member
+  instead of stalling below its configured size. `Reconcile` derived the next
+  PVC name from the count of surviving PVCs, so with `pool_size: 3` and member
+  `-0` deleted it re-attempted `sparkwing-cache-pool-2`, which already existed,
+  and logged a creation that never happened on every tick. It now allocates the
+  lowest free member index and says when a PVC already existed.
+- **wingd:** A run no longer hangs indefinitely when the admission daemon
+  accepts its connection and then stalls. Client frames now carry the same
+  bounded write deadline the daemon applies to its own side, so a full socket
+  buffer fails the exchange into the existing retry path instead of blocking
+  admission, release, cancel and queue-state writes with no diagnostic.
+- **wingd:** A client no longer wedges after an exchange that ends on an
+  expired or cancelled context. The wake that interrupts the wait could land
+  after the caller had already stood it down, leaving the connection past its
+  deadline for good, so every later exchange on that client failed instantly
+  and reported the daemon as unreachable.
+- **wingd:** Ctrl-C again ends a queued run after the admission daemon has
+  restarted under it. The waiter armed cancellation against the connection it
+  held when the wait began, so once a reconnect replaced that socket the
+  interrupt reached a dead one and the run stayed blocked until the daemon
+  happened to send a frame.
+- **controller:** Finishing a run no longer loses the terminal GitHub commit
+  status and the run's capacity measurements when the client goes away.
+  `POST /api/v1/runs/{id}/finish` writes the terminal run row and then folds
+  the run's profiles and posts the commit status, and both follow-ups ran on
+  the request's context, which net/http cancels the moment the connection
+  drops -- plausible whenever the fold is slow, which it is, since it walks
+  every node's metric series before the status call. Nothing else produces a
+  finished run's status, so the check on the pull request stayed `pending`
+  forever. The follow-ups now run detached from the request, under a bound
+  that sits inside the shutdown budget, and the commit-status queue's drain
+  at shutdown gets a budget of its own instead of whatever the HTTP
+  listener's own shutdown left of one.
+- **controller:** A chunked request body is no longer ignored on the five
+  routes whose body is optional: `POST /api/v1/triggers/claim`,
+  `/triggers/{id}/claim` (on both the hosted controller and the loopback one a
+  local run mounts), `/tokens/{prefix}/rotate`, and
+  `/maintenance/reconcile-orphans`. Each decoded only when the request carried
+  a positive `Content-Length`, so a client that streams its body -- which Go's
+  own `http.Client` does for any body it cannot size, and most non-Go clients
+  do -- got a normal success with every field defaulted: a trigger worker
+  asking for one pipeline was handed a trigger for any pipeline, a claim asking
+  for an hour of lease got the three-minute default, and a rotation asking for
+  an hour of grace got the 24-hour default. The orphan reconcile refused its
+  own request instead, since it rejects a zero threshold.
+- **controller:** A run's detail read no longer drops the connection when the
+  run has an approval gate or a spawned child pipeline but no plan snapshot.
+  The decorations the snapshot supplies are absent in that case, and joining
+  the approval and spawned-pipeline rows onto them panicked, so
+  `GET /api/v1/runs/{id}?include=nodes` -- the dashboard's run page -- failed
+  for that run on every retry.
+- **controller:** The concurrency waiter stream at
+  `GET /api/v1/concurrency/{key}/notify` keeps its documented 30-minute
+  budget. The listener's 30-second write timeout covers the whole
+  connection, and the handler never pushed it back, so a waiter promoted
+  more than 30 seconds after connecting -- the normal case for a queue --
+  got the `: open` preamble and then an EOF, and the `ready` event was lost
+  with nothing logged. The handler now extends the connection deadline on
+  every poll and logs an event it could not write.
+
+- **controller:** HTTP request metrics label the `route` with the pattern the
+  request matched rather than a hand-maintained regex table, so the ten
+  `/api/v1/concurrency/{key}/...` routes, `/api/v1/artifacts/{key}`, the
+  `{nodeID}` in the approval routes and the `{path...}` in the Git cache proxy
+  routes stop minting a permanent Prometheus series per distinct key. An
+  unrouted path is now labeled `other` instead of carrying the raw path, and
+  so is any request method outside the seven the controller answers, which an
+  unauthenticated caller could otherwise invent one series at a time.
+
+- **controller:** The warm-PVC pool binding is published atomically, so the
+  pool routes no longer race the goroutine that builds it. The router went
+  live before `LoadConfig` and `NewPool` had run, and the handlers read the
+  pool and its config with no synchronization, which the race detector flags
+  and which could hand a request a half-built pool during the first seconds
+  after a controller with `--pool` starts. Requests in that window still
+  answer `503 pool not ready`.
+- **local admission:** A guarded session (`sparkwing queue exec`) whose client
+  dies is now reaped instead of held forever. The daemon marked the lease
+  disconnected and waited for the command tree to end on its own -- no timer, and
+  nothing that would ever end it -- so an abandoned tree kept its cores,
+  memory and semaphores charged and the daemon could never idle out. A
+  disconnected guard now gets the same bounded grace an unreclaimed lease gets
+  after a daemon restart (30 seconds by default, `GraceWindow`); when it closes,
+  the daemon terminates the session, releases the lease and finalizes the run.
+  A client that reattaches inside the window keeps its session running, a
+  reattach once termination has begun is refused rather than handed a lease over
+  a dying tree, and a tree that ends on its own is still released the moment the
+  sweep sees it.
+
+- **local admission:** A daemon restart no longer hands one connection every
+  member of a lease a nested run shares. A parent and its child present the
+  same lease token, so whichever reclaimed the lease first took the other's
+  membership with it -- freeing the whole charge as soon as either run
+  finished, while the other was still executing -- and the run that lost the
+  race was evicted outright. Each run now reclaims its own membership, whatever
+  no run reclaims is released when the reattach grace window closes, and a child
+  that attaches after a reclaim is recorded again.
+
+- **local admission:** `sparkwing runs cancel` no longer strands the run queued
+  behind the one it cancels when the cancelled run's own process is already
+  gone. The daemon promoted the waiter in the ledger, then abandoned the whole
+  batch of pending frames -- the promoted run's grant included -- and its own
+  acknowledgement the moment the wind-down signal to the dead run failed to
+  send. It now drops that connection the way every other delivery does and
+  finishes the flush, so the promoted run learns it holds the lease and the
+  cancelling command gets its answer instead of retrying into `Found: false`.
+  A failed tombstone write flushes those promotions too; it still withholds the
+  acknowledgement, which is how the caller learns the cancellation is not
+  durable.
+
+- **local admission:** The extra concurrency lease a nested run takes for a
+  `.Concurrency()` group its parent does not already hold now records the run
+  that owns it. A child attaches to its parent's lease and is handed that
+  lease's token, but the daemon accepted that token as proof of ownership only
+  from the lease's original run, so the sub-lease was admitted ownerless and
+  both the queue view and the stall probe's owner check lost track of it.
 
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
@@ -769,6 +905,29 @@ code change to unlock.
 
 ### Security
 
+- **controller:** Finishing or renewing a trigger is now bound to the worker
+  that claimed it. `POST /api/v1/triggers/{id}/heartbeat` and
+  `/triggers/{id}/done` checked the `triggers.claim` scope and nothing else, so
+  any token carrying that scope -- every trigger worker in a fleet, or one
+  stolen from any of them -- could close out another worker's in-flight
+  trigger, hiding it from the reaper's lease-expiry cascade, or hold a dead
+  worker's trigger alive forever by heartbeating it. Both routes answer `403
+  claim_required` unless the caller is the claimant the trigger row records; an
+  `admin` token still bypasses, and a controller serving without auth is
+  unchanged.
+- **controller:** `POST /api/v1/users` no longer discards the requested scopes
+  when it takes the bootstrap path. Creating the first account with an explicit
+  scope set returned a full `admin` account instead, so an operator who asked
+  for `runs.read` got a superuser and never learned of it. The bootstrap path
+  now honours the set it is given, and refuses one that omits `admin` with a
+  `400` rather than widening it; omitting `scopes` still grants `admin`.
+
+  worker's trigger alive forever by heartbeating it. Both routes now answer
+  `403 claim_required` when another principal holds the trigger's claim, and
+  `404` when the row records no claimant at all -- a trigger that never
+  existed, or one the reaper requeued, which is the answer a worker's
+  heartbeat loop already reads as "claim lost, stop". An `admin` token still
+  bypasses, and a controller serving without auth is unchanged.
 - **store:** A SQLite state-database path containing `#` or `?` no longer opens
   a different file. The path was interpolated into a `file:` URI without
   escaping, so SQLite ended the filename at the first such character and opened
@@ -1176,6 +1335,33 @@ code change to unlock.
 
 ### Docs
 
+- **api:** `api/openapi.yaml` now describes the wire types the controller
+  actually serves, and `bin/check-api-spec.sh` holds it there. Every object with
+  a `properties` block -- a named schema or an inline request or response body
+  alike -- names the Go type it mirrors as `x-sparkwing-go-type`, and the check
+  compares its members and their OpenAPI types against that type's JSON tags, so
+  a renamed, dropped, or retyped field fails the check instead of leaving the
+  document quietly untrue. Two escapes stay, both spelled out in the file:
+  `x-sparkwing-go-type: none` where the controller writes the shape from a map
+  literal, and `x-sparkwing-go-partial` where the document covers part of a
+  larger type (the unified queue view, which reuses the admission daemon's
+  snapshot type) -- that one still rejects a member the type does not serialize.
+  The corrections an integrator can act on, each of which a spec-conformant
+  client got a `400` or a missing field for: `TriggerRequest` no longer
+  documents `plan_admission`, which the trigger API dropped in v0.16.0;
+  `CreateTokenRequest` takes `ttl_secs`, not `expires_at`; `CreateTokenResponse`
+  answers `{token, metadata}`, not `{token, prefix, token_metadata}`; `Token`
+  and `Secret` timestamps are Unix seconds, not RFC3339 strings; `Agent` is the
+  shape the agents view serves; the node and step annotation routes read
+  `message`, not `annotation`, and the summary routes read `markdown`, not
+  `summary`; `POST /api/v1/runs/{id}/nodes/{nodeID}/steps/skip` never read the
+  documented `reason`, and `POST /api/v1/runs/{id}/cancel` never read a body at
+  all. `POST /api/v1/secrets` regains `repo` and `shared`, `POST
+  /api/v1/nodes/claim` regains `headroom`, `GET /api/v1/auth/session` regains
+  `csrf_token`, `GET /api/v1/auth/whoami` regains `token_prefix`, and `Run`,
+  `Node`, `Trigger`, `Secret`, `NodeBounce`, `AuthError`, `Receipt`,
+  `ConcurrencyState`, `ConcurrencyHolder` and both acquire-slot bodies regain
+  the members the document had dropped.
 - **helm:** Both chart READMEs now open with the minimal `helm template`
   invocation. `helm template` stops on the runner bundle's `validate.yaml`
   until `controller.tokenSecret.name` is set, and `sparkwing-full` takes it

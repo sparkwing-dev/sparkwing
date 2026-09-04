@@ -57,6 +57,7 @@ type Daemon struct {
 	leaseCharge         map[admission.LeaseID]wingwire.HostResources
 	leaseMembers        map[admission.LeaseID][]string
 	reattachWait        map[admission.LeaseID]struct{}
+	reattachMembers     map[admission.LeaseID][]string
 	cancelPending       map[string]struct{}
 	cancelledRuns       map[string]struct{}
 	cancelledRunOrder   []string
@@ -152,6 +153,7 @@ func New(cfg Config) (*Daemon, error) {
 		leaseCharge:         map[admission.LeaseID]wingwire.HostResources{},
 		leaseMembers:        map[admission.LeaseID][]string{},
 		reattachWait:        map[admission.LeaseID]struct{}{},
+		reattachMembers:     map[admission.LeaseID][]string{},
 		cancelPending:       map[string]struct{}{},
 		cancelledRuns:       map[string]struct{}{},
 		disconnectedPending: map[string]struct{}{},
@@ -380,6 +382,7 @@ func (d *Daemon) initLedger() error {
 			d.guards[ls.ID] = &sessionGuardState{persistedGuard: guard, disconnected: true}
 		} else {
 			d.reattachWait[ls.ID] = struct{}{}
+			d.reattachMembers[ls.ID] = append([]string(nil), ls.Members...)
 		}
 	}
 	for _, guard := range guards {
@@ -447,12 +450,13 @@ func (d *Daemon) expireGrace() {
 	var events []admission.Event
 	released := 0
 	for id := range d.reattachWait {
-		for _, m := range d.leaseMembers[id] {
+		for _, m := range d.reattachMembers[id] {
 			evs, err := d.ledger.Release(id, m)
 			if err == nil {
 				events = append(events, evs...)
 			}
 		}
+		delete(d.reattachMembers, id)
 		delete(d.reattachWait, id)
 		released++
 	}
@@ -1203,9 +1207,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	c.origin = req.Origin
 	c.parentRun = d.leaseRun[leaseID]
 	d.byRun[req.RunID] = c
-	if existing, ok := d.leaseMembers[leaseID]; ok {
-		d.leaseMembers[leaseID] = append(existing, req.RunID)
-	}
+	d.leaseMembers[leaseID] = append(d.leaseMembers[leaseID], req.RunID)
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
@@ -1240,7 +1242,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	}
 	guard := d.guards[leaseID]
 	_, pending := d.reattachWait[leaseID]
-	if !pending && guard == nil {
+	if (!pending && guard == nil) || (guard != nil && guard.terminating) {
 		d.mu.Unlock()
 		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
 		return
@@ -1278,34 +1280,32 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	_, pending = d.reattachWait[leaseID]
 	guard = d.guards[leaseID]
 	if err != nil || currentLeaseID != leaseID || (!pending && guard == nil) ||
-		(guard != nil && !guard.disconnected) {
+		(guard != nil && (!guard.disconnected || guard.terminating)) {
 		d.mu.Unlock()
 		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
 		return
 	}
-	if pending {
-		delete(d.reattachWait, leaseID)
-	}
 	requestID := d.leaseRun[leaseID]
+	reclaimed := requestID
 	c.role = roleHolder
 	c.leaseID = leaseID
-	c.runID = requestID
 	c.startAt = d.now()
 	c.finalizable = true
 	c.resources = d.leaseCharge[leaseID]
-	if members, ok := d.leaseMembers[leaseID]; ok {
-		c.members = append([]string(nil), members...)
-		if guard == nil {
-			delete(d.leaseMembers, leaseID)
-		}
-	} else {
-		c.members = []string{requestID}
-	}
 	if guard != nil {
 		session := guard.Session
 		c.guard = &session
 		guard.disconnected = false
+		d.stopGuardGraceLocked(guard)
+		c.members = append([]string(nil), d.leaseMembers[leaseID]...)
+		if len(c.members) == 0 {
+			c.members = []string{requestID}
+		}
+	} else {
+		reclaimed = d.claimUnreclaimedMemberLocked(leaseID, requestID)
+		c.members = []string{reclaimed}
 	}
+	c.runID = reclaimed
 	for _, m := range c.members {
 		d.byRun[m] = c
 	}
@@ -1316,8 +1316,39 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
-	d.cfg.logf("reattach: run %s reclaimed lease %s", requestID, leaseID)
-	_ = c.send(&wingwire.Grant{RunID: requestID, LeaseToken: lease.Token, Resources: c.resources})
+	d.cfg.logf("reattach: run %s reclaimed lease %s", reclaimed, leaseID)
+	_ = c.send(&wingwire.Grant{RunID: reclaimed, LeaseToken: lease.Token, Resources: c.resources})
+}
+
+// safety: a nested run's parent and child present the same lease token, so each
+// reattach claims one member; one connection owning them all releases the whole
+// lease when any one run ends. The frame names no run, so members go out in order
+// after the lease's request, and a child reattaching first is finalized under it.
+func (d *Daemon) claimUnreclaimedMemberLocked(id admission.LeaseID, requestID string) string {
+	remaining := d.reattachMembers[id]
+	if len(remaining) == 0 {
+		delete(d.reattachMembers, id)
+		delete(d.reattachWait, id)
+		return requestID
+	}
+	claimed, at := "", -1
+	for i, member := range remaining {
+		if member == requestID {
+			claimed, at = member, i
+			break
+		}
+	}
+	if at < 0 {
+		claimed, at = remaining[0], 0
+	}
+	remaining = append(remaining[:at], remaining[at+1:]...)
+	if len(remaining) == 0 {
+		delete(d.reattachMembers, id)
+		delete(d.reattachWait, id)
+	} else {
+		d.reattachMembers[id] = remaining
+	}
+	return claimed
 }
 
 func (d *Daemon) handleRelease(c *conn, _ *wingwire.Release) {
@@ -1455,18 +1486,22 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	for owner, runID := range current {
 		d.cfg.logf("cancel: signalling run %s to wind down", runID)
 		if err := owner.send(&wingwire.Cancel{RunID: runID, Reason: reason}); err != nil {
-			c.close()
-			return
+			// safety: the promotions below are already committed to the ledger, so a
+			// dead cancel target must not cost the promoted waiters their grants.
+			go d.handleDisconnect(owner)
 		}
-	}
-	if persistErr != nil {
-		c.close()
-		return
 	}
 	for _, dl := range deliveries {
 		if err := dl.c.send(dl.msg); err != nil {
 			go d.handleDisconnect(dl.c)
 		}
+	}
+	if persistErr != nil {
+		// safety: the missing acknowledgement is how the caller learns the
+		// cancellation is not durable; the promotions above are already committed
+		// in memory, so they go out either way.
+		c.close()
+		return
 	}
 	_ = c.send(&wingwire.CancelLeaseAck{Found: true})
 }
@@ -1518,6 +1553,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 				if guard.completion == c {
 					guard.completion = nil
 				}
+				d.armGuardGraceLocked(c.leaseID, guard)
 				d.touchConnLocked(c)
 				d.mu.Unlock()
 				d.logDisconnect(c, role, runID)

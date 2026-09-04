@@ -70,7 +70,9 @@ func procSessionIdentity(session wingwire.ProcessSession) procgroup.SessionIdent
 type sessionGuardState struct {
 	persistedGuard
 	disconnected bool
+	terminating  bool
 	completion   *conn
+	graceTimer   *time.Timer
 }
 
 type guardReconcileState struct {
@@ -149,6 +151,60 @@ func (d *Daemon) completeEmptyGuard(guard guardReconcileState) {
 	if guard.finalize {
 		d.finalizeAsync(guard.RunID)
 	}
+}
+
+// safety: a guarded tree outlives its client on purpose, but nothing else ever
+// reaps it -- the sweep only watches for it to end -- so a client that never
+// comes back would hold its charge, and the daemon's idle exit, forever.
+func (d *Daemon) armGuardGraceLocked(id admission.LeaseID, guard *sessionGuardState) {
+	if guard.graceTimer != nil {
+		return
+	}
+	session := guard.Session
+	guard.graceTimer = time.AfterFunc(d.cfg.graceWindow(), func() { d.expireGuardGrace(id, session) })
+}
+
+func (d *Daemon) stopGuardGraceLocked(guard *sessionGuardState) {
+	if guard.graceTimer == nil {
+		return
+	}
+	guard.graceTimer.Stop()
+	guard.graceTimer = nil
+}
+
+func (d *Daemon) expireGuardGrace(id admission.LeaseID, session wingwire.ProcessSession) {
+	d.mu.Lock()
+	guard := d.guards[id]
+	if d.shuttingDown || guard == nil || guard.Session != session || !guard.disconnected {
+		if guard != nil && guard.Session == session {
+			guard.graceTimer = nil
+		}
+		d.mu.Unlock()
+		return
+	}
+	guard.graceTimer = nil
+	// safety: Terminate blocks for the session's own shutdown, and a client that
+	// reattached in that window would be handed a lease over an already dead
+	// process tree, so reattach is refused from here until the outcome is known.
+	guard.terminating = true
+	reclaim := guardReconcileState{persistedGuard: guard.persistedGuard, completion: guard.completion, finalize: true}
+	d.mu.Unlock()
+
+	d.cfg.logf("guard: run %s lost its client %s ago; terminating the guarded session",
+		reclaim.RunID, d.cfg.graceWindow())
+	if err := d.guardInspector.Terminate(session); err != nil {
+		d.cfg.logf("guard: terminate abandoned session for %s: %v", reclaim.RunID, err)
+		d.mu.Lock()
+		if current := d.guards[id]; current != nil && current.Session == session {
+			current.terminating = false
+			if current.disconnected {
+				d.armGuardGraceLocked(id, current)
+			}
+		}
+		d.mu.Unlock()
+		return
+	}
+	d.completeEmptyGuard(reclaim)
 }
 
 func (d *Daemon) disconnectedGuardForRunLocked(runID string) *sessionGuardState {
@@ -358,6 +414,7 @@ func (d *Daemon) releaseGuardDurably(leaseID admission.LeaseID, session wingwire
 		return nil, false, writeErr
 	}
 
+	d.stopGuardGraceLocked(current)
 	delete(d.guards, leaseID)
 	deliveries := d.routeLocked(events)
 	d.persistedEventSeq = next.EventSeq

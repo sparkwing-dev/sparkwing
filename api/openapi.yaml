@@ -4,6 +4,18 @@
 # here. Rewrite this file with `bash bin/gen-api-docs.sh` and prove it current
 # with `bash bin/check-api-spec.sh`. Give a route's authorization as
 # x-sparkwing-scope, never as prose, so no two sentences can disagree.
+#
+# Every object with a `properties` block, whether a named schema or an inline
+# request or response body, names the Go type it mirrors as x-sparkwing-go-type,
+# and the check holds its members to that type's JSON tags: a member the type
+# does not serialize, one the document drops, and one documented as the wrong
+# OpenAPI type each fail. A body declared as an unnamed struct inside its
+# handler is addressed as `<dir>.<Receiver>.<func>.<var>`. Two escapes,
+# both deliberate and both visible here: x-sparkwing-go-type: none where the
+# controller writes the shape from a map literal with no struct behind it, and
+# x-sparkwing-go-partial where the document describes part of a larger type, which
+# still rejects a member that type does not serialize but does not demand the
+# rest.
 
 openapi: 3.0.3
 
@@ -165,6 +177,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [runs]
                 properties:
@@ -210,6 +223,7 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/Run"
                   - type: object
+                    x-sparkwing-go-type: none
                     required: [run, nodes]
                     properties:
                       run: {$ref: "#/components/schemas/Run"}
@@ -267,14 +281,7 @@ paths:
       x-sparkwing-scope: runs.write
       tags: [runs]
       summary: Request cancellation. The orchestrator surfaces this via heartbeat.
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                reason: {type: string}
+      description: Takes no request body; the handler reads none.
       responses:
         "204": {description: Cancellation requested.}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -296,6 +303,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [run_id]
                 properties:
@@ -321,6 +329,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [attempts]
                 properties:
@@ -346,6 +355,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [trigger_ids]
                 properties:
@@ -383,6 +393,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [nodes]
                 properties:
@@ -463,6 +474,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.updateDepsReq
               type: object
               required: [deps]
               properties:
@@ -559,6 +571,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleUpdateNodeActivity.body
               type: object
               properties:
                 detail: {type: string}
@@ -589,10 +602,11 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleAppendNodeAnnotation.body
               type: object
-              required: [annotation]
+              required: [message]
               properties:
-                annotation: {type: string}
+                message: {type: string}
       responses:
         "204": {description: Appended.}
 
@@ -609,10 +623,11 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleSetNodeSummary.body
               type: object
-              required: [summary]
+              required: [markdown]
               properties:
-                summary: {type: string}
+                markdown: {type: string}
       responses:
         "204": {description: Stored.}
 
@@ -629,6 +644,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleSetNodeArtifactManifest.body
               type: object
               required: [manifest_digest]
               properties:
@@ -661,6 +677,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [points]
                 properties:
@@ -694,6 +711,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.revokeResp
                 type: object
                 required: [revoked]
                 properties:
@@ -715,6 +733,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.heartbeatSlotReq
               type: object
               required: [holder_id]
               properties:
@@ -755,6 +774,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleSetNodeStatus.body
               type: object
               required: [status]
               properties:
@@ -823,6 +843,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleConsumeNodeBounce.body
               type: object
               properties:
                 seq: {type: integer, format: int64}
@@ -865,6 +886,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [pauses]
                 properties:
@@ -895,6 +917,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [pauses]
                 properties:
@@ -915,6 +938,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleStartNodeStep.body
               type: object
               required: [step_id]
               properties:
@@ -935,6 +959,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleFinishNodeStep.body
               type: object
               required: [step_id, status]
               properties:
@@ -958,11 +983,11 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleSkipNodeStep.body
               type: object
               required: [step_id]
               properties:
                 step_id: {type: string}
-                reason: {type: string}
       responses:
         "204": {description: Recorded.}
 
@@ -979,11 +1004,12 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleAppendStepAnnotation.body
               type: object
-              required: [step_id, annotation]
+              required: [step_id, message]
               properties:
                 step_id: {type: string}
-                annotation: {type: string}
+                message: {type: string}
       responses:
         "204": {description: Appended.}
 
@@ -1000,11 +1026,12 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.Server.handleSetStepSummary.body
               type: object
-              required: [step_id, summary]
+              required: [step_id, markdown]
               properties:
                 step_id: {type: string}
-                summary: {type: string}
+                markdown: {type: string}
       responses:
         "204": {description: Stored.}
 
@@ -1020,6 +1047,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [steps]
                 properties:
@@ -1047,6 +1075,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [events]
                 properties:
@@ -1062,6 +1091,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.appendEventReq
               type: object
               required: [kind]
               properties:
@@ -1077,6 +1107,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.appendEventResp
                 type: object
                 required: [seq]
                 properties:
@@ -1102,6 +1133,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.triggerResp
                 type: object
                 required: [run_id, status]
                 properties:
@@ -1128,6 +1160,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [triggers]
                 properties:
@@ -1148,6 +1181,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.claimTriggerReq
               type: object
               properties:
                 pipelines:
@@ -1184,17 +1218,28 @@ paths:
       x-sparkwing-scope: triggers.claim
       tags: [triggers]
       summary: Extend the worker lease on a claimed trigger.
+      description: >-
+        Bound to the claimant the trigger row records, so only the worker that claimed the trigger may renew it.
       responses:
         "200":
           description: Heartbeat. Body signals whether cancel was requested.
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.heartbeatResp
                 type: object
                 required: [cancel_requested]
                 properties:
                   cancel_requested: {type: boolean}
-        "404": {description: Trigger missing -- worker should stop.}
+        "403":
+          description: >-
+            Another principal holds the trigger's claim. The caller keeps working; it does not own this trigger.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AuthError"}
+        "404":
+          description: >-
+            Trigger missing, or its claim was reaped or requeued and the row now records no claimant -- worker should stop.
 
   /api/v1/triggers/{id}/done:
     parameters: [{$ref: "#/components/parameters/TriggerID"}]
@@ -1202,8 +1247,18 @@ paths:
       x-sparkwing-scope: triggers.claim
       tags: [triggers]
       summary: Mark a trigger `done`. Idempotent.
+      description: >-
+        Bound to the claimant the trigger row records. The record survives the trigger's own completion, so the claimant's retry of a done whose response was lost still succeeds.
       responses:
         "204": {description: Done.}
+        "403":
+          description: Another principal holds the trigger's claim.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AuthError"}
+        "404":
+          description: >-
+            Trigger missing, or its claim was reaped or requeued and the row now records no claimant.
 
   /api/v1/triggers/spawned-child:
     get:
@@ -1244,6 +1299,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.requestApprovalReq
               type: object
               properties:
                 message: {type: string}
@@ -1268,6 +1324,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.resolveApprovalReq
               type: object
               required: [resolution]
               properties:
@@ -1309,6 +1366,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [approvals]
                 properties:
@@ -1327,6 +1385,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [approvals]
                 properties:
@@ -1386,6 +1445,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.heartbeatSlotReq
               type: object
               required: [holder_id]
               properties:
@@ -1397,6 +1457,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.heartbeatSlotResp
                 type: object
                 required: [lease_expires_at, cancelled_by_newer]
                 properties:
@@ -1419,6 +1480,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.releaseSlotReq
               type: object
               required: [holder_id, outcome]
               properties:
@@ -1578,6 +1640,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.cancelWaiterReq
               type: object
               required: [run_id]
               properties:
@@ -1589,6 +1652,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.cancelWaiterResp
                 type: object
                 required: [cancelled]
                 properties:
@@ -1613,6 +1677,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.forceReleaseResp
                 type: object
                 properties:
                   dropped:
@@ -1636,11 +1701,13 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-partial: pkg/wingwire.QueueState
                 type: object
                 properties:
                   resources:
                     type: array
                     items:
+                      x-sparkwing-go-partial: pkg/wingwire.ResourceState
                       type: object
                       properties:
                         key: {type: string}
@@ -1649,6 +1716,7 @@ paths:
                   holders:
                     type: array
                     items:
+                      x-sparkwing-go-partial: pkg/wingwire.Holder
                       type: object
                       properties:
                         run_id: {type: string}
@@ -1660,6 +1728,7 @@ paths:
                   waiters:
                     type: array
                     items:
+                      x-sparkwing-go-partial: pkg/wingwire.Waiter
                       type: object
                       properties:
                         run_id: {type: string}
@@ -1672,6 +1741,7 @@ paths:
                   runners:
                     type: array
                     items:
+                      x-sparkwing-go-partial: pkg/wingwire.RunnerHeadroom
                       type: object
                       properties:
                         name: {type: string}
@@ -1698,6 +1768,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.claimNodeReq
               type: object
               required: [holder_id]
               properties:
@@ -1706,6 +1777,11 @@ paths:
                 labels:
                   type: array
                   items: {type: string}
+                headroom:
+                  allOf: [{$ref: "#/components/schemas/AgentHeadroom"}]
+                  nullable: true
+                  description: >-
+                    The runner's free capacity at claim time, which the agents view reports back. Omit it when the runner engages no local admission daemon.
       responses:
         "200":
           description: Claimed node.
@@ -1744,6 +1820,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [pvc]
                 properties:
@@ -1832,6 +1909,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [tokens]
                 properties:
@@ -1891,6 +1969,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [users]
                 properties:
@@ -1909,6 +1988,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.createUserReq
               type: object
               required: [name, password]
               properties:
@@ -1917,7 +1997,7 @@ paths:
                 scopes:
                   type: array
                   description: >-
-                    Scopes this account's dashboard sessions carry. Omit to grant admin. Ignored on the bootstrap path, which always creates an admin.
+                    Scopes this account's dashboard sessions carry. Omit to grant admin. The bootstrap path honours the set it is given but rejects one that omits admin, so the first account can always reach the rest of the API.
                   items: {type: string}
       responses:
         "201":
@@ -1952,6 +2032,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.loginReq
               type: object
               required: [username, password]
               properties:
@@ -1963,6 +2044,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.loginResp
                 type: object
                 required: [session_id, csrf_token, principal, scopes, expires_at]
                 properties:
@@ -1985,6 +2067,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.logoutReq
               type: object
               required: [session_id]
               properties:
@@ -2005,13 +2088,17 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.sessionResp
                 type: object
                 properties:
                   principal: {type: string}
                   scopes:
                     type: array
                     items: {type: string}
-                  expires_at: {type: integer, format: int64}
+                  csrf_token:
+                    type: string
+                    description: Token the dashboard echoes on each state-changing request.
+                  expires_at: {type: integer, format: int64, description: Unix seconds.}
 
   /api/v1/auth/whoami:
     get:
@@ -2024,6 +2111,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.whoamiResp
                 type: object
                 properties:
                   principal: {type: string}
@@ -2031,6 +2119,9 @@ paths:
                     type: array
                     items: {type: string}
                   kind: {type: string}
+                  token_prefix:
+                    type: string
+                    description: Prefix of the bearer token that answered, absent for a session or anonymous principal.
         "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/auth/bootstrap-needed:
@@ -2045,6 +2136,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 properties:
                   needed: {type: boolean}
@@ -2059,12 +2151,21 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.secretSetReq
               type: object
               required: [name, value]
               properties:
                 name: {type: string}
                 value: {type: string}
-                masked: {type: boolean}
+                repo:
+                  type: string
+                  description: Bind the secret to this repository. Omit for a principal-wide secret.
+                masked:
+                  type: boolean
+                  description: Omit to store the value masked; only an explicit `false` stores plain config.
+                shared:
+                  type: boolean
+                  description: Let an unscoped secret answer a run. Admin only.
       responses:
         "201": {description: Created.}
     get:
@@ -2077,6 +2178,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [secrets]
                 properties:
@@ -2119,6 +2221,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [agents]
                 properties:
@@ -2150,6 +2253,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 required: [points]
                 properties:
@@ -2232,6 +2336,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.setPinReq
               type: object
               properties:
                 cores: {type: number}
@@ -2402,6 +2507,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.ServicesResponse
                 type: object
                 properties:
                   cache_pod: {type: string}
@@ -2421,6 +2527,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: none
                 type: object
                 properties:
                   status: {type: string, enum: [ok]}
@@ -2489,6 +2596,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.reconcileOrphansReq
               type: object
               required: [threshold_nanos]
               properties:
@@ -2499,6 +2607,7 @@ paths:
           content:
             application/json:
               schema:
+                x-sparkwing-go-type: pkg/controller.reconcileOrphansResp
                 type: object
                 properties:
                   reconciled: {type: integer}
@@ -2542,6 +2651,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.profileObservationReq
               type: object
               properties:
                 duration_nanos: {type: integer, format: int64}
@@ -2575,6 +2685,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.waitObservationReq
               type: object
               required: [wait_nanos]
               properties:
@@ -2604,6 +2715,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.nodeUsageReq
               type: object
               properties:
                 cpu_time_nanos: {type: integer, format: int64}
@@ -2632,6 +2744,7 @@ paths:
         content:
           application/json:
             schema:
+              x-sparkwing-go-type: pkg/controller.claimSpecificTriggerReq
               type: object
               properties:
                 lease_nanos: {type: integer, format: int64}
@@ -2728,19 +2841,24 @@ components:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
     Error:
+      x-sparkwing-go-type: none
       type: object
       description: Canonical error shape for non-2xx responses.
       required: [error]
       properties:
         error: {type: string}
     AuthError:
+      x-sparkwing-go-type: pkg/controller.authErrorBody
       type: object
       description: Error returned by the auth middleware. Carries a missing-scope hint when applicable.
       required: [error]
       properties:
         error: {type: string}
         missing_scope: {type: string}
+        principal: {type: string}
+        message: {type: string}
     Run:
+      x-sparkwing-go-type: pkg/store.Run
       type: object
       description: One pipeline invocation row. Mirrors `pkg/store.Run`.
       required: [id, pipeline, status, started_at]
@@ -2784,7 +2902,14 @@ components:
         annotations:
           type: array
           items: {type: string}
+        last_heartbeat_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Most recent run-level liveness ping from the dispatching orchestrator. Absent for rows that predate the column and for backends that ping per node instead (local and S3 modes).
     Node:
+      x-sparkwing-go-type: pkg/store.Node
       type: object
       description: One DAG node row. Mirrors `pkg/store.Node`.
       required: [id, status, deps]
@@ -2819,7 +2944,26 @@ components:
           type: array
           items: {type: string}
         summary: {type: string}
+        cpu_nanos:
+          type: integer
+          format: int64
+          description: >-
+            User plus system CPU time the kernel accounted to the process that executed this node. Written only by a runner that supervised a process of its own; zero means absent, not measured-as-nothing.
+        max_rss_bytes:
+          type: integer
+          format: int64
+          description: Peak resident set size reported for that process, kept as a high-water mark across in-place retries.
+        process_wall_nanos:
+          type: integer
+          format: int64
+          description: >-
+            How long that process existed, spawn to reap. Wider than `finished_at - started_at`, which the node stamps from inside itself once startup is done.
+        artifact_manifest:
+          type: string
+          description: >-
+            Content-addressed digest of the manifest describing the files this node published as artifacts. Empty when the node declared no outputs or no artifact store was configured.
     NodeStep:
+      x-sparkwing-go-type: pkg/store.NodeStep
       type: object
       description: One step inside a node's inner DAG. Mirrors `pkg/store.NodeStep`.
       required: [node_id, step_id, status]
@@ -2837,6 +2981,7 @@ components:
           items: {type: string}
         summary: {type: string}
     Event:
+      x-sparkwing-go-type: pkg/store.Event
       type: object
       description: One ordered event in a run's audit stream. Mirrors `pkg/store.Event`.
       required: [run_id, seq, kind, ts]
@@ -2849,6 +2994,7 @@ components:
         payload:
           description: Either a structured JSON object or a raw string (escaped).
     NodeDispatch:
+      x-sparkwing-go-type: pkg/store.NodeDispatch
       type: object
       description: >-
         One dispatch-frame snapshot for a node attempt. Mirrors `pkg/store.NodeDispatch`. The byte-typed members carry base64-encoded JSON.
@@ -2881,6 +3027,7 @@ components:
         input_size_bytes: {type: integer, format: int64}
         secret_redactions: {type: integer}
     MetricSample:
+      x-sparkwing-go-type: pkg/controller.metricSample
       type: object
       description: |
         One resource reading for a node. A zero `cpu_time_nanos` is a
@@ -2891,6 +3038,7 @@ components:
         memory_bytes: {type: integer, format: int64}
         cpu_time_nanos: {type: integer, format: int64}
     Trigger:
+      x-sparkwing-go-type: pkg/store.Trigger
       type: object
       description: One queued or in-flight trigger. Mirrors `pkg/store.Trigger`.
       required: [id, pipeline, status, created_at]
@@ -2924,7 +3072,28 @@ components:
           enum: ["", manual, auto]
         parent_node_id: {type: string}
         full: {type: boolean}
+        repo_inherited:
+          type: boolean
+          description: Whether the repository came from parent provenance rather than an explicit cross-repository request.
+        idempotency_key:
+          type: string
+          description: >-
+            Caller-supplied deduplication token, scoped to the pipeline. At most one trigger may carry any given non-empty (pipeline, key) pair.
+        claim_seq:
+          type: integer
+          format: int64
+          description: >-
+            How many times this trigger has been claimed. A terminal write presenting a stale value is refused, so a re-claim invalidates the previous dispatch.
+        webhook_delivery:
+          type: string
+          description: >-
+            The provider's delivery id for the webhook that created this trigger, empty for every other submission path. Unique across the store, so replaying a delivery is refused.
+        webhook_replay_key:
+          type: string
+          description: >-
+            Digest of the material the webhook signature covered. Unique across the store, so re-sending an accepted body is refused however its delivery id reads.
     TriggerRequest:
+      x-sparkwing-go-type: pkg/controller.triggerReq
       type: object
       description: Body of `POST /api/v1/triggers`. `trigger.source` is required.
       required: [pipeline, trigger]
@@ -2935,6 +3104,7 @@ components:
           additionalProperties: {type: string}
         trigger:
           type: object
+          x-sparkwing-go-type: pkg/controller.triggerReqMeta
           required: [source]
           properties:
             source: {type: string}
@@ -2944,6 +3114,7 @@ components:
               additionalProperties: {type: string}
         git:
           type: object
+          x-sparkwing-go-type: pkg/controller.triggerReqGit
           properties:
             branch: {type: string}
             sha: {type: string}
@@ -2954,28 +3125,8 @@ components:
         parent_run_id: {type: string}
         parent_node_id: {type: string}
         retry_of: {type: string}
-        plan_admission: {$ref: "#/components/schemas/TriggerPlanAdmission"}
-    TriggerPlanAdmission:
-      type: object
-      description: Inherited plan-admission holders forwarded from an ancestor run.
-      properties:
-        key:
-          type: string
-          description: Primary inherited concurrency key.
-        holder_id:
-          type: string
-          description: Holder id for `key`.
-        admissions:
-          type: object
-          description: Full inherited admission set keyed by concurrency key.
-          additionalProperties: {type: string}
-        host_admission:
-          type: boolean
-          description: Whether one inherited holder owns host execution admission.
-        host_admission_key:
-          type: string
-          description: Key in `admissions` whose holder owns host execution admission.
     Approval:
+      x-sparkwing-go-type: pkg/store.Approval
       type: object
       description: One human-gate row. Mirrors `pkg/store.Approval`.
       required: [run_id, node_id, requested_at]
@@ -2995,6 +3146,7 @@ components:
           enum: ["", approved, denied, timed_out]
         comment: {type: string}
     DebugPause:
+      x-sparkwing-go-type: pkg/store.DebugPause
       type: object
       description: Operator-induced node pause.
       required: [run_id, node_id, reason, paused_at, expires_at]
@@ -3008,6 +3160,7 @@ components:
         released_by: {type: string}
         release_kind: {type: string}
     Token:
+      x-sparkwing-go-type: pkg/controller.tokenRecordJSON
       type: object
       description: One bearer-token row (raw value redacted; only `prefix` is shown after mint).
       properties:
@@ -3017,12 +3170,13 @@ components:
         scopes:
           type: array
           items: {type: string}
-        created_at: {type: string, format: date-time}
-        expires_at: {type: string, format: date-time, nullable: true}
-        last_used_at: {type: string, format: date-time, nullable: true}
-        revoked_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+        expires_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
+        last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
+        revoked_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
         replaced_by: {type: string}
     CreateTokenRequest:
+      x-sparkwing-go-type: pkg/controller.createTokenReq
       type: object
       required: [principal, scopes]
       properties:
@@ -3031,18 +3185,22 @@ components:
         scopes:
           type: array
           items: {type: string}
-        expires_at: {type: string, format: date-time}
+        ttl_secs:
+          type: integer
+          format: int64
+          description: Lifetime in seconds from mint time. Omit or zero for a token that does not expire.
     CreateTokenResponse:
+      x-sparkwing-go-type: pkg/controller.createTokenResp
       type: object
       description: Returned only at mint time. The raw `token` is never re-served.
-      required: [token, prefix]
+      required: [token, metadata]
       properties:
         token:
           type: string
           description: Full bearer token. Copy now; the controller never re-shows it.
-        prefix: {type: string}
-        token_metadata: {$ref: "#/components/schemas/Token"}
+        metadata: {$ref: "#/components/schemas/Token"}
     Secret:
+      x-sparkwing-go-type: pkg/controller.secretJSON
       type: object
       description: One stored secret. List endpoints redact `value`.
       required: [name]
@@ -3050,10 +3208,14 @@ components:
         name: {type: string}
         value: {type: string}
         principal: {type: string}
+        repo: {type: string, description: Repository this secret is bound to; empty for a principal-wide secret.}
         masked: {type: boolean}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
+        shared: {type: boolean, description: Whether the secret is readable beyond its owning principal.}
+        bound: {type: boolean, description: Whether the secret is bound to a repository.}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+        updated_at: {type: integer, format: int64, description: Unix seconds.}
     User:
+      x-sparkwing-go-type: pkg/controller.userJSON
       type: object
       required: [name, created_at]
       properties:
@@ -3071,20 +3233,44 @@ components:
           format: int64
           nullable: true
     Agent:
+      x-sparkwing-go-type: pkg/controller.Agent
       type: object
-      description: Heartbeating runner.
+      description: >-
+        One runner, inferred from recent node claims -- there is no explicit agent registration.
       properties:
-        id: {type: string}
+        name: {type: string}
+        type:
+          type: string
+          enum: [agent, pool, local]
         labels:
-          type: array
-          items: {type: string}
-        last_heartbeat: {type: string, format: date-time}
-        in_flight_node:
           type: object
-          properties:
-            run_id: {type: string}
-            node_id: {type: string}
+          additionalProperties: {type: string}
+        last_seen: {type: string, format: date-time}
+        status:
+          type: string
+          enum: [busy, idle]
+        active_jobs:
+          type: array
+          description: Ids of the runs this runner currently holds an unfinished node of.
+          items: {type: string}
+        max_concurrent:
+          type: integer
+          description: Always zero -- there is no agent registration to declare a limit.
+        headroom:
+          allOf: [{$ref: "#/components/schemas/AgentHeadroom"}]
+          nullable: true
+          description: >-
+            The runner's most recently advertised free capacity. Absent for a runner that never advertised, or whose last report has gone stale.
+    AgentHeadroom:
+      x-sparkwing-go-type: pkg/controller.AgentHeadroom
+      type: object
+      description: A runner's advertised free capacity in the agents view.
+      properties:
+        cores: {type: number}
+        memory_bytes: {type: integer, format: int64}
+        queue_depth: {type: integer}
     TrendPoint:
+      x-sparkwing-go-type: pkg/controller.TrendPoint
       type: object
       description: |
         One time bucket of the dashboard's overview chart. Bucket
@@ -3122,6 +3308,7 @@ components:
             average; a bucket containing only such runs reports
             zero.
     Receipt:
+      x-sparkwing-go-type: internal/orchestrator/receipt.Receipt
       type: object
       description: |
         Per-run audit + cost receipt. Recomputed from nodes,
@@ -3129,23 +3316,76 @@ components:
       properties:
         run_id: {type: string}
         pipeline: {type: string}
+        git_sha: {type: string}
+        status: {type: string}
         started_at: {type: string, format: date-time}
         finished_at: {type: string, format: date-time, nullable: true}
-        compute_cents: {type: integer}
-        cost_rate_source: {type: string}
-        nodes:
+        duration_ms: {type: integer, format: int64}
+        identity: {$ref: "#/components/schemas/ReceiptIdentity"}
+        invocation:
+          type: object
+          description: The run's `invocation` snapshot, copied verbatim.
+          additionalProperties: true
+        steps:
           type: array
           description: Per-node line items.
-          items:
-            type: object
-            additionalProperties: true
+          items: {$ref: "#/components/schemas/ReceiptStep"}
+        cost: {$ref: "#/components/schemas/ReceiptCost"}
+        receipt_sha: {type: string, description: Digest over every member but `store`.}
+        store:
+          type: string
+          description: >-
+            Which runs store the receipt was read from. Excluded from `receipt_sha`, so the same run yields the same digest from any store.
+    ReceiptIdentity:
+      x-sparkwing-go-type: internal/orchestrator/receipt.Identity
+      type: object
+      description: The hashes that say what was run and what it produced.
+      properties:
+        pipeline_version_hash: {type: string}
+        inputs_hash: {type: string}
+        plan_hash: {type: string}
+        outputs_hash:
+          type: object
+          additionalProperties: {type: string}
+    ReceiptStep:
+      x-sparkwing-go-type: internal/orchestrator/receipt.Step
+      type: object
+      description: One node's line in a receipt.
+      properties:
+        id: {type: string}
+        node_id: {type: string}
+        duration_ms: {type: integer, format: int64}
+        outcome: {type: string}
+        skip_reason: {type: string}
+    ReceiptCost:
+      x-sparkwing-go-type: internal/orchestrator/receipt.Cost
+      type: object
+      description: What the run cost, where the rate came from, and whether it is final.
+      properties:
+        currency: {type: string}
+        compute_cents: {type: integer, format: int64}
+        rate_source: {type: string}
+        settled: {type: boolean}
     AcquireSlotRequest:
+      x-sparkwing-go-type: pkg/controller.acquireSlotReq
       type: object
       required: [holder_id, run_id]
       properties:
         holder_id: {type: string}
+        inherited_holder_id:
+          type: string
+          description: >-
+            Join and refresh this existing live holder instead of creating `holder_id`. Its cost is already accounted, so joining draws no further budget.
         run_id: {type: string}
         node_id: {type: string}
+        cost:
+          type: integer
+          description: >-
+            Admission weight this arrival draws from the key's capacity, in author-defined units. Zero or negative is treated as one.
+        bypass_read:
+          type: boolean
+          description: >-
+            Suppress the cache lookup: the request flows straight into the capacity, coalesce and queue path as if no prior entry existed for this key. Cache writes at release time are unaffected.
         max:
           type: integer
           description: Capacity for this key. Set on every acquire; latest write wins per the store's drift-handling rule.
@@ -3157,6 +3397,7 @@ components:
         cancel_timeout_ns: {type: integer, format: int64}
         lease_secs: {type: integer}
     AcquireSlotResponse:
+      x-sparkwing-go-type: pkg/controller.acquireSlotResp
       type: object
       required: [kind, granted]
       properties:
@@ -3176,7 +3417,13 @@ components:
           items: {type: string}
         previous_capacity: {type: integer}
         drift_note: {type: string}
+        position: {type: integer, description: One-based place in the key's queue.}
+        queue_length: {type: integer}
+        holders:
+          type: array
+          items: {$ref: "#/components/schemas/ConcurrencyHolder"}
     ConcurrencyHolder:
+      x-sparkwing-go-type: pkg/controller.stateHolderResp
       type: object
       description: One live or superseded holder of a concurrency slot.
       properties:
@@ -3184,9 +3431,16 @@ components:
         run_id: {type: string}
         node_id: {type: string}
         claimed_at: {type: string, format: date-time}
+        queue_arrived_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When this holder joined the queue, absent for one that never waited.
         lease_expires_at: {type: string, format: date-time}
         superseded: {type: boolean}
+        cost: {type: integer, description: Admission weight this holder draws from the key's capacity.}
     ResolveWaiterResponse:
+      x-sparkwing-go-type: pkg/controller.resolveWaiterResp
       type: object
       description: One waiter's standing in a concurrency key's queue.
       required: [status]
@@ -3207,6 +3461,7 @@ components:
           type: array
           items: {$ref: "#/components/schemas/ConcurrencyHolder"}
     NodeBounce:
+      x-sparkwing-go-type: pkg/store.NodeBounce
       type: object
       description: A request that a running node restart its process.
       properties:
@@ -3215,44 +3470,56 @@ components:
         seq: {type: integer, format: int64}
         requested_by: {type: string}
         requested_at: {type: string, format: date-time}
+        consumed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the running node picked the request up. Absent while it is still outstanding.
         outcome: {type: string}
     ConcurrencyState:
+      x-sparkwing-go-type: pkg/controller.stateResp
       type: object
       required: [key, capacity, holders, waiters]
       properties:
         key: {type: string}
         capacity: {type: integer}
+        effective_capacity:
+          type: integer
+          description: The most restrictive minimum actually enforced over the live participants, which may be below the last-declared `capacity`.
+        used_cost:
+          type: integer
+          description: >-
+            Summed cost of the active (non-superseded, unexpired) holders. Available budget is `effective_capacity - used_cost`.
         holders:
           type: array
-          items:
-            type: object
-            properties:
-              holder_id: {type: string}
-              run_id: {type: string}
-              node_id: {type: string}
-              claimed_at: {type: string, format: date-time}
-              lease_expires_at: {type: string, format: date-time}
-              superseded: {type: boolean}
+          items: {$ref: "#/components/schemas/ConcurrencyHolder"}
         waiters:
           type: array
-          items:
-            type: object
-            properties:
-              run_id: {type: string}
-              node_id: {type: string}
-              arrived_at: {type: string, format: date-time}
-              policy: {type: string}
-              cache_key_hash: {type: string}
-              leader_run_id: {type: string}
-              leader_node_id: {type: string}
-              cancel_timeout: {type: string}
+          items: {$ref: "#/components/schemas/ConcurrencyWaiter"}
+    ConcurrencyWaiter:
+      x-sparkwing-go-type: pkg/controller.stateWaiterResp
+      type: object
+      description: One run waiting on a concurrency key.
+      properties:
+        run_id: {type: string}
+        node_id: {type: string}
+        arrived_at: {type: string, format: date-time}
+        policy: {type: string}
+        cache_key_hash: {type: string}
+        leader_run_id: {type: string}
+        leader_node_id: {type: string}
+        cancel_timeout: {type: string}
+        cost: {type: integer}
+        position: {type: integer, description: One-based place in the key's queue.}
     FinishRunRequest:
+      x-sparkwing-go-type: pkg/controller.finishRunReq
       type: object
       required: [status]
       properties:
         status: {type: string}
         error: {type: string}
     FinishNodeRequest:
+      x-sparkwing-go-type: pkg/controller.finishNodeReq
       type: object
       required: [outcome]
       properties:
@@ -3265,6 +3532,7 @@ components:
         failure_reason: {type: string}
         exit_code: {type: integer, nullable: true}
     PoolListResponse:
+      x-sparkwing-go-type: none
       type: object
       description: Snapshot of the warm-PVC pool (cluster-only).
       properties:
@@ -3274,6 +3542,7 @@ components:
           type: array
           items:
             type: object
+            x-sparkwing-go-type: none
             required: [name]
             properties:
               name: {type: string}

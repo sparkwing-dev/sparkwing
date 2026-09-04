@@ -129,6 +129,11 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (bool, 
 
 func stopChild(child Child, grace time.Duration) error {
 	done := child.Wait()
+	select {
+	case waitErr := <-done:
+		return waitErr
+	default:
+	}
 	if err := child.Terminate(); err != nil {
 		select {
 		case waitErr := <-done:
@@ -187,8 +192,24 @@ func startExecChild(self string, args []string) (Child, error) {
 }
 
 func (c *execChild) Wait() <-chan error { return c.done }
-func (c *execChild) Terminate() error   { return signalTerminate(c.cmd.Process.Pid) }
-func (c *execChild) Kill() error        { return signalKill(c.cmd.Process.Pid) }
+
+func (c *execChild) Terminate() error {
+	return signalExited(signalTerminate(c.cmd.Process))
+}
+
+func (c *execChild) Kill() error {
+	return signalExited(signalKill(c.cmd.Process))
+}
+
+// safety: signalling the handle rather than the pid means a child the kernel
+// has already reaped answers ErrProcessDone instead of letting the signal reach
+// whichever process inherited its pid.
+func signalExited(err error) error {
+	if errors.Is(err, os.ErrProcessDone) {
+		return nil
+	}
+	return err
+}
 
 func Run(args []string) error {
 	fs := flag.NewFlagSet("wingd supervise", flag.ContinueOnError)

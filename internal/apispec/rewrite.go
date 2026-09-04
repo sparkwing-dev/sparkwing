@@ -21,7 +21,19 @@ every ` + scopeKey + ` value are read from the route registrations in
 pkg/controller/server.go; summaries, schemas, and examples are hand-written
 here. Rewrite this file with ` + "`bash bin/gen-api-docs.sh`" + ` and prove it current
 with ` + "`bash bin/check-api-spec.sh`" + `. Give a route's authorization as
-` + scopeKey + `, never as prose, so no two sentences can disagree.`
+` + scopeKey + `, never as prose, so no two sentences can disagree.
+
+Every object with a ` + "`properties`" + ` block, whether a named schema or an inline
+request or response body, names the Go type it mirrors as ` + goTypeKey + `,
+and the check holds its members to that type's JSON tags: a member the type
+does not serialize, one the document drops, and one documented as the wrong
+OpenAPI type each fail. A body declared as an unnamed struct inside its
+handler is addressed as ` + "`<dir>.<Receiver>.<func>.<var>`" + `. Two escapes,
+both deliberate and both visible here: ` + goTypeKey + `: none where the
+controller writes the shape from a map literal with no struct behind it, and
+` + goPartialKey + ` where the document describes part of a larger type, which
+still rejects a member that type does not serialize but does not demand the
+rest.`
 
 const stubSummary = "Registered route awaiting a description."
 

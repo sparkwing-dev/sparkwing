@@ -283,6 +283,14 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_http_requests_total` | Counter | HTTP requests by route, method, status |
 | `sparkwing_http_request_duration_seconds` | Histogram | HTTP latency by route and method |
 
+The `route` label is the pattern the controller registered the request
+against, so every path parameter reaches Prometheus in its declared form
+(`/api/v1/concurrency/{key}/state`, `/api/v1/runs/{id}`) and a run id,
+concurrency key or artifact digest never becomes a label value. A request
+that matches no route is labeled `other`, and so is any `method` outside
+the seven the controller answers, so neither an unrecognized path nor an
+invented request method can grow the series count.
+
 **Cache** (`sparkwing-cache`, OTEL meter):
 
 | Metric | Type | Description |

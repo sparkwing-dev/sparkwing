@@ -310,3 +310,70 @@ func TestMetricsAddr_FailsStartupWhenTheMetricsPortIsTaken(t *testing.T) {
 		t.Fatal("ServeWith error = nil, want the bind failure")
 	}
 }
+
+func TestMetrics_HTTPRouteCollapsesEveryPathParameter(t *testing.T) {
+	base := newServerWithArtifacts(t, &fakeArtifactStore{})
+
+	for _, path := range []string{
+		"/api/v1/concurrency/prom-key-alpha/state",
+		"/api/v1/concurrency/prom-key-beta/state",
+		"/api/v1/concurrency/prom-key-gamma/state",
+		"/api/v1/artifacts/prom-digest-aaa",
+		"/api/v1/artifacts/prom-digest-bbb",
+		"/api/v1/runs/prom-run-1/approvals/prom-node-1",
+		"/api/v1/prom-unrouted-path",
+	} {
+		resp := mustGet(t, base+path)
+		resp.Body.Close()
+	}
+
+	body := scrape(t, base)
+
+	for _, want := range []string{
+		`route="/api/v1/concurrency/{key}/state"`,
+		`route="/api/v1/artifacts/{key}"`,
+		`route="/api/v1/runs/{id}/approvals/{nodeID}"`,
+		`route="other"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/metrics missing collapsed route label %q", want)
+		}
+	}
+	for _, leaked := range []string{
+		"prom-key-alpha", "prom-key-beta", "prom-key-gamma",
+		"prom-digest-aaa", "prom-digest-bbb",
+		"prom-run-1", "prom-node-1", "prom-unrouted-path",
+	} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("caller-supplied segment %q leaked into a metric label", leaked)
+		}
+	}
+}
+
+func TestMetrics_HTTPMethodLabelClampsInventedMethods(t *testing.T) {
+	base, _, cleanup := newTestServer(t)
+	defer cleanup()
+
+	for _, method := range []string{"PROMMETHODA", "PROMMETHODB", "PROMMETHODC"} {
+		req, err := http.NewRequest(method, base+"/api/v1/runs", nil)
+		if err != nil {
+			t.Fatalf("build %s request: %v", method, err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s /api/v1/runs: %v", method, err)
+		}
+		resp.Body.Close()
+	}
+
+	body := scrape(t, base)
+
+	if !strings.Contains(body, `method="other"`) {
+		t.Errorf("/metrics missing the clamped method label:\n%s", body)
+	}
+	for _, method := range []string{"PROMMETHODA", "PROMMETHODB", "PROMMETHODC"} {
+		if strings.Contains(body, method) {
+			t.Errorf("invented method %q leaked into a metric label", method)
+		}
+	}
+}
