@@ -108,3 +108,38 @@ func TestAcquire_CancelStillInterruptsTheWaitAfterAReconnect(t *testing.T) {
 		t.Fatal("cancellation did not interrupt the admission wait on the reconnected socket")
 	}
 }
+
+func TestCancelOnDone_LeavesTheConnectionUsableAfterACancelledWait(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		client, daemon := net.Pipe()
+		drained := make(chan struct{})
+		go func() {
+			defer close(drained)
+			r := newFrameReader(daemon)
+			for {
+				if _, err := r.read(); err != nil {
+					return
+				}
+			}
+		}()
+		cl := &Client{nc: client, dec: newFrameReader(client)}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		cl.cancelOnDone(ctx)()
+
+		cl.connMu.Lock()
+		stillArmed := cl.waitCancelled
+		cl.connMu.Unlock()
+		if stillArmed {
+			t.Fatalf("wait %d: cancellation stayed armed, so the next connection would be woken the moment it is installed", i)
+		}
+		if err := cl.write(&wingwire.QueueState{}); err != nil {
+			t.Fatalf("wait %d: the connection a cancelled wait left behind is unusable: %v", i, err)
+		}
+
+		_ = client.Close()
+		_ = daemon.Close()
+		<-drained
+	}
+}
