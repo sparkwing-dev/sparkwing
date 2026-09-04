@@ -670,6 +670,7 @@ Args.
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
 | `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
+| `--sw-isolated-home DIR` | Keep this run's state and config under DIR, so it hosts an admission daemon from the sparkwing you invoked instead of joining the machine's |
 | `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
 

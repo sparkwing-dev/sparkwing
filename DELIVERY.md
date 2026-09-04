@@ -14,6 +14,13 @@ this file is a menu and checklist, not a command that every change must run.
   and browser smoke suites, formatting, vet, build, tests, documentation
   mirrors, and source policy. Unit and ESLint run in parallel; the production
   build then feeds the browser suite.
+- **Gating a branch beside a released daemon:** when the branch's pipeline
+  binary carries a newer runs-store schema than the sparkwing hosting this
+  machine's admission daemon, admission refuses the run. Give the gate a home
+  of its own instead of replacing the daemon every other repository shares:
+  `sparkwing run pre-commit --sw-isolated-home "$(mktemp -d)"`, run from a
+  sparkwing built from this checkout, which points that run's state and config
+  at the directory and hosts a daemon there from that binary.
 - **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when

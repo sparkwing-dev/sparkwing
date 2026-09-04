@@ -53,14 +53,16 @@ func daemonStoreSchemaSkew(daemonVersion, selfVersion string, daemonSchema int, 
 		describeVersion(daemonVersion), daemonSchema, describeVersion(selfVersion), selfSchema), selfSchema)
 }
 
-// safety: `sparkwing daemon restart` respawns the installed build and a fresh
-// SPARKWING_HOME still spawns the sparkwing on PATH, so neither of the usual
-// remedies moves a source-built client off a released daemon.
+// safety: `sparkwing daemon restart` respawns the installed build, so both
+// machine-wide remedies replace a daemon other repositories share. The
+// isolated home leaves it alone, and only from a sparkwing new enough for the
+// store, which is why the command says so.
 func storeSchemaRemedy(diagnosis string, selfSchema int) error {
 	return fmt.Errorf("%w: %s. "+
 		"Install a sparkwing that understands schema %d, or set %s to a binary that does and stop the daemon so the next run brings it up. "+
-		"`sparkwing daemon restart` respawns the same build, and a fresh SPARKWING_HOME still hosts the daemon from the sparkwing on PATH",
-		ErrDaemonStoreSchemaTooOld, diagnosis, selfSchema, wingdclient.HostBinEnv)
+		"To leave this machine's daemon where it is, give the run a home of its own and start it from a sparkwing that understands schema %d: %s. "+
+		"`sparkwing daemon restart` respawns the same build",
+		ErrDaemonStoreSchemaTooOld, diagnosis, selfSchema, wingdclient.HostBinEnv, selfSchema, isolatedHomeCommand())
 }
 
 func describeVersion(v string) string {

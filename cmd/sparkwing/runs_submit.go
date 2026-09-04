@@ -368,6 +368,8 @@ var undetachableFlags = map[string]string{
 	"--sw-allow":      "risk authorization is not carried on the trigger yet; run it in the foreground",
 	"--sw-local-only": "backend overrides are not carried on the trigger yet; run it in the foreground",
 	"--sw-secrets":    "secret-profile selection is not carried on the trigger yet; run it in the foreground",
+	"--sw-isolated-home": "the resident consumer executes against this home's store and daemon, " +
+		"so a home of the run's own would not be the one it uses; run it in the foreground with `sparkwing run --sw-isolated-home`",
 }
 
 var submitOwnedFlags = map[string]string{
