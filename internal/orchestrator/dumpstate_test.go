@@ -336,9 +336,17 @@ func normalizeNodeTimes(n *store.Node) {
 		t := n.ReadyAt.UTC()
 		n.ReadyAt = &t
 	}
+	if n.OfferStartedAt != nil {
+		t := n.OfferStartedAt.UTC()
+		n.OfferStartedAt = &t
+	}
 	if n.LeaseExpiresAt != nil {
 		t := n.LeaseExpiresAt.UTC()
 		n.LeaseExpiresAt = &t
+	}
+	if n.ExecutionStartedAt != nil {
+		t := n.ExecutionStartedAt.UTC()
+		n.ExecutionStartedAt = &t
 	}
 	if n.LastHeartbeat != nil {
 		t := n.LastHeartbeat.UTC()
