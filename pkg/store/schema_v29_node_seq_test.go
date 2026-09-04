@@ -105,9 +105,11 @@ func TestSchemaV29_UpgradeIsSafeToReplay(t *testing.T) {
 	seedV28Nodes(t, path)
 
 	for i := 0; i < 2; i++ {
-		if _, err := store.Open(path); err != nil {
+		replay, err := store.Open(path)
+		if err != nil {
 			t.Fatalf("Open (upgrade pass %d): %v", i, err)
 		}
+		_ = replay.Close()
 	}
 	st, err := store.Open(path)
 	if err != nil {

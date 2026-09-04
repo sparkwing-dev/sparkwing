@@ -9,6 +9,11 @@ this file is a menu and checklist, not a command that every change must run.
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
+- **Goroutine leaks:** every package with tests carries a `leak_test.go` whose
+  `TestMain` hands the suite to `internal/testleak`, so a package fails when a
+  goroutine outlives its tests. A new test package needs that file too; copy an
+  existing one. A package that must tolerate a goroutine passes its own
+  `goleak` option from its `TestMain` and says why in a `safety:` comment.
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured alone on an
   idle 16-core Linux box, `GOWORK=off go test -count=1 <pkg>`:

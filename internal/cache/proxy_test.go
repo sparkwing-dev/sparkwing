@@ -153,6 +153,9 @@ func withTestProxy(t *testing.T, registries map[string]Registry, fn func()) {
 		proxyDir = oldProxyDir
 		proxyPublicBase = oldPublicBase
 		proxyTrustForwardedHost = oldTrustForwarded
+		// safety: the shared client parks an idle keep-alive connection per upstream,
+		// and a real registry holds one open long after the test that reached it.
+		proxyClient.CloseIdleConnections()
 	}()
 	fn()
 }
