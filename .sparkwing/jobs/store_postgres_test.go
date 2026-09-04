@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestStorePostgresLayoutKeepsDataOutOfTheToolCache(t *testing.T) {
@@ -101,6 +102,38 @@ func TestStorePostgresRunStopsAndRemovesWhenCancelled(t *testing.T) {
 	cancel()
 }
 
+func TestStorePostgresRunStopsAndRemovesOnInterrupt(t *testing.T) {
+	t.Parallel()
+	var stopped, removed atomic.Bool
+	interrupts := make(chan os.Signal, 1)
+	running := make(chan struct{})
+	go func() {
+		<-running
+		interrupts <- os.Interrupt
+	}()
+
+	err := runStorePostgresSuite(context.Background(), storePostgresRun{
+		interrupts: interrupts,
+		start:      func() (string, error) { return "postgres://unused", nil },
+		stop:       func() error { stopped.Store(true); return nil },
+		remove:     func() error { removed.Store(true); return nil },
+		suite: func(context.Context, string) error {
+			close(running)
+			select {}
+		},
+	})
+
+	if err == nil || !strings.Contains(err.Error(), "interrupted by") {
+		t.Fatalf("err = %v, want the interrupt", err)
+	}
+	if !stopped.Load() {
+		t.Error("the server was left running after the interrupt")
+	}
+	if !removed.Load() {
+		t.Error("the data directory survived the interrupt")
+	}
+}
+
 func TestStorePostgresRunReportsTheLogAfterStopping(t *testing.T) {
 	t.Parallel()
 	var log strings.Builder
@@ -160,5 +193,51 @@ func TestWithTempDirRestoresTheCallersSetting(t *testing.T) {
 	}
 	if got := os.Getenv("TMPDIR"); got != "/original" {
 		t.Errorf("TMPDIR after the call = %q, want /original", got)
+	}
+}
+
+func TestSweepStorePostgresRootsSparesLiveAndRecentRuns(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	now := time.Now()
+	old := now.Add(-time.Hour)
+
+	mkroot := func(name string, modified time.Time, pid string) string {
+		t.Helper()
+		root := filepath.Join(tempDir, name)
+		if err := os.MkdirAll(filepath.Join(root, "data"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if pid != "" {
+			if err := os.WriteFile(filepath.Join(root, "data", "postmaster.pid"), []byte(pid+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Chtimes(root, modified, modified); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+
+	abandoned := mkroot(storePostgresRootPrefix+"abandoned", old, "4242")
+	stopped := mkroot(storePostgresRootPrefix+"stopped", old, "")
+	live := mkroot(storePostgresRootPrefix+"live", old, "99")
+	recent := mkroot(storePostgresRootPrefix+"recent", now, "")
+	other := mkroot("someone-elses-temp-dir", old, "")
+
+	removed := sweepStorePostgresRoots(tempDir, now, func(pid int) bool { return pid == 99 })
+
+	if len(removed) != 2 {
+		t.Fatalf("removed = %v, want the abandoned and the stopped root", removed)
+	}
+	for _, root := range []string{abandoned, stopped} {
+		if _, err := os.Stat(root); !os.IsNotExist(err) {
+			t.Errorf("%s survived the sweep", root)
+		}
+	}
+	for _, root := range []string{live, recent, other} {
+		if _, err := os.Stat(root); err != nil {
+			t.Errorf("the sweep took %s: %v", root, err)
+		}
 	}
 }

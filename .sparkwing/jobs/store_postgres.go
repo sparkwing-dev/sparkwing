@@ -8,10 +8,13 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
@@ -32,7 +35,8 @@ func (StorePostgres) Help() string {
 		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
 		"directory under a temporary root and its binaries under the persistent tool cache, " +
 		"and stops the server and removes the data directory whether the suite passes, " +
-		"fails, or the run is cancelled. A failing suite prints the tail of the server log, " +
+		"fails, or is interrupted; a run killed before its teardown finishes leaves a data " +
+		"directory that the next run reclaims. A failing suite prints the tail of the server log, " +
 		"which embedded-postgres only makes available once the server has stopped. A server " +
 		"that will not start is retried once on a fresh port and then fails the step with " +
 		"the cause; the suite is never skipped. Needs no Docker."
@@ -63,6 +67,10 @@ const (
 	// bind, so one fresh port is tried before the step fails.
 	storePostgresStartAttempts = 2
 	storePostgresLogLines      = 40
+	storePostgresRootPrefix    = "sparkwing-store-postgres-"
+	// safety: a root this old whose postmaster is gone belongs to a run that
+	// was killed before its teardown finished, not to a run still starting.
+	storePostgresRootStaleAfter = 10 * time.Minute
 	// safety: pre-push calls the step directly, so the Plan's timeout does
 	// not reach it; both read this.
 	storePostgresPrePushTimeout = 30 * time.Minute
@@ -121,7 +129,11 @@ func (p *StorePostgres) run(ctx context.Context) error {
 		return runStoreSuiteAgainst(ctx, dsn)
 	}
 
-	root, err := os.MkdirTemp("", "sparkwing-store-postgres-")
+	for _, stale := range sweepStorePostgresRoots(os.TempDir(), time.Now(), processAlive) {
+		sparkwing.Info(ctx, "removed %s, left by a run that was killed before it could", stale)
+	}
+
+	root, err := os.MkdirTemp("", storePostgresRootPrefix)
 	if err != nil {
 		return fmt.Errorf("create the postgres temporary root: %w", err)
 	}
@@ -165,12 +177,13 @@ func (p *StorePostgres) run(ctx context.Context) error {
 }
 
 type storePostgresRun struct {
-	start     func() (string, error)
-	stop      func() error
-	remove    func() error
-	suite     func(ctx context.Context, dsn string) error
-	serverLog func() string
-	report    func(tail string)
+	interrupts <-chan os.Signal
+	start      func() (string, error)
+	stop       func() error
+	remove     func() error
+	suite      func(ctx context.Context, dsn string) error
+	serverLog  func() string
+	report     func(tail string)
 }
 
 func runStorePostgresSuite(ctx context.Context, r storePostgresRun) (err error) {
@@ -200,6 +213,16 @@ func runStorePostgresSuite(ctx context.Context, r storePostgresRun) (err error) 
 		}
 	}()
 
+	interrupts := r.interrupts
+	if interrupts == nil {
+		// safety: pkg/runner installs no handler, so an unhandled SIGINT
+		// kills this process before any defer can stop the server.
+		signalled := make(chan os.Signal, 1)
+		signal.Notify(signalled, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(signalled)
+		interrupts = signalled
+	}
+
 	done := make(chan error, 1)
 	go func() { done <- r.suite(ctx, dsn) }()
 	select {
@@ -208,7 +231,56 @@ func runStorePostgresSuite(ctx context.Context, r storePostgresRun) (err error) 
 	case <-ctx.Done():
 		stop()
 		return ctx.Err()
+	case sig := <-interrupts:
+		stop()
+		return fmt.Errorf("interrupted by %s while the store suite was running", sig)
 	}
+}
+
+func sweepStorePostgresRoots(tempDir string, now time.Time, alive func(int) bool) []string {
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		return nil
+	}
+	var removed []string
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), storePostgresRootPrefix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || now.Sub(info.ModTime()) < storePostgresRootStaleAfter {
+			continue
+		}
+		root := filepath.Join(tempDir, entry.Name())
+		if pid, ok := postmasterPID(root); ok && alive(pid) {
+			continue
+		}
+		if err := os.RemoveAll(root); err == nil {
+			removed = append(removed, root)
+		}
+	}
+	return removed
+}
+
+func postmasterPID(root string) (int, bool) {
+	contents, err := os.ReadFile(filepath.Join(root, "data", "postmaster.pid"))
+	if err != nil {
+		return 0, false
+	}
+	first, _, _ := strings.Cut(string(contents), "\n")
+	pid, err := strconv.Atoi(strings.TrimSpace(first))
+	if err != nil {
+		return 0, false
+	}
+	return pid, true
+}
+
+func processAlive(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return process.Signal(syscall.Signal(0)) == nil
 }
 
 func withTempDir(dir string, run func() error) error {

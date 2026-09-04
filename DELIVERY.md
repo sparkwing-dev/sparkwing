@@ -105,8 +105,9 @@ this file is a menu and checklist, not a command that every change must run.
   dialect instead of a SQLite file. It reuses `SPARKWING_TEST_PG_URL` when
   that is set and otherwise starts an embedded Postgres on a free port (data
   under a temporary root, binaries cached in `$TMPDIR`), then stops it and
-  removes the data directory whether the suite passes, fails, or the run is
-  cancelled. No Docker. A failing suite prints the tail of the server log,
+  removes the data directory whether the suite passes, fails, or is
+  interrupted; a run killed before its teardown finishes leaves a data
+  directory that the next run reclaims. No Docker. A failing suite prints the tail of the server log,
   which embedded-postgres only makes available once the server has stopped.
   A server that will not start is retried once on a fresh port and then
   fails the step. `pre-push` runs it after the race gate, under a
