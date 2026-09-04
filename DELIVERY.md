@@ -39,6 +39,10 @@ this file is a menu and checklist, not a command that every change must run.
   `sparkwing run pre-commit --sw-isolated-home "$(mktemp -d)"`, run from a
   sparkwing built from this checkout, which points that run's state and config
   at the directory and hosts a daemon there from that binary.
+- **Lint rules:** golangci-lint judges only code new since origin/main. Among
+  the family set it also rejects `_ = call()` on an error-returning call, nil
+  returned after an error was observed, and work started on a context that is
+  not the caller's. Drop an error only through a helper that logs why.
 - **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
