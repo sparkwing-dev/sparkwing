@@ -20,8 +20,6 @@ import (
 
 const casMaxRetries = 16
 
-// maxTriggerIDAttempts bounds how many ids a single enqueue will mint
-// before giving up on finding one no trigger already holds.
 const maxTriggerIDAttempts = 8
 
 const maxAncestorDepth = 64
