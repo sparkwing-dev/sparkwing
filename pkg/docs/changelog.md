@@ -360,6 +360,11 @@ code change to unlock.
 
 ### Fixed
 
+- **runner:** Forcing a stuck local process group now works. A cleanup that had
+  reached its final descendant wait held the lock every caller needs, so the
+  `Kill` escape hatch queued behind the unbounded wait it exists to shortcut
+  whenever a descendant survived SIGKILL, as one in uninterruptible sleep on a
+  hung mount does.
 - **wingd:** The supervisor no longer signals a daemon it has already reaped.
   `stopChild` sent SIGTERM before looking at the exit channel, so a daemon that
   exited on its own -- the routine idle-exit path -- in the same moment the

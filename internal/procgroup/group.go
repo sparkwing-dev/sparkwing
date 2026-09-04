@@ -54,6 +54,7 @@ type Group struct {
 	leaderDone chan struct{}
 	leaderErr  error
 	leaderMu   sync.Mutex
+	cleanupMu  sync.Mutex
 	finishMu   sync.Mutex
 	reaped     bool
 	reapedFlag atomic.Bool
@@ -394,10 +395,13 @@ func (g *Group) Terminate(ctx context.Context, grace time.Duration) error {
 }
 
 func (g *Group) finish(ctx context.Context, grace time.Duration) error {
-	g.finishMu.Lock()
-	defer g.finishMu.Unlock()
-	if g.reaped {
-		return g.waitErr
+	// safety: cleanupMu serialises cleanups so only one reaps, while finishMu
+	// stays free during the descendant wait, which has no bound. Kill and
+	// Terminate exist to shortcut that wait and must never queue behind it.
+	g.cleanupMu.Lock()
+	defer g.cleanupMu.Unlock()
+	if reaped, err := g.reapedResult(); reaped {
+		return err
 	}
 	if err := g.leaderExitError(); err != nil {
 		return fmt.Errorf("%w: observe group %d leader: %w", ErrCleanup, g.id, err)
@@ -405,10 +409,21 @@ func (g *Group) finish(ctx context.Context, grace time.Duration) error {
 	if err := g.emptyDescendants(ctx, grace); err != nil {
 		return fmt.Errorf("%w: %w", ErrCleanup, err)
 	}
+	g.finishMu.Lock()
+	defer g.finishMu.Unlock()
+	if g.reaped {
+		return g.waitErr
+	}
 	g.waitErr = g.cmd.Wait()
 	g.reaped = true
 	g.reapedFlag.Store(true)
 	return g.waitErr
+}
+
+func (g *Group) reapedResult() (bool, error) {
+	g.finishMu.Lock()
+	defer g.finishMu.Unlock()
+	return g.reaped, g.waitErr
 }
 
 func (g *Group) awaitLeader(ctx context.Context) error {
