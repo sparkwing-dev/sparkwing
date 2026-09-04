@@ -1182,6 +1182,20 @@ code change to unlock.
 
 ### Docs
 
+- **api:** `api/openapi.yaml` now describes the wire types the controller
+  actually serves, and `bin/check-api-spec.sh` holds it there. Every object
+  shape names the Go type it mirrors as `x-sparkwing-go-type`, and the check
+  compares its members against that type's JSON tags, so a renamed, dropped, or
+  retyped field fails the check instead of leaving the document quietly untrue.
+  The corrections an integrator can act on: `TriggerRequest` no longer documents
+  `plan_admission`, which the trigger API dropped in v0.16.0 and which a
+  spec-conformant client got a 400 for sending; `CreateTokenRequest` takes
+  `ttl_secs`, not `expires_at`; `CreateTokenResponse` answers `{token,
+  metadata}`, not `{token, prefix, token_metadata}`; `Token` and `Secret`
+  timestamps are Unix seconds, not RFC3339 strings; and `Agent` is the shape the
+  agents view serves. `Run`, `Node`, `Trigger`, `Secret`, `NodeBounce`,
+  `AuthError`, `Receipt`, `ConcurrencyState`, `ConcurrencyHolder` and both
+  acquire-slot bodies regain the members the document had dropped.
 - **helm:** Both chart READMEs now open with the minimal `helm template`
   invocation. `helm template` stops on the runner bundle's `validate.yaml`
   until `controller.tokenSecret.name` is set, and `sparkwing-full` takes it
