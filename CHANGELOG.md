@@ -162,6 +162,9 @@ code change to unlock.
   read never migrates one; a store this sparkwing cannot open is named on
   stderr with the release that can, and one written at an older store schema is
   named with its run count.
+- **cli:** `runs errors` on a run id no store holds now exits 1 with `not found`, where it
+  printed `no failing nodes` and exited 0. It resolves the run before reading its nodes, so a
+  missing id and a run with no failures are no longer the same answer.
 - **cli:** The write verbs act on a standalone run in its own store.
   `runs bounce`, `runs annotations add`, `runs approvals approve` and `deny`,
   `debug rerun`, and `debug replay` open that store read-write only when

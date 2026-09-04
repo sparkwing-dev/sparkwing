@@ -830,7 +830,8 @@ you no longer want the runs in it.
 A read verb opens every standalone store read-only, so reporting on one
 never migrates it, and lists what it finds newest first. An id that is in
 both the shared store and a standalone one lists once, from the shared
-store, which is the store the single-id verbs resolve first.
+store, whatever the two copies say about when they started, which is the
+store the single-id verbs resolve first.
 
 A standalone store this build cannot read is named on stderr after the
 table instead of listed. One this sparkwing is too old to open -- it records a schema
@@ -839,8 +840,13 @@ can open it. One written at an older store schema, which is what the
 `schema-<N>` directories hold, is named with its run count
 (`standalone/schema-20/state.db holds 3 runs written by an older
 sparkwing; read them with that release`), because this build's queries
-ask for columns that store does not have. Neither is ever reported as a
-database error.
+ask for columns that store does not have. One that is busy is named as
+busy and read again next time, and one that is not a runs store this
+build can read is named as that. No note carries a database error.
+
+A verb that writes prints the same notes when the id it was given is in
+no store it could read, so a run in a skipped store is not reported
+simply missing.
 
 `sparkwing runs bounce`, `runs annotations add`, `runs approvals approve`,
 `runs approvals deny`, `debug rerun`, and `debug replay` write to the
