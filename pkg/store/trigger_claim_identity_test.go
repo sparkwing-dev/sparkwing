@@ -103,3 +103,70 @@ func TestTriggerClaim_ReleaseAtGenerationDropsClaimant(t *testing.T) {
 		t.Fatal("runner-a still holds the claim after releasing it at its generation")
 	}
 }
+
+// The claimant recorded on a trigger row outlives the claim's lease and
+// the trigger's own completion, which is what lets the holder close out
+// or retry a close; a requeue clears it, and an unbound caller and a
+// different consumer never match it.
+func TestTriggerClaim_IsClaimantOutlivesLeaseAndCompletion(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
+	runnerB := store.ClaimIdentity{Principal: "runner-b", TokenPrefix: "swr_bbbbbbbb"}
+
+	seedPending(t, s, "t1")
+	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Hour, nil, nil); err != nil {
+		t.Fatalf("ClaimNextTriggerFor: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		claimant store.ClaimIdentity
+		want     bool
+	}{
+		{"the holder", runnerA, true},
+		{"another consumer", runnerB, false},
+		{"an unbound caller", store.ClaimIdentity{}, false},
+	} {
+		got, err := s.PrincipalIsTriggerClaimant(ctx, "t1", tc.claimant)
+		if err != nil {
+			t.Fatalf("PrincipalIsTriggerClaimant %s: %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Errorf("PrincipalIsTriggerClaimant %s = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+
+	if err := s.FinishTrigger(ctx, "t1"); err != nil {
+		t.Fatalf("FinishTrigger: %v", err)
+	}
+	got, err := s.PrincipalIsTriggerClaimant(ctx, "t1", runnerA)
+	if err != nil {
+		t.Fatalf("PrincipalIsTriggerClaimant after finish: %v", err)
+	}
+	if !got {
+		t.Error("the holder stopped matching its own finished trigger")
+	}
+}
+
+func TestTriggerClaim_IsClaimantClearedByRequeue(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
+
+	seedPending(t, s, "t1")
+	if _, err := s.ClaimNextTriggerFor(ctx, runnerA, time.Hour, nil, nil); err != nil {
+		t.Fatalf("ClaimNextTriggerFor: %v", err)
+	}
+	requeued, err := s.RequeueUnstartedClaim(ctx, "t1")
+	if err != nil || !requeued {
+		t.Fatalf("RequeueUnstartedClaim = (%v, %v), want (true, nil)", requeued, err)
+	}
+	got, err := s.PrincipalIsTriggerClaimant(ctx, "t1", runnerA)
+	if err != nil {
+		t.Fatalf("PrincipalIsTriggerClaimant: %v", err)
+	}
+	if got {
+		t.Error("runner-a still matches a trigger whose claim was requeued")
+	}
+}

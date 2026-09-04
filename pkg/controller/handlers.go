@@ -780,6 +780,34 @@ type heartbeatResp struct {
 	CancelRequested bool `json:"cancel_requested"`
 }
 
+// safety: scope alone says a principal may work triggers, not which trigger,
+// so ending or renewing one is bound to the claimant its row records. Admin
+// bypasses, and an unauthenticated server has no claimant to bind to.
+func (s *Server) claimedTrigger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFromContext(r.Context())
+		if !ok || p.HasScope(ScopeAdmin) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		id := r.PathValue("id")
+		held, err := s.store.PrincipalIsTriggerClaimant(r.Context(), id, claimIdentity(r))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !held {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:      "claim_required",
+				Principal: p.label(),
+				Message:   "trigger " + id + " is not claimed by this principal",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	cancelled, err := s.store.HeartbeatTrigger(r.Context(), id, 0)

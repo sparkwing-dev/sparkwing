@@ -360,6 +360,12 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** A run's detail read no longer drops the connection when the
+  run has an approval gate or a spawned child pipeline but no plan snapshot.
+  The decorations the snapshot supplies are absent in that case, and joining
+  the approval and spawned-pipeline rows onto them panicked, so
+  `GET /api/v1/runs/{id}?include=nodes` -- the dashboard's run page -- failed
+  for that run on every retry.
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
   that node as cancelled, and an `OnFailure` child skipped because its cancelled
@@ -769,6 +775,16 @@ code change to unlock.
 
 ### Security
 
+- **controller:** Finishing or renewing a trigger is now bound to the worker
+  that claimed it. `POST /api/v1/triggers/{id}/heartbeat` and
+  `/triggers/{id}/done` checked the `triggers.claim` scope and nothing else, so
+  any token carrying that scope -- every trigger worker in a fleet, or one
+  stolen from any of them -- could close out another worker's in-flight
+  trigger, hiding it from the reaper's lease-expiry cascade, or hold a dead
+  worker's trigger alive forever by heartbeating it. Both routes answer `403
+  claim_required` unless the caller is the claimant the trigger row records; an
+  `admin` token still bypasses, and a controller serving without auth is
+  unchanged.
 - **store:** A SQLite state-database path containing `#` or `?` no longer opens
   a different file. The path was interpolated into a `file:` URI without
   escaping, so SQLite ended the filename at the first such character and opened
