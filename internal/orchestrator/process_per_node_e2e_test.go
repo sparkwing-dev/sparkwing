@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -191,11 +190,11 @@ func TestProcessPerNode_NodeAbandonsARunWhoseDispatcherDied(t *testing.T) {
 	nodePID := waitForPID(t, probe, "orphan", 90*time.Second)
 	t.Cleanup(func() {
 		if processAlive(nodePID) {
-			_ = syscall.Kill(nodePID, syscall.SIGKILL)
+			_ = killProcessForTest(nodePID)
 		}
 	})
 
-	if err := cmd.Process.Signal(syscall.SIGKILL); err != nil {
+	if err := cmd.Process.Kill(); err != nil {
 		t.Fatalf("kill dispatcher: %v", err)
 	}
 	<-dispatcherDone
@@ -224,10 +223,6 @@ func waitForPID(t *testing.T, dir, name string, timeout time.Duration) int {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-}
-
-func processAlive(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
 }
 
 func buildProcPerNodeBinary(t *testing.T) (mod, bin string) {

@@ -164,21 +164,42 @@ func runNodeChild(
 	}
 
 	// #nosec G702 -- the node runner binary this process resolved, run as argv without a shell
-	cmd := exec.CommandContext(ctx, binary, "run-node", runID, nodeID)
+	cmd := exec.Command(binary, "run-node", runID, nodeID)
 	cmd.Dir = dir
 	cmd.Env = childEnv
 	cmd.Stdin = strings.NewReader(broker.capability + "\n")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
-		logger.Warn("runNodeRemote: child exited non-zero",
-			"run_id", runID, "node_id", nodeID, "err", err)
+	outcome, startErr := runAssistedChildProcess(ctx, cmd, logger)
+	if startErr != nil {
+		logger.Warn("runNodeRemote: child failed to start",
+			"run_id", runID, "node_id", nodeID, "err", startErr)
 		return runner.Result{
 			Outcome: sparkwing.Failed,
-			Err:     fmt.Errorf("child run-node: %w", err),
+			Err:     fmt.Errorf("child run-node: %w", startErr),
 		}, nil
 	}
+	if outcome.cancelCause != nil {
+		logger.Warn("runNodeRemote: child canceled after owned process cleanup",
+			"run_id", runID, "node_id", nodeID,
+			"ownership_boundary", assistedChildOwnershipBoundary)
+		return runner.Result{
+			Outcome: sparkwing.Failed,
+			Err:     fmt.Errorf("child run-node canceled: %w", outcome.cancelCause),
+		}, nil
+	}
+	if outcome.waitErr != nil {
+		logger.Warn("runNodeRemote: child exited non-zero",
+			"run_id", runID, "node_id", nodeID, "err", outcome.waitErr)
+		return runner.Result{
+			Outcome: sparkwing.Failed,
+			Err:     fmt.Errorf("child run-node: %w", outcome.waitErr),
+		}, nil
+	}
+	logger.Debug("runNodeRemote: child ownership released",
+		"run_id", runID, "node_id", nodeID,
+		"ownership_boundary", assistedChildOwnershipBoundary)
 	return runner.Result{Outcome: sparkwing.Success}, nil
 }
 

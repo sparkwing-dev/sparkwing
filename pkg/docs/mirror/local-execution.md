@@ -550,6 +550,12 @@ files, use the network, and start processes with every permission the agent OS
 user has. Run an agent under a dedicated account and enroll it only for
 repositories whose code that account may execute. Give each device its own
 short-lived runner token and revoke it when the device leaves the pool.
+Native Windows helpers bind a suspended body to a non-breakaway Job Object
+before its code can run, then wait for the Job to reach zero active processes
+after exit or cancellation. Linux, macOS, and WSL helpers terminate and empty
+the body's dedicated process session. Unix code can leave that session with
+`setsid`, so pipeline bodies must not daemonize out of it. Sparkwing treats
+deliberate escape as trusted OS-user code, not as a containment failure.
 Sparkwing never joins a tailnet or changes host networking; configure the
 controller connection outside Sparkwing. Do not expose a raw unauthenticated
 cache outside a trusted private network. Source snapshots remain immutable,

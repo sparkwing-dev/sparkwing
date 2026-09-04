@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -2146,7 +2145,7 @@ func TestRunLocal_SIGINTFinalizesRunAsCancelledAndReleasesLease(t *testing.T) {
 	}()
 	gate.awaitStarted(t, "wingd-sigint")
 
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
+	if err := signalSelfInterruptForTest(); err != nil {
 		t.Fatalf("send SIGINT: %v", err)
 	}
 	select {

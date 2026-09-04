@@ -31,12 +31,22 @@ file, network, and process permission of the agent OS user. Use a dedicated
 account whose reach every enrolled repository may have. Sparkwing does not
 join a tailnet or configure host networking.
 
+Native Windows helpers start the body suspended, assign it to a Job Object
+that kills all members on close and does not permit breakaway, and then resume
+it. The supervisor waits for the Job to report zero active processes after
+the body exits or is cancelled. Linux, macOS, and WSL helpers instead create a
+dedicated process session, send TERM and then KILL to its remaining members,
+and wait for that session to empty. Unix code can call `setsid` to leave that
+accounting boundary. Pipeline bodies must not daemonize out of their session;
+Sparkwing does not try to contain intentional evasion by code already trusted
+to run as the agent OS user.
+
 Schema 30 supplies authenticated foreground enrollment, offer, award, source
 handoff, and coordinator fallback as an internal release dependency. It does
-not expose remote helper body completion. That process boundary must ship with
-schema 31, which adds the current-attempt fence and durable grants required by
-`Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`, cross-pipeline references,
-and dynamic `SpawnNode`. Schema 30 is not a complete assisted-node
+not expose remote helper body completion. The containment boundary above must
+ship with schema 31, which adds the current-attempt fence and durable grants
+required by `Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`, cross-pipeline
+references, and dynamic `SpawnNode`. Schema 30 is not a complete assisted-node
 compatibility boundary on its own.
 
 **A warm pool shares one OS account across repositories.** Assisted job bodies
