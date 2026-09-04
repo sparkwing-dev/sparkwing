@@ -334,8 +334,10 @@ code change to unlock.
   cancel was requested on every beat but discarded the answer, so only the
   pre-dispatch check could act on it and a run flagged mid-flight -- through the
   controller's cancel endpoint against a shared store -- ran to completion. The
-  heartbeat now cancels the dispatch and records the run as `cancelled`, the way
-  the controller-backed worker already did.
+  heartbeat now cancels the dispatch and records the run as `cancelled`, along
+  with every node the killed child left unfinished, the way the
+  controller-backed worker already did. A dispatch that reaches its own failure
+  in the same moment keeps that failure.
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,

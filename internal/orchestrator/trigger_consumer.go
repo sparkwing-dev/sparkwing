@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const (
@@ -382,14 +383,24 @@ func runClaimedTrigger(
 	}
 	env = submissionExecutionEnvironment(env, home)
 	err := dispatchLocalTrigger(dispatchCtx, trig, "", "", cache, logger, env)
+	settleClaimedTriggerDispatch(book, st, trig, err, cancelled.Load(), ctx.Err() != nil, logger)
+}
+
+func settleClaimedTriggerDispatch(
+	book context.Context, st *store.Store, trig *store.Trigger,
+	err error, cancelled, shuttingDown bool, logger *slog.Logger,
+) {
 	if err == nil {
 		return
 	}
-	if cancelled.Load() {
+	// safety: the child is SIGKILLed by the cancel, so only a dispatch that
+	// died with it is the operator's cancel; anything else is the child's own
+	// failure and keeps that verdict.
+	if cancelled && canceledByRun(err) {
 		finishCancelledClaimedTrigger(book, st, trig, logger)
 		return
 	}
-	if ctx.Err() != nil {
+	if shuttingDown {
 
 		logger.Info("local trigger dispatch interrupted by shutdown; returning it to the queue",
 			"trigger_id", trig.ID, "pipeline", trig.Pipeline)
@@ -430,6 +441,22 @@ func finishCancelledClaimedTrigger(ctx context.Context, st *store.Store, trig *s
 	_ = st.CreateRun(ctx, store.Run{ID: trig.ID, Pipeline: trig.Pipeline, Status: "pending", StartedAt: time.Now()})
 	if _, finishErr := st.FinishRunAtGeneration(ctx, trig.ID, trig.ClaimSeq, "cancelled", "cancelled by operator"); finishErr != nil {
 		logger.Warn("record dispatch cancellation", "trigger_id", trig.ID, "err", finishErr)
+	}
+	// safety: the SIGKILLed child never finished its own rows, and the orphan
+	// sweep only visits runs still marked running, so a terminal run written
+	// here would strand them.
+	nodes, nerr := st.ListNodes(ctx, trig.ID)
+	if nerr != nil {
+		logger.Warn("list nodes of a cancelled run", "trigger_id", trig.ID, "err", nerr)
+	}
+	for _, n := range nodes {
+		if n.Status == "done" {
+			continue
+		}
+		if ferr := st.FinishNode(ctx, trig.ID, n.NodeID,
+			string(sparkwing.Cancelled), "cancelled by operator", nil); ferr != nil {
+			logger.Warn("record cancelled node", "trigger_id", trig.ID, "node_id", n.NodeID, "err", ferr)
+		}
 	}
 	if _, finishErr := st.FinishTriggerAtGeneration(ctx, trig.ID, trig.ClaimSeq); finishErr != nil {
 		logger.Warn("finish cancelled trigger", "trigger_id", trig.ID, "err", finishErr)
