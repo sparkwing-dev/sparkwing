@@ -29,6 +29,11 @@ type ConcurrencyMaintenanceResult struct {
 	CacheExpired int64               `json:"cache_expired"`
 	StaleWaiters []ConcurrencyWaiter `json:"stale_waiters,omitempty"`
 	CacheEvicted int64               `json:"cache_evicted"`
+	// CacheOrphaned counts memo entries dropped because the run that
+	// produced their output is gone. Such an entry can only fail the
+	// node that hits it, since fetching the output needs the origin's
+	// node row.
+	CacheOrphaned int64 `json:"cache_orphaned"`
 }
 
 // ConcurrencyMaintenanceOptions tunes a maintenance pass. Zero values fall
@@ -62,8 +67,8 @@ func (o *ConcurrencyMaintenanceOptions) withDefaults() {
 
 // MaintainConcurrency runs the full controller-free janitorial pass over
 // the concurrency tables: reconcile keys with idle capacity, reap
-// lease-expired holders and promote the next waiters, sweep expired and
-// over-cap cache rows, and drop stale or orphaned waiters. It touches only
+// lease-expired holders and promote the next waiters, sweep expired,
+// orphaned and over-cap cache rows, and drop stale or orphaned waiters. It touches only
 // finished or expired rows, so it is safe to run alongside live runs and
 // idempotent under racing processes hitting the same tables.
 //
@@ -105,6 +110,12 @@ func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMainten
 		errs = append(errs, fmt.Errorf("sweep expired cache: %w", err))
 	} else {
 		res.CacheExpired = n
+	}
+
+	if n, err := s.sweepOrphanedConcurrencyCache(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("sweep orphaned cache: %w", err))
+	} else {
+		res.CacheOrphaned = n
 	}
 
 	if n, err := s.sweepLRUConcurrencyCache(ctx, opts.CacheCap); err != nil {

@@ -450,6 +450,9 @@ code change to unlock.
   a hit whose output no longer existed and failed with `cache hit: fetch
   output: not found` for the rest of the entry's TTL. Such a node now executes
   instead.
+  A maintenance pass also drops entries whose origin run is already gone, so a
+  database written by an earlier version repairs itself instead of failing
+  those nodes until the entries expire.
 - **store + cli:** `sparkwing triggers list --repo` and
   `GET /api/v1/triggers?repo=` now find matches that are not on the newest
   page. The repository is read out of each trigger's environment, which ran

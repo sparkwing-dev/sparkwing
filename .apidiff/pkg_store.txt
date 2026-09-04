@@ -99,6 +99,8 @@ type ConcurrencyMaintenanceResult struct {
 	CacheExpired int64
 	StaleWaiters []ConcurrencyWaiter
 	CacheEvicted int64
+
+	CacheOrphaned int64
 }
 type ConcurrencyState struct {
 	Key               string
@@ -199,19 +201,20 @@ func IsProtocolErr(err error) bool
 func JoinProfileKey(repo, pipeline string) string
 func KnownRequirements() []string
 var Maintenance = storeMaintenanceFns{
-	ReapExpiredTriggers:          (*Store).reapExpiredTriggers,
-	ReapStalePendingRuns:         (*Store).reapStalePendingRuns,
-	ReapStaleRunningRuns:         (*Store).reapStaleRunningRuns,
-	ReapTimedOutApprovals:        (*Store).reapTimedOutApprovals,
-	FailNodesInRun:               (*Store).failNodesInRun,
-	FailStaleQueuedNodes:         (*Store).failStaleQueuedNodes,
-	FailExpiredNodeClaims:        (*Store).failExpiredNodeClaims,
-	ReconcileOrphanedLocalRuns:   (*Store).reconcileOrphanedLocalRuns,
-	ReapStaleConcurrencyHolders:  (*Store).reapStaleConcurrencyHolders,
-	ReapStaleConcurrencyWaiters:  (*Store).reapStaleConcurrencyWaiters,
-	SweepExpiredConcurrencyCache: (*Store).sweepExpiredConcurrencyCache,
-	SweepLRUConcurrencyCache:     (*Store).sweepLRUConcurrencyCache,
-	ReconcileConcurrencyKeys:     (*Store).reconcileConcurrencyKeys,
+	ReapExpiredTriggers:           (*Store).reapExpiredTriggers,
+	ReapStalePendingRuns:          (*Store).reapStalePendingRuns,
+	ReapStaleRunningRuns:          (*Store).reapStaleRunningRuns,
+	ReapTimedOutApprovals:         (*Store).reapTimedOutApprovals,
+	FailNodesInRun:                (*Store).failNodesInRun,
+	FailStaleQueuedNodes:          (*Store).failStaleQueuedNodes,
+	FailExpiredNodeClaims:         (*Store).failExpiredNodeClaims,
+	ReconcileOrphanedLocalRuns:    (*Store).reconcileOrphanedLocalRuns,
+	ReapStaleConcurrencyHolders:   (*Store).reapStaleConcurrencyHolders,
+	ReapStaleConcurrencyWaiters:   (*Store).reapStaleConcurrencyWaiters,
+	SweepExpiredConcurrencyCache:  (*Store).sweepExpiredConcurrencyCache,
+	SweepOrphanedConcurrencyCache: (*Store).sweepOrphanedConcurrencyCache,
+	SweepLRUConcurrencyCache:      (*Store).sweepLRUConcurrencyCache,
+	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20

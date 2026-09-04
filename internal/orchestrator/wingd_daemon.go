@@ -166,6 +166,7 @@ func reapSummary(res store.ConcurrencyMaintenanceResult) string {
 	add(res.Promoted, "promoted waiter(s)")
 	add(res.Reconciled, "reconciled key(s)")
 	add(int(res.CacheExpired), "expired cache row(s)")
+	add(int(res.CacheOrphaned), "orphaned cache row(s)")
 	add(int(res.CacheEvicted), "evicted cache row(s)")
 	return strings.Join(parts, ", ")
 }
