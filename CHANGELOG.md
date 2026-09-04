@@ -442,6 +442,41 @@ code change to unlock.
   and which could hand a request a half-built pool during the first seconds
   after a controller with `--pool` starts. Requests in that window still
   answer `503 pool not ready`.
+- **local admission:** A guarded session (`sparkwing queue exec`) whose client
+  dies is now reaped instead of held forever. The daemon marked the lease
+  disconnected and waited for the command tree to end on its own -- no timer, and
+  nothing that would ever end it -- so an abandoned tree kept its cores,
+  memory and semaphores charged and the daemon could never idle out. A
+  disconnected guard now gets the same bounded grace an unreclaimed lease gets
+  after a daemon restart (30 seconds by default, `GraceWindow`); when it closes,
+  the daemon terminates the session, releases the lease and finalizes the run.
+  A client that reattaches inside the window keeps its session running, and a
+  tree that ends on its own is still released the moment the sweep sees it.
+
+- **local admission:** A daemon restart no longer hands one connection every
+  member of a lease a nested run shares. A parent and its child present the
+  same lease token, so whichever reclaimed the lease first took the other's
+  membership with it -- freeing the whole charge as soon as either run
+  finished, while the other was still executing -- and the run that lost the
+  race was evicted outright. Each run now reclaims its own membership, whatever
+  no run reclaims is released when the reattach grace window closes, and a child
+  that attaches after a reclaim is recorded again.
+
+- **local admission:** `sparkwing runs cancel` no longer strands the run queued
+  behind the one it cancels when the cancelled run's own process is already
+  gone. The daemon promoted the waiter in the ledger, then abandoned the whole
+  batch of pending frames -- the promoted run's grant included -- and its own
+  acknowledgement the moment the wind-down signal to the dead run failed to
+  send. It now drops that connection the way every other delivery does and
+  finishes the flush, so the promoted run learns it holds the lease and the
+  cancelling command gets its answer instead of retrying into `Found: false`.
+
+- **local admission:** The extra concurrency lease a nested run takes for a
+  `.Concurrency()` group its parent does not already hold now records the run
+  that owns it. A child attaches to its parent's lease and is handed that
+  lease's token, but the daemon accepted that token as proof of ownership only
+  from the lease's original run, so the sub-lease was admitted ownerless and
+  both the queue view and the stall probe's owner check lost track of it.
 
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
