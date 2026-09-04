@@ -717,6 +717,8 @@ CREATE INDEX IF NOT EXISTS idx_concurrency_cache_expires
     ON concurrency_cache(expires_at);
 CREATE INDEX IF NOT EXISTS idx_concurrency_cache_lru
     ON concurrency_cache(last_hit_at);
+CREATE INDEX IF NOT EXISTS idx_concurrency_cache_origin_run
+    ON concurrency_cache(origin_run_id);
 
 -- Per-node resource samples; append-only.
 -- Per-step runtime state. One row per (run, node, step). Status is
@@ -1349,7 +1351,11 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 27:
 		return rewriteLegacyInheritedHolderMarkers(ctx, tx)
 	case 28:
-		return addNodeMetricsRunCascadeSQLite(ctx, tx)
+		if err := addNodeMetricsRunCascadeSQLite(ctx, tx); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, concurrencyCacheOriginRunIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1954,7 +1960,15 @@ var nodeMetricsRunCascadePostgres = []string{
 	`ALTER TABLE node_metrics DROP CONSTRAINT IF EXISTS node_metrics_run_id_fkey`,
 	`ALTER TABLE node_metrics ADD CONSTRAINT node_metrics_run_id_fkey
      FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE`,
+	concurrencyCacheOriginRunIndex,
 }
+
+// safety: DeleteRun clears a run's cache rows by origin_run_id, which the
+// (key, cache_key_hash) primary key cannot serve, so pruning many runs scans
+// the table once per run behind SQLite's single writer.
+const concurrencyCacheOriginRunIndex = `
+CREATE INDEX IF NOT EXISTS idx_concurrency_cache_origin_run
+    ON concurrency_cache(origin_run_id)`
 
 func addNodeMetricsRunCascadeSQLite(ctx context.Context, tx *storeTx) error {
 	var referencesRuns int

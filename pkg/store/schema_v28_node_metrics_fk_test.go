@@ -164,6 +164,34 @@ func TestSchemaV28_UpgradeOfARealV27ShapeCascadesAndDropsOrphans(t *testing.T) {
 	}
 }
 
+func countNodeMetricsRunForeignKeys(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_foreign_key_list('node_metrics') WHERE "table" = 'runs'`,
+	).Scan(&n); err != nil {
+		t.Fatalf("read node_metrics foreign keys: %v", err)
+	}
+	return n
+}
+
+func countIndexesNamed(t *testing.T, db *sql.DB, name string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&n); err != nil {
+		t.Fatalf("read index %s: %v", name, err)
+	}
+	return n
+}
+
+func resetSchemaVersionTo27(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 28`); err != nil {
+		t.Fatalf("reset version to 27: %v", err)
+	}
+}
+
 func TestSchemaV28_UpgradeIsSafeToReplay(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "replay28.db")
 	downgradeNodeMetricsToV27(t, path)
@@ -176,14 +204,57 @@ func TestSchemaV28_UpgradeIsSafeToReplay(t *testing.T) {
 		if got := countNodeMetrics(t, st.DB()); got != 1 {
 			t.Fatalf("attempt %d: node_metrics = %d, want 1", attempt, got)
 		}
+		if got := countNodeMetricsRunForeignKeys(t, st.DB()); got != 1 {
+			t.Fatalf("attempt %d: node_metrics foreign keys to runs = %d, want 1", attempt, got)
+		}
+		if got := countIndexesNamed(t, st.DB(), "idx_node_metrics_lookup"); got != 1 {
+			t.Errorf("attempt %d: idx_node_metrics_lookup count = %d, want 1", attempt, got)
+		}
 		if v := readSchemaVersion(t, st.DB()); v != store.ExpectedSchemaVersion() {
 			t.Errorf("attempt %d: version = %d, want %d", attempt, v, store.ExpectedSchemaVersion())
+		}
+		if attempt < 3 {
+			resetSchemaVersionTo27(t, st.DB())
 		}
 		if err := st.Close(); err != nil {
 			t.Fatalf("Close attempt %d: %v", attempt, err)
 		}
-		if _, err := sql.Open("sqlite", "file:"+path); err != nil {
-			t.Fatalf("reopen probe: %v", err)
-		}
+	}
+}
+
+func TestSchemaV28_IndexesConcurrencyCacheByOriginRun(t *testing.T) {
+	fresh := filepath.Join(t.TempDir(), "fresh.db")
+	st, err := store.Open(fresh)
+	if err != nil {
+		t.Fatalf("Open fresh: %v", err)
+	}
+	if got := countIndexesNamed(t, st.DB(), "idx_concurrency_cache_origin_run"); got != 1 {
+		t.Errorf("fresh database: idx_concurrency_cache_origin_run count = %d, want 1", got)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close fresh: %v", err)
+	}
+
+	upgraded := filepath.Join(t.TempDir(), "upgraded.db")
+	downgradeNodeMetricsToV27(t, upgraded)
+	pre, err := store.Open(upgraded)
+	if err != nil {
+		t.Fatalf("Open for index drop: %v", err)
+	}
+	if _, err := pre.DB().Exec(`DROP INDEX IF EXISTS idx_concurrency_cache_origin_run`); err != nil {
+		t.Fatalf("drop index: %v", err)
+	}
+	resetSchemaVersionTo27(t, pre.DB())
+	if err := pre.Close(); err != nil {
+		t.Fatalf("Close before upgrade: %v", err)
+	}
+
+	up, err := store.Open(upgraded)
+	if err != nil {
+		t.Fatalf("Open (upgrade): %v", err)
+	}
+	defer func() { _ = up.Close() }()
+	if got := countIndexesNamed(t, up.DB(), "idx_concurrency_cache_origin_run"); got != 1 {
+		t.Errorf("after upgrade: idx_concurrency_cache_origin_run count = %d, want 1", got)
 	}
 }
