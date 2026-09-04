@@ -391,7 +391,10 @@ code change to unlock.
   read the same list and the second write is computed from the stale copy,
   while `annotation_count` -- a real atomic increment -- counts both, leaving
   a run whose counter exceeds the annotations it can show. The reads now take
-  the row lock they always needed.
+  the row lock they always needed, and the step append's placeholder insert
+  upserts rather than skipping on conflict, so an appender that loses the
+  insert waits for the winner's row instead of reading past it and dropping
+  the message.
 
 - **store:** A superseded dispatch can no longer stamp its outcome over the
   run the current claim is producing. `FinishRunAtGeneration` read the

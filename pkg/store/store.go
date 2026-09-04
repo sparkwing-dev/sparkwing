@@ -3100,29 +3100,27 @@ ORDER BY node_id, started_at`, runID)
 // yet exist (annotations may fire before step_start lands in the
 // rare reorder case). Read-modify-write inside one transaction that
 // holds the rows it rewrites, which is what keeps concurrent
-// appenders from losing entries.
+// appenders from losing entries: the placeholder upsert returns the
+// row it locked, so an appender that lost the insert waits for the
+// winner rather than reading past it.
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `
+	// safety: DO UPDATE rather than DO NOTHING because only the update branch
+	// waits on a conflicting insert that has not committed. DO NOTHING skips
+	// it, and the read that followed then saw no row at all and dropped the
+	// annotation. The assignment rewrites status to itself; the row, not the
+	// value, is what this needs.
+	var current []byte
+	if err := tx.QueryRowContext(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status)
 VALUES (?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, nodeID, stepID, StepRunning); err != nil {
-		return err
-	}
-	var current []byte
-	row := tx.QueryRowContext(ctx, `
-SELECT annotations_json FROM node_steps
-WHERE run_id = ? AND node_id = ? AND step_id = ?`+tx.forUpdate(),
-		runID, nodeID, stepID)
-	if err := row.Scan(&current); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
+ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
+RETURNING annotations_json`,
+		runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
 		return err
 	}
 	var list []string
