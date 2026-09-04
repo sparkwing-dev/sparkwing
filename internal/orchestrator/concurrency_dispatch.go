@@ -637,13 +637,7 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp c
 			}
 			continue
 		case store.WaiterPromoted:
-			if req.ReacquireWorkerSlot != nil && !req.ReacquireWorkerSlot() {
-				r.markFailed(ctx, req.RunID, req.Node.ID(), context.Canceled)
-				return runner.Result{Outcome: sparkwing.Cancelled}
-			}
-			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_promoted", nil)
-			_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), "")
-			return r.runHeldSlot(ctx, req, cp, res.HolderID, wedgeBudget)
+			return r.runPromotedSlot(ctx, req, cp, res.HolderID, wedgeBudget)
 		case store.WaiterCached:
 			return r.applyCacheHit(ctx, req, cp, res.OriginRunID, res.OriginNodeID)
 		case store.WaiterLeaderFinished:
@@ -655,6 +649,34 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp c
 			return runner.Result{Outcome: sparkwing.Superseded, Err: err}
 		}
 	}
+}
+
+func (r *NodeExecutor) runPromotedSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string, wedgeBudget time.Duration) runner.Result {
+	// safety: promotion already granted this holder, and only
+	// runHeldSlot releases it, so every exit short of that hand-off
+	// gives the slot back here.
+	handedOff := false
+	defer func() {
+		if handedOff {
+			return
+		}
+		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := r.backends.Concurrency.ReleaseSlot(bg, cp.key, holderID, "cancelled", "", "", 0); err != nil {
+			slog.Warn("promoted holder release failed; relying on reaper",
+				"key", cp.key, "holder_id", holderID, "err", err)
+		}
+	}()
+
+	if req.ReacquireWorkerSlot != nil && !req.ReacquireWorkerSlot() {
+		r.markFailed(ctx, req.RunID, req.Node.ID(), context.Canceled)
+		return runner.Result{Outcome: sparkwing.Cancelled}
+	}
+	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_promoted", nil)
+	_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), "")
+
+	handedOff = true
+	return r.runHeldSlot(ctx, req, cp, holderID, wedgeBudget)
 }
 
 func (r *NodeExecutor) failQueueTimeout(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
