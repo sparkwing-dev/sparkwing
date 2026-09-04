@@ -694,6 +694,13 @@ attempt matters. Filtering is node-level (log lines aren't
 timestamped on disk). --events-only and --no-events are mutually
 exclusive views of the unified stream.
 
+--events-only emits the envelope records the dispatcher writes beside a
+local run (run_start, node_start, run_finish, ...). A run read through a
+backend emits that run's stored event records instead (admission_wait,
+concurrency_wait, cache_hit, ...) -- a different record shape. That is
+any profile whose state is a shared database, an object store or a
+controller, and any profile that declares its own logs surface.
+
 ### Flags
 
 | Flag | Description |
@@ -1222,7 +1229,9 @@ Useful when the queue looks stuck ("why isn't my trigger being
 claimed?"): --status pending shows unclaimed work, --status
 claimed shows what a worker has in-flight. The repo filter
 matches GITHUB_REPOSITORY on the trigger env so webhook-driven
-entries narrow cleanly.
+entries narrow cleanly; that value is not indexed, so the search
+covers the newest 5,000 triggers matching the other filters and
+an older entry is not reported.
 
 ### Flags
 
@@ -1230,7 +1239,7 @@ entries narrow cleanly.
 |---|---|
 | `--status STATUS` | Filter by status: pending \| claimed \| done |
 | `--pipeline NAME` | Filter by pipeline name |
-| `--repo OWNER/NAME` | Match GITHUB_REPOSITORY on the trigger env |
+| `--repo OWNER/NAME` | Match GITHUB_REPOSITORY on the trigger env, over the newest 5,000 triggers |
 | `--limit N` | Max triggers to show (default: 20) |
 | `-q, --quiet` | Print only trigger ids, newline-separated |
 | `-o, --output FORMAT` | Output format: json emits the raw triggers array |

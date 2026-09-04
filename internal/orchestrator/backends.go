@@ -614,6 +614,10 @@ func (l localState) GetTrigger(ctx context.Context, id string) (*store.Trigger, 
 	return l.st.GetTrigger(ctx, id)
 }
 
+func (l localState) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
+	return l.st.ReleaseClaimAtGeneration(ctx, id, seq)
+}
+
 func (l localState) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error) {
 	return l.st.GetPipelineProfile(ctx, pipeline, nodeID)
 }

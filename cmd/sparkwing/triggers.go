@@ -41,7 +41,7 @@ func runTriggersList(args []string) error {
 	fs := flag.NewFlagSet(cmdTriggersList.Path, flag.ContinueOnError)
 	status := fs.String("status", "", "filter by status (pending|claimed|done)")
 	pipeline := fs.String("pipeline", "", "filter by pipeline name")
-	repo := fs.String("repo", "", "match GITHUB_REPOSITORY on trigger env")
+	repo := fs.String("repo", "", "match GITHUB_REPOSITORY on trigger env, over the newest 5,000 triggers")
 	limit := fs.Int("limit", 20, "max rows")
 	quiet := fs.BoolP("quiet", "q", false, "print only trigger ids")
 	output := fs.StringP("output", "o", "", "output format (json)")
@@ -91,6 +91,10 @@ func runTriggersList(args []string) error {
 		return nil
 	}
 	if len(trigs) == 0 {
+		if *repo != "" {
+			fmt.Fprintf(os.Stdout, "(no triggers for %s among the newest 5,000 matching the other filters)\n", *repo)
+			return nil
+		}
 		fmt.Fprintln(os.Stdout, "(no triggers)")
 		return nil
 	}

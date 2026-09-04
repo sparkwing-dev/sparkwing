@@ -32,6 +32,12 @@ var additiveColumnSources = map[int][]map[string]string{
 	23: {secretsSharedCols, triggerClaimOwnerCols},
 	24: {triggerWebhookDeliveryCols},
 	25: {triggerWebhookReplayKeyCols},
+	// safety: v28 adds a foreign key and an index, not a column, and this
+	// guard only inspects columns; an older binary never writes a
+	// node_metrics row for a run that does not exist, so the constraint it
+	// has never heard of cannot refuse one of its inserts.
+	28: nil,
+	29: {nodesOrderCols},
 }
 
 func columnSpecMaps() []map[string]string {

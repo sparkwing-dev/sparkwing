@@ -11,10 +11,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const (
@@ -365,7 +367,14 @@ func runClaimedTrigger(
 
 	dispatchCtx, stopHeartbeat := context.WithCancel(ctx)
 	defer stopHeartbeat()
-	go heartbeatClaimedTrigger(dispatchCtx, st, trig.ID, trig.ClaimSeq, lease, logger)
+	cancelled := &atomic.Bool{}
+	go heartbeatClaimedTrigger(dispatchCtx, st, trig.ID, trig.ClaimSeq, lease, logger, func() {
+		if cancelled.CompareAndSwap(false, true) {
+			logger.Info("operator cancel requested; cancelling the dispatched run",
+				"trigger_id", trig.ID)
+			stopHeartbeat()
+		}
+	})
 
 	env, envErr := consumeSubmissionEnvironment(home, trig, logger)
 	if envErr != nil {
@@ -374,10 +383,24 @@ func runClaimedTrigger(
 	}
 	env = submissionExecutionEnvironment(env, home)
 	err := dispatchLocalTrigger(dispatchCtx, trig, "", "", cache, logger, env)
+	settleClaimedTriggerDispatch(book, st, trig, err, cancelled.Load(), ctx.Err() != nil, logger)
+}
+
+func settleClaimedTriggerDispatch(
+	book context.Context, st *store.Store, trig *store.Trigger,
+	err error, cancelled, shuttingDown bool, logger *slog.Logger,
+) {
 	if err == nil {
 		return
 	}
-	if ctx.Err() != nil {
+	// safety: the child is SIGKILLed by the cancel, so only a dispatch that
+	// died with it is the operator's cancel; anything else is the child's own
+	// failure and keeps that verdict.
+	if cancelled && canceledByRun(err) {
+		finishCancelledClaimedTrigger(book, st, trig, logger)
+		return
+	}
+	if shuttingDown {
 
 		logger.Info("local trigger dispatch interrupted by shutdown; returning it to the queue",
 			"trigger_id", trig.ID, "pipeline", trig.Pipeline)
@@ -411,6 +434,32 @@ func runClaimedTrigger(
 	}
 	if _, ferr := st.FinishTriggerAtGeneration(book, trig.ID, trig.ClaimSeq); ferr != nil {
 		logger.Warn("finish superseded trigger", "trigger_id", trig.ID, "err", ferr)
+	}
+}
+
+func finishCancelledClaimedTrigger(ctx context.Context, st *store.Store, trig *store.Trigger, logger *slog.Logger) {
+	_ = st.CreateRun(ctx, store.Run{ID: trig.ID, Pipeline: trig.Pipeline, Status: "pending", StartedAt: time.Now()})
+	if _, finishErr := st.FinishRunAtGeneration(ctx, trig.ID, trig.ClaimSeq, "cancelled", "cancelled by operator"); finishErr != nil {
+		logger.Warn("record dispatch cancellation", "trigger_id", trig.ID, "err", finishErr)
+	}
+	// safety: the SIGKILLed child never finished its own rows, and the orphan
+	// sweep only visits runs still marked running, so a terminal run written
+	// here would strand them.
+	nodes, nerr := st.ListNodes(ctx, trig.ID)
+	if nerr != nil {
+		logger.Warn("list nodes of a cancelled run", "trigger_id", trig.ID, "err", nerr)
+	}
+	for _, n := range nodes {
+		if n.Status == "done" {
+			continue
+		}
+		if ferr := st.FinishNode(ctx, trig.ID, n.NodeID,
+			string(sparkwing.Cancelled), "cancelled by operator", nil); ferr != nil {
+			logger.Warn("record cancelled node", "trigger_id", trig.ID, "node_id", n.NodeID, "err", ferr)
+		}
+	}
+	if _, finishErr := st.FinishTriggerAtGeneration(ctx, trig.ID, trig.ClaimSeq); finishErr != nil {
+		logger.Warn("finish cancelled trigger", "trigger_id", trig.ID, "err", finishErr)
 	}
 }
 
@@ -450,8 +499,8 @@ func cancelClaimedTriggerIfRequested(
 const heartbeatRetryFraction = 3
 
 func heartbeatClaimedTrigger(
-	ctx context.Context, st *store.Store, id string, seq int64,
-	lease time.Duration, logger *slog.Logger,
+	ctx context.Context, st triggerHeartbeatStore, id string, seq int64,
+	lease time.Duration, logger *slog.Logger, onCancelRequested func(),
 ) {
 	interval := lease / heartbeatRetryFraction
 	if interval < 200*time.Millisecond {
@@ -465,7 +514,14 @@ func heartbeatClaimedTrigger(
 			return
 		case <-t.C:
 		}
-		if !heartbeatOnce(ctx, st, id, seq, lease, interval, logger) {
+		cancelRequested, keepGoing := heartbeatOnce(ctx, st, id, seq, lease, interval, logger)
+		if cancelRequested {
+			if onCancelRequested != nil {
+				onCancelRequested()
+			}
+			return
+		}
+		if !keepGoing {
 			return
 		}
 	}
@@ -479,35 +535,35 @@ type triggerHeartbeatStore interface {
 func heartbeatOnce(
 	ctx context.Context, st triggerHeartbeatStore, id string, seq int64,
 	lease, budget time.Duration, logger *slog.Logger,
-) bool {
+) (cancelRequested, keepGoing bool) {
 	deadline := time.Now().Add(budget)
 	backoff := 50 * time.Millisecond
 	for {
-		_, err := st.HeartbeatTrigger(ctx, id, lease)
+		cancel, err := st.HeartbeatTrigger(ctx, id, lease)
 		if err == nil {
 
 			if current, gerr := st.TriggerClaimGeneration(ctx, id); gerr == nil && current != seq {
 				logger.Warn("stopping heartbeat; the claim was superseded",
 					"trigger_id", id, "claimed_generation", seq, "current_generation", current)
-				return false
+				return false, false
 			}
-			return true
+			return cancel, true
 		}
 		if errors.Is(err, store.ErrNotFound) {
-			return false
+			return false, false
 		}
 		if ctx.Err() != nil {
-			return false
+			return false, false
 		}
 		if !time.Now().Before(deadline) {
 			logger.Warn("local trigger heartbeat failing; the claim may lapse",
 				"trigger_id", id, "err", err)
 
-			return true
+			return false, true
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			return false, false
 		case <-time.After(backoff):
 		}
 		if backoff < time.Second {

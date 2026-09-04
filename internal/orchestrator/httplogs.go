@@ -137,6 +137,20 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 
 	payload, err := json.Marshal(&rec)
 	if err != nil {
+		// safety: a record no encoder will take never reaches the store, the same
+		// loss as an append that never lands.
+		l.mu.Lock()
+		l.dropCount++
+		if l.dropReason == "" {
+			l.dropReason = err.Error()
+		}
+		l.mu.Unlock()
+		l.logger.Warn(
+			"log record could not be encoded; dropping the line",
+			"run_id", l.runID,
+			"node_id", l.nodeID,
+			"err", err,
+		)
 		return
 	}
 	payload = append(payload, '\n')

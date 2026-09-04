@@ -360,6 +360,141 @@ code change to unlock.
 
 ### Fixed
 
+- **orchestrator:** A run cancelled while a node was still waiting on a
+  dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
+  that node as cancelled, and an `OnFailure` child skipped because its cancelled
+  parent did not fail is recorded as skipped. Both terminal writes used the run
+  context that had just been cancelled, so they never reached the store and the
+  node's row stayed at `status=pending` under a finished run -- visible in
+  `sparkwing runs status` and the receipt until a `doctor`/`jobs` sweep
+  reconciled it.
+- **orchestrator:** A local child trigger that a parent run's shutdown
+  interrupts now goes back on the queue instead of vanishing. The loop wrote the
+  child's run and trigger rows on the context that had just killed the child --
+  which fires at the end of every parent run, not only on Ctrl-C -- so the
+  trigger stayed `claimed` with no run row and `sparkwing runs status <child>`
+  reported it as not found. A dispatch that fails for its own reasons still
+  records a failed run, now on a context that outlives the parent, and the run
+  waits for the loop to stop before closing the store. A requeued child is
+  re-run from the start, so a child that had already done part of its work
+  repeats it -- the same trade the resident trigger consumer already makes.
+- **orchestrator:** The local trigger consumer now honours a cancel request that
+  arrives after dispatch has started. Its claim heartbeat asks the store whether
+  cancel was requested on every beat but discarded the answer, so only the
+  pre-dispatch check could act on it and a run flagged mid-flight -- through the
+  controller's cancel endpoint against a shared store -- ran to completion. The
+  heartbeat now cancels the dispatch and records the run as `cancelled`, the way
+  the controller-backed worker already did.
+- **store:** `node_metrics` now carries the `ON DELETE CASCADE` foreign key to
+  `runs` that every other child table has, so `sparkwing runs delete` and
+  `sparkwing runs prune` remove a run's per-node CPU and memory samples instead
+  of leaving them behind forever -- the largest child table was the one the
+  only pruning the system has never touched, and `ListNodeMetrics` still
+  returned a deleted run's samples. Schema v28 adds the constraint on both
+  SQLite and Postgres and deletes samples already orphaned, and indexes
+  `concurrency_cache` by `origin_run_id` so clearing a run's cache rows no
+  longer scans the table once per pruned run. Additive: an older binary keeps
+  reading and writing the migrated database.
+- **store:** Orphan reconciliation now runs on Postgres. Its freshness test
+  called SQLite's variadic `max()` in a `WHERE` clause, which Postgres spells
+  `GREATEST` and where its own `max` is an aggregate no `WHERE` accepts, so
+  against a `postgres://` state spec the query errored and runs abandoned by a
+  dead orchestrator stayed `running` forever. `sparkwing jobs list` and
+  `sparkwing job status` also discarded that error; they now warn on stderr
+  instead of failing silently.
+- **cli:** `sparkwing runs logs --follow` against a controller no longer spins
+  reconnecting to a node whose log stream closes at once. The per-node reader
+  paused only when the connection failed, so an already-terminal node -- or any
+  mid-stream read error -- reopened the stream as fast as the network allowed,
+  one goroutine per node, until the run reached a terminal status. It now waits
+  250ms between reconnects, the same as the reader for every other backend.
+
+- **cli:** `sparkwing runs logs --events-only` on a run read through a backend
+  no longer stops at the first 500 events. It made one unpaginated call, and
+  every backend caps that at 500, so a busy run lost everything past the cap
+  without a word. The reader now pages, and stops if a page fails to advance
+  rather than replaying it. The help says what that path emits, which is the
+  run's stored event records rather than the envelope stream a local run
+  writes: that covers any profile whose state is a shared database, an object
+  store or a controller, and any profile that declares its own logs surface.
+  `JobLogsRemoteWithTokens` refused the flag outright; it now serves the same
+  stored event records as every other backend-read run.
+
+- **cli:** `sparkwing runs list --by-pipeline` now honours `--limit`. A
+  client-side filter -- `--started-after`, `--search`, `--error`, a
+  `!`-prefixed `--status` or `--pipeline` -- switches the query to a 1000-run
+  over-fetch, and the rollup counted the whole over-fetch, so the RUNS and FAIL
+  columns and the JSON changed fiftyfold depending on whether an unrelated flag
+  was present. The over-fetch is now trimmed back to `--limit` before the
+  rollup, in local and controller mode both. `--sparkline N` is bounded by
+  `--limit` as a result -- it drew on up to 1000 runs in the filtered case, and
+  now draws on the same window the RUNS column counts, which is what it already
+  did with no filter set.
+
+- **cli:** `sparkwing runs logs --profile <name>` now reads the run and its
+  nodes from that profile's state store. It listed nodes from the default local
+  `state.db` instead, so a run held in a Postgres profile -- or a sqlite profile
+  at a non-default path -- printed nothing, or failed with `node "x" not found
+  in run ...` under `--node`. A profile that declares its own logs surface now
+  reads log bodies through that backend rather than the local run directories,
+  and `--tree`, which needs local state and on-disk logs both, says so when it
+  cannot run.
+
+- **store:** A lapsed claim whose run has already started is no longer
+  requeued on Postgres. `RequeueUnstartedClaim` read the run's status and
+  then updated the trigger as two statements against two tables, so at READ
+  COMMITTED a run that started in between was requeued anyway and a second
+  copy of live work went back on the pending queue. The run status is now a
+  correlated subquery in the requeue's own WHERE, which narrows that window
+  from a round trip to a single statement. A run whose start commits after
+  that statement's snapshot is still invisible to it; closing that remainder
+  needs the consumer's start-of-run path to touch the trigger row.
+
+- **store:** Concurrent `sparkwing.Annotate` calls no longer lose entries on
+  Postgres. The node, step and run annotation appends are read-modify-write
+  inside a transaction, which is not enough at READ COMMITTED: two appenders
+  read the same list and the second write is computed from the stale copy,
+  while `annotation_count` -- a real atomic increment -- counts both, leaving
+  a run whose counter exceeds the annotations it can show. The reads now take
+  the row lock they always needed, and the step append's placeholder insert
+  upserts rather than skipping on conflict, so an appender that loses the
+  insert waits for the winner's row instead of reading past it and dropping
+  the message.
+
+- **store:** A superseded dispatch can no longer stamp its outcome over the
+  run the current claim is producing. `FinishRunAtGeneration` read the
+  trigger's claim generation and wrote the run in two separate statements
+  with nothing held between them, so a re-claim landing in that window let
+  the old dispatch write anyway -- the exact interleaving the generation
+  fence exists to refuse. Both now happen in one transaction that holds the
+  trigger row.
+
+- **store:** `ListNodes` returns nodes in creation order on Postgres again.
+  It ordered by `ctid`, the physical tuple location, which Postgres rewrites
+  on every update -- and a node row is updated on every start, status change,
+  heartbeat and usage report -- so `sparkwing job status`, `runs timeline`,
+  `runs summary`, the receipt writer and the dashboard node list rendered
+  whatever order the heap happened to be in. Runs-store schema 29 adds a
+  `nodes.seq` column that `CreateNode` fills, and both dialects order by it.
+  The migration is additive: an older binary keeps reading and writing the
+  store, and existing SQLite rows are backfilled from their rowid so their
+  order is unchanged. Rows an older Postgres store wrote carry no sequence
+  and order by node id.
+
+- **store:** Event appends no longer collide on Postgres. `AppendEvent` chose
+  its sequence number with an unlocked `MAX(seq)+1` and then inserted it as
+  half the primary key, so two nodes of one run emitting at the same moment
+  both picked the same number and one insert failed -- and because nearly
+  every caller discards the error, the run's event stream lost the record
+  silently. The run row is now held while the number is chosen.
+  `RequestNodeBounce` allocated its sequence the same way and holds the node
+  row for the same reason. SQLite was never affected: its immediate
+  transactions already serialized the pair.
+
+  heartbeat now cancels the dispatch and records the run as `cancelled`, along
+  with every node the killed child left unfinished, the way the
+  controller-backed worker already did. A dispatch that reaches its own failure
+  in the same moment keeps that failure.
 - **runners:** A warm-pool node cancelled while the orchestrator was still
   announcing it to the controller now reports `cancelled` instead of `failed`.
   The runner also revokes the node's readiness on that path, so a cancellation
@@ -466,6 +601,15 @@ code change to unlock.
   N runners on one hot key retried in lockstep, burning retries against each
   other until one exhausted its 200 attempts and failed the acquire. Each
   attempt now draws its own wait.
+- **orchestrator:** A concurrency slot is given back when a run is cancelled at
+  the instant it is promoted. A node queued on a concurrency group is granted a
+  real slot as soon as the group frees one; if the dispatcher's context had been
+  cancelled by then (Ctrl-C, a fail-fast plan failure, or a dispatch-wait
+  timeout) the node could not reclaim its worker slot and returned cancelled
+  without releasing the slot it had just been handed, so the group ran one slot
+  short until the lease lapsed and a reaper swept it. The promoted slot is now
+  released on every exit from the promotion that does not go on to run the
+  node.
 - **orchestrator:** S3-shared-state concurrency again recognizes the
   inherited-holder marker earlier releases wrote. The marker inside a
   `concurrency/` slot object changed shape and nothing rewrites those objects,
@@ -508,6 +652,33 @@ code change to unlock.
   backend uses the same shape. Run-store schema 27 rewrites the marker in an
   existing SQLite database, so no row is left in a form the new code cannot
   match; a Postgres database needs no rewrite because it never accepted one.
+- **store:** Deleting a run now drops the memo entries it produced. A cache
+  entry written by `on_limit: coalesce` outlived the run whose output it
+  pointed at, so after `sparkwing runs delete`, `sparkwing runs prune` or
+  `DELETE /api/v1/runs/{id}`, the next node with the same cache key was handed
+  a hit whose output no longer existed and failed with `cache hit: fetch
+  output: not found` for the rest of the entry's TTL. Such a node now executes
+  instead.
+  A maintenance pass also drops entries whose origin run is already gone, so a
+  database written by an earlier version repairs itself instead of failing
+  those nodes until the entries expire.
+- **store + cli:** `sparkwing triggers list --repo` and
+  `GET /api/v1/triggers?repo=` now find matches that are not on the newest
+  page. The repository is read out of each trigger's environment, which ran
+  after the SQL limit, so a caller asking for 20 triggers of one repository got
+  only those among the newest 20 overall -- commonly none. The store now walks
+  pages by keyset cursor until the limit is filled, over the newest 5,000
+  triggers matching the other filters. That search horizon is stated in
+  `--repo`'s help and in the CLI reference, an empty `--repo` listing names it,
+  and the store logs a warning when it stops there short of the limit, so a
+  match older than the horizon is not reported as a plain empty result.
+- **store + controller:** A run created without a start time now starts when it
+  was created. `POST /api/v1/runs` requires only an id, a pipeline and a
+  status, and a body omitting `started_at` stored the zero `time.Time`'s
+  undefined nanosecond value, landing the run in 1754: it sorted below every
+  real run so a default list never showed it, every `--since` window excluded
+  it, and the stale-run reaper skipped it forever. A row already written that
+  way now reads back with an unset start time rather than a 1754 date.
 - **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
   it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
   of printing a skip and exiting 0, so the comment and `#nosec` annotation
@@ -568,6 +739,24 @@ code change to unlock.
   `WithReadCacheTTL`), a read that found no run is not cached at all, and
   `GetLatestRun` reads each run envelope without retaining it, so scanning a
   bucket no longer pins every run in it for the life of the process.
+- **orchestrator:** A node whose local log file stops accepting writes now fails
+  instead of reporting success. The local per-node log writer -- the one every
+  default `sparkwing run` uses -- discarded each write error, so a full disk, a
+  revoked permission or a bad descriptor lost log lines while the node finished
+  green. Those lost lines now count as drops the same way an unreachable remote
+  log store's do: the run records a `logs_drop` event, the node fails with
+  reason `logs_dropped`, and `SPARKWING_LOGS_DROP_POLICY=warn` still keeps such
+  a run green. The node log is now closed before that verdict is reached, so a
+  file that fails on close counts too, and a record that will not encode -- a
+  `NaN` or a func in a log record's attributes, say -- counts as one dropped
+  line on the local and the remote writer alike instead of vanishing on one and
+  failing the node on the other.
+- **orchestrator:** A node timeout or a cancelled run now interrupts the remote
+  fetch and compile a node does when its pipeline is not in the runner image.
+  The clone, the binary-cache download, the `go build` and the cache upload all
+  ran outside the node's context, so only the final child process honoured
+  `--timeout` or Ctrl-C and a stuck git host or cache endpoint held the node
+  open past its budget until the dispatch watchdog dumped stacks.
 - **ci:** The `commentcheck` gate tells an agent what to do instead of implying
   the comment should go. `--help` now names the `<root>` positional -- one
   directory to walk, not a list of files -- and the caps a tagged comment obeys
@@ -580,6 +769,15 @@ code change to unlock.
 
 ### Security
 
+- **store:** A SQLite state-database path containing `#` or `?` no longer opens
+  a different file. The path was interpolated into a `file:` URI without
+  escaping, so SQLite ended the filename at the first such character and opened
+  the truncated path instead -- a database it created with the process umask
+  rather than the 0600 the intended path was hardened to, holding secret values
+  and token hashes, and with every connection pragma (`busy_timeout`, WAL,
+  `synchronous`, `foreign_keys`, `_txlock=immediate`) silently dropped along
+  with the swallowed query string. Paths are now percent-escaped, so `#`, `?`
+  and `%` reach SQLite intact.
 - **cache:** A pipeline binary fetched from a shared artifact store must carry
   its `.sha256` sidecar. When the sidecar was missing the fetch accepted
   whatever bytes were there, computed a digest from those same bytes, wrote it

@@ -44,3 +44,13 @@ func localStore(b backend.Backend) *store.Store {
 	}
 	return nil
 }
+
+// safety: a profile that declares a logs surface serves log bodies through
+// the backend, so the readers that open files under Paths would find nothing.
+func logsUnderPaths(ctx context.Context, b backend.Backend) bool {
+	caps, err := b.Capabilities(ctx)
+	if err != nil {
+		return false
+	}
+	return caps.Storage.Logs == "" || caps.Storage.Logs == "fs"
+}

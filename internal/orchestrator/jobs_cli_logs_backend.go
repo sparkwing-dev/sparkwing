@@ -54,22 +54,39 @@ func writeLogsViaBackend(ctx context.Context, b backend.Backend, runID string, t
 }
 
 func writeEventsViaBackend(ctx context.Context, b backend.Backend, runID string, opts LogsOpts, out io.Writer) error {
-	events, err := b.ListEventsAfter(ctx, runID, 0, 0)
-	if err != nil {
-		return err
-	}
+	const page = 500
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
-	for _, e := range events {
-		if err := enc.Encode(e); err != nil {
+	var after int64
+	for {
+		events, err := b.ListEventsAfter(ctx, runID, after, page)
+		if err != nil {
 			return err
+		}
+		if len(events) == 0 {
+			break
+		}
+		// safety: the contract is seq > after, ascending; a backend that
+		// ignores after would otherwise replay one page forever.
+		last := events[len(events)-1].Seq
+		if last <= after {
+			break
+		}
+		for _, e := range events {
+			if err := enc.Encode(e); err != nil {
+				return err
+			}
+		}
+		after = last
+		if len(events) < page {
+			break
 		}
 	}
 	data := buf.Bytes()
 	if opts.Tail > 0 || opts.Head > 0 || opts.Lines != "" || opts.Grep != "" {
 		data = opts.applyClientFilters(data)
 	}
-	_, err = out.Write(data)
+	_, err := out.Write(data)
 	return err
 }
 

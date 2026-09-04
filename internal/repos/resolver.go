@@ -96,7 +96,7 @@ func PipelineNamesForRepo(absPath string) ([]string, error) {
 		return nil, fmt.Errorf("cache entry: %w", err)
 	}
 	lease, _, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
-		return bincache.CompilePipeline(sparkwingDir, tempPath)
+		return bincache.CompilePipeline(context.Background(), sparkwingDir, tempPath)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("compile %s: %w", sparkwingDir, err)

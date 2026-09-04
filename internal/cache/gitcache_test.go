@@ -3,6 +3,7 @@ package cache
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -840,12 +841,12 @@ func TestHandleBinClientRejectsPoisonedBlob(t *testing.T) {
 	if err := os.WriteFile(src, []byte("compiled pipeline bytes"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := bincache.UploadBinary(srv.URL, "writer-token", hash, src); err != nil {
+	if err := bincache.UploadBinary(context.Background(), srv.URL, "writer-token", hash, src); err != nil {
 		t.Fatalf("UploadBinary: %v", err)
 	}
 
 	dest := filepath.Join(t.TempDir(), "pipeline")
-	if err := bincache.TryBinary(srv.URL, "writer-token", hash, dest); err != nil {
+	if err := bincache.TryBinary(context.Background(), srv.URL, "writer-token", hash, dest); err != nil {
 		t.Fatalf("TryBinary: %v", err)
 	}
 
@@ -853,7 +854,7 @@ func TestHandleBinClientRejectsPoisonedBlob(t *testing.T) {
 		t.Fatal(err)
 	}
 	poisoned := filepath.Join(t.TempDir(), "pipeline")
-	if err := bincache.TryBinary(srv.URL, "writer-token", hash, poisoned); !errors.Is(err, bincache.ErrDigest) {
+	if err := bincache.TryBinary(context.Background(), srv.URL, "writer-token", hash, poisoned); !errors.Is(err, bincache.ErrDigest) {
 		t.Fatalf("err = %v, want ErrDigest", err)
 	}
 	if _, err := os.Stat(poisoned); !os.IsNotExist(err) {

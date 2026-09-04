@@ -365,12 +365,20 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			profileName = opts.Profile.Name
 		}
 		consumerCtx, cancelConsumer := context.WithCancel(ctx)
-		defer cancelConsumer()
 		child := childStoreEnv{}
 		if opts.standalone != nil {
 			child = childStoreEnv{path: opts.standalone.stateDB, reason: opts.standalone.reason}
 		}
-		go runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget, child)
+		// safety: the loop's last writes race the caller's deferred store
+		// close, so this run stops it and waits for it before returning.
+		var triggerLoop sync.WaitGroup
+		triggerLoop.Add(1)
+		defer triggerLoop.Wait()
+		defer cancelConsumer()
+		go func() {
+			defer triggerLoop.Done()
+			runLocalTriggerLoop(consumerCtx, canonicalState(backends.State), runID, profileName, parentTriggerRepoDir(), nil, wedgeBudget, child)
+		}()
 	}
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout
@@ -2718,8 +2726,11 @@ func (s *dispatchState) markFailed(nodeID string, reason error) {
 }
 
 func (s *dispatchState) markCancelled(nodeID, reason string) {
-	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Cancelled), reason, nil)
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_cancelled", []byte(reason))
+	// safety: the common caller has just observed the run context Done, and a
+	// store write on a cancelled context never reaches the driver.
+	ctx := context.WithoutCancel(s.ctx)
+	_ = s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Cancelled), reason, nil)
+	_ = s.backends.State.AppendEvent(ctx, s.runID, nodeID, "node_cancelled", []byte(reason))
 	s.setOutcome(nodeID, sparkwing.Cancelled)
 }
 
@@ -2743,8 +2754,11 @@ func canceledByRun(err error) bool {
 }
 
 func (s *dispatchState) markSkipped(nodeID, reason string) {
-	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Skipped), reason, nil)
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_skipped", []byte(reason))
+	// safety: an OnFailure child whose parent was cancelled reaches this from a
+	// select that races the run context, so the write outlives a cancelled run.
+	ctx := context.WithoutCancel(s.ctx)
+	_ = s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Skipped), reason, nil)
+	_ = s.backends.State.AppendEvent(ctx, s.runID, nodeID, "node_skipped", []byte(reason))
 	s.setOutcome(nodeID, sparkwing.Skipped)
 }
 
