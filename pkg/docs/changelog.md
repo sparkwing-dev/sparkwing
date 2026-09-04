@@ -360,6 +360,12 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** The warm cache PVC pool refills a gap left by a deleted member
+  instead of stalling below its configured size. `Reconcile` derived the next
+  PVC name from the count of surviving PVCs, so with `pool_size: 3` and member
+  `-0` deleted it re-attempted `sparkwing-cache-pool-2`, which already existed,
+  and logged a creation that never happened on every tick. It now allocates the
+  lowest free member index and says when a PVC already existed.
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
   that node as cancelled, and an `OnFailure` child skipped because its cancelled

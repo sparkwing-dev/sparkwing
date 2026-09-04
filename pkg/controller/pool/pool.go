@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +34,8 @@ const (
 	PoolLabelKey    = "sparkwing.dev/pool"
 	PoolLabelValue  = "cache"
 )
+
+const memberPrefix = "sparkwing-cache-pool-"
 
 // Pool manages a pool of warm Docker cache PVCs.
 type Pool struct {
@@ -66,12 +70,24 @@ func (p *Pool) Reconcile(ctx context.Context, heartbeatTimeout, startupGrace tim
 		return fmt.Errorf("listing pool pvcs: %w", err)
 	}
 
-	for i := len(pvcs); i < p.poolSize; i++ {
-		if err := p.create(ctx, i); err != nil {
-			log.Printf("pool: warning: creating pool PVC %d: %v", i, err)
+	// safety: a deleted middle member leaves a free index the member count never lands on
+	occupied := occupiedMembers(pvcs)
+	next := 0
+	for have := len(pvcs); have < p.poolSize; have++ {
+		for occupied[next] {
+			next++
+		}
+		occupied[next] = true
+		created, err := p.create(ctx, next)
+		if err != nil {
+			log.Printf("pool: warning: creating pool PVC %d: %v", next, err)
 			continue
 		}
-		log.Printf("pool: created sparkwing-cache-pool-%d", i)
+		if !created {
+			log.Printf("pool: pool PVC %s already exists", memberName(next))
+			continue
+		}
+		log.Printf("pool: created %s", memberName(next))
 	}
 
 	now := time.Now()
@@ -160,8 +176,40 @@ func (p *Pool) list(ctx context.Context) ([]corev1.PersistentVolumeClaim, error)
 	return pvcs.Items, nil
 }
 
-func (p *Pool) create(ctx context.Context, index int) error {
-	name := fmt.Sprintf("sparkwing-cache-pool-%d", index)
+func occupiedMembers(pvcs []corev1.PersistentVolumeClaim) map[int]bool {
+	occupied := make(map[int]bool, len(pvcs))
+	for _, pvc := range pvcs {
+		if i, ok := memberIndex(pvc); ok {
+			occupied[i] = true
+		}
+	}
+	return occupied
+}
+
+func memberIndex(pvc corev1.PersistentVolumeClaim) (int, bool) {
+	if s := pvc.Annotations[AnnPoolMember]; s != "" {
+		if i, err := strconv.Atoi(s); err == nil && i >= 0 {
+			return i, true
+		}
+	}
+	// safety: pools created before the member annotation carry the index only in the name
+	s, ok := strings.CutPrefix(pvc.Name, memberPrefix)
+	if !ok {
+		return 0, false
+	}
+	i, err := strconv.Atoi(s)
+	if err != nil || i < 0 {
+		return 0, false
+	}
+	return i, true
+}
+
+func memberName(index int) string {
+	return fmt.Sprintf("%s%d", memberPrefix, index)
+}
+
+func (p *Pool) create(ctx context.Context, index int) (bool, error) {
+	name := memberName(index)
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -173,7 +221,7 @@ func (p *Pool) create(ctx context.Context, index int) error {
 			},
 			Annotations: map[string]string{
 				AnnPoolState:  StateDirty,
-				AnnPoolMember: fmt.Sprintf("%d", index),
+				AnnPoolMember: strconv.Itoa(index),
 			},
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
@@ -186,10 +234,13 @@ func (p *Pool) create(ctx context.Context, index int) error {
 		},
 	}
 	_, err := p.Client.CoreV1().PersistentVolumeClaims(p.Namespace).Create(ctx, pvc, metav1.CreateOptions{})
-	if err != nil && !errors.IsAlreadyExists(err) {
-		return err
+	if errors.IsAlreadyExists(err) {
+		return false, nil
 	}
-	return nil
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Checkout atomically allocates a clean PVC for a job. Returns "" if
