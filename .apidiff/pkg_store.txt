@@ -610,6 +610,7 @@ func (s *Store) PrincipalHoldsPipelineClaim(ctx context.Context, pipeline string
 func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsRunClaim(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (bool, error)
 func (s *Store) PrincipalHoldsTriggerClaim(ctx context.Context, triggerID string, claimant ClaimIdentity, now time.Time) (bool, error)
+func (s *Store) PrincipalIsTriggerClaimant(ctx context.Context, triggerID string, claimant ClaimIdentity) (bool, error)
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)

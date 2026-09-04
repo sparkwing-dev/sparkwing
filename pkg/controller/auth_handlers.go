@@ -361,11 +361,9 @@ type rotateResp struct {
 func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
 	prefix := r.PathValue("prefix")
 	var req rotateReq
-	if r.ContentLength > 0 {
-		if err := decodeJSON(r, &req); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
+	if err := decodeOptionalJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 	grace := defaultRotateGrace
 	if req.GraceSecs > 0 {

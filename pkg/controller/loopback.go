@@ -379,7 +379,7 @@ func (l *Loopback) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 
 func (l *Loopback) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = r.Body.Close() }()
-	snapshot, err := io.ReadAll(r.Body)
+	snapshot, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPlanSnapshotBody))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return

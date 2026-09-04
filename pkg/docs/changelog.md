@@ -175,6 +175,13 @@ code change to unlock.
 
 ### Changed
 
+- **controller:** A plan snapshot upload is capped at 4 MiB, the same ceiling
+  the store puts on a node's dispatch envelope. `POST /api/v1/runs/{id}/plan`
+  is the one write path that stores its body verbatim rather than decoding it,
+  and it read the body whole with no limit, so a caller holding a claim on a
+  run could make the controller buffer and persist a body of any size. An
+  over-cap body is now refused with 400 and the stored snapshot is left alone.
+  The same cap applies on the loopback controller a local run talks to.
 - **cli:** The read verbs see runs that went standalone. `runs list`, `jobs`,
   `runs find`, and `runs failures` merge this home's own store with every
   standalone store under it, newest first, and tag each row with the store it
@@ -386,6 +393,30 @@ code change to unlock.
   held when the wait began, so once a reconnect replaced that socket the
   interrupt reached a dead one and the run stayed blocked until the daemon
   happened to send a frame.
+- **controller:** Finishing a run no longer loses the terminal GitHub commit
+  status and the run's capacity measurements when the client goes away.
+  `POST /api/v1/runs/{id}/finish` writes the terminal run row and then folds
+  the run's profiles and posts the commit status, and both follow-ups ran on
+  the request's context, which net/http cancels the moment the connection
+  drops -- plausible whenever the fold is slow, which it is, since it walks
+  every node's metric series before the status call. Nothing else produces a
+  finished run's status, so the check on the pull request stayed `pending`
+  forever. The follow-ups now run detached from the request, under a bound of
+  their own.
+- **controller:** A chunked request body is no longer ignored on the two routes
+  whose body is optional. `POST /api/v1/triggers/claim` and
+  `POST /api/v1/tokens/{prefix}/rotate` decoded only when the request carried a
+  positive `Content-Length`, so a client that streams its body -- which Go's
+  own `http.Client` does for any body it cannot size, and most non-Go clients
+  do -- got a normal success with every field defaulted: a trigger worker
+  asking for one pipeline was handed a trigger for any pipeline, and a rotation
+  asking for an hour of grace got the 24-hour default.
+- **controller:** A run's detail read no longer drops the connection when the
+  run has an approval gate or a spawned child pipeline but no plan snapshot.
+  The decorations the snapshot supplies are absent in that case, and joining
+  the approval and spawned-pipeline rows onto them panicked, so
+  `GET /api/v1/runs/{id}?include=nodes` -- the dashboard's run page -- failed
+  for that run on every retry.
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
   that node as cancelled, and an `OnFailure` child skipped because its cancelled
@@ -795,6 +826,16 @@ code change to unlock.
 
 ### Security
 
+- **controller:** Finishing or renewing a trigger is now bound to the worker
+  that claimed it. `POST /api/v1/triggers/{id}/heartbeat` and
+  `/triggers/{id}/done` checked the `triggers.claim` scope and nothing else, so
+  any token carrying that scope -- every trigger worker in a fleet, or one
+  stolen from any of them -- could close out another worker's in-flight
+  trigger, hiding it from the reaper's lease-expiry cascade, or hold a dead
+  worker's trigger alive forever by heartbeating it. Both routes answer `403
+  claim_required` unless the caller is the claimant the trigger row records; an
+  `admin` token still bypasses, and a controller serving without auth is
+  unchanged.
 - **store:** A SQLite state-database path containing `#` or `?` no longer opens
   a different file. The path was interpolated into a `file:` URI without
   escaping, so SQLite ended the filename at the first such character and opened
