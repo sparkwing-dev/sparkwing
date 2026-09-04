@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -281,17 +280,16 @@ func (cl *Client) readCancelLease(runID string) (found bool, terminal, transient
 }
 
 func (cl *Client) cancelOnDone(ctx context.Context) (stop func()) {
-	nc := cl.nc
 	done := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
-			_ = nc.SetReadDeadline(time.Now())
+			cl.wakeWaiter()
 		case <-done:
 		}
 	}()
 	return func() {
 		close(done)
-		_ = nc.SetReadDeadline(time.Time{})
+		cl.resumeWaiter()
 	}
 }

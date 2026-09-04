@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -181,8 +182,11 @@ func (o Options) spawn(home, version string) error {
 }
 
 type Client struct {
-	nc   net.Conn
-	dec  *frameReader
+	connMu        sync.Mutex
+	nc            net.Conn
+	dec           *frameReader
+	waitCancelled bool
+
 	ack  wingwire.HelloAck
 	opts Options
 	sock string
@@ -426,8 +430,7 @@ func (cl *Client) connect(ctx context.Context) error {
 			}
 			continue
 		}
-		cl.nc = nc
-		cl.dec = newFrameReader(nc)
+		cl.setConn(nc)
 		ack, herr := cl.handshake(opts.Version)
 		if herr != nil {
 			cl.Close()
@@ -516,9 +519,13 @@ func (cl *Client) recoverConn(ctx context.Context) error {
 
 func (cl *Client) takeover(ctx context.Context, opts Options) error {
 	opts.logf("taking over daemon %s with %s", cl.ack.BinaryVersion, opts.Version)
-	_ = cl.nc.SetWriteDeadline(time.Now().Add(opts.dialTimeout()))
+	if nc := cl.conn(); nc != nil {
+		_ = nc.SetWriteDeadline(time.Now().Add(opts.dialTimeout()))
+	}
 	_ = cl.write(&wingwire.DrainRequest{SuccessorVersion: opts.Version})
-	_ = cl.nc.SetReadDeadline(time.Now().Add(opts.dialTimeout()))
+	if nc := cl.conn(); nc != nil {
+		_ = nc.SetReadDeadline(time.Now().Add(opts.dialTimeout()))
+	}
 	_, _ = cl.dec.read()
 	cl.Close()
 	if err := opts.spawn(opts.Home, opts.Version); err != nil {
@@ -582,17 +589,62 @@ func (cl *Client) write(msg wingwire.Message) error {
 	if err != nil {
 		return err
 	}
-	_, err = cl.nc.Write(line)
+	nc := cl.conn()
+	if nc == nil {
+		return net.ErrClosed
+	}
+	_, err = nc.Write(line)
 	return err
 }
 
+// safety: a reconnect replaces the socket a waiting caller is blocked on, so
+// an already-armed cancellation is re-armed against the new one; otherwise the
+// wake reaches a socket nobody is reading and the live read never returns.
+func (cl *Client) setConn(nc net.Conn) {
+	cl.connMu.Lock()
+	defer cl.connMu.Unlock()
+	cl.nc = nc
+	cl.dec = newFrameReader(nc)
+	if cl.waitCancelled {
+		_ = nc.SetReadDeadline(time.Now())
+		_ = nc.SetWriteDeadline(time.Now())
+	}
+}
+
+func (cl *Client) conn() net.Conn {
+	cl.connMu.Lock()
+	defer cl.connMu.Unlock()
+	return cl.nc
+}
+
+func (cl *Client) wakeWaiter() {
+	cl.connMu.Lock()
+	defer cl.connMu.Unlock()
+	cl.waitCancelled = true
+	if cl.nc != nil {
+		_ = cl.nc.SetReadDeadline(time.Now())
+		_ = cl.nc.SetWriteDeadline(time.Now())
+	}
+}
+
+func (cl *Client) resumeWaiter() {
+	cl.connMu.Lock()
+	defer cl.connMu.Unlock()
+	cl.waitCancelled = false
+	if cl.nc != nil {
+		_ = cl.nc.SetReadDeadline(time.Time{})
+		_ = cl.nc.SetWriteDeadline(time.Time{})
+	}
+}
+
 func (cl *Client) Close() error {
-	if cl.nc == nil {
+	nc := cl.conn()
+	if nc == nil {
 		return nil
 	}
 	// safety: mark closed before closing the socket so a Watch or Acquire
 	// reader that wakes on the close sees the intent and exits instead of
 	// reconnecting to a daemon the caller is done with.
 	cl.closed.Store(true)
-	return cl.nc.Close()
+	return nc.Close()
 }

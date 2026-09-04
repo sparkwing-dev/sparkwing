@@ -360,6 +360,11 @@ code change to unlock.
 
 ### Fixed
 
+- **wingd:** Ctrl-C again ends a queued run after the admission daemon has
+  restarted under it. The waiter armed cancellation against the connection it
+  held when the wait began, so once a reconnect replaced that socket the
+  interrupt reached a dead one and the run stayed blocked until the daemon
+  happened to send a frame.
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
   that node as cancelled, and an `OnFailure` child skipped because its cancelled
