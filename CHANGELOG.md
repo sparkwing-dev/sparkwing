@@ -360,6 +360,15 @@ code change to unlock.
 
 ### Fixed
 
+- **local admission:** A daemon restart no longer hands one connection every
+  member of a lease a nested run shares. A parent and its child present the
+  same lease token, so whichever reclaimed the lease first took the other's
+  membership with it -- freeing the whole charge as soon as either run
+  finished, while the other was still executing -- and the run that lost the
+  race was evicted outright. Each run now reclaims its own membership, whatever
+  no run reclaims is released when the reattach grace window closes, and a child
+  that attaches after a reclaim is recorded again.
+
 - **local admission:** `sparkwing runs cancel` no longer strands the run queued
   behind the one it cancels when the cancelled run's own process is already
   gone. The daemon promoted the waiter in the ledger, then abandoned the whole
