@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$ROOT" || exit 1
+
 CYAN="\033[36m"
 GREEN="\033[32m"
 RED="\033[31m"
@@ -85,7 +88,7 @@ fi
 if [[ "$FLAKY_RUNS" -gt 0 ]]; then
   echo ""
   echo -e "${BOLD}Flaky detection${RESET} (${FLAKY_RUNS} runs)"
-  exec "$0/../bin/flaky-detect.sh" "$FLAKY_RUNS" "$PACKAGE"
+  exec "$ROOT/bin/flaky-detect.sh" "$FLAKY_RUNS" "$PACKAGE"
 fi
 
 exit $EXIT_CODE

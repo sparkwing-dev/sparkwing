@@ -311,6 +311,10 @@ code change to unlock.
 
 ### Fixed
 
+- **tooling:** `bin/` scripts resolve the repository root from their own
+  location, so running one by absolute path from another checkout or a
+  worktree operates on the script's own tree.
+
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,

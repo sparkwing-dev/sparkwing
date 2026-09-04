@@ -2,13 +2,15 @@
 
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
 if [ $# -lt 1 ]; then
   echo "usage: bash bin/extract-changelog-section.sh <version> [changelog-path]" >&2
   exit 2
 fi
 
 version="$1"
-path="${2:-CHANGELOG.md}"
+path="${2:-$ROOT/CHANGELOG.md}"
 
 if [ ! -f "$path" ]; then
   echo "extract-changelog-section: $path: no such file" >&2
