@@ -99,6 +99,16 @@ this file is a menu and checklist, not a command that every change must run.
   are atomic, and recording prunes anything older than 14 days. Delete the
   directory to force full verification without `--exhaustive`.
 
+- **Store dialect matrix:** `sparkwing run store-postgres` runs
+  `go test ./pkg/store/...` with `SPARKWING_TEST_STORE=postgres`, so every
+  store test that opens through `pkg/store/storetest` exercises the Postgres
+  dialect instead of a SQLite file. It reuses `SPARKWING_TEST_PG_URL` when
+  that is set and otherwise starts an embedded Postgres on a free port (data
+  under a temporary root, binaries cached), then stops it and removes the
+  data directory. No Docker. A server that will not start fails the step.
+  `pre-push` runs it after the race gate. Roughly 80 seconds on a warm
+  cache; the first run downloads the Postgres binaries.
+
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is
   set to a database they cannot reach. Start one with `docker run --rm -d
