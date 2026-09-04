@@ -9,6 +9,21 @@ this file is a menu and checklist, not a command that every change must run.
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
+- **Heavy packages:** run these by name rather than reaching for `./...`, and
+  give the command a timeout the package actually fits in. Measured alone on an
+  idle 16-core Linux box, `GOWORK=off go test -count=1 <pkg>`:
+
+  | Package | Alone | Suggested `-timeout` |
+  | --- | --- | --- |
+  | `./cmd/sparkwing/...` | 174s | 10m |
+  | `./internal/orchestrator` | 121s | 10m |
+  | `./internal/cache` | 6s | 2m |
+  | `./internal/cluster` | 4s | 2m |
+
+  Under contention from parallel agents the two heavy packages have been
+  observed at two to four times those figures, so the suggested budgets sit
+  well above the measurement.
+
 - **Normal broad check:** `sparkwing run pre-commit` covers every committed Go
   module, the dashboard TypeScript unit, full ESLint, production build,
   and browser smoke suites, formatting, vet, build, tests, documentation
