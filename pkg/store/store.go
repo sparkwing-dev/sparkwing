@@ -4270,9 +4270,13 @@ func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
 // alone cannot see, so requeueing it would put a second copy of live
 // work on the queue; that case belongs to the orphan reaper, which
 // judges by heartbeat. The run's status is a correlated subquery inside
-// the requeue's own WHERE rather than a read before it, so there is no
-// window between the check and the write for a run to start in. A run
-// with no row at all reads as not started, which is what an unclaimed
+// the requeue's own WHERE rather than a read before it, which narrows
+// the window a run can start in from a round trip to a single
+// statement. It does not close it: the subquery reads that statement's
+// snapshot, so a run that commits its start afterwards is invisible
+// here, and nothing this function locks would make it visible -- the
+// consumer that starts a run does not touch the trigger row. A run with
+// no row at all reads as not started, which is also what an unclaimed
 // trigger looks like before its consumer gets that far.
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
 	res, err := s.exec(ctx,

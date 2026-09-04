@@ -382,8 +382,10 @@ code change to unlock.
   then updated the trigger as two statements against two tables, so at READ
   COMMITTED a run that started in between was requeued anyway and a second
   copy of live work went back on the pending queue. The run status is now a
-  correlated subquery in the requeue's own WHERE, leaving no window between
-  the check and the write.
+  correlated subquery in the requeue's own WHERE, which narrows that window
+  from a round trip to a single statement. A run whose start commits after
+  that statement's snapshot is still invisible to it; closing that remainder
+  needs the consumer's start-of-run path to touch the trigger row.
 
 - **store:** Concurrent `sparkwing.Annotate` calls no longer lose entries on
   Postgres. The node, step and run annotation appends are read-modify-write
