@@ -337,6 +337,11 @@ code change to unlock.
 
 ### Fixed
 
+- **runners:** A warm-pool node cancelled while the orchestrator was still
+  announcing it to the controller now reports `cancelled` instead of `failed`.
+  The runner also revokes the node's readiness on that path, so a cancellation
+  landing mid-announcement cannot leave the node advertised to remote agents.
+
 - **web:** ESLint no longer reads Playwright's output. `playwright-report/` and
   `test-results/` join the dashboard's ESLint ignore list, so a browser run that
   left its HTML report and traces behind no longer fails the next lint step with

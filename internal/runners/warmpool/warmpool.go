@@ -47,6 +47,10 @@ var _ runner.Runner = (*Runner)(nil)
 
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	if err := r.ctrl.MarkNodeReady(ctx, req.RunID, req.NodeID); err != nil {
+		// safety: the server may have marked the node ready before the cancelled request failed
+		if ctx.Err() != nil {
+			return r.revokeAndReportCancelled(ctx, req)
+		}
 		return runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("mark ready: %w", err)}
 	}
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, "waiting for warm runner")
@@ -66,13 +70,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	for {
 		select {
 		case <-ctx.Done():
-			revokeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-			if _, err := r.ctrl.RevokeNodeReady(revokeCtx, req.RunID, req.NodeID); err != nil {
-				r.logger.Debug("warmpool: cancellation revoke failed",
-					"run_id", req.RunID, "node_id", req.NodeID, "err", err)
-			}
-			cancel()
-			return runner.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
+			return r.revokeAndReportCancelled(ctx, req)
 		case <-poll.C:
 			n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
 			if err != nil {
@@ -125,10 +123,31 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				r.logger.Warn("warmpool: no claim in window; falling back",
 					"run_id", req.RunID, "node_id", req.NodeID,
 					"wait", r.cfg.ClaimWaitTimeout)
-				return r.fallback.RunNode(ctx, req)
+				return asCancellation(ctx, r.fallback.RunNode(ctx, req))
 			}
 		}
 	}
+}
+
+func (r *Runner) revokeAndReportCancelled(ctx context.Context, req runner.Request) runner.Result {
+	revokeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancel()
+	if _, err := r.ctrl.RevokeNodeReady(revokeCtx, req.RunID, req.NodeID); err != nil {
+		r.logger.Debug("warmpool: cancellation revoke failed",
+			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+	}
+	return runner.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
+}
+
+func asCancellation(ctx context.Context, res runner.Result) runner.Result {
+	if ctx.Err() == nil || res.Outcome != sparkwing.Failed {
+		return res
+	}
+	// safety: a fallback aborted by cancellation is a cancelled node, not a failed one
+	if errors.Is(res.Err, context.Canceled) || errors.Is(res.Err, context.DeadlineExceeded) {
+		return runner.Result{Outcome: sparkwing.Cancelled, Err: res.Err, Output: res.Output, Usage: res.Usage}
+	}
+	return res
 }
 
 func heartbeatLoop(
