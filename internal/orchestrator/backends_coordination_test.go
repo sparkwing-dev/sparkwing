@@ -137,7 +137,9 @@ func TestLocalStateSetPipelinePinClearsWithoutCreatingARow(t *testing.T) {
 }
 
 func TestS3StateAdapterReportsCoordinationUnsupported(t *testing.T) {
-	adapter := s3StateAdapter{Backend: s3state.New(nil)}
+	backend := s3state.New(nil)
+	t.Cleanup(func() { _ = backend.Close() })
+	adapter := s3StateAdapter{Backend: backend}
 	ctx := context.Background()
 
 	checks := map[string]func() error{

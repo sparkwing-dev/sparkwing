@@ -1254,6 +1254,14 @@ func TestConcurrency_PlanLevelEvictedBeforeDispatchCancelsRun(t *testing.T) {
 		})
 		leaderDone <- res
 	}()
+	t.Cleanup(func() {
+		releaseLeaderBarrier()
+		select {
+		case <-leaderDone:
+		case <-time.After(15 * time.Second):
+			t.Error("timed out waiting for the held leader run to finish")
+		}
+	})
 	waitForLeaderHolding(t)
 
 	victimDone := make(chan *orchestrator.Result, 1)
