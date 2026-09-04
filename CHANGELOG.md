@@ -280,7 +280,7 @@ code change to unlock.
   requirements, safe executor name, kind, and location fields, scores, and
   outcomes without credentials, membership IDs, internal controller or
   executor IDs, holders, or reservation identifiers. See the
-  [migration guide](docs/migrations/_unreleased.md#enrolled-executor-offer-arbitration).
+  [migration guide](docs/migrations/v0.41.0.md#enrolled-executor-offer-arbitration).
 - **controller + runner:** A node whose agent or gateway lease expires now ends
   as `agent_lost` and, when its pipeline retry budget allows, the source
   controller creates one fresh linked run for the lost work and its descendants.
@@ -327,7 +327,7 @@ code change to unlock.
   the ones `SPARKWING_ALLOW_UNADMITTED=1` produces, are invisible to
   `sparkwing runs`, `sparkwing jobs`, and the dashboard, which is what the
   block says; see the
-  [migration guide](docs/migrations/_unreleased.md#two-refusals-became-warnings-and-those-runs-leave-sparkwing-runs).
+  [migration guide](docs/migrations/v0.41.0.md#two-refusals-became-warnings-and-those-runs-leave-sparkwing-runs).
   Their start record and `sparkwing runs status` carry `standalone` and
   `standalone_reason` (`no-daemon`, `daemon-older`, `daemon-fault`, `floor`,
   `forced`), and `sparkwing doctor` lists each standalone store with its run
@@ -352,7 +352,7 @@ code change to unlock.
   no upgrade fixes. Dry runs write to a throwaway store and leave none behind.
   Pipeline binaries built before this release still open the shared store
   directly; see the
-  [migration note](docs/migrations/_unreleased.md#pipeline-binaries-built-before-the-daemon-owned-the-runs-store).
+  [migration note](docs/migrations/v0.41.0.md#pipeline-binaries-built-before-the-daemon-owned-the-runs-store).
 
 - **orchestrator:** A local run now reaches this machine's runs store through
   the admission daemon instead of opening `state.db` itself. When the
@@ -746,7 +746,7 @@ code change to unlock.
   upgraded store; upgrade every controller that shares it before any opens it.
   Enrolled helpers also require matching runner and local-daemon builds for
   nonblocking admission. See the
-  [migration guide](docs/migrations/_unreleased.md#executor-registration-and-contribution-budgets).
+  [migration guide](docs/migrations/v0.41.0.md#executor-registration-and-contribution-budgets).
 - **store (Breaking):** Run-store schema 29 persists enrolled executor offer
   rounds and their credential, reservation, resource-digest, physical-slot,
   priority, and liveness bindings. Older writers could allocate outside the
@@ -754,7 +754,7 @@ code change to unlock.
   requirement. Binaries that do not know it refuse the upgraded store; upgrade
   every controller sharing it before any opens it, and upgrade enrolled agents
   and wingd before resuming them. See the
-  [migration guide](docs/migrations/_unreleased.md#enrolled-executor-offer-arbitration).
+  [migration guide](docs/migrations/v0.41.0.md#enrolled-executor-offer-arbitration).
 - **store + controller client (Breaking):** Run-store schema 30 persists
   generation-bound execution attempts, global invocation counts, agent-loss
   retry lineage, and durable retry availability. Older writers could mutate a
@@ -766,7 +766,7 @@ code change to unlock.
   Custom HTTP clients must also send the exact node-claim headers on node
   writes, or the exact trigger-generation header for source-coordinator writes.
   See the
-  [migration guide](docs/migrations/_unreleased.md#agent-loss-retry-lineage-and-execution-fencing).
+  [migration guide](docs/migrations/v0.41.0.md#agent-loss-retry-lineage-and-execution-fencing).
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
@@ -1098,7 +1098,7 @@ code change to unlock.
   `/api/v1/runs/{id}/nodes/{nodeID}/steps/summary`, and
   `/api/v1/runs/{id}/nodes/{nodeID}/summary`. Regenerate clients and use the
   public replacement fields described in the
-  [migration guide](docs/migrations/_unreleased.md#public-controller-schema-cuts).
+  [migration guide](docs/migrations/v0.41.0.md#public-controller-schema-cuts).
 - **cache:** A pipeline binary fetched from a shared artifact store must carry
   its `.sha256` sidecar. When the sidecar was missing the fetch accepted
   whatever bytes were there, computed a digest from those same bytes, wrote it
@@ -1155,7 +1155,7 @@ code change to unlock.
   errors on an ambiguous prefix instead of returning the first row. A database
   that already holds two tokens on one prefix refuses to migrate and names the
   prefix; see the
-  [migration guide](docs/migrations/_unreleased.md#token-prefixes-are-unique).
+  [migration guide](docs/migrations/v0.41.0.md#token-prefixes-are-unique).
 - **web:** Browser sessions now die at an absolute age. The controller refuses
   to renew a session older than seven days and deletes it, so a polling tab can
   no longer slide the twelve-hour TTL forever; embedders set another cap with
@@ -1165,7 +1165,7 @@ code change to unlock.
   bind unless the operator also passes `--allow-insecure-cookies-remote`. The
   chart renders that flag alongside the variable when `ingress.allowInsecure`
   publishes the dashboard over plain HTTP, so that opt-in still starts; see the
-  [migration guide](docs/migrations/_unreleased.md#the-dashboard-refuses-an-insecure-cookie-remote-bind).
+  [migration guide](docs/migrations/v0.41.0.md#the-dashboard-refuses-an-insecure-cookie-remote-bind).
   A session whose creation time sits in the future, from a clock stepped
   backwards or a tampered row, is deleted and refused instead of renewed. A tab
   whose session ends stops polling and goes to the sign-in page rather than
@@ -1196,7 +1196,7 @@ code change to unlock.
   rotation -- errors on an ambiguous prefix instead of returning the first row.
   A database that already holds two tokens on one prefix refuses to migrate and
   names the prefix; see the
-  [migration guide](docs/migrations/_unreleased.md#token-prefixes-are-unique).
+  [migration guide](docs/migrations/v0.41.0.md#token-prefixes-are-unique).
 - **sparks:** A `sparks:` entry's `source` is checked as a Go module path
   before it reaches `go list`, so a malformed path fails with a named error
   instead of becoming an argument to the go command.
@@ -1337,7 +1337,7 @@ code change to unlock.
   than by a wrapper that ran before authentication. `sparkwing-controller
   --metrics-addr` (`$SPARKWING_METRICS_ADDR`) binds Prometheus `/metrics` to
   its own listener, off the API listener and any ingress in front of it. See
-  [the migration note](docs/migrations/_unreleased.md).
+  [the migration note](docs/migrations/v0.41.0.md).
 - **cli:** `sparkwing runs submit` now snapshots an allow-listed environment
   instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
   `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every credential-shaped
@@ -1408,7 +1408,7 @@ code change to unlock.
   `GET /api/v1/health` no longer names the storage path or the volume's free
   bytes to an unauthenticated caller. See the
   [operator checklist](docs/security.md#operator-checklist) and the
-  [migration guide](docs/migrations/_unreleased.md).
+  [migration guide](docs/migrations/v0.41.0.md).
 - **cli (Breaking):** `sparkwing runs submit` now snapshots an allow-listed
   environment instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`,
   `HOME`, `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every
@@ -1423,7 +1423,7 @@ code change to unlock.
   deletes the snapshot when it starts the run; a run that returns to the queue
   without its snapshot fails rather than inheriting the consumer's own shell.
   See the
-  [migration guide](docs/migrations/_unreleased.md#breaking-submitted-runs-carry-an-allow-listed-environment).
+  [migration guide](docs/migrations/v0.41.0.md#breaking-submitted-runs-carry-an-allow-listed-environment).
 - **controller:** Secret envelopes are now bound to the fields of the row
   that decide who may read them -- the secret name, the owning repository,
   whether an unscoped row is shared with every run, and whether the value is
@@ -1488,7 +1488,7 @@ code change to unlock.
   The loopback, private, and link-local checks fired only on an IP literal, so
   a database host named under `.internal` walked straight past them. `sparkwing-cache` drops any
   `repo-names.json` entry it can no longer validate when it starts; see the
-  [migration guide](docs/migrations/_unreleased.md#breaking-clone-hosts-in-inward-only-name-spaces-are-refused).
+  [migration guide](docs/migrations/v0.41.0.md#breaking-clone-hosts-in-inward-only-name-spaces-are-refused).
   This is a name check and not a complete SSRF guard: a name that resolves to
   a loopback or private address still passes, because git resolves the name
   again when it connects and an address checked at validation time is not the
