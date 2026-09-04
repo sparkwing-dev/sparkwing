@@ -23,7 +23,7 @@ var supportedPlatforms = map[Binary]map[string]map[string]bool{
 	SparkwingCache:      releasePlatforms(false),
 	SparkwingController: releasePlatforms(false),
 	SparkwingLogs:       releasePlatforms(false),
-	SparkwingRunner:     releasePlatforms(false),
+	SparkwingRunner:     releasePlatforms(true),
 	SparkwingWeb:        releasePlatforms(false),
 }
 

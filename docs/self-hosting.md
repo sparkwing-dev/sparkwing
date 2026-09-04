@@ -63,6 +63,20 @@ go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
 bash install/install.sh
 ```
 
+GitHub Releases also contain `sparkwing-runner` binaries for amd64 and arm64
+on macOS, Linux, and Windows (Windows asset names end in `.exe`). Before
+registering or restarting a downloaded runner, inspect its embedded identity
+without contacting the network:
+
+```bash
+sparkwing-runner version -o json --offline
+```
+
+The record names the runner binary, release version, target platform, and any
+VCS provenance embedded by the Go build. The runner does not yet download or
+replace its own executable; update the service binary through the same installer
+or service manager you used to install it.
+
 The installer asks for the controller URL, logs URL, API token, runner name,
 and maximum concurrent jobs. It writes the existing unenrolled agent format,
 which uses legacy FIFO claims with local admission enabled. Its default CPU

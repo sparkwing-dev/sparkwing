@@ -59,6 +59,12 @@ code change to unlock.
   explicitly eligible work falls back to the coordinator. Schema 30 does not
   expose remote helper body completion, which remains gated on schema 31's
   current-attempt routes and durable grants.
+- **runner + release:** `sparkwing-runner version` reports the runner binary,
+  release version, target platform, and available VCS provenance in pretty,
+  plain, or JSON output without network access. Releases now include signed
+  `sparkwing-runner` binaries for Windows amd64 and arm64.
+  This identity surface prepares safe helper updates; runners do not yet
+  download or replace themselves.
 - **storage/conformance:** `TestConditionalWriterAcrossHandles`, which races two
   handles onto one store so a backend has to prove its conditional writes
   exclude writers that arrived independently, not only goroutines sharing one

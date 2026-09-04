@@ -16,7 +16,7 @@ func TestVerifyBindsAssetAndManifestToOneTrustedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := Target{Binary: Sparkwing, GOOS: "windows", GOARCH: "arm64"}
+	target := Target{Binary: SparkwingRunner, GOOS: "windows", GOARCH: "arm64"}
 	name, err := target.Name()
 	if err != nil {
 		t.Fatal(err)

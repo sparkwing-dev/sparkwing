@@ -156,6 +156,29 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowPublishesWindowsRunnerAssets(t *testing.T) {
+	t.Parallel()
+
+	body, err := os.ReadFile("../../.github/workflows/release.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(body)
+	if !strings.Contains(workflow, "goos: [linux, darwin, windows]") ||
+		!strings.Contains(workflow, "goarch: [amd64, arm64]") {
+		t.Fatal("release build matrix lost a Windows or architecture axis")
+	}
+	if strings.Contains(workflow, "{ binary: sparkwing-runner, goos: windows }") {
+		t.Fatal("release build matrix still excludes Windows sparkwing-runner assets")
+	}
+	for _, binary := range []string{"sparkwing-cache", "sparkwing-controller", "sparkwing-logs", "sparkwing-web"} {
+		exclusion := "{ binary: " + binary + ", goos: windows }"
+		if !strings.Contains(workflow, exclusion) {
+			t.Errorf("release build matrix lost the intentional %s exclusion", binary)
+		}
+	}
+}
+
 func TestReleaseWorkflowRefreshesAlpinePackagesPerAttempt(t *testing.T) {
 	t.Parallel()
 

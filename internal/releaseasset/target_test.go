@@ -8,6 +8,8 @@ func TestNamesContainEveryOfficialRunnerPlatform(t *testing.T) {
 		"sparkwing-runner-darwin-arm64":      true,
 		"sparkwing-runner-linux-amd64":       true,
 		"sparkwing-runner-linux-arm64":       true,
+		"sparkwing-runner-windows-amd64.exe": true,
+		"sparkwing-runner-windows-arm64.exe": true,
 	}
 	for _, name := range Names() {
 		delete(want, name)

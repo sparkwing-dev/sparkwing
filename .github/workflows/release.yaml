@@ -93,7 +93,6 @@ jobs:
         exclude:
           - { binary: sparkwing-cache, goos: windows }
           - { binary: sparkwing-controller, goos: windows }
-          - { binary: sparkwing-runner, goos: windows }
           - { binary: sparkwing-logs, goos: windows }
           - { binary: sparkwing-web, goos: windows }
     runs-on: ${{ matrix.goos == 'darwin' && 'macos-latest' || 'ubuntu-latest' }}
