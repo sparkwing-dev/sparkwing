@@ -178,3 +178,26 @@ func storePostgresGoCommand(cpuCount int) string {
 func init() {
 	sparkwing.Register("store-postgres", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &StorePostgres{} })
 }
+
+func runStorePostgresIfTouched(ctx context.Context) error {
+	files, scope, err := changeScope(ctx, "pkg/store file(s)", storeFiles)
+	if err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "store-postgres: %s", scope)
+	if len(files) == 0 {
+		sparkwing.Info(ctx, "store-postgres: pkg/store unchanged; pre-push runs the suite against postgres regardless")
+		return nil
+	}
+	return (&StorePostgres{}).run(ctx)
+}
+
+func storeFiles(all []string) []string {
+	out := make([]string, 0, len(all))
+	for _, f := range all {
+		if strings.HasPrefix(f, "pkg/store/") && !isTestdataPath(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
