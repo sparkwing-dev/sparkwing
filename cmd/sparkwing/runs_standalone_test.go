@@ -142,6 +142,84 @@ func TestRunsErrors_ReportsAStandaloneRunsFailure(t *testing.T) {
 	}
 }
 
+func TestRunsAnnotationsList_ReadsTheStandaloneStore(t *testing.T) {
+	paths := standaloneHome(t)
+	writeNode(t, paths.StandaloneStateDB(), "run-alone", "n1")
+	err := addLocalAnnotation(context.Background(), paths, "run-alone", "n1", "", "from the test")
+	if err != nil {
+		t.Fatalf("annotate: %v", err)
+	}
+
+	entries, err := listLocalAnnotations(context.Background(), paths, "run-alone", "", "", false)
+	if err != nil {
+		t.Fatalf("listLocalAnnotations: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Message != "from the test" {
+		t.Fatalf("annotations list did not read the standalone store: %+v", entries)
+	}
+}
+
+func TestRunsApprovalsList_ReadsTheStandaloneStore(t *testing.T) {
+	paths := standaloneHome(t)
+	writeNode(t, paths.StandaloneStateDB(), "run-alone", "gate")
+	st, err := store.Open(paths.StandaloneStateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = st.CreateApproval(context.Background(), store.Approval{
+		RunID: "run-alone", NodeID: "gate", RequestedAt: time.Now().UTC(), Message: "approve to ship",
+	})
+	if cerr := st.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	if err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+
+	rows, err := listLocalApprovals(context.Background(), paths, "run-alone")
+	if err != nil {
+		t.Fatalf("listLocalApprovals: %v", err)
+	}
+	if len(rows) != 1 || rows[0].NodeID != "gate" {
+		t.Fatalf("approvals list did not read the standalone store: %+v", rows)
+	}
+}
+
+func TestRunsAnnotate_UnreadableStandaloneStoreIsNamed(t *testing.T) {
+	paths := standaloneHome(t)
+	aged := filepath.Join(paths.StandaloneSchemaDir(20), "state.db")
+	writeRun(t, aged, "run-old")
+	dropRunsColumn(t, aged, "last_heartbeat_at")
+
+	stderr := captureStderr(t, func() {
+		err := addLocalAnnotation(context.Background(), paths, "run-old", "n1", "", "nope")
+		if err == nil {
+			t.Fatal("expected the write to fail for a run in a store this build cannot read")
+		}
+	})
+	if !strings.Contains(stderr, "standalone/schema-20/state.db") {
+		t.Fatalf("the skipped store was not named:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "older sparkwing") {
+		t.Fatalf("the note did not say why the store was skipped:\n%s", stderr)
+	}
+}
+
+func dropRunsColumn(t *testing.T, path, column string) {
+	t.Helper()
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.DB().Exec("ALTER TABLE runs DROP COLUMN " + column)
+	if cerr := st.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	if err != nil {
+		t.Fatalf("drop %s: %v", column, err)
+	}
+}
+
 func writeNode(t *testing.T, path, runID, nodeID string) {
 	t.Helper()
 	st, err := store.Open(path)

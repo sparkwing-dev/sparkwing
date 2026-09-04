@@ -146,6 +146,7 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		return fmt.Errorf("%s: at least one --run RUN_ID is required (use --run - to read ids from stdin)", cmdJobsRetry.Path)
 	}
 	failures := 0
+	requested := len(ids)
 	if *on == "" {
 		var refused []runResult
 		refused, ids = standaloneLocalRuns(ctx, "", ids, cmdJobsRetry.Path,
@@ -155,7 +156,7 @@ func runRunsRetry(ctx context.Context, args []string) error {
 			fmt.Fprintf(os.Stderr, "rerun of %s failed: %s\n", r.RunID, r.Error)
 		}
 		if len(ids) == 0 {
-			return fmt.Errorf("retry: %d of %d failed", failures, failures)
+			return fmt.Errorf("retry: %d of %d failed", failures, requested)
 		}
 	}
 	c, _, err := resolveRunsClient(*on, cmdJobsRetry.Path)
@@ -175,7 +176,7 @@ func runRunsRetry(ctx context.Context, args []string) error {
 			newID, profileSuffix(*on))
 	}
 	if failures > 0 {
-		return fmt.Errorf("retry: %d of %d failed", failures, failures+len(ids))
+		return fmt.Errorf("retry: %d of %d failed", failures, requested)
 	}
 	return nil
 }

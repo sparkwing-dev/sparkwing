@@ -140,14 +140,19 @@ func listLocalApprovals(ctx context.Context, paths orchestrator.Paths, runID str
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
 	}
+	if runID != "" {
+		st, _, done, err := orchestrator.OpenStoreForRun(ctx, paths, runID)
+		if err != nil {
+			return nil, err
+		}
+		defer done()
+		return st.ListApprovalsForRun(ctx, runID)
+	}
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = st.Close() }()
-	if runID != "" {
-		return st.ListApprovalsForRun(ctx, runID)
-	}
 	return st.ListPendingApprovals(ctx)
 }
 
