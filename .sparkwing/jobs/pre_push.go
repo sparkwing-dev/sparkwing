@@ -157,7 +157,10 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "go test -race: passed")
 	}
 
-	if err := (&StorePostgres{}).run(ctx); err != nil {
+	storeCtx, cancelStore := context.WithTimeout(ctx, storePostgresPrePushTimeout)
+	err := (&StorePostgres{}).run(storeCtx)
+	cancelStore()
+	if err != nil {
 		failures = append(failures, fmt.Sprintf("store postgres suite: %v", err))
 	} else {
 		sparkwing.Info(ctx, "store postgres suite: passed against postgres")

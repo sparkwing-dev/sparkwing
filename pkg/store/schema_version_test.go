@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func TestSchemaVersion_FreshSQLiteRecordsExpected(t *testing.T) {
+func TestSchemaVersion_FreshDatabaseRecordsExpected(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -26,7 +26,7 @@ func TestSchemaVersion_FreshSQLiteRecordsExpected(t *testing.T) {
 	}
 }
 
-func TestSchemaVersion_ReopenSQLiteIsNoOp(t *testing.T) {
+func TestSchemaVersion_ReopenIsNoOp(t *testing.T) {
 	target := storetest.New(t)
 
 	st1, err := target.TryOpen()
@@ -48,7 +48,7 @@ func TestSchemaVersion_ReopenSQLiteIsNoOp(t *testing.T) {
 	}
 }
 
-func TestSchemaVersion_SQLiteUnknownRequirementRefuses(t *testing.T) {
+func TestSchemaVersion_UnknownRequirementRefuses(t *testing.T) {
 	target := storetest.New(t)
 
 	st, err := target.TryOpen()

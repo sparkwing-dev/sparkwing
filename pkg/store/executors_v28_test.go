@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func enrollTestExecutor(t *testing.T, s *store.Store, name string, maxConcurrent int, cores float64) store.ClaimIdentity {

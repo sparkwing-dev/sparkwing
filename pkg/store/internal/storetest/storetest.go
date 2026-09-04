@@ -22,28 +22,10 @@ const (
 	// URLEnv names the Postgres server that schema-scoped test stores
 	// are created on.
 	URLEnv = "SPARKWING_TEST_PG_URL"
-	// RequireEnv turns a missing URLEnv into a failure instead of a skip
-	// for tests that are Postgres-only.
-	RequireEnv = "SPARKWING_REQUIRE_PG"
 )
 
-// Dialect reports the dialect the suite runs against.
-func Dialect() store.Dialect {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv(DialectEnv)), "postgres") {
-		return store.DialectPostgres
-	}
-	return store.DialectSQLite
-}
-
-// IsPostgres reports whether the suite runs against Postgres.
-func IsPostgres() bool { return Dialect() == store.DialectPostgres }
-
-// SkipOnPostgres skips a test whose subject is the SQLite file itself.
-func SkipOnPostgres(t *testing.T, why string) {
-	t.Helper()
-	if IsPostgres() {
-		t.Skip(why)
-	}
+func suiteRunsOnPostgres() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(DialectEnv)), "postgres")
 }
 
 // Target is a store location that survives Close, so a test can open it
@@ -58,7 +40,7 @@ type Target struct {
 // temporary directory, or a schema of its own on the configured server.
 func New(t *testing.T) *Target {
 	t.Helper()
-	if !IsPostgres() {
+	if !suiteRunsOnPostgres() {
 		return &Target{dialect: store.DialectSQLite, path: filepath.Join(t.TempDir(), "state.db")}
 	}
 	dsn := os.Getenv(URLEnv)
@@ -88,14 +70,14 @@ func NewPostgres(t *testing.T) *Target {
 	return &Target{dialect: store.DialectPostgres, dsn: newSchema(t, PostgresURL(t))}
 }
 
-// PostgresURL returns the configured server URL, skipping the test when
-// there is none and RequireEnv is unset.
+// PostgresURL returns the configured server URL. A suite that selected
+// the Postgres dialect fails without one; any other suite skips.
 func PostgresURL(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv(URLEnv)
 	if strings.TrimSpace(dsn) == "" {
-		if os.Getenv(RequireEnv) != "" {
-			t.Fatalf("%s is set, so %s must name a reachable Postgres", RequireEnv, URLEnv)
+		if suiteRunsOnPostgres() {
+			t.Fatalf("%s=postgres requires %s to name a reachable Postgres", DialectEnv, URLEnv)
 		}
 		t.Skipf("%s not set; skipping Postgres test", URLEnv)
 	}
@@ -114,12 +96,6 @@ func OpenPostgres(t *testing.T) *store.Store {
 	t.Helper()
 	return NewPostgres(t).Open(t)
 }
-
-// Dialect reports the dialect this target opens.
-func (tg *Target) Dialect() store.Dialect { return tg.dialect }
-
-// Path is the SQLite file the target opens, empty under Postgres.
-func (tg *Target) Path() string { return tg.path }
 
 // DSN is the schema-scoped connection string the target opens, empty
 // under SQLite.
@@ -151,7 +127,7 @@ func (tg *Target) open() (*store.Store, error) {
 
 func newSchema(t *testing.T, baseDSN string) string {
 	t.Helper()
-	schema := "sw_test_" + sanitize(t.Name()) + "_" + Unique()
+	schema := schemaName(t.Name())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -173,7 +149,7 @@ func newSchema(t *testing.T, baseDSN string) string {
 		_, _ = cleanup.DB().Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
 		_ = cleanup.Close()
 	})
-	return WithSearchPath(baseDSN, schema)
+	return withSearchPath(baseDSN, schema)
 }
 
 // Rebind translates a query written with SQLite's "?" placeholders into
@@ -195,8 +171,7 @@ func Rebind(st *store.Store, query string) string {
 	return out.String()
 }
 
-// WithSearchPath points a connection string at one schema.
-func WithSearchPath(dsn, schema string) string {
+func withSearchPath(dsn, schema string) string {
 	sep := "?"
 	if strings.Contains(dsn, "?") {
 		sep = "&"
@@ -218,6 +193,19 @@ var uniqCounter struct {
 	n int
 }
 
+// safety: Postgres truncates an over-long identifier at the tail, which
+// is where the uniquifier sits, so the whole name stays under 63 bytes.
+func schemaName(testName string) string {
+	const prefix = "sw_test_"
+	const identifierLimit = 63
+	unique := Unique()
+	name := sanitize(testName)
+	if room := identifierLimit - len(prefix) - len(unique) - 1; len(name) > room {
+		name = name[:max(room, 0)]
+	}
+	return prefix + name + "_" + unique
+}
+
 func sanitize(s string) string {
 	out := strings.Map(func(r rune) rune {
 		switch {
@@ -228,8 +216,5 @@ func sanitize(s string) string {
 		}
 		return '_'
 	}, s)
-	if len(out) > 40 {
-		out = out[:40]
-	}
 	return out
 }

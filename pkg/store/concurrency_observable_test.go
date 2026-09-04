@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestConcurrency_QueuedResponseCarriesPositionAndHolders(t *testing.T) {

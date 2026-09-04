@@ -2,9 +2,12 @@ package jobs
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -106,5 +109,131 @@ func TestStorePostgresStepWaitsOnTheTestStep(t *testing.T) {
 	}
 	if !stepWaitsOn(w, "store-postgres", "test") {
 		t.Error("store-postgres does not wait on test")
+	}
+}
+
+func TestStorePostgresRunStopsAndRemovesWhenCancelled(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	var stopped, removed atomic.Bool
+	running := make(chan struct{})
+	go func() {
+		<-running
+		cancel()
+	}()
+
+	err := runStorePostgresSuite(ctx, storePostgresRun{
+		start:  func() (string, error) { return "postgres://unused", nil },
+		stop:   func() error { stopped.Store(true); return nil },
+		remove: func() error { removed.Store(true); return nil },
+		suite: func(ctx context.Context, _ string) error {
+			close(running)
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if !stopped.Load() {
+		t.Error("the server was left running after the run was cancelled")
+	}
+	if !removed.Load() {
+		t.Error("the data directory survived a cancelled run")
+	}
+	cancel()
+}
+
+func TestStorePostgresRunStopsAndRemovesOnInterrupt(t *testing.T) {
+	t.Parallel()
+	var stopped, removed atomic.Bool
+	interrupts := make(chan os.Signal, 1)
+	running := make(chan struct{})
+	go func() {
+		<-running
+		interrupts <- os.Interrupt
+	}()
+
+	err := runStorePostgresSuite(context.Background(), storePostgresRun{
+		interrupts: interrupts,
+		start:      func() (string, error) { return "postgres://unused", nil },
+		stop:       func() error { stopped.Store(true); return nil },
+		remove:     func() error { removed.Store(true); return nil },
+		suite: func(context.Context, string) error {
+			close(running)
+			select {}
+		},
+	})
+
+	if err == nil || !strings.Contains(err.Error(), "interrupted by") {
+		t.Fatalf("err = %v, want the interrupt", err)
+	}
+	if !stopped.Load() {
+		t.Error("the server was left running after the interrupt")
+	}
+	if !removed.Load() {
+		t.Error("the data directory survived the interrupt")
+	}
+}
+
+func TestStorePostgresRunReportsTheLogAfterStopping(t *testing.T) {
+	t.Parallel()
+	var log strings.Builder
+	log.WriteString("startup banner\n")
+	var reported string
+
+	err := runStorePostgresSuite(context.Background(), storePostgresRun{
+		start: func() (string, error) { return "postgres://unused", nil },
+		stop: func() error {
+			log.WriteString("what the server logged during the suite\n")
+			return nil
+		},
+		remove:    func() error { return nil },
+		suite:     func(context.Context, string) error { return errors.New("suite failed") },
+		serverLog: func() string { return log.String() },
+		report:    func(tail string) { reported = tail },
+	})
+
+	if err == nil || !strings.Contains(err.Error(), "suite failed") {
+		t.Fatalf("err = %v, want the suite failure", err)
+	}
+	if !strings.Contains(reported, "what the server logged during the suite") {
+		t.Fatalf("reported tail = %q, want the lines the server flushed on stop", reported)
+	}
+}
+
+func TestStorePostgresRunKeepsRemovingWhenTheServerWillNotStart(t *testing.T) {
+	t.Parallel()
+	var removed atomic.Bool
+
+	err := runStorePostgresSuite(context.Background(), storePostgresRun{
+		start:  func() (string, error) { return "", errors.New("no port") },
+		stop:   func() error { t.Error("stop ran for a server that never started"); return nil },
+		remove: func() error { removed.Store(true); return nil },
+		suite:  func(context.Context, string) error { t.Error("the suite ran without a server"); return nil },
+	})
+
+	if err == nil || !strings.Contains(err.Error(), "no port") {
+		t.Fatalf("err = %v, want the start failure", err)
+	}
+	if !removed.Load() {
+		t.Error("a failed start left the data directory behind")
+	}
+}
+
+func TestWithTempDirRestoresTheCallersSetting(t *testing.T) {
+	scratch := t.TempDir()
+	t.Setenv("TMPDIR", "/original")
+	var seen string
+
+	if err := withTempDir(scratch, func() error { seen = os.TempDir(); return nil }); err != nil {
+		t.Fatalf("withTempDir: %v", err)
+	}
+
+	if seen != scratch {
+		t.Errorf("TMPDIR inside the call = %q, want %q", seen, scratch)
+	}
+	if got := os.Getenv("TMPDIR"); got != "/original" {
+		t.Errorf("TMPDIR after the call = %q, want /original", got)
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
-	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func enrollOfferExecutor(t *testing.T, s *store.Store, name string, base, ceiling int, capabilities ...string) store.ClaimIdentity {
