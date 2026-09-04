@@ -14,6 +14,15 @@ type Sample struct {
 	TTLSecs int64  ` + "`json:\"ttl_secs,omitempty\"`" + `
 	Hidden  string ` + "`json:\"-\"`" + `
 }
+
+type Server struct{}
+
+func (s *Server) handleThing() {
+	var body struct {
+		Message string ` + "`json:\"message\"`" + `
+	}
+	_ = body
+}
 `
 
 func fakeRoot(t *testing.T) string {
@@ -139,7 +148,7 @@ func TestSchemaCheckReachesNestedObjectsAndArrayItems(t *testing.T) {
 	if err == nil {
 		t.Fatal("checkSchemaDrift accepted an undeclared nested object")
 	}
-	if !strings.Contains(err.Error(), "Sample.nested: object has properties but no x-sparkwing-go-type") {
+	if !strings.Contains(err.Error(), "components.schemas.Sample.properties.nested: object has properties but no x-sparkwing-go-type") {
 		t.Fatalf("checkSchemaDrift = %v, want it to name the nested object", err)
 	}
 
@@ -159,8 +168,101 @@ func TestSchemaCheckReachesNestedObjectsAndArrayItems(t *testing.T) {
 	if err == nil {
 		t.Fatal("checkSchemaDrift accepted an undeclared array item object")
 	}
-	if !strings.Contains(err.Error(), "Sample.rows[]: object has properties but no x-sparkwing-go-type") {
+	if !strings.Contains(err.Error(), "components.schemas.Sample.properties.rows.items: object has properties but no x-sparkwing-go-type") {
 		t.Fatalf("checkSchemaDrift = %v, want it to name the array item object", err)
+	}
+}
+
+func TestSchemaCheckReachesAnInlineRequestBody(t *testing.T) {
+	spec := `openapi: 3.0.3
+paths:
+  /api/v1/things:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: fake.Sample
+              type: object
+              properties:
+                name: {type: string}
+                ttl_secs: {type: integer}
+                invented: {type: string}
+`
+	err := checkSchemaDrift(spec, fakeRoot(t))
+	if err == nil {
+		t.Fatal("checkSchemaDrift accepted a drifted inline request body")
+	}
+	if !strings.Contains(err.Error(), `documents "invented", which fake.Sample does not serialize`) {
+		t.Fatalf("checkSchemaDrift = %v, want the inline body's drift", err)
+	}
+}
+
+func TestSchemaCheckReachesAnAllOfBranch(t *testing.T) {
+	body := `      type: object
+      allOf:
+        - x-sparkwing-go-type: fake.Sample
+          type: object
+          properties:
+            name: {type: string}
+            ttl_secs: {type: integer}
+            invented: {type: string}
+`
+	err := checkSchemaDrift(specWithSchema(body), fakeRoot(t))
+	if err == nil {
+		t.Fatal("checkSchemaDrift accepted a drifted allOf branch")
+	}
+	if !strings.Contains(err.Error(), `components.schemas.Sample.allOf[0]: documents "invented"`) {
+		t.Fatalf("checkSchemaDrift = %v, want the allOf branch's drift", err)
+	}
+}
+
+func TestSchemaCheckAddressesABodyDeclaredInsideItsHandler(t *testing.T) {
+	body := `      x-sparkwing-go-type: fake.Server.handleThing.body
+      type: object
+      properties:
+        message: {type: string}
+`
+	if err := checkSchemaDrift(specWithSchema(body), fakeRoot(t)); err != nil {
+		t.Fatalf("checkSchemaDrift: %v", err)
+	}
+
+	drifted := `      x-sparkwing-go-type: fake.Server.handleThing.body
+      type: object
+      properties:
+        annotation: {type: string}
+`
+	err := checkSchemaDrift(specWithSchema(drifted), fakeRoot(t))
+	if err == nil {
+		t.Fatal("checkSchemaDrift accepted a body naming a member the handler does not read")
+	}
+	if !strings.Contains(err.Error(), `documents "annotation", which fake.Server.handleThing.body does not serialize`) {
+		t.Fatalf("checkSchemaDrift = %v, want the handler body's drift", err)
+	}
+}
+
+func TestSchemaCheckPartialAllowsAnUndocumentedMemberButNotAnInventedOne(t *testing.T) {
+	partial := `      x-sparkwing-go-partial: fake.Sample
+      type: object
+      properties:
+        name: {type: string}
+`
+	if err := checkSchemaDrift(specWithSchema(partial), fakeRoot(t)); err != nil {
+		t.Fatalf("checkSchemaDrift rejected a declared-partial shape: %v", err)
+	}
+
+	invented := `      x-sparkwing-go-partial: fake.Sample
+      type: object
+      properties:
+        name: {type: string}
+        invented: {type: string}
+`
+	err := checkSchemaDrift(specWithSchema(invented), fakeRoot(t))
+	if err == nil {
+		t.Fatal("checkSchemaDrift accepted an invented member on a declared-partial shape")
+	}
+	if !strings.Contains(err.Error(), `documents "invented", which fake.Sample does not serialize`) {
+		t.Fatalf("checkSchemaDrift = %v, want the invented member reported", err)
 	}
 }
 

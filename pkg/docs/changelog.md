@@ -1317,19 +1317,32 @@ code change to unlock.
 ### Docs
 
 - **api:** `api/openapi.yaml` now describes the wire types the controller
-  actually serves, and `bin/check-api-spec.sh` holds it there. Every object
-  shape names the Go type it mirrors as `x-sparkwing-go-type`, and the check
-  compares its members against that type's JSON tags, so a renamed, dropped, or
-  retyped field fails the check instead of leaving the document quietly untrue.
-  The corrections an integrator can act on: `TriggerRequest` no longer documents
-  `plan_admission`, which the trigger API dropped in v0.16.0 and which a
-  spec-conformant client got a 400 for sending; `CreateTokenRequest` takes
-  `ttl_secs`, not `expires_at`; `CreateTokenResponse` answers `{token,
-  metadata}`, not `{token, prefix, token_metadata}`; `Token` and `Secret`
-  timestamps are Unix seconds, not RFC3339 strings; and `Agent` is the shape the
-  agents view serves. `Run`, `Node`, `Trigger`, `Secret`, `NodeBounce`,
-  `AuthError`, `Receipt`, `ConcurrencyState`, `ConcurrencyHolder` and both
-  acquire-slot bodies regain the members the document had dropped.
+  actually serves, and `bin/check-api-spec.sh` holds it there. Every object with
+  a `properties` block -- a named schema or an inline request or response body
+  alike -- names the Go type it mirrors as `x-sparkwing-go-type`, and the check
+  compares its members and their OpenAPI types against that type's JSON tags, so
+  a renamed, dropped, or retyped field fails the check instead of leaving the
+  document quietly untrue. Two escapes stay, both spelled out in the file:
+  `x-sparkwing-go-type: none` where the controller writes the shape from a map
+  literal, and `x-sparkwing-go-partial` where the document covers part of a
+  larger type (the unified queue view, which reuses the admission daemon's
+  snapshot type) -- that one still rejects a member the type does not serialize.
+  The corrections an integrator can act on, each of which a spec-conformant
+  client got a `400` or a missing field for: `TriggerRequest` no longer
+  documents `plan_admission`, which the trigger API dropped in v0.16.0;
+  `CreateTokenRequest` takes `ttl_secs`, not `expires_at`; `CreateTokenResponse`
+  answers `{token, metadata}`, not `{token, prefix, token_metadata}`; `Token`
+  and `Secret` timestamps are Unix seconds, not RFC3339 strings; `Agent` is the
+  shape the agents view serves; the node and step annotation routes read
+  `message`, not `annotation`, and the summary routes read `markdown`, not
+  `summary`; `POST /api/v1/runs/{id}/nodes/{nodeID}/steps/skip` never read the
+  documented `reason`, and `POST /api/v1/runs/{id}/cancel` never read a body at
+  all. `POST /api/v1/secrets` regains `repo` and `shared`, `POST
+  /api/v1/nodes/claim` regains `headroom`, `GET /api/v1/auth/session` regains
+  `csrf_token`, `GET /api/v1/auth/whoami` regains `token_prefix`, and `Run`,
+  `Node`, `Trigger`, `Secret`, `NodeBounce`, `AuthError`, `Receipt`,
+  `ConcurrencyState`, `ConcurrencyHolder` and both acquire-slot bodies regain
+  the members the document had dropped.
 - **helm:** Both chart READMEs now open with the minimal `helm template`
   invocation. `helm template` stops on the runner bundle's `validate.yaml`
   until `controller.tokenSecret.name` is set, and `sparkwing-full` takes it
