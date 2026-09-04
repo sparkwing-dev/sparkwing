@@ -35,6 +35,22 @@ type terminateError struct{}
 
 func (*terminateError) Error() string { return "session refused to die" }
 
+type blockingGuardInspector struct {
+	reapableGuardInspector
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newBlockingGuardInspector() *blockingGuardInspector {
+	return &blockingGuardInspector{entered: make(chan struct{}, 1), release: make(chan struct{})}
+}
+
+func (g *blockingGuardInspector) Terminate(session wingwire.ProcessSession) error {
+	g.entered <- struct{}{}
+	<-g.release
+	return g.reapableGuardInspector.Terminate(session)
+}
+
 func guardedSession() *wingwire.ProcessSession {
 	return &wingwire.ProcessSession{LeaderPID: 4242, SessionID: 4242, BirthToken: "birth-4242"}
 }
@@ -131,7 +147,7 @@ func TestGuardGraceRetriesAfterATerminationFailure(t *testing.T) {
 
 func TestReclaimedGuardedSessionIsNotReaped(t *testing.T) {
 	inspector := &reapableGuardInspector{}
-	d, _ := guardedHolderDaemon(t, inspector, 20*time.Millisecond)
+	d, _ := guardedHolderDaemon(t, inspector, time.Hour)
 
 	holder, holderPeer := handlerConn(t, d)
 	grant := mustGrantFrame(t, callAndRead(t, holderPeer, func() {
@@ -142,6 +158,9 @@ func TestReclaimedGuardedSessionIsNotReaped(t *testing.T) {
 	}))
 
 	d.handleDisconnect(holder)
+	if !guardGraceArmed(t, d) {
+		t.Fatal("losing a guarded client armed no grace timer")
+	}
 
 	successor, successorPeer := handlerConn(t, d)
 	reclaimed := mustGrantFrame(t, callAndRead(t, successorPeer, func() {
@@ -151,14 +170,77 @@ func TestReclaimedGuardedSessionIsNotReaped(t *testing.T) {
 		t.Fatalf("reattached run = %q, want reclaimed-run", reclaimed.RunID)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	if guardGraceArmed(t, d) {
+		t.Fatal("a guarded session whose client came back is still counting down to termination")
+	}
 	if inspector.terminated.Load() {
 		t.Fatal("a guarded session whose client came back was terminated anyway")
 	}
+}
+
+func guardGraceArmed(t *testing.T, d *Daemon) bool {
+	t.Helper()
 	d.mu.Lock()
-	guards := len(d.guards)
-	d.mu.Unlock()
-	if guards != 1 {
-		t.Fatalf("guards = %d, want the reclaimed one still held", guards)
+	defer d.mu.Unlock()
+	if len(d.guards) != 1 {
+		t.Fatalf("guards = %d, want exactly one", len(d.guards))
+	}
+	for _, guard := range d.guards {
+		return guard.graceTimer != nil
+	}
+	return false
+}
+
+func TestReattachIsRefusedWhileTheGuardedSessionIsBeingTerminated(t *testing.T) {
+	inspector := newBlockingGuardInspector()
+	d, finalized := guardedHolderDaemon(t, inspector, 20*time.Millisecond)
+
+	holder, holderPeer := handlerConn(t, d)
+	grant := mustGrantFrame(t, callAndRead(t, holderPeer, func() {
+		d.handleAdmission(holder, &wingwire.AdmissionRequest{
+			RunID: "terminating-run", SemaphoresOnly: true, Semaphores: exclusiveClaim(),
+			Guard: guardedSession(),
+		})
+	}))
+
+	waiter, waiterPeer := handlerConn(t, d)
+	callAndRead(t, waiterPeer, func() {
+		d.handleAdmission(waiter, &wingwire.AdmissionRequest{
+			RunID: "queued-run", SemaphoresOnly: true, Semaphores: exclusiveClaim(),
+		})
+	})
+
+	promotion := readAsync(waiterPeer)
+	d.handleDisconnect(holder)
+	select {
+	case <-inspector.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the abandoned guarded session was never terminated")
+	}
+
+	successor, successorPeer := handlerConn(t, d)
+	reply := callAndRead(t, successorPeer, func() {
+		d.handleReattach(successor, &wingwire.Reattach{LeaseToken: grant.LeaseToken})
+	})
+	evicted, ok := reply.(*wingwire.Evicted)
+	if !ok {
+		t.Fatalf("reattach during termination = %#v, want an eviction; the client would hold a lease over a dead tree", reply)
+	}
+	if evicted.Key != "reattach" {
+		t.Fatalf("eviction key = %q, want reattach", evicted.Key)
+	}
+
+	close(inspector.release)
+	grantFrame := mustGrantFrame(t, waitFrame(t, promotion, "promotion grant"))
+	if grantFrame.RunID != "queued-run" {
+		t.Fatalf("promoted run = %q, want queued-run", grantFrame.RunID)
+	}
+	select {
+	case runID := <-finalized:
+		if runID != "terminating-run" {
+			t.Fatalf("finalized %q, want terminating-run", runID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the terminated run was never finalized")
 	}
 }

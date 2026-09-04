@@ -70,6 +70,7 @@ func procSessionIdentity(session wingwire.ProcessSession) procgroup.SessionIdent
 type sessionGuardState struct {
 	persistedGuard
 	disconnected bool
+	terminating  bool
 	completion   *conn
 	graceTimer   *time.Timer
 }
@@ -182,6 +183,10 @@ func (d *Daemon) expireGuardGrace(id admission.LeaseID, session wingwire.Process
 		return
 	}
 	guard.graceTimer = nil
+	// safety: Terminate blocks for the session's own shutdown, and a client that
+	// reattached in that window would be handed a lease over an already dead
+	// process tree, so reattach is refused from here until the outcome is known.
+	guard.terminating = true
 	reclaim := guardReconcileState{persistedGuard: guard.persistedGuard, completion: guard.completion, finalize: true}
 	d.mu.Unlock()
 
@@ -190,8 +195,11 @@ func (d *Daemon) expireGuardGrace(id admission.LeaseID, session wingwire.Process
 	if err := d.guardInspector.Terminate(session); err != nil {
 		d.cfg.logf("guard: terminate abandoned session for %s: %v", reclaim.RunID, err)
 		d.mu.Lock()
-		if current := d.guards[id]; current != nil && current.Session == session && current.disconnected {
-			d.armGuardGraceLocked(id, current)
+		if current := d.guards[id]; current != nil && current.Session == session {
+			current.terminating = false
+			if current.disconnected {
+				d.armGuardGraceLocked(id, current)
+			}
 		}
 		d.mu.Unlock()
 		return
