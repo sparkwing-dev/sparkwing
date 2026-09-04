@@ -17,6 +17,8 @@ import (
 
 const goTypeKey = "x-sparkwing-go-type"
 
+const goPartialKey = "x-sparkwing-go-partial"
+
 const goTypeNone = "none"
 
 type goField struct {
@@ -39,9 +41,9 @@ func newGoTypes(root string) *goTypes {
 }
 
 func (g *goTypes) fields(qualified string) ([]goField, error) {
-	cut := strings.LastIndex(qualified, ".")
+	cut := strings.Index(qualified, ".")
 	if cut <= 0 || cut == len(qualified)-1 {
-		return nil, fmt.Errorf("%q is not <package-dir>.<TypeName>", qualified)
+		return nil, fmt.Errorf("%q is not <package-dir>.<TypeName> or <package-dir>.<func>.<local>", qualified)
 	}
 	dir, name := qualified[:cut], qualified[cut+1:]
 	pkg, err := g.load(dir)
@@ -74,27 +76,76 @@ func (g *goTypes) load(dir string) (map[string]goStruct, error) {
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Files {
 			for _, decl := range file.Decls {
-				gen, ok := decl.(*ast.GenDecl)
-				if !ok || gen.Tok != token.TYPE {
-					continue
-				}
-				for _, spec := range gen.Specs {
-					ts, ok := spec.(*ast.TypeSpec)
-					if !ok {
-						continue
-					}
-					st, ok := ts.Type.(*ast.StructType)
-					if !ok {
-						continue
-					}
-					fields, err := structFields(st)
-					structs[ts.Name.Name] = goStruct{fields: fields, err: err}
+				switch d := decl.(type) {
+				case *ast.GenDecl:
+					collectStructDecl(structs, "", d)
+				case *ast.FuncDecl:
+					collectLocalStructs(structs, d)
 				}
 			}
 		}
 	}
 	g.loaded[dir] = structs
 	return structs, nil
+}
+
+func collectStructDecl(out map[string]goStruct, prefix string, gen *ast.GenDecl) {
+	for _, spec := range gen.Specs {
+		switch sp := spec.(type) {
+		case *ast.TypeSpec:
+			if st, ok := sp.Type.(*ast.StructType); ok {
+				record(out, prefix+sp.Name.Name, st)
+			}
+		case *ast.ValueSpec:
+			st, ok := sp.Type.(*ast.StructType)
+			if !ok {
+				continue
+			}
+			for _, name := range sp.Names {
+				record(out, prefix+name.Name, st)
+			}
+		}
+	}
+}
+
+// safety: a request body declared as an unnamed struct inside its handler has
+// no type name to cite, so it is addressed as <receiver>.<func>.<var> instead;
+// Loopback mirrors the Server handler names, so the receiver has to be there.
+func collectLocalStructs(out map[string]goStruct, fn *ast.FuncDecl) {
+	if fn.Body == nil {
+		return
+	}
+	prefix := fn.Name.Name + "."
+	if recv := receiverName(fn); recv != "" {
+		prefix = recv + "." + prefix
+	}
+	for _, stmt := range fn.Body.List {
+		decl, ok := stmt.(*ast.DeclStmt)
+		if !ok {
+			continue
+		}
+		gen, ok := decl.Decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		collectStructDecl(out, prefix, gen)
+	}
+}
+
+func receiverName(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) != 1 {
+		return ""
+	}
+	return strings.TrimPrefix(types.ExprString(fn.Recv.List[0].Type), "*")
+}
+
+func record(out map[string]goStruct, name string, st *ast.StructType) {
+	fields, err := structFields(st)
+	if prior, ok := out[name]; ok && prior.err == nil {
+		err = fmt.Errorf("%s is declared more than once, so a schema cannot name it unambiguously", name)
+		fields = nil
+	}
+	out[name] = goStruct{fields: fields, err: err}
 }
 
 func structFields(st *ast.StructType) ([]goField, error) {
@@ -173,18 +224,8 @@ func checkSchemaDrift(spec, repoRoot string) error {
 }
 
 func checkSchemas(root *yaml.Node, repoRoot string) []string {
-	components := mapValue(root, "components")
-	if components == nil {
-		return []string{"no components mapping"}
-	}
-	schemas := mapValue(components, "schemas")
-	if schemas == nil || schemas.Kind != yaml.MappingNode {
-		return []string{"no components.schemas mapping"}
-	}
 	c := &schemaChecker{types: newGoTypes(repoRoot)}
-	for i := 0; i+1 < len(schemas.Content); i += 2 {
-		c.walk(schemas.Content[i].Value, schemas.Content[i+1])
-	}
+	c.walk("", root)
 	sort.Strings(c.problems)
 	return c.problems
 }
@@ -198,26 +239,53 @@ func (c *schemaChecker) reportf(where, format string, args ...any) {
 	c.problems = append(c.problems, where+": "+fmt.Sprintf(format, args...))
 }
 
+// safety: an example may hold a member named "properties" that describes
+// nothing, so the walk stops before reading one as a schema.
+var opaqueToSchemaWalk = map[string]bool{"example": true, "examples": true}
+
 func (c *schemaChecker) walk(where string, node *yaml.Node) {
-	if node == nil || node.Kind != yaml.MappingNode {
+	if node == nil {
 		return
 	}
-	if props := mapValue(node, "properties"); props != nil && props.Kind == yaml.MappingNode {
-		c.compare(where, node, props)
-		for i := 0; i+1 < len(props.Content); i += 2 {
-			c.walk(where+"."+props.Content[i].Value, props.Content[i+1])
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, child := range node.Content {
+			c.walk(where, child)
 		}
-	}
-	if items := mapValue(node, "items"); items != nil {
-		c.walk(where+"[]", items)
+	case yaml.MappingNode:
+		if props := mapValue(node, "properties"); props != nil && props.Kind == yaml.MappingNode {
+			c.compare(where, node, props)
+		}
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := node.Content[i].Value
+			if opaqueToSchemaWalk[key] {
+				continue
+			}
+			c.walk(joinPath(where, key), node.Content[i+1])
+		}
+	case yaml.SequenceNode:
+		for i, child := range node.Content {
+			c.walk(fmt.Sprintf("%s[%d]", where, i), child)
+		}
 	}
 }
 
+func joinPath(where, key string) string {
+	if where == "" {
+		return key
+	}
+	return where + "." + key
+}
+
 func (c *schemaChecker) compare(where string, node, props *yaml.Node) {
-	named := mapValue(node, goTypeKey)
+	named, key := mapValue(node, goTypeKey), goTypeKey
+	partial := false
 	if named == nil || named.Value == "" {
-		c.reportf(where, "object has properties but no %s; name the Go type it mirrors, or %q where the controller builds it by hand",
-			goTypeKey, goTypeNone)
+		named, key, partial = mapValue(node, goPartialKey), goPartialKey, true
+	}
+	if named == nil || named.Value == "" {
+		c.reportf(where, "object has properties but no %s; name the Go type it mirrors, %s it describes only part of, or %q where the controller builds it by hand",
+			goTypeKey, goPartialKey, goTypeNone)
 		return
 	}
 	if named.Value == goTypeNone {
@@ -225,7 +293,7 @@ func (c *schemaChecker) compare(where string, node, props *yaml.Node) {
 	}
 	fields, err := c.types.fields(named.Value)
 	if err != nil {
-		c.reportf(where, "%s %s: %v", goTypeKey, named.Value, err)
+		c.reportf(where, "%s %s: %v", key, named.Value, err)
 		return
 	}
 	byName := map[string]goField{}
@@ -253,6 +321,9 @@ func (c *schemaChecker) compare(where string, node, props *yaml.Node) {
 			c.reportf(where, "documents %q as %s; %s serializes %s, which is %s",
 				name, got.Value, named.Value, field.typ, want)
 		}
+	}
+	if partial {
+		return
 	}
 	for _, f := range fields {
 		if !documented[f.json] {

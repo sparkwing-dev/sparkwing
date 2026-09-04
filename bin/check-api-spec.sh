@@ -16,8 +16,10 @@ fi
 
 if diff -u "$spec" "$rewritten"; then
   echo "check-api-spec: api/openapi.yaml documents every registered route and no other,"
-  echo "carries each route's scope from the route table, and every schema's members match"
-  echo "the JSON tags of the Go type it names in x-sparkwing-go-type"
+  echo "carries each route's scope from the route table, and holds every object with a"
+  echo "properties block -- named schema or inline body -- to the JSON tags of the Go type"
+  echo "it names in x-sparkwing-go-type, except the shapes marked none (built from a map"
+  echo "literal) or x-sparkwing-go-partial (a documented subset of a larger type)"
   exit 0
 fi
 
