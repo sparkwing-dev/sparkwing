@@ -32,7 +32,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	23: {secretsSharedCols, triggerClaimOwnerCols},
 	24: {triggerWebhookDeliveryCols},
 	25: {triggerWebhookReplayKeyCols},
-	28: {nodesOrderCols},
+	28: nil,
+	29: {nodesOrderCols},
 }
 
 func columnSpecMaps() []map[string]string {

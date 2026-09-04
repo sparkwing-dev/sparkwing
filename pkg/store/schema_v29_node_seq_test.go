@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func seedV27Nodes(t *testing.T, path string) {
+func seedV28Nodes(t *testing.T, path string) {
 	t.Helper()
 	st, err := store.Open(path)
 	if err != nil {
@@ -29,21 +29,21 @@ func seedV27Nodes(t *testing.T, path string) {
 	if _, err := st.DB().Exec(`ALTER TABLE nodes DROP COLUMN seq`); err != nil {
 		t.Fatalf("drop seq column: %v", err)
 	}
-	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 28`); err != nil {
-		t.Fatalf("reset version to 27: %v", err)
+	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 29`); err != nil {
+		t.Fatalf("reset version to 28: %v", err)
 	}
-	if v := readSchemaVersion(t, st.DB()); v != 27 {
-		t.Fatalf("seeded version = %d, want 27", v)
+	if v := readSchemaVersion(t, st.DB()); v != 28 {
+		t.Fatalf("seeded version = %d, want 28", v)
 	}
 	_ = st.Close()
 }
 
-// TestSchemaV28_UpgradeOfARealV27ShapeKeepsSQLiteInsertionOrder upgrades a
-// file shaped the way a v27 binary left it and checks the backfill kept the
+// TestSchemaV29_UpgradeOfARealV28ShapeKeepsSQLiteInsertionOrder upgrades a
+// file shaped the way a v28 binary left it and checks the backfill kept the
 // order that store returned.
-func TestSchemaV28_UpgradeOfARealV27ShapeKeepsSQLiteInsertionOrder(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "real27.db")
-	seedV27Nodes(t, path)
+func TestSchemaV29_UpgradeOfARealV28ShapeKeepsSQLiteInsertionOrder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "real28.db")
+	seedV28Nodes(t, path)
 
 	up, err := store.Open(path)
 	if err != nil {
@@ -67,18 +67,18 @@ func TestSchemaV28_UpgradeOfARealV27ShapeKeepsSQLiteInsertionOrder(t *testing.T)
 			for j, x := range nodes {
 				got[j] = x.NodeID
 			}
-			t.Fatalf("order after backfill = %v, want the order the v27 store wrote them, %v",
+			t.Fatalf("order after backfill = %v, want the order the v28 store wrote them, %v",
 				got, orderedNodeIDs)
 		}
 	}
 }
 
-// TestSchemaV28_NodeCreatedAfterUpgradeSortsLast pins that a node created
+// TestSchemaV29_NodeCreatedAfterUpgradeSortsLast pins that a node created
 // after the upgrade sorts after the backfilled ones, which holds only while
 // the backfilled values and the newly assigned ones share one scale.
-func TestSchemaV28_NodeCreatedAfterUpgradeSortsLast(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "append27.db")
-	seedV27Nodes(t, path)
+func TestSchemaV29_NodeCreatedAfterUpgradeSortsLast(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "append28.db")
+	seedV28Nodes(t, path)
 
 	up, err := store.Open(path)
 	if err != nil {
@@ -99,9 +99,9 @@ func TestSchemaV28_NodeCreatedAfterUpgradeSortsLast(t *testing.T) {
 	}
 }
 
-func TestSchemaV28_UpgradeIsSafeToReplay(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "replay28.db")
-	seedV27Nodes(t, path)
+func TestSchemaV29_UpgradeIsSafeToReplay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "replay29.db")
+	seedV28Nodes(t, path)
 
 	for i := 0; i < 2; i++ {
 		if _, err := store.Open(path); err != nil {
@@ -113,14 +113,14 @@ func TestSchemaV28_UpgradeIsSafeToReplay(t *testing.T) {
 		t.Fatalf("Open (final): %v", err)
 	}
 	defer func() { _ = st.Close() }()
-	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 28`); err != nil {
+	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 29`); err != nil {
 		t.Fatalf("reset version: %v", err)
 	}
 	_ = st.Close()
 
 	replayed, err := store.Open(path)
 	if err != nil {
-		t.Fatalf("Open (replay of v28): %v", err)
+		t.Fatalf("Open (replay of v29): %v", err)
 	}
 	defer func() { _ = replayed.Close() }()
 	nodes, err := replayed.ListNodes(context.Background(), "r1")

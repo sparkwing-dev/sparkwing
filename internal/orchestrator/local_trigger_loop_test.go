@@ -546,3 +546,63 @@ func runGitForRetryTest(t *testing.T, dir string, args ...string) string {
 	}
 	return string(out)
 }
+
+func claimedChildTrigger(t *testing.T, st *store.Store, id, pipeline string) *store.Trigger {
+	t.Helper()
+	ctx := context.Background()
+	if err := st.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: pipeline, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := st.ClaimNextTrigger(ctx, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return claimed
+}
+
+func TestLocalTriggerFailure_ShutdownReturnsTheChildToTheQueue(t *testing.T) {
+	st := consumerTestStore(t, t.TempDir())
+	claimed := claimedChildTrigger(t, st, "run-interrupted", "deploy")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	recordLocalTriggerFailure(ctx, localState{st: st}, claimed,
+		errors.New("child exec: signal: killed"), quietLogger())
+
+	trig, err := st.GetTrigger(context.Background(), "run-interrupted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trig.Status != "pending" {
+		t.Fatalf("trigger status = %q, want pending: a child the parent's shutdown killed belongs back on the queue", trig.Status)
+	}
+	if _, err := st.GetRun(context.Background(), "run-interrupted"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a requeued child left a run row behind (err=%v)", err)
+	}
+}
+
+func TestLocalTriggerFailure_LiveContextRecordsTheFailedRun(t *testing.T) {
+	st := consumerTestStore(t, t.TempDir())
+	claimed := claimedChildTrigger(t, st, "run-broken", "deploy")
+
+	recordLocalTriggerFailure(context.Background(), localState{st: st}, claimed,
+		errors.New("compile failed"), quietLogger())
+
+	run, err := st.GetRun(context.Background(), "run-broken")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.Status != "failed" {
+		t.Fatalf("run status = %q, want failed", run.Status)
+	}
+	if !strings.Contains(run.Error, "compile failed") {
+		t.Fatalf("run error = %q, want the dispatch error it carries", run.Error)
+	}
+	trig, err := st.GetTrigger(context.Background(), "run-broken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trig.Status != "done" {
+		t.Fatalf("trigger status = %q, want done", trig.Status)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -179,7 +180,21 @@ func sqliteDSN(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", path, ms), nil
+	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", sqliteURI(path), ms), nil
+}
+
+// safety: SQLite ends a file: URI path at the first unescaped `?` or `#` and
+// percent-decodes what precedes it, so an unescaped path carrying one of those
+// or a literal `%` names a different file than the caller stat'd and hardened,
+// and swallows the query string that carries every connection pragma.
+func sqliteURI(path string) string {
+	escaped := (&url.URL{Path: path}).EscapedPath()
+	if strings.HasPrefix(escaped, "//") {
+		// safety: an explicit empty authority keeps a leading `//` in the
+		// path from being parsed as a host name.
+		return "file://" + escaped
+	}
+	return "file:" + escaped
 }
 
 func sqliteReadOnlyDSN(path string) (string, error) {
@@ -199,7 +214,7 @@ func sqliteReadOnlyDSNWithMode(path string, immutable bool) (string, error) {
 	if immutable {
 		mode += "&immutable=1"
 	}
-	return fmt.Sprintf("file:%s?%s&_pragma=busy_timeout(%d)&_pragma=query_only(true)", path, mode, ms), nil
+	return fmt.Sprintf("%s?%s&_pragma=busy_timeout(%d)&_pragma=query_only(true)", sqliteURI(path), mode, ms), nil
 }
 
 // OpenReadOnly opens an existing SQLite state database for reads only.
@@ -376,7 +391,7 @@ func sameSnapshotSource(a, b snapshotSource) bool {
 }
 
 func checkpointSQLiteCopy(path string) error {
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(30000)")
+	db, err := sql.Open("sqlite", sqliteURI(path)+"?_pragma=busy_timeout(30000)")
 	if err != nil {
 		return err
 	}
@@ -732,7 +747,8 @@ CREATE TABLE IF NOT EXISTS node_metrics (
     ts              INTEGER NOT NULL,
     cpu_millicores  INTEGER NOT NULL,
     memory_bytes    INTEGER NOT NULL,
-    PRIMARY KEY (run_id, node_id, ts)
+    PRIMARY KEY (run_id, node_id, ts),
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_node_metrics_lookup
@@ -858,7 +874,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 28
+const expectedSchemaVersion = 29
 
 const runIdentityIndexes = `
 CREATE INDEX IF NOT EXISTS idx_runs_sha_started ON runs(git_sha, started_at DESC);
@@ -1337,6 +1353,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 27:
 		return rewriteLegacyInheritedHolderMarkers(ctx, tx)
 	case 28:
+		return addNodeMetricsRunCascadeSQLite(ctx, tx)
+	case 29:
 		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesOrderCols); err != nil {
 			return err
 		}
@@ -1447,6 +1465,13 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		// would only bind a NUL that Postgres rejects again.
 		return nil
 	case 28:
+		for _, stmt := range nodeMetricsRunCascadePostgres {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return err
+			}
+		}
+		return nil
+	case 29:
 		return addColumnsTx(ctx, tx, "nodes", nodesOrderCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -1650,7 +1675,7 @@ var nodesOrderCols = map[string]string{
 }
 
 // safety: rowid rises with every insert, so ordering by it within a run is the
-// insertion order the pre-v28 column-free query returned; Postgres has no such
+// insertion order the pre-v29 column-free query returned; Postgres has no such
 // value to recover, and its rows keep the default until CreateNode assigns one.
 const nodesOrderBackfillSQLite = `UPDATE nodes SET seq = rowid WHERE seq = 0`
 
@@ -1919,6 +1944,61 @@ func addTriggerWebhookReplayKey(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
+// safety: SQLite cannot add a constraint to an existing table, so the cascade
+// arrives by rebuild; the orphan filter on the copy is what keeps the new
+// foreign key satisfiable, since foreign_keys is on and cannot be turned off
+// inside the migration's transaction.
+var nodeMetricsRunCascadeRebuildSQLite = []string{
+	`CREATE TABLE node_metrics_cascade (
+    run_id          TEXT NOT NULL,
+    node_id         TEXT NOT NULL,
+    ts              INTEGER NOT NULL,
+    cpu_millicores  INTEGER NOT NULL,
+    memory_bytes    INTEGER NOT NULL,
+    cpu_time_nanos  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (run_id, node_id, ts),
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+)`,
+	`INSERT INTO node_metrics_cascade
+     (run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos)
+     SELECT m.run_id, m.node_id, m.ts, m.cpu_millicores, m.memory_bytes, m.cpu_time_nanos
+       FROM node_metrics m
+      WHERE EXISTS (SELECT 1 FROM runs r WHERE r.id = m.run_id)`,
+	`DROP TABLE node_metrics`,
+	`ALTER TABLE node_metrics_cascade RENAME TO node_metrics`,
+	`CREATE INDEX IF NOT EXISTS idx_node_metrics_lookup
+    ON node_metrics(run_id, node_id, ts)`,
+}
+
+var nodeMetricsRunCascadePostgres = []string{
+	`DELETE FROM node_metrics
+     WHERE NOT EXISTS (SELECT 1 FROM runs r WHERE r.id = node_metrics.run_id)`,
+	`ALTER TABLE node_metrics DROP CONSTRAINT IF EXISTS node_metrics_run_id_fkey`,
+	`ALTER TABLE node_metrics ADD CONSTRAINT node_metrics_run_id_fkey
+     FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE`,
+}
+
+func addNodeMetricsRunCascadeSQLite(ctx context.Context, tx *storeTx) error {
+	var referencesRuns int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_foreign_key_list('node_metrics') WHERE "table" = 'runs'`,
+	).Scan(&referencesRuns); err != nil {
+		return fmt.Errorf("read node_metrics foreign keys: %w", err)
+	}
+	if referencesRuns > 0 {
+		return nil
+	}
+	if err := ensureColumnsSQLite(ctx, tx, "node_metrics", nodeMetricsCPUTimeCols); err != nil {
+		return err
+	}
+	for _, stmt := range nodeMetricsRunCascadeRebuildSQLite {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func uniqueTokenPrefixIndexTx(ctx context.Context, q migrationQueryExecer) error {
 	dupes, err := duplicateTokenPrefixes(ctx, q)
 	if err != nil {
@@ -2075,6 +2155,9 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	var parent sql.NullString
 	if r.ParentRunID != "" {
 		parent = sql.NullString{String: r.ParentRunID, Valid: true}
+	}
+	if r.StartedAt.IsZero() {
+		r.StartedAt = time.Now()
 	}
 	created := r.CreatedAt
 	if created.IsZero() {
@@ -2415,7 +2498,8 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 	return scanRun(s.queryRow(ctx, q, args...))
 }
 
-// DeleteRun removes the run + its trigger; CASCADE handles children.
+// DeleteRun removes the run, its trigger and its memo entries;
+// CASCADE handles children.
 //
 // Triggers carrying parent_node_id are the cross-pipeline spawn
 // linkage from their PARENT run -- they double as the dispatch row
@@ -2436,6 +2520,13 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM triggers WHERE id = ? AND parent_node_id = ''`, runID); err != nil {
+		return err
+	}
+	// safety: concurrency_cache carries no foreign key, so a memo
+	// entry left here keeps pointing at output this delete removes,
+	// and every later hit on that key fails to fetch it.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM concurrency_cache WHERE origin_run_id = ?`, runID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2497,7 +2588,9 @@ func scanRun(rs rowScanner) (*Run, error) {
 	if createdNS > 0 {
 		r.CreatedAt = time.Unix(0, createdNS)
 	}
-	r.StartedAt = time.Unix(0, startedNS)
+	if startedNS > 0 {
+		r.StartedAt = time.Unix(0, startedNS)
+	}
 	if finishedNS.Valid {
 		t := time.Unix(0, finishedNS.Int64)
 		r.FinishedAt = &t
@@ -2727,7 +2820,7 @@ UPDATE nodes
 
 // ListNodes returns the nodes for a run in insertion order, which the
 // nodes.seq column records because no physical row order survives an
-// update on Postgres. Rows a pre-v28 Postgres store wrote carry no
+// update on Postgres. Rows a pre-v29 Postgres store wrote carry no
 // sequence and fall back to node id.
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	rows, err := s.query(ctx, `
@@ -4761,20 +4854,23 @@ UPDATE nodes
 	return err
 }
 
-func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
-	cutoff := time.Now().Add(-threshold).UnixNano()
-
-	rows, err := s.query(ctx, `
+func (s *Store) orphanedRunsQuery() string {
+	return `
 SELECT r.id
   FROM runs r
  WHERE r.status = ?
    AND r.started_at < ?
-   AND max(
+   AND ` + s.greatest() + `(
          COALESCE((SELECT MAX(last_heartbeat) FROM nodes n WHERE n.run_id = r.id), 0),
          COALESCE(r.last_heartbeat_at, 0),
          r.started_at
-       ) < ?`,
-		runStatusRunning, cutoff, cutoff)
+       ) < ?`
+}
+
+func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error) {
+	cutoff := time.Now().Add(-threshold).UnixNano()
+
+	rows, err := s.query(ctx, s.orphanedRunsQuery(), runStatusRunning, cutoff, cutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -5022,7 +5118,16 @@ type TriggerFilter struct {
 	Limit     int    // <=0 = 20
 }
 
+const (
+	triggerRepoScanBatch = 200
+	triggerRepoScanCap   = 5000
+)
+
 // ListTriggers returns triggers newest-first, filtered by f.
+//
+// Repo lives in a blob no dialect can filter on, so rows are read in
+// pages and matched in Go until the limit is filled, over at most the
+// newest 5,000 triggers that pass the other fields.
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
 	limit := f.Limit
 	if limit <= 0 {
@@ -5050,7 +5155,6 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 	}
 	addIn("status", f.Statuses)
 	addIn("pipeline", f.Pipelines)
-	args = append(args, limit)
 
 	query := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
@@ -5060,8 +5164,38 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        idempotency_key, claim_seq, webhook_delivery
   FROM triggers` + where + `
  ORDER BY created_at DESC
- LIMIT ?`
-	rows, err := s.query(ctx, query, args...)
+ LIMIT ? OFFSET ?`
+
+	batch := limit
+	if f.Repo != "" {
+		batch = max(limit, triggerRepoScanBatch)
+	}
+	var out []*Trigger
+	for offset := 0; ; offset += batch {
+		page, err := s.listTriggerPage(ctx, query, args, batch, offset)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range page {
+			if f.Repo != "" && t.TriggerEnv["GITHUB_REPOSITORY"] != f.Repo {
+				continue
+			}
+			out = append(out, t)
+			if len(out) == limit {
+				return out, nil
+			}
+		}
+		if f.Repo == "" || len(page) < batch || offset+batch >= triggerRepoScanCap {
+			return out, nil
+		}
+	}
+}
+
+func (s *Store) listTriggerPage(ctx context.Context, query string, args []any, limit, offset int) ([]*Trigger, error) {
+	pageArgs := make([]any, 0, len(args)+2)
+	pageArgs = append(pageArgs, args...)
+	pageArgs = append(pageArgs, limit, offset)
+	rows, err := s.query(ctx, query, pageArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -5101,11 +5235,6 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		}
 		if len(envJSON) > 0 {
 			_ = json.Unmarshal(envJSON, &t.TriggerEnv)
-		}
-		if f.Repo != "" {
-			if t.TriggerEnv["GITHUB_REPOSITORY"] != f.Repo {
-				continue
-			}
 		}
 		out = append(out, &t)
 	}

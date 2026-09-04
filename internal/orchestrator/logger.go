@@ -18,6 +18,9 @@ type nodeLogger struct {
 	enc      *json.Encoder
 	delegate sparkwing.Logger
 	nodeID   string
+
+	dropCount  int
+	dropReason string
 }
 
 func newNodeLogger(path, nodeID string, delegate sparkwing.Logger) (*nodeLogger, error) {
@@ -45,7 +48,9 @@ func (l *nodeLogger) Emit(rec sparkwing.LogRecord) {
 		rec.JobID = l.nodeID
 	}
 	l.mu.Lock()
-	_ = l.enc.Encode(&rec)
+	if err := l.enc.Encode(&rec); err != nil {
+		l.recordDropLocked(err)
+	}
 	l.mu.Unlock()
 	if l.delegate != nil {
 		l.delegate.Emit(rec)
@@ -55,7 +60,26 @@ func (l *nodeLogger) Emit(rec sparkwing.LogRecord) {
 func (l *nodeLogger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.file.Close()
+	err := l.file.Close()
+	if err != nil {
+		l.recordDropLocked(err)
+	}
+	return err
+}
+
+// Drops reports lines this writer failed to put on disk, so a node whose local
+// log file stopped accepting writes fails the same way a lost remote append does.
+func (l *nodeLogger) Drops() (int, string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.dropCount, l.dropReason
+}
+
+func (l *nodeLogger) recordDropLocked(err error) {
+	l.dropCount++
+	if l.dropReason == "" {
+		l.dropReason = err.Error()
+	}
 }
 
 type PrettyRenderer = logpretty.PrettyRenderer

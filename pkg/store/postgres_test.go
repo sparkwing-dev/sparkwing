@@ -161,6 +161,42 @@ func TestSchemaV18_PostgresScrubsSecretInputHash(t *testing.T) {
 	}
 }
 
+func TestPostgresReconcileOrphanedLocalRuns(t *testing.T) {
+	st := openPGTestStore(t)
+	ctx := context.Background()
+
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "pg-orphan", Pipeline: "p", Status: "running",
+		StartedAt: time.Now().Add(-10 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := st.DB().ExecContext(ctx,
+		`UPDATE runs SET last_heartbeat_at = NULL WHERE id = $1`, "pg-orphan"); err != nil {
+		t.Fatalf("clear run heartbeat: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{
+		RunID: "pg-orphan", NodeID: "build", Status: "running",
+	}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	n, err := store.Maintenance.ReconcileOrphanedLocalRuns(st, ctx, 60*time.Second)
+	if err != nil {
+		t.Fatalf("ReconcileOrphanedLocalRuns: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("reconciled count = %d, want 1", n)
+	}
+	got, err := st.GetRun(ctx, "pg-orphan")
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got == nil || got.Status != "failed" {
+		t.Fatalf("run = %+v, want status failed", got)
+	}
+}
+
 func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 	st := openPGTestStore(t)
 	ctx := context.Background()

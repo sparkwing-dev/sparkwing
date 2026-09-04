@@ -67,8 +67,8 @@ func parseDigestHeader(value string) ([]byte, error) {
 	return nil, fmt.Errorf("%w: response carried no sha-256 digest", ErrDigest)
 }
 
-func TryBinary(gcURL, token, hash, dest string) error {
-	req, err := http.NewRequest(http.MethodGet, gcURL+"/bin/"+hash, nil)
+func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, gcURL+"/bin/"+hash, nil)
 	if err != nil {
 		return err
 	}
@@ -122,12 +122,12 @@ func TryBinary(gcURL, token, hash, dest string) error {
 	return os.Rename(tmp, dest)
 }
 
-func UploadBinary(gcURL, token, hash, src string) error {
+func UploadBinary(ctx context.Context, gcURL, token, hash, src string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPut, gcURL+"/bin/"+hash, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, gcURL+"/bin/"+hash, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -162,41 +162,43 @@ func UploadBinary(gcURL, token, hash, src string) error {
 	return nil
 }
 
-func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return fetchPipelineSource(gcURL, "", repoSSH, branch, sha, parentDir, false, "")
+func FetchPipelineSource(ctx context.Context, gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
+	return fetchPipelineSource(ctx, gcURL, "", repoSSH, branch, sha, parentDir, false, "")
 }
 
 // FetchPipelineSourceWithToken authenticates cache reads only when gcURL is the controller's proxy.
 func FetchPipelineSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return FetchPipelineSourceWithCredentials(gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
+	return FetchPipelineSourceWithCredentials(context.Background(), gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
 }
 
 // FetchPipelineWorkspaceSourceWithToken materializes workspace blobs without checkout transformations.
 func FetchPipelineWorkspaceSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return FetchPipelineWorkspaceSourceWithCredentials(gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
+	return FetchPipelineWorkspaceSourceWithCredentials(context.Background(), gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
 }
 
 // FetchPipelineSourceWithCredentials prevents a controller bearer from crossing into a direct cache origin.
 func FetchPipelineSourceWithCredentials(
+	ctx context.Context,
 	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
 	bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken)
 	if bearer == "" {
 		bearer = cacheToken
 	}
-	return fetchPipelineSource(gcURL, bearer, repoSSH, branch, sha, parentDir, false,
+	return fetchPipelineSource(ctx, gcURL, bearer, repoSSH, branch, sha, parentDir, false,
 		controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
 }
 
 // FetchPipelineWorkspaceSourceWithCredentials combines raw workspace restoration with the same origin credential fence.
 func FetchPipelineWorkspaceSourceWithCredentials(
+	ctx context.Context,
 	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
 	bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken)
 	if bearer == "" {
 		bearer = cacheToken
 	}
-	return fetchPipelineSource(gcURL, bearer, repoSSH, branch, sha, parentDir, true,
+	return fetchPipelineSource(ctx, gcURL, bearer, repoSSH, branch, sha, parentDir, true,
 		controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
 }
 
@@ -274,7 +276,7 @@ func controllerClaimedRepoName(gcURL, controllerURL, repoURL string) string {
 	return ClaimedRepoNameFromURL(repoURL)
 }
 
-func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool, cacheName string) (sparkwingDir string, err error) {
+func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool, cacheName string) (sparkwingDir string, err error) {
 	if gcURL == "" {
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
 	}
@@ -296,7 +298,7 @@ func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, r
 		return "", fmt.Errorf("FetchPipelineSource: cannot derive repo name from %q", repoSSH)
 	}
 
-	if err := registerRepoWithCache(gcURL, token, name, repoSSH); err != nil {
+	if err := registerRepoWithCache(ctx, gcURL, token, name, repoSSH); err != nil {
 		return "", fmt.Errorf("git register: %w", err)
 	}
 
@@ -310,20 +312,20 @@ func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, r
 	}
 
 	if sha != "" {
-		if err := fetchExactSHA(gcURL, cloneURL, token, sha, workTree); err != nil {
+		if err := fetchExactSHA(ctx, gcURL, cloneURL, token, sha, workTree); err != nil {
 			return "", err
 		}
-		workspaceCommit, inspectErr := isWorkspaceSnapshotCommit(workTree, sha)
+		workspaceCommit, inspectErr := isWorkspaceSnapshotCommit(ctx, workTree, sha)
 		if inspectErr != nil {
 			return "", inspectErr
 		}
 		if rawWorkspace || workspaceCommit {
-			if err := restoreRawCheckout(workTree, sha); err != nil {
+			if err := restoreRawCheckout(ctx, workTree, sha); err != nil {
 				return "", err
 			}
 		}
 	} else {
-		if err := shallowCloneBranch(gcURL, cloneURL, token, branch, workTree); err != nil {
+		if err := shallowCloneBranch(ctx, gcURL, cloneURL, token, branch, workTree); err != nil {
 			return "", err
 		}
 	}
@@ -335,7 +337,7 @@ func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, r
 	return "", fmt.Errorf("cloned tree has no .sparkwing directory under %s", workTree)
 }
 
-func fetchExactSHA(gcURL, cloneURL, token, sha, dest string) error {
+func fetchExactSHA(ctx context.Context, gcURL, cloneURL, token, sha, dest string) error {
 	// safety: the sha reaches git as a fetch argument, so only an object id may pass.
 	sha, err := validateGitObject(sha)
 	if err != nil {
@@ -345,7 +347,7 @@ func fetchExactSHA(gcURL, cloneURL, token, sha, dest string) error {
 		return err
 	}
 	runIn := func(args ...string) ([]byte, error) {
-		cmd := exec.Command("git", args...)
+		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = dest
 		cmd.Env = gitHTTPEnv(gcURL, token)
 		return cmd.CombinedOutput()
@@ -365,8 +367,8 @@ func fetchExactSHA(gcURL, cloneURL, token, sha, dest string) error {
 	return nil
 }
 
-func isWorkspaceSnapshotCommit(repoDir, sha string) (bool, error) {
-	out, err := exec.Command("git", "-C", repoDir, "cat-file", "commit", sha).Output()
+func isWorkspaceSnapshotCommit(ctx context.Context, repoDir, sha string) (bool, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "cat-file", "commit", sha).Output()
 	if err != nil {
 		return false, fmt.Errorf("inspect workspace commit: %w", err)
 	}
@@ -387,8 +389,8 @@ func isWorkspaceSnapshotCommit(repoDir, sha string) (bool, error) {
 	return author && parents == 1 && string(message) == "sparkwing working-tree snapshot\n", nil
 }
 
-func restoreRawCheckout(repoDir, sha string) error {
-	out, err := exec.Command("git", "-C", repoDir, "ls-tree", "-rz", "--full-tree", sha).Output()
+func restoreRawCheckout(ctx context.Context, repoDir, sha string) error {
+	out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "ls-tree", "-rz", "--full-tree", sha).Output()
 	if err != nil {
 		return fmt.Errorf("inspect workspace tree: %w", err)
 	}
@@ -405,7 +407,7 @@ func restoreRawCheckout(repoDir, sha string) error {
 		if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("inspect workspace tree: unsafe path %q", name)
 		}
-		blob, blobErr := exec.Command("git", "-C", repoDir, "cat-file", "blob", string(fields[2])).Output()
+		blob, blobErr := exec.CommandContext(ctx, "git", "-C", repoDir, "cat-file", "blob", string(fields[2])).Output()
 		if blobErr != nil {
 			return fmt.Errorf("read workspace blob %q: %w", name, blobErr)
 		}
@@ -436,9 +438,9 @@ func restoreRawCheckout(repoDir, sha string) error {
 	return nil
 }
 
-func shallowCloneBranch(gcURL, cloneURL, token, branch, dest string) error {
-	cmd := exec.Command(
-		"git", "clone",
+func shallowCloneBranch(ctx context.Context, gcURL, cloneURL, token, branch, dest string) error {
+	cmd := exec.CommandContext(
+		ctx, "git", "clone",
 		"--depth", "1",
 		"--single-branch",
 		"--branch", branch,
@@ -453,11 +455,11 @@ func shallowCloneBranch(gcURL, cloneURL, token, branch, dest string) error {
 	return nil
 }
 
-func registerRepoWithCache(gcURL, token, name, repoURL string) error {
+func registerRepoWithCache(ctx context.Context, gcURL, token, name, repoURL string) error {
 	q := neturl.Values{}
 	q.Set("name", name)
 	q.Set("repo", repoURL)
-	req, err := http.NewRequest(http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(gcURL, "/")+"/git/register?"+q.Encode(), nil)
 	if err != nil {
 		return err
@@ -831,7 +833,7 @@ func (lb *lockedBuffer) Bytes() []byte {
 	return append([]byte(nil), lb.buf.Bytes()...)
 }
 
-func CompilePipeline(sparkwingDir, dest string) error {
+func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
 	if _, err := exec.LookPath("go"); err != nil {
 		return fmt.Errorf(
 			"go toolchain not on PATH: sparkwing compiles .sparkwing/ via `go build`.\n" +
@@ -872,7 +874,7 @@ func CompilePipeline(sparkwingDir, dest string) error {
 		args = append(args, "-modfile="+overlay)
 	}
 	args = append(args, "-o", dest, ".")
-	cmd := exec.Command("go", args...)
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = sparkwingDir
 	var captured lockedBuffer
 	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)

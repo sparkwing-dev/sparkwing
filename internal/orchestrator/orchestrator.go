@@ -2718,8 +2718,11 @@ func (s *dispatchState) markFailed(nodeID string, reason error) {
 }
 
 func (s *dispatchState) markCancelled(nodeID, reason string) {
-	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Cancelled), reason, nil)
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_cancelled", []byte(reason))
+	// safety: the common caller has just observed the run context Done, and a
+	// store write on a cancelled context never reaches the driver.
+	ctx := context.WithoutCancel(s.ctx)
+	_ = s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Cancelled), reason, nil)
+	_ = s.backends.State.AppendEvent(ctx, s.runID, nodeID, "node_cancelled", []byte(reason))
 	s.setOutcome(nodeID, sparkwing.Cancelled)
 }
 

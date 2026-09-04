@@ -1,6 +1,7 @@
 package bincache
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -60,7 +61,7 @@ func TestPipelineCacheKey_ReplaceVersionIsPartOfIdentity(t *testing.T) {
 func TestCompilePipeline_PassesTrimpath(t *testing.T) {
 	log := installFakeGo(t)
 	dir := newPipelineDir(t)
-	if err := CompilePipeline(dir, filepath.Join(t.TempDir(), "bin", "pipelines")); err != nil {
+	if err := CompilePipeline(context.Background(), dir, filepath.Join(t.TempDir(), "bin", "pipelines")); err != nil {
 		t.Fatalf("CompilePipeline: %v", err)
 	}
 	raw, err := os.ReadFile(log)
@@ -83,8 +84,8 @@ func TestCompilePipeline_IdenticalBinariesAcrossCheckoutPaths(t *testing.T) {
 	sum := func(pipelineDir string) string {
 		t.Helper()
 		dest := filepath.Join(t.TempDir(), "pipelines")
-		if err := CompilePipeline(pipelineDir, dest); err != nil {
-			t.Fatalf("CompilePipeline(%s): %v", pipelineDir, err)
+		if err := CompilePipeline(context.Background(), pipelineDir, dest); err != nil {
+			t.Fatalf("CompilePipeline(context.Background(), %s): %v", pipelineDir, err)
 		}
 		f, err := os.Open(dest)
 		if err != nil {

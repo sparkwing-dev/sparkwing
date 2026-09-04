@@ -685,6 +685,13 @@ attempt matters. Filtering is node-level (log lines aren't
 timestamped on disk). --events-only and --no-events are mutually
 exclusive views of the unified stream.
 
+--events-only emits the envelope records the dispatcher writes beside a
+local run (run_start, node_start, run_finish, ...). Against a profile
+whose state lives in a shared database or an object store it emits that
+run's stored event records instead (admission_wait, concurrency_wait,
+cache_hit, ...) -- a different record shape. Against a controller it is
+refused.
+
 ### Flags
 
 | Flag | Description |
