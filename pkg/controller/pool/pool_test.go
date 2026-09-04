@@ -158,3 +158,27 @@ func poolPVC(name, member string) *corev1.PersistentVolumeClaim {
 		},
 	}
 }
+
+func TestReconcileReservesBothIndexesOfADisagreeingPVC(t *testing.T) {
+	client := fake.NewSimpleClientset(poolPVC("sparkwing-cache-pool-0", "2"))
+	p := NewPool(client, "builds", 3, "")
+
+	for range 3 {
+		if err := p.Reconcile(context.Background(), time.Minute, time.Minute); err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+	}
+
+	pvcs, err := p.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var names []string
+	for _, pvc := range pvcs {
+		names = append(names, pvc.Name)
+	}
+	want := []string{"sparkwing-cache-pool-0", "sparkwing-cache-pool-1", "sparkwing-cache-pool-3"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("pool after 3 reconciles = %v, want %v", names, want)
+	}
+}

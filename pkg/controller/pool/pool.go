@@ -176,25 +176,25 @@ func (p *Pool) list(ctx context.Context) ([]corev1.PersistentVolumeClaim, error)
 	return pvcs.Items, nil
 }
 
+// safety: a PVC whose annotation and name disagree holds both indices, and
+// creating either name would collide with it.
 func occupiedMembers(pvcs []corev1.PersistentVolumeClaim) map[int]bool {
 	occupied := make(map[int]bool, len(pvcs))
 	for _, pvc := range pvcs {
-		if i, ok := memberIndex(pvc); ok {
+		if i, ok := memberNumber(pvc.Annotations[AnnPoolMember]); ok {
 			occupied[i] = true
+		}
+		if suffix, ok := strings.CutPrefix(pvc.Name, memberPrefix); ok {
+			if i, ok := memberNumber(suffix); ok {
+				occupied[i] = true
+			}
 		}
 	}
 	return occupied
 }
 
-func memberIndex(pvc corev1.PersistentVolumeClaim) (int, bool) {
-	if s := pvc.Annotations[AnnPoolMember]; s != "" {
-		if i, err := strconv.Atoi(s); err == nil && i >= 0 {
-			return i, true
-		}
-	}
-	// safety: pools created before the member annotation carry the index only in the name
-	s, ok := strings.CutPrefix(pvc.Name, memberPrefix)
-	if !ok {
+func memberNumber(s string) (int, bool) {
+	if s == "" {
 		return 0, false
 	}
 	i, err := strconv.Atoi(s)
