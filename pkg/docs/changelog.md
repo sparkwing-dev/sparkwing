@@ -360,6 +360,15 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** The concurrency waiter stream at
+  `GET /api/v1/concurrency/{key}/notify` keeps its documented 30-minute
+  budget. The listener's 30-second write timeout covers the whole
+  connection, and the handler never pushed it back, so a waiter promoted
+  more than 30 seconds after connecting -- the normal case for a queue --
+  got the `: open` preamble and then an EOF, and the `ready` event was lost
+  with nothing logged. The handler now extends the connection deadline on
+  every poll and logs an event it could not write.
+
 - **controller:** HTTP request metrics label the `route` with the pattern the
   request matched rather than a hand-maintained regex table, so the ten
   `/api/v1/concurrency/{key}/...` routes, `/api/v1/artifacts/{key}`, the

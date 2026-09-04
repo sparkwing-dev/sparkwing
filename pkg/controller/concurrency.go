@@ -379,6 +379,11 @@ func (s *Server) handleForceRelease(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+const (
+	waiterNotifyMaxWait        = 30 * time.Minute
+	waiterNotifyDeadlineWindow = 2 * time.Minute
+)
+
 func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	runID := r.URL.Query().Get("run_id")
@@ -397,6 +402,7 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+	extendStreamDeadline(w, r, waiterNotifyDeadlineWindow)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(": open\n\n"))
 	flusher.Flush()
@@ -404,10 +410,10 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
-	maxWait := time.NewTimer(30 * time.Minute)
+	maxWait := time.NewTimer(waiterNotifyMaxWait)
 	defer maxWait.Stop()
 
-	emit := func(event string, payload map[string]string) bool {
+	emit := func(event string, payload map[string]string) {
 		payload["key"] = key
 		payload["run_id"] = runID
 		if nodeID != "" {
@@ -415,10 +421,11 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 		}
 		b, _ := json.Marshal(payload)
 		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b); err != nil {
-			return false
+			s.logger.Warn("concurrency waiter stream: event not delivered",
+				"key", key, "run_id", runID, "event", event, "err", err)
+			return
 		}
 		flusher.Flush()
-		return true
 	}
 
 	for {
@@ -429,6 +436,9 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 			emit("stream_end", map[string]string{"reason": "max_wait"})
 			return
 		case <-ticker.C:
+			// safety: the write that matters comes minutes after the preamble,
+			// so the connection deadline is pushed back ahead of every poll.
+			extendStreamDeadline(w, r, waiterNotifyDeadlineWindow)
 		}
 
 		resolution, err := s.store.ResolveWaiter(ctx, key, runID, nodeID, "", "", "", false)
