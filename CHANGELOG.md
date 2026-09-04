@@ -388,6 +388,9 @@ code change to unlock.
   send. It now drops that connection the way every other delivery does and
   finishes the flush, so the promoted run learns it holds the lease and the
   cancelling command gets its answer instead of retrying into `Found: false`.
+  A failed tombstone write flushes those promotions too; it still withholds the
+  acknowledgement, which is how the caller learns the cancellation is not
+  durable.
 
 - **local admission:** The extra concurrency lease a nested run takes for a
   `.Concurrency()` group its parent does not already hold now records the run

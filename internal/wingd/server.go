@@ -1490,14 +1490,17 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			go d.handleDisconnect(owner)
 		}
 	}
-	if persistErr != nil {
-		c.close()
-		return
-	}
 	for _, dl := range deliveries {
 		if err := dl.c.send(dl.msg); err != nil {
 			go d.handleDisconnect(dl.c)
 		}
+	}
+	if persistErr != nil {
+		// safety: the missing acknowledgement is how the caller learns the
+		// cancellation is not durable; the promotions above are already committed
+		// in memory, so they go out either way.
+		c.close()
+		return
 	}
 	_ = c.send(&wingwire.CancelLeaseAck{Found: true})
 }
