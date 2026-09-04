@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -26,6 +28,24 @@ func TestWriteErrorMasksInternalDetails(t *testing.T) {
 		if strings.Contains(body, sentinel) {
 			t.Errorf("internal response exposed %q: %s", sentinel, body)
 		}
+	}
+}
+
+func TestWriteExecutionAdmissionErrorPreservesUnresolvedSafeHold(t *testing.T) {
+	rec := httptest.NewRecorder()
+	err := &executionpolicy.UpgradeRequiredError{
+		Scope: "supervisor", Missing: []string{"future-supervisor-v9"}, SafeHold: true,
+	}
+	if !writeExecutionAdmissionError(rec, err) {
+		t.Fatal("typed upgrade error was not handled")
+	}
+	var body executionAdmissionErrorBody
+	if decodeErr := json.Unmarshal(rec.Body.Bytes(), &body); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if rec.Code != http.StatusConflict || body.Code != "upgrade_required" || !body.SafeHold ||
+		body.MinimumRelease != "" || len(body.Missing) != 1 || body.Missing[0] != "future-supervisor-v9" {
+		t.Fatalf("safe-hold response = status %d, body %+v", rec.Code, body)
 	}
 }
 

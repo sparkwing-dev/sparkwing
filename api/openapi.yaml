@@ -1767,6 +1767,11 @@ paths:
         the lease is unexpired; another runner token gets `403` with
         `"error": "claim_required"`, even one carrying the same principal
         name. `lease_secs` is clamped to the server cap of 10 minutes.
+        A request carrying `executor_name` is a sealed assisted offer:
+        it validates the private binding and returns `409
+        body_attestation_required` before reservation or award. The `200`
+        response remains active only for the ordinary legacy claim shape that
+        omits `executor_name`; sealed nodes are excluded from that path.
       requestBody:
         required: true
         content:
@@ -1784,6 +1789,8 @@ paths:
                 resource_digest: {type: string}
                 slot: {type: integer}
                 lease_secs: {type: integer}
+                execution_binding:
+                  $ref: "#/components/schemas/ExecutionClaimBinding"
                 labels:
                   type: array
                   items: {type: string}
@@ -1811,6 +1818,12 @@ paths:
                       reservation_id: {type: string}
         "204": {description: Nothing to claim.}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "409":
+          description: >-
+            Assisted offer refusal. The controller does not reserve, record, or award the offer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ExecutionAdmissionError"}
 
   /api/v1/pool:
     get:
@@ -2904,6 +2917,33 @@ paths:
                     cores: {type: number, minimum: 0}
                     memory_bytes: {type: integer, format: int64, minimum: 0}
                     queue_depth: {type: integer, minimum: 0}
+                runtime:
+                  x-sparkwing-go-type: pkg/controller.agentRuntimeReportReq
+                  type: object
+                  description: >-
+                    Supervisor host capabilities and observational build identity. This report does not attest any compiled workload.
+                  required: [body_protocol_minimum, body_protocol_maximum, build_identity]
+                  properties:
+                    body_protocol_minimum: {type: integer, minimum: 0}
+                    body_protocol_maximum: {type: integer, minimum: 0}
+                    supervisor_requirements:
+                      type: array
+                      items: {type: string}
+                    body_host_requirements:
+                      type: array
+                      items: {type: string}
+                    build_identity:
+                      x-sparkwing-go-type: internal/buildinfo.Identity
+                      type: object
+                      description: Observational runner identity; never compared for exact admission equality.
+                      properties:
+                        binary: {type: string}
+                        version: {type: string}
+                        commit: {type: string}
+                        revision_time: {type: string}
+                        modified: {type: boolean}
+                        goos: {type: string}
+                        goarch: {type: string}
       responses:
         "204": {description: Heartbeat recorded. Empty body.}
         "400": {$ref: "#/components/responses/BadRequest"}
@@ -2917,10 +2957,11 @@ paths:
       tags: [nodes]
       summary: Preview the next node eligible for an enrolled executor.
       description: |
-        Returns the controller-owned resource digest and current membership
+        Evaluates the controller-owned resource digest and current membership
         snapshot without claiming the node or reserving capacity. A foreground
-        Fleet authority restricts this lookup to its own run. The executor
-        submits a locally reserved slot to `/api/v1/nodes/claim` afterward.
+        Fleet authority restricts this lookup to its own run. A sealed
+        compatible candidate returns `409 body_attestation_required` with its
+        protected binding. No capacity is reserved.
       requestBody:
         required: true
         content:
@@ -2932,15 +2973,16 @@ paths:
               properties:
                 executor_name: {type: string}
       responses:
-        "200":
-          description: Eligible node and exact enrollment snapshot.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ExecutorClaimPreparation"}
         "204": {description: No eligible node. Empty body.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {description: Credential does not match this enrollment.}
+        "409":
+          description: >-
+            Typed upgrade, protocol-incompatibility, or compiled-body-attestation refusal. No capacity has been reserved.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ExecutionAdmissionError"}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset:
@@ -3700,46 +3742,55 @@ components:
         memory_bytes: {type: integer, format: int64}
         queue_depth: {type: integer}
         observed_at: {type: string, format: date-time}
-    ExecutorClaimPreparation:
-      x-sparkwing-go-type: pkg/controller.executorClaimPreparationResp
+    ExecutionClaimBinding:
+      x-sparkwing-go-type: none
       type: object
-      description: Read-only controller admission snapshot for one eligible node.
-      required: [summary, membership]
-      properties:
-        summary: {$ref: "#/components/schemas/ExecutorSchedulingSummary"}
-        membership: {$ref: "#/components/schemas/ExecutorMembershipSnapshot"}
-        offer_deadline:
-          type: string
-          format: date-time
-          nullable: true
-          description: Existing round deadline, absent until the first offer opens the round.
-    ExecutorSchedulingSummary:
-      x-sparkwing-go-type: pkg/controller.executorSchedulingSummaryResp
-      type: object
-      description: Node requirements recomputed by the controller when an offer is awarded.
-      required: [run_id, node_id, resources, resource_digest, slots]
+      description: >-
+        Protected prepare-to-offer binding for one exact immutable policy tuple. It is never present in public run or node projections.
+      required:
+        - run_id
+        - node_id
+        - policy_hash
+        - policy_version
+        - body_protocol
+        - supervisor_requirements_hash
+        - body_requirements_hash
       properties:
         run_id: {type: string}
         node_id: {type: string}
-        resources: {$ref: "#/components/schemas/ExecutorResource"}
-        resource_digest: {type: string}
-        slots: {type: integer, minimum: 1}
-    ExecutorMembershipSnapshot:
-      x-sparkwing-go-type: pkg/controller.executorMembershipResp
+        policy_hash: {type: string}
+        policy_version: {type: integer, minimum: 1}
+        body_protocol: {type: integer, minimum: 1}
+        supervisor_requirements_hash: {type: string}
+        body_requirements_hash: {type: string}
+    ExecutionAdmissionError:
+      x-sparkwing-go-type: none
       type: object
-      description: Credential-safe view of one enrollment under this controller authority.
-      required:
-        - membership_id
-        - worker_id
-        - eligible
-        - effective_priority
-        - max_concurrent
+      description: Stable assisted-admission refusal returned before reservation or award.
+      required: [error, code]
       properties:
-        membership_id: {type: string}
-        worker_id: {type: string}
-        eligible: {type: boolean}
-        effective_priority: {type: integer}
-        max_concurrent: {type: integer, minimum: 1}
+        error: {type: string}
+        code:
+          type: string
+          enum: [upgrade_required, protocol_incompatible, body_attestation_required]
+        run_id: {type: string}
+        node_id: {type: string}
+        scope:
+          type: string
+          enum: [supervisor, body_host]
+        missing:
+          type: array
+          items: {type: string}
+        minimum_release: {type: string}
+        safe_hold:
+          type: boolean
+          description: >-
+            True when no trusted stable release floor resolves every missing capability; automated updating must not guess a target.
+        policy_protocol: {type: integer}
+        helper_minimum: {type: integer}
+        helper_maximum: {type: integer}
+        execution_binding:
+          $ref: "#/components/schemas/ExecutionClaimBinding"
     ExecutorResource:
       x-sparkwing-go-type: pkg/store.ExecutorResource
       type: object

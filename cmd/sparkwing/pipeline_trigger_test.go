@@ -456,7 +456,7 @@ func TestSeedWorkingTreeSnapshot_ControllerFallbackGetsFreshDeadline(t *testing.
 	if err := os.WriteFile(bundle, []byte("bundle"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	snapshot := &worktreeSnapshot{BundlePath: bundle, SHA: strings.Repeat("a", 40)}
+	snapshot := &worktreeSnapshot{BundlePath: bundle, SHA: strings.Repeat("a", 40), ManifestDigest: "sha256:" + strings.Repeat("b", 64)}
 	prof := &profile.Profile{Controller: &profile.ControllerSpec{URL: controller.URL, Token: "runner-token"}}
 	if err := seedWorkingTreeSnapshot(prof, direct.URL, "https://git.example.com/acme/widgets.git", snapshot, 20*time.Millisecond, time.Second); err != nil {
 		t.Fatal(err)

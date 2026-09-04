@@ -231,8 +231,30 @@ func TestAgents_AdminEnrollmentExactCredentialLivenessAndLegacyBoundary(t *testi
 		t.Fatalf("enrollment principal = %q, %v; want token owner", stored.Principal, err)
 	}
 	if status, body := agentRequest(t, http.MethodPost, srv.URL+"/api/v1/agents/desk/heartbeat", runnerRaw,
-		map[string]any{"headroom": map[string]any{"cores": 3, "memory_bytes": 6 << 30, "queue_depth": 1}}); status != http.StatusNoContent {
+		map[string]any{
+			"headroom": map[string]any{"cores": 3, "memory_bytes": 6 << 30, "queue_depth": 1},
+			"runtime": map[string]any{
+				"body_protocol_minimum": 1, "body_protocol_maximum": 1,
+				"supervisor_requirements": []string{"fleet-supervisor-v1"},
+				"body_host_requirements":  []string{"fleet-body-v1"},
+				"build_identity": map[string]any{
+					"binary": "sparkwing-runner", "version": "v9.8.7", "commit": "sentinel-build-commit",
+					"goos": "windows", "goarch": "amd64",
+				},
+			},
+		}); status != http.StatusNoContent {
 		t.Fatalf("heartbeat = %d: %s", status, body)
+	}
+	var protocolMin, protocolMax int
+	var supervisorJSON, bodyJSON, buildJSON []byte
+	if err := st.DB().QueryRow(`SELECT supported_body_protocol_min, supported_body_protocol_max,
+supervisor_requirements_json, body_runtime_requirements_json, runner_build_identity_json
+FROM executors WHERE name = 'desk'`).Scan(&protocolMin, &protocolMax, &supervisorJSON, &bodyJSON, &buildJSON); err != nil {
+		t.Fatal(err)
+	}
+	if protocolMin != 1 || protocolMax != 1 || !strings.Contains(string(supervisorJSON), "fleet-supervisor-v1") ||
+		!strings.Contains(string(bodyJSON), "fleet-body-v1") || !strings.Contains(string(buildJSON), "sentinel-build-commit") {
+		t.Fatalf("persisted runtime report = %d..%d %s %s %s", protocolMin, protocolMax, supervisorJSON, bodyJSON, buildJSON)
 	}
 	if status, body := agentRequest(t, http.MethodPost, srv.URL+"/api/v1/agents/desk/heartbeat", rotatedRaw,
 		map[string]any{"headroom": map[string]any{"cores": 99, "memory_bytes": 0, "queue_depth": 0}}); status != http.StatusConflict {
@@ -257,6 +279,9 @@ func TestAgents_AdminEnrollmentExactCredentialLivenessAndLegacyBoundary(t *testi
 	status, body := agentRequest(t, http.MethodGet, srv.URL+"/api/v1/agents", adminRaw, nil)
 	if status != http.StatusOK {
 		t.Fatalf("list agents = %d: %s", status, body)
+	}
+	if strings.Contains(body, "sentinel-build-commit") {
+		t.Fatalf("public agent projection exposed protected runner build identity: %s", body)
 	}
 	if strings.Contains(body, runner.Prefix) || strings.Contains(body, rotated.Prefix) || strings.Contains(body, "same-principal") || strings.Contains(body, "token_prefix") {
 		t.Fatalf("agents response exposed credential metadata: %s", body)

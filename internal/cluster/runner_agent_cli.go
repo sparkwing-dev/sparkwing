@@ -15,6 +15,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/executorinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -318,6 +320,8 @@ func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoor
 	}
 	for ctx.Err() == nil {
 		prepareCtx, cancelPrepare := context.WithTimeout(ctx, executorClaimRequestTimeout)
+		preparationSink := executionpolicy.NewPreparationSink()
+		prepareCtx = executionpolicy.WithPreparationSink(prepareCtx, preparationSink)
 		preparation, err := ctrl.PrepareExecutorClaim(prepareCtx, member.Name)
 		cancelPrepare()
 		if err != nil {
@@ -328,6 +332,12 @@ func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoor
 			continue
 		}
 		if preparation == nil {
+			sleepOrCancel(ctx, cfg.Poll)
+			continue
+		}
+		binding := preparationSink.Load()
+		if binding.IsZero() {
+			logger.Error("executor claim preparation omitted its sealed execution binding", "slot", slot)
 			sleepOrCancel(ctx, cfg.Poll)
 			continue
 		}
@@ -366,6 +376,12 @@ func runExecutorOfferSlot(ctx context.Context, cfg AgentConfig, member AgentCoor
 				requestStop = offerStop
 			}
 			requestCtx, cancelRequest := context.WithDeadline(offerCtx, requestStop)
+			requestCtx, err = executionpolicy.WithOfferBinding(requestCtx, binding)
+			if err != nil {
+				cancelRequest()
+				logger.Error("executor claim binding is invalid", "err", err, "slot", slot)
+				break
+			}
 			result, err := ctrl.OfferExecutorClaim(requestCtx, claim, preparation.Summary.RunID, preparation.Summary.NodeID)
 			cancelRequest()
 			if err != nil {
@@ -429,6 +445,10 @@ func DefaultAgentConfigPath() (string, error) {
 }
 
 func RunAgentCLI(args []string) error {
+	return runAgentCLI(args, buildinfo.Read("sparkwing-runner", ""))
+}
+
+func runAgentCLI(args []string, identity buildinfo.Identity) error {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to agent.yaml (default: ~/.config/sparkwing/agent.yaml)")
 	if err := fs.Parse(args); err != nil {
@@ -487,6 +507,10 @@ func RunAgentCLI(args []string) error {
 			Contribution: cfg.Contribution,
 		}, logger)
 	}
+	runtimeCtx, err := executionpolicy.WithRuntimeReport(ctx, executionpolicy.CurrentRuntimeReport(identity))
+	if err != nil {
+		return err
+	}
 
 	ledger := NewWingdExecutorCapacityLedger("", "", logger)
 	errCh := make(chan error, len(memberships))
@@ -494,7 +518,7 @@ func RunAgentCLI(args []string) error {
 		membership := membership
 		go func() {
 			memberLogger := logger.With("coordinator", membership.Controller, "executor", membership.Name)
-			errCh <- superviseAgentMembership(ctx, func(runCtx context.Context) error {
+			errCh <- superviseAgentMembership(runtimeCtx, func(runCtx context.Context) error {
 				return runAgentMembership(runCtx, cfg, membership, ledger, memberLogger)
 			}, memberLogger)
 		}()

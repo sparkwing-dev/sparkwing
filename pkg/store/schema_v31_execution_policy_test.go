@@ -6,7 +6,9 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -39,6 +41,70 @@ func TestSchemaV31UpgradesRealV30SQLiteShape(t *testing.T) {
 	assertExecutionPolicySchemaSQLite(t, up.DB())
 	if got := readSchemaVersion(t, up.DB()); got != store.ExpectedSchemaVersion() {
 		t.Fatalf("schema version = %d, want %d", got, store.ExpectedSchemaVersion())
+	}
+}
+
+func TestSchemaV31MigratedV30ReadyNodeCannotPrepareOrOfferAsAssistedWork(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v30-ready.db")
+	ctx := context.Background()
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(ctx, store.Run{ID: "legacy", Pipeline: "release", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "legacy", NodeID: "work", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNodeReady(ctx, "legacy", "work"); err != nil {
+		t.Fatal(err)
+	}
+	downgradeExecutionPolicyToV30SQLite(t, st.DB())
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	up, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer up.Close()
+	claimant := store.ClaimIdentity{Principal: "helper-principal", TokenPrefix: "swr_helper"}
+	if err := up.EnrollExecutor(ctx, claimant.TokenPrefix, store.Executor{
+		Name: "helper", Kind: "agent", Location: "local", Principal: claimant.Principal,
+		BasePriority: 100, PriorityCeiling: 100, MaxConcurrent: 1, Budget: store.ExecutorResource{Cores: 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reportCtx, err := executionpolicy.WithRuntimeReport(ctx, executionpolicy.CurrentRuntimeReport(buildinfo.Identity{
+		Binary: "sparkwing-runner", Version: "v0.41.0", GOOS: "linux", GOARCH: "amd64",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := up.HeartbeatExecutor(reportCtx, claimant, "helper", store.ExecutorResource{Cores: 2}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if preparation, err := up.PrepareNextExecutorClaim(reportCtx, claimant, "helper"); !errors.Is(err, store.ErrNotFound) || preparation != nil {
+		t.Fatalf("migrated unsealed prepare = (%+v, %v), want empty", preparation, err)
+	}
+	if _, err := up.OfferExecutorClaim(reportCtx, claimant, store.ExecutorClaimOffer{
+		ExecutorName: "helper", HolderID: "holder", RunID: "legacy", NodeID: "work",
+		ReservationID: "reservation", ResourceDigest: "sha256:forged", Slot: 0,
+	}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("migrated unsealed direct offer = %v, want not found", err)
+	}
+	var offers int
+	var claimedBy sql.NullString
+	if err := up.DB().QueryRow(`SELECT COUNT(*) FROM node_claim_offers`).Scan(&offers); err != nil {
+		t.Fatal(err)
+	}
+	if err := up.DB().QueryRow(`SELECT claimed_by FROM nodes WHERE run_id = 'legacy' AND node_id = 'work'`).Scan(&claimedBy); err != nil {
+		t.Fatal(err)
+	}
+	if offers != 0 || claimedBy.Valid {
+		t.Fatalf("migrated unsealed path mutated helper state: offers=%d claimed=%v", offers, claimedBy)
 	}
 }
 

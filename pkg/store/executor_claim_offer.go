@@ -3,28 +3,64 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 )
 
 const (
-	nodeClaimOfferWindow  = 5 * time.Second
-	executorOfferLiveness = 2 * time.Second
+	nodeClaimOfferWindow            = 5 * time.Second
+	executorOfferLiveness           = 2 * time.Second
+	executorPrepareCandidateLimit   = 128
+	executorPrepareNeedsJSONMaxSize = 16 << 10
+	executorPreparePlanJSONMaxSize  = executionpolicy.MaxEncodedPolicyBytes
 )
 
 var errExecutorOfferLimit = errors.New("executor scheduling limit exceeded: maximum 256 offers per node")
 
-// ExecutorClaimPreparation is the controller-owned admission contract for one
-// enrolled executor and ready node.
+type executorPrepareCursor struct {
+	readyAt       int64
+	runID, nodeID string
+}
+
+type executorPrepareCandidate struct {
+	executorPrepareCursor
+	needsJSON                                              []byte
+	requiredCoordinatorID, requiredLocation                string
+	avoidCoordinatorID, avoidExecutorKind, avoidExecutorID string
+	avoidUntil, offerStarted                               sql.NullInt64
+	policyVersion, bodyProtocol, offerPriorityTarget       int
+	supervisorJSON, bodyJSON                               []byte
+	supervisorRequirementsHash, bodyRequirementsHash       string
+}
+
+type executorPreparePlan struct {
+	pipeline string
+	raw      []byte
+}
+
+type executorPrepareRange uint8
+
+const (
+	executorPrepareFromStart executorPrepareRange = iota
+	executorPrepareAfterCursor
+	executorPrepareThroughCursor
+)
+
+// ExecutorClaimPreparation is a controller-owned preview of one sealed node.
+// Prepare returns it with ErrBodyAttestationRequired and never reserves capacity.
 type ExecutorClaimPreparation struct {
 	Summary       ExecutorSchedulingSummary  `json:"summary"`
 	Membership    ExecutorMembershipSnapshot `json:"membership"`
 	OfferDeadline *time.Time                 `json:"offer_deadline,omitempty"`
 }
 
-// ExecutorClaimOffer binds one controller offer to capacity already reserved
-// under the exact preparation digest.
+// ExecutorClaimOffer describes an attested reservation submission bound to an
+// exact preparation digest. OfferExecutorClaim rejects unattested submissions.
 type ExecutorClaimOffer struct {
 	ExecutorName   string
 	HolderID       string
@@ -36,8 +72,8 @@ type ExecutorClaimOffer struct {
 	Lease          time.Duration
 }
 
-// ExecutorClaimOfferResult distinguishes an unresolved round from an offer
-// that lost or no longer names a ready node.
+// ExecutorClaimOfferResult describes an attested offer outcome. Unattested
+// offers return ErrBodyAttestationRequired before reservation or arbitration.
 type ExecutorClaimOfferResult struct {
 	Node    *Node
 	Pending bool
@@ -79,8 +115,8 @@ func executorOfferEventFor(summary ExecutorSchedulingSummary, membership Executo
 
 func offerSlot(slot int) *int { return &slot }
 
-// PrepareNextExecutorClaim returns the oldest eligible node without changing
-// queue or claim state. The exact resource digest is recomputed on award.
+// PrepareNextExecutorClaim identifies a sealed compatible node without changing
+// queue or claim state. It returns its preview with ErrBodyAttestationRequired.
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error) {
 	return s.prepareNextExecutorClaim(ctx, claimant, executorName, "")
 }
@@ -95,7 +131,27 @@ func (s *Store) PrepareExecutorClaimForRun(ctx context.Context, claimant ClaimId
 }
 
 func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName, runID string) (*ExecutorClaimPreparation, error) {
-	executor, err := s.ExecutorForCredential(ctx, claimant, executorName)
+	executors, err := s.ListExecutors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(executors) > MaxEnrolledExecutors {
+		return nil, ErrExecutorEnrollmentLimit
+	}
+	var executor Executor
+	for _, candidate := range executors {
+		if candidate.Name == executorName {
+			executor = candidate
+			break
+		}
+	}
+	if executor.Name == "" {
+		return nil, ErrNotFound
+	}
+	if claimant.TokenPrefix == "" || executor.TokenPrefix != claimant.TokenPrefix || executor.Principal != claimant.Principal {
+		return nil, ErrExecutorCredentialMismatch
+	}
+	runtimeReport, err := s.executorRuntimeReport(ctx, executorName)
 	if err != nil {
 		return nil, err
 	}
@@ -103,87 +159,363 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 	if err != nil {
 		return nil, err
 	}
-	activeAfter := time.Now().Add(-executorOfferLiveness).UnixNano()
-	type candidate struct {
-		runID, nodeID string
-		readyAt       int64
+	authorityID, err := s.controllerAuthorityID(ctx)
+	if err != nil {
+		return nil, err
 	}
-	var after candidate
-	for {
-		rows, err := s.query(ctx, `
-SELECT n.run_id, n.node_id, n.ready_at
+	now := time.Now()
+	usage, err := s.loadExecutorUsage(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	activeAfter := now.Add(-ExecutorRegistrationActiveWindow)
+	cursor := s.loadExecutorPrepareCursor(executorName, runID)
+	page, err := s.loadExecutorPrepareCandidates(ctx, runID, executorName, now, cursor)
+	if err != nil {
+		return nil, err
+	}
+	if len(page) == 0 {
+		return nil, ErrNotFound
+	}
+
+	hardEligible := make([]executorPrepareCandidate, 0, len(page))
+	for _, item := range page {
+		var needs []string
+		if len(item.needsJSON) != 0 {
+			err = json.Unmarshal(item.needsJSON, &needs)
+		}
+		if err != nil {
+			return nil, err
+		}
+		summary := ExecutorSchedulingSummary{
+			RunID: item.runID, NodeID: item.nodeID, HardCapabilities: needs, Slots: 1,
+			RequiredCoordinatorID: item.requiredCoordinatorID, RequiredLocation: item.requiredLocation,
+		}
+		if executorHardExclusionReason(executor, summary, coordinatorID) == "" {
+			hardEligible = append(hardEligible, item)
+		}
+	}
+	plans, err := s.loadExecutorPreparePlans(ctx, hardEligible)
+	if err != nil {
+		return nil, err
+	}
+	profiles, err := s.loadExecutorPrepareProfiles(ctx, hardEligible, plans)
+	if err != nil {
+		return nil, err
+	}
+	var runtimeRefusal error
+	for _, item := range hardEligible {
+		plan, ok := plans[item.runID]
+		if !ok {
+			continue
+		}
+		var needs []string
+		if err := json.Unmarshal(item.needsJSON, &needs); err != nil && len(item.needsJSON) != 0 {
+			return nil, err
+		}
+		charge := executorNodeChargeFromSnapshot(plan.raw, item.nodeID, profiles[executorPrepareProfileKey(plan.pipeline, item.nodeID)])
+		summary := ExecutorSchedulingSummary{
+			RunID: item.runID, NodeID: item.nodeID, HardCapabilities: needs,
+			PreferredCapabilities: snapshotNodePrefers(plan.raw, item.nodeID),
+			Resources:             charge, ResourceDigest: executorResourceDigest(charge), Slots: 1,
+			RunPriority: snapshotRunPriority(plan.raw), RequiredCoordinatorID: item.requiredCoordinatorID,
+			RequiredLocation: item.requiredLocation,
+		}
+		membership, err := executorMembershipFromSnapshot(executor, claimant, summary, usage.ByExecutor[executorName],
+			authorityID, coordinatorID, activeAfter)
+		if err != nil {
+			return nil, err
+		}
+		if !membership.Eligible {
+			continue
+		}
+		if item.avoidUntil.Valid && time.Unix(0, item.avoidUntil.Int64).After(now) &&
+			item.avoidCoordinatorID == coordinatorID && item.avoidExecutorKind == executor.Kind && item.avoidExecutorID == executor.id {
+			if hasAlternateEligibleExecutorSnapshot(executors, usage, executor.Name, summary, activeAfter, coordinatorID) {
+				continue
+			}
+		}
+		if err := executionpolicy.CheckRuntimeCompatibilityMetadata(
+			item.policyVersion, item.bodyProtocol,
+			item.supervisorJSON, item.supervisorRequirementsHash,
+			item.bodyJSON, item.bodyRequirementsHash, runtimeReport,
+		); err != nil {
+			if isExecutorRuntimeRefusal(err) {
+				if runtimeRefusal == nil {
+					runtimeRefusal = err
+				}
+				continue
+			}
+			return nil, err
+		}
+		membership.HighestEligiblePriority = item.offerPriorityTarget
+		preparation := &ExecutorClaimPreparation{Summary: summary, Membership: membership}
+		if item.offerStarted.Valid {
+			deadline := time.Unix(0, item.offerStarted.Int64).Add(nodeClaimOfferWindow)
+			preparation.OfferDeadline = &deadline
+		}
+		record := &nodeRecord{}
+		if err := scanNodeRow(s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
+  FROM nodes WHERE run_id = ? AND node_id = ?`, item.runID, item.nodeID), record); err != nil {
+			return nil, err
+		}
+		policy, present, err := policyForNodeExecution(record)
+		if err != nil || !present {
+			if err == nil {
+				err = errExecutionPolicyInvalid
+			}
+			return nil, err
+		}
+		if err := executionpolicy.CheckRuntimeCompatibility(policy, runtimeReport); err != nil {
+			if isExecutorRuntimeRefusal(err) {
+				if runtimeRefusal == nil {
+					runtimeRefusal = err
+				}
+				continue
+			}
+			return nil, err
+		}
+		binding, err := claimBindingForNodeExecution(record)
+		if err != nil {
+			return nil, err
+		}
+		if err := executionpolicy.StorePreparation(ctx, binding); err != nil {
+			return nil, err
+		}
+		s.storeExecutorPrepareCursor(executorName, runID, item.executorPrepareCursor)
+		return preparation, &executionpolicy.BodyAttestationRequiredError{RunID: item.runID, NodeID: item.nodeID}
+	}
+	s.storeExecutorPrepareCursor(executorName, runID, page[len(page)-1].executorPrepareCursor)
+	if runtimeRefusal != nil {
+		return nil, runtimeRefusal
+	}
+	return nil, ErrNotFound
+}
+
+func (s *Store) loadExecutorPrepareCandidates(ctx context.Context, runID, executorName string, now time.Time,
+	cursor executorPrepareCursor,
+) ([]executorPrepareCandidate, error) {
+	if cursor == (executorPrepareCursor{}) {
+		return s.loadExecutorPrepareCandidateRange(ctx, runID, executorName, now,
+			executorPrepareFromStart, cursor, executorPrepareCandidateLimit)
+	}
+	page, err := s.loadExecutorPrepareCandidateRange(ctx, runID, executorName, now,
+		executorPrepareAfterCursor, cursor, executorPrepareCandidateLimit)
+	if err != nil || len(page) == executorPrepareCandidateLimit {
+		return page, err
+	}
+	wrapped, err := s.loadExecutorPrepareCandidateRange(ctx, runID, executorName, now,
+		executorPrepareThroughCursor, cursor, executorPrepareCandidateLimit-len(page))
+	return append(page, wrapped...), err
+}
+
+func (s *Store) loadExecutorPrepareCandidateRange(ctx context.Context, runID, executorName string, now time.Time,
+	rangeKind executorPrepareRange, cursor executorPrepareCursor, limit int,
+) ([]executorPrepareCandidate, error) {
+	query, args := executorPrepareCandidateQuery(runID, executorName, now, rangeKind, cursor, limit)
+	rows, err := s.query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	page := make([]executorPrepareCandidate, 0, limit)
+	for rows.Next() {
+		var item executorPrepareCandidate
+		if err := rows.Scan(&item.runID, &item.nodeID, &item.readyAt, &item.needsJSON,
+			&item.requiredCoordinatorID, &item.requiredLocation,
+			&item.avoidCoordinatorID, &item.avoidExecutorKind, &item.avoidExecutorID, &item.avoidUntil,
+			&item.offerStarted, &item.offerPriorityTarget,
+			&item.policyVersion, &item.bodyProtocol,
+			&item.supervisorJSON, &item.supervisorRequirementsHash,
+			&item.bodyJSON, &item.bodyRequirementsHash); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		page = append(page, item)
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	return page, err
+}
+
+func executorPrepareCandidateQuery(runID, executorName string, now time.Time, rangeKind executorPrepareRange,
+	cursor executorPrepareCursor, limit int,
+) (string, []any) {
+	cursorPredicate := ""
+	args := []any{
+		executionpolicy.NodeExecutionPolicyVersion, executionpolicy.MaxEncodedPolicyBytes,
+		executionpolicy.MaxRuntimeRequirementsJSONBytes, executionpolicy.MaxRuntimeRequirementsJSONBytes,
+		executorPrepareNeedsJSONMaxSize,
+		runID, runID, executorName, now.Add(-executorOfferLiveness).UnixNano(),
+	}
+	switch rangeKind {
+	case executorPrepareAfterCursor:
+		cursorPredicate = `
+	   AND (n.ready_at > ? OR (n.ready_at = ? AND
+	       (n.run_id > ? OR (n.run_id = ? AND n.node_id > ?))))`
+		args = append(args, cursor.readyAt, cursor.readyAt, cursor.runID, cursor.runID, cursor.nodeID)
+	case executorPrepareThroughCursor:
+		cursorPredicate = `
+	   AND (n.ready_at < ? OR (n.ready_at = ? AND
+	       (n.run_id < ? OR (n.run_id = ? AND n.node_id <= ?))))`
+		args = append(args, cursor.readyAt, cursor.readyAt, cursor.runID, cursor.runID, cursor.nodeID)
+	}
+	args = append(args, limit)
+	return `
+SELECT n.run_id, n.node_id, n.ready_at, n.needs_labels,
+	   n.required_coordinator_id, n.required_executor_location,
+	   n.avoid_coordinator_id, n.avoid_executor_kind, n.avoid_executor_id, n.avoid_until,
+	   n.offer_started_at, n.offer_priority_target,
+	   n.execution_policy_version, n.execution_body_protocol,
+	   n.execution_supervisor_requirements_json, n.execution_supervisor_requirements_hash,
+	   n.execution_body_requirements_json, n.execution_body_requirements_hash
  FROM nodes n
- WHERE n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.`+nodeNotDone+`
+	WHERE n.ready_at IS NOT NULL AND n.claimed_by IS NULL
+	   AND n.outcome = '' AND n.finished_at IS NULL AND n.` + nodeNotDone + `
+	   AND n.execution_policy_hash != ''
+	   AND n.execution_policy_version = ? AND n.execution_body_protocol > 0
+	   AND COALESCE(LENGTH(n.execution_policy_json), 0) > 0
+	   AND LENGTH(n.execution_policy_json) <= ?
+	   AND COALESCE(LENGTH(n.execution_supervisor_requirements_json), 0) > 0
+	   AND LENGTH(n.execution_supervisor_requirements_json) <= ?
+	   AND n.execution_supervisor_requirements_hash != ''
+	   AND COALESCE(LENGTH(n.execution_body_requirements_json), 0) > 0
+	   AND LENGTH(n.execution_body_requirements_json) <= ?
+	   AND n.execution_body_requirements_hash != ''
+	   AND COALESCE(LENGTH(n.needs_labels), 0) <= ?
 	   AND (? = '' OR n.run_id = ?)
 	   AND NOT EXISTS (
 	       SELECT 1 FROM node_claim_offers o
 	        WHERE o.run_id = n.run_id AND o.node_id = n.node_id
 	          AND o.executor_name = ? AND o.last_seen_at >= ?)
-   AND (n.ready_at > ? OR (n.ready_at = ? AND (n.run_id > ? OR (n.run_id = ? AND n.node_id > ?))))
- ORDER BY n.ready_at, n.run_id, n.node_id
-	LIMIT 64`, runID, runID, executorName, activeAfter, after.readyAt, after.readyAt, after.runID, after.runID, after.nodeID)
-		if err != nil {
-			return nil, err
-		}
-		page := make([]candidate, 0, 64)
-		for rows.Next() {
-			var item candidate
-			if err := rows.Scan(&item.runID, &item.nodeID, &item.readyAt); err != nil {
-				_ = rows.Close()
-				return nil, err
-			}
-			page = append(page, item)
-		}
-		err = rows.Err()
-		_ = rows.Close()
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range page {
-			summary, err := s.SchedulingSummary(ctx, item.runID, item.nodeID)
-			if errors.Is(err, ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-			membership, err := s.resolveExecutorMembership(ctx, claimant, executorName, summary, time.Now())
-			if err != nil {
-				return nil, err
-			}
-			if !membership.Eligible {
-				continue
-			}
-			node, err := s.GetNode(ctx, item.runID, item.nodeID)
-			if err != nil {
-				return nil, err
-			}
-			if node.AvoidUntil != nil && node.AvoidUntil.After(time.Now()) &&
-				node.AvoidCoordinatorID == coordinatorID && node.AvoidExecutorKind == executor.Kind && node.AvoidExecutorID == executor.id {
-				alternate, err := s.hasAlternateEligibleExecutor(ctx, executor.Name, summary)
-				if err != nil {
-					return nil, err
-				}
-				if alternate {
-					continue
-				}
-			}
-			var opened sql.NullInt64
-			if err := s.queryRow(ctx, `SELECT offer_started_at, offer_priority_target FROM nodes WHERE run_id = ? AND node_id = ?`, item.runID, item.nodeID).Scan(&opened, &membership.HighestEligiblePriority); err != nil {
-				return nil, err
-			}
-			preparation := &ExecutorClaimPreparation{Summary: summary, Membership: membership}
-			if opened.Valid {
-				deadline := time.Unix(0, opened.Int64).Add(nodeClaimOfferWindow)
-				preparation.OfferDeadline = &deadline
-			}
-			return preparation, nil
-		}
-		if len(page) < 64 {
-			return nil, ErrNotFound
-		}
-		after = page[len(page)-1]
+	` + cursorPredicate + `
+	ORDER BY n.ready_at, n.run_id, n.node_id
+	LIMIT ?`, args
+}
+
+func isExecutorRuntimeRefusal(err error) bool {
+	var upgrade *executionpolicy.UpgradeRequiredError
+	var protocol *executionpolicy.ProtocolIncompatibleError
+	return errors.As(err, &upgrade) || errors.As(err, &protocol)
+}
+
+func (s *Store) loadExecutorPrepareCursor(executorName, runID string) executorPrepareCursor {
+	s.prepareCursorMu.Lock()
+	defer s.prepareCursorMu.Unlock()
+	return s.prepareCursors[executorName+"\x00"+runID]
+}
+
+func (s *Store) storeExecutorPrepareCursor(executorName, runID string, cursor executorPrepareCursor) {
+	s.prepareCursorMu.Lock()
+	defer s.prepareCursorMu.Unlock()
+	if s.prepareCursors == nil {
+		s.prepareCursors = make(map[string]executorPrepareCursor)
 	}
+	s.prepareCursors[executorName+"\x00"+runID] = cursor
+}
+
+func (s *Store) loadExecutorPreparePlans(ctx context.Context, candidates []executorPrepareCandidate) (map[string]executorPreparePlan, error) {
+	runSet := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		runSet[candidate.runID] = struct{}{}
+	}
+	runIDs := make([]string, 0, len(runSet))
+	for runID := range runSet {
+		runIDs = append(runIDs, runID)
+	}
+	sort.Strings(runIDs)
+	if len(runIDs) == 0 {
+		return map[string]executorPreparePlan{}, nil
+	}
+	args := make([]any, 0, len(runIDs)+1)
+	args = append(args, executorPreparePlanJSONMaxSize)
+	for _, runID := range runIDs {
+		args = append(args, runID)
+	}
+	rows, err := s.query(ctx, `
+SELECT id, pipeline, plan_json FROM runs
+ WHERE COALESCE(LENGTH(plan_json), 0) <= ? AND id IN (`+
+		strings.TrimSuffix(strings.Repeat("?,", len(runIDs)), ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	plans := make(map[string]executorPreparePlan, len(runIDs))
+	for rows.Next() {
+		var runID string
+		var plan executorPreparePlan
+		if err := rows.Scan(&runID, &plan.pipeline, &plan.raw); err != nil {
+			return nil, err
+		}
+		plans[runID] = plan
+	}
+	return plans, rows.Err()
+}
+
+func (s *Store) loadExecutorPrepareProfiles(ctx context.Context, candidates []executorPrepareCandidate,
+	plans map[string]executorPreparePlan,
+) (map[string]*PipelineProfile, error) {
+	type profileIdentity struct{ pipeline, nodeID string }
+	identities := make(map[profileIdentity]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if plan, ok := plans[candidate.runID]; ok {
+			identities[profileIdentity{pipeline: plan.pipeline, nodeID: candidate.nodeID}] = struct{}{}
+		}
+	}
+	ordered := make([]profileIdentity, 0, len(identities))
+	for identity := range identities {
+		ordered = append(ordered, identity)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].pipeline != ordered[j].pipeline {
+			return ordered[i].pipeline < ordered[j].pipeline
+		}
+		return ordered[i].nodeID < ordered[j].nodeID
+	})
+	if len(ordered) == 0 {
+		return map[string]*PipelineProfile{}, nil
+	}
+	var predicate strings.Builder
+	args := make([]any, 0, len(ordered)*2)
+	for i, identity := range ordered {
+		if i != 0 {
+			predicate.WriteString(" OR ")
+		}
+		predicate.WriteString("(pipeline = ? AND node_id = ?)")
+		args = append(args, identity.pipeline, identity.nodeID)
+	}
+	rows, err := s.query(ctx, `SELECT pipeline, node_id, `+profileColumns+`
+  FROM pipeline_profiles WHERE `+predicate.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	profiles := make(map[string]*PipelineProfile, len(ordered))
+	for rows.Next() {
+		var pipeline, nodeID string
+		profile, err := scanProfileInto(rows.Scan, &pipeline, &nodeID)
+		if err != nil {
+			return nil, err
+		}
+		profiles[executorPrepareProfileKey(pipeline, nodeID)] = profile
+	}
+	return profiles, rows.Err()
+}
+
+func executorPrepareProfileKey(pipeline, nodeID string) string { return pipeline + "\x00" + nodeID }
+
+func hasAlternateEligibleExecutorSnapshot(executors []Executor, usage executorUsageSnapshot, current string,
+	summary ExecutorSchedulingSummary, activeAfter time.Time, coordinatorID string,
+) bool {
+	for _, candidate := range executors {
+		if candidate.Name == current {
+			continue
+		}
+		used := usage.ByExecutor[candidate.Name]
+		if executorExclusionReason(candidate, summary, used.Active, used.Cores, used.MemoryBytes, activeAfter, coordinatorID) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) hasAlternateEligibleExecutor(ctx context.Context, current string, summary ExecutorSchedulingSummary) (bool, error) {
@@ -199,8 +531,8 @@ func (s *Store) hasAlternateEligibleExecutor(ctx context.Context, current string
 	return false, nil
 }
 
-// OfferExecutorClaim records one live reservation and awards immediately at
-// the round target or deterministically at the deadline.
+// OfferExecutorClaim validates a sealed offer and refuses unattested submissions
+// before reservation, recording, or award.
 func (s *Store) OfferExecutorClaim(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) (ExecutorClaimOfferResult, error) {
 	return s.offerExecutorClaimAt(ctx, claimant, offer, time.Now())
 }
@@ -210,6 +542,13 @@ func (s *Store) offerExecutorClaimAt(ctx context.Context, claimant ClaimIdentity
 		offer.ReservationID == "" || offer.ResourceDigest == "" || offer.Slot < 0 {
 		return ExecutorClaimOfferResult{}, errors.New("executor offer requires executor, holder, node, reservation, digest, and slot")
 	}
+	if err := s.rejectUnattestedExecutorOffer(ctx, claimant, offer); err != nil {
+		return ExecutorClaimOfferResult{}, err
+	}
+	return s.recordExecutorOfferAt(ctx, claimant, offer, now)
+}
+
+func (s *Store) recordExecutorOfferAt(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer, now time.Time) (ExecutorClaimOfferResult, error) {
 	offer.Lease = clampNodeLease(offer.Lease)
 	if err := s.ValidateExecutorClaimReservation(ctx, claimant, offer.RunID, offer.NodeID,
 		offer.ExecutorName, offer.ReservationID, offer.Slot, offer.ResourceDigest); err == nil {
@@ -385,6 +724,50 @@ ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
 		return ExecutorClaimOfferResult{Node: winner.Node}, nil
 	}
 	return ExecutorClaimOfferResult{}, nil
+}
+
+func (s *Store) rejectUnattestedExecutorOffer(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	executor, err := s.getExecutorTx(ctx, tx, offer.ExecutorName)
+	if err != nil {
+		return err
+	}
+	if claimant.TokenPrefix == "" || executor.TokenPrefix != claimant.TokenPrefix || executor.Principal != claimant.Principal {
+		return ErrExecutorCredentialMismatch
+	}
+	record := &nodeRecord{}
+	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
+  FROM nodes WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL
+	AND claimed_by IS NULL AND `+nodeNotDone+tx.forUpdate(), offer.RunID, offer.NodeID), record); err != nil {
+		return err
+	}
+	policy, sealed, err := policyForNodeExecution(record)
+	if err != nil {
+		return err
+	}
+	if !sealed {
+		return ErrNotFound
+	}
+	runtimeReport, err := executorRuntimeReportTx(ctx, tx, offer.ExecutorName)
+	if err != nil {
+		return err
+	}
+	if err := executionpolicy.CheckRuntimeCompatibility(policy, runtimeReport); err != nil {
+		return err
+	}
+	want, err := claimBindingForNodeExecution(record)
+	if err != nil {
+		return err
+	}
+	got, ok := executionpolicy.OfferBindingFromContext(ctx)
+	if !ok || got != want {
+		return ErrLockHeld
+	}
+	return &executionpolicy.BodyAttestationRequiredError{RunID: offer.RunID, NodeID: offer.NodeID}
 }
 
 type executorOfferWinner struct {

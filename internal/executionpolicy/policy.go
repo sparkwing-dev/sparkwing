@@ -22,8 +22,8 @@ const (
 	assistedExecutionPolicyRequirement = "assisted-execution-policy-v1"
 	NodeExecutionPolicyVersion         = 1
 	AssistedBodyProtocolVersion        = 1
-	fleetSupervisorRuntimeRequirement  = "fleet-supervisor-v1"
-	fleetBodyRuntimeRequirement        = "fleet-body-v1"
+	fleetSupervisorRuntimeRequirement  = FleetSupervisorRequirement
+	fleetBodyRuntimeRequirement        = FleetBodyRequirement
 	executorLocationCoordinator        = "coordinator"
 	executorLocationLocal              = "local"
 	executorLocationCloud              = "cloud"
@@ -37,6 +37,9 @@ const (
 	maxExecutionEvents                   = 100_000
 	maxExecutionEventBytes               = 1 << 20
 )
+
+// MaxEncodedPolicyBytes bounds an indexed candidate before policy decoding.
+const MaxEncodedPolicyBytes = maxExecutionPolicyBytes
 
 var (
 	ErrExecutionPolicyInvalid    = errors.New("invalid node execution policy")
@@ -961,30 +964,40 @@ func executionPolicyDepsMatch(stored []string, policy []NodeDependencyAuthority)
 }
 
 func validateAssistedPlacement(binding Binding, declared []string) error {
-	allowed := []string{executorLocationCloud, executorLocationLocal}
-	if binding.RequiredExecutorLocation != "" {
-		var err error
-		allowed, err = narrowAssistedLocations(allowed, []string{binding.RequiredExecutorLocation})
-		if err != nil {
-			return err
-		}
-	}
-	for _, term := range binding.NeedsLabels {
-		termPlacements, found, err := assistedPlacementFromTerm(term)
-		if err != nil {
-			return err
-		}
-		if found {
-			allowed, err = narrowAssistedLocations(allowed, termPlacements)
-			if err != nil {
-				return err
-			}
-		}
+	allowed, err := AllowedLocationsForBinding(binding)
+	if err != nil {
+		return err
 	}
 	if !slices.Equal(allowed, declared) {
 		return fmt.Errorf("%w: policy allowed locations %v do not match stored requirements %v", ErrExecutionPolicyInvalid, declared, allowed)
 	}
 	return nil
+}
+
+// AllowedLocationsForBinding derives helper placement from the complete
+// persisted scheduling requirement set.
+func AllowedLocationsForBinding(binding Binding) ([]string, error) {
+	allowed := []string{executorLocationCloud, executorLocationLocal}
+	if binding.RequiredExecutorLocation != "" {
+		var err error
+		allowed, err = narrowAssistedLocations(allowed, []string{binding.RequiredExecutorLocation})
+		if err != nil {
+			return nil, err
+		}
+	}
+	for _, term := range binding.NeedsLabels {
+		termPlacements, found, err := assistedPlacementFromTerm(term)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			allowed, err = narrowAssistedLocations(allowed, termPlacements)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return allowed, nil
 }
 
 func assistedPlacementFromTerm(term string) ([]string, bool, error) {

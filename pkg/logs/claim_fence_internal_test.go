@@ -46,7 +46,7 @@ func TestAttemptSubstreamCannotContaminateReplacementAfterValidation(t *testing.
 	if err := st.MarkNodeReady(ctx, "source", "build"); err != nil {
 		t.Fatal(err)
 	}
-	first := offerInternalLogTestClaim(t, st, identity, "source", "build", "agent:a", "reservation-a")
+	first := seedHistoricalAssistedLogTestClaim(t, st, identity, "source", "build", "agent:a", "reservation-a")
 	if err := st.AcknowledgeNodeExecutionStart(ctx, first.RunID, first.NodeID, identity, store.ExecutionStart{
 		HolderID: first.ClaimedBy, MembershipID: first.ClaimMembershipID, ReservationID: first.ReservationID,
 		ClaimGeneration: first.ClaimGeneration, AttemptOrdinal: 1,
@@ -107,7 +107,7 @@ func TestAttemptSubstreamCannotContaminateReplacementAfterValidation(t *testing.
 	if err := st.MarkNodeReady(ctx, retryID, "build"); err != nil {
 		t.Fatal(err)
 	}
-	second := offerInternalLogTestClaim(t, st, identity, retryID, "build", "agent:b", "reservation-b")
+	second := seedHistoricalAssistedLogTestClaim(t, st, identity, retryID, "build", "agent:b", "reservation-b")
 	if err := st.AcknowledgeNodeExecutionStart(ctx, second.RunID, second.NodeID, identity, store.ExecutionStart{
 		HolderID: second.ClaimedBy, MembershipID: second.ClaimMembershipID, ReservationID: second.ReservationID,
 		ClaimGeneration: second.ClaimGeneration, AttemptOrdinal: 2,
@@ -144,35 +144,36 @@ func TestAttemptSubstreamCannotContaminateReplacementAfterValidation(t *testing.
 	}
 }
 
-func offerInternalLogTestClaim(t *testing.T, st *store.Store, identity store.ClaimIdentity, runID, nodeID, holder, reservation string) *store.Node {
+func seedHistoricalAssistedLogTestClaim(t *testing.T, st *store.Store, identity store.ClaimIdentity, runID, nodeID, holder, reservation string) *store.Node {
 	t.Helper()
-	const executor = "log-test-agent"
-	if err := st.EnrollExecutor(context.Background(), identity.TokenPrefix, store.Executor{
-		Name: executor, Kind: "agent", Location: "local", Principal: identity.Principal,
-		BasePriority: 100, PriorityCeiling: 100, MaxConcurrent: 1,
-		Budget: store.ExecutorResource{Cores: 4, MemoryBytes: 4 << 30},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.HeartbeatExecutor(context.Background(), identity, executor,
-		store.ExecutorResource{Cores: 4, MemoryBytes: 4 << 30}, 0, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	summary, err := st.SchedulingSummary(context.Background(), runID, nodeID)
+	coordinatorID, err := st.CoordinatorID(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	offer, err := st.OfferExecutorClaim(context.Background(), identity, store.ExecutorClaimOffer{
-		ExecutorName: executor, HolderID: holder, RunID: runID, NodeID: nodeID,
-		ReservationID: reservation, ResourceDigest: summary.ResourceDigest, Lease: time.Minute,
-	})
+	// safety: schema 31 refuses unsealed assisted offers; this fixture restores
+	// only the historical attribution needed to exercise attempt-log fencing.
+	result, err := st.DB().ExecContext(context.Background(), `UPDATE nodes
+SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
+    claim_executor = 'log-test-agent', claim_reservation = ?, claim_slot = 0,
+    lease_expires_at = ?, coordinator_id = ?, executor_kind = 'agent',
+    executor_id = 'log-test-agent', executor_location = 'local',
+    claim_worker_id = 'log-test-agent', claim_membership_id = 'log-test-membership', reservation_id = ?,
+    required_coordinator_id = ?, required_executor_location = 'local',
+    claim_generation = claim_generation + 1
+WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL`,
+		holder, identity.Principal, identity.TokenPrefix, reservation, time.Now().Add(time.Minute).UnixNano(),
+		coordinatorID, reservation, coordinatorID, runID, nodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if offer.Node == nil {
-		t.Fatalf("claim offer remained pending: %+v", offer)
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		t.Fatalf("seed historical claim rows = %d, %v", changed, err)
 	}
-	return offer.Node
+	claimed, err := st.GetNode(context.Background(), runID, nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return claimed
 }
 
 func TestTriggerGenerationSubstreamCannotContaminateReplacementAfterValidation(t *testing.T) {

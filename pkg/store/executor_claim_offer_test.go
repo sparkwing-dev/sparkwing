@@ -40,7 +40,7 @@ func executorOffer(t *testing.T, s *store.Store, identity store.ClaimIdentity, n
 	if err != nil {
 		t.Fatalf("SchedulingSummary: %v", err)
 	}
-	result, err := s.OfferExecutorClaim(context.Background(), identity, store.ExecutorClaimOffer{
+	result, err := s.TestOnlyOfferExecutorClaim(context.Background(), identity, store.ExecutorClaimOffer{
 		ExecutorName: name, HolderID: holder, RunID: runID, NodeID: nodeID,
 		ReservationID: reservation, ResourceDigest: summary.ResourceDigest, Slot: slot, Lease: time.Minute,
 	})
@@ -114,7 +114,7 @@ func TestExecutorClaimPreparationScansPastSixtyFourIneligibleNodes(t *testing.T)
 	if err := s.MarkNodeReady(ctx, "run", "linux"); err != nil {
 		t.Fatal(err)
 	}
-	preparation, err := s.PrepareNextExecutorClaim(ctx, identity, "desk")
+	preparation, err := s.TestOnlyPrepareNextExecutorClaim(ctx, identity, "desk")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +383,7 @@ func TestExecutorClaimOfferLocationPolicyFiltersBeforePriority(t *testing.T) {
 			if test.winnerLocation == "local" {
 				loserLocation = "cloud"
 			}
-			_, err = s.OfferExecutorClaim(ctx, identities[loserLocation], store.ExecutorClaimOffer{
+			_, err = s.TestOnlyOfferExecutorClaim(ctx, identities[loserLocation], store.ExecutorClaimOffer{
 				ExecutorName: loserLocation, HolderID: "holder-loser", RunID: "run", NodeID: "work",
 				ReservationID: "reservation-loser", ResourceDigest: summary.ResourceDigest, Slot: 0, Lease: time.Minute,
 			})
@@ -461,27 +461,27 @@ func TestExecutorClaimOfferRejectsWrongCredentialDigestAndReservationReuse(t *te
 	identity := enrollOfferExecutor(t, s, "desk", 40, 80, "linux")
 	enrollOfferPriorityTarget(t, s)
 	seedExecutorNode(t, s, "run", 1, "linux")
-	preparation, err := s.PrepareNextExecutorClaim(ctx, identity, "desk")
+	preparation, err := s.TestOnlyPrepareNextExecutorClaim(ctx, identity, "desk")
 	if err != nil {
 		t.Fatal(err)
 	}
 	base := store.ExecutorClaimOffer{ExecutorName: "desk", HolderID: "holder", RunID: "run", NodeID: "work", ReservationID: "reservation", ResourceDigest: preparation.Summary.ResourceDigest, Slot: 0, Lease: time.Minute}
 	wrong := store.ClaimIdentity{Principal: identity.Principal, TokenPrefix: "swr_other"}
-	if _, err := s.OfferExecutorClaim(ctx, wrong, base); !errors.Is(err, store.ErrExecutorCredentialMismatch) {
+	if _, err := s.TestOnlyOfferExecutorClaim(ctx, wrong, base); !errors.Is(err, store.ErrExecutorCredentialMismatch) {
 		t.Fatalf("wrong credential = %v", err)
 	}
 	badDigest := base
 	badDigest.ResourceDigest = "sha256:wrong"
-	if _, err := s.OfferExecutorClaim(ctx, identity, badDigest); !errors.Is(err, store.ErrLockHeld) {
+	if _, err := s.TestOnlyOfferExecutorClaim(ctx, identity, badDigest); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("wrong digest = %v", err)
 	}
-	if result, err := s.OfferExecutorClaim(ctx, identity, base); err != nil || !result.Pending {
+	if result, err := s.TestOnlyOfferExecutorClaim(ctx, identity, base); err != nil || !result.Pending {
 		t.Fatalf("valid offer = %+v, %v", result, err)
 	}
 	reused := base
 	reused.HolderID = "other-holder"
 	reused.Slot = 1
-	if _, err := s.OfferExecutorClaim(ctx, identity, reused); !errors.Is(err, store.ErrLockHeld) {
+	if _, err := s.TestOnlyOfferExecutorClaim(ctx, identity, reused); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("reused reservation = %v", err)
 	}
 }
@@ -498,7 +498,7 @@ func TestExecutorClaimPreparationUsesOneExecutorSlotPerNode(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run", "work-2"); err != nil {
 		t.Fatal(err)
 	}
-	first, err := s.PrepareNextExecutorClaim(ctx, identity, "desk")
+	first, err := s.TestOnlyPrepareNextExecutorClaim(ctx, identity, "desk")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,17 +506,17 @@ func TestExecutorClaimPreparationUsesOneExecutorSlotPerNode(t *testing.T) {
 		ExecutorName: "desk", HolderID: "holder-0", RunID: "run", NodeID: first.Summary.NodeID,
 		ReservationID: "reservation-0", ResourceDigest: first.Summary.ResourceDigest, Slot: 0, Lease: time.Minute,
 	}
-	if result, err := s.OfferExecutorClaim(ctx, identity, offer); err != nil || !result.Pending {
+	if result, err := s.TestOnlyOfferExecutorClaim(ctx, identity, offer); err != nil || !result.Pending {
 		t.Fatalf("first offer = %+v, %v", result, err)
 	}
 	duplicate := offer
 	duplicate.HolderID = "holder-1"
 	duplicate.ReservationID = "reservation-1"
 	duplicate.Slot = 1
-	if _, err := s.OfferExecutorClaim(ctx, identity, duplicate); !errors.Is(err, store.ErrLockHeld) {
+	if _, err := s.TestOnlyOfferExecutorClaim(ctx, identity, duplicate); !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("second slot on same node = %v", err)
 	}
-	second, err := s.PrepareNextExecutorClaim(ctx, identity, "desk")
+	second, err := s.TestOnlyPrepareNextExecutorClaim(ctx, identity, "desk")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,11 +537,11 @@ func TestExecutorClaimExpiredOfferCanBeReplaced(t *testing.T) {
 	if _, err := s.DB().Exec(`UPDATE node_claim_offers SET last_seen_at = ?`, time.Now().Add(-3*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	preparation, err := s.PrepareNextExecutorClaim(ctx, identity, "desk")
+	preparation, err := s.TestOnlyPrepareNextExecutorClaim(ctx, identity, "desk")
 	if err != nil || preparation.Summary.NodeID != "work" {
 		t.Fatalf("replacement preparation = %+v, %v", preparation, err)
 	}
-	result, err := s.OfferExecutorClaim(ctx, identity, store.ExecutorClaimOffer{
+	result, err := s.TestOnlyOfferExecutorClaim(ctx, identity, store.ExecutorClaimOffer{
 		ExecutorName: "desk", HolderID: "new-holder", RunID: "run", NodeID: "work",
 		ReservationID: "new-reservation", ResourceDigest: preparation.Summary.ResourceDigest, Slot: 0, Lease: time.Minute,
 	})
@@ -676,7 +676,7 @@ func TestExecutorClaimOfferAndFallbackHaveOneWinner(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		offerResult, offerErr = s.OfferExecutorClaim(ctx, identity, store.ExecutorClaimOffer{
+		offerResult, offerErr = s.TestOnlyOfferExecutorClaim(ctx, identity, store.ExecutorClaimOffer{
 			ExecutorName: "desk", HolderID: "holder", RunID: "run", NodeID: "work",
 			ReservationID: "reservation", ResourceDigest: summary.ResourceDigest, Slot: 0, Lease: time.Minute,
 		})
@@ -729,7 +729,7 @@ func TestExecutorClaimOfferDifferentClaimantsCompleteConcurrently(t *testing.T) 
 	errs := make(chan error, 2)
 	go func() {
 		<-start
-		_, err := s.OfferExecutorClaim(ctx, alpha, store.ExecutorClaimOffer{
+		_, err := s.TestOnlyOfferExecutorClaim(ctx, alpha, store.ExecutorClaimOffer{
 			ExecutorName: "alpha", HolderID: "holder-alpha", RunID: "alpha-run", NodeID: "work",
 			ReservationID: "reservation-alpha", ResourceDigest: summaryAlpha.ResourceDigest, Slot: 0, Lease: time.Minute,
 		})
@@ -737,7 +737,7 @@ func TestExecutorClaimOfferDifferentClaimantsCompleteConcurrently(t *testing.T) 
 	}()
 	go func() {
 		<-start
-		_, err := s.OfferExecutorClaim(ctx, zeta, store.ExecutorClaimOffer{
+		_, err := s.TestOnlyOfferExecutorClaim(ctx, zeta, store.ExecutorClaimOffer{
 			ExecutorName: "zeta", HolderID: "holder-zeta", RunID: "zeta-run", NodeID: "work",
 			ReservationID: "reservation-zeta", ResourceDigest: summaryZeta.ResourceDigest, Slot: 0, Lease: time.Minute,
 		})

@@ -81,14 +81,15 @@ type Options struct {
 	LocalOnly bool
 	Fleet     bool
 
-	FleetConfigPath    string
-	FleetSourceRoot    string
-	FleetSourceBundle  string
-	FleetSourceSHA     string
-	FleetSourceRepoURL string
-	FleetSourceFiles   int
-	FleetSourceBytes   int64
-	FleetBundleBytes   int64
+	FleetConfigPath           string
+	FleetSourceRoot           string
+	FleetSourceBundle         string
+	FleetSourceSHA            string
+	FleetSourceManifestDigest string
+	FleetSourceRepoURL        string
+	FleetSourceFiles          int
+	FleetSourceBytes          int64
+	FleetBundleBytes          int64
 
 	DryRun bool
 
@@ -216,6 +217,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	owner, repo := sparkwing.GithubOwnerRepo(gitOpt.Repo)
 	invocation := buildRunInvocation(opts, runID, localRunLogDir(backends.Logs, runID), reg.SecretArgNames())
+	runGitSHA := gitOpt.SHA
+	if opts.Fleet {
+		runGitSHA = opts.FleetSourceSHA
+	}
 	if opts.RunHandlePath != "" {
 		release, err := reserveRunHandle(opts.RunHandlePath)
 		if err != nil {
@@ -232,7 +237,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		RetrySource:   opts.RetrySource,
 		TriggerSource: trigger.Source,
 		GitBranch:     gitOpt.Branch,
-		GitSHA:        gitOpt.SHA,
+		GitSHA:        runGitSHA,
 		Repo:          gitOpt.Repo,
 		RepoURL:       gitOpt.RepoURL,
 		GithubOwner:   owner,
@@ -1114,6 +1119,12 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if opts.standalone != nil && opts.standalone.reason != "" {
 		inv["standalone"] = true
 		inv["standalone_reason"] = opts.standalone.reason
+	}
+	if opts.Fleet {
+		inv["fleet_source"] = map[string]string{
+			"kind": "working_tree", "identity": opts.FleetSourceSHA,
+			"manifest_digest": opts.FleetSourceManifestDigest,
+		}
 	}
 	if opts.RetryRepoDir != "" || opts.RetryRepoIdentity != "" || opts.RetryRevision != "" || opts.RetryPlanHash != "" {
 		inv["retry_provenance"] = map[string]string{
@@ -3140,6 +3151,8 @@ type snapshotNode struct {
 	Deps         []string          `json:"deps"`
 	OptionalDeps []string          `json:"optional_deps,omitempty"`
 	Env          map[string]string `json:"env,omitempty"`
+	Outputs      []string          `json:"outputs,omitempty"`
+	Consumes     []snapshotConsume `json:"consumes,omitempty"`
 
 	Groups   []string          `json:"groups,omitempty"`
 	Dynamic  bool              `json:"dynamic,omitempty"`
@@ -3150,6 +3163,11 @@ type snapshotNode struct {
 	Modifiers *snapshotModifiers `json:"modifiers,omitempty"`
 
 	Work *snapshotWork `json:"work,omitempty"`
+}
+
+type snapshotConsume struct {
+	Producer string `json:"producer"`
+	Into     string `json:"into,omitempty"`
 }
 
 type snapshotConc struct {
@@ -3279,6 +3297,8 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 			Deps:         n.DepIDs(),
 			OptionalDeps: n.OptionalDepIDs(),
 			Env:          n.EnvMap(),
+			Outputs:      n.OutputGlobs(),
+			Consumes:     snapshotConsumeEdges(n.ConsumeEdges()),
 			Groups:       p.JobGroupNames(n.ID()),
 			Dynamic:      p.IsDynamicNode(n.ID()),
 		}
@@ -3310,6 +3330,8 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 			Deps:         rec.DepIDs(),
 			OptionalDeps: rec.OptionalDepIDs(),
 			Env:          rec.EnvMap(),
+			Outputs:      rec.OutputGlobs(),
+			Consumes:     snapshotConsumeEdges(rec.ConsumeEdges()),
 			Groups:       p.JobGroupNames(rec.ID()),
 			OnFailureOf:  n.ID(),
 			Modifiers:    nodeModifiersSnapshot(rec),
@@ -3325,6 +3347,14 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 		seen[rec.ID()] = true
 	}
 	return json.Marshal(snap)
+}
+
+func snapshotConsumeEdges(edges []sparkwing.ConsumeEdge) []snapshotConsume {
+	out := make([]snapshotConsume, len(edges))
+	for i, edge := range edges {
+		out[i] = snapshotConsume{Producer: edge.Producer, Into: edge.Into}
+	}
+	return out
 }
 
 func planPriorityFromSnapshot(raw []byte) int {

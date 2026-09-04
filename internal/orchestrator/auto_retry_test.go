@@ -112,7 +112,11 @@ func enrollMixedExecutor(t *testing.T, st *store.Store) store.ClaimIdentity {
 	return identity
 }
 
-func awaitMixedClaim(t *testing.T, ctx context.Context, st *store.Store, runID string, consumed int, identity store.ClaimIdentity) *store.Node {
+func awaitLegacyMixedClaim(t *testing.T, ctx context.Context, st *store.Store, runID string, identity store.ClaimIdentity) *store.Node {
+	return awaitLegacyMixedClaimAfterAttempts(t, ctx, st, runID, 0, identity)
+}
+
+func awaitLegacyMixedClaimAfterAttempts(t *testing.T, ctx context.Context, st *store.Store, runID string, consumed int, identity store.ClaimIdentity) *store.Node {
 	t.Helper()
 	for {
 		node, err := st.GetNode(ctx, runID, "mixed")
@@ -121,35 +125,6 @@ func awaitMixedClaim(t *testing.T, ctx context.Context, st *store.Store, runID s
 				time.Now().Add(-time.Minute).UnixNano(), runID, "mixed")
 		}
 		if err == nil && node.ReadyAt != nil && node.AttemptsConsumed == consumed && !node.Claimed {
-			summary, summaryErr := st.SchedulingSummary(ctx, runID, "mixed")
-			if summaryErr != nil {
-				t.Fatal(summaryErr)
-			}
-			result, offerErr := st.OfferExecutorClaim(ctx, identity, store.ExecutorClaimOffer{
-				ExecutorName: "mixed-agent", HolderID: fmt.Sprintf("holder-%d", consumed+1),
-				RunID: runID, NodeID: "mixed", ReservationID: fmt.Sprintf("reservation-%d", consumed+1),
-				ResourceDigest: summary.ResourceDigest, Slot: 0, Lease: time.Minute,
-			})
-			if offerErr != nil {
-				t.Fatal(offerErr)
-			}
-			if result.Node != nil {
-				return result.Node
-			}
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-time.After(time.Millisecond):
-		}
-	}
-}
-
-func awaitLegacyMixedClaim(t *testing.T, ctx context.Context, st *store.Store, runID string, identity store.ClaimIdentity) *store.Node {
-	t.Helper()
-	for {
-		node, err := st.GetNode(ctx, runID, "mixed")
-		if err == nil && node.ReadyAt != nil && !node.Claimed {
 			claimed, claimErr := st.ClaimNextReadyNode(store.WithoutClaimFences(ctx), identity, "legacy-holder", time.Minute, nil)
 			if claimErr == nil {
 				return claimed
@@ -295,7 +270,7 @@ func TestAutoRetry_WarmRunnerRedispatchesAReportedFailure(t *testing.T) {
 	}
 }
 
-func TestAutoRetry_FallbackThenAssistedLossUsesOnlyTwoGlobalAttempts(t *testing.T) {
+func TestAutoRetry_FallbackThenLegacyLossUsesOnlyTwoGlobalAttempts(t *testing.T) {
 	autoRetryCount.Store(0)
 	paths := newPaths(t)
 	st, err := store.Open(paths.StateDB())
@@ -324,7 +299,7 @@ func TestAutoRetry_FallbackThenAssistedLossUsesOnlyTwoGlobalAttempts(t *testing.
 		})
 		done <- runResult{result: result, err: runErr}
 	}()
-	claimed := awaitMixedClaim(t, ctx, st, "mixed-fallback-agent", 1, agent)
+	claimed := awaitLegacyMixedClaimAfterAttempts(t, ctx, st, "mixed-fallback-agent", 1, agent)
 	claimCtx := store.WithNodeClaimFence(store.WithoutClaimFences(ctx), store.NodeClaimFence{
 		Claimant: agent, HolderID: claimed.ClaimedBy, MembershipID: claimed.ClaimMembershipID,
 		ReservationID: claimed.ReservationID, ClaimGeneration: claimed.ClaimGeneration,

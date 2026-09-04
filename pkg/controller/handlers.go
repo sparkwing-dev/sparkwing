@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -322,6 +323,7 @@ type executorClaimPreparationResp struct {
 	Summary       executorSchedulingSummaryResp `json:"summary"`
 	Membership    executorMembershipResp        `json:"membership"`
 	OfferDeadline *time.Time                    `json:"offer_deadline,omitempty"`
+	Binding       json.RawMessage               `json:"execution_binding,omitempty"`
 }
 
 type executorSchedulingSummaryResp struct {
@@ -340,10 +342,11 @@ type executorMembershipResp struct {
 	MaxConcurrent     int    `json:"max_concurrent"`
 }
 
-func executorClaimPreparationForResponse(preparation *store.ExecutorClaimPreparation) *executorClaimPreparationResp {
+func executorClaimPreparationForResponse(preparation *store.ExecutorClaimPreparation, binding executionpolicy.ClaimBinding) *executorClaimPreparationResp {
 	if preparation == nil {
 		return nil
 	}
+	encodedBinding, _ := executionpolicy.EncodeClaimBinding(binding)
 	return &executorClaimPreparationResp{
 		Summary: executorSchedulingSummaryResp{
 			RunID: preparation.Summary.RunID, NodeID: preparation.Summary.NodeID,
@@ -356,6 +359,7 @@ func executorClaimPreparationForResponse(preparation *store.ExecutorClaimPrepara
 			MaxConcurrent: preparation.Membership.MaxConcurrent,
 		},
 		OfferDeadline: preparation.OfferDeadline,
+		Binding:       encodedBinding,
 	}
 }
 
@@ -1170,6 +1174,54 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
+type executionAdmissionErrorBody struct {
+	Error          string          `json:"error"`
+	Code           string          `json:"code"`
+	RunID          string          `json:"run_id,omitempty"`
+	NodeID         string          `json:"node_id,omitempty"`
+	Scope          string          `json:"scope,omitempty"`
+	Missing        []string        `json:"missing,omitempty"`
+	MinimumRelease string          `json:"minimum_release,omitempty"`
+	SafeHold       bool            `json:"safe_hold"`
+	PolicyProtocol int             `json:"policy_protocol,omitempty"`
+	HelperMinimum  int             `json:"helper_minimum,omitempty"`
+	HelperMaximum  int             `json:"helper_maximum,omitempty"`
+	Binding        json.RawMessage `json:"execution_binding,omitempty"`
+}
+
+func writeExecutionAdmissionError(w http.ResponseWriter, err error, bindings ...executionpolicy.ClaimBinding) bool {
+	var upgrade *executionpolicy.UpgradeRequiredError
+	if errors.As(err, &upgrade) {
+		writeJSON(w, http.StatusConflict, executionAdmissionErrorBody{
+			Error: err.Error(), Code: "upgrade_required", Scope: upgrade.Scope,
+			Missing: append([]string(nil), upgrade.Missing...), MinimumRelease: upgrade.MinimumRelease,
+			SafeHold: upgrade.SafeHold,
+		})
+		return true
+	}
+	var protocol *executionpolicy.ProtocolIncompatibleError
+	if errors.As(err, &protocol) {
+		writeJSON(w, http.StatusConflict, executionAdmissionErrorBody{
+			Error: err.Error(), Code: "protocol_incompatible", PolicyProtocol: protocol.PolicyProtocol,
+			HelperMinimum: protocol.HelperMinimum, HelperMaximum: protocol.HelperMaximum,
+		})
+		return true
+	}
+	if errors.Is(err, executionpolicy.ErrBodyAttestationRequired) {
+		body := executionAdmissionErrorBody{Error: err.Error(), Code: "body_attestation_required"}
+		var detail *executionpolicy.BodyAttestationRequiredError
+		if errors.As(err, &detail) {
+			body.RunID, body.NodeID = detail.RunID, detail.NodeID
+		}
+		if len(bindings) != 0 {
+			body.Binding, _ = executionpolicy.EncodeClaimBinding(bindings[0])
+		}
+		writeJSON(w, http.StatusConflict, body)
+		return true
+	}
+	return false
+}
+
 func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1266,16 +1318,17 @@ func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request
 }
 
 type claimNodeReq struct {
-	HolderID       string         `json:"holder_id"`
-	RunID          string         `json:"run_id,omitempty"`
-	NodeID         string         `json:"node_id,omitempty"`
-	ExecutorName   string         `json:"executor_name,omitempty"`
-	ReservationID  string         `json:"reservation_id,omitempty"`
-	ResourceDigest string         `json:"resource_digest,omitempty"`
-	Slot           int            `json:"slot,omitempty"`
-	LeaseSecs      int            `json:"lease_secs,omitempty"`
-	Labels         []string       `json:"labels,omitempty"`
-	Headroom       *claimHeadroom `json:"headroom,omitempty"`
+	HolderID       string          `json:"holder_id"`
+	RunID          string          `json:"run_id,omitempty"`
+	NodeID         string          `json:"node_id,omitempty"`
+	ExecutorName   string          `json:"executor_name,omitempty"`
+	ReservationID  string          `json:"reservation_id,omitempty"`
+	ResourceDigest string          `json:"resource_digest,omitempty"`
+	Slot           int             `json:"slot,omitempty"`
+	LeaseSecs      int             `json:"lease_secs,omitempty"`
+	Labels         []string        `json:"labels,omitempty"`
+	Headroom       *claimHeadroom  `json:"headroom,omitempty"`
+	Binding        json.RawMessage `json:"execution_binding,omitempty"`
 }
 
 type claimHeadroom struct {
@@ -1335,12 +1388,28 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, errors.New("executor offer does not belong to this foreground run"))
 			return
 		}
-		result, err := s.store.OfferExecutorClaim(r.Context(), claimIdentity(r), store.ExecutorClaimOffer{
+		ctx := r.Context()
+		binding, err := executionpolicy.DecodeClaimBinding(body.Binding)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if !binding.IsZero() {
+			ctx, err = executionpolicy.WithOfferBinding(ctx, binding)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+		}
+		result, err := s.store.OfferExecutorClaim(ctx, claimIdentity(r), store.ExecutorClaimOffer{
 			ExecutorName: body.ExecutorName, HolderID: body.HolderID,
 			RunID: body.RunID, NodeID: body.NodeID, ReservationID: body.ReservationID,
 			ResourceDigest: body.ResourceDigest, Slot: body.Slot, Lease: lease,
 		})
 		if err != nil {
+			if writeExecutionAdmissionError(w, err) {
+				return
+			}
 			if errors.Is(err, store.ErrExecutorCredentialMismatch) {
 				writeError(w, http.StatusForbidden, store.ErrExecutorCredentialMismatch)
 				return
@@ -1529,17 +1598,22 @@ func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var preparation *store.ExecutorClaimPreparation
+	sink := executionpolicy.NewPreparationSink()
+	ctx := executionpolicy.WithPreparationSink(r.Context(), sink)
 	var err error
 	if s.assistedRunID != "" {
-		preparation, err = s.store.PrepareExecutorClaimForRun(r.Context(), claimIdentity(r), body.ExecutorName, s.assistedRunID)
+		preparation, err = s.store.PrepareExecutorClaimForRun(ctx, claimIdentity(r), body.ExecutorName, s.assistedRunID)
 	} else {
-		preparation, err = s.store.PrepareNextExecutorClaim(r.Context(), claimIdentity(r), body.ExecutorName)
+		preparation, err = s.store.PrepareNextExecutorClaim(ctx, claimIdentity(r), body.ExecutorName)
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if err != nil {
+		if writeExecutionAdmissionError(w, err, sink.Load()) {
+			return
+		}
 		if errors.Is(err, store.ErrExecutorCredentialMismatch) {
 			writeError(w, http.StatusForbidden, store.ErrExecutorCredentialMismatch)
 			return
@@ -1547,7 +1621,7 @@ func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, executorClaimPreparationForResponse(preparation))
+	writeJSON(w, http.StatusOK, executorClaimPreparationForResponse(preparation, sink.Load()))
 }
 
 func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {

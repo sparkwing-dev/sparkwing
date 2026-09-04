@@ -3,6 +3,7 @@ package controller_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -270,7 +271,7 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 	}
 }
 
-func TestNodeClaimOffer_HTTPUsesEnrolledPriorityAndPreservesPendingState(t *testing.T) {
+func TestNodeClaimOffer_HTTPRejectsUnsealedSchema31Candidate(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -313,19 +314,12 @@ func TestNodeClaimOffer_HTTPUsesEnrolledPriorityAndPreservesPendingState(t *test
 		t.Fatal(err)
 	}
 	preparation, err := c.PrepareExecutorClaim(ctx, "desk")
-	if err != nil || preparation == nil || preparation.Summary.RunID != "run-1" || preparation.Summary.NodeID != "node-a" {
-		t.Fatalf("PrepareExecutorClaim = %+v, %v", preparation, err)
-	}
-	if preparation.Membership.EffectivePriority != 40 || preparation.Membership.WorkerID != "desk" {
-		t.Fatalf("trusted membership = %+v", preparation.Membership)
-	}
-	executor := client.ExecutorClaim{
-		ExecutorName: "desk", HolderID: "holder", ReservationID: "reservation",
-		ResourceDigest: preparation.Summary.ResourceDigest, Slot: 0, Lease: time.Minute,
+	if err != nil || preparation != nil {
+		t.Fatalf("PrepareExecutorClaim = %+v, %v; want empty unsealed candidate", preparation, err)
 	}
 	untrusted, err := json.Marshal(map[string]any{
 		"executor_name": "desk", "holder_id": "holder", "run_id": "run-1", "node_id": "node-a",
-		"reservation_id": "reservation", "resource_digest": preparation.Summary.ResourceDigest,
+		"reservation_id": "reservation", "resource_digest": "sha256:forged",
 		"slot": 0, "claim_priority": 100,
 	})
 	if err != nil {
@@ -345,42 +339,23 @@ func TestNodeClaimOffer_HTTPUsesEnrolledPriorityAndPreservesPendingState(t *test
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("self-reported priority status = %d, want 400", resp.StatusCode)
 	}
-	result, err := c.OfferExecutorClaim(ctx, executor, preparation.Summary.RunID, preparation.Summary.NodeID)
-	if err != nil {
+	result, err := c.OfferExecutorClaim(ctx, client.ExecutorClaim{
+		ExecutorName: "desk", HolderID: "holder", ReservationID: "reservation",
+		ResourceDigest: "sha256:forged", Slot: 0, Lease: time.Minute,
+	}, "run-1", "node-a")
+	if err != nil || result.Node != nil || result.Pending {
+		t.Fatalf("direct unsealed offer = %+v, %v; want empty refusal", result, err)
+	}
+	var claimedBy sql.NullString
+	var offers int
+	if err := st.DB().QueryRow(`SELECT claimed_by FROM nodes WHERE run_id = ? AND node_id = ?`,
+		"run-1", "node-a").Scan(&claimedBy); err != nil {
 		t.Fatal(err)
 	}
-	if !result.Pending || result.Node != nil {
-		t.Fatalf("first offer = %+v, want pending", result)
-	}
-
-	if _, err := st.DB().Exec(`UPDATE nodes SET offer_started_at = ? WHERE run_id = ? AND node_id = ?`,
-		time.Now().Add(-6*time.Second).UnixNano(), "run-1", "node-a"); err != nil {
+	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM node_claim_offers`).Scan(&offers); err != nil {
 		t.Fatal(err)
 	}
-	result, err = c.OfferExecutorClaim(ctx, executor, preparation.Summary.RunID, preparation.Summary.NodeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Node == nil || result.Pending {
-		t.Fatalf("ceiling offer = %+v", result)
-	}
-	if result.Node.ClaimedBy != "holder" || result.Node.ClaimMembershipID == "" || result.Node.ReservationID != "reservation" {
-		t.Fatalf("claim response omitted exact fence: %+v", result.Node)
-	}
-	if result.Node.ExecutorName != "desk" || result.Node.ExecutorKind != "gateway" || result.Node.ExecutorLocation != "local" {
-		t.Fatalf("claim response omitted public attribution: %+v", result.Node)
-	}
-	if result.Node.CoordinatorID != "" || result.Node.ExecutorID != "" || result.Node.RequiredCoordinatorID != "" ||
-		result.Node.ClaimWorkerID != "" || result.Node.ClaimExecutorKind != "" || result.Node.ClaimReservationID != "" {
-		t.Fatalf("claim response exposed redundant internal identity: %+v", result.Node)
-	}
-	var executorName, reservation string
-	var slot int
-	if err := st.DB().QueryRow(`SELECT claim_executor, claim_reservation, claim_slot FROM nodes WHERE run_id = ? AND node_id = ?`,
-		"run-1", "node-a").Scan(&executorName, &reservation, &slot); err != nil {
-		t.Fatal(err)
-	}
-	if executorName != "desk" || reservation != "reservation" || slot != 0 {
-		t.Fatalf("claim binding = executor %q reservation %q slot %d", executorName, reservation, slot)
+	if claimedBy.Valid || offers != 0 {
+		t.Fatalf("unsealed offer mutated claim state: claimed=%v offers=%d", claimedBy, offers)
 	}
 }

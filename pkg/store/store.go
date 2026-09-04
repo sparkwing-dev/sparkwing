@@ -28,6 +28,8 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
+
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 )
 
 // BusyTimeoutEnvVar names the environment override for the SQLite
@@ -95,11 +97,13 @@ const (
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	db        *sql.DB
-	dialect   Dialect
-	cleanup   func() error
-	csrfKeyMu sync.Mutex
-	csrfKey   []byte
+	db              *sql.DB
+	dialect         Dialect
+	cleanup         func() error
+	csrfKeyMu       sync.Mutex
+	csrfKey         []byte
+	prepareCursorMu sync.Mutex
+	prepareCursors  map[string]executorPrepareCursor
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -619,7 +623,7 @@ CREATE INDEX IF NOT EXISTS idx_nodes_claimed_lease
     ON nodes(lease_expires_at)
     WHERE claimed_by IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_nodes_assisted_claimable
-    ON nodes(ready_at, execution_body_protocol)
+    ON nodes(execution_policy_version, ready_at, run_id, node_id)
     WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND outcome = '' AND finished_at IS NULL AND execution_policy_hash != '';
 
 CREATE TABLE IF NOT EXISTS node_claim_offers (
@@ -1202,7 +1206,7 @@ const agentLossRetryLegacyDenyAllTable = `CREATE TABLE IF NOT EXISTS agent_loss_
 );`
 
 const nodesAssistedClaimableIndex = `CREATE INDEX IF NOT EXISTS idx_nodes_assisted_claimable
-    ON nodes(ready_at, execution_body_protocol)
+    ON nodes(execution_policy_version, ready_at, run_id, node_id)
     WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND outcome = '' AND finished_at IS NULL AND execution_policy_hash != ''`
 
 const nodeExecutionUnsealed = `COALESCE(execution_policy_hash, '') = ''
@@ -1813,6 +1817,9 @@ func applyExecutionPolicyMigrationSQLite(ctx context.Context, tx *storeTx) error
 	if err := backfillAgentLossRetryNodeSourcesTx(ctx, tx); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_nodes_assisted_claimable`); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(ctx, nodesAssistedClaimableIndex)
 	return err
 }
@@ -2008,6 +2015,9 @@ func applyExecutionPolicyMigrationPostgres(ctx context.Context, tx *storeTx) err
 		return err
 	}
 	if err := backfillAgentLossRetryNodeSourcesTx(ctx, tx); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_nodes_assisted_claimable`); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, nodesAssistedClaimableIndex)
@@ -4438,6 +4448,26 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	}
 	if isAgentLossRetry && !agentLossRetrySourceMatchesMaterialized(retrySource, node) {
 		return fmt.Errorf("%w: retry node no longer matches durable source", errExecutionPolicyInvalid)
+	}
+	if policy == nil && executionpolicy.AssistedReadyFromContext(ctx) {
+		if nodeHasExecutionPolicy(node) {
+			existing, present, policyErr := policyForNodeExecution(node)
+			if policyErr != nil {
+				return policyErr
+			}
+			if !present {
+				return errExecutionPolicyInvalid
+			}
+			policy = &existing
+		} else {
+			built, eligible, policyErr := s.buildNodeExecutionPolicyTx(ctx, tx, node, pipeline)
+			if policyErr != nil {
+				return policyErr
+			}
+			if eligible {
+				policy = &built
+			}
+		}
 	}
 
 	if policy == nil {

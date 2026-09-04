@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -109,7 +110,7 @@ func TestExecutorClaimPreparationForResponseContainsOnlyReservationInputs(t *tes
 		OfferDeadline: &deadline,
 	}
 
-	got := executorClaimPreparationForResponse(raw)
+	got := executorClaimPreparationForResponse(raw, executionpolicy.ClaimBinding{})
 	if got.Summary.RunID != "run" || got.Summary.NodeID != "node" || got.Summary.ResourceDigest != "sha256:digest" ||
 		got.Membership.MembershipID != "membership" || got.Membership.WorkerID != "helper" || got.Membership.EffectivePriority != 22 {
 		t.Fatalf("preparation lost executor admission contract: %+v", got)

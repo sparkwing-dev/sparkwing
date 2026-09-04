@@ -151,19 +151,39 @@ resource filters before bounded priority. Each controller accepts at most 256
 enrolled executors. The fixed safety bound keeps one scheduling snapshot and
 offer round finite; adding the 257th returns
 `executor enrollment limit reached: maximum 256 per controller`.
-At schema 30 a helper's observed OS, architecture, and environment are logged
-only; heartbeat does not yet persist or match those facts. Use explicit
-non-reserved trusted capabilities for admission tests rather than treating an
-`os=`, `arch=`, or `environment=` selector as automatic helper placement.
+At schema 31 heartbeat persists the supervisor's body-protocol range, named
+supervisor and body-host capability sets, and observational runner build
+identity. Those fields gate protocol hosting; they do not attest a particular
+compiled pipeline binary, and Sparkwing never requires exact runner-version
+equality. Observed OS, architecture, and environment are not trusted placement
+facts. Use explicit non-reserved trusted capabilities for admission tests
+rather than treating an `os=`, `arch=`, or `environment=` selector as automatic
+helper placement.
 Once an executor wins a node, its coordinator and location become hard
 requirements for any agent-loss retry.
 
-Schema 30 adds durable offer rounds. A named or plural agent prepares the
-oldest node eligible for that membership, reserves the exact resource digest
-and physical slot through wingd, then offers that reservation. One shared local
-slot ledger covers every configured coordinator, so two controllers cannot
-award the same physical capacity. wingd also enforces machine-wide and
-per-membership CPU and memory contribution ceilings at reservation time. A
+Schema 31 admits only nodes carrying an immutable controller-derived execution
+policy. Migrated schema-30 and other unsealed nodes stay coordinator-only.
+Prepare checks the indexed policy and placement metadata, then requires the
+helper's supervisor protocol and capability sets before decoding the bounded
+policy document or reserving capacity. Missing host capabilities return
+`upgrade_required`; a helper whose minimum protocol is newer than the sealed
+body returns `protocol_incompatible`. A compatible helper currently stops at
+`body_attestation_required`: exact compiled-body attestation and policy
+enforcement are not implemented yet, so it cannot reserve, offer, or execute.
+The upgrade response names the highest stable release that introduced every
+known missing floor. An unknown capability or protocol reports `safe_hold`
+with no minimum release, so a future updater cannot guess a download target.
+Eligible nodes fall back once to the coordinator; helper-only nodes remain
+pending. Automatic runner update is not implemented.
+
+Schema 30 added the durable offer records and arbitration rules retained by
+assisted scheduling. Schema 31 keeps that data model, but public helpers cannot
+submit an offer while compiled-body attestation is absent. The reservation
+contract binds one exact resource digest and physical slot through wingd. One
+shared local slot ledger covers every configured coordinator, so two
+controllers cannot award the same physical capacity. wingd also enforces
+machine-wide and per-membership CPU and memory contribution ceilings. A
 gateway must make an equivalent downstream admission reservation before
 offering. Schema 30 also persists separate random internal identities for the
 controller and each enrollment. Membership IDs derive from those two values,

@@ -252,6 +252,7 @@ func dispatchRun(args []string) error {
 		env = setEnv(env, "SPARKWING_FLEET_SOURCE_ROOT", fleetSnapshot.tempDir)
 		env = setEnv(env, "SPARKWING_FLEET_SOURCE_BUNDLE", fleetSnapshot.BundlePath)
 		env = setEnv(env, "SPARKWING_FLEET_SOURCE_SHA", fleetSnapshot.SHA)
+		env = setEnv(env, "SPARKWING_FLEET_SOURCE_MANIFEST_DIGEST", fleetSnapshot.ManifestDigest)
 		env = setEnv(env, "SPARKWING_FLEET_SOURCE_REPO_URL", repoURL)
 		env = setEnv(env, "SPARKWING_FLEET_SOURCE_FILES", strconv.Itoa(fleetSnapshot.FileCount))
 		env = setEnv(env, "SPARKWING_FLEET_SOURCE_BYTES", strconv.FormatInt(fleetSnapshot.Size, 10))

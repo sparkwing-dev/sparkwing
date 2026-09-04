@@ -859,7 +859,7 @@ func TestPostgresDeadlineAwardDoesNotBlockUnrelatedClaimHeartbeat(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := st.OfferExecutorClaim(ctx, low, store.ExecutorClaimOffer{
+	result, err := st.TestOnlyOfferExecutorClaim(ctx, low, store.ExecutorClaimOffer{
 		ExecutorName: "shared-low", HolderID: "shared-holder", RunID: "shared-round", NodeID: "work",
 		ReservationID: "shared-reservation", ResourceDigest: summary.ResourceDigest, Slot: 0, Lease: time.Minute,
 	})
@@ -1010,7 +1010,7 @@ func TestPostgresExecutorOffersOnDifferentClaimantsDoNotDeadlock(t *testing.T) {
 		errs := make(chan error, 2)
 		go func() {
 			<-start
-			_, err := st.OfferExecutorClaim(ctx, alpha, store.ExecutorClaimOffer{
+			_, err := st.TestOnlyOfferExecutorClaim(ctx, alpha, store.ExecutorClaimOffer{
 				ExecutorName: "alpha", HolderID: "holder-alpha", RunID: runAlpha, NodeID: "work",
 				ReservationID: "reservation-" + runAlpha, ResourceDigest: summaryAlpha.ResourceDigest, Slot: 0, Lease: time.Minute,
 			})
@@ -1018,7 +1018,7 @@ func TestPostgresExecutorOffersOnDifferentClaimantsDoNotDeadlock(t *testing.T) {
 		}()
 		go func() {
 			<-start
-			_, err := st.OfferExecutorClaim(ctx, zeta, store.ExecutorClaimOffer{
+			_, err := st.TestOnlyOfferExecutorClaim(ctx, zeta, store.ExecutorClaimOffer{
 				ExecutorName: "zeta", HolderID: "holder-zeta", RunID: runZeta, NodeID: "work",
 				ReservationID: "reservation-" + runZeta, ResourceDigest: summaryZeta.ResourceDigest, Slot: 0, Lease: time.Minute,
 			})

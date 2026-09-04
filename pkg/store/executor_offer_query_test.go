@@ -52,7 +52,7 @@ func pendingExecutorOfferStatements(t *testing.T, fleetSize int) []string {
 		t.Fatal(err)
 	}
 	recorder.reset()
-	result, err := st.OfferExecutorClaim(ctx, ClaimIdentity{Principal: "principal-seed-0", TokenPrefix: "swr_seed-0"}, ExecutorClaimOffer{
+	result, err := st.TestOnlyOfferExecutorClaim(ctx, ClaimIdentity{Principal: "principal-seed-0", TokenPrefix: "swr_seed-0"}, ExecutorClaimOffer{
 		ExecutorName: "seed-0", HolderID: "holder", RunID: "run", NodeID: "work",
 		ReservationID: "reservation", ResourceDigest: summary.ResourceDigest, Slot: 0, Lease: time.Minute,
 	})

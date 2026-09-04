@@ -18,12 +18,14 @@ var (
 	errExecutionUpgradeRequired = executionpolicy.ErrExecutionUpgradeRequired
 )
 
-type executionPolicyPersistence = executionpolicy.Persistence
-type nodeExecutionPolicy = executionpolicy.NodeExecutionPolicy
-type nodeDependencyAuthority = executionpolicy.NodeDependencyAuthority
-type nodeCompiledBodyAuthority = executionpolicy.NodeCompiledBodyAuthority
-type nodeBodySourceAuthority = executionpolicy.NodeBodySourceAuthority
-type sealedExecutionPolicy = executionpolicy.Sealed
+type (
+	executionPolicyPersistence = executionpolicy.Persistence
+	nodeExecutionPolicy        = executionpolicy.NodeExecutionPolicy
+	nodeDependencyAuthority    = executionpolicy.NodeDependencyAuthority
+	nodeCompiledBodyAuthority  = executionpolicy.NodeCompiledBodyAuthority
+	nodeBodySourceAuthority    = executionpolicy.NodeBodySourceAuthority
+	sealedExecutionPolicy      = executionpolicy.Sealed
+)
 
 type nodeRecord struct {
 	Node
@@ -62,6 +64,14 @@ func nodeExecutionPolicyPersistence(node *nodeRecord) (executionpolicy.Persisten
 
 func nodeHasExecutionPolicy(node *nodeRecord) bool {
 	return executionpolicy.IsSealed(node)
+}
+
+func policyForNodeExecution(node *nodeRecord) (nodeExecutionPolicy, bool, error) {
+	return executionpolicy.PolicyOf(node)
+}
+
+func claimBindingForNodeExecution(node *nodeRecord) (executionpolicy.ClaimBinding, error) {
+	return executionpolicy.ClaimBindingOf(node, node.RunID, node.NodeID)
 }
 
 func copyNodeExecutionPolicy(dst, src *nodeRecord) {

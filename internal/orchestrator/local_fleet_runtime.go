@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
@@ -142,7 +143,7 @@ type localStoreFleetCoordinator struct {
 }
 
 func (c localStoreFleetCoordinator) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
-	return c.store.MarkNodeReady(ctx, runID, nodeID)
+	return c.store.MarkNodeReady(executionpolicy.WithAssistedReady(ctx), runID, nodeID)
 }
 
 func (c localStoreFleetCoordinator) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error {

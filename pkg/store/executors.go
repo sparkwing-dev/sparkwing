@@ -1,16 +1,20 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 )
 
 // ErrExecutorCredentialMismatch means an executor is enrolled to another
@@ -115,10 +119,16 @@ UPDATE executors
        headroom_cores = CASE WHEN token_prefix = ? THEN headroom_cores ELSE 0 END,
        headroom_memory_bytes = CASE WHEN token_prefix = ? THEN headroom_memory_bytes ELSE 0 END,
        queue_depth = CASE WHEN token_prefix = ? THEN queue_depth ELSE 0 END,
+	   supported_body_protocol_min = CASE WHEN token_prefix = ? THEN supported_body_protocol_min ELSE 0 END,
+	   supported_body_protocol_max = CASE WHEN token_prefix = ? THEN supported_body_protocol_max ELSE 0 END,
+	   supervisor_requirements_json = CASE WHEN token_prefix = ? THEN supervisor_requirements_json ELSE NULL END,
+	   body_runtime_requirements_json = CASE WHEN token_prefix = ? THEN body_runtime_requirements_json ELSE NULL END,
+	   runner_build_identity_json = CASE WHEN token_prefix = ? THEN runner_build_identity_json ELSE NULL END,
        token_prefix = ?, kind = ?, location = ?, capabilities_json = ?,
        base_priority = ?, priority_ceiling = ?, max_concurrent = ?,
        budget_cores = ?, budget_memory_bytes = ?, principal = ?
  WHERE name = ?`,
+		tokenPrefix, tokenPrefix, tokenPrefix, tokenPrefix, tokenPrefix,
 		tokenPrefix, tokenPrefix, tokenPrefix, tokenPrefix, tokenPrefix,
 		tokenPrefix, executor.Kind, executor.Location, caps, executor.BasePriority, executor.PriorityCeiling, executor.MaxConcurrent,
 		executor.Budget.Cores, executor.Budget.MemoryBytes, executor.Principal, executor.Name)
@@ -241,11 +251,19 @@ func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, n
 	if err := lockExecutorRegistryTx(ctx, tx, true); err != nil {
 		return err
 	}
+	protocolMin, protocolMax, supervisorJSON, bodyJSON, buildJSON, err := heartbeatRuntimeValues(ctx)
+	if err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `
 UPDATE executors
-   SET last_seen = ?, headroom_reported = 1, headroom_cores = ?, headroom_memory_bytes = ?, queue_depth = ?
+   SET last_seen = ?, headroom_reported = 1, headroom_cores = ?, headroom_memory_bytes = ?, queue_depth = ?,
+	   supported_body_protocol_min = ?, supported_body_protocol_max = ?,
+	   supervisor_requirements_json = ?, body_runtime_requirements_json = ?, runner_build_identity_json = ?
  WHERE name = ? AND token_prefix = ? AND principal = ?`,
-		now.UnixNano(), headroom.Cores, headroom.MemoryBytes, queueDepth, name, claimant.TokenPrefix, claimant.Principal)
+		now.UnixNano(), headroom.Cores, headroom.MemoryBytes, queueDepth,
+		protocolMin, protocolMax, supervisorJSON, bodyJSON, buildJSON,
+		name, claimant.TokenPrefix, claimant.Principal)
 	if err != nil {
 		return err
 	}
@@ -257,6 +275,93 @@ UPDATE executors
 		return fmt.Errorf("%w: %s", ErrExecutorCredentialMismatch, name)
 	}
 	return tx.Commit()
+}
+
+func heartbeatRuntimeValues(ctx context.Context) (int, int, []byte, []byte, []byte, error) {
+	report, ok := executionpolicy.RuntimeReportFromContext(ctx)
+	if !ok {
+		return 0, 0, nil, nil, nil, nil
+	}
+	report, err := executionpolicy.NormalizeRuntimeReport(report)
+	if err != nil {
+		return 0, 0, nil, nil, nil, err
+	}
+	supervisorJSON, err := json.Marshal(report.Supervisor)
+	if err != nil {
+		return 0, 0, nil, nil, nil, err
+	}
+	bodyJSON, err := json.Marshal(report.BodyHost)
+	if err != nil {
+		return 0, 0, nil, nil, nil, err
+	}
+	buildJSON, err := json.Marshal(report.Build)
+	if err != nil {
+		return 0, 0, nil, nil, nil, err
+	}
+	return report.BodyProtocolMinimum, report.BodyProtocolMaximum, supervisorJSON, bodyJSON, buildJSON, nil
+}
+
+func (s *Store) executorRuntimeReport(ctx context.Context, name string) (executionpolicy.RuntimeReport, error) {
+	return executorRuntimeReportFromRow(s.queryRow(ctx, `
+SELECT supported_body_protocol_min, supported_body_protocol_max,
+	   CASE WHEN COALESCE(LENGTH(supervisor_requirements_json), 0) <= ? THEN supervisor_requirements_json END,
+	   CASE WHEN COALESCE(LENGTH(body_runtime_requirements_json), 0) <= ? THEN body_runtime_requirements_json END,
+	   CASE WHEN COALESCE(LENGTH(runner_build_identity_json), 0) <= ? THEN runner_build_identity_json END
+  FROM executors WHERE name = ?`, executionpolicy.MaxRuntimeRequirementsJSONBytes,
+		executionpolicy.MaxRuntimeRequirementsJSONBytes, executionpolicy.MaxRuntimeIdentityJSONBytes, name))
+}
+
+func executorRuntimeReportTx(ctx context.Context, tx *storeTx, name string) (executionpolicy.RuntimeReport, error) {
+	return executorRuntimeReportFromRow(tx.QueryRowContext(ctx, `
+SELECT supported_body_protocol_min, supported_body_protocol_max,
+	   CASE WHEN COALESCE(LENGTH(supervisor_requirements_json), 0) <= ? THEN supervisor_requirements_json END,
+	   CASE WHEN COALESCE(LENGTH(body_runtime_requirements_json), 0) <= ? THEN body_runtime_requirements_json END,
+	   CASE WHEN COALESCE(LENGTH(runner_build_identity_json), 0) <= ? THEN runner_build_identity_json END
+  FROM executors WHERE name = ?`, executionpolicy.MaxRuntimeRequirementsJSONBytes,
+		executionpolicy.MaxRuntimeRequirementsJSONBytes, executionpolicy.MaxRuntimeIdentityJSONBytes, name))
+}
+
+type runtimeReportRow interface {
+	Scan(...any) error
+}
+
+func executorRuntimeReportFromRow(row runtimeReportRow) (executionpolicy.RuntimeReport, error) {
+	var report executionpolicy.RuntimeReport
+	var supervisorJSON, bodyJSON, buildJSON []byte
+	if err := row.Scan(&report.BodyProtocolMinimum, &report.BodyProtocolMaximum,
+		&supervisorJSON, &bodyJSON, &buildJSON); errors.Is(err, sql.ErrNoRows) {
+		return executionpolicy.RuntimeReport{}, ErrNotFound
+	} else if err != nil {
+		return executionpolicy.RuntimeReport{}, err
+	}
+	if len(supervisorJSON) != 0 {
+		if err := decodeExecutorRuntimeJSON(supervisorJSON, &report.Supervisor); err != nil {
+			return executionpolicy.RuntimeReport{}, err
+		}
+	}
+	if len(bodyJSON) != 0 {
+		if err := decodeExecutorRuntimeJSON(bodyJSON, &report.BodyHost); err != nil {
+			return executionpolicy.RuntimeReport{}, err
+		}
+	}
+	if len(buildJSON) != 0 {
+		if err := decodeExecutorRuntimeJSON(buildJSON, &report.Build); err != nil {
+			return executionpolicy.RuntimeReport{}, err
+		}
+	}
+	return executionpolicy.NormalizeRuntimeReport(report)
+}
+
+func decodeExecutorRuntimeJSON(raw []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("invalid executor runtime report: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("invalid executor runtime report: trailing JSON")
+	}
+	return nil
 }
 
 // ExecutorForCredential returns an enrollment only when name and the exact
@@ -828,6 +933,24 @@ func executorExclusionReason(e Executor, summary ExecutorSchedulingSummary, acti
 	if e.LastSeen.Before(activeAfter) {
 		return "offline"
 	}
+	if reason := executorHardExclusionReason(e, summary, coordinatorID); reason != "" {
+		return reason
+	}
+	if summary.Slots != 1 || active+summary.Slots > e.MaxConcurrent {
+		return "slot_limit"
+	}
+	if (e.Budget.Cores > 0 && usedCores+summary.Resources.Cores > e.Budget.Cores) ||
+		(e.Budget.MemoryBytes > 0 && usedMemory+summary.Resources.MemoryBytes > e.Budget.MemoryBytes) {
+		return "resource_budget"
+	}
+	if (e.HeadroomReported && e.Headroom.Cores >= 0 && summary.Resources.Cores > e.Headroom.Cores) ||
+		(e.HeadroomReported && e.Headroom.MemoryBytes >= 0 && summary.Resources.MemoryBytes > e.Headroom.MemoryBytes) {
+		return "headroom"
+	}
+	return ""
+}
+
+func executorHardExclusionReason(e Executor, summary ExecutorSchedulingSummary, coordinatorID string) string {
 	if summary.RequiredCoordinatorID != "" && summary.RequiredCoordinatorID != coordinatorID {
 		return "trusted_placement"
 	}
@@ -851,17 +974,6 @@ func executorExclusionReason(e Executor, summary ExecutorSchedulingSummary, acti
 	}
 	if capabilityMissing {
 		return "hard_capability"
-	}
-	if summary.Slots != 1 || active+summary.Slots > e.MaxConcurrent {
-		return "slot_limit"
-	}
-	if (e.Budget.Cores > 0 && usedCores+summary.Resources.Cores > e.Budget.Cores) ||
-		(e.Budget.MemoryBytes > 0 && usedMemory+summary.Resources.MemoryBytes > e.Budget.MemoryBytes) {
-		return "resource_budget"
-	}
-	if (e.HeadroomReported && e.Headroom.Cores >= 0 && summary.Resources.Cores > e.Headroom.Cores) ||
-		(e.HeadroomReported && e.Headroom.MemoryBytes >= 0 && summary.Resources.MemoryBytes > e.Headroom.MemoryBytes) {
-		return "headroom"
 	}
 	return ""
 }
@@ -1326,15 +1438,25 @@ SELECT `+profileColumns+`
 		return ExecutorResource{}, err
 	}
 	if err == nil {
+		return executorNodeChargeFromSnapshot(plan, n.NodeID, profile), nil
+	}
+	return executorNodeChargeFromSnapshot(plan, n.NodeID, nil), nil
+}
+
+func executorNodeChargeFromSnapshot(plan []byte, nodeID string, profile *PipelineProfile) ExecutorResource {
+	if pin := snapshotNodeResource(plan, nodeID); pin.Cores > 0 || pin.MemoryBytes > 0 {
+		return pin
+	}
+	if profile != nil {
 		if profile.PinnedCores > 0 || profile.PinnedMemoryBytes > 0 {
-			return ExecutorResource{Cores: profile.PinnedCores, MemoryBytes: profile.PinnedMemoryBytes}, nil
+			return ExecutorResource{Cores: profile.PinnedCores, MemoryBytes: profile.PinnedMemoryBytes}
 		}
 		if profile.SampleCount >= 3 && (profile.PeakCores > 0 || profile.CPUMeasured) {
 			cores := profile.SustainedCores
 			if cores <= 0 {
 				cores = profile.PeakCores
 			}
-			return ExecutorResource{Cores: math.Max(cores, 0.1), MemoryBytes: profile.PeakMemoryBytes}, nil
+			return ExecutorResource{Cores: math.Max(cores, 0.1), MemoryBytes: profile.PeakMemoryBytes}
 		}
 		cores := profile.PrevSustainedCores
 		if cores <= 0 {
@@ -1343,10 +1465,10 @@ SELECT `+profileColumns+`
 		cores = math.Max(cores, 2*profile.FloorCores)
 		memory := max(profile.PrevPeakMemoryBytes, 2*profile.FloorMemoryBytes)
 		if cores > 0 || memory > 0 {
-			return ExecutorResource{Cores: cores, MemoryBytes: memory}, nil
+			return ExecutorResource{Cores: cores, MemoryBytes: memory}
 		}
 	}
-	return ExecutorResource{Cores: 1}, nil
+	return ExecutorResource{Cores: 1}
 }
 
 func snapshotNodeResource(raw []byte, nodeID string) ExecutorResource {

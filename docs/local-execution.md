@@ -371,6 +371,7 @@ feature; it selects a `fleet.yaml` outside the default config directory. The
 remaining `SPARKWING_FLEET*` names are private parent-to-pipeline handoff, not
 configuration: `SPARKWING_FLEET`, `SPARKWING_FLEET_SOURCE_ROOT`,
 `SPARKWING_FLEET_SOURCE_BUNDLE`, `SPARKWING_FLEET_SOURCE_SHA`,
+`SPARKWING_FLEET_SOURCE_MANIFEST_DIGEST`,
 `SPARKWING_FLEET_SOURCE_REPO_URL`, `SPARKWING_FLEET_SOURCE_FILES`,
 `SPARKWING_FLEET_SOURCE_BYTES`, `SPARKWING_FLEET_SOURCE_BUNDLE_BYTES`,
 `SPARKWING_FLEET_PARENT_GUARD`, and `SPARKWING_FLEET_PARENT_TOKEN`. Sparkwing
@@ -467,19 +468,17 @@ heartbeat and does not clear the coordinator's last report. Coordinator loops
 restart independently. Idle enrollments remain visible, and stale ones appear
 offline.
 
-For each idle slot, the agent asks a coordinator for the oldest eligible node,
-then reserves the returned resource digest and physical slot through wingd
-before offering. The reservation remains pinned through the offer round. An
-award consumes that same lease; a loss or expiry releases it. The agent shares
-one slot ledger across all configured coordinators, so the same physical slot
-cannot back simultaneous offers to two controllers. A gateway needs an
-equivalent downstream admission reservation before it offers.
+For each idle slot, the agent asks a coordinator for the oldest eligible node.
+A compatible sealed node returns `body_attestation_required` before wingd
+reservation or offer. The agent does not reserve local capacity or execute the
+node without an exact compiled-body attestation.
 
-The controller waits no more than five seconds. Priority 100 and the exact
-highest eligible effective priority recorded at round open win immediately;
-otherwise the deadline winner is the highest effective priority, then the
-earliest offer, executor name, slot, and holder. `Requires` and resource limits
-filter before ranking.
+The retained offer records encode a five-second arbitration rule. Priority 100
+and the exact highest eligible effective priority recorded at round open win
+immediately; otherwise the deadline winner is the highest effective priority,
+then the earliest offer, executor name, slot, and holder. `Requires` and
+resource limits filter before ranking. The sealed helper path does not open or
+populate an offer round while compiled-body attestation is absent.
 Run priority and the first matching `Prefers` term add to base priority and are
 then clamped inside each administrator-owned priority range. A preference is a
 small tie-breaking boost, not an absolute override: base priority can still
@@ -560,22 +559,34 @@ Sparkwing never joins a tailnet or changes host networking; configure the
 controller connection outside Sparkwing. Do not expose a raw unauthenticated
 cache outside a trusted private network. Source snapshots remain immutable,
 and cached source or binary objects do not contain credentials. The compiled
-pipeline binary interprets `warm`, so upgrade the controller, runner, and
-pipeline module to the same release before enabling this mode.
+pipeline binary interprets `warm`; protocol and named-capability negotiation,
+not exact release equality, decides compatibility.
 
 Schema 30 is an internal dependency of the assisted-execution release, not a
-standalone compatibility boundary. For a foreground `--sw-fleet` run it makes
-the fixed listener, enrolled-helper authentication, offer and award, exact
-source handoff, and coordinator fallback operational. It does not authorize a
-helper to complete a remote job body. Current-attempt-scoped body mutations,
-the complete attempt API, and durable grants for `Memoize`, `Concurrency`,
-`ToolSlot`, `RunAndAwait`, cross-pipeline references, and dynamic `SpawnNode`
-arrive together in schema 31. Do not deploy schema 30 as remote execution.
-At this boundary the helper's observed OS, architecture, and environment are
-startup diagnostics only; they are not persisted or matched for scheduling.
-Use an explicit non-reserved trusted capability when testing admission. Schema
-31 must carry observed platform facts through heartbeat, persistence, matching,
-and the dashboard before selectors such as `os=windows` are truthful.
+standalone compatibility boundary. Its offer and award records remain for
+migration, but schema 31 never admits an unsealed node to a helper. The
+foreground authority derives and seals policy from its immutable source, run,
+plan, dependency, and artifact records. Prepare then checks the helper's
+supervisor protocol and named host capabilities before local capacity is
+reserved. A missing capability returns `upgrade_required`; a helper whose
+minimum supported protocol is newer than the sealed body returns
+`protocol_incompatible`. Unknown capability or protocol floors carry
+`safe_hold` and no minimum release instead of guessing an update target.
+
+Remote body execution is still disabled. A compatible helper receives only an
+opaque binding and `body_attestation_required`; it cannot offer, reserve, or
+run the node until a later release verifies that exact compiled pipeline binary
+and enforces the sealed body and action authority. Eligible work therefore
+falls back to the coordinator, while helper-only work remains pending. The
+runner build identity recorded by heartbeat is observational and is never
+compared for exact version equality. There is no automatic runner updater yet.
+Do not deploy this boundary as remote execution.
+
+The helper's observed OS, architecture, and environment remain diagnostics,
+not trusted scheduling facts. Use explicit non-reserved administrator-owned
+capabilities and `location=local` or `location=cloud` for admission. Sparkwing
+must persist, evaluate, and render observed platform facts separately before
+selectors such as `os=windows` are truthful.
 The bundled service installer supports Linux and macOS. Native Windows agents
 run under an operator-managed service; WSL can use the Linux installer when
 systemd user services are enabled.

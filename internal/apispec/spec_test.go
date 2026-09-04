@@ -81,6 +81,40 @@ func TestEveryRegisteredRouteIsDocumented(t *testing.T) {
 	}
 }
 
+func TestAssistedClaimSpecKeepsRefusalBoundary(t *testing.T) {
+	spec, _, _ := realSpec(t)
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(stripHeader(spec)), &doc); err != nil {
+		t.Fatal(err)
+	}
+	paths := mapValue(doc.Content[0], "paths")
+	prepare := mapValue(mapValue(paths, "/api/v1/nodes/claim/prepare"), "post")
+	prepareDescription := mapValue(prepare, "description")
+	responses := mapValue(prepare, "responses")
+	conflict := mapValue(mapValue(responses, "409"), "description")
+	for name, node := range map[string]*yaml.Node{
+		"prepare description": prepareDescription,
+		"409 description":     conflict,
+	} {
+		if node == nil {
+			t.Fatalf("%s is absent", name)
+		}
+	}
+	if !strings.Contains(prepareDescription.Value, "409 body_attestation_required") ||
+		!strings.Contains(conflict.Value, "No capacity has been reserved") {
+		t.Fatalf("assisted prepare contract drifted: description=%q 409=%q",
+			prepareDescription.Value, conflict.Value)
+	}
+	if success := mapValue(responses, "200"); success != nil {
+		t.Fatalf("unattested prepare documents an unreachable success response: %+v", success)
+	}
+	claim := mapValue(mapValue(paths, "/api/v1/nodes/claim"), "post")
+	if description := mapValue(claim, "description"); description == nil ||
+		!strings.Contains(description.Value, "before reservation or award") {
+		t.Fatalf("assisted offer boundary is absent from claim description: %+v", description)
+	}
+}
+
 func documentedOperations(t *testing.T, spec string) map[string]bool {
 	t.Helper()
 	var doc yaml.Node

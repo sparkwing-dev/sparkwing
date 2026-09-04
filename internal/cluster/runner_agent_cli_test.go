@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -343,6 +344,7 @@ type seenClaim struct {
 
 type offerSlotClient struct {
 	preparation *store.ExecutorClaimPreparation
+	prepare     func(context.Context) (*store.ExecutorClaimPreparation, error)
 	offers      []client.ExecutorClaim
 	results     []client.ExecutorClaimOfferResult
 	offerErrors map[int]error
@@ -351,11 +353,22 @@ type offerSlotClient struct {
 
 func (*offerSlotClient) HeartbeatExecutor(context.Context, string, client.Headroom) error { return nil }
 
-func (c *offerSlotClient) PrepareExecutorClaim(context.Context, string) (*store.ExecutorClaimPreparation, error) {
+func (c *offerSlotClient) PrepareExecutorClaim(ctx context.Context, _ string) (*store.ExecutorClaimPreparation, error) {
+	if c.prepare != nil {
+		return c.prepare(ctx)
+	}
+	if c.preparation != nil {
+		if err := executionpolicy.StorePreparation(ctx, testExecutorClaimBinding()); err != nil {
+			return nil, err
+		}
+	}
 	return c.preparation, nil
 }
 
 func (c *offerSlotClient) OfferExecutorClaim(ctx context.Context, claim client.ExecutorClaim, _, _ string) (client.ExecutorClaimOfferResult, error) {
+	if binding, ok := executionpolicy.OfferBindingFromContext(ctx); !ok || binding != testExecutorClaimBinding() {
+		return client.ExecutorClaimOfferResult{}, errors.New("offer omitted prepared execution binding")
+	}
 	c.offers = append(c.offers, claim)
 	if c.offer != nil {
 		return c.offer(ctx, claim, len(c.offers))
@@ -366,6 +379,53 @@ func (c *offerSlotClient) OfferExecutorClaim(ctx context.Context, claim client.E
 	result := c.results[0]
 	c.results = c.results[1:]
 	return result, nil
+}
+
+func testExecutorClaimBinding() executionpolicy.ClaimBinding {
+	return executionpolicy.ClaimBinding{
+		RunID: "run", NodeID: "node", PolicyHash: "sha256:policy", PolicyVersion: 1, BodyProtocol: 1,
+		SupervisorRequirementsHash: "sha256:supervisor", BodyRequirementsHash: "sha256:body",
+	}
+}
+
+func TestExecutorOfferSlotDoesNotReserveAfterBodyAttestationRefusal(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ctrl := &offerSlotClient{prepare: func(context.Context) (*store.ExecutorClaimPreparation, error) {
+		cancel()
+		return nil, &executionpolicy.BodyAttestationRequiredError{RunID: "run", NodeID: "node"}
+	}}
+	var reservations atomic.Int64
+	ledger := offerSlotLedger{reserve: func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, executorCapacityLimits, int) (ExecutorCapacityReservation, error) {
+		reservations.Add(1)
+		return nil, errors.New("unexpected reservation")
+	}}
+	runExecutorOfferSlot(ctx, AgentConfig{Poll: time.Millisecond}, AgentCoordinatorConfig{Name: "desk"}, 123, 0,
+		ctrl, ledger, nil, discardSlog())
+	if reservations.Load() != 0 || len(ctrl.offers) != 0 {
+		t.Fatalf("body-attestation refusal reserved=%d offered=%d", reservations.Load(), len(ctrl.offers))
+	}
+}
+
+func TestExecutorOfferSlotDoesNotReserveOrRunAnUnsealedLegacyCandidate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ctrl := &offerSlotClient{prepare: func(context.Context) (*store.ExecutorClaimPreparation, error) {
+		cancel()
+		return nil, nil
+	}}
+	var reservations, executions atomic.Int64
+	ledger := offerSlotLedger{reserve: func(context.Context, store.ExecutorSchedulingSummary, store.ExecutorMembershipSnapshot, executorCapacityLimits, int) (ExecutorCapacityReservation, error) {
+		reservations.Add(1)
+		return nil, errors.New("unexpected reservation")
+	}}
+	exec := func(context.Context, *store.Node, string, *orchestrator.LocalAdmission) {
+		executions.Add(1)
+	}
+	runExecutorOfferSlot(ctx, AgentConfig{Poll: time.Millisecond}, AgentCoordinatorConfig{Name: "desk"}, 123, 0,
+		ctrl, ledger, exec, discardSlog())
+	if reservations.Load() != 0 || len(ctrl.offers) != 0 || executions.Load() != 0 {
+		t.Fatalf("unsealed legacy candidate reserved=%d offered=%d executed=%d",
+			reservations.Load(), len(ctrl.offers), executions.Load())
+	}
 }
 
 type offerSlotLedger struct {

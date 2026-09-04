@@ -120,7 +120,7 @@ func TestLocalFleetAuthorityCloseRevokesEphemeralAccessAndClosesSurfaces(t *test
 		Local: fleet.Local{Name: "local", MaxConcurrent: 1, Contribution: "50%,50%"},
 	}, &Options{
 		Pipeline: "test", FleetSourceRoot: fixture.root, FleetSourceBundle: fixture.bundle,
-		FleetSourceSHA: fixture.sha, FleetSourceRepoURL: fixture.repoURL,
+		FleetSourceSHA: fixture.sha, FleetSourceManifestDigest: fixture.manifest, FleetSourceRepoURL: fixture.repoURL,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ func TestLocalFleetAuthorityStopClaimsRejectsNewPrepareAndOfferOverAuthenticated
 		}},
 	}, &Options{
 		Pipeline: "test", FleetSourceRoot: fixture.root, FleetSourceBundle: fixture.bundle,
-		FleetSourceSHA: fixture.sha, FleetSourceRepoURL: fixture.repoURL,
+		FleetSourceSHA: fixture.sha, FleetSourceManifestDigest: fixture.manifest, FleetSourceRepoURL: fixture.repoURL,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)

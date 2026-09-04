@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -144,7 +146,16 @@ func (s *Server) handleEnrollAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type agentHeartbeatReq struct {
-	Headroom *claimHeadroom `json:"headroom"`
+	Headroom *claimHeadroom         `json:"headroom"`
+	Runtime  *agentRuntimeReportReq `json:"runtime,omitempty"`
+}
+
+type agentRuntimeReportReq struct {
+	BodyProtocolMinimum int                `json:"body_protocol_minimum"`
+	BodyProtocolMaximum int                `json:"body_protocol_maximum"`
+	Supervisor          []string           `json:"supervisor_requirements,omitempty"`
+	BodyHost            []string           `json:"body_host_requirements,omitempty"`
+	Build               buildinfo.Identity `json:"build_identity"`
 }
 
 func validateClaimHeadroom(headroom *claimHeadroom) error {
@@ -165,7 +176,22 @@ func (s *Server) handleHeartbeatAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.HeartbeatExecutor(r.Context(), claimIdentity(r), r.PathValue("name"),
+	ctx := r.Context()
+	if body.Runtime != nil {
+		var err error
+		ctx, err = executionpolicy.WithRuntimeReport(ctx, executionpolicy.RuntimeReport{
+			BodyProtocolMinimum: body.Runtime.BodyProtocolMinimum,
+			BodyProtocolMaximum: body.Runtime.BodyProtocolMaximum,
+			Supervisor:          body.Runtime.Supervisor,
+			BodyHost:            body.Runtime.BodyHost,
+			Build:               body.Runtime.Build,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	if err := s.store.HeartbeatExecutor(ctx, claimIdentity(r), r.PathValue("name"),
 		store.ExecutorResource{Cores: body.Headroom.Cores, MemoryBytes: body.Headroom.MemoryBytes},
 		body.Headroom.QueueDepth, time.Now()); err != nil {
 		if errors.Is(err, store.ErrExecutorCredentialMismatch) {

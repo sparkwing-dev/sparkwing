@@ -949,10 +949,10 @@ func TestSchemaV30SoftAvoidancePrefersAnotherEnrolledExecutor(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-avoid", "build"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PrepareNextExecutorClaim(ctx, a, "desk-a"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.TestOnlyPrepareNextExecutorClaim(ctx, a, "desk-a"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("avoided executor preparation = %v, want ErrNotFound", err)
 	}
-	preparation, err := s.PrepareNextExecutorClaim(ctx, b, "desk-b")
+	preparation, err := s.TestOnlyPrepareNextExecutorClaim(ctx, b, "desk-b")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -963,7 +963,7 @@ func TestSchemaV30SoftAvoidancePrefersAnotherEnrolledExecutor(t *testing.T) {
 		time.Now().Add(-2*store.ExecutorRegistrationActiveWindow).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	preparation, err = s.PrepareNextExecutorClaim(ctx, a, "desk-a")
+	preparation, err = s.TestOnlyPrepareNextExecutorClaim(ctx, a, "desk-a")
 	if err != nil {
 		t.Fatalf("only viable avoided executor should reclaim: %v", err)
 	}
@@ -1008,10 +1008,10 @@ func TestSchemaV30RetryPreservesControllerOwnedPlacement(t *testing.T) {
 	if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{}, "legacy-holder", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("legacy claim bypassed hard placement: %v", err)
 	}
-	if _, err := s.PrepareNextExecutorClaim(ctx, cloud, "cloud-box"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.TestOnlyPrepareNextExecutorClaim(ctx, cloud, "cloud-box"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cloud placement = %v, want ErrNotFound", err)
 	}
-	preparation, err := s.PrepareNextExecutorClaim(ctx, local, "local-box")
+	preparation, err := s.TestOnlyPrepareNextExecutorClaim(ctx, local, "local-box")
 	if err != nil {
 		t.Fatal(err)
 	}

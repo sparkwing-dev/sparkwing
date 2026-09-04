@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceidentity"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -97,6 +98,13 @@ func startLocalFleetAuthority(st *store.Store, runID string, cfg fleet.Config, o
 	}
 	a.source, err = startLocalFleetSource(opts.FleetSourceRoot, opts.FleetSourceBundle, opts.FleetSourceSHA, opts.FleetSourceRepoURL, sourceToken)
 	if err != nil {
+		return fail(a, err)
+	}
+	manifestDigest, err := sourceidentity.GitTreeManifestDigest(context.Background(), a.source.bareRepo, opts.FleetSourceSHA)
+	if err != nil || manifestDigest != opts.FleetSourceManifestDigest {
+		if err == nil {
+			err = errors.New("served Fleet source does not match its manifest digest")
+		}
 		return fail(a, err)
 	}
 	git := opts.Git

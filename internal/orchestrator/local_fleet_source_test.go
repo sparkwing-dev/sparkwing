@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceidentity"
 )
 
 func TestLocalFleetSourceServesOnlyExactAuthenticatedSnapshot(t *testing.T) {
@@ -116,8 +117,8 @@ func TestLocalFleetSourceRejectsHistoryBearingBundle(t *testing.T) {
 }
 
 type fleetSourceFixture struct {
-	root, bundle, sha, repoURL string
-	historySHA, secretBlob     string
+	root, bundle, sha, manifest, repoURL string
+	historySHA, secretBlob               string
 }
 
 func newFleetSourceFixture(t *testing.T) fleetSourceFixture {
@@ -159,8 +160,12 @@ func newFleetSourceFixture(t *testing.T) fleetSourceFixture {
 	runGit("-C", repo, "update-ref", ref, sha)
 	bundle := filepath.Join(root, "snapshot.bundle")
 	runGit("-C", repo, "bundle", "create", bundle, ref)
+	manifest, err := sourceidentity.GitTreeManifestDigest(context.Background(), repo, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return fleetSourceFixture{
-		root: root, bundle: bundle, sha: sha,
+		root: root, bundle: bundle, sha: sha, manifest: manifest,
 		repoURL:    "https://source.sparkwing.invalid/exact.git",
 		historySHA: historySHA, secretBlob: secretBlob,
 	}

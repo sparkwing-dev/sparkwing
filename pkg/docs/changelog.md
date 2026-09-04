@@ -55,10 +55,12 @@ code change to unlock.
   `fleet.yaml`, `sparkwing fleet agents enroll` binds revocable helper
   credentials to trusted policy, and `sparkwing run --sw-fleet` serves an
   immutable working-tree snapshot through an authenticated, fixed local
-  foreground authority. Enrolled helpers can prepare and win schema-30 offers;
-  explicitly eligible work falls back to the coordinator. Schema 30 does not
-  expose remote helper body completion, which remains gated on schema 31's
-  current-attempt routes and durable grants.
+  foreground authority. Schema 31 seals controller-derived execution policy
+  before helper admission and refuses missing supervisor capabilities before
+  capacity reservation. Unsealed legacy work remains coordinator-only. Even a
+  compatible helper stops at `body_attestation_required`, so explicitly
+  eligible work falls back to the coordinator while exact compiled-body
+  attestation and policy enforcement remain unfinished.
 - **runner + release:** `sparkwing-runner version` reports the runner binary,
   release version, target platform, and available VCS provenance in pretty,
   plain, or JSON output without network access. Releases now include signed

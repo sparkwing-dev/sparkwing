@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceidentity"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -33,14 +34,15 @@ var defaultWorktreeSnapshotLimits = worktreeSnapshotLimits{
 }
 
 type worktreeSnapshot struct {
-	RepoRoot   string
-	BaseSHA    string
-	SHA        string
-	BundlePath string
-	FileCount  int
-	Size       int64
-	BundleSize int64
-	tempDir    string
+	RepoRoot       string
+	BaseSHA        string
+	SHA            string
+	ManifestDigest string
+	BundlePath     string
+	FileCount      int
+	Size           int64
+	BundleSize     int64
+	tempDir        string
 }
 
 func (s *worktreeSnapshot) close() error {
@@ -192,6 +194,10 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 	if err != nil {
 		return fail(err)
 	}
+	manifestDigest, err := sourceidentity.GitTreeManifestDigest(ctx, gitDir, sha)
+	if err != nil {
+		return fail(err)
+	}
 	ref := bincache.SeedRef(sha)
 	if _, err := gitDirOutput(ctx, gitDir, "update-ref", ref, sha); err != nil {
 		return fail(fmt.Errorf("name snapshot ref: %w", err))
@@ -208,6 +214,7 @@ func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits
 		return fail(fmt.Errorf("working-tree snapshot bundle is %d bytes; limit is %d bytes", info.Size(), maxWorktreeSnapshotBytes))
 	}
 	snapshot.SHA = sha
+	snapshot.ManifestDigest = manifestDigest
 	snapshot.BundlePath = bundlePath
 	snapshot.Size = sourceBytes
 	snapshot.BundleSize = info.Size()
