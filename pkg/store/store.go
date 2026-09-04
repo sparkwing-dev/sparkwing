@@ -2134,6 +2134,9 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if r.ParentRunID != "" {
 		parent = sql.NullString{String: r.ParentRunID, Valid: true}
 	}
+	if r.StartedAt.IsZero() {
+		r.StartedAt = time.Now()
+	}
 	created := r.CreatedAt
 	if created.IsZero() {
 		created = r.StartedAt
@@ -2472,7 +2475,8 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 	return scanRun(s.queryRow(ctx, q, args...))
 }
 
-// DeleteRun removes the run + its trigger; CASCADE handles children.
+// DeleteRun removes the run, its trigger and its memo entries;
+// CASCADE handles children.
 //
 // Triggers carrying parent_node_id are the cross-pipeline spawn
 // linkage from their PARENT run -- they double as the dispatch row
@@ -2493,6 +2497,13 @@ func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM triggers WHERE id = ? AND parent_node_id = ''`, runID); err != nil {
+		return err
+	}
+	// safety: concurrency_cache carries no foreign key, so a memo
+	// entry left here keeps pointing at output this delete removes,
+	// and every later hit on that key fails to fetch it.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM concurrency_cache WHERE origin_run_id = ?`, runID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2554,7 +2565,9 @@ func scanRun(rs rowScanner) (*Run, error) {
 	if createdNS > 0 {
 		r.CreatedAt = time.Unix(0, createdNS)
 	}
-	r.StartedAt = time.Unix(0, startedNS)
+	if startedNS > 0 {
+		r.StartedAt = time.Unix(0, startedNS)
+	}
 	if finishedNS.Valid {
 		t := time.Unix(0, finishedNS.Int64)
 		r.FinishedAt = &t
@@ -5059,7 +5072,16 @@ type TriggerFilter struct {
 	Limit     int    // <=0 = 20
 }
 
+const (
+	triggerRepoScanBatch = 200
+	triggerRepoScanCap   = 5000
+)
+
 // ListTriggers returns triggers newest-first, filtered by f.
+//
+// Repo lives in a blob no dialect can filter on, so rows are read in
+// pages and matched in Go until the limit is filled, over at most the
+// newest 5,000 triggers that pass the other fields.
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
 	limit := f.Limit
 	if limit <= 0 {
@@ -5087,7 +5109,6 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 	}
 	addIn("status", f.Statuses)
 	addIn("pipeline", f.Pipelines)
-	args = append(args, limit)
 
 	query := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
@@ -5097,8 +5118,38 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        idempotency_key, claim_seq, webhook_delivery
   FROM triggers` + where + `
  ORDER BY created_at DESC
- LIMIT ?`
-	rows, err := s.query(ctx, query, args...)
+ LIMIT ? OFFSET ?`
+
+	batch := limit
+	if f.Repo != "" {
+		batch = max(limit, triggerRepoScanBatch)
+	}
+	var out []*Trigger
+	for offset := 0; ; offset += batch {
+		page, err := s.listTriggerPage(ctx, query, args, batch, offset)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range page {
+			if f.Repo != "" && t.TriggerEnv["GITHUB_REPOSITORY"] != f.Repo {
+				continue
+			}
+			out = append(out, t)
+			if len(out) == limit {
+				return out, nil
+			}
+		}
+		if f.Repo == "" || len(page) < batch || offset+batch >= triggerRepoScanCap {
+			return out, nil
+		}
+	}
+}
+
+func (s *Store) listTriggerPage(ctx context.Context, query string, args []any, limit, offset int) ([]*Trigger, error) {
+	pageArgs := make([]any, 0, len(args)+2)
+	pageArgs = append(pageArgs, args...)
+	pageArgs = append(pageArgs, limit, offset)
+	rows, err := s.query(ctx, query, pageArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -5138,11 +5189,6 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		}
 		if len(envJSON) > 0 {
 			_ = json.Unmarshal(envJSON, &t.TriggerEnv)
-		}
-		if f.Repo != "" {
-			if t.TriggerEnv["GITHUB_REPOSITORY"] != f.Repo {
-				continue
-			}
 		}
 		out = append(out, &t)
 	}
