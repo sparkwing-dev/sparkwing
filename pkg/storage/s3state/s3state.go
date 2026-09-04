@@ -35,6 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -173,7 +174,7 @@ type runState struct {
 	flushedSize int
 
 	run       *store.Run
-	nodes     map[string]*store.Node
+	nodes     map[string]*nodeRecord
 	steps     map[string]map[string]*store.NodeStep
 	stepOrder []stepKey
 	events    []store.Event
@@ -193,6 +194,11 @@ type stepKey struct {
 	stepID string
 }
 
+type nodeRecord struct {
+	store.Node
+	executionpolicy.Carrier
+}
+
 type envelope struct {
 	Kind string          `json:"kind"`
 	Data json.RawMessage `json:"data"`
@@ -200,7 +206,7 @@ type envelope struct {
 
 func newRunState() *runState {
 	return &runState{
-		nodes:   map[string]*store.Node{},
+		nodes:   map[string]*nodeRecord{},
 		steps:   map[string]map[string]*store.NodeStep{},
 		metrics: map[string][]store.MetricSample{},
 	}
@@ -273,7 +279,7 @@ func (rs *runState) resetLocked() {
 	rs.envelopes = nil
 	rs.bufSize = 0
 	rs.run = nil
-	rs.nodes = map[string]*store.Node{}
+	rs.nodes = map[string]*nodeRecord{}
 	rs.steps = map[string]map[string]*store.NodeStep{}
 	rs.stepOrder = nil
 	rs.events = nil
@@ -320,7 +326,9 @@ func (b *Backend) loadLocked(ctx context.Context, runID string, rs *runState) er
 		return fmt.Errorf("s3state: parse %s: %w", runID, err)
 	}
 	for _, env := range envs {
-		applyEnvelope(rs, env)
+		if err := applyEnvelope(rs, env); err != nil {
+			return fmt.Errorf("s3state: apply %s: %w", runID, err)
+		}
 		rs.envelopes = append(rs.envelopes, env)
 	}
 	return nil
@@ -332,10 +340,13 @@ func (b *Backend) appendEnvelope(ctx context.Context, runID string, env envelope
 		return err
 	}
 	rs.mu.Lock()
+	if err := applyEnvelope(rs, env); err != nil {
+		rs.mu.Unlock()
+		return err
+	}
 	rs.envelopes = append(rs.envelopes, env)
 	rs.bufSize += len(env.Data) + len(env.Kind) + 32
 	rs.dirty = true
-	applyEnvelope(rs, env)
 	shouldFlush := rs.bufSize >= b.bufferLimit
 	rs.mu.Unlock()
 	if shouldFlush {
@@ -594,7 +605,7 @@ func parseEnvelopes(r io.Reader) ([]envelope, error) {
 	return out, scanner.Err()
 }
 
-func applyEnvelope(rs *runState, env envelope) {
+func applyEnvelope(rs *runState, env envelope) error {
 	switch env.Kind {
 	case KindRun:
 		var r store.Run
@@ -602,10 +613,15 @@ func applyEnvelope(rs *runState, env envelope) {
 			rs.run = &r
 		}
 	case KindNode:
-		var n store.Node
-		if err := json.Unmarshal(env.Data, &n); err == nil {
-			rs.nodes[n.NodeID] = &n
+		pipeline := ""
+		if rs.run != nil {
+			pipeline = rs.run.Pipeline
 		}
+		n, err := decodeNodeEnvelope(env.Data, pipeline)
+		if err != nil {
+			return err
+		}
+		rs.nodes[n.NodeID] = n
 	case KindNodeStep:
 		var s store.NodeStep
 		if err := json.Unmarshal(env.Data, &s); err == nil {
@@ -629,7 +645,7 @@ func applyEnvelope(rs *runState, env envelope) {
 		if err := json.Unmarshal(env.Data, &payload); err == nil {
 			n, ok := rs.nodes[payload.NodeID]
 			if !ok {
-				n = &store.Node{NodeID: payload.NodeID}
+				n = &nodeRecord{Node: store.Node{NodeID: payload.NodeID}}
 				rs.nodes[payload.NodeID] = n
 			}
 			if payload.Status != "" {
@@ -657,6 +673,7 @@ func applyEnvelope(rs *runState, env envelope) {
 			rs.events = append(rs.events, e)
 		}
 	}
+	return nil
 }
 
 func encodeEnvelope(kind string, data any) (envelope, error) {
@@ -665,6 +682,49 @@ func encodeEnvelope(kind string, data any) (envelope, error) {
 		return envelope{}, err
 	}
 	return envelope{Kind: kind, Data: raw}, nil
+}
+
+type nodeEnvelopeRecord struct {
+	store.Node
+	ExecutionPolicy json.RawMessage `json:"execution_policy,omitempty"`
+}
+
+func encodeNodeEnvelope(node nodeRecord, pipeline string) (envelope, error) {
+	if err := executionpolicy.ValidateForNode(&node, executionPolicyBinding(pipeline, &node.Node)); err != nil {
+		return envelope{}, err
+	}
+	raw, err := executionpolicy.EncodeCarrier(&node)
+	if err != nil {
+		return envelope{}, err
+	}
+	return encodeEnvelope(KindNode, nodeEnvelopeRecord{Node: node.Node, ExecutionPolicy: raw})
+}
+
+func decodeNodeEnvelope(raw []byte, pipeline string) (*nodeRecord, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var record nodeEnvelopeRecord
+	if err := dec.Decode(&record); err != nil {
+		return nil, err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("decode node envelope trailing JSON: %v", err)
+	}
+	node := &nodeRecord{Node: record.Node}
+	if err := executionpolicy.DecodeCarrierStrict(record.ExecutionPolicy, node); err != nil {
+		return nil, err
+	}
+	if err := executionpolicy.ValidateForNode(node, executionPolicyBinding(pipeline, &node.Node)); err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
+func executionPolicyBinding(pipeline string, node *store.Node) executionpolicy.Binding {
+	return executionpolicy.Binding{
+		Pipeline: pipeline, NodeID: node.NodeID, Dependencies: node.Deps,
+		NeedsLabels: node.NeedsLabels, RequiredExecutorLocation: node.RequiredExecutorLocation,
+	}
 }
 
 func (b *Backend) CreateRun(ctx context.Context, r store.Run) error {
@@ -839,7 +899,17 @@ func (b *Backend) CreateNode(ctx context.Context, n store.Node) error {
 	if n.Status == "" {
 		n.Status = "pending"
 	}
-	env, err := encodeEnvelope(KindNode, n)
+	rs, err := b.getRunState(ctx, n.RunID, accessWrite)
+	if err != nil {
+		return err
+	}
+	rs.mu.Lock()
+	pipeline := ""
+	if rs.run != nil {
+		pipeline = rs.run.Pipeline
+	}
+	rs.mu.Unlock()
+	env, err := encodeNodeEnvelope(nodeRecord{Node: n}, pipeline)
 	if err != nil {
 		return err
 	}
@@ -938,8 +1008,8 @@ func (b *Backend) GetNode(ctx context.Context, runID, nodeID string) (*store.Nod
 	if !ok {
 		return nil, store.ErrNotFound
 	}
-	clone := *n
-	return &clone, nil
+	clone := cloneNodeRecord(n)
+	return &clone.Node, nil
 }
 
 func (b *Backend) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
@@ -951,11 +1021,26 @@ func (b *Backend) ListNodes(ctx context.Context, runID string) ([]*store.Node, e
 	defer rs.mu.Unlock()
 	nodes := make([]*store.Node, 0, len(rs.nodes))
 	for _, node := range rs.nodes {
-		clone := *node
-		nodes = append(nodes, &clone)
+		clone := cloneNodeRecord(node)
+		nodes = append(nodes, &clone.Node)
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
 	return nodes, nil
+}
+
+func cloneNodeRecord(node *nodeRecord) *nodeRecord {
+	if node == nil {
+		return nil
+	}
+	clone := *node
+	clone.Deps = append([]string(nil), node.Deps...)
+	clone.NeedsLabels = append([]string(nil), node.NeedsLabels...)
+	clone.PrefersLabels = append([]string(nil), node.PrefersLabels...)
+	clone.Output = append([]byte(nil), node.Output...)
+	clone.Annotations = append([]string(nil), node.Annotations...)
+	clone.ExecutionAttempts = append([]store.ExecutionAttempt(nil), node.ExecutionAttempts...)
+	executionpolicy.CopyCarrier(&clone, node)
+	return &clone
 }
 
 func (b *Backend) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error {
@@ -989,18 +1074,16 @@ func (b *Backend) mutateNode(ctx context.Context, runID, nodeID string, f func(*
 	rs.mu.Lock()
 	n, ok := rs.nodes[nodeID]
 	if !ok {
-		n = &store.Node{RunID: runID, NodeID: nodeID}
+		n = &nodeRecord{Node: store.Node{RunID: runID, NodeID: nodeID}}
 	}
-	clone := *n
-	if clone.Annotations != nil {
-		clone.Annotations = append([]string(nil), n.Annotations...)
-	}
-	if clone.Deps != nil {
-		clone.Deps = append([]string(nil), n.Deps...)
+	clone := cloneNodeRecord(n)
+	pipeline := ""
+	if rs.run != nil {
+		pipeline = rs.run.Pipeline
 	}
 	rs.mu.Unlock()
-	f(&clone)
-	env, err := encodeEnvelope(KindNode, clone)
+	f(&clone.Node)
+	env, err := encodeNodeEnvelope(*clone, pipeline)
 	if err != nil {
 		return err
 	}

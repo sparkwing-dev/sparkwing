@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -188,7 +189,36 @@ func TestDumpRunState_RedactsClaimIdentityAndRetainsAttemptLineage(t *testing.T)
 	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending", RequiredExecutorLocation: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	digest := "sha256:" + strings.Repeat("a", 64)
+	var policyCarrier executionpolicy.Carrier
+	if err := executionpolicy.SetNew(&policyCarrier, executionpolicy.NodeExecutionPolicy{
+		Version: executionpolicy.NodeExecutionPolicyVersion, Pipeline: "build", NodeID: nodeID,
+		AllowedLocations: []string{"local"}, ResultMaxBytes: 1 << 20,
+		SupervisorRequirements: []string{"fleet-supervisor-v1", "sentinel-private-supervisor"},
+		Body: executionpolicy.NodeCompiledBodyAuthority{
+			ProtocolVersion:     executionpolicy.AssistedBodyProtocolVersion,
+			RuntimeRequirements: []string{"fleet-body-v1", "sentinel-private-body"},
+			Source: executionpolicy.NodeBodySourceAuthority{
+				Kind: "git", Identity: strings.Repeat("b", 40), ManifestDigest: digest, PlanDigest: digest,
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := executionpolicy.PersistenceOf(&policyCarrier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET
+ execution_policy_json=?, execution_policy_hash=?, execution_policy_version=?, execution_body_protocol=?,
+ execution_supervisor_requirements_json=?, execution_supervisor_requirements_hash=?,
+ execution_body_requirements_json=?, execution_body_requirements_hash=?
+ WHERE run_id=? AND node_id=?`, persisted.PolicyJSON, persisted.PolicyHash, persisted.PolicyVersion, persisted.BodyProtocol,
+		persisted.SupervisorRequirementsJSON, persisted.SupervisorRequirementsHash,
+		persisted.BodyRequirementsJSON, persisted.BodyRequirementsHash, runID, nodeID); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UnixNano()
@@ -239,6 +269,9 @@ func TestDumpRunState_RedactsClaimIdentityAndRetainsAttemptLineage(t *testing.T)
 		"private-executor", "private-required-coordinator", "private-reservation",
 		"private-attempt-coordinator", "private-attempt-membership", "private-attempt-executor",
 		"private-attempt-holder", "private-attempt-reservation",
+		`"execution_policy"`, `"execution_policy_hash"`, `"execution_policy_version"`,
+		`"execution_body_protocol"`, `"execution_supervisor_requirements"`,
+		`"execution_body_requirements"`, "sentinel-private-supervisor", "sentinel-private-body",
 	} {
 		if strings.Contains(dump, banned) {
 			t.Errorf("state dump contains private claim identity %q:\n%s", banned, dump)

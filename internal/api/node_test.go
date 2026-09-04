@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,7 +42,6 @@ func TestPublicNodeScrubsInternalExecutionIdentity(t *testing.T) {
 			HolderID: "private-holder", ReservationID: "reservation",
 		}},
 	}
-
 	got := PublicNode(raw)
 	if !got.Claimed || got.ExecutorName != "desktop" {
 		t.Fatalf("projected node lost public execution attribution: %+v", got)
@@ -63,5 +64,14 @@ func TestPublicNodeScrubsInternalExecutionIdentity(t *testing.T) {
 	got.ExecutionAttempts[0].Outcome = "mutated"
 	if raw.ExecutionAttempts[0].Outcome != "" {
 		t.Fatal("projection retained the source attempt slice")
+	}
+	rawJSON, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sentinel := range []string{"execution_policy", "policy_hash", "runtime_requirements"} {
+		if strings.Contains(string(rawJSON), sentinel) {
+			t.Fatalf("public Node leaked %q: %s", sentinel, rawJSON)
+		}
 	}
 }

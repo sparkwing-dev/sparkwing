@@ -58,6 +58,34 @@ func init() {
 	register("agent-loss-selective-retry", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &agentLossRetryPipeline{} })
 }
 
+func seedAgentLossRetrySourceFixture(t *testing.T, st *store.Store, retryRunID, sourceRunID string) {
+	t.Helper()
+	result, err := st.DB().ExecContext(context.Background(), `INSERT INTO agent_loss_retry_node_sources
+    (retry_run_id, source_run_id, node_id, deps_json, needs_labels_json, prefers_labels_json,
+     requested_cores, requested_memory_bytes, requested_slots, attempts_consumed,
+     required_coordinator_id, required_executor_location,
+     avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
+     policy_json, policy_hash, policy_version, body_protocol,
+     supervisor_requirements_json, supervisor_requirements_hash,
+     body_requirements_json, body_requirements_hash)
+SELECT ?, run_id, node_id, deps_json, needs_labels, prefers_labels,
+       requested_cores, requested_memory_bytes, requested_slots, attempts_consumed,
+       required_coordinator_id, required_executor_location,
+       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
+       execution_policy_json, execution_policy_hash, execution_policy_version, execution_body_protocol,
+       execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
+       execution_body_requirements_json, execution_body_requirements_hash
+  FROM nodes WHERE run_id = ?`, retryRunID, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := result.RowsAffected(); err != nil {
+		t.Fatal(err)
+	} else if count == 0 {
+		t.Fatalf("source run %q has no nodes to snapshot", sourceRunID)
+	}
+}
+
 func TestRun_AgentLossRetryRerunsOnlyCausesAndDescendants(t *testing.T) {
 	agentLossCounts.Lock()
 	agentLossCounts.values = map[string]int{}
@@ -110,6 +138,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, "retry", "source", "source", causes,
 		time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano(), 1); err != nil {
 		t.Fatal(err)
 	}
+	seedAgentLossRetrySourceFixture(t, st, "retry", "source")
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -184,6 +213,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, "dynamic-retry", "dynamic-source", "dynamic-sourc
 		time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano(), 1); err != nil {
 		t.Fatal(err)
 	}
+	seedAgentLossRetrySourceFixture(t, st, "dynamic-retry", "dynamic-source")
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -275,6 +305,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, "dynamic-drift-retry", source.RunID, source.RunID
 		time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano(), 1); err != nil {
 		t.Fatal(err)
 	}
+	seedAgentLossRetrySourceFixture(t, st, "dynamic-drift-retry", source.RunID)
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +346,11 @@ func TestRun_AgentLossRetryFailsClosedWhenSourceCannotBeRehydrated(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, nodeID := range []string{"cause", "descendant", "optional-descendant", "unrelated-failure", "unrelated-cleanup", "unrelated-success"} {
-		if err := st.CreateNode(ctx, store.Node{RunID: "source-read-failure", NodeID: nodeID, Status: "pending"}); err != nil {
+		deps := []string(nil)
+		if nodeID == "descendant" || nodeID == "optional-descendant" {
+			deps = []string{"cause"}
+		}
+		if err := st.CreateNode(ctx, store.Node{RunID: "source-read-failure", NodeID: nodeID, Status: "pending", Deps: deps}); err != nil {
 			t.Fatal(err)
 		}
 		if err := st.FinishNode(ctx, "source-read-failure", nodeID, "success", "", nil); err != nil {
@@ -334,6 +369,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, "retry-read-failure", "source-read-failure", "sou
 		time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano(), 1); err != nil {
 		t.Fatal(err)
 	}
+	seedAgentLossRetrySourceFixture(t, st, "retry-read-failure", "source-read-failure")
 	backends := orchestrator.LocalBackends(paths, st, nil)
 	backends.State = rehydrateReadFailureState{
 		StateBackend: backends.State, runID: "source-read-failure", nodeID: "unrelated-success",

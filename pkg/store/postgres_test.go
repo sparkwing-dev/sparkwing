@@ -123,6 +123,141 @@ func TestSchemaV29_PostgresFreshShape(t *testing.T) {
 	assertPostgresNodeOfferColumnTypes(t, st)
 }
 
+func TestSchemaV31PostgresFreshAndV30UpgradeShape(t *testing.T) {
+	t.Run("fresh", func(t *testing.T) {
+		assertPostgresExecutionPolicyShape(t, openPGTestStore(t))
+	})
+	t.Run("v30 upgrade", func(t *testing.T) {
+		scoped := pgTestSchemaDSN(t)
+		ctx := context.Background()
+		st, err := store.OpenPostgres(ctx, scoped)
+		if err != nil {
+			t.Fatal(err)
+		}
+		statements := []string{
+			`DROP INDEX idx_nodes_assisted_claimable`,
+			`DROP TABLE agent_loss_retry_legacy_deny_all`,
+			`DROP TABLE agent_loss_retry_node_sources`,
+		}
+		for _, column := range []string{
+			"execution_policy_json", "execution_policy_hash", "execution_policy_version", "execution_body_protocol",
+			"execution_supervisor_requirements_json", "execution_supervisor_requirements_hash",
+			"execution_body_requirements_json", "execution_body_requirements_hash",
+		} {
+			statements = append(statements, `ALTER TABLE nodes DROP COLUMN `+column)
+		}
+		for _, column := range []string{
+			"supported_body_protocol_min", "supported_body_protocol_max", "supervisor_requirements_json",
+			"body_runtime_requirements_json", "runner_build_identity_json",
+		} {
+			statements = append(statements, `ALTER TABLE executors DROP COLUMN `+column)
+		}
+		for _, column := range []string{
+			"execution_policy_hash", "execution_policy_version", "execution_body_protocol",
+			"execution_supervisor_requirements_hash", "execution_body_requirements_hash",
+		} {
+			statements = append(statements, `ALTER TABLE node_claim_offers DROP COLUMN `+column)
+		}
+		statements = append(statements,
+			`DELETE FROM sparkwing_requirements WHERE name = 'assisted-execution-policy-v1'`,
+			`DELETE FROM sparkwing_schema_version WHERE version >= 31`,
+		)
+		for _, statement := range statements {
+			if _, err := st.DB().ExecContext(ctx, statement); err != nil {
+				_ = st.Close()
+				t.Fatalf("downgrade with %q: %v", statement, err)
+			}
+		}
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+		up, err := store.OpenPostgres(ctx, scoped)
+		if err != nil {
+			t.Fatalf("upgrade v30: %v", err)
+		}
+		defer up.Close()
+		assertPostgresExecutionPolicyShape(t, up)
+	})
+}
+
+func assertPostgresExecutionPolicyShape(t *testing.T, st *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	for table, columns := range map[string][]string{
+		"nodes": {
+			"execution_policy_json", "execution_policy_hash", "execution_policy_version", "execution_body_protocol",
+			"execution_supervisor_requirements_json", "execution_supervisor_requirements_hash",
+			"execution_body_requirements_json", "execution_body_requirements_hash",
+		},
+		"executors": {
+			"supported_body_protocol_min", "supported_body_protocol_max", "supervisor_requirements_json",
+			"body_runtime_requirements_json", "runner_build_identity_json",
+		},
+		"node_claim_offers": {
+			"execution_policy_hash", "execution_policy_version", "execution_body_protocol",
+			"execution_supervisor_requirements_hash", "execution_body_requirements_hash",
+		},
+		"agent_loss_retry_node_sources": {
+			"retry_run_id", "source_run_id", "node_id", "deps_json", "needs_labels_json", "prefers_labels_json",
+			"requested_cores", "requested_memory_bytes", "requested_slots", "attempts_consumed",
+			"required_coordinator_id", "required_executor_location", "avoid_coordinator_id", "avoid_executor_kind",
+			"avoid_executor_id", "avoid_until", "policy_json", "policy_hash", "policy_version", "body_protocol",
+			"supervisor_requirements_json", "supervisor_requirements_hash", "body_requirements_json", "body_requirements_hash",
+		},
+		"agent_loss_retry_legacy_deny_all": {"retry_run_id", "source_run_id", "reason"},
+	} {
+		for _, column := range columns {
+			var exists bool
+			if err := st.DB().QueryRowContext(ctx, `SELECT EXISTS (
+  SELECT 1 FROM information_schema.columns
+   WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2
+)`, table, column).Scan(&exists); err != nil {
+				t.Fatal(err)
+			}
+			if !exists {
+				t.Errorf("missing %s.%s", table, column)
+			}
+		}
+	}
+	for column, want := range map[[2]string]string{
+		{"nodes", "execution_policy_json"}:                   "bytea",
+		{"nodes", "execution_policy_version"}:                "bigint",
+		{"executors", "supported_body_protocol_min"}:         "bigint",
+		{"agent_loss_retry_node_sources", "requested_cores"}: "double precision",
+		{"agent_loss_retry_node_sources", "requested_slots"}: "bigint",
+		{"agent_loss_retry_node_sources", "policy_json"}:     "bytea",
+		{"agent_loss_retry_node_sources", "avoid_until"}:     "bigint",
+	} {
+		var got string
+		if err := st.DB().QueryRowContext(ctx, `SELECT data_type FROM information_schema.columns
+ WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2`, column[0], column[1]).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("%s.%s type = %q, want %q", column[0], column[1], got, want)
+		}
+	}
+	var retryCascade, sourceForeignKeys int
+	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FILTER (WHERE pg_get_constraintdef(c.oid) = 'FOREIGN KEY (retry_run_id) REFERENCES runs(id) ON DELETE CASCADE'),
+       COUNT(*) FILTER (WHERE pg_get_constraintdef(c.oid) LIKE 'FOREIGN KEY (source_run_id)%')
+  FROM pg_constraint c
+  JOIN pg_class rel ON rel.oid = c.conrelid
+ WHERE rel.relnamespace = current_schema()::regnamespace
+   AND rel.relname = 'agent_loss_retry_node_sources' AND c.contype = 'f'`).Scan(&retryCascade, &sourceForeignKeys); err != nil {
+		t.Fatal(err)
+	}
+	if retryCascade != 1 || sourceForeignKeys != 0 {
+		t.Errorf("retry snapshot FKs: cascade=%d source=%d", retryCascade, sourceForeignKeys)
+	}
+	var requirement int
+	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM sparkwing_requirements WHERE name = 'assisted-execution-policy-v1'`).Scan(&requirement); err != nil {
+		t.Fatal(err)
+	}
+	if requirement != 1 {
+		t.Errorf("policy requirement count = %d, want 1", requirement)
+	}
+}
+
 func assertPostgresNodeOfferColumnTypes(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -397,8 +532,8 @@ func TestSchemaV30CompositeRestoresAgentLossFieldsPostgres(t *testing.T) {
 		t.Fatalf("open v29 shape at schema %d: %v", store.ExpectedSchemaVersion(), err)
 	}
 	defer up.Close()
-	if got, err := up.CurrentSchemaVersion(ctx); err != nil || got != 30 {
-		t.Fatalf("schema version = %d, err=%v, want 30", got, err)
+	if got, err := up.CurrentSchemaVersion(ctx); err != nil || got != store.ExpectedSchemaVersion() {
+		t.Fatalf("schema version = %d, err=%v, want %d", got, err, store.ExpectedSchemaVersion())
 	}
 	for table, names := range map[string][]string{
 		"runs":     {"retry_cause_node_id", "retry_avoid_coordinator_id", "retry_avoid_executor_kind", "retry_avoid_executor_id", "retry_avoid_until"},

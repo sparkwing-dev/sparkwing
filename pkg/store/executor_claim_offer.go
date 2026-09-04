@@ -253,7 +253,7 @@ func (s *Store) offerExecutorClaimAt(ctx context.Context, claimant ClaimIdentity
 		return ExecutorClaimOfferResult{Node: n}, nil
 	}
 
-	n := &Node{}
+	n := &nodeRecord{}
 	err = scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
  WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL
@@ -566,7 +566,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 		return nil, ErrNotFound
 	}
 	item := &candidates[0]
-	n := &Node{}
+	n := &nodeRecord{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL
    AND claimed_by IS NULL AND `+nodeNotDone, runID, nodeID), n); err != nil {
@@ -624,7 +624,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 	if n.RequiredExecutorLocation == "" {
 		n.RequiredExecutorLocation = item.ExecutorLocation
 	}
-	item.Node = n
+	item.Node = &n.Node
 	selected := executionAttributionEventFields(item.ExecutorKind, item.ExecutorName, item.ExecutorLocation)
 	if n.AvoidUntil != nil && n.AvoidUntil.After(now) {
 		selected["avoid_until"] = n.AvoidUntil
@@ -818,12 +818,12 @@ func claimedExecutorOffer(ctx context.Context, tx *storeTx, claimant ClaimIdenti
 		executorName.String != offer.ExecutorName || reservationID.String != offer.ReservationID || slot != offer.Slot || expires < now.UnixNano() {
 		return nil, false, nil
 	}
-	n := &Node{}
+	n := &nodeRecord{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes WHERE run_id = ? AND node_id = ?`, offer.RunID, offer.NodeID), n); err != nil {
 		return nil, false, err
 	}
-	return n, true, nil
+	return &n.Node, true, nil
 }
 
 // FinalizeExecutorClaimRound awards the best live offer after the deadline or

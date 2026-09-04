@@ -151,6 +151,7 @@ func TestSchemaV28_UpgradeOfARealV27ShapeCascadesAndDropsOrphans(t *testing.T) {
 	if v := readSchemaVersion(t, up.DB()); v != store.ExpectedSchemaVersion() {
 		t.Errorf("version after upgrade = %d, want %d", v, store.ExpectedSchemaVersion())
 	}
+	assertExecutionPolicySchemaSQLite(t, up.DB())
 	if got := countNodeMetrics(t, up.DB()); got != 1 {
 		t.Fatalf("node_metrics after upgrade = %d, want 1 (the orphan should be gone)", got)
 	}

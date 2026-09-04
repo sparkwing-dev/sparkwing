@@ -73,8 +73,8 @@ func TestSchemaV30CompositeRestoresAgentLossFieldsSQLite(t *testing.T) {
 		t.Fatalf("open v29 shape at schema %d: %v", store.ExpectedSchemaVersion(), err)
 	}
 	defer up.Close()
-	if got := readSchemaVersion(t, up.DB()); got != 30 {
-		t.Fatalf("schema version = %d, want 30", got)
+	if got := readSchemaVersion(t, up.DB()); got != store.ExpectedSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", got, store.ExpectedSchemaVersion())
 	}
 	for table, names := range map[string][]string{
 		"runs":     {"retry_cause_node_id", "retry_avoid_coordinator_id", "retry_avoid_executor_kind", "retry_avoid_executor_id", "retry_avoid_until"},

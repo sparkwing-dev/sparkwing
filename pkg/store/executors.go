@@ -457,12 +457,12 @@ func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (Ex
 }
 
 func (s *Store) schedulingSummaryTx(ctx context.Context, tx *storeTx, runID, nodeID string) (ExecutorSchedulingSummary, error) {
-	n := &Node{}
+	n := &nodeRecord{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes WHERE run_id = ? AND node_id = ?`, runID, nodeID), n); err != nil {
 		return ExecutorSchedulingSummary{}, err
 	}
-	charge, err := s.executorNodeCharge(ctx, tx, n)
+	charge, err := s.executorNodeCharge(ctx, tx, &n.Node)
 	if err != nil {
 		return ExecutorSchedulingSummary{}, err
 	}
@@ -1108,7 +1108,7 @@ func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, cl
 }
 
 func (s *Store) claimReadyNodeForExecutorTx(ctx context.Context, tx *storeTx, claimant ClaimIdentity, executorName, runID, nodeID, holderID string, lease time.Duration, reservationID string, slot int, resourceDigest string) (*Node, error) {
-	n := &Node{}
+	n := &nodeRecord{}
 	err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
  WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+tx.forUpdate(), runID, nodeID), n)
@@ -1185,7 +1185,7 @@ SELECT COUNT(*), COALESCE(SUM(claim_cores), 0), COALESCE(SUM(claim_memory_bytes)
 		return nil, ErrNotFound
 	}
 
-	charge, err := s.executorNodeCharge(ctx, tx, n)
+	charge, err := s.executorNodeCharge(ctx, tx, &n.Node)
 	if err != nil {
 		return nil, err
 	}
@@ -1263,7 +1263,7 @@ UPDATE nodes
 	if _, err := appendEventTx(ctx, tx, n.RunID, n.NodeID, "executor_selected", payload, now); err != nil {
 		return nil, err
 	}
-	return n, nil
+	return &n.Node, nil
 }
 
 // ValidateExecutorClaimReservation proves that a live claim carries the

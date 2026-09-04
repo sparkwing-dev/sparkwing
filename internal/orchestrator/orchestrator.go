@@ -3395,9 +3395,6 @@ func effectiveJobRequires(n *sparkwing.JobNode, pipelineRequires []string) []str
 		out = append(out, l)
 	}
 	for _, l := range pipelineRequires {
-		if l == "local" {
-			continue
-		}
 		if _, ok := seen[l]; ok {
 			continue
 		}

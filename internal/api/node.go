@@ -1,6 +1,8 @@
 package api
 
-import "github.com/sparkwing-dev/sparkwing/pkg/store"
+import (
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
 
 // PublicNode returns the credential-safe shape shared by node read surfaces.
 func PublicNode(node *store.Node) *store.Node {

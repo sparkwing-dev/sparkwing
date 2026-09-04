@@ -17,6 +17,7 @@ var fleetRequirementNames = []string{
 	"executor-enrollment-v1",
 	"executor-offer-arbitration-v1",
 	"agent-loss-attempt-fencing-v1",
+	"assisted-execution-policy-v1",
 }
 
 func deleteFleetRequirements(t *testing.T, db *sql.DB) {
@@ -206,8 +207,8 @@ func seedLegacyFleetSQLite(t *testing.T, path string, stage int) {
 
 func assertSQLiteWave2AndFleetV30(t *testing.T, db *sql.DB) {
 	t.Helper()
-	if got := readSchemaVersion(t, db); got != 30 {
-		t.Fatalf("schema version = %d, want 30", got)
+	if got := readSchemaVersion(t, db); got != store.ExpectedSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", got, store.ExpectedSchemaVersion())
 	}
 	if got, want := requirementNames(t, db), store.KnownRequirements(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("requirements = %v, want %v", got, want)
@@ -265,8 +266,8 @@ func TestSchemaV30FreshSQLiteHasWave2AndFleetShape(t *testing.T) {
 func assertPostgresWave2AndFleetV30(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()
-	if got, err := st.CurrentSchemaVersion(ctx); err != nil || got != 30 {
-		t.Fatalf("schema version = %d, %v; want 30", got, err)
+	if got, err := st.CurrentSchemaVersion(ctx); err != nil || got != store.ExpectedSchemaVersion() {
+		t.Fatalf("schema version = %d, %v; want %d", got, err, store.ExpectedSchemaVersion())
 	}
 	if got, want := requirementNames(t, st.DB()), store.KnownRequirements(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("requirements = %v, want %v", got, want)

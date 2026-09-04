@@ -12,6 +12,9 @@ const (
 )
 
 func legacyFleetStage(version int, listed []SchemaRequirement) (int, bool, error) {
+	if version > 30 {
+		return 0, false, nil
+	}
 	haveEnrollment := false
 	haveOffers := false
 	haveAgentLoss := false

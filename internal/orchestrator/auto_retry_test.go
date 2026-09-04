@@ -495,6 +495,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, runID, sourceRunID, sourceRunID, []byte(`["always
 		time.Now().UnixNano(), time.Now().Add(time.Hour).UnixNano(), 1); err != nil {
 		t.Fatal(err)
 	}
+	seedAgentLossRetrySourceFixture(t, st, runID, sourceRunID)
 	res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{
 		Pipeline: "auto-retry-exhausts", RunID: runID, State: st,
 	})

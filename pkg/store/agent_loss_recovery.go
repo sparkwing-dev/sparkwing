@@ -454,6 +454,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, retryID, sourceRunID, rootRunID, causesJSON,
 		availableAt.UnixNano(), deadline.UnixNano(), retryCount); err != nil {
 		return "", nil, nil, err
 	}
+	if err := snapshotAgentLossRetryNodesTx(ctx, tx, retryID, sourceRunID); err != nil {
+		return "", nil, nil, err
+	}
 	return retryID, causes, decisions, nil
 }
 

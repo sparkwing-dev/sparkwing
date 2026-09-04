@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -566,6 +567,14 @@ CREATE TABLE IF NOT EXISTS nodes (
     executor_location TEXT NOT NULL DEFAULT 'unknown',
     required_coordinator_id TEXT NOT NULL DEFAULT '',
     required_executor_location TEXT NOT NULL DEFAULT '',
+    execution_policy_json BLOB,
+    execution_policy_hash TEXT NOT NULL DEFAULT '',
+    execution_policy_version INTEGER NOT NULL DEFAULT 0,
+    execution_body_protocol INTEGER NOT NULL DEFAULT 0,
+    execution_supervisor_requirements_json BLOB,
+    execution_supervisor_requirements_hash TEXT NOT NULL DEFAULT '',
+    execution_body_requirements_json BLOB,
+    execution_body_requirements_hash TEXT NOT NULL DEFAULT '',
     avoid_coordinator_id TEXT NOT NULL DEFAULT '',
     avoid_executor_kind TEXT NOT NULL DEFAULT '',
     avoid_executor_id TEXT NOT NULL DEFAULT '',
@@ -609,6 +618,9 @@ CREATE INDEX IF NOT EXISTS idx_nodes_claimable
 CREATE INDEX IF NOT EXISTS idx_nodes_claimed_lease
     ON nodes(lease_expires_at)
     WHERE claimed_by IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_nodes_assisted_claimable
+    ON nodes(ready_at, execution_body_protocol)
+    WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND outcome = '' AND finished_at IS NULL AND execution_policy_hash != '';
 
 CREATE TABLE IF NOT EXISTS node_claim_offers (
     claim_token_prefix TEXT NOT NULL DEFAULT '',
@@ -628,6 +640,11 @@ CREATE TABLE IF NOT EXISTS node_claim_offers (
     offered_at         INTEGER NOT NULL,
     last_seen_at       INTEGER NOT NULL,
     lease_ns           INTEGER NOT NULL,
+    execution_policy_hash TEXT NOT NULL DEFAULT '',
+    execution_policy_version INTEGER NOT NULL DEFAULT 0,
+    execution_body_protocol INTEGER NOT NULL DEFAULT 0,
+    execution_supervisor_requirements_hash TEXT NOT NULL DEFAULT '',
+    execution_body_requirements_hash TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (claim_token_prefix, claim_principal, holder_id),
     FOREIGN KEY (run_id, node_id) REFERENCES nodes(run_id, node_id) ON DELETE CASCADE
 );
@@ -656,9 +673,50 @@ CREATE TABLE IF NOT EXISTS executors (
     headroom_reported     INTEGER NOT NULL DEFAULT 0,
     headroom_cores        DOUBLE PRECISION NOT NULL DEFAULT 0,
     headroom_memory_bytes INTEGER NOT NULL DEFAULT 0,
-    queue_depth           INTEGER NOT NULL DEFAULT 0
+    queue_depth           INTEGER NOT NULL DEFAULT 0,
+    supported_body_protocol_min INTEGER NOT NULL DEFAULT 0,
+    supported_body_protocol_max INTEGER NOT NULL DEFAULT 0,
+    supervisor_requirements_json BLOB,
+    body_runtime_requirements_json BLOB,
+    runner_build_identity_json BLOB
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_executors_executor_id ON executors(executor_id);
+
+CREATE TABLE IF NOT EXISTS agent_loss_retry_node_sources (
+    retry_run_id       TEXT NOT NULL,
+    source_run_id      TEXT NOT NULL,
+    node_id            TEXT NOT NULL,
+    deps_json          BLOB NOT NULL,
+    needs_labels_json  BLOB,
+    prefers_labels_json BLOB,
+    requested_cores    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    requested_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    requested_slots    INTEGER NOT NULL DEFAULT 1,
+    attempts_consumed  INTEGER NOT NULL DEFAULT 0,
+    required_coordinator_id TEXT NOT NULL DEFAULT '',
+    required_executor_location TEXT NOT NULL DEFAULT '',
+    avoid_coordinator_id TEXT NOT NULL DEFAULT '',
+    avoid_executor_kind TEXT NOT NULL DEFAULT '',
+    avoid_executor_id TEXT NOT NULL DEFAULT '',
+    avoid_until INTEGER,
+    policy_json        BLOB,
+    policy_hash        TEXT NOT NULL DEFAULT '',
+    policy_version     INTEGER NOT NULL DEFAULT 0,
+    body_protocol      INTEGER NOT NULL DEFAULT 0,
+    supervisor_requirements_json BLOB,
+    supervisor_requirements_hash TEXT NOT NULL DEFAULT '',
+    body_requirements_json BLOB,
+    body_requirements_hash TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (retry_run_id, node_id),
+    FOREIGN KEY (retry_run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS agent_loss_retry_legacy_deny_all (
+    retry_run_id  TEXT PRIMARY KEY,
+    source_run_id TEXT NOT NULL,
+    reason        TEXT NOT NULL,
+    FOREIGN KEY (retry_run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS events (
     run_id   TEXT NOT NULL,
@@ -969,7 +1027,61 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 30
+const expectedSchemaVersion = 31
+
+var nodeExecutionPolicyCols = map[string]string{
+	"execution_policy_json":                  "BLOB",
+	"execution_policy_hash":                  "TEXT NOT NULL DEFAULT ''",
+	"execution_policy_version":               "INTEGER NOT NULL DEFAULT 0",
+	"execution_body_protocol":                "INTEGER NOT NULL DEFAULT 0",
+	"execution_supervisor_requirements_json": "BLOB",
+	"execution_supervisor_requirements_hash": "TEXT NOT NULL DEFAULT ''",
+	"execution_body_requirements_json":       "BLOB",
+	"execution_body_requirements_hash":       "TEXT NOT NULL DEFAULT ''",
+}
+
+var nodeExecutionPolicyColsPostgres = map[string]string{
+	"execution_policy_json":                  "BYTEA",
+	"execution_policy_hash":                  "TEXT NOT NULL DEFAULT ''",
+	"execution_policy_version":               "BIGINT NOT NULL DEFAULT 0",
+	"execution_body_protocol":                "BIGINT NOT NULL DEFAULT 0",
+	"execution_supervisor_requirements_json": "BYTEA",
+	"execution_supervisor_requirements_hash": "TEXT NOT NULL DEFAULT ''",
+	"execution_body_requirements_json":       "BYTEA",
+	"execution_body_requirements_hash":       "TEXT NOT NULL DEFAULT ''",
+}
+
+var executorExecutionProtocolCols = map[string]string{
+	"supported_body_protocol_min":    "INTEGER NOT NULL DEFAULT 0",
+	"supported_body_protocol_max":    "INTEGER NOT NULL DEFAULT 0",
+	"supervisor_requirements_json":   "BLOB",
+	"body_runtime_requirements_json": "BLOB",
+	"runner_build_identity_json":     "BLOB",
+}
+
+var executorExecutionProtocolColsPostgres = map[string]string{
+	"supported_body_protocol_min":    "BIGINT NOT NULL DEFAULT 0",
+	"supported_body_protocol_max":    "BIGINT NOT NULL DEFAULT 0",
+	"supervisor_requirements_json":   "BYTEA",
+	"body_runtime_requirements_json": "BYTEA",
+	"runner_build_identity_json":     "BYTEA",
+}
+
+var claimOfferExecutionPolicyCols = map[string]string{
+	"execution_policy_hash":                  "TEXT NOT NULL DEFAULT ''",
+	"execution_policy_version":               "INTEGER NOT NULL DEFAULT 0",
+	"execution_body_protocol":                "INTEGER NOT NULL DEFAULT 0",
+	"execution_supervisor_requirements_hash": "TEXT NOT NULL DEFAULT ''",
+	"execution_body_requirements_hash":       "TEXT NOT NULL DEFAULT ''",
+}
+
+var claimOfferExecutionPolicyColsPostgres = map[string]string{
+	"execution_policy_hash":                  "TEXT NOT NULL DEFAULT ''",
+	"execution_policy_version":               "BIGINT NOT NULL DEFAULT 0",
+	"execution_body_protocol":                "BIGINT NOT NULL DEFAULT 0",
+	"execution_supervisor_requirements_hash": "TEXT NOT NULL DEFAULT ''",
+	"execution_body_requirements_hash":       "TEXT NOT NULL DEFAULT ''",
+}
 
 var nodeAgentRetryCols = map[string]string{
 	"claim_generation":           "INTEGER NOT NULL DEFAULT 0",
@@ -1047,6 +1159,60 @@ var nodeExecutionAttemptsTablePostgres = strings.NewReplacer(
 	"INTEGER", "BIGINT",
 	"BLOB", "BYTEA",
 ).Replace(nodeExecutionAttemptsTableSQLite)
+
+const agentLossRetryNodeSourcesTableSQLite = `CREATE TABLE IF NOT EXISTS agent_loss_retry_node_sources (
+    retry_run_id       TEXT NOT NULL,
+    source_run_id      TEXT NOT NULL,
+    node_id            TEXT NOT NULL,
+    deps_json          BLOB NOT NULL,
+    needs_labels_json  BLOB,
+    prefers_labels_json BLOB,
+    requested_cores    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    requested_memory_bytes INTEGER NOT NULL DEFAULT 0,
+    requested_slots    INTEGER NOT NULL DEFAULT 1,
+    attempts_consumed  INTEGER NOT NULL DEFAULT 0,
+    required_coordinator_id TEXT NOT NULL DEFAULT '',
+    required_executor_location TEXT NOT NULL DEFAULT '',
+    avoid_coordinator_id TEXT NOT NULL DEFAULT '',
+    avoid_executor_kind TEXT NOT NULL DEFAULT '',
+    avoid_executor_id TEXT NOT NULL DEFAULT '',
+    avoid_until INTEGER,
+    policy_json        BLOB,
+    policy_hash        TEXT NOT NULL DEFAULT '',
+    policy_version     INTEGER NOT NULL DEFAULT 0,
+    body_protocol      INTEGER NOT NULL DEFAULT 0,
+    supervisor_requirements_json BLOB,
+    supervisor_requirements_hash TEXT NOT NULL DEFAULT '',
+    body_requirements_json BLOB,
+    body_requirements_hash TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (retry_run_id, node_id),
+    FOREIGN KEY (retry_run_id) REFERENCES runs(id) ON DELETE CASCADE
+);`
+
+var agentLossRetryNodeSourcesTablePostgres = strings.NewReplacer(
+	"INTEGER", "BIGINT",
+	"BLOB", "BYTEA",
+).Replace(agentLossRetryNodeSourcesTableSQLite)
+
+const agentLossRetryLegacyDenyAllTable = `CREATE TABLE IF NOT EXISTS agent_loss_retry_legacy_deny_all (
+    retry_run_id  TEXT PRIMARY KEY,
+    source_run_id TEXT NOT NULL,
+    reason        TEXT NOT NULL,
+    FOREIGN KEY (retry_run_id) REFERENCES runs(id) ON DELETE CASCADE
+);`
+
+const nodesAssistedClaimableIndex = `CREATE INDEX IF NOT EXISTS idx_nodes_assisted_claimable
+    ON nodes(ready_at, execution_body_protocol)
+    WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND outcome = '' AND finished_at IS NULL AND execution_policy_hash != ''`
+
+const nodeExecutionUnsealed = `COALESCE(execution_policy_hash, '') = ''
+   AND COALESCE(LENGTH(execution_policy_json), 0) = 0
+   AND COALESCE(execution_policy_version, 0) = 0
+   AND COALESCE(execution_body_protocol, 0) = 0
+   AND COALESCE(LENGTH(execution_supervisor_requirements_json), 0) = 0
+   AND COALESCE(execution_supervisor_requirements_hash, '') = ''
+   AND COALESCE(LENGTH(execution_body_requirements_json), 0) = 0
+   AND COALESCE(execution_body_requirements_hash, '') = ''`
 
 const executorsTableSQLite = `CREATE TABLE IF NOT EXISTS executors (
     name                  TEXT PRIMARY KEY,
@@ -1521,6 +1687,7 @@ var migrationRequirements = map[int][]string{
 		executorOfferRequirement,
 		agentLossRequirement,
 	},
+	31: {assistedExecutionPolicyRequirement},
 }
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
@@ -1620,9 +1787,34 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return err
 	case 30:
 		return applyFleetMigrationSQLite(ctx, tx)
+	case 31:
+		return applyExecutionPolicyMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
+}
+
+func applyExecutionPolicyMigrationSQLite(ctx context.Context, tx *storeTx) error {
+	if err := ensureColumnsSQLite(ctx, tx, "nodes", nodeExecutionPolicyCols); err != nil {
+		return err
+	}
+	if err := ensureColumnsSQLite(ctx, tx, "executors", executorExecutionProtocolCols); err != nil {
+		return err
+	}
+	if err := ensureColumnsSQLite(ctx, tx, "node_claim_offers", claimOfferExecutionPolicyCols); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, agentLossRetryNodeSourcesTableSQLite); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, agentLossRetryLegacyDenyAllTable); err != nil {
+		return err
+	}
+	if err := backfillAgentLossRetryNodeSourcesTx(ctx, tx); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, nodesAssistedClaimableIndex)
+	return err
 }
 
 func applyFleetMigrationSQLite(ctx context.Context, tx *storeTx) error {
@@ -1792,9 +1984,34 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "nodes", nodesOrderCols)
 	case 30:
 		return applyFleetMigrationPostgres(ctx, tx)
+	case 31:
+		return applyExecutionPolicyMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
+}
+
+func applyExecutionPolicyMigrationPostgres(ctx context.Context, tx *storeTx) error {
+	if err := addColumnsTx(ctx, tx, "nodes", nodeExecutionPolicyColsPostgres); err != nil {
+		return err
+	}
+	if err := addColumnsTx(ctx, tx, "executors", executorExecutionProtocolColsPostgres); err != nil {
+		return err
+	}
+	if err := addColumnsTx(ctx, tx, "node_claim_offers", claimOfferExecutionPolicyColsPostgres); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, agentLossRetryNodeSourcesTablePostgres); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, agentLossRetryLegacyDenyAllTable); err != nil {
+		return err
+	}
+	if err := backfillAgentLossRetryNodeSourcesTx(ctx, tx); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, nodesAssistedClaimableIndex)
+	return err
 }
 
 func applyFleetMigrationPostgres(ctx context.Context, tx *storeTx) error {
@@ -3439,6 +3656,31 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if err := s.assertRunMutationFenceTx(ctx, tx, n.RunID); err != nil {
 		return err
 	}
+	requestedSlots := n.RequestedSlots
+	if requestedSlots < 1 {
+		requestedSlots = 1
+	}
+	n.RequestedSlots = requestedSlots
+	retrySource, isAgentLossRetry, err := s.requiredAgentLossRetryNodeSourceTx(ctx, tx, n.RunID, n.NodeID)
+	if err != nil {
+		return err
+	}
+	if isAgentLossRetry {
+		n.Deps = slices.Clone(retrySource.Record.Deps)
+		n.NeedsLabels = slices.Clone(retrySource.Record.NeedsLabels)
+		n.PrefersLabels = slices.Clone(retrySource.Record.PrefersLabels)
+		n.RequestedCores = retrySource.Record.RequestedCores
+		n.RequestedMemoryBytes = retrySource.Record.RequestedMemoryBytes
+		n.RequestedSlots = retrySource.Record.RequestedSlots
+		n.RequiredCoordinatorID = retrySource.Record.RequiredCoordinatorID
+		n.RequiredExecutorLocation = retrySource.Record.RequiredExecutorLocation
+		n.AvoidCoordinatorID = retrySource.Record.AvoidCoordinatorID
+		n.AvoidExecutorKind = retrySource.Record.AvoidExecutorKind
+		n.AvoidExecutorID = retrySource.Record.AvoidExecutorID
+		n.AvoidUntil = retrySource.Record.AvoidUntil
+		n.AttemptsConsumed = retrySource.Record.AttemptsConsumed
+		requestedSlots = n.RequestedSlots
+	}
 	depsJSON, _ := json.Marshal(n.Deps)
 	var labelsJSON []byte
 	if len(n.NeedsLabels) > 0 {
@@ -3448,52 +3690,54 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 	if len(n.PrefersLabels) > 0 {
 		prefersJSON, _ = json.Marshal(n.PrefersLabels)
 	}
-	requestedSlots := n.RequestedSlots
-	if requestedSlots < 1 {
-		requestedSlots = 1
+	var policyJSON, supervisorRequirementsJSON, bodyRequirementsJSON []byte
+	var policyHash, supervisorRequirementsHash, bodyRequirementsHash string
+	var policyVersion, bodyProtocol int
+	if isAgentLossRetry {
+		persisted, persistErr := nodeExecutionPolicyPersistence(&retrySource.Record)
+		if persistErr != nil {
+			return persistErr
+		}
+		policyJSON, policyHash = persisted.PolicyJSON, persisted.PolicyHash
+		policyVersion, bodyProtocol = persisted.PolicyVersion, persisted.BodyProtocol
+		supervisorRequirementsJSON = persisted.SupervisorRequirementsJSON
+		supervisorRequirementsHash = persisted.SupervisorRequirementsHash
+		bodyRequirementsJSON = persisted.BodyRequirementsJSON
+		bodyRequirementsHash = persisted.BodyRequirementsHash
 	}
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels, prefers_labels,
                    requested_cores, requested_memory_bytes, requested_slots,
 			       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
 			       attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
+			       execution_policy_json, execution_policy_hash, execution_policy_version, execution_body_protocol,
+			       execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
+			       execution_body_requirements_json, execution_body_requirements_hash,
 			       seq)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
-		COALESCE((SELECT src.avoid_coordinator_id FROM agent_loss_retries alr JOIN nodes src
-		           ON src.run_id = alr.source_run_id AND src.node_id = ? WHERE alr.run_id = ?),
-		         (SELECT retry_avoid_coordinator_id FROM runs WHERE id = ?), ''),
-		COALESCE((SELECT src.avoid_executor_kind FROM agent_loss_retries alr JOIN nodes src
-		           ON src.run_id = alr.source_run_id AND src.node_id = ? WHERE alr.run_id = ?),
-		         (SELECT retry_avoid_executor_kind FROM runs WHERE id = ?), ''),
-		COALESCE((SELECT src.avoid_executor_id FROM agent_loss_retries alr JOIN nodes src
-		           ON src.run_id = alr.source_run_id AND src.node_id = ? WHERE alr.run_id = ?),
-		         (SELECT retry_avoid_executor_id FROM runs WHERE id = ?), ''),
-		COALESCE((SELECT src.avoid_until FROM agent_loss_retries alr JOIN nodes src
-		           ON src.run_id = alr.source_run_id AND src.node_id = ? WHERE alr.run_id = ?),
-		         (SELECT retry_avoid_until FROM runs WHERE id = ?)),
-		COALESCE((SELECT src.attempts_consumed
-		            FROM agent_loss_retries alr
-		            JOIN nodes src ON src.run_id = alr.source_run_id AND src.node_id = ?
-                   WHERE alr.run_id = ?), 0),
-		COALESCE((SELECT root_run_id FROM agent_loss_retries WHERE run_id = ?), ?),
-		COALESCE((SELECT src.required_coordinator_id
-		            FROM agent_loss_retries alr JOIN nodes src
-		              ON src.run_id = alr.source_run_id AND src.node_id = ?
-		           WHERE alr.run_id = ?), ?),
-		COALESCE((SELECT src.required_executor_location
-		            FROM agent_loss_retries alr JOIN nodes src
-		              ON src.run_id = alr.source_run_id AND src.node_id = ?
-		           WHERE alr.run_id = ?), ?),
+		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_coordinator_id FROM runs WHERE id = ?), ''),
+		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_kind FROM runs WHERE id = ?), ''),
+		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_id FROM runs WHERE id = ?), ''),
+		COALESCE(?, (SELECT retry_avoid_until FROM runs WHERE id = ?)),
+		?,
+		COALESCE((SELECT root_run_id FROM agent_loss_retries WHERE run_id = ?), NULLIF(?, ''), ?),
+		?,
+		?,
+		?, ?, ?, ?, ?, ?, ?, ?,
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE run_id = ?))`,
 		n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
 		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
-		n.NodeID, n.RunID, n.RunID,
-		n.NodeID, n.RunID, n.RunID,
-		n.NodeID, n.RunID, n.RunID,
-		n.NodeID, n.RunID, n.RunID,
-		n.NodeID, n.RunID, n.RunID, n.RunID,
-		n.NodeID, n.RunID, n.RequiredCoordinatorID,
-		n.NodeID, n.RunID, n.RequiredExecutorLocation,
+		n.AvoidCoordinatorID, n.RunID,
+		n.AvoidExecutorKind, n.RunID,
+		n.AvoidExecutorID, n.RunID,
+		nullableUnixNano(n.AvoidUntil), n.RunID,
+		n.AttemptsConsumed,
+		n.RunID, n.RetryRootRunID, n.RunID,
+		n.RequiredCoordinatorID,
+		n.RequiredExecutorLocation,
+		policyJSON, policyHash, policyVersion, bodyProtocol,
+		supervisorRequirementsJSON, supervisorRequirementsHash,
+		bodyRequirementsJSON, bodyRequirementsHash,
 		n.RunID)
 	if err != nil {
 		return err
@@ -3574,9 +3818,16 @@ func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string)
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error {
 	depsJSON, _ := json.Marshal(deps)
 	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID,
-		`UPDATE nodes SET deps_json = ? WHERE run_id = ? AND node_id = ?`, depsJSON, runID, nodeID)
+		`UPDATE nodes SET deps_json = ?
+		  WHERE run_id = ? AND node_id = ? AND ready_at IS NULL AND `+nodeExecutionUnsealed,
+		depsJSON, runID, nodeID)
 	if err != nil {
 		return err
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return errExecutionPolicyConflict
 	}
 	return fencedRows(res, fenced)
 }
@@ -3701,11 +3952,11 @@ func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	defer func() { _ = rows.Close() }()
 	var out []*Node
 	for rows.Next() {
-		n := &Node{}
-		if err := scanNodeRow(rows, n); err != nil {
+		record := &nodeRecord{}
+		if err := scanNodeRow(rows, record); err != nil {
 			return nil, err
 		}
-		out = append(out, n)
+		out = append(out, &record.Node)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -3728,16 +3979,16 @@ func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error
 	row := s.queryRow(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
  WHERE run_id = ? AND node_id = ?`, runID, nodeID)
-	n := &Node{}
-	if err := scanNodeRow(row, n); err != nil {
+	record := &nodeRecord{}
+	if err := scanNodeRow(row, record); err != nil {
 		return nil, err
 	}
 	attempts, err := s.ListNodeExecutionAttempts(ctx, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	n.ExecutionAttempts = attempts
-	return n, nil
+	record.ExecutionAttempts = attempts
+	return &record.Node, nil
 }
 
 const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
@@ -3750,10 +4001,17 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error, o
 	   coordinator_id, claim_generation, claim_membership_id,
 	   executor_kind, executor_id, executor_location, execution_started_at, reservation_id,
 	   attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
-	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until`
+	   execution_policy_json, execution_policy_hash, execution_policy_version, execution_body_protocol,
+	   execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
+	   execution_body_requirements_json, execution_body_requirements_hash,
+	   avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
+	   (SELECT pipeline FROM runs WHERE id = nodes.run_id)`
 
-func scanNodeRow(rs rowScanner, n *Node) error {
+func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	var depsJSON, outputJSON, labelsJSON, prefersJSON, annotationsJSON []byte
+	var policyJSON, supervisorRequirementsJSON, bodyRequirementsJSON []byte
+	var policyHash, supervisorRequirementsHash, bodyRequirementsHash, pipeline string
+	var policyVersion, bodyProtocol int
 	var startedNS, finishedNS, readyNS, leaseNS, offerStartedNS, heartbeatNS, executionStartedNS, avoidUntilNS sql.NullInt64
 	var claimedBy sql.NullString
 	var exitCode sql.NullInt64
@@ -3769,7 +4027,10 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&n.CoordinatorID, &n.ClaimGeneration, &n.ClaimMembershipID,
 		&n.ExecutorKind, &n.ExecutorID, &n.ExecutorLocation, &executionStartedNS, &n.ReservationID,
 		&n.AttemptsConsumed, &n.RetryRootRunID, &n.RequiredCoordinatorID, &n.RequiredExecutorLocation,
-		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS)
+		&policyJSON, &policyHash, &policyVersion, &bodyProtocol,
+		&supervisorRequirementsJSON, &supervisorRequirementsHash,
+		&bodyRequirementsJSON, &bodyRequirementsHash,
+		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS, &pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -3783,6 +4044,13 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 	}
 	if len(prefersJSON) > 0 {
 		_ = json.Unmarshal(prefersJSON, &n.PrefersLabels)
+	}
+	if err := restoreNodeExecutionPolicySeal(n, policyJSON, policyHash, policyVersion, bodyProtocol,
+		supervisorRequirementsJSON, supervisorRequirementsHash, bodyRequirementsJSON, bodyRequirementsHash); err != nil {
+		return err
+	}
+	if err := validateNodeExecutionPolicy(n, pipeline); err != nil {
+		return err
 	}
 	if startedNS.Valid {
 		t := time.Unix(0, startedNS.Int64)
@@ -4136,6 +4404,14 @@ WHERE run_id = ? AND node_id = ? AND step_id = ?`,
 // MarkNodeReady opens the node's offer round with the highest attainable
 // executor priority from the same transaction that snapshots its requirements.
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
+	return s.markNodeReady(ctx, runID, nodeID, nil)
+}
+
+func (s *Store) markNodeReadyWithExecutionPolicy(ctx context.Context, runID, nodeID string, policy nodeExecutionPolicy) error {
+	return s.markNodeReady(ctx, runID, nodeID, &policy)
+}
+
+func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy *nodeExecutionPolicy) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -4144,16 +4420,88 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	if err := lockExecutorEligibilityTx(ctx, tx, true); err != nil {
 		return err
 	}
-	var opened sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT offer_started_at FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&opened); errors.Is(err, sql.ErrNoRows) {
+	node := &nodeRecord{}
+	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
+  FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID), node); err != nil {
+		return err
+	}
+	var pipeline string
+	if err := tx.QueryRowContext(ctx, `SELECT pipeline FROM runs WHERE id = ?`, runID).Scan(&pipeline); errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
 	}
+	opened := node.OfferStartedAt != nil
+	retrySource, isAgentLossRetry, err := s.requiredAgentLossRetryNodeSourceTx(ctx, tx, runID, nodeID)
+	if err != nil {
+		return err
+	}
+	if isAgentLossRetry && !agentLossRetrySourceMatchesMaterialized(retrySource, node) {
+		return fmt.Errorf("%w: retry node no longer matches durable source", errExecutionPolicyInvalid)
+	}
+
+	if policy == nil {
+		if err := validateNodeExecutionPolicy(node, pipeline); err != nil {
+			return err
+		}
+		if nodeHasExecutionPolicy(node) {
+			return errExecutionPolicyConflict
+		}
+		if isAgentLossRetry && nodeHasExecutionPolicy(&retrySource.Record) {
+			return errExecutionPolicyConflict
+		}
+	} else {
+		candidate := *node
+		copyNodeExecutionPolicy(&candidate, node)
+		if err := setNodeExecutionPolicy(&candidate, *policy); err != nil {
+			return err
+		}
+		if err := validateNodeExecutionPolicy(&candidate, pipeline); err != nil {
+			return err
+		}
+		if isAgentLossRetry {
+			if !nodeExecutionPoliciesEqual(&candidate, &retrySource.Record) {
+				return errExecutionPolicyConflict
+			}
+		}
+		if err := validateNodeExecutionPolicy(node, pipeline); err != nil {
+			return err
+		}
+		if nodeHasExecutionPolicy(node) {
+			if !nodeExecutionPoliciesEqual(node, &candidate) {
+				return errExecutionPolicyConflict
+			}
+		} else {
+			if opened {
+				return errExecutionPolicyConflict
+			}
+			persisted, persistErr := nodeExecutionPolicyPersistence(&candidate)
+			if persistErr != nil {
+				return persistErr
+			}
+			result, err := tx.ExecContext(ctx, `UPDATE nodes
+			   SET execution_policy_json = ?, execution_policy_hash = ?, execution_policy_version = ?, execution_body_protocol = ?,
+       execution_supervisor_requirements_json = ?, execution_supervisor_requirements_hash = ?,
+       execution_body_requirements_json = ?, execution_body_requirements_hash = ?
+			 WHERE run_id = ? AND node_id = ? AND offer_started_at IS NULL
+			   AND `+nodeExecutionUnsealed,
+				persisted.PolicyJSON, persisted.PolicyHash, persisted.PolicyVersion, persisted.BodyProtocol,
+				persisted.SupervisorRequirementsJSON, persisted.SupervisorRequirementsHash,
+				persisted.BodyRequirementsJSON, persisted.BodyRequirementsHash, runID, nodeID)
+			if err != nil {
+				return err
+			}
+			if changed, err := result.RowsAffected(); err != nil {
+				return err
+			} else if changed != 1 {
+				return errExecutionPolicyConflict
+			}
+		}
+	}
 	var summary ExecutorSchedulingSummary
 	target := 0
 	var now time.Time
-	if !opened.Valid {
+	if !opened {
 		if err := lockExecutorRegistryTx(ctx, tx, false); err != nil {
 			return err
 		}
@@ -4193,7 +4541,7 @@ func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	if n == 0 {
 		return ErrNotFound
 	}
-	if !opened.Valid {
+	if !opened {
 		if _, err := appendEventTx(ctx, tx, runID, nodeID, "executor_offer_round_opened", map[string]any{
 			"deadline":               now.Add(nodeClaimOfferWindow),
 			"priority_target":        target,
@@ -4354,11 +4702,12 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 			_ = tx.Rollback()
 			return nil, err
 		}
-		n := &Node{}
+		n := &nodeRecord{}
 		err = scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
  FROM nodes
- WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
+	WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
 	AND required_coordinator_id = '' AND required_executor_location = ''
+	AND `+nodeExecutionUnsealed+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
             AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)
  ORDER BY ready_at ASC
@@ -4399,7 +4748,8 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 			        executor_location = 'unknown', reservation_id = '', claim_membership_id = '',
 			        claim_generation = claim_generation + 1
 			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL
-			    AND required_coordinator_id = '' AND required_executor_location = ''`,
+			    AND required_coordinator_id = '' AND required_executor_location = ''
+			    AND `+nodeExecutionUnsealed,
 			holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
 			coordinatorID, n.RunID, n.NodeID,
 		); err != nil {
@@ -4414,7 +4764,7 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 		n.CoordinatorID = coordinatorID
 		n.ExecutorLocation = "unknown"
 		n.ClaimGeneration++
-		return n, nil
+		return &n.Node, nil
 	}
 	return nil, ErrNotFound
 }
