@@ -723,7 +723,11 @@ code change to unlock.
   green. Those lost lines now count as drops the same way an unreachable remote
   log store's do: the run records a `logs_drop` event, the node fails with
   reason `logs_dropped`, and `SPARKWING_LOGS_DROP_POLICY=warn` still keeps such
-  a run green.
+  a run green. The node log is now closed before that verdict is reached, so a
+  file that fails on close counts too, and a record that will not encode -- a
+  `NaN` or a func in a log record's attributes, say -- counts as one dropped
+  line on the local and the remote writer alike instead of vanishing on one and
+  failing the node on the other.
 - **orchestrator:** A node timeout or a cancelled run now interrupts the remote
   fetch and compile a node does when its pipeline is not in the runner image.
   The clone, the binary-cache download, the `go build` and the cache upload all

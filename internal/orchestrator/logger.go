@@ -19,6 +19,7 @@ type nodeLogger struct {
 	delegate sparkwing.Logger
 	nodeID   string
 
+	closed     bool
 	dropCount  int
 	dropReason string
 }
@@ -48,8 +49,10 @@ func (l *nodeLogger) Emit(rec sparkwing.LogRecord) {
 		rec.JobID = l.nodeID
 	}
 	l.mu.Lock()
-	if err := l.enc.Encode(&rec); err != nil {
-		l.recordDropLocked(err)
+	if !l.closed {
+		if err := l.enc.Encode(&rec); err != nil {
+			l.recordDropLocked(err)
+		}
 	}
 	l.mu.Unlock()
 	if l.delegate != nil {
@@ -57,9 +60,15 @@ func (l *nodeLogger) Emit(rec sparkwing.LogRecord) {
 	}
 }
 
+// Close is safe to call twice: the executor closes the log before it reads
+// [nodeLogger.Drops], and its own deferred close then has nothing left to do.
 func (l *nodeLogger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.closed {
+		return nil
+	}
+	l.closed = true
 	err := l.file.Close()
 	if err != nil {
 		l.recordDropLocked(err)
