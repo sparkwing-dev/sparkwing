@@ -9,7 +9,7 @@ import (
 	"syscall"
 )
 
-var errAssistedChildBreakawayUnsupported = errors.New("Windows Job breakaway is unavailable")
+var errAssistedChildBreakawayUnsupported = errors.New("job breakaway is unavailable on Windows")
 
 func platformIgnoreAssistedChildTermination() {
 	signal.Ignore(syscall.SIGTERM)
