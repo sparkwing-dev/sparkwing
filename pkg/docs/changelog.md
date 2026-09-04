@@ -317,8 +317,10 @@ code change to unlock.
   of leaving them behind forever -- the largest child table was the one the
   only pruning the system has never touched, and `ListNodeMetrics` still
   returned a deleted run's samples. Schema v28 adds the constraint on both
-  SQLite and Postgres and deletes samples already orphaned. Additive: an older
-  binary keeps reading and writing the migrated database.
+  SQLite and Postgres and deletes samples already orphaned, and indexes
+  `concurrency_cache` by `origin_run_id` so clearing a run's cache rows no
+  longer scans the table once per pruned run. Additive: an older binary keeps
+  reading and writing the migrated database.
 - **store:** Orphan reconciliation now runs on Postgres. Its freshness test
   called SQLite's variadic `max()` in a `WHERE` clause, which Postgres spells
   `GREATEST` and where its own `max` is an aggregate no `WHERE` accepts, so
