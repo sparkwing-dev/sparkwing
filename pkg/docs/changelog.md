@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.41.0] - 2026-09-04
 ### Added
 
 - **cli + orchestrator:** `sparkwing fleet init` creates an owner-only
