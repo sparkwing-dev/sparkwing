@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
 )
 
 func TestCheckFile_AllowsDocAndTagsRejectsNarration(t *testing.T) {
@@ -456,5 +458,106 @@ func TestDiffFailure_NamesTheFixAndTheEscape(t *testing.T) {
 	}
 	if got := diffFailure("", errors.New("boom")); !strings.Contains(got, "the staged diff") {
 		t.Errorf("the staged-mode failure does not name its scope: %s", got)
+	}
+}
+
+func TestUsage_NamesThePositionalAndTheCaps(t *testing.T) {
+	for _, want := range []string{
+		"<root>",
+		"one directory to walk",
+		"takes no list of files",
+		"at most 4 lines",
+		"120 characters",
+	} {
+		if !strings.Contains(usageText, want) {
+			t.Errorf("the usage text does not name %q:\n%s", want, usageText)
+		}
+	}
+}
+
+func TestAdvice_TellsTheAgentToTagRatherThanDelete(t *testing.T) {
+	for _, want := range []string{
+		"tag the comment, do not delete it",
+		"hack:/safety:/bug:/perf:",
+		"say why in one short line",
+		"belongs under hack: or safety:",
+	} {
+		if !strings.Contains(advice, want) {
+			t.Errorf("the failure advice does not say %q:\n%s", want, advice)
+		}
+	}
+	if strings.Contains(advice, "Fix: delete the comment") {
+		t.Errorf("the failure advice still leads with deleting the comment:\n%s", advice)
+	}
+}
+
+func TestCheckFile_NosecViolationsNameTheirRule(t *testing.T) {
+	src := `package widget
+
+import "os"
+
+func adjacent() {
+	// safety: the path is this process's own
+	// #nosec G703 -- the path comes from this user's own environment
+	_, _ = os.Stat(os.Getenv("WIDGET_PATH"))
+}
+
+func malformed() {
+	// #nosec G703
+	_, _ = os.Stat(os.Getenv("WIDGET_PATH"))
+}
+`
+	path := filepath.Join(t.TempDir(), "widget.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("violations = %+v, want the adjacent and malformed annotations", got)
+	}
+	for _, want := range []string{"nosec adjacency", "rides past this gate unread", "put a blank line"} {
+		if !strings.Contains(got[0].text, want) {
+			t.Errorf("the adjacency violation %q does not say %q", got[0].text, want)
+		}
+	}
+	if !strings.Contains(got[1].text, "nosec form") {
+		t.Errorf("the malformed violation %q does not name the form rule", got[1].text)
+	}
+}
+
+func TestScopedAdds_BaseChargesUntrackedFiles(t *testing.T) {
+	repo := newGatedRepo(t)
+	writeSource(t, filepath.Join(repo, "untracked_test.go"), "package p\n\nfunc h() {\n\t// narrate the new test\n}\n")
+	writeSource(t, filepath.Join(repo, "untracked.txt"), "not go\n")
+
+	added, err := scopedAdds(repo, false, "main")
+	if err != nil {
+		t.Fatalf("scopedAdds: %v", err)
+	}
+	if !added["untracked_test.go"][4] {
+		t.Errorf("the base diff reported %v; a comment in an untracked file is not charged to the branch", added)
+	}
+	if _, ok := added["untracked.txt"]; ok {
+		t.Errorf("the base diff reported %v; a non-Go untracked file is in scope", added)
+	}
+}
+
+func TestScopedAdds_StagedIgnoresUntrackedFiles(t *testing.T) {
+	repo := newGatedRepo(t)
+	writeSource(t, filepath.Join(repo, "untracked.go"), "package p\n\nfunc h() {\n\t// narrate\n}\n")
+
+	t.Setenv("GIT_INDEX_FILE", "")
+	t.Setenv(gitenv.GateIndexVar, "")
+
+	added, err := scopedAdds(repo, true, "")
+	if err != nil {
+		t.Fatalf("scopedAdds: %v", err)
+	}
+	if len(added) != 0 {
+		t.Errorf("the staged diff reported %v; an untracked file the commit does not carry is charged to it", added)
 	}
 }

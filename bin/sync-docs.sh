@@ -29,7 +29,7 @@ for arg in "$@"; do
   esac
 done
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SRC="$REPO_ROOT/docs"
 DST="$REPO_ROOT/pkg/docs/mirror"
 CHANGELOG_SRC="$REPO_ROOT/CHANGELOG.md"

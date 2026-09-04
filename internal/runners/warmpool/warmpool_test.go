@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -247,7 +248,16 @@ func TestRunnerDoesNotFallbackLabeledNode(t *testing.T) {
 }
 
 func TestRunnerCancellationRevokesUnclaimedNode(t *testing.T) {
-	st, ctrl, cleanup := newWarmPoolFixture(t, nil, nil)
+	polled := make(chan struct{})
+	var polledOnce sync.Once
+	st, ctrl, cleanup := newWarmPoolFixture(t, nil, func(next http.Handler, _ *store.Store) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			next.ServeHTTP(w, req)
+			if req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/nodes/build") {
+				polledOnce.Do(func() { close(polled) })
+			}
+		})
+	})
 	defer cleanup()
 	fallback := &fallbackRunner{}
 	r := New(ctrl, fallback, Config{
@@ -260,15 +270,10 @@ func TestRunnerCancellationRevokesUnclaimedNode(t *testing.T) {
 	go func() {
 		done <- r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
 	}()
-	for {
-		node, err := st.GetNode(context.Background(), "run-1", "build")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if node.ReadyAt != nil {
-			break
-		}
-		time.Sleep(time.Millisecond)
+	select {
+	case <-polled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("runner never reached the claim poll loop")
 	}
 	cancel()
 
@@ -278,6 +283,54 @@ func TestRunnerCancellationRevokesUnclaimedNode(t *testing.T) {
 			t.Fatalf("result = %+v, want cancelled", result)
 		}
 	case <-time.After(time.Second):
+		t.Fatal("runner did not stop after cancellation")
+	}
+	node, err := st.GetNode(context.Background(), "run-1", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.ReadyAt != nil {
+		t.Fatalf("ready_at = %v, want revoked on cancellation", node.ReadyAt)
+	}
+	if fallback.calls.Load() != 0 {
+		t.Fatalf("fallback calls = %d, want 0", fallback.calls.Load())
+	}
+}
+
+func TestRunnerCancellationDuringMarkReadyReportsCancelled(t *testing.T) {
+	cancels := make(chan context.CancelFunc, 1)
+	st, ctrl, cleanup := newWarmPoolFixture(t, nil, func(next http.Handler, _ *store.Store) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if strings.HasSuffix(req.URL.Path, "/mark-ready") {
+				(<-cancels)()
+				// safety: the caller is already gone, so the node must still reach ready for the revoke to matter
+				next.ServeHTTP(w, req.WithContext(context.WithoutCancel(req.Context())))
+				return
+			}
+			next.ServeHTTP(w, req)
+		})
+	})
+	defer cleanup()
+	fallback := &fallbackRunner{}
+	r := New(ctrl, fallback, Config{
+		PollInterval:     5 * time.Millisecond,
+		ClaimWaitTimeout: time.Minute,
+	}, quietTestLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancels <- cancel
+	done := make(chan runner.Result, 1)
+	go func() {
+		done <- r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	}()
+
+	select {
+	case result := <-done:
+		if result.Outcome != sparkwing.Cancelled {
+			t.Fatalf("result = %+v, want cancelled", result)
+		}
+	case <-time.After(10 * time.Second):
 		t.Fatal("runner did not stop after cancellation")
 	}
 	node, err := st.GetNode(context.Background(), "run-1", "build")

@@ -9,7 +9,8 @@ RESET="\033[0m"
 pass() { echo -e "  ${GREEN}PASS${RESET} $1"; }
 fail() { echo -e "  ${RED}FAIL${RESET} $1"; exit 1; }
 
-cd "$(git rev-parse --show-toplevel)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$ROOT"
 
 echo "==> dispatch substrate"
 go test ./pkg/orchestrator/store/ -run TestDispatch -count=1 >/dev/null 2>&1 || fail "store dispatch tests"

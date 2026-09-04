@@ -94,11 +94,26 @@ func runFrontendBuild(ctx context.Context) error {
 	return nil
 }
 
-func runFrontendBrowser(ctx context.Context) error {
-	marker := filepath.Join(sparkwing.WorkDir(), "web", "test-results", ".sparkwing-browser-failed")
-	if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("clear frontend browser failure marker: %w", err)
+func browserArtifactDirs() []string {
+	web := filepath.Join(sparkwing.WorkDir(), "web")
+	return []string{filepath.Join(web, "playwright-report"), filepath.Join(web, "test-results")}
+}
+
+func removeBrowserArtifacts() error {
+	var failures []error
+	for _, dir := range browserArtifactDirs() {
+		if err := os.RemoveAll(dir); err != nil {
+			failures = append(failures, fmt.Errorf("remove browser artifact directory %s: %w", dir, err))
+		}
 	}
+	return errors.Join(failures...)
+}
+
+func runFrontendBrowser(ctx context.Context) error {
+	if err := removeBrowserArtifacts(); err != nil {
+		return err
+	}
+	marker := filepath.Join(sparkwing.WorkDir(), "web", "test-results", ".sparkwing-browser-failed")
 	if _, err := sparkwing.Bash(ctx, "npm --prefix web run test:browser:gate").Run(); err != nil {
 		if markerErr := os.MkdirAll(filepath.Dir(marker), 0o755); markerErr != nil {
 			return errors.Join(fmt.Errorf("frontend browser smoke suite: %w", err), fmt.Errorf("create browser failure artifact directory: %w", markerErr))
@@ -106,9 +121,10 @@ func runFrontendBrowser(ctx context.Context) error {
 		if markerErr := os.WriteFile(marker, []byte("failed\n"), 0o644); markerErr != nil {
 			return errors.Join(fmt.Errorf("frontend browser smoke suite: %w", err), fmt.Errorf("write browser failure artifact marker: %w", markerErr))
 		}
+		// safety: a failed run keeps both directories because the hosted gate uploads them after this step.
 		return fmt.Errorf("frontend browser smoke suite: %w", err)
 	}
-	return nil
+	return removeBrowserArtifacts()
 }
 
 func checkComments(ctx context.Context) error {

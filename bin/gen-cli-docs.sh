@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 go -C "$REPO_ROOT" run ./cmd/sparkwing commands -o markdown --split-dir "$REPO_ROOT/docs"
 bash "$REPO_ROOT/bin/sync-docs.sh" >/dev/null
 

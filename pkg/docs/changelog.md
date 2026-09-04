@@ -155,6 +155,23 @@ code change to unlock.
 - **s3state:** `WithReadCacheTTL` bounds how stale a read of a run this process
   does not write may be, `DefaultDrainTimeout` bounds a synchronous outbox
   drain, and `DefaultOutboxMaxRows` caps the outbox queue.
+- **cli:** `sparkwing info --for-agent` names the command that works when a
+  `go.work` above the working directory does not list this repo's module, the
+  case that makes `go build`, `go test`, and `go run` fail with "does not
+  contain modules listed in go.work" inside a git worktree. The line carries the
+  workspace file and `GOWORK=off go -C <module root> build ./...` with the paths
+  filled in, and says why `-C` on its own is not enough: go reads the workspace
+  from the directory it lands in. It appears only when a workspace in scope
+  leaves the module out.
+- **cli:** `sparkwing run --sw-isolated-home DIR` keeps one run's state and
+  config under `DIR`, so it hosts an admission daemon from the sparkwing you
+  invoked instead of joining the machine's. It is the way to gate a branch
+  whose pipeline binary carries a newer runs-store schema than the installed
+  release hosting the daemon, without replacing that daemon for every other
+  repository on the box. The admission refusals that skew produces -- the
+  daemon-store-schema error and a `terminal-check` eviction -- now print the
+  command, naming the pipeline being run. `sparkwing runs submit` refuses the
+  flag, because a detached run executes against the resident consumer's home.
 
 ### Changed
 
@@ -332,7 +349,32 @@ code change to unlock.
   removing one fails the release rather than quietly shrinking the preflight.
   The full gates keep their existing coverage.
 
+- **release:** `CHANGELOG.md` and the `pkg/docs/changelog.md` mirror carry
+  `merge=union` in `.gitattributes`, so branches that each add `[Unreleased]`
+  bullets merge without a conflict and without a hand resolution. Union merge
+  keeps both sides of a hunk, which gets two cases wrong: two branches
+  rewording one bullet produce both wordings, and two branches renaming
+  `[Unreleased]` to different versions stack both headings on adjacent lines.
+  `bin/check-changelog.sh` now fails on that stacked pair rather than letting a
+  release ship it.
+
 ### Fixed
+
+- **runners:** A warm-pool node cancelled while the orchestrator was still
+  announcing it to the controller now reports `cancelled` instead of `failed`.
+  The runner also revokes the node's readiness on that path, so a cancellation
+  landing mid-announcement cannot leave the node advertised to remote agents.
+
+- **web:** ESLint no longer reads Playwright's output. `playwright-report/` and
+  `test-results/` join the dashboard's ESLint ignore list, so a browser run that
+  left its HTML report and traces behind no longer fails the next lint step with
+  thousands of findings from Playwright's own minified trace viewer. The
+  pre-commit browser gate now also clears both directories before it starts and
+  after it passes; a failed run still keeps them, because that is what the
+  hosted gate uploads.
+- **tooling:** `bin/` scripts resolve the repository root from their own
+  location, so running one by absolute path from another checkout or a
+  worktree operates on the script's own tree.
 
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
@@ -526,6 +568,15 @@ code change to unlock.
   `WithReadCacheTTL`), a read that found no run is not cached at all, and
   `GetLatestRun` reads each run envelope without retaining it, so scanning a
   bucket no longer pins every run in it for the life of the process.
+- **ci:** The `commentcheck` gate tells an agent what to do instead of implying
+  the comment should go. `--help` now names the `<root>` positional -- one
+  directory to walk, not a list of files -- and the caps a tagged comment obeys
+  (four lines, 120 characters each). The failure text says to tag the comment
+  rather than delete it and names the tag ordinary rationale belongs under, so a
+  why-comment survives the gate. A `#nosec` annotation sharing a group with
+  another line now names the rule it broke and why, and `-base` charges
+  untracked `.go` files to the branch, so a new test file no longer reports
+  clean before the commit and fails after it.
 
 ### Security
 

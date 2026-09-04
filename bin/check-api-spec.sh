@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 spec="$REPO_ROOT/api/openapi.yaml"
 
 rewritten="$(mktemp)"
