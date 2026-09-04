@@ -3,6 +3,7 @@ package supervise
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -216,5 +217,38 @@ func TestStopChildEscalatesWhenTerminateReturnsError(t *testing.T) {
 	terms, kills := child.actions()
 	if terms != 1 || kills != 1 {
 		t.Fatalf("cleanup actions after terminate error = term:%d kill:%d, want one each", terms, kills)
+	}
+}
+
+func TestStopChildDoesNotSignalAChildThatAlreadyExited(t *testing.T) {
+	child := newSupervisorTestChild()
+	want := errors.New("idle exit")
+	child.done <- want
+
+	if err := stopChild(child, time.Second); !errors.Is(err, want) {
+		t.Fatalf("stopChild = %v, want the recorded exit %v", err, want)
+	}
+	terms, kills := child.actions()
+	if terms != 0 || kills != 0 {
+		t.Fatalf("signals sent to an exited child = term:%d kill:%d, want none", terms, kills)
+	}
+}
+
+func TestExecChildStopsSignallingOnceItHasBeenReaped(t *testing.T) {
+	child, err := startExecChild(os.Args[0], []string{"-test.list=^$"})
+	if err != nil {
+		t.Fatalf("start exec child: %v", err)
+	}
+	select {
+	case <-child.Wait():
+	case <-time.After(30 * time.Second):
+		t.Fatal("helper process never exited")
+	}
+
+	if err := child.Terminate(); err != nil {
+		t.Fatalf("terminate after reap = %v, want a no-op", err)
+	}
+	if err := child.Kill(); err != nil {
+		t.Fatalf("kill after reap = %v, want a no-op", err)
 	}
 }
