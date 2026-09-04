@@ -360,6 +360,17 @@ code change to unlock.
 
 ### Fixed
 
+- **local admission:** A guarded session (`sparkwing queue exec`) whose client
+  dies is now reaped instead of held forever. The daemon marked the lease
+  disconnected and waited for the command tree to end on its own -- no timer, and
+  nothing that would ever end it -- so an abandoned tree kept its cores,
+  memory and semaphores charged and the daemon could never idle out. A
+  disconnected guard now gets the same bounded grace an unreclaimed lease gets
+  after a daemon restart (30 seconds by default, `GraceWindow`); when it closes,
+  the daemon terminates the session, releases the lease and finalizes the run.
+  A client that reattaches inside the window keeps its session running, and a
+  tree that ends on its own is still released the moment the sweep sees it.
+
 - **local admission:** A daemon restart no longer hands one connection every
   member of a lease a nested run shares. A parent and its child present the
   same lease token, so whichever reclaimed the lease first took the other's

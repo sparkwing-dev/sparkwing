@@ -1296,6 +1296,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		session := guard.Session
 		c.guard = &session
 		guard.disconnected = false
+		d.stopGuardGraceLocked(guard)
 		c.members = append([]string(nil), d.leaseMembers[leaseID]...)
 		if len(c.members) == 0 {
 			c.members = []string{requestID}
@@ -1548,6 +1549,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 				if guard.completion == c {
 					guard.completion = nil
 				}
+				d.armGuardGraceLocked(c.leaseID, guard)
 				d.touchConnLocked(c)
 				d.mu.Unlock()
 				d.logDisconnect(c, role, runID)

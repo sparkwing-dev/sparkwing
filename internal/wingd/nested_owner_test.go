@@ -11,7 +11,13 @@ import (
 
 func handlerDaemon(t *testing.T, cores float64) *Daemon {
 	t.Helper()
-	d, err := New(Config{Home: t.TempDir()})
+	return configuredHandlerDaemon(t, Config{}, cores)
+}
+
+func configuredHandlerDaemon(t *testing.T, cfg Config, cores float64) *Daemon {
+	t.Helper()
+	cfg.Home = t.TempDir()
+	d, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
