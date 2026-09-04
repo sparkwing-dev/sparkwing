@@ -9,6 +9,8 @@ import (
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
 
 func TestResolveSampler_Default(t *testing.T) {
@@ -143,5 +145,5 @@ func indexOf(haystack, needle string) int {
 
 func TestMain(m *testing.M) {
 	os.Unsetenv("OTEL_TRACES_SAMPLER_ARG")
-	os.Exit(m.Run())
+	testleak.Main(m)
 }
