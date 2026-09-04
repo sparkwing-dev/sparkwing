@@ -2054,6 +2054,9 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if r.ParentRunID != "" {
 		parent = sql.NullString{String: r.ParentRunID, Valid: true}
 	}
+	if r.StartedAt.IsZero() {
+		r.StartedAt = time.Now()
+	}
 	created := r.CreatedAt
 	if created.IsZero() {
 		created = r.StartedAt
@@ -2482,7 +2485,9 @@ func scanRun(rs rowScanner) (*Run, error) {
 	if createdNS > 0 {
 		r.CreatedAt = time.Unix(0, createdNS)
 	}
-	r.StartedAt = time.Unix(0, startedNS)
+	if startedNS > 0 {
+		r.StartedAt = time.Unix(0, startedNS)
+	}
 	if finishedNS.Valid {
 		t := time.Unix(0, finishedNS.Int64)
 		r.FinishedAt = &t

@@ -457,6 +457,13 @@ code change to unlock.
   only those among the newest 20 overall -- commonly none. The store now reads
   pages until the limit is filled, over the newest 5,000 triggers matching the
   other filters.
+- **store + controller:** A run created without a start time now starts when it
+  was created. `POST /api/v1/runs` requires only an id, a pipeline and a
+  status, and a body omitting `started_at` stored the zero `time.Time`'s
+  undefined nanosecond value, landing the run in 1754: it sorted below every
+  real run so a default list never showed it, every `--since` window excluded
+  it, and the stale-run reaper skipped it forever. A row already written that
+  way now reads back with an unset start time rather than a 1754 date.
 - **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
   it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
   of printing a skip and exiting 0, so the comment and `#nosec` annotation
