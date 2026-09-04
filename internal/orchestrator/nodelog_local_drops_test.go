@@ -53,7 +53,7 @@ type stubLogs struct {
 	logs []*nodeLogger
 }
 
-func (l *stubLogs) OpenNodeLog(_, nodeID string, _ sparkwing.Logger) (NodeLog, error) {
+func (l *stubLogs) OpenNodeLog(_ context.Context, _, nodeID string, _ sparkwing.Logger) (NodeLog, error) {
 	nl := l.open(nodeID)
 	l.mu.Lock()
 	l.logs = append(l.logs, nl)
@@ -186,7 +186,7 @@ func TestHTTPNodeLogMarshalFailureDropsOneLine(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	quiet := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	nlog, err := NewHTTPLogs(srv.URL, nil, quiet).OpenNodeLog("run-1", "only", nil)
+	nlog, err := NewHTTPLogs(srv.URL, nil, quiet).OpenNodeLog(context.Background(), "run-1", "only", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

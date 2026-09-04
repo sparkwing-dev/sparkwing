@@ -30,6 +30,7 @@ func TestMigrateSQLite_FailedVersionLeavesNoPartialSchema(t *testing.T) {
 			t.Fatalf("%s: %v", stmt, err)
 		}
 	}
+	deleteFleetRequirements(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +90,7 @@ func TestMigrateSQLite_FailedMinVersionStampRollsBackTheVersionRow(t *testing.T)
 			t.Fatalf("%s: %v", stmt, err)
 		}
 	}
+	deleteFleetRequirements(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

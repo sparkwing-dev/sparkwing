@@ -88,6 +88,9 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 	lease.RecordUse(sparkwingDir, keyParts)
 	ensureDescribeCache(sparkwingDir, key, lease.Path())
 	env = append(env, "SPARKWING_BINARY_SOURCE="+source)
+	if fleetExecutionEnv(env) {
+		return runExec(lease.Path(), args, sparkwingDir, env)
+	}
 	return lease.ExecReplace(args, sparkwingDir, env)
 }
 
@@ -126,11 +129,23 @@ func runExec(bin string, args []string, dir string, env []string) error {
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			os.Exit(ee.ExitCode())
+			if fleetExecutionEnv(env) {
+				return exitError(ee.ExitCode(), err)
+			}
+			os.Exit(ee.ExitCode()) //nolint:forbidigo // foreground wrapper preserves the pipeline's exit status
 		}
 		return err
 	}
 	return nil
+}
+
+func fleetExecutionEnv(env []string) bool {
+	for _, entry := range env {
+		if entry == "SPARKWING_FLEET=1" {
+			return true
+		}
+	}
+	return false
 }
 
 func runGo(dir string, args, env []string) error {

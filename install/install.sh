@@ -98,6 +98,8 @@ CACHE_TOKEN="${SPARKWING_CACHE_TOKEN:-}"
 API_TOKEN="${SPARKWING_API_TOKEN:-}"
 RUNNER_NAME="${RUNNER_NAME:-}"
 MAX_CONCURRENT="${MAX_CONCURRENT:-}"
+CONTRIBUTION="${SPARKWING_CONTRIBUTION:-50%,50%}"
+LOCAL_RESERVE="${SPARKWING_LOCAL_RESERVE:-}"
 
 if [ -z "$CONTROLLER_URL" ]; then
   CONTROLLER_URL="$(ask 'Controller URL (e.g. https://controller.example.com)' '')"
@@ -131,6 +133,8 @@ reject_unsafe_value "Logs service URL" "$LOGS_URL"
 reject_unsafe_value "Gitcache URL" "$GITCACHE_URL"
 reject_unsafe_value "Cache token" "$CACHE_TOKEN"
 reject_unsafe_value "Runner name" "$RUNNER_NAME"
+reject_unsafe_value "Contribution ceiling" "$CONTRIBUTION"
+reject_unsafe_value "Local reserve" "$LOCAL_RESERVE"
 
 log ""
 log "config summary:"
@@ -140,6 +144,7 @@ log "  logs:           $LOGS_URL"
 log "  gitcache:       $GITCACHE_URL"
 log "  runner name:    $RUNNER_NAME"
 log "  max concurrent: $MAX_CONCURRENT"
+log "  contribution:   $CONTRIBUTION"
 log ""
 
 if [ "$NON_INTERACTIVE" = false ]; then
@@ -167,6 +172,9 @@ cache_token: "${CACHE_TOKEN}"
 token: "${API_TOKEN}"
 max_concurrent: ${MAX_CONCURRENT}
 holder_prefix: "${RUNNER_NAME}"
+contribution: "${CONTRIBUTION}"
+local_admission: true
+local_reserve: "${LOCAL_RESERVE}"
 YAML
 log "wrote $CONFIG_PATH (mode 600)"
 

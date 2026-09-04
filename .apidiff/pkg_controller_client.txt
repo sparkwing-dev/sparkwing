@@ -34,6 +34,7 @@ type AcquireSlotResponse struct {
 }
 type Client struct {
 }
+func (c *Client) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, start store.ExecutionStart) error
 func (c *Client) AcquireSlot(ctx context.Context, key string, req AcquireSlotRequest) (*AcquireSlotResponse, error)
 func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error
 func (c *Client) AddNodeUsage(ctx context.Context, runID, nodeID string, u store.NodeUsage) error
@@ -44,6 +45,7 @@ func (c *Client) BaseURL() string
 func (c *Client) CancelRun(ctx context.Context, runID string) error
 func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error)
+func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error)
 func (c *Client) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error)
 func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
@@ -85,8 +87,10 @@ func (c *Client) EnqueueTriggerWithEnv(
 	branch string,
 	triggerEnv map[string]string,
 ) (string, error)
+func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error)
 func (c *Client) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (c *Client) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
+func (c *Client) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish store.ExecutionAttemptFinish) error
 func (c *Client) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
 func (c *Client) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
 func (c *Client) FinishRun(ctx context.Context, runID, status, errMsg string) error
@@ -106,6 +110,7 @@ func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error)
 func (c *Client) GetSecretForRepo(ctx context.Context, name, repo string) (*Secret, error)
 func (c *Client) GetSecretForRun(ctx context.Context, name, runID string) (*Secret, error)
 func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)
+func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom Headroom) error
 func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error)
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error)
@@ -123,7 +128,9 @@ func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
+func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim, runID, nodeID string) (ExecutorClaimOfferResult, error)
 func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
+func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) (*store.ExecutorClaimPreparation, error)
 func (c *Client) ReconcileOrphanedLocalRuns(ctx context.Context, threshold time.Duration) (int, error)
 func (c *Client) RecordContention(ctx context.Context, pipeline string) error
 func (c *Client) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs store.ProfileObservation) error
@@ -131,6 +138,7 @@ func (c *Client) RecordWaitObservation(ctx context.Context, pipeline string, wai
 func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
 func (c *Client) RequestNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
+func (c *Client) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
 func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
 func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (*WaiterResolution, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
@@ -159,6 +167,18 @@ type ConcurrencyState struct {
 	Waiters           []StateWaiter
 }
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
+type ExecutorClaim struct {
+	ExecutorName   string
+	HolderID       string
+	ReservationID  string
+	ResourceDigest string
+	Slot           int
+	Lease          time.Duration
+}
+type ExecutorClaimOfferResult struct {
+	Node    *store.Node
+	Pending bool
+}
 type GitMeta struct {
 	Branch      string
 	SHA         string

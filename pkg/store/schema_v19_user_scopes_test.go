@@ -27,6 +27,7 @@ func TestSchemaV19_ExistingUsersDefaultToAdmin(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 19`); err != nil {
 		t.Fatal(err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

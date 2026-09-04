@@ -159,7 +159,15 @@ SELECT run_id, node_id, seq, requested_at, requested_by, consumed_at, outcome
 // true one. A seq that names no row is ErrNotFound -- that is a caller
 // bug, not a replay.
 func (s *Store) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error {
-	res, err := s.exec(ctx, `
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `
 UPDATE node_bounces
    SET consumed_at = ?, outcome = ?
  WHERE run_id = ? AND node_id = ? AND seq = ? AND consumed_at IS NULL`,
@@ -172,10 +180,10 @@ UPDATE node_bounces
 		return err
 	}
 	if n > 0 {
-		return nil
+		return tx.Commit()
 	}
 	var exists int
-	if err := s.queryRow(ctx, `
+	if err := tx.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM node_bounces
  WHERE run_id = ? AND node_id = ? AND seq = ?`, runID, nodeID, seq).Scan(&exists); err != nil {
 		return err
@@ -183,7 +191,7 @@ SELECT COUNT(*) FROM node_bounces
 	if exists == 0 {
 		return fmt.Errorf("bounce %s/%s#%d: %w", runID, nodeID, seq, ErrNotFound)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ListNodeBounces returns every bounce request recorded for a run,

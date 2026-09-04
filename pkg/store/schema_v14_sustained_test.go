@@ -35,6 +35,7 @@ func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 14`); err != nil {
 		t.Fatalf("reset version to 13: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if v := readSchemaVersion(t, st.DB()); v != 13 {
 		t.Fatalf("seeded version = %d, want 13", v)
 	}
@@ -188,6 +189,7 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 14`); err != nil {
 		t.Fatalf("reset version to 13: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
 	up, err := store.Open(path)
@@ -237,6 +239,7 @@ func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 14`); err != nil {
 		t.Fatalf("rewind version stamp: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
 	up, err := store.Open(path)

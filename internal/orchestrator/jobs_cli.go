@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
@@ -262,7 +263,7 @@ func joinStepsByNode(nodes []*store.Node, steps []*store.NodeStep) []nodeWithSte
 	idx := groupStepsByNode(steps)
 	out := make([]nodeWithSteps, 0, len(nodes))
 	for _, n := range nodes {
-		out = append(out, nodeWithSteps{Node: n, Steps: idx[n.NodeID]})
+		out = append(out, nodeWithSteps{Node: api.PublicNode(n), Steps: idx[n.NodeID]})
 	}
 	return out
 }

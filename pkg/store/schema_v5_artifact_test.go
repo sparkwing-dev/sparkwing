@@ -22,6 +22,7 @@ func TestSchemaV5_UpgradeAddsArtifactManifestColumn(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version > 4`); err != nil {
 		t.Fatalf("reset version to 4: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if v := readSchemaVersion(t, st.DB()); v != 4 {
 		t.Fatalf("seeded version = %d, want 4", v)
 	}

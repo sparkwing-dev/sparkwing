@@ -41,6 +41,7 @@ func TestSchemaV22_KeepsLegacySecretsAndAdmitsARepoScopedTwin(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 22`); err != nil {
 		t.Fatal(err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -189,6 +190,7 @@ func TestSchemaV23_ExistingSecretsDefaultToUnshared(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 23`); err != nil {
 		t.Fatal(err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

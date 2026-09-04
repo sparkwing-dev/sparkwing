@@ -15,7 +15,11 @@ before(async () => {
   const previousWindow = runtime.window;
   runtime.window = {};
   try {
-    ({ getNodeStreamUrl, cancelRun, getConnectionStatus } = await import("./api"));
+    ({
+      getNodeStreamUrl,
+      cancelRun,
+      getConnectionStatus,
+    } = await import("./api"));
   } finally {
     if (hadWindow) runtime.window = previousWindow;
     else delete runtime.window;

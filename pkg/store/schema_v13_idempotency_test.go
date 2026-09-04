@@ -27,6 +27,7 @@ func TestSchemaV13_UpgradeAddsIdempotencyKeyAndItsConstraint(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 13`); err != nil {
 		t.Fatal(err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
 	up, err := store.Open(path)

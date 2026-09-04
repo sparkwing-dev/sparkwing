@@ -22,6 +22,7 @@ func TestSchemaV6_UpgradeAddsQueueArrivedAtColumn(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 6`); err != nil {
 		t.Fatalf("reset version to 5: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if v := readSchemaVersion(t, st.DB()); v != 5 {
 		t.Fatalf("seeded version = %d, want 5", v)
 	}

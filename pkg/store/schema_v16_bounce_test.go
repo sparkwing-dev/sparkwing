@@ -28,6 +28,7 @@ func TestSchemaV16_UpgradeOfARealV15ShapeAddsTheBounceTable(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 16`); err != nil {
 		t.Fatalf("reset version to 15: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if v := readSchemaVersion(t, st.DB()); v != 15 {
 		t.Fatalf("seeded version = %d, want 15", v)
 	}
@@ -70,6 +71,7 @@ func TestSchemaV16_UpgradeIsSafeToReplay(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 16`); err != nil {
 		t.Fatalf("rewind version stamp: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
 	up, err := store.Open(path)

@@ -64,7 +64,7 @@ func heldByLabel(holders []store.ConcurrencyHolder) string {
 }
 
 func (r *NodeExecutor) emitConcWaitLog(ctx context.Context, req runner.Request, detail string) {
-	if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
+	if nlog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nlog.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "concurrency_wait", Msg: detail})
 		_ = nlog.Close()
 	}
@@ -362,7 +362,7 @@ func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, cp
 	r.copyArtifactManifest(ctx, req.RunID, req.Node.ID(), originRun, originNode)
 	_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Cached), "", output)
 
-	if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
+	if nlog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
 		ts := time.Now()
 		nlog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start", Attrs: map[string]any{"cache_hit": true}})
@@ -380,7 +380,7 @@ func (r *NodeExecutor) applySkippedConcurrent(ctx context.Context, req runner.Re
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_skipped_concurrent", nil)
 	_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.SkippedConcurrent), "", nil)
 
-	if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
+	if nlog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
 		ts := time.Now()
 		nlog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start"})
@@ -734,7 +734,7 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 		_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(outcome), "", output)
 	}
 
-	if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
+	if nlog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
 		ts := time.Now()
 		nlog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start", Attrs: map[string]any{

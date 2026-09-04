@@ -214,3 +214,60 @@ func TestMissingRequirements_ReportsWhatTheOtherSideLacks(t *testing.T) {
 		t.Errorf("UnknownRequirements(KnownRequirements()) = %v, want nil", got)
 	}
 }
+
+func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
+	preFleet := []string{
+		"inherited-holder-marker",
+		"repo-scoped-secrets",
+		"session-token-digest",
+		"unique-token-prefix",
+	}
+	want := []string{
+		"agent-loss-attempt-fencing-v1",
+		"executor-enrollment-v1",
+		"executor-offer-arbitration-v1",
+	}
+	if got := store.MissingRequirements(preFleet, store.KnownRequirements()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("requirements unknown to a pre-fleet binary = %v, want %v", got, want)
+	}
+}
+
+func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wave2-v29.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 30`); err != nil {
+		t.Fatal(err)
+	}
+	deleteFleetRequirements(t, st.DB())
+
+	wouldAdd, err := st.RequirementsWritingWouldAdd(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"agent-loss-attempt-fencing-v1",
+		"executor-enrollment-v1",
+		"executor-offer-arbitration-v1",
+	}
+	if !reflect.DeepEqual(wouldAdd, want) {
+		t.Fatalf("RequirementsWritingWouldAdd = %v, want %v", wouldAdd, want)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ro, err := store.OpenReadOnly(path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer func() { _ = ro.Close() }()
+	if got, err := ro.CurrentSchemaVersion(context.Background()); err != nil || got != 29 {
+		t.Fatalf("read-only schema = %d, %v; want unchanged v29", got, err)
+	}
+	if got, err := ro.Requirements(context.Background()); err != nil || len(got) != 4 {
+		t.Fatalf("read-only requirements = %v, %v; want only the four pre-Fleet gates", got, err)
+	}
+}

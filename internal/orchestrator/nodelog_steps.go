@@ -12,11 +12,11 @@ type stepStateNodeLog struct {
 	persist func(event, stepID, outcome string)
 }
 
-func wrapNodeLogWithStepState(inner NodeLog, state StateBackend, runID, nodeID string) NodeLog {
+func wrapNodeLogWithStepState(ctx context.Context, inner NodeLog, state StateBackend, runID, nodeID string) NodeLog {
 	if inner == nil || state == nil {
 		return inner
 	}
-	ctx := context.Background()
+	ctx = context.WithoutCancel(ctx)
 	return &stepStateNodeLog{
 		inner: inner,
 		persist: func(event, stepID, outcome string) {
@@ -54,6 +54,14 @@ func (l *stepStateNodeLog) Emit(rec sparkwing.LogRecord) {
 }
 
 func (l *stepStateNodeLog) Close() error { return l.inner.Close() }
+
+func (l *stepStateNodeLog) BindExecutionAttempt(ordinal int) error {
+	return bindNodeLogExecutionAttempt(l.inner, ordinal)
+}
+
+func (l *stepStateNodeLog) FlushExecutionAttempt() error {
+	return flushNodeLogExecutionAttempt(l.inner)
+}
 
 func (l *stepStateNodeLog) Fatal() error {
 	if f, ok := l.inner.(interface{ Fatal() error }); ok {

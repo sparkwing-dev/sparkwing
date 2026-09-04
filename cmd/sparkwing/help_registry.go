@@ -21,7 +21,7 @@ programs in a repo's .sparkwing/ directory, triggered by git hooks,
 webhooks, schedules, or manual invocation. Use 'sparkwing run
 <pipeline>' to invoke one; 'sparkwing pipeline list' / 'describe'
 for agent-facing discovery.`,
-	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "queue", "cache", "daemon", "profile", "version", "update", "dashboard", "doctor", "cluster", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
+	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "queue", "cache", "daemon", "profile", "version", "update", "dashboard", "doctor", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run build-test-deploy"},
 		{"First command an agent should run", "sparkwing info --for-agent"},
@@ -141,7 +141,7 @@ address; set them up with 'sparkwing configure profiles'.`,
 	SubcommandOrder: []string{"status", "agents", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
-		{"List fleet agents", "sparkwing cluster agents --profile prod"},
+		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
 	},
 }
 
@@ -3427,12 +3427,44 @@ var cmdAgents = Command{
 	Path:     "sparkwing cluster agents",
 	Synopsis: "Inspect the controller's fleet view",
 	Description: `Hits GET /api/v1/agents on the selected profile's controller.
-Prints one row per agent seen claiming work in the last hour
-(the controller infers agents from recent node claims; there
-is no explicit registration table yet).`,
-	SubcommandOrder: []string{"list"},
+Prints persisted executor registrations, including idle and
+offline agents and gateways, plus recent legacy claim-only runners.`,
+	SubcommandOrder: []string{"list", "enroll"},
 	Examples: []Example{
 		{"List prod agents", "sparkwing cluster agents list --profile prod"},
+	},
+}
+
+var cmdAgentsEnroll = Command{
+	Path:     "sparkwing cluster agents enroll",
+	Synopsis: "Enroll or update a trusted executor",
+	Description: `Binds one exact runner or service token prefix to an
+operator-owned executor envelope. The token must be live and carry
+nodes.claim; its stored principal becomes audit metadata. Re-enrollment
+with the same credential updates trusted scheduling fields without changing
+live headroom. Changing the prefix requires a new heartbeat.
+
+Use a distinct revocable token for every coordinator membership. The
+prefix is accepted as input but is never returned by the agents API. A
+controller accepts at most 256 enrolled executors. Adding another returns
+` + "`executor enrollment limit reached: maximum 256 per controller`" + `.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "NAME", Desc: "Executor name", Required: true, Group: "Identity"},
+		{Name: "token-prefix", Argument: "PREFIX", Desc: "Exact runner or service token prefix", Required: true, Group: "Identity"},
+		{Name: "kind", Argument: "KIND", Desc: "Executor kind (agent|gateway)", Default: "agent", Group: "Identity"},
+		{Name: "location", Argument: "WHERE", Desc: "Trusted placement location (local|cloud|unknown)", Default: "unknown", Group: "Identity"},
+		{Name: "capability", Argument: "LABEL", Desc: "Trusted capability (repeatable)", Group: "Trust"},
+		{Name: "base-priority", Argument: "N", Desc: "Base scheduling priority (0-100)", Default: "0", Group: "Trust"},
+		{Name: "priority-ceiling", Argument: "N", Desc: "Highest effective priority (0-100)", Default: "100", Group: "Trust"},
+		{Name: "max-concurrent", Argument: "N", Desc: "Trusted concurrent slot ceiling", Default: "1", Group: "Limits"},
+		{Name: "budget-cores", Argument: "N", Desc: "CPU contribution ceiling (0 = uncapped)", Default: "0", Group: "Limits"},
+		{Name: "budget-memory-bytes", Argument: "N", Desc: "Memory contribution ceiling in bytes (0 = uncapped)", Default: "0", Group: "Limits"},
+		{Name: "profile", Argument: "NAME", Desc: "Admin controller profile", Required: true, Group: "System"},
+	},
+	GroupOrder: []string{"Identity", "Trust", "Limits", "System", "Other"},
+	Examples: []Example{
+		{"Enroll a workstation agent", "sparkwing cluster agents enroll --profile prod --name desk --token-prefix swr_01234567 --kind agent --location local --capability linux --max-concurrent 2 --budget-cores 4 --budget-memory-bytes 8589934592"},
+		{"Enroll a capacity gateway", "sparkwing cluster agents enroll --profile prod --name build-gateway --token-prefix sws_01234567 --kind gateway --location cloud --capability linux-amd64 --max-concurrent 8"},
 	},
 }
 
@@ -3440,9 +3472,10 @@ var cmdAgentsList = Command{
 	Path:     "sparkwing cluster agents list",
 	Synopsis: "Print the controller's known agents",
 	Description: `Fetches /api/v1/agents and renders a table of fleet members.
-The controller infers agents from node claims over the last
-hour, so idle agents without any recent claim activity won't
-show up -- a known limitation until we add explicit heartbeats.
+Registered executors report their operator-assigned identity,
+kind, trusted placement location, capabilities, concurrency limit, and
+measured resource headroom. A stale registration remains visible
+as offline; recent legacy claim-only runners remain visible too.
 
 Use -q to print just names, one per line, for shell piping
 (e.g. looping over agents with xargs).`,
@@ -3455,6 +3488,84 @@ Use -q to print just names, one per line, for shell piping
 	Examples: []Example{
 		{"List agents on prod", "sparkwing cluster agents list --profile prod"},
 		{"Just agent names for piping", "sparkwing cluster agents list --profile prod -q"},
+	},
+}
+
+var cmdFleet = Command{
+	Path:     "sparkwing fleet",
+	Synopsis: "Configure foreground assisted execution",
+	Description: `Local fleet configuration and one-time helper provisioning. Running a
+pipeline with assistance still uses sparkwing run PIPELINE --sw-fleet.
+
+Fleet runs transmit an immutable snapshot containing every tracked file and
+every non-ignored untracked file to the executor that wins a node. Review
+'git status' and ignore local secret files before starting a fleet run. Normal
+output reports only the source digest, file count, and total bytes, never file
+names. The snapshot commit has no parent and does not transmit repository
+history.`,
+	SubcommandOrder: []string{"init", "agents"},
+}
+
+var cmdFleetInit = Command{
+	Path:     "sparkwing fleet init",
+	Synopsis: "Create an owner-only foreground fleet policy",
+	Description: `Creates fleet.yaml without replacing an existing policy. The listener is
+fixed for the life of each foreground run. HTTPS public URLs assume a local
+Tailscale Serve or reverse proxy and therefore require a literal loopback
+listener. Plain HTTP is accepted only at a literal IP that the local Tailscale
+client confirms belongs to this machine. Tailscale supplies transport, not
+Sparkwing authorization: only explicitly enrolled helpers receive credentials,
+and no peer discovery occurs.`,
+	Flags: []FlagSpec{
+		{Name: "tailnet", Desc: "Use this machine's Tailscale IPv4 address on port 4346", Group: "Network"},
+		{Name: "listen", Argument: "HOST:PORT", Desc: "Fixed private listener address", Group: "Network"},
+		{Name: "public-url", Argument: "URL", Desc: "Helper-reachable coordinator origin", Group: "Network"},
+		{Name: "allow-tailnet-http", Desc: "Allow HTTP at a verified literal local Tailscale IP", Group: "Network"},
+	},
+	GroupOrder: []string{"Network", "Other"},
+	Examples: []Example{
+		{"Direct Tailscale transport", "sparkwing fleet init --tailnet"},
+		{"Tailscale Serve or a local proxy", "sparkwing fleet init --listen 127.0.0.1:4346 --public-url https://runner.example.com"},
+		{"Advanced direct Tailscale transport", "sparkwing fleet init --listen 100.64.1.2:4346 --public-url http://100.64.1.2:4346 --allow-tailnet-http"},
+	},
+}
+
+var cmdFleetAgents = Command{
+	Path:            "sparkwing fleet agents",
+	Synopsis:        "Provision helpers for foreground coordinators",
+	Description:     `Creates local verifier-backed credentials and trusted executor enrollments. Raw credentials print once and never enter fleet.yaml.`,
+	SubcommandOrder: []string{"enroll"},
+}
+
+var cmdFleetAgentsEnroll = Command{
+	Path:     "sparkwing fleet agents enroll",
+	Synopsis: "Provision one helper membership",
+	Description: `Atomically mints a runner credential in the local Sparkwing state
+store and binds its verifier to the trusted executor envelope. The raw
+credential prints once in an agent.yaml membership snippet on stdout. The
+trusted policy is added to fleet.yaml in the same command. Credential verifier
+and binding data remain in Sparkwing's private local state; fleet.yaml stores
+no token material or token identifier.
+
+Atomically merge stdout into the helper's owner-only agent.yaml (0600 on Unix;
+a protected user ACL on Windows). Direct shell redirection can truncate an
+existing multi-coordinator file before validation and is not a safe merge.
+
+Use one credential per coordinator membership.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "NAME", Desc: "Executor name", Required: true, Group: "Identity"},
+		{Name: "location", Argument: "WHERE", Desc: "Controller-owned placement (local|cloud)", Required: true, Group: "Identity"},
+		{Name: "capability", Argument: "LABEL", Desc: "Trusted capability (repeatable)", Group: "Trust"},
+		{Name: "base-priority", Argument: "N", Desc: "Base scheduling priority (0-100)", Default: "50", Group: "Trust"},
+		{Name: "priority-ceiling", Argument: "N", Desc: "Highest effective priority (0-100)", Default: "100", Group: "Trust"},
+		{Name: "max-concurrent", Argument: "N", Desc: "Trusted concurrent slot ceiling", Default: "1", Group: "Limits"},
+		{Name: "budget-cores", Argument: "N", Desc: "CPU contribution ceiling (0 = uncapped)", Default: "0", Group: "Limits"},
+		{Name: "budget-memory-bytes", Argument: "N", Desc: "Memory contribution ceiling in bytes (0 = uncapped)", Default: "0", Group: "Limits"},
+		{Name: "ttl", Argument: "DURATION", Desc: "Credential lifetime (0 = never expires)", Default: "0", Group: "Credential"},
+	},
+	GroupOrder: []string{"Identity", "Trust", "Limits", "Credential", "Other"},
+	Examples: []Example{
+		{"Provision a laptop helper", "sparkwing fleet agents enroll --name desk --location local --capability toolchain=go --max-concurrent 2"},
 	},
 }
 

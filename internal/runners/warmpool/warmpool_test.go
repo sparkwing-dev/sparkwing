@@ -65,6 +65,13 @@ func newWarmPoolFixture(
 	return st, client.New(srv.URL, nil), cleanup
 }
 
+func TestRunnerCapsOfferWindowAtFiveSeconds(t *testing.T) {
+	r := New(nil, nil, Config{ClaimWaitTimeout: time.Minute}, quietTestLogger())
+	if r.cfg.ClaimWaitTimeout != 5*time.Second {
+		t.Fatalf("claim wait = %s", r.cfg.ClaimWaitTimeout)
+	}
+}
+
 func TestRunnerUsesRemoteClaimBeforeFallback(t *testing.T) {
 	_, ctrl, cleanup := newWarmPoolFixture(t, nil, nil)
 	defer cleanup()
@@ -134,6 +141,32 @@ func TestRunnerFallsBackAfterClaimWindow(t *testing.T) {
 	}
 }
 
+func TestRunnerFallsBackForLabelsItAdvertises(t *testing.T) {
+	st, ctrl, cleanup := newWarmPoolFixture(t, []string{"location=coordinator", "gpu"}, nil)
+	defer cleanup()
+	fallback := &fallbackRunner{}
+	r := New(ctrl, fallback, Config{
+		PollInterval:     5 * time.Millisecond,
+		ClaimWaitTimeout: 20 * time.Millisecond,
+		FallbackLabels:   []string{"gpu", "location=coordinator", "local"},
+	}, quietTestLogger())
+
+	result := r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
+	if result.Outcome != sparkwing.Success || result.Err != nil {
+		t.Fatalf("result = %+v", result)
+	}
+	if fallback.calls.Load() != 1 {
+		t.Fatalf("fallback calls = %d, want 1", fallback.calls.Load())
+	}
+	node, err := st.GetNode(context.Background(), "run-1", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.Claimed || node.ReadyAt != nil {
+		t.Fatalf("fallback node remains admitted: claimed=%v ready_at=%v", node.Claimed, node.ReadyAt)
+	}
+}
+
 func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
 	claimed := make(chan struct{})
 	revokeServed := make(chan struct{})
@@ -143,7 +176,7 @@ func TestRunnerClaimDuringFallbackHandoffPreventsDoubleExecution(t *testing.T) {
 			if strings.HasSuffix(req.URL.Path, "/touch") {
 				touches.Add(1)
 			}
-			if strings.HasSuffix(req.URL.Path, "/revoke-ready") {
+			if strings.HasSuffix(req.URL.Path, "/finalize-ready") {
 				node, err := st.ClaimNextReadyNode(req.Context(), store.ClaimIdentity{
 					Principal:   "remote-workstation",
 					TokenPrefix: "swr_remote-workstation",
@@ -359,6 +392,7 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 	go func() {
 		done <- r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
 	}()
+	claimDeadline := time.After(time.Second)
 	for {
 		node, err := st.ClaimNextReadyNode(context.Background(), store.ClaimIdentity{
 			Principal:   "offline-server",
@@ -373,17 +407,26 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 		if err != store.ErrNotFound {
 			t.Fatal(err)
 		}
-		time.Sleep(time.Millisecond)
+		select {
+		case <-claimDeadline:
+			t.Fatal("node did not become ready for the remote executor")
+		case <-time.After(time.Millisecond):
+		}
 	}
+	observedDeadline := time.After(time.Second)
 	for {
 		node, err := st.GetNode(context.Background(), "run-1", "build")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if node.StatusDetail == "claimed by agent:offline-server" {
+		if node.StatusDetail == "claimed by remote executor" {
 			break
 		}
-		time.Sleep(time.Millisecond)
+		select {
+		case <-observedDeadline:
+			t.Fatal("warm runner did not observe the active remote claim")
+		case <-time.After(time.Millisecond):
+		}
 	}
 	time.Sleep(20 * time.Millisecond)
 	pairs, err := store.Maintenance.FailExpiredNodeClaims(st, context.Background())

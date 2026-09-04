@@ -38,6 +38,7 @@ func TestSchemaV8_UpgradePreservesRowsAndQualifiesLegacyPeaks(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 8`); err != nil {
 		t.Fatalf("reset version to 7: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if v := readSchemaVersion(t, st.DB()); v != 7 {
 		t.Fatalf("seeded version = %d, want 7", v)
 	}

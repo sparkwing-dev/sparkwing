@@ -175,6 +175,9 @@ func runToolchain(w io.Writer, d toolchainDecision) error {
 }
 
 func ensureToolchainBinary(w io.Writer, version string) (string, error) {
+	if !isReleaseTag(version) {
+		return "", fmt.Errorf("toolchain version %q is not a canonical stable release", version)
+	}
 	p, err := paths.DefaultPaths()
 	if err != nil {
 		return "", fmt.Errorf("locate the sparkwing home for the toolchain store: %w", err)
@@ -238,10 +241,12 @@ func prepareToolchainStore(p paths.Paths, dir string) error {
 }
 
 func verifyStoredToolchain(dir, binPath string) error {
+	// #nosec G703 -- the caller admits only canonical stable release names beneath the private toolchain store
 	manifest, err := os.ReadFile(filepath.Join(dir, releaseManifestName))
 	if err != nil {
 		return err
 	}
+	// #nosec G703 -- the caller admits only canonical stable release names beneath the private toolchain store
 	manifestSig, err := os.ReadFile(filepath.Join(dir, releaseManifestName+".sig"))
 	if err != nil {
 		return err

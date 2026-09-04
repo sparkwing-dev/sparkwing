@@ -150,6 +150,23 @@ func TestSwitchToolchainLocalRefusalNamesTheVersion(t *testing.T) {
 	}
 }
 
+func TestEnsureToolchainBinaryRejectsNoncanonicalVersionBeforeStoreAccess(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	escape := filepath.Join(home, "escape")
+	if err := os.Mkdir(escape, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(escape, releaseManifestName), []byte("must not be read"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ensureToolchainBinary(&bytes.Buffer{}, "../escape")
+	if err == nil || !strings.Contains(err.Error(), "not a canonical stable release") {
+		t.Fatalf("noncanonical version error = %v", err)
+	}
+}
+
 func TestSwitchToolchainStaysUnderARecursionGuard(t *testing.T) {
 	t.Setenv(toolchainModeEnv, "")
 	withToolchainActive(t, "v0.40.0")

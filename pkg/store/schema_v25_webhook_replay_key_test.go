@@ -25,6 +25,7 @@ func TestSchemaV25_AddsWebhookReplayKeyConstraintToAnOlderDatabase(t *testing.T)
 			t.Fatalf("%s: %v", stmt, err)
 		}
 	}
+	deleteFleetRequirements(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

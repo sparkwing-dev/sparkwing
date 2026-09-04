@@ -45,9 +45,17 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 	if d.DispatchedAt.IsZero() {
 		d.DispatchedAt = time.Now()
 	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.assertNodeMutationFenceTx(ctx, tx, d.RunID, d.NodeID); err != nil {
+		return err
+	}
 	seq := d.Seq
 	if seq < 0 {
-		if err := s.queryRow(ctx, `
+		if err := tx.QueryRowContext(ctx, `
 			SELECT COALESCE(MAX(seq), -1) + 1
 			  FROM node_dispatches
 			 WHERE run_id = ? AND node_id = ?
@@ -55,8 +63,7 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 			return fmt.Errorf("assign next seq: %w", err)
 		}
 	}
-	_, err := s.exec(
-		ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO node_dispatches (
 			run_id, node_id, seq, dispatched_at,
 			code_version, binary_hash, runner_labels, env_json,
@@ -68,8 +75,10 @@ func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error {
 		d.CodeVersion, d.BinaryHash, d.RunnerLabels, d.EnvJSON,
 		d.Workdir, envelope, origSize, d.SecretRedactions,
 		d.RedactedKeys,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // GetNodeDispatch returns the snapshot at seq; seq<0 = latest.

@@ -40,6 +40,14 @@ func (l *maskingNodeLog) Emit(rec sparkwing.LogRecord) {
 
 func (l *maskingNodeLog) Close() error { return l.inner.Close() }
 
+func (l *maskingNodeLog) BindExecutionAttempt(ordinal int) error {
+	return bindNodeLogExecutionAttempt(l.inner, ordinal)
+}
+
+func (l *maskingNodeLog) FlushExecutionAttempt() error {
+	return flushNodeLogExecutionAttempt(l.inner)
+}
+
 func (l *maskingNodeLog) Fatal() error {
 	if f, ok := l.inner.(interface{ Fatal() error }); ok {
 		return f.Fatal()

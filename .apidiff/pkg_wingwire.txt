@@ -27,6 +27,8 @@ type AdmissionRequest struct {
 
 	SubLease bool
 
+	NonBlocking bool
+
 	CostSource CostSource
 
 	ExpectedDurationMS int64
@@ -66,7 +68,7 @@ type BudgetState struct {
 
 	Raw string
 }
-const BuildIdentity = "wingwire-v1-liveness"
+const BuildIdentity = "wingwire-v1-nonblocking-admission"
 type Cancel struct {
 	RunID  string
 	Reason string

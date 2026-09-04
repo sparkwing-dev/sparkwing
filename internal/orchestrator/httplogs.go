@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -62,24 +64,41 @@ func (h *HTTPLogs) localRunDir(runID string) string {
 	return dir
 }
 
-func (h *HTTPLogs) OpenNodeLog(runID, nodeID string, delegate sparkwing.Logger) (NodeLog, error) {
+func (h *HTTPLogs) OpenNodeLog(ctx context.Context, runID, nodeID string, delegate sparkwing.Logger) (NodeLog, error) {
+	_, requiresAttempt := store.NodeClaimFenceFromContext(ctx)
+	if _, triggerClaim := store.TriggerClaimFenceFromContext(ctx); triggerClaim {
+		requiresAttempt = true
+	}
+	attempt := 0
+	if !requiresAttempt {
+		attempt, _ = store.ExecutionAttemptOrdinalFromContext(ctx)
+	}
 	return &httpNodeLog{
-		client:   h.client,
-		logger:   h.logger,
-		runID:    runID,
-		nodeID:   nodeID,
-		delegate: delegate,
+		ctx:             context.WithoutCancel(ctx),
+		client:          h.client,
+		logger:          h.logger,
+		runID:           runID,
+		nodeID:          nodeID,
+		delegate:        delegate,
+		requiresAttempt: requiresAttempt,
+		attempt:         attempt,
 	}, nil
 }
 
 type httpNodeLog struct {
-	mu       sync.Mutex
-	client   storage.LogStore
-	logger   *slog.Logger
-	runID    string
-	nodeID   string
-	delegate sparkwing.Logger
-	closed   bool
+	ctx             context.Context
+	writeMu         sync.Mutex
+	mu              sync.Mutex
+	client          storage.LogStore
+	logger          *slog.Logger
+	runID           string
+	nodeID          string
+	delegate        sparkwing.Logger
+	closed          bool
+	requiresAttempt bool
+	attempt         int
+	pending         [][]byte
+	pendingBytes    int
 
 	fatal      error
 	dropCount  int
@@ -94,6 +113,8 @@ var (
 )
 
 var httpNodeLogDropCooldown = 5 * time.Second
+
+const httpNodeLogPendingLimit = 4 << 20
 
 func SetTestHTTPNodeLogRetry(t interface{ Cleanup(func()) }, attempts, backoffMS int) {
 	oldA, oldB := httpNodeLogRetryAttempts, httpNodeLogRetryBackoff
@@ -155,19 +176,84 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 	}
 	payload = append(payload, '\n')
 
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
 	l.appendWithRetry(payload)
 }
 
+func (l *httpNodeLog) BindExecutionAttempt(ordinal int) error {
+	if ordinal < 1 {
+		return errors.New("execution attempt ordinal must be positive")
+	}
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	l.mu.Lock()
+	if !l.requiresAttempt {
+		l.mu.Unlock()
+		return nil
+	}
+	l.attempt = ordinal
+	l.mu.Unlock()
+	return l.Fatal()
+}
+
+func (l *httpNodeLog) FlushExecutionAttempt() error {
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	l.appendWithRetry(nil)
+	return l.Fatal()
+}
+
 func (l *httpNodeLog) appendWithRetry(payload []byte) {
+	l.mu.Lock()
+	ordinal := l.attempt
+	if l.requiresAttempt && ordinal == 0 {
+		if len(payload) == 0 {
+			l.mu.Unlock()
+			return
+		}
+		if l.pendingBytes+len(payload) > httpNodeLogPendingLimit {
+			if l.fatal == nil {
+				l.fatal = errors.New("pre-execution log buffer exceeded 4 MiB")
+			}
+			l.mu.Unlock()
+			return
+		}
+		l.pending = append(l.pending, slices.Clone(payload))
+		l.pendingBytes += len(payload)
+		l.mu.Unlock()
+		return
+	}
+	pending := l.pending
+	l.pending = nil
+	l.pendingBytes = 0
+	l.mu.Unlock()
+	for _, buffered := range pending {
+		l.appendBoundWithRetry(ordinal, buffered)
+		if l.Fatal() != nil {
+			return
+		}
+	}
+	if len(payload) == 0 {
+		return
+	}
+	l.appendBoundWithRetry(ordinal, payload)
+}
+
+func (l *httpNodeLog) appendBoundWithRetry(ordinal int, payload []byte) {
 	if l.dropSuppressed() {
 		return
 	}
 	var lastErr error
-	for attempt := 0; attempt < httpNodeLogRetryAttempts; attempt++ {
-		if attempt > 0 {
-			time.Sleep(httpNodeLogRetryBackoff << (attempt - 1))
+	for retry := 0; retry < httpNodeLogRetryAttempts; retry++ {
+		if retry > 0 {
+			time.Sleep(httpNodeLogRetryBackoff << (retry - 1))
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		attemptCtx := l.ctx
+		if ordinal > 0 {
+			attemptCtx = store.WithExecutionAttemptOrdinal(attemptCtx, ordinal)
+		}
+		ctx, cancel := context.WithTimeout(attemptCtx, 5*time.Second)
 		err := l.client.Append(ctx, l.runID, l.nodeID, payload)
 		cancel()
 		if err == nil {
@@ -175,18 +261,17 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 		}
 		lastErr = err
 		var authErr *logs.AuthError
-		if errors.As(err, &authErr) {
+		if errors.As(err, &authErr) || errors.Is(err, logs.ErrClaimConflict) {
 			l.mu.Lock()
 			if l.fatal == nil {
-				l.fatal = authErr
+				l.fatal = err
 			}
 			l.mu.Unlock()
 			l.logger.Error(
-				"logs append blocked by auth; failing run",
+				"logs append rejected; failing run",
 				"run_id", l.runID,
 				"node_id", l.nodeID,
-				"status", authErr.Status,
-				"scope", authErr.Scope,
+				"err", err,
 			)
 			return
 		}

@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
@@ -19,6 +21,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+const fleetUntrackedSourceWarning = "fleet source: every non-ignored untracked file is included; review Git ignores before sharing with enrolled helpers"
 
 func init() {
 	docs.Version = installedVersion()
@@ -208,6 +212,51 @@ func dispatchRun(args []string) error {
 	if wf.localOnly {
 		env = append(env, "SPARKWING_LOCAL_ONLY=1")
 	}
+	var fleetSnapshot *worktreeSnapshot
+	if wf.fleet {
+		configPath := os.Getenv("SPARKWING_FLEET_CONFIG")
+		if configPath == "" {
+			configPath, err = fleet.DefaultPath()
+			if err != nil {
+				return fmt.Errorf("--sw-fleet config: %w", err)
+			}
+		}
+		fleetConfig, err := fleet.Load(configPath, fleet.LocalTailscaleIPs)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("--sw-fleet config %s does not exist; create it with `sparkwing fleet init --tailnet` or explicit --listen and --public-url", configPath)
+			}
+			return fmt.Errorf("--sw-fleet config %s: %w", configPath, err)
+		}
+		if len(fleetConfig.Executors) == 0 {
+			return errors.New("--sw-fleet has no enrolled helpers; add one with `sparkwing fleet agents enroll --name ... --location ...`")
+		}
+		env = setEnv(env, "SPARKWING_FLEET_CONFIG", configPath)
+		if err := resolveSparks(context.Background(), dir, compileOptions{NoUpdate: wf.noUpdate}); err != nil {
+			return err
+		}
+		fleetSnapshot, err = captureWorktreeSnapshot(context.Background(), filepath.Dir(dir))
+		if err != nil {
+			return fmt.Errorf("--sw-fleet source: %w", err)
+		}
+		defer func() { _ = fleetSnapshot.close() }()
+		checkout, repoURL, checkoutErr := fleetSnapshot.materialize(context.Background())
+		if checkoutErr != nil {
+			return fmt.Errorf("--sw-fleet source: %w", checkoutErr)
+		}
+		fmt.Fprintf(os.Stderr, "fleet source: snapshot %s (%d files, %s uncompressed; %s bundle)\n",
+			fleetSnapshot.SHA, fleetSnapshot.FileCount, snapshotBytes(fleetSnapshot.Size), snapshotBytes(fleetSnapshot.BundleSize))
+		fmt.Fprintln(os.Stderr, fleetUntrackedSourceWarning)
+		dir = filepath.Join(checkout, ".sparkwing")
+		env = setEnv(env, "SPARKWING_FLEET", "1")
+		env = setEnv(env, "SPARKWING_FLEET_SOURCE_ROOT", fleetSnapshot.tempDir)
+		env = setEnv(env, "SPARKWING_FLEET_SOURCE_BUNDLE", fleetSnapshot.BundlePath)
+		env = setEnv(env, "SPARKWING_FLEET_SOURCE_SHA", fleetSnapshot.SHA)
+		env = setEnv(env, "SPARKWING_FLEET_SOURCE_REPO_URL", repoURL)
+		env = setEnv(env, "SPARKWING_FLEET_SOURCE_FILES", strconv.Itoa(fleetSnapshot.FileCount))
+		env = setEnv(env, "SPARKWING_FLEET_SOURCE_BYTES", strconv.FormatInt(fleetSnapshot.Size, 10))
+		env = setEnv(env, "SPARKWING_FLEET_SOURCE_BUNDLE_BYTES", strconv.FormatInt(fleetSnapshot.BundleSize, 10))
+	}
 	if len(wf.allow) > 0 {
 		env = append(env, "SPARKWING_ALLOW="+strings.Join(wf.allow, ","))
 	}
@@ -234,8 +283,18 @@ func dispatchRun(args []string) error {
 	if runNeedsDaemon(wf, passthrough) {
 		ensureRunDaemonFn()
 	}
+	var fleetParentGuard *fleet.ParentGuard
+	if wf.fleet {
+		fleetParentGuard, err = fleet.StartParentGuard()
+		if err != nil {
+			return fmt.Errorf("--sw-fleet coordinator lifetime: %w", err)
+		}
+		defer fleetParentGuard.Close()
+		env = setEnv(env, "SPARKWING_FLEET_PARENT_GUARD", fleetParentGuard.Address)
+		env = setEnv(env, "SPARKWING_FLEET_PARENT_TOKEN", fleetParentGuard.Token)
+	}
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
-		compileOptions{NoUpdate: wf.noUpdate})
+		compileOptions{NoUpdate: wf.noUpdate || wf.fleet})
 }
 
 func removeEnv(env []string, key string) []string {
@@ -284,6 +343,8 @@ func runSparkwing(args []string) error {
 
 	case "cluster":
 		return runCluster(args[1:])
+	case "fleet":
+		return runFleet(args[1:])
 	case "doctor":
 		return runDoctor(args[1:])
 	case "secrets":

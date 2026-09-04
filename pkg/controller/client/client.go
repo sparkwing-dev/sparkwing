@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -497,6 +498,7 @@ func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, co
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
 		return err
@@ -522,6 +524,7 @@ func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatSta
 	if err != nil {
 		return nil, err
 	}
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
 		return nil, err
@@ -1007,16 +1010,105 @@ func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byt
 	}
 }
 
-// Headroom is a registered runner's live free capacity, advertised to
-// the controller on each node claim and heartbeat so the scheduler can
-// see whose box has room. It is the local admission daemon's grantable
-// cores and memory after subtracting the operator's local reserve, plus
-// the daemon's current queue depth. A nil *Headroom means the runner is
-// not advertising (it engages no local daemon).
+// Headroom is a runner's live free capacity after its local reserve.
 type Headroom struct {
 	Cores       float64 `json:"cores"`
 	MemoryBytes int64   `json:"memory_bytes"`
 	QueueDepth  int     `json:"queue_depth"`
+}
+
+// ExecutorClaim identifies one locally reserved slot in an enrolled executor.
+type ExecutorClaim struct {
+	ExecutorName   string
+	HolderID       string
+	ReservationID  string
+	ResourceDigest string
+	Slot           int
+	Lease          time.Duration
+}
+
+// ExecutorClaimOfferResult distinguishes a pending priority round from an empty
+// queue so a reserved slot stays pinned to one coordinator until resolution.
+type ExecutorClaimOfferResult struct {
+	Node    *store.Node
+	Pending bool
+}
+
+// PrepareExecutorClaim returns the controller-owned admission contract for the
+// oldest node eligible for the enrolled executor.
+func (c *Client) PrepareExecutorClaim(ctx context.Context, executorName string) (*store.ExecutorClaimPreparation, error) {
+	body := map[string]any{"executor_name": executorName}
+	buf, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/api/v1/nodes/claim/prepare", bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	setNodeClaimFenceHeaders(req, ctx)
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var preparation store.ExecutorClaimPreparation
+		if err := json.NewDecoder(resp.Body).Decode(&preparation); err != nil {
+			return nil, err
+		}
+		return &preparation, nil
+	case http.StatusNoContent:
+		return nil, nil
+	default:
+		return nil, readHTTPError(resp)
+	}
+}
+
+// OfferExecutorClaim submits one locally reserved slot for a prepared node.
+func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim, runID, nodeID string) (ExecutorClaimOfferResult, error) {
+	body := executorClaimBody(executor)
+	body["run_id"] = runID
+	body["node_id"] = nodeID
+	buf, _ := json.Marshal(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/api/v1/nodes/claim", bytes.NewReader(buf))
+	if err != nil {
+		return ExecutorClaimOfferResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.do(req)
+	if err != nil {
+		return ExecutorClaimOfferResult{}, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var n store.Node
+		if err := json.NewDecoder(resp.Body).Decode(&n); err != nil {
+			return ExecutorClaimOfferResult{}, err
+		}
+		return ExecutorClaimOfferResult{Node: &n}, nil
+	case http.StatusNoContent:
+		return ExecutorClaimOfferResult{Pending: resp.Header.Get("X-Sparkwing-Claim-Offer-State") == "pending"}, nil
+	default:
+		return ExecutorClaimOfferResult{}, readHTTPError(resp)
+	}
+}
+
+func executorClaimBody(executor ExecutorClaim) map[string]any {
+	body := map[string]any{
+		"executor_name":   executor.ExecutorName,
+		"holder_id":       executor.HolderID,
+		"reservation_id":  executor.ReservationID,
+		"resource_digest": executor.ResourceDigest,
+		"slot":            executor.Slot,
+	}
+	if executor.Lease > 0 {
+		secs := max(int(executor.Lease.Seconds()), 1)
+		body["lease_secs"] = secs
+	}
+	return body
 }
 
 // ClaimNode atomically claims the oldest ready, unclaimed node for
@@ -1026,6 +1118,11 @@ type Headroom struct {
 // The controller filters candidates so a returned node's needs_labels
 // is a subset of labels (AND semantics).
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error) {
+	return c.ClaimNodeAs(ctx, holderID, labels, lease, headroom, store.ExecutorIdentity{})
+}
+
+func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error) {
+	_ = executor
 	body := map[string]any{"holder_id": holderID}
 	if lease > 0 {
 		secs := int(lease.Seconds())
@@ -1066,10 +1163,72 @@ func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string
 	}
 }
 
+func (c *Client) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, start store.ExecutionStart) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/execution-start",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	buf, _ := json.Marshal(start)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	setNodeClaimFenceHeaders(req, ctx)
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return nil
+	case http.StatusConflict:
+		return store.ErrLockHeld
+	default:
+		return readHTTPError(resp)
+	}
+}
+
+func (c *Client) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, finish store.ExecutionAttemptFinish) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/execution-finish",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	buf, _ := json.Marshal(finish)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	setNodeClaimFenceHeaders(req, ctx)
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return store.ErrLockHeld
+	}
+	return readHTTPError(resp)
+}
+
+// HeartbeatExecutor reports live capacity for an administrator-enrolled
+// executor. The controller authenticates the exact enrollment credential.
+func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom Headroom) error {
+	path := fmt.Sprintf("/api/v1/agents/%s/heartbeat", url.PathEscape(name))
+	return c.post(ctx, path, map[string]any{"headroom": headroom}, http.StatusNoContent, nil)
+}
+
 // MarkNodeReady sets ready_at on a node so pool runners can claim it.
 // Idempotent; first call wins (stable FIFO ordering).
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/mark-ready",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	return c.post(ctx, path, nil, http.StatusNoContent, nil)
+}
+
+func (c *Client) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/auto-retry/reset",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	return c.post(ctx, path, nil, http.StatusNoContent, nil)
 }
@@ -1087,6 +1246,18 @@ func (c *Client) RevokeNodeReady(ctx context.Context, runID, nodeID string) (boo
 		return false, err
 	}
 	return resp.Revoked, nil
+}
+
+// FinalizeNodeReady atomically awards the best pending offer or transfers an
+// unclaimed node to the coordinator's local or cloud fallback.
+func (c *Client) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error) {
+	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/finalize-ready",
+		url.PathEscape(runID), url.PathEscape(nodeID))
+	var resp store.ExecutorClaimRoundResult
+	if err := c.post(ctx, path, nil, http.StatusOK, &resp); err != nil {
+		return store.ExecutorClaimRoundResult{}, err
+	}
+	return resp, nil
 }
 
 // HeartbeatNodeClaim extends the claim lease for holderID, optionally
@@ -1113,6 +1284,7 @@ func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
 		return err
@@ -1380,6 +1552,7 @@ func (c *Client) post(ctx context.Context, path string, body any, wantStatus int
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
 		return err
@@ -1402,6 +1575,7 @@ func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStat
 		return err
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
+	setNodeClaimFenceHeaders(req, ctx)
 	resp, err := c.do(req)
 	if err != nil {
 		return err
@@ -1411,6 +1585,18 @@ func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStat
 		return readHTTPError(resp)
 	}
 	return nil
+}
+
+func setNodeClaimFenceHeaders(req *http.Request, ctx context.Context) {
+	if fence, ok := store.NodeClaimFenceFromContext(ctx); ok {
+		req.Header.Set(store.ClaimHolderHeader, fence.HolderID)
+		req.Header.Set(store.ClaimMembershipHeader, fence.MembershipID)
+		req.Header.Set(store.ClaimReservationHeader, fence.ReservationID)
+		req.Header.Set(store.ClaimGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
+	}
+	if fence, ok := store.TriggerClaimFenceFromContext(ctx); ok {
+		req.Header.Set(store.TriggerGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
+	}
 }
 
 const unsupportedRouteError = "unsupported"
@@ -1457,6 +1643,12 @@ func controllerLacksRoute(route string) error {
 
 func readHTTPError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusConflict {
+		return fmt.Errorf("%w: %s", store.ErrLockHeld, bytes.TrimSpace(body))
+	}
+	if resp.StatusCode == http.StatusNotImplemented {
+		return fmt.Errorf("%w: controller returned %s", storage.ErrNotSupported, resp.Status)
+	}
 	var payload unsupportedRouteBody
 	if len(body) > 0 && json.Unmarshal(body, &payload) == nil && payload.Error != "" {
 		if resp.StatusCode == http.StatusNotFound && payload.Error == unsupportedRouteError {

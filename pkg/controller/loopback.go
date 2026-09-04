@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -475,7 +476,7 @@ func (l *Loopback) handleGetNode(w http.ResponseWriter, r *http.Request) {
 		writeStateError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, n)
+	writeJSON(w, http.StatusOK, api.PublicNode(n))
 }
 
 func (l *Loopback) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {

@@ -33,6 +33,7 @@ func TestSchemaV27_RewritesTheNULInheritedHolderMarker(t *testing.T) {
 		`DELETE FROM sparkwing_schema_version WHERE version >= 27`); err != nil {
 		t.Fatalf("reset version: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

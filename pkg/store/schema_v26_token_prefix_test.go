@@ -32,6 +32,7 @@ func downgradeTokenPrefixIndex(t *testing.T, path string, seed ...[2]string) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 26`); err != nil {
 		t.Fatalf("reset version: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

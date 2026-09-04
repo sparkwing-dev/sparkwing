@@ -208,6 +208,47 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 	}
 }
 
+func TestRunTriggerLoop_EarlyFailureFinishesWithClaimGeneration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var finishRunGeneration, finishTriggerGeneration string
+	var claimed atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+			if claimed.Swap(true) {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(store.Trigger{
+				ID: "bad-source", Pipeline: "demo", RepoURL: "http://127.0.0.1/repo",
+				Status: "claimed", ClaimSeq: 7,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/bad-source/finish":
+			finishRunGeneration = r.Header.Get(store.TriggerGenerationHeader)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/bad-source/done":
+			finishTriggerGeneration = r.Header.Get(store.TriggerGenerationHeader)
+			w.WriteHeader(http.StatusNoContent)
+			cancel()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	if err := RunTriggerLoop(ctx, TriggerLoopOptions{
+		ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+		Poll: 5 * time.Millisecond, MaxConcurrent: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if finishRunGeneration != "7" || finishTriggerGeneration != "7" {
+		t.Fatalf("failure cleanup generations = run %q trigger %q, want 7 for both",
+			finishRunGeneration, finishTriggerGeneration)
+	}
+}
+
 func waitForTriggerHelper(path string, timeout time.Duration) error {
 	deadlineAt := time.Now().Add(timeout)
 	poll := time.NewTicker(5 * time.Millisecond)

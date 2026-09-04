@@ -24,6 +24,7 @@ func (c *Client) ReadFiltered(ctx context.Context, runID, nodeID string, f ReadF
 func (c *Client) ReadRun(ctx context.Context, runID string) ([]byte, error)
 func (c *Client) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error)
 func DefaultLimits() Limits
+var ErrClaimConflict = errors.New("logs append claim is no longer current")
 type Limits struct {
 	MaxNodeBytes int64
 

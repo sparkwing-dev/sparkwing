@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -23,6 +25,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // safety: NAME_MAX is 255 bytes, so the cap covers the mapped node id plus its ".log" suffix.
@@ -541,6 +544,11 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nodeID: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	identity, err := appendIdentityFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	defer func() { _ = r.Body.Close() }()
 	reserved := int64(maxAppendRequestBytes)
@@ -570,6 +578,10 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if status, err := s.validateAppendClaim(r, runID, nodeID); err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
 	if !s.hasFreeSpace() {
 		http.Error(w, "log store is out of space", http.StatusInsufficientStorage)
 		return
@@ -586,14 +598,20 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := nodePath(runID, nodeID)
+	name := identity.path(runID, nodeID)
+	if name != nodePath(runID, nodeID) {
+		if err := s.ensureAttemptDir(root, runID, nodeID); err != nil {
+			s.storeError(w, "create attempt log dir", err)
+			return
+		}
+	}
 	rt := s.runTotals.acquire(runID)
 	defer s.runTotals.release(rt)
-	lock := s.appendLock(name)
+	lock := s.appendNodeLock(runID, nodeID)
 	lock.Lock()
 	defer lock.Unlock()
 
-	plan := s.planAppend(root, runID, name, rt, body)
+	plan := s.planAppend(root, runID, nodeID, rt, body)
 	if len(plan.write) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -620,6 +638,156 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) appendNodeLock(runID, nodeID string) *sync.Mutex {
+	return s.appendLock(nodePath(runID, nodeID))
+}
+
+func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (int, error) {
+	if s.authDisabled() {
+		return 0, nil
+	}
+	p, _ := logsPrincipalFromContext(r.Context())
+	if p != nil && p.hasScope(scopeAdmin) {
+		return 0, nil
+	}
+	raw, err := extractBearer(r)
+	if err != nil {
+		return http.StatusUnauthorized, err
+	}
+	u := strings.TrimRight(s.controllerURL, "/") + "/api/v1/runs/" + url.PathEscape(runID) +
+		"/nodes/" + url.PathEscape(nodeID) + "/claim/validate"
+	// #nosec G704 -- the origin is operator configuration; caller values are escaped path segments
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, u, nil)
+	if err != nil {
+		return http.StatusBadGateway, err
+	}
+	req.Header.Set("Authorization", "Bearer "+raw)
+	for _, name := range []string{
+		"X-Sparkwing-Claim-Holder",
+		"X-Sparkwing-Claim-Membership",
+		"X-Sparkwing-Claim-Reservation",
+		"X-Sparkwing-Claim-Generation",
+		"X-Sparkwing-Attempt-Ordinal",
+		"X-Sparkwing-Trigger-Generation",
+	} {
+		req.Header.Set(name, r.Header.Get(name))
+	}
+	// #nosec G704 -- the validated request retains the same operator-configured origin
+	resp, err := s.authHTTP.Do(req)
+	if err != nil {
+		return http.StatusBadGateway, fmt.Errorf("validate log claim: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return 0, nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	message := strings.TrimSpace(string(body))
+	if message == "" {
+		message = http.StatusText(resp.StatusCode)
+	}
+	return resp.StatusCode, fmt.Errorf("validate log claim: %s", message)
+}
+
+type appendIdentity struct {
+	claimGeneration   int64
+	attemptOrdinal    int
+	triggerGeneration int64
+}
+
+func appendIdentityFromRequest(r *http.Request) (appendIdentity, error) {
+	nodeHeaders := []string{
+		store.ClaimHolderHeader,
+		store.ClaimMembershipHeader,
+		store.ClaimReservationHeader,
+		store.ClaimGenerationHeader,
+	}
+	hasNodeIdentity := false
+	for _, name := range nodeHeaders {
+		hasNodeIdentity = hasNodeIdentity || r.Header.Get(name) != ""
+	}
+	hasTriggerIdentity := r.Header.Get(store.TriggerGenerationHeader) != ""
+	rawOrdinal := r.Header.Get(store.AttemptOrdinalHeader)
+	if hasNodeIdentity && hasTriggerIdentity {
+		return appendIdentity{}, errors.New("node attempt and trigger identities cannot be combined")
+	}
+	if hasNodeIdentity {
+		generation, generationErr := strconv.ParseInt(r.Header.Get(store.ClaimGenerationHeader), 10, 64)
+		ordinal, ordinalErr := strconv.Atoi(rawOrdinal)
+		if generationErr != nil || ordinalErr != nil || generation < 1 || ordinal < 1 || r.Header.Get(store.ClaimHolderHeader) == "" {
+			return appendIdentity{}, errors.New("exact node attempt identity is required")
+		}
+		return appendIdentity{claimGeneration: generation, attemptOrdinal: ordinal}, nil
+	}
+	if hasTriggerIdentity {
+		generation, err := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
+		if err != nil || generation < 1 {
+			return appendIdentity{}, errors.New("exact trigger identity is required")
+		}
+		if rawOrdinal == "" {
+			return appendIdentity{triggerGeneration: generation}, nil
+		}
+		ordinal, err := strconv.Atoi(rawOrdinal)
+		if err != nil || ordinal < 1 {
+			return appendIdentity{}, errors.New("trigger attempt ordinal must be positive")
+		}
+		return appendIdentity{triggerGeneration: generation, attemptOrdinal: ordinal}, nil
+	}
+	if rawOrdinal != "" {
+		return appendIdentity{}, errors.New("attempt ordinal requires a node or trigger identity")
+	}
+	return appendIdentity{}, nil
+}
+
+func (i appendIdentity) path(runID, nodeID string) string {
+	if i.claimGeneration > 0 {
+		return nodeAttemptPath(runID, nodeID, i.claimGeneration, i.attemptOrdinal)
+	}
+	if i.triggerGeneration > 0 {
+		if i.attemptOrdinal > 0 {
+			return nodeTriggerAttemptPath(runID, nodeID, i.triggerGeneration, i.attemptOrdinal)
+		}
+		return nodeTriggerPath(runID, nodeID, i.triggerGeneration)
+	}
+	return nodePath(runID, nodeID)
+}
+
+func selectedNodeLogPath(r *http.Request, runID, nodeID string) (string, bool, error) {
+	q := r.URL.Query()
+	rawAttempt := q.Get("attempt")
+	rawClaimGeneration := q.Get("claim_generation")
+	rawTriggerGeneration := q.Get("trigger_generation")
+	if rawAttempt == "" && rawClaimGeneration == "" && rawTriggerGeneration == "" {
+		return "", false, nil
+	}
+	if rawTriggerGeneration != "" {
+		if rawClaimGeneration != "" {
+			return "", false, errors.New("trigger_generation cannot be combined with claim_generation")
+		}
+		generation, err := strconv.ParseInt(rawTriggerGeneration, 10, 64)
+		if err != nil || generation < 1 {
+			return "", false, errors.New("trigger_generation must be positive")
+		}
+		if rawAttempt == "" {
+			return nodeTriggerPath(runID, nodeID, generation), true, nil
+		}
+		ordinal, err := strconv.Atoi(rawAttempt)
+		if err != nil || ordinal < 1 {
+			return "", false, errors.New("attempt must be positive")
+		}
+		return nodeTriggerAttemptPath(runID, nodeID, generation, ordinal), true, nil
+	}
+	if rawAttempt == "" || rawClaimGeneration == "" {
+		return "", false, errors.New("attempt and claim_generation must be provided together")
+	}
+	ordinal, ordinalErr := strconv.Atoi(rawAttempt)
+	generation, generationErr := strconv.ParseInt(rawClaimGeneration, 10, 64)
+	if ordinalErr != nil || generationErr != nil || ordinal < 1 || generation < 1 {
+		return "", false, errors.New("attempt and claim_generation must be positive")
+	}
+	return nodeAttemptPath(runID, nodeID, generation, ordinal), true, nil
+}
+
 func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runID")
 	nodeID := r.PathValue("nodeID")
@@ -640,7 +808,17 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = root.Close() }()
 
-	f, err := root.Open(nodePath(runID, nodeID))
+	selectedPath, selected, selectErr := selectedNodeLogPath(r, runID, nodeID)
+	if selectErr != nil {
+		http.Error(w, selectErr.Error(), http.StatusBadRequest)
+		return
+	}
+	var data []byte
+	if selected {
+		data, err = readLogFile(root, selectedPath)
+	} else {
+		data, err = readNodeLogData(root, runID, nodeID)
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -650,15 +828,11 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "open node log", err)
 		return
 	}
-	defer f.Close()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	if filter.passThrough() {
-		_, _ = io.Copy(w, f)
-		return
-	}
-	data, rerr := io.ReadAll(f)
-	if rerr != nil {
+		// #nosec G705 -- the response is text/plain, never HTML
+		_, _ = w.Write(data)
 		return
 	}
 	// #nosec G705 -- the response is text/plain, never HTML
@@ -828,25 +1002,38 @@ func (s *Server) handleReadRun(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	for i, e := range entries {
-		name := e.Name()
-		if !strings.HasSuffix(name, ".log") {
-			continue
-		}
-		nodeID := strings.TrimSuffix(name, ".log")
+	groups := nodeLogGroups(root, runID, entries)
+	logicalNames := make([]string, 0, len(groups))
+	for name := range groups {
+		logicalNames = append(logicalNames, name)
+		slices.SortFunc(groups[name], func(a, b string) int {
+			if a == name {
+				return -1
+			}
+			if b == name {
+				return 1
+			}
+			return strings.Compare(a, b)
+		})
+	}
+	slices.Sort(logicalNames)
+	for i, logical := range logicalNames {
+		nodeID := strings.TrimSuffix(logical, ".log")
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
 		// #nosec G705 -- the response is text/plain, never HTML
 		fmt.Fprintf(w, "=== %s ===\n", nodeID)
-		f, err := root.Open(filepath.Join(runID, name))
-		if err != nil {
-			// #nosec G705 -- the response is text/plain, never HTML
-			fmt.Fprintf(w, "(error reading %s)\n", nodeID)
-			continue
+		for _, name := range groups[logical] {
+			f, err := root.Open(filepath.Join(runID, name))
+			if err != nil {
+				// #nosec G705 -- the response is text/plain, never HTML
+				fmt.Fprintf(w, "(error reading %s)\n", nodeID)
+				continue
+			}
+			_, _ = io.Copy(w, f)
+			_ = f.Close()
 		}
-		_, _ = io.Copy(w, f)
-		_ = f.Close()
 	}
 }
 
@@ -857,8 +1044,6 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	path := nodePath(runID, nodeID)
-
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -882,8 +1067,8 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
-	var offset int64
-	pending := ""
+	offsets := map[string]int64{}
+	pending := map[string]string{}
 	for {
 		select {
 		case <-r.Context().Done():
@@ -894,37 +1079,30 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case <-ticker.C:
-			f, err := root.Open(path)
+			names, err := nodeLogNames(root, runID, nodeID)
 			if err != nil {
 				continue
 			}
-			fi, err := f.Stat()
-			if err != nil {
-				f.Close()
-				continue
-			}
-			if fi.Size() <= offset {
-				f.Close()
-				continue
-			}
-			if _, err := f.Seek(offset, io.SeekStart); err != nil {
-				f.Close()
-				continue
-			}
-			buf := make([]byte, fi.Size()-offset)
-			n, _ := io.ReadFull(f, buf)
-			f.Close()
-			offset += int64(n)
-
-			chunk := pending + string(buf[:n])
-			parts := splitKeepPartial(chunk)
-			pending = parts.trailing
-			for _, line := range parts.complete {
-				if _, err := fmt.Fprintf(w, "data: %s\n\n", sseEscape(line)); err != nil {
-					return
+			wrote := false
+			for _, name := range names {
+				data, readErr := readLogFile(root, filepath.Join(runID, name))
+				if readErr != nil || int64(len(data)) <= offsets[name] {
+					continue
+				}
+				buf := data[offsets[name]:]
+				offsets[name] = int64(len(data))
+				parts := splitKeepPartial(pending[name] + string(buf))
+				pending[name] = parts.trailing
+				for _, line := range parts.complete {
+					if _, err := fmt.Fprintf(w, "data: %s\n\n", sseEscape(line)); err != nil {
+						return
+					}
+					wrote = true
 				}
 			}
-			flusher.Flush()
+			if wrote {
+				flusher.Flush()
+			}
 		}
 	}
 }
@@ -977,8 +1155,24 @@ func (s *Server) ensureRunDir(root *os.Root, runID string) error {
 	return nil
 }
 
+func (s *Server) ensureAttemptDir(root *os.Root, runID, nodeID string) error {
+	for _, dir := range []string{
+		filepath.Join(runID, ".attempts"),
+		filepath.Join(runID, ".attempts", nodeFile(nodeID)),
+	} {
+		if err := root.Mkdir(dir, s.dirMode); err != nil && !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+	}
+	return nil
+}
+
 func readRunDir(root *os.Root, runID string) ([]fs.DirEntry, error) {
-	d, err := root.Open(runID)
+	return readDirAt(root, runID)
+}
+
+func readDirAt(root *os.Root, path string) ([]fs.DirEntry, error) {
+	d, err := root.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -1011,6 +1205,131 @@ func validateIDs(runID, nodeID string) error {
 
 func nodePath(runID, nodeID string) string {
 	return filepath.Join(runID, nodeFile(nodeID))
+}
+
+func nodeAttemptPath(runID, nodeID string, generation int64, ordinal int) string {
+	return filepath.Join(runID, ".attempts", nodeFile(nodeID), fmt.Sprintf("a%020d_g%020d.log", ordinal, generation))
+}
+
+func nodeTriggerPath(runID, nodeID string, generation int64) string {
+	return filepath.Join(runID, ".attempts", nodeFile(nodeID), fmt.Sprintf("t_g%020d.log", generation))
+}
+
+func nodeTriggerAttemptPath(runID, nodeID string, generation int64, ordinal int) string {
+	return filepath.Join(runID, ".attempts", nodeFile(nodeID), fmt.Sprintf("a%020d_t%020d.log", ordinal, generation))
+}
+
+func readNodeLogData(root *os.Root, runID, nodeID string) ([]byte, error) {
+	names, err := nodeLogNames(root, runID, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	for _, name := range names {
+		data, err := readLogFile(root, filepath.Join(runID, name))
+		if err != nil {
+			return nil, err
+		}
+		_, _ = out.Write(data)
+	}
+	return out.Bytes(), nil
+}
+
+func readLogFile(root *os.Root, path string) ([]byte, error) {
+	f, err := root.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	data, readErr := io.ReadAll(f)
+	closeErr := f.Close()
+	return data, errors.Join(readErr, closeErr)
+}
+
+func nodeLogNames(root *os.Root, runID, nodeID string) ([]string, error) {
+	entries, err := readRunDir(root, runID)
+	if err != nil {
+		return nil, err
+	}
+	legacy := nodeFile(nodeID)
+	var attemptNames []string
+	legacyExists := false
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == legacy {
+			legacyExists = true
+		}
+	}
+	attemptDir := filepath.Join(runID, ".attempts", legacy)
+	if entries, err := readDirAt(root, attemptDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".log") {
+				attemptNames = append(attemptNames, filepath.Join(".attempts", legacy, entry.Name()))
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	slices.Sort(attemptNames)
+	names := attemptNames
+	if legacyExists {
+		names = append([]string{legacy}, attemptNames...)
+	}
+	return names, nil
+}
+
+func nodeLogGroups(root *os.Root, runID string, entries []fs.DirEntry) map[string][]string {
+	groups := map[string][]string{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() && strings.HasSuffix(name, ".log") {
+			groups[name] = append(groups[name], name)
+		}
+	}
+	attemptRoot := filepath.Join(runID, ".attempts")
+	dirs, err := readDirAt(root, attemptRoot)
+	if err != nil {
+		return groups
+	}
+	for _, dir := range dirs {
+		if !dir.IsDir() || !strings.HasSuffix(dir.Name(), ".log") {
+			continue
+		}
+		files, err := readDirAt(root, filepath.Join(attemptRoot, dir.Name()))
+		if err != nil {
+			continue
+		}
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(file.Name(), ".log") {
+				groups[dir.Name()] = append(groups[dir.Name()], filepath.Join(".attempts", dir.Name(), file.Name()))
+			}
+		}
+	}
+	for logical := range groups {
+		slices.SortFunc(groups[logical], func(a, b string) int {
+			if a == logical {
+				return -1
+			}
+			if b == logical {
+				return 1
+			}
+			return strings.Compare(a, b)
+		})
+	}
+	return groups
+}
+
+func logicalNodeSize(root *os.Root, runID, nodeID string) int64 {
+	names, err := nodeLogNames(root, runID, nodeID)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, name := range names {
+		if info, err := root.Stat(filepath.Join(runID, name)); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
 }
 
 // safety: a hierarchical node id collapses to one file name, so the

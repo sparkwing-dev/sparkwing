@@ -32,6 +32,7 @@ func seedV28Nodes(t *testing.T, path string) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 29`); err != nil {
 		t.Fatalf("reset version to 28: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if v := readSchemaVersion(t, st.DB()); v != 28 {
 		t.Fatalf("seeded version = %d, want 28", v)
 	}
@@ -116,6 +117,7 @@ func TestSchemaV29_UpgradeIsSafeToReplay(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 29`); err != nil {
 		t.Fatalf("reset version: %v", err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
 	replayed, err := store.Open(path)
@@ -149,6 +151,7 @@ func TestSchemaV29_ReplayLeavesTheV28CascadeIntact(t *testing.T) {
 	if _, err := upgraded.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 29`); err != nil {
 		t.Fatalf("reset version: %v", err)
 	}
+	deleteFleetRequirements(t, upgraded.DB())
 	_ = upgraded.Close()
 
 	replayed, err := store.Open(path)

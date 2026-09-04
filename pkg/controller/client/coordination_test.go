@@ -25,6 +25,7 @@ type coordinationFixture struct {
 	runner *client.Client
 	admin  *client.Client
 	store  *store.Store
+	ctx    context.Context
 }
 
 // safety: the runner client holds only the trigger claim on run r1 of pipeline demo,
@@ -59,9 +60,12 @@ func newCoordinationFixture(t *testing.T) coordinationFixture {
 		admin:  client.NewWithToken(srv.URL, srv.Client(), adminRaw),
 		store:  st,
 	}
-	if _, err := f.runner.ClaimTrigger(ctx); err != nil {
+	claimed, err := f.runner.ClaimTrigger(ctx)
+	if err != nil {
 		t.Fatalf("ClaimTrigger: %v", err)
 	}
+	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
+	f.ctx = ctx
 	if err := f.runner.CreateRun(ctx, store.Run{
 		ID: "r1", Pipeline: "demo", Status: "running", StartedAt: now,
 	}); err != nil {
@@ -100,13 +104,14 @@ func TestClientTriggerLoopRoutesMatchTheStore(t *testing.T) {
 	if err != nil || claimed.ID != "child-1" {
 		t.Fatalf("ClaimSpecificTrigger = %v, %v", claimed, err)
 	}
+	claimedCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
 
-	if err := c.CreateRun(ctx, store.Run{
+	if err := c.CreateRun(claimedCtx, store.Run{
 		ID: "child-1", Pipeline: "child", Status: "running", StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("CreateRun for the trigger this client just claimed: %v", err)
 	}
-	if err := c.CreateNode(ctx, store.Node{RunID: "child-1", NodeID: "build", Status: "pending"}); err != nil {
+	if err := c.CreateNode(claimedCtx, store.Node{RunID: "child-1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode on the claimed child run: %v", err)
 	}
 
@@ -116,7 +121,7 @@ func TestClientTriggerLoopRoutesMatchTheStore(t *testing.T) {
 	if _, err := c.ClaimSpecificTrigger(ctx, "no-such-trigger", store.DefaultLeaseDuration); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("claim of a missing trigger err = %v, want ErrNotFound", err)
 	}
-	if err := c.FinishTrigger(ctx, "child-1"); err != nil {
+	if err := c.FinishTrigger(claimedCtx, "child-1"); err != nil {
 		t.Fatalf("FinishTrigger: %v", err)
 	}
 }
@@ -188,7 +193,7 @@ func TestClientCapacityRoutesRefuseAnotherPipelineAndAbsurdInput(t *testing.T) {
 func TestClientNodeUsageAndMetricsRoundTrip(t *testing.T) {
 	f := newCoordinationFixture(t)
 	c, st := f.runner, f.store
-	ctx := context.Background()
+	ctx := f.ctx
 
 	sample := store.MetricSample{
 		TS: time.Now().UTC().Truncate(time.Millisecond), CPUMillicores: 900,

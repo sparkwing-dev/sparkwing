@@ -254,6 +254,24 @@ func TestPipelineAdmission_NeverHosts(t *testing.T) {
 	}
 }
 
+func TestReservedNodeAdmissionUsesExistingLease(t *testing.T) {
+	la := NewReservedNodeAdmission("/unused", "test", "reserved-token", wingwire.OriginController)
+	ctx, ok := la.attachReservedNode(context.Background(), 37)
+	if !ok {
+		t.Fatal("reserved admission was not attached")
+	}
+	got, token, hostAdmitted := localAdmissionFromContext(ctx)
+	if got != la || token != "reserved-token" || !hostAdmitted {
+		t.Fatalf("admission context = (%p, %q, %v), want (%p, reserved-token, true)", got, token, hostAdmitted, la)
+	}
+	if child := localAdmissionChildTokenFromContext(ctx); child != "reserved-token" {
+		t.Fatalf("child token = %q, want reserved-token", child)
+	}
+	if priority := localAdmissionPriorityFromContext(ctx); priority != 37 {
+		t.Fatalf("priority = %d, want 37", priority)
+	}
+}
+
 func TestPipelineAdmission_NoHostResolvableSpawnsNothing(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, "")
 	t.Setenv("PATH", t.TempDir())

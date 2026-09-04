@@ -47,6 +47,28 @@ type LocalAdmission struct {
 	logged   map[string]bool
 
 	QueueHeartbeat time.Duration
+
+	reservedNodeLeaseToken string
+}
+
+// NewReservedNodeAdmission attaches node execution to capacity that a caller
+// already reserved. The caller retains ownership of the lease and must release
+// it after execution stops.
+func NewReservedNodeAdmission(home, version, leaseToken string, origin wingwire.Origin) *LocalAdmission {
+	return &LocalAdmission{
+		Home:                   home,
+		Version:                version,
+		Origin:                 origin,
+		reservedNodeLeaseToken: leaseToken,
+	}
+}
+
+func (la *LocalAdmission) attachReservedNode(ctx context.Context, priority int) (context.Context, bool) {
+	if la == nil || la.reservedNodeLeaseToken == "" {
+		return ctx, false
+	}
+	token := la.reservedNodeLeaseToken
+	return withLocalAdmission(ctx, la, token, token, true, priority), true
 }
 
 const defaultQueueHeartbeat = 30 * time.Second

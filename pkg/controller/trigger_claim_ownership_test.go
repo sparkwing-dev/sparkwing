@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -16,10 +17,11 @@ import (
 )
 
 type triggerOwnershipFixture struct {
-	url      string
-	holder   string
-	stranger string
-	store    *store.Store
+	url        string
+	holder     string
+	stranger   string
+	store      *store.Store
+	generation int64
 }
 
 func newTriggerOwnershipFixture(t *testing.T) triggerOwnershipFixture {
@@ -53,16 +55,25 @@ func newTriggerOwnershipFixture(t *testing.T) triggerOwnershipFixture {
 	if trig == nil || trig.ID != "run-owned" {
 		t.Fatalf("holder claimed %+v, want run-owned", trig)
 	}
-	return triggerOwnershipFixture{url: srv.URL, holder: holder, stranger: stranger, store: st}
+	return triggerOwnershipFixture{
+		url: srv.URL, holder: holder, stranger: stranger, store: st,
+		generation: trig.ClaimSeq,
+	}
 }
 
 func (f triggerOwnershipFixture) post(t *testing.T, token, path string) int {
+	t.Helper()
+	return f.postAtGeneration(t, token, path, f.generation)
+}
+
+func (f triggerOwnershipFixture) postAtGeneration(t *testing.T, token, path string, generation int64) int {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, f.url+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(generation, 10))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
@@ -70,6 +81,19 @@ func (f triggerOwnershipFixture) post(t *testing.T, token, path string) int {
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode
+}
+
+func TestTriggerClaim_StaleGenerationAnswersConflict(t *testing.T) {
+	f := newTriggerOwnershipFixture(t)
+	if _, err := f.store.DB().Exec(
+		`UPDATE triggers SET claim_seq = claim_seq + 1 WHERE id = ?`, "run-owned",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.postAtGeneration(t, f.holder,
+		"/api/v1/triggers/run-owned/heartbeat", f.generation); got != http.StatusConflict {
+		t.Errorf("stale-generation heartbeat status=%d want 409", got)
+	}
 }
 
 func (f triggerOwnershipFixture) status(t *testing.T) string {

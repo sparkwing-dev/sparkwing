@@ -42,7 +42,12 @@ func silentAfterReconnect(t *testing.T, home string) (queuedAgain <-chan struct{
 				_ = nc.Close()
 				continue
 			}
-			ack, _ := wingwire.Encode(&wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "v1.0.0"})
+			ack, _ := wingwire.Encode(&wingwire.HelloAck{
+				ProtocolMajor:       wingd.ProtocolMajor,
+				NativeProtocolMajor: wingd.ProtocolMajor,
+				BinaryVersion:       "v1.0.0",
+				BuildIdentity:       wingwire.BuildIdentity,
+			})
 			if _, werr := nc.Write(ack); werr != nil {
 				_ = nc.Close()
 				continue

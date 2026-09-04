@@ -404,6 +404,11 @@ func blockTheStoreOpen(t *testing.T, home string) *sql.Tx {
 	if _, err := foreign.DB().ExecContext(ctx, `DELETE FROM sparkwing_schema_version`); err != nil {
 		t.Fatalf("clear the applied schema versions: %v", err)
 	}
+	if _, err := foreign.DB().ExecContext(ctx, `DELETE FROM sparkwing_requirements WHERE name IN (
+        'executor-enrollment-v1', 'executor-offer-arbitration-v1', 'agent-loss-attempt-fencing-v1'
+    )`); err != nil {
+		t.Fatalf("clear future Fleet requirements: %v", err)
+	}
 	tx, err := foreign.DB().BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("foreign begin: %v", err)

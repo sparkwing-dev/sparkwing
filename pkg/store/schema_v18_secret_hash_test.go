@@ -69,6 +69,7 @@ func TestSchemaV18_ScrubsSecretInputHashes(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 18`); err != nil {
 		t.Fatal(err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +132,7 @@ func TestSchemaV18_FailsClosedOnMalformedInvocationJSON(t *testing.T) {
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 18`); err != nil {
 		t.Fatal(err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

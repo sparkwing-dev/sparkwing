@@ -19,24 +19,32 @@ repository, team, or environment. Two projects that must not read each
 other's runs need two controllers, not two tokens in one.
 
 **Pipeline authors run code on runners.** A pipeline is Go that the runner
-compiles and executes, and the runner's bearer sits in the environment of
-that process, so pipeline code can call every route the token unlocks: read
-the secrets its repository owns, write node state, ship logs. Merging a
-change under `.sparkwing/` therefore hands the author the runner's
-authority, and the review that gates that merge is the control. Keeping the
-bearer out of the pipeline body is an open design step; see the extension
-points in [auth.md](auth.md).
+compiles and executes. Enrolling a workstation or gateway authorizes that
+code to execute as the agent service's OS user. Assisted execution keeps the
+enrollment bearer and claim identity in the supervisor; the job-body child
+gets a process-lifetime loopback capability limited to its exact run and node,
+with execution start, finish, and logs additionally bound to its acknowledged
+attempt ordinal. The child does not inherit arbitrary agent service credentials,
+and its capability cannot claim or renew work, manage the fleet, or call
+administrative routes. This is not an OS sandbox: the pipeline keeps every
+file, network, and process permission of the agent OS user. Use a dedicated
+account whose reach every enrolled repository may have. Sparkwing does not
+join a tailnet or configure host networking.
 
-**A warm pool shares one process across repositories.** `sparkwing cluster
-runner` claims nodes in a loop and executes them in its own process until
-`--max-claims-before-restart` recycles the container. The controller hands
-out whatever node is ready, so consecutive nodes commonly belong to
-different repositories and share that process's memory, filesystem, and
-token. A pipeline that writes a credential to disk or leaves one in the
-environment leaves it where the next repository's pipeline reads it. Run
-`sparkwing cluster worker --runner k8s` to give each node its own Job pod
-where repositories do not trust each other; see
-[warm-pool.md](warm-pool.md).
+Schema 30 supplies authenticated foreground enrollment, offer, award, source
+handoff, and coordinator fallback as an internal release dependency. It does
+not expose remote helper body completion. That process boundary must ship with
+schema 31, which adds the current-attempt fence and durable grants required by
+`Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`, cross-pipeline references,
+and dynamic `SpawnNode`. Schema 30 is not a complete assisted-node
+compatibility boundary on its own.
+
+**A warm pool shares one OS account across repositories.** Assisted job bodies
+run in separate child processes, but consecutive nodes still share the same
+filesystem, network identity, and OS permissions. A pipeline that writes a
+credential to disk can leave it where the next repository reads it. Run
+`sparkwing cluster worker --runner k8s` to give each node its own Job pod where
+repositories do not trust each other; see [warm-pool.md](warm-pool.md).
 
 **`runs.read` is deployment-wide.** `GET /api/v1/runs` filters on the query
 the caller supplies, never on the caller. One `runs.read` token lists every

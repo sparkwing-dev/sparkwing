@@ -1240,6 +1240,8 @@ paths:
         "404":
           description: >-
             Trigger missing, or its claim was reaped or requeued and the row now records no claimant -- worker should stop.
+        "409":
+          description: The claimant presented a stale or invalid trigger generation.
 
   /api/v1/triggers/{id}/done:
     parameters: [{$ref: "#/components/parameters/TriggerID"}]
@@ -1259,6 +1261,8 @@ paths:
         "404":
           description: >-
             Trigger missing, or its claim was reaped or requeued and the row now records no claimant.
+        "409":
+          description: The claimant presented a stale or invalid trigger generation.
 
   /api/v1/triggers/spawned-child:
     get:
@@ -1773,6 +1777,12 @@ paths:
               required: [holder_id]
               properties:
                 holder_id: {type: string}
+                run_id: {type: string}
+                node_id: {type: string}
+                executor_name: {type: string}
+                reservation_id: {type: string}
+                resource_digest: {type: string}
+                slot: {type: integer}
                 lease_secs: {type: integer}
                 labels:
                   type: array
@@ -1787,7 +1797,18 @@ paths:
           description: Claimed node.
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/Node"}
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/Node"}
+                  - x-sparkwing-go-partial: pkg/store.Node
+                    type: object
+                    description: >-
+                      Exact claim fence returned only to the authenticated runner that won this claim.
+                    properties:
+                      claimed_by: {type: string}
+                      claim_generation: {type: integer, format: int64}
+                      claim_membership_id: {type: string}
+                      reservation_id: {type: string}
         "204": {description: Nothing to claim.}
         "400": {$ref: "#/components/responses/BadRequest"}
 
@@ -2553,10 +2574,26 @@ paths:
         schema: {type: string}
     post:
       x-sparkwing-scope: nodes.claim
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      tags: [gitcache]
+      summary: Map the claimed run's source repository into the cache.
+      description: |
+        Run-scoped counterpart of `/api/v1/gitcache/git/register`. A
+        claim-only caller must hold this run, and `name` plus `repo` must
+        identify the run's recorded source. The controller forwards neither
+        the caller's bearer nor arbitrary repository credentials to the cache.
+      parameters:
+        - in: query
+          name: name
+          required: true
+          schema: {type: string, pattern: "^[A-Za-z0-9._-]{1,64}$"}
+        - {$ref: "#/components/parameters/GitcacheRepo"}
       responses:
-        default: {description: Undescribed.}
+        "200": {description: "The cache's answer, forwarded verbatim."}
+        "400": {description: Rejected name or repository URL.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Caller does not hold the run or the repository is not its source.}
+        "502": {description: The cache is unreachable or answered badly.}
+        "503": {description: No cache is configured on this controller.}
 
   /api/v1/runs/{id}/gitcache/git/{path}:
     parameters:
@@ -2570,16 +2607,46 @@ paths:
         schema: {type: string}
     get:
       x-sparkwing-scope: nodes.claim
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      tags: [gitcache]
+      summary: Advertise the claimed run's cached source refs.
+      description: |
+        Forwards only `<registered-name>/info/refs?service=git-upload-pack`.
+        A claim-only caller must hold this run, and the registered name must
+        identify its recorded source repository.
+      parameters:
+        - in: query
+          name: service
+          required: true
+          schema: {type: string, enum: [git-upload-pack]}
       responses:
-        default: {description: Undescribed.}
+        "200": {description: Git smart-protocol ref advertisement.}
+        "400": {description: The path does not name a valid registered mirror.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Caller does not hold the run or the mirror is not its source.}
+        "405": {description: Anything but an upload-pack ref advertisement.}
+        "502": {description: The cache is unreachable or answered badly.}
+        "503": {description: No cache is configured on this controller.}
     post:
       x-sparkwing-scope: nodes.claim
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      tags: [gitcache]
+      summary: Fetch from the claimed run's cached source mirror.
+      description: |
+        Forwards only `<registered-name>/git-upload-pack`. A claim-only caller
+        must hold this run, and the registered name must identify its recorded
+        source repository. Push requests cannot cross this proxy.
+      requestBody:
+        required: true
+        content:
+          application/x-git-upload-pack-request:
+            schema: {type: string, format: binary}
       responses:
-        default: {description: Undescribed.}
+        "200": {description: Git smart-protocol packfile response.}
+        "400": {description: The path does not name a valid registered mirror.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Caller does not hold the run or the mirror is not its source.}
+        "405": {description: Anything but an upload-pack fetch.}
+        "502": {description: The cache is unreachable or answered badly.}
+        "503": {description: No cache is configured on this controller.}
 
   /api/v1/maintenance/reconcile-orphans:
     post:
@@ -2759,6 +2826,300 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/agents/{name}:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: {type: string}
+    put:
+      x-sparkwing-scope: admin
+      tags: [agents]
+      summary: Enroll an executor under an exact runner credential.
+      description: |
+        Creates or updates the named executor. `token_prefix` must resolve to
+        a live runner or service credential authorized to claim nodes; the raw bearer is
+        never accepted here. Location is a trusted operator declaration, while
+        capabilities describe placement features and cannot impersonate a
+        location. Rebinding a name to another credential clears its liveness.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.enrollAgentReq
+              type: object
+              required: [token_prefix, kind, max_concurrent]
+              properties:
+                token_prefix: {type: string, description: Non-secret prefix of the credential bound to this enrollment.}
+                kind: {type: string, enum: [agent, gateway]}
+                location: {type: string, enum: [local, cloud, unknown], default: unknown}
+                capabilities:
+                  type: array
+                  items: {type: string}
+                base_priority: {type: integer, minimum: 0, maximum: 100}
+                priority_ceiling: {type: integer, minimum: 0, maximum: 100}
+                max_concurrent: {type: integer, minimum: 1}
+                budget:
+                  x-sparkwing-go-type: pkg/controller.AgentResources
+                  type: object
+                  required: [cores, memory_bytes]
+                  properties:
+                    cores: {type: number, minimum: 0}
+                    memory_bytes: {type: integer, format: int64, minimum: 0}
+      responses:
+        "204": {description: Executor enrolled. Empty body.}
+        "400": {description: Invalid enrollment or credential prefix.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {description: Enrollment limit or name/credential conflict.}
+
+  /api/v1/agents/{name}/heartbeat:
+    parameters:
+      - in: path
+        name: name
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [agents]
+      summary: Report an enrolled executor's available capacity.
+      description: |
+        The exact credential bound by enrollment must authenticate this call.
+        The controller timestamps the observation itself; the runner cannot
+        supply a clock value. Negative or non-finite capacity is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.agentHeartbeatReq
+              type: object
+              required: [headroom]
+              properties:
+                headroom:
+                  x-sparkwing-go-type: pkg/controller.claimHeadroom
+                  type: object
+                  required: [cores, memory_bytes, queue_depth]
+                  properties:
+                    cores: {type: number, minimum: 0}
+                    memory_bytes: {type: integer, format: int64, minimum: 0}
+                    queue_depth: {type: integer, minimum: 0}
+      responses:
+        "204": {description: Heartbeat recorded. Empty body.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {description: Credential does not match this enrollment.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/nodes/claim/prepare:
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [nodes]
+      summary: Preview the next node eligible for an enrolled executor.
+      description: |
+        Returns the controller-owned resource digest and current membership
+        snapshot without claiming the node or reserving capacity. A foreground
+        Fleet authority restricts this lookup to its own run. The executor
+        submits a locally reserved slot to `/api/v1/nodes/claim` afterward.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-partial: pkg/controller.claimNodeReq
+              type: object
+              required: [executor_name]
+              properties:
+                executor_name: {type: string}
+      responses:
+        "200":
+          description: Eligible node and exact enrollment snapshot.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ExecutorClaimPreparation"}
+        "204": {description: No eligible node. Empty body.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Credential does not match this enrollment.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.state
+      tags: [nodes]
+      summary: Reset an ordinarily failed node for its next in-place attempt.
+      description: |
+        Clears one terminal failed attempt back to pending while retaining its
+        consumed-attempt count. The caller must present the run's exact live
+        trigger generation unless controller-internal authorization applies.
+        Agent-loss failures use the separate recovery
+        path and cannot be reset here.
+      responses:
+        "204": {description: "Node reset, or already pending and unclaimed. Empty body."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Caller lacks the exact trigger claim identity.}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Stale generation or node state cannot be reset.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/claim/validate:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: logs.write
+      tags: [nodes]
+      summary: Validate a log writer's exact live execution attempt.
+      description: |
+        Internal controller-to-log-service fence check. The request must carry
+        either the four `X-Sparkwing-Claim-*` headers plus a positive
+        `X-Sparkwing-Attempt-Ordinal`, or a positive
+        `X-Sparkwing-Trigger-Generation` and, except for `_compile`, an attempt
+        ordinal. Mixing node and trigger identities is rejected. Trusted
+        controller-internal calls bypass claim validation.
+      responses:
+        "204": {description: Attempt is live. Empty body.}
+        "400": {description: Node and trigger identities were combined.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409": {description: "Missing, malformed, stale, expired, or finished identity."}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/execution-finish:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [nodes]
+      summary: Finish one exact node execution attempt.
+      description: |
+        Completes the attempt ledger entry for the live claim fence. Success
+        and cancellation carry no failure reason; failed attempts accept only
+        Sparkwing's structured failure reasons. This does not finish the node
+        row itself.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/store.ExecutionAttemptFinish
+              type: object
+              required: [holder_id, claim_generation, attempt_ordinal, outcome]
+              properties:
+                holder_id: {type: string}
+                membership_id: {type: string}
+                reservation_id: {type: string}
+                claim_generation: {type: integer, format: int64, minimum: 1}
+                attempt_ordinal: {type: integer, minimum: 1}
+                outcome: {type: string, enum: [success, failed, cancelled]}
+                failure_reason:
+                  type: string
+                  enum: [unknown, oom_killed, timeout, no_progress_timeout, verify, queue_timeout, logs_auth, logs_dropped]
+      responses:
+        "204": {description: Attempt finished. Empty body.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Exact claim identity is missing.}
+        "409": {description: Claim is stale or the attempt does not match current state.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/execution-start:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim
+      tags: [nodes]
+      summary: Start one exact node execution attempt.
+      description: |
+        Opens the next attempt-ledger entry under the caller's live claim fence.
+        Repeating the same exact start is idempotent; another identity or
+        ordinal conflicts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/store.ExecutionStart
+              type: object
+              required: [holder_id, claim_generation, attempt_ordinal]
+              properties:
+                holder_id: {type: string}
+                membership_id: {type: string}
+                reservation_id: {type: string}
+                claim_generation: {type: integer, format: int64, minimum: 1}
+                attempt_ordinal: {type: integer, minimum: 1}
+      responses:
+        "204": {description: Attempt started. Empty body.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Exact claim identity is missing.}
+        "409": {description: Claim is stale or the ordinal is not the next attempt.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: admin
+      tags: [nodes]
+      summary: Resolve an executor offer round or release coordinator fallback.
+      description: |
+        After the five-second offer window, atomically awards the best still
+        eligible offer. If no live offer remains and placement permits the
+        coordinator, clears readiness so the coordinator can execute locally.
+        A still-open round or hard placement requirement reports `pending`.
+      responses:
+        "200":
+          description: Resolution state.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: {type: boolean, description: Readiness moved back to coordinator fallback.}
+                  pending: {type: boolean, description: The offer window or a hard placement requirement remains unresolved.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -2890,6 +3251,13 @@ components:
         retry_source:
           type: string
           enum: ["", manual, auto]
+        retry_cause_node_id: {type: string}
+        retry_cause_node_ids:
+          type: array
+          items: {type: string}
+        retry_available_at: {type: string, format: date-time, nullable: true}
+        retry_deadline_at: {type: string, format: date-time, nullable: true}
+        agent_loss_retry_count: {type: integer}
         replay_of_run_id: {type: string}
         replay_of_node_id: {type: string}
         invocation:
@@ -2909,9 +3277,10 @@ components:
           description: >-
             Most recent run-level liveness ping from the dispatching orchestrator. Absent for rows that predate the column and for backends that ping per node instead (local and S3 modes).
     Node:
-      x-sparkwing-go-type: pkg/store.Node
+      x-sparkwing-go-partial: pkg/store.Node
       type: object
-      description: One DAG node row. Mirrors `pkg/store.Node`.
+      description: >-
+        Credential-safe DAG node view. Claim-holder, reservation, membership, executor, and coordinator identities are removed from read responses.
       required: [id, status, deps]
       properties:
         run_id: {type: string}
@@ -2931,11 +3300,35 @@ components:
         started_at: {type: string, format: date-time, nullable: true}
         finished_at: {type: string, format: date-time, nullable: true}
         ready_at: {type: string, format: date-time, nullable: true}
-        claimed_by: {type: string}
+        claimed: {type: boolean}
         lease_expires_at: {type: string, format: date-time, nullable: true}
+        offer_started_at: {type: string, format: date-time, nullable: true}
+        offer_priority_target: {type: integer}
+        claim_base_priority: {type: integer}
+        claim_priority: {type: integer}
+        executor_kind: {type: string}
+        executor_name: {type: string}
+        executor_location:
+          type: string
+          enum: [local, cloud, unknown]
+        required_executor_location:
+          type: string
+          enum: ["", local, cloud, unknown]
+        execution_started_at: {type: string, format: date-time, nullable: true}
+        attempts_consumed: {type: integer}
+        retry_root_run_id: {type: string}
+        execution_attempts:
+          type: array
+          items: {$ref: "#/components/schemas/ExecutionAttempt"}
         needs_labels:
           type: array
           items: {type: string}
+        prefers_labels:
+          type: array
+          items: {type: string}
+        requested_cores: {type: number}
+        requested_memory_bytes: {type: integer, format: int64}
+        requested_slots: {type: integer}
         status_detail: {type: string}
         last_heartbeat: {type: string, format: date-time, nullable: true}
         failure_reason: {type: string}
@@ -2962,6 +3355,24 @@ components:
           type: string
           description: >-
             Content-addressed digest of the manifest describing the files this node published as artifacts. Empty when the node declared no outputs or no artifact store was configured.
+    ExecutionAttempt:
+      x-sparkwing-go-partial: pkg/store.ExecutionAttempt
+      type: object
+      description: One started execution attempt for a node.
+      properties:
+        run_id: {type: string}
+        node_id: {type: string}
+        attempt: {type: integer}
+        executor_kind: {type: string}
+        executor_name: {type: string}
+        location:
+          type: string
+          enum: [local, cloud, unknown]
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+        outcome: {type: string}
+        failure_reason: {type: string}
+        retry_run_id: {type: string}
     NodeStep:
       x-sparkwing-go-type: pkg/store.NodeStep
       type: object
@@ -3236,26 +3647,45 @@ components:
       x-sparkwing-go-type: pkg/controller.Agent
       type: object
       description: >-
-        One runner, inferred from recent node claims -- there is no explicit agent registration.
+        One runner known to the controller through enrollment, heartbeats, or recent node claims.
       properties:
         name: {type: string}
         type:
           type: string
-          enum: [agent, pool, local]
+          enum: [agent, gateway, pool, local]
+        location:
+          type: string
+          enum: [local, cloud, unknown]
         labels:
           type: object
           additionalProperties: {type: string}
+        capabilities:
+          type: array
+          items: {type: string}
         last_seen: {type: string, format: date-time}
         status:
           type: string
-          enum: [busy, idle]
+          enum: [busy, idle, offline]
         active_jobs:
           type: array
           description: Ids of the runs this runner currently holds an unfinished node of.
           items: {type: string}
         max_concurrent:
           type: integer
-          description: Always zero -- there is no agent registration to declare a limit.
+          description: Configured concurrent-node ceiling.
+        active_slots:
+          type: integer
+          nullable: true
+          description: Slots occupied now; absent when the controller cannot calculate it.
+        base_priority: {type: integer}
+        priority_ceiling: {type: integer}
+        budget:
+          x-sparkwing-go-type: pkg/controller.AgentResources
+          type: object
+          required: [cores, memory_bytes]
+          properties:
+            cores: {type: number}
+            memory_bytes: {type: integer, format: int64}
         headroom:
           allOf: [{$ref: "#/components/schemas/AgentHeadroom"}]
           nullable: true
@@ -3269,6 +3699,54 @@ components:
         cores: {type: number}
         memory_bytes: {type: integer, format: int64}
         queue_depth: {type: integer}
+        observed_at: {type: string, format: date-time}
+    ExecutorClaimPreparation:
+      x-sparkwing-go-type: pkg/controller.executorClaimPreparationResp
+      type: object
+      description: Read-only controller admission snapshot for one eligible node.
+      required: [summary, membership]
+      properties:
+        summary: {$ref: "#/components/schemas/ExecutorSchedulingSummary"}
+        membership: {$ref: "#/components/schemas/ExecutorMembershipSnapshot"}
+        offer_deadline:
+          type: string
+          format: date-time
+          nullable: true
+          description: Existing round deadline, absent until the first offer opens the round.
+    ExecutorSchedulingSummary:
+      x-sparkwing-go-type: pkg/controller.executorSchedulingSummaryResp
+      type: object
+      description: Node requirements recomputed by the controller when an offer is awarded.
+      required: [run_id, node_id, resources, resource_digest, slots]
+      properties:
+        run_id: {type: string}
+        node_id: {type: string}
+        resources: {$ref: "#/components/schemas/ExecutorResource"}
+        resource_digest: {type: string}
+        slots: {type: integer, minimum: 1}
+    ExecutorMembershipSnapshot:
+      x-sparkwing-go-type: pkg/controller.executorMembershipResp
+      type: object
+      description: Credential-safe view of one enrollment under this controller authority.
+      required:
+        - membership_id
+        - worker_id
+        - eligible
+        - effective_priority
+        - max_concurrent
+      properties:
+        membership_id: {type: string}
+        worker_id: {type: string}
+        eligible: {type: boolean}
+        effective_priority: {type: integer}
+        max_concurrent: {type: integer, minimum: 1}
+    ExecutorResource:
+      x-sparkwing-go-type: pkg/store.ExecutorResource
+      type: object
+      required: [cores, memory_bytes]
+      properties:
+        cores: {type: number, minimum: 0}
+        memory_bytes: {type: integer, format: int64, minimum: 0}
     TrendPoint:
       x-sparkwing-go-type: pkg/controller.TrendPoint
       type: object

@@ -21,6 +21,7 @@ func TestSchemaV12_UpgradePreservesImplicitAwaitRepositoryProvenance(t *testing.
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 12`); err != nil {
 		t.Fatal(err)
 	}
+	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
 	up, err := store.Open(path)

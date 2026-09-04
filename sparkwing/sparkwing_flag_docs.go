@@ -48,6 +48,7 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-only", Argument: "GLOB", Desc: "Run only jobs whose ID matches GLOB (plus their Needs ancestors)", Group: "System", Hot: true},
 	{Name: "sw-no-cache", Desc: "Ignore cached per-node results (writes still happen)", Group: "System", Hot: true},
 	{Name: "sw-local-only", Desc: "Force local secrets, state, cache, and logs for this run; ignore any configured shared backends", Group: "System"},
+	{Name: "sw-fleet", Desc: "Let explicitly enrolled helpers execute nodes under this foreground process's authority", Group: "System"},
 	{Name: "sw-dry-run", Desc: "Run each step's dry-run probe instead of its real action", Group: "System", Hot: true},
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
 	{Name: "sw-index", Argument: "PATH", Desc: "Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it)", Group: "System"},

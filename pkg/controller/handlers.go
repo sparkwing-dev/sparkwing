@@ -111,17 +111,9 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(ScopeAdmin) {
-		held, err := s.ownsRun(r.Context(), body.ID, claimIdentity(r))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
-		if !held {
-			writeAuthError(w, http.StatusForbidden, authErrorBody{
-				Code:      "claim_required",
-				Principal: p.label(),
-				Message:   "run " + body.ID + " is not claimed by this principal",
-			})
+		var authorized bool
+		r, authorized = s.triggerClaimRequest(w, r, body.ID)
+		if !authorized {
 			return
 		}
 		if !s.bindRunRepoToTrigger(w, r, &body) {
@@ -306,6 +298,67 @@ func runForResponse(r *http.Request, run *store.Run, allowed secretValueGate) *s
 	return store.RedactedRun(run)
 }
 
+func nodeForResponse(node *store.Node) *store.Node {
+	return api.PublicNode(node)
+}
+
+func nodesForResponse(nodes []*store.Node) []*store.Node {
+	return api.PublicNodes(nodes)
+}
+
+func nodeForClaimResponse(node *store.Node) *store.Node {
+	out := nodeForResponse(node)
+	if out == nil {
+		return nil
+	}
+	out.ClaimedBy = node.ClaimedBy
+	out.ClaimGeneration = node.ClaimGeneration
+	out.ClaimMembershipID = node.ClaimMembershipID
+	out.ReservationID = node.ReservationID
+	return out
+}
+
+type executorClaimPreparationResp struct {
+	Summary       executorSchedulingSummaryResp `json:"summary"`
+	Membership    executorMembershipResp        `json:"membership"`
+	OfferDeadline *time.Time                    `json:"offer_deadline,omitempty"`
+}
+
+type executorSchedulingSummaryResp struct {
+	RunID          string                 `json:"run_id"`
+	NodeID         string                 `json:"node_id"`
+	Resources      store.ExecutorResource `json:"resources"`
+	ResourceDigest string                 `json:"resource_digest"`
+	Slots          int                    `json:"slots"`
+}
+
+type executorMembershipResp struct {
+	MembershipID      string `json:"membership_id"`
+	WorkerID          string `json:"worker_id"`
+	Eligible          bool   `json:"eligible"`
+	EffectivePriority int    `json:"effective_priority"`
+	MaxConcurrent     int    `json:"max_concurrent"`
+}
+
+func executorClaimPreparationForResponse(preparation *store.ExecutorClaimPreparation) *executorClaimPreparationResp {
+	if preparation == nil {
+		return nil
+	}
+	return &executorClaimPreparationResp{
+		Summary: executorSchedulingSummaryResp{
+			RunID: preparation.Summary.RunID, NodeID: preparation.Summary.NodeID,
+			Resources: preparation.Summary.Resources, ResourceDigest: preparation.Summary.ResourceDigest,
+			Slots: preparation.Summary.Slots,
+		},
+		Membership: executorMembershipResp{
+			MembershipID: preparation.Membership.MembershipID, WorkerID: preparation.Membership.WorkerID,
+			Eligible: preparation.Membership.Eligible, EffectivePriority: preparation.Membership.EffectivePriority,
+			MaxConcurrent: preparation.Membership.MaxConcurrent,
+		},
+		OfferDeadline: preparation.OfferDeadline,
+	}
+}
+
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	run, err := s.store.GetRun(r.Context(), runID)
@@ -326,6 +379,7 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		if nodes == nil {
 			nodes = []*store.Node{}
 		}
+		nodes = nodesForResponse(nodes)
 		for _, n := range nodes {
 			if n.Deps == nil {
 				n.Deps = []string{}
@@ -396,7 +450,7 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	if nodes == nil {
 		nodes = []*store.Node{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodesForResponse(nodes)})
 }
 
 func splitCSV(s string) []string {
@@ -507,7 +561,35 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("kind is required"))
 		return
 	}
+	p, authenticated := PrincipalFromContext(r.Context())
+	if authenticated && !p.HasScope(ScopeAdmin) {
+		if body.NodeID == "" {
+			var authorized bool
+			r, authorized = s.triggerClaimRequest(w, r, runID)
+			if !authorized {
+				return
+			}
+		} else if fence, err := nodeClaimFenceFromRequest(r); err == nil {
+			r = r.WithContext(store.WithNodeClaimFence(r.Context(), fence))
+		} else {
+			generation, parseErr := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
+			if parseErr != nil || generation < 1 {
+				writeAuthError(w, http.StatusForbidden, authErrorBody{
+					Code: "claim_required", Principal: p.label(),
+					Message: "node " + runID + "/" + body.NodeID + " requires its exact claim fence",
+				})
+				return
+			}
+			r = r.WithContext(store.WithTriggerClaimFence(r.Context(), store.TriggerClaimFence{
+				Claimant: claimIdentity(r), ClaimGeneration: generation,
+			}))
+		}
+	}
 	seq, err := s.store.AppendEvent(r.Context(), runID, body.NodeID, body.Kind, body.Payload)
+	if errors.Is(err, store.ErrLockHeld) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -835,6 +917,10 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -844,6 +930,10 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleFinishTrigger(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.store.FinishTrigger(r.Context(), id); err != nil {
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -1070,7 +1160,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func writeError(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, map[string]string{"error": err.Error()})
+	if errors.Is(err, store.ErrLockHeld) {
+		status = http.StatusConflict
+	}
+	message := err.Error()
+	if status >= http.StatusInternalServerError {
+		message = "internal server error"
+	}
+	writeJSON(w, status, map[string]string{"error": message})
 }
 
 func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
@@ -1085,7 +1182,7 @@ func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, n)
+	writeJSON(w, http.StatusOK, nodeForResponse(n))
 }
 
 func (s *Server) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {
@@ -1169,16 +1266,40 @@ func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request
 }
 
 type claimNodeReq struct {
-	HolderID  string         `json:"holder_id"`
-	LeaseSecs int            `json:"lease_secs,omitempty"`
-	Labels    []string       `json:"labels,omitempty"`
-	Headroom  *claimHeadroom `json:"headroom,omitempty"`
+	HolderID       string         `json:"holder_id"`
+	RunID          string         `json:"run_id,omitempty"`
+	NodeID         string         `json:"node_id,omitempty"`
+	ExecutorName   string         `json:"executor_name,omitempty"`
+	ReservationID  string         `json:"reservation_id,omitempty"`
+	ResourceDigest string         `json:"resource_digest,omitempty"`
+	Slot           int            `json:"slot,omitempty"`
+	LeaseSecs      int            `json:"lease_secs,omitempty"`
+	Labels         []string       `json:"labels,omitempty"`
+	Headroom       *claimHeadroom `json:"headroom,omitempty"`
 }
 
 type claimHeadroom struct {
 	Cores       float64 `json:"cores"`
 	MemoryBytes int64   `json:"memory_bytes"`
 	QueueDepth  int     `json:"queue_depth"`
+}
+
+var errAssistedOfferRequired = errors.New("credential is enrolled; assisted offer protocol is required")
+
+func (s *Server) rejectEnrolledLegacyClaim(r *http.Request) error {
+	claimant := claimIdentity(r)
+	if claimant.TokenPrefix == "" {
+		return nil
+	}
+	_, err := s.store.ExecutorNameForTokenPrefix(r.Context(), claimant.TokenPrefix)
+	switch {
+	case err == nil:
+		return errAssistedOfferRequired
+	case errors.Is(err, store.ErrNotFound):
+		return nil
+	default:
+		return err
+	}
 }
 
 func (s *Server) recordAdvertisedHeadroom(holderID string, h *claimHeadroom) {
@@ -1204,8 +1325,55 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
-	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
+	if body.ExecutorName != "" {
+		if body.RunID == "" || body.NodeID == "" || body.ReservationID == "" || body.ResourceDigest == "" || body.Slot < 0 {
+			writeError(w, http.StatusBadRequest, errors.New("run_id, node_id, reservation_id, resource_digest, and non-negative slot are required for an executor offer"))
+			return
+		}
+		if s.assistedRunID != "" && body.RunID != s.assistedRunID {
+			writeError(w, http.StatusForbidden, errors.New("executor offer does not belong to this foreground run"))
+			return
+		}
+		result, err := s.store.OfferExecutorClaim(r.Context(), claimIdentity(r), store.ExecutorClaimOffer{
+			ExecutorName: body.ExecutorName, HolderID: body.HolderID,
+			RunID: body.RunID, NodeID: body.NodeID, ReservationID: body.ReservationID,
+			ResourceDigest: body.ResourceDigest, Slot: body.Slot, Lease: lease,
+		})
+		if err != nil {
+			if errors.Is(err, store.ErrExecutorCredentialMismatch) {
+				writeError(w, http.StatusForbidden, store.ErrExecutorCredentialMismatch)
+				return
+			}
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
+				w.Header().Set("X-Sparkwing-Claim-Offer-State", "empty")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if result.Node == nil {
+			if result.Pending {
+				w.Header().Set("X-Sparkwing-Claim-Offer-State", "pending")
+			} else {
+				w.Header().Set("X-Sparkwing-Claim-Offer-State", "empty")
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeClaimedNode(w, r, s, result.Node)
+		return
+	}
+	if err := s.rejectEnrolledLegacyClaim(r); err != nil {
+		if errors.Is(err, errAssistedOfferRequired) {
+			writeError(w, http.StatusForbidden, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	n, err := s.store.ClaimNextReadyNode(r.Context(), claimIdentity(r), body.HolderID, lease, body.Labels)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -1215,6 +1383,10 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	writeClaimedNode(w, r, s, n)
+}
+
+func writeClaimedNode(w http.ResponseWriter, r *http.Request, s *Server, n *store.Node) {
 	pipeline := ""
 	if run, err := s.store.GetRun(r.Context(), n.RunID); err == nil && run != nil {
 		pipeline = run.Pipeline
@@ -1223,7 +1395,159 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	otelutil.StampSpan(r.Context(), otelutil.SpanAttrs{
 		RunID: n.RunID, NodeID: n.NodeID, Pipeline: pipeline,
 	})
-	writeJSON(w, http.StatusOK, n)
+	writeJSON(w, http.StatusOK, nodeForClaimResponse(n))
+}
+
+func (s *Server) handleAcknowledgeNodeExecutionStart(w http.ResponseWriter, r *http.Request) {
+	var body store.ExecutionStart
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	_, triggerClaim := store.TriggerClaimFenceFromContext(r.Context())
+	if body.AttemptOrdinal < 1 || (!triggerClaim && (body.HolderID == "" || body.ClaimGeneration < 1)) {
+		writeError(w, http.StatusBadRequest, errors.New("attempt_ordinal and an exact execution identity are required"))
+		return
+	}
+	err := s.store.AcknowledgeNodeExecutionStart(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), claimIdentity(r), body)
+	if errors.Is(err, store.ErrLockHeld) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleFinishNodeExecutionAttempt(w http.ResponseWriter, r *http.Request) {
+	var body store.ExecutionAttemptFinish
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	_, triggerClaim := store.TriggerClaimFenceFromContext(r.Context())
+	if body.AttemptOrdinal < 1 || body.Outcome == "" || (!triggerClaim && (body.HolderID == "" || body.ClaimGeneration < 1)) {
+		writeError(w, http.StatusBadRequest, errors.New("attempt_ordinal, outcome, and an exact execution identity are required"))
+		return
+	}
+	if !validExecutionAttemptResult(body.Outcome, body.FailureReason) {
+		writeError(w, http.StatusBadRequest, errors.New("invalid execution-attempt outcome or failure_reason"))
+		return
+	}
+	err := s.store.FinishNodeExecutionAttempt(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), claimIdentity(r), body)
+	if errors.Is(err, store.ErrLockHeld) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func validExecutionAttemptResult(outcome, reason string) bool {
+	if outcome == "success" || outcome == "cancelled" {
+		return reason == ""
+	}
+	if outcome != "failed" {
+		return false
+	}
+	switch reason {
+	case store.FailureUnknown, store.FailureOOMKilled, store.FailureTimeout,
+		store.FailureNoProgressTimeout, store.FailureVerify, store.FailureQueueTimeout,
+		store.FailureLogsAuth, store.FailureLogsDropped:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Request) {
+	hasNodeIdentity, hasTriggerIdentity := claimIdentityShape(r)
+	if hasNodeIdentity && hasTriggerIdentity {
+		writeError(w, http.StatusBadRequest, errors.New("node attempt and trigger identities cannot be combined"))
+		return
+	}
+	if p, ok := PrincipalFromContext(r.Context()); ok && p.HasScope(ScopeAdmin) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	var held bool
+	var err error
+	if hasNodeIdentity {
+		fence, fenceErr := nodeClaimFenceFromRequest(r)
+		if fenceErr != nil {
+			writeError(w, http.StatusConflict, store.ErrLockHeld)
+			return
+		}
+		ordinal, parseErr := strconv.Atoi(r.Header.Get(store.AttemptOrdinalHeader))
+		if parseErr == nil && ordinal > 0 {
+			held, err = s.store.NodeExecutionAttemptIsLive(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
+		}
+	} else if hasTriggerIdentity {
+		generation, parseErr := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
+		if parseErr != nil || generation < 1 {
+			writeError(w, http.StatusConflict, store.ErrLockHeld)
+			return
+		}
+		fence := store.TriggerClaimFence{Claimant: claimIdentity(r), ClaimGeneration: generation}
+		rawOrdinal := r.Header.Get(store.AttemptOrdinalHeader)
+		if rawOrdinal == "" && r.PathValue("nodeID") == "_compile" {
+			held, err = s.store.TriggerClaimFenceIsLive(r.Context(), r.PathValue("id"), claimIdentity(r), generation, time.Now())
+		} else {
+			ordinal, ordinalErr := strconv.Atoi(rawOrdinal)
+			if ordinalErr == nil && ordinal > 0 {
+				held, err = s.store.TriggerExecutionAttemptIsLive(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), fence, ordinal, time.Now())
+			}
+		}
+	} else {
+		writeError(w, http.StatusConflict, store.ErrLockHeld)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !held {
+		writeError(w, http.StatusConflict, store.ErrLockHeld)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) {
+	var body claimNodeReq
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.ExecutorName == "" {
+		writeError(w, http.StatusBadRequest, errors.New("executor_name is required"))
+		return
+	}
+	var preparation *store.ExecutorClaimPreparation
+	var err error
+	if s.assistedRunID != "" {
+		preparation, err = s.store.PrepareExecutorClaimForRun(r.Context(), claimIdentity(r), body.ExecutorName, s.assistedRunID)
+	} else {
+		preparation, err = s.store.PrepareNextExecutorClaim(r.Context(), claimIdentity(r), body.ExecutorName)
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err != nil {
+		if errors.Is(err, store.ErrExecutorCredentialMismatch) {
+			writeError(w, http.StatusForbidden, store.ErrExecutorCredentialMismatch)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, executorClaimPreparationForResponse(preparation))
 }
 
 func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
@@ -1238,6 +1562,40 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleResetNodeForAutoRetry(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.ResetNodeForAutoRetry(r.Context(), r.PathValue("id"), r.PathValue("nodeID")); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleFinalizeNodeReady(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	nodeID := r.PathValue("nodeID")
+	result, err := s.store.FinalizeExecutorClaimRound(r.Context(), runID, nodeID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Revoked bool `json:"revoked"`
+		Pending bool `json:"pending,omitempty"`
+	}{Revoked: result.Revoked, Pending: result.Pending})
 }
 
 type revokeResp struct {
@@ -1267,9 +1625,15 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
+	fence, err := nodeClaimFenceFromRequest(r)
+	if err != nil || fence.HolderID != body.HolderID {
+		writeError(w, http.StatusConflict, store.ErrLockHeld)
+		return
+	}
 	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	if err := s.store.HeartbeatNodeClaim(r.Context(), runID, nodeID, claimIdentity(r), body.HolderID, lease); err != nil {
+	claimCtx := store.WithNodeClaimFence(r.Context(), fence)
+	if err := s.store.HeartbeatNodeClaim(claimCtx, runID, nodeID, fence.Claimant, body.HolderID, lease); err != nil {
 		if errors.Is(err, store.ErrLockHeld) {
 			writeError(w, http.StatusConflict, err)
 			return
@@ -1544,7 +1908,7 @@ func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	if events == nil {
 		events = []store.Event{}
 	}
-	writeJSON(w, http.StatusOK, events)
+	writeJSON(w, http.StatusOK, api.PublicEvents(events))
 }
 
 func (s *Server) handleListDebugPauses(w http.ResponseWriter, r *http.Request) {
