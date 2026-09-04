@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,5 +128,67 @@ func TestRotateToken_ChunkedBodyKeepsTheGrace(t *testing.T) {
 	grace := time.Unix(body.OldRevoked, 0).Sub(now)
 	if grace > 2*time.Hour {
 		t.Errorf("old token revoked in %s, want the hour the chunked body asked for", grace)
+	}
+}
+
+func TestClaimSpecificTrigger_ChunkedBodyKeepsTheLease(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateTrigger(context.Background(), store.Trigger{
+		ID: "run-specific", Pipeline: "child", TriggerSource: "cli", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	resp := postChunked(t, srv.URL+"/api/v1/triggers/run-specific/claim", "",
+		`{"lease_nanos":`+strconv.FormatInt(int64(time.Hour), 10)+`}`)
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want 200", resp.StatusCode, raw)
+	}
+
+	trig, err := st.GetTrigger(context.Background(), "run-specific")
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trig.LeaseExpiresAt == nil {
+		t.Fatal("the claim recorded no lease")
+	}
+	if lease := time.Until(*trig.LeaseExpiresAt); lease <= store.DefaultLeaseDuration {
+		t.Errorf("lease=%s, want the hour the chunked body asked for rather than the %s default",
+			lease.Round(time.Second), store.DefaultLeaseDuration)
+	}
+}
+
+func TestReconcileOrphans_ChunkedBodyKeepsTheThreshold(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	admin, _, err := st.CreateToken("root", store.TokenKindUser,
+		[]string{controller.ScopeAdmin}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateToken admin: %v", err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	defer srv.Close()
+
+	resp := postChunked(t, srv.URL+"/api/v1/maintenance/reconcile-orphans", admin,
+		`{"threshold_nanos":`+strconv.FormatInt(int64(time.Hour), 10)+`}`)
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want 200: the threshold the chunked body carried was dropped",
+			resp.StatusCode, raw)
 	}
 }

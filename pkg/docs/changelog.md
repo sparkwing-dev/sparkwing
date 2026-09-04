@@ -379,14 +379,18 @@ code change to unlock.
   that sits inside the shutdown budget, and the commit-status queue's drain
   at shutdown gets a budget of its own instead of whatever the HTTP
   listener's own shutdown left of one.
-- **controller:** A chunked request body is no longer ignored on the two routes
-  whose body is optional. `POST /api/v1/triggers/claim` and
-  `POST /api/v1/tokens/{prefix}/rotate` decoded only when the request carried a
-  positive `Content-Length`, so a client that streams its body -- which Go's
+- **controller:** A chunked request body is no longer ignored on the five
+  routes whose body is optional: `POST /api/v1/triggers/claim`,
+  `/triggers/{id}/claim` (on both the hosted controller and the loopback one a
+  local run mounts), `/tokens/{prefix}/rotate`, and
+  `/maintenance/reconcile-orphans`. Each decoded only when the request carried
+  a positive `Content-Length`, so a client that streams its body -- which Go's
   own `http.Client` does for any body it cannot size, and most non-Go clients
   do -- got a normal success with every field defaulted: a trigger worker
-  asking for one pipeline was handed a trigger for any pipeline, and a rotation
-  asking for an hour of grace got the 24-hour default.
+  asking for one pipeline was handed a trigger for any pipeline, a claim asking
+  for an hour of lease got the three-minute default, and a rotation asking for
+  an hour of grace got the 24-hour default. The orphan reconcile refused its
+  own request instead, since it rejects a zero threshold.
 - **controller:** A run's detail read no longer drops the connection when the
   run has an approval gate or a spawned child pipeline but no plan snapshot.
   The decorations the snapshot supplies are absent in that case, and joining
