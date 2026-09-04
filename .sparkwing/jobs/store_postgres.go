@@ -209,10 +209,10 @@ func runStorePostgresSuite(ctx context.Context, r storePostgresRun) (err error) 
 	if interrupts == nil {
 		// safety: pkg/runner installs no handler, so an unhandled SIGINT
 		// kills this process before any defer can stop the server.
-		signalled := make(chan os.Signal, 1)
-		signal.Notify(signalled, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(signalled)
-		interrupts = signalled
+		signaled := make(chan os.Signal, 1)
+		signal.Notify(signaled, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(signaled)
+		interrupts = signaled
 	}
 
 	done := make(chan error, 1)

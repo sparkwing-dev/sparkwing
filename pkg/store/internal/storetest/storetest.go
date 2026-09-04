@@ -108,7 +108,11 @@ func (tg *Target) Open(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("open %s store: %v", tg.dialect, err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("close %s store: %v", tg.dialect, err)
+		}
+	})
 	return st
 }
 
@@ -129,25 +133,36 @@ func newSchema(t *testing.T, baseDSN string) string {
 	t.Helper()
 	schema := schemaName(t.Name())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	admin, err := store.OpenPostgres(ctx, baseDSN)
 	if err != nil {
 		t.Fatalf("open admin postgres: %v", err)
 	}
 	if _, err := admin.DB().ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS `+schema); err != nil {
-		_ = admin.Close()
+		if closeErr := admin.Close(); closeErr != nil {
+			t.Logf("close admin postgres: %v", closeErr)
+		}
 		t.Fatalf("create schema %s: %v", schema, err)
 	}
-	_ = admin.Close()
+	if err := admin.Close(); err != nil {
+		t.Fatalf("close admin postgres: %v", err)
+	}
 
 	t.Cleanup(func() {
+		// safety: t.Context is cancelled before Cleanup runs, so the drop
+		// needs a context of its own.
 		cleanup, err := store.OpenPostgres(context.Background(), baseDSN)
 		if err != nil {
+			t.Errorf("open postgres to drop schema %s: %v", schema, err)
 			return
 		}
-		_, _ = cleanup.DB().Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
-		_ = cleanup.Close()
+		if _, err := cleanup.DB().Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`); err != nil {
+			t.Errorf("drop schema %s: %v", schema, err)
+		}
+		if err := cleanup.Close(); err != nil {
+			t.Errorf("close postgres after dropping schema %s: %v", schema, err)
+		}
 	})
 	return withSearchPath(baseDSN, schema)
 }

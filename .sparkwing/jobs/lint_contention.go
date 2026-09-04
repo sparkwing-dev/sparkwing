@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"time"
@@ -51,12 +50,12 @@ func lintCommandFor(holdsBudget bool) string {
 	return fmt.Sprintf("golangci-lint run %s ./...", flag)
 }
 
-func shouldLeaseLintPath(gcURL string) bool {
-	if gcURL != "" {
-		return false
-	}
-	gitMarker, err := os.Stat(filepath.Join(sparkwing.WorkDir(), ".git"))
-	return err == nil && !gitMarker.IsDir()
+func shouldLeaseLintPath(string) bool {
+	// safety: the slot cache is shared by every worktree that leases it, and
+	// golangci-lint answers from findings cached under the tree the slot pointed
+	// at last: a leased lint reported 0 issues for a tree with eight. Each
+	// checkout keeps its own cache until the slot keys its cache by tree.
+	return false
 }
 
 func runGolangciLint(ctx context.Context) error {
