@@ -69,6 +69,7 @@
         "cli-docs",
         "cli-doctor",
         "cli-examples",
+        "cli-fleet",
         "cli-info",
         "cli-pipeline",
         "cli-profile",
