@@ -401,6 +401,15 @@ code change to unlock.
   N runners on one hot key retried in lockstep, burning retries against each
   other until one exhausted its 200 attempts and failed the acquire. Each
   attempt now draws its own wait.
+- **orchestrator:** A concurrency slot is given back when a run is cancelled at
+  the instant it is promoted. A node queued on a concurrency group is granted a
+  real slot as soon as the group frees one; if the dispatcher's context had been
+  cancelled by then (Ctrl-C, a fail-fast plan failure, or a dispatch-wait
+  timeout) the node could not reclaim its worker slot and returned cancelled
+  without releasing the slot it had just been handed, so the group ran one slot
+  short until the lease lapsed and a reaper swept it. The promoted slot is now
+  released on every exit from the promotion that does not go on to run the
+  node.
 - **orchestrator:** S3-shared-state concurrency again recognizes the
   inherited-holder marker earlier releases wrote. The marker inside a
   `concurrency/` slot object changed shape and nothing rewrites those objects,
