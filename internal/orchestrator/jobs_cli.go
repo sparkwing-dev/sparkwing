@@ -80,13 +80,13 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 		return err
 	}
 	runs = applyClientFilters(runs, clientFilter)
+	if opts.Limit > 0 && len(runs) > opts.Limit {
+		runs = runs[:opts.Limit]
+	}
 	if opts.ByPipeline {
 		opts.Pivot.JSON = opts.JSON
 		opts.Pivot.Quiet = opts.Quiet
 		return RenderPipelinePivot(runs, opts.Pivot, out)
-	}
-	if opts.Limit > 0 && len(runs) > opts.Limit {
-		runs = runs[:opts.Limit]
 	}
 	admissionStatus := func(runID string) (admissionWaitDetail, bool) {
 		return latestAdmissionWait(ctx, b, runID)
@@ -94,18 +94,11 @@ func ListJobs(ctx context.Context, paths Paths, opts ListOpts, out io.Writer) er
 	return renderRunList(runs, opts, out, admissionStatus)
 }
 
-func listFetchLimit(opts ListOpts) int {
-	return listFetchLimitForFilter(opts.Limit, opts.Filter)
-}
-
 func listFetchLimitForFilter(limit int, filter CompiledFilter) int {
 	if !filter.HasAny() {
 		return limit
 	}
 	const overFetch = 1000
-	if limit <= 0 || limit > overFetch {
-		return overFetch
-	}
 	return overFetch
 }
 
@@ -765,9 +758,10 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	}
 	defer func() { _ = closer.Close() }()
 
-	if st := localStore(b); st == nil {
+	st := localStore(b)
+	if st == nil || !logsUnderPaths(ctx, b) {
 		if opts.Tree {
-			return fmt.Errorf("--tree is only supported against local SQLite state; " +
+			return fmt.Errorf("--tree is only supported against local SQLite state with on-disk logs; " +
 				"unset --tree to read this run from the configured remote backend")
 		}
 		if opts.EventsOnly {
@@ -797,12 +791,6 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 		return writeLogsViaBackend(ctx, b, runID, target, opts, out)
 	}
 
-	st, err := store.Open(paths.StateDB())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = st.Close() }()
-
 	nodes, err := st.ListNodes(ctx, runID)
 	if err != nil {
 		return err
@@ -824,7 +812,7 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 	target = filterNodesBySince(target, opts.Since)
 
 	if opts.Tree {
-		return writeLogsTreeLocal(paths, runID, opts, out)
+		return writeLogsTreeLocal(ctx, st, paths, runID, opts, out)
 	}
 
 	if !opts.NoEvents && opts.Node == "" && envelopeExists(paths, runID) {
@@ -1219,14 +1207,7 @@ func followLogs(ctx context.Context, st *store.Store, paths Paths, runID string,
 	}
 }
 
-func writeLogsTreeLocal(paths Paths, rootID string, opts LogsOpts, out io.Writer) error {
-	st, err := store.Open(paths.StateDB())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = st.Close() }()
-
-	ctx := context.Background()
+func writeLogsTreeLocal(ctx context.Context, st *store.Store, paths Paths, rootID string, opts LogsOpts, out io.Writer) error {
 	ids, err := descendantRunIDs(ctx, st, rootID)
 	if err != nil {
 		return err

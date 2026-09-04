@@ -346,6 +346,37 @@ code change to unlock.
   dead orchestrator stayed `running` forever. `sparkwing jobs list` and
   `sparkwing job status` also discarded that error; they now warn on stderr
   instead of failing silently.
+- **cli:** `sparkwing runs logs --follow` against a controller no longer spins
+  reconnecting to a node whose log stream closes at once. The per-node reader
+  paused only when the connection failed, so an already-terminal node -- or any
+  mid-stream read error -- reopened the stream as fast as the network allowed,
+  one goroutine per node, until the run reached a terminal status. It now waits
+  250ms between reconnects, the same as the reader for every other backend.
+
+- **cli:** `sparkwing runs logs --events-only` against a profile whose state
+  lives in a shared database or an object store no longer stops at the first
+  500 events. It made one unpaginated call, and every backend caps that at 500,
+  so a busy run lost everything past the cap without a word. The help now also
+  says what that path emits -- the run's stored event records, not the local
+  envelope stream -- since the three modes genuinely differ.
+
+- **cli:** `sparkwing runs list --by-pipeline` now honours `--limit`. A
+  client-side filter -- `--started-after`, `--search`, `--error`, a
+  `!`-prefixed `--status` or `--pipeline` -- switches the query to a 1000-run
+  over-fetch, and the rollup counted the whole over-fetch, so the RUNS and FAIL
+  columns and the JSON changed fiftyfold depending on whether an unrelated flag
+  was present. The over-fetch is now trimmed back to `--limit` before the
+  rollup, in local and controller mode both.
+
+- **cli:** `sparkwing runs logs --profile <name>` now reads the run and its
+  nodes from that profile's state store. It listed nodes from the default local
+  `state.db` instead, so a run held in a Postgres profile -- or a sqlite profile
+  at a non-default path -- printed nothing, or failed with `node "x" not found
+  in run ...` under `--node`. A profile that declares its own logs surface now
+  reads log bodies through that backend rather than the local run directories,
+  and `--tree`, which needs local state and on-disk logs both, says so when it
+  cannot run.
+
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,
