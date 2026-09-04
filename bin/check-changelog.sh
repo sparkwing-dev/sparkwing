@@ -9,8 +9,9 @@ usage() {
   cat <<'EOF'
 usage: bash bin/check-changelog.sh [--fix]
 
-  (no flags)  require a CHANGELOG.md entry when the diff touches a covered
-              surface
+  (no flags)  reject the doubled release heading a union merge of two
+              competing [Unreleased] renames leaves behind, then require a
+              CHANGELOG.md entry when the diff touches a covered surface
   --fix       collapse duplicate ### headings under [Unreleased] into one
               block per category, keeping bullets in landing order, then
               re-sync the embedded mirror
@@ -18,7 +19,36 @@ usage: bash bin/check-changelog.sh [--fix]
 EOF
 }
 
+# The union merge driver CHANGELOG.md carries (.gitattributes) keeps both sides
+# of every hunk, so two branches that each rename [Unreleased] to their own
+# version leave both headings stacked on adjacent lines. Nothing downstream
+# reads that as an error, so catch it here.
+check_stacked_headings() {
+  local stacked
+  stacked="$(
+    awk '
+      /^## / {
+        if (prev != "") { print prevLine ": " prev; print NR ": " $0 }
+        prev = $0
+        prevLine = NR
+        next
+      }
+      { prev = "" }
+    ' CHANGELOG.md
+  )"
+  if [[ -z "$stacked" ]]; then
+    return 0
+  fi
+  echo "check-changelog: two release headings sit on adjacent lines:" >&2
+  sed 's/^/  /' <<<"$stacked" >&2
+  echo "" >&2
+  echo "A union merge stacked them. Keep the heading this release is cutting," >&2
+  echo "delete the other, and run bash bin/sync-docs.sh." >&2
+  exit 1
+}
+
 fix_unreleased() {
+  check_stacked_headings
   local dups
   dups="$(
     awk '
@@ -96,6 +126,8 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+check_stacked_headings
 
 base="${BASE_REF:-}"
 if [[ -z "$base" ]]; then

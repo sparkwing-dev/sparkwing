@@ -143,7 +143,7 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 	t.Setenv("SPARKWING_TRIGGER_LOOP_HELPER", "1")
 	ready := filepath.Join(t.TempDir(), "helper-ready")
 	t.Setenv("SPARKWING_TRIGGER_LOOP_READY", ready)
-	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	var claims atomic.Int32
@@ -158,7 +158,7 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 				return
 			}
 			if n == 2 {
-				if err := waitForTriggerHelper(ready, 500*time.Millisecond); err != nil {
+				if err := waitForTriggerHelper(ready, 15*time.Second); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
@@ -202,8 +202,9 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 	if len(claimTimes) < 2 {
 		t.Fatalf("claims = %d, want at least 2", len(claimTimes))
 	}
-	if elapsed := time.Since(claimTimes[1]); elapsed >= 300*time.Millisecond {
-		t.Fatalf("trigger loop returned %s after the second claim, want < 300ms", elapsed)
+	// safety: the in-flight handler blocks forever, so any bounded return proves the loop did not wait on it
+	if elapsed := time.Since(claimTimes[1]); elapsed >= 5*time.Second {
+		t.Fatalf("trigger loop returned %s after the second claim, want < 5s", elapsed)
 	}
 }
 

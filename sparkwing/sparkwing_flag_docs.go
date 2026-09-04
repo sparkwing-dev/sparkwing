@@ -52,6 +52,7 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-allow", Argument: "LABEL[,LABEL...]", Desc: "Authorize risk-labeled steps (repeatable)", Group: "System"},
 	{Name: "sw-index", Argument: "PATH", Desc: "Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it)", Group: "System"},
 	{Name: "sw-run-handle-file", Argument: "PATH", Desc: "Atomically publish the accepted run's machine-readable handle to PATH", Group: "System"},
+	{Name: "sw-isolated-home", Argument: "DIR", Desc: "Keep this run's state and config under DIR, so it hosts an admission daemon from the sparkwing you invoked instead of joining the machine's", Group: "System"},
 	{Name: "profile", Argument: "NAME", Desc: "Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop)", Group: "System", Hot: true},
 	{Name: "target", Argument: "TARGET", Desc: "Run against the named pipeline deployment target (e.g. dev, prod)", Group: "System", Hot: true},
 }

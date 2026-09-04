@@ -106,6 +106,13 @@ func dispatchRun(args []string) error {
 	if err := checkRetiredWhereFlags(passthrough, nil); err != nil {
 		return err
 	}
+	// safety: before the toolchain re-exec and the daemon pre-warm, because both
+	// resolve this machine's home from the environment this call rewrites.
+	if wf.isolatedHome != "" {
+		if err := applyIsolatedHome(wf.isolatedHome); err != nil {
+			return err
+		}
+	}
 	if wf.profile != "" {
 		if _, perr := resolveProfileFlag(wf.profile); perr != nil {
 			return perr

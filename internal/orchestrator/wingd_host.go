@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"errors"
 	"os"
+	"sync/atomic"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -11,6 +12,25 @@ import (
 const AllowUnadmittedEnv = "SPARKWING_ALLOW_UNADMITTED"
 
 const installAdvice = "curl -fsSL https://sparkwing.dev/install.sh | sh"
+
+// IsolatedHomeFlag names the `sparkwing run` flag that moves one run's state
+// and config under a directory of its own, so the run hosts an admission
+// daemon from the sparkwing that started it instead of joining the machine's.
+const IsolatedHomeFlag = "--sw-isolated-home"
+
+// safety: only the entry point knows which pipeline this binary was started
+// for, and an admission remedy the operator cannot paste is not a remedy.
+var invokedPipeline atomic.Pointer[string]
+
+func recordInvokedPipeline(name string) { invokedPipeline.Store(&name) }
+
+func isolatedHomeCommand() string {
+	pipeline := "<pipeline>"
+	if p := invokedPipeline.Load(); p != nil && *p != "" {
+		pipeline = *p
+	}
+	return "sparkwing run " + pipeline + " " + IsolatedHomeFlag + ` "$(mktemp -d)"`
+}
 
 func pipelineAdmission(parentLeaseToken string, origin wingwire.Origin) *LocalAdmission {
 	spawn, ok := wingdclient.HostSpawn()

@@ -22,7 +22,9 @@ test:browser:install` once to cache Chromium, then `npm run test:browser` to
 rebuild the static export and exercise the dashboard smoke suite. Failed
 browser runs retain their trace, screenshot, video, and HTML report under
 `test-results/` and `playwright-report/`; the hosted pre-commit gate uploads
-those directories for 14 days when the browser suite fails. The suite runs
+those directories for 14 days when the browser suite fails. The gate clears
+both directories before it starts and after it passes, and ESLint ignores
+them. The suite runs
 deterministic API fixtures against OS-assigned loopback ports; it needs no
 controller, hosted secret, or Kubernetes cluster.
 

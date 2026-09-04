@@ -9,11 +9,33 @@ this file is a menu and checklist, not a command that every change must run.
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
+- **Heavy packages:** run these by name rather than reaching for `./...`, and
+  give the command a timeout the package actually fits in. Measured alone on an
+  idle 16-core Linux box, `GOWORK=off go test -count=1 <pkg>`:
+
+  | Package | Alone | Suggested `-timeout` |
+  | --- | --- | --- |
+  | `./cmd/sparkwing/...` | 174s | 10m |
+  | `./internal/orchestrator` | 121s | 10m |
+  | `./internal/cache` | 6s | 2m |
+  | `./internal/cluster` | 4s | 2m |
+
+  Under contention from parallel agents the two heavy packages have been
+  observed at two to four times those figures, so the suggested budgets sit
+  well above the measurement.
+
 - **Normal broad check:** `sparkwing run pre-commit` covers every committed Go
   module, the dashboard TypeScript unit, full ESLint, production build,
   and browser smoke suites, formatting, vet, build, tests, documentation
   mirrors, and source policy. Unit and ESLint run in parallel; the production
   build then feeds the browser suite.
+- **Gating a branch beside a released daemon:** when the branch's pipeline
+  binary carries a newer runs-store schema than the sparkwing hosting this
+  machine's admission daemon, admission refuses the run. Give the gate a home
+  of its own instead of replacing the daemon every other repository shares:
+  `sparkwing run pre-commit --sw-isolated-home "$(mktemp -d)"`, run from a
+  sparkwing built from this checkout, which points that run's state and config
+  at the directory and hosts a daemon there from that binary.
 - **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
@@ -112,9 +134,15 @@ this file is a menu and checklist, not a command that every change must run.
   `pkg/docs/mirror/`, and the vendored runner-bundle tarball) in one pass and
   is a no-op on a clean tree. Resolve a merge conflict in any of them by
   taking either side, running that script, and committing the result.
-  `bash bin/check-changelog.sh --fix` does the same for `CHANGELOG.md`,
-  collapsing the duplicate `###` headings that parallel landings leave under
-  `[Unreleased]`.
+  `CHANGELOG.md` and the mirror `pkg/docs` embeds resolve themselves instead:
+  `.gitattributes` marks both `merge=union`, so a merge of two branches that
+  each added `[Unreleased]` bullets keeps both sides with no conflict. Union
+  merge gets two cases wrong. Two branches that reword the same bullet produce
+  both wordings, and two branches that each rename `[Unreleased]` to their own
+  version stack both headings on adjacent lines -- `bin/check-changelog.sh`
+  fails on the stacked pair, and the reworded pair needs a reader. Where both
+  sides opened the same `###` heading, `bash bin/check-changelog.sh --fix`
+  collapses it into one block and re-syncs the mirror.
 - **Changelog:** notable adopter-facing behavior belongs in `[Unreleased]` and
   follows `docs/changelog-style.md`. Mark breaking changes and supply migration
   guidance before release. Keep the embedded changelog mirror byte-identical.

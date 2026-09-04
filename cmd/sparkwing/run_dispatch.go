@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -63,6 +64,34 @@ type runFlags struct {
 	index string
 
 	runHandleFile string
+
+	isolatedHome string
+}
+
+func isolatedHomeConfigDir(root string) string { return filepath.Join(root, "config") }
+
+// safety: the pre-warmed daemon, the toolchain re-exec, and the compiled
+// pipeline binary all read the process environment, so an isolated home has to
+// land there rather than only on the child's environment.
+func applyIsolatedHome(dir string) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("--sw-isolated-home %s: %w", dir, err)
+	}
+	if err := fssecure.EnsureDir(abs); err != nil {
+		return fmt.Errorf("--sw-isolated-home %s: %w", dir, err)
+	}
+	config := isolatedHomeConfigDir(abs)
+	if err := fssecure.EnsureDir(config); err != nil {
+		return fmt.Errorf("--sw-isolated-home %s: %w", dir, err)
+	}
+	if err := os.Setenv("SPARKWING_HOME", abs); err != nil {
+		return fmt.Errorf("--sw-isolated-home %s: %w", dir, err)
+	}
+	if err := os.Setenv("XDG_CONFIG_HOME", config); err != nil {
+		return fmt.Errorf("--sw-isolated-home %s: %w", dir, err)
+	}
+	return nil
 }
 
 func collectPipelineArgs(passthrough []string) map[string]string {
@@ -254,6 +283,17 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			i++
 		case strings.HasPrefix(a, "--sw-run-handle-file="):
 			wf.runHandleFile = strings.TrimPrefix(a, "--sw-run-handle-file=")
+			i++
+		case a == "--sw-isolated-home":
+			if i+1 < len(args) {
+				wf.isolatedHome = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--sw-isolated-home="):
+			wf.isolatedHome = strings.TrimPrefix(a, "--sw-isolated-home=")
 			i++
 		case a == "-C", a == "--sw-cd":
 			if i+1 < len(args) {
