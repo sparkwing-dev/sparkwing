@@ -313,10 +313,12 @@ code change to unlock.
 
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
-  that node as cancelled. The terminal write used the run context that had just
-  been cancelled, so it never reached the store and the node's row stayed at
-  `status=pending` under a finished run -- visible in `sparkwing runs status`
-  and the receipt until a `doctor`/`jobs` sweep reconciled it.
+  that node as cancelled, and an `OnFailure` child skipped because its cancelled
+  parent did not fail is recorded as skipped. Both terminal writes used the run
+  context that had just been cancelled, so they never reached the store and the
+  node's row stayed at `status=pending` under a finished run -- visible in
+  `sparkwing runs status` and the receipt until a `doctor`/`jobs` sweep
+  reconciled it.
 - **orchestrator:** A local child trigger that a parent run's shutdown
   interrupts now goes back on the queue instead of vanishing. The loop wrote the
   child's run and trigger rows on the context that had just killed the child --

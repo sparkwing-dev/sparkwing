@@ -2746,8 +2746,11 @@ func canceledByRun(err error) bool {
 }
 
 func (s *dispatchState) markSkipped(nodeID, reason string) {
-	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Skipped), reason, nil)
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_skipped", []byte(reason))
+	// safety: an OnFailure child whose parent was cancelled reaches this from a
+	// select that races the run context, so the write outlives a cancelled run.
+	ctx := context.WithoutCancel(s.ctx)
+	_ = s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Skipped), reason, nil)
+	_ = s.backends.State.AppendEvent(ctx, s.runID, nodeID, "node_skipped", []byte(reason))
 	s.setOutcome(nodeID, sparkwing.Skipped)
 }
 
