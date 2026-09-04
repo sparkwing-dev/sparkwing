@@ -95,6 +95,7 @@ func failingDaemon(t *testing.T, home string) *atomic.Int64 {
 					ProtocolMajor:       wingd.ProtocolMajor,
 					NativeProtocolMajor: wingd.ProtocolMajor,
 					BinaryVersion:       "v9.9.9",
+					BuildIdentity:       wingwire.BuildIdentity,
 				})
 				if _, err := nc.Write(line); err != nil {
 					return

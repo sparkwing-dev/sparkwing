@@ -17,6 +17,7 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing docs`](cli-docs.md) -- Embedded user docs (offline)
 - [`sparkwing doctor`](cli-doctor.md) -- Diagnose and safely repair local state
 - [`sparkwing examples`](cli-examples.md) -- Worked pipelines to read, not starting points to scaffold
+- [`sparkwing fleet`](cli-fleet.md) -- Configure foreground assisted execution
 - [`sparkwing info`](cli-info.md) -- Self-describe sparkwing + the current project (agent entrypoint)
 - [`sparkwing pipeline`](cli-pipeline.md) -- This repo's pipelines
 - [`sparkwing profile`](cli-profile.md) -- Show which profile sparkwing would use right now, and why

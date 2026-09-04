@@ -38,7 +38,7 @@ import (
 // BuildIdentity changes whenever same-major wire behavior changes. It lets
 // source and installed builds compiled from the same protocol implementation
 // recognize each other even when their display versions differ.
-const BuildIdentity = "wingwire-v1-liveness"
+const BuildIdentity = "wingwire-v1-nonblocking-admission"
 
 // ProtocolMajor is the newest wire protocol major this build speaks.
 // Clients send it in [Hello]; a daemon answers on it whenever the client

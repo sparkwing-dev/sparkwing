@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -94,11 +95,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	budget := s.newSearchBudget(r.Context())
 	needle := strings.ToLower(q)
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".log") {
-			continue
-		}
+	groups := nodeLogGroups(root, runFilter, entries)
+	names := make([]string, 0, len(groups))
+	for name := range groups {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
 		nodeID := strings.TrimSuffix(name, ".log")
 		if nodeFilter != "" && nodeID != nodeFilter {
 			continue
@@ -107,14 +110,20 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			resp.Truncated = true
 			break
 		}
-		f, oerr := root.Open(filepath.Join(runFilter, name))
-		if oerr != nil {
-			continue
+		lineNo := 0
+		for _, path := range groups[name] {
+			f, oerr := root.Open(filepath.Join(runFilter, path))
+			if oerr != nil {
+				continue
+			}
+			scanNode(f, needle, runFilter, nodeID, limit, budget, &resp, &lineNo)
+			_ = f.Close()
+			if budget.spent() || len(resp.Results) >= limit {
+				resp.Truncated = true
+				break
+			}
 		}
-		scanNode(f, needle, runFilter, nodeID, limit, budget, &resp)
-		_ = f.Close()
-		if budget.spent() {
-			resp.Truncated = true
+		if resp.Truncated {
 			break
 		}
 	}
@@ -122,13 +131,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, http.StatusOK, resp)
 }
 
-func scanNode(f *os.File, needle, runID, nodeID string, limit int, budget *searchBudget, resp *SearchResponse) {
+func scanNode(f *os.File, needle, runID, nodeID string, limit int, budget *searchBudget, resp *SearchResponse, lineNo *int) {
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	lineNo := 0
 	for scanner.Scan() {
 		line := scanner.Text()
-		lineNo++
+		*lineNo++
 		if budget.charge(int64(len(line)) + 1) {
 			return
 		}
@@ -140,7 +148,7 @@ func scanNode(f *os.File, needle, runID, nodeID string, limit int, budget *searc
 			resp.Results = append(resp.Results, SearchResult{
 				RunID:   runID,
 				NodeID:  nodeID,
-				Line:    lineNo,
+				Line:    *lineNo,
 				Content: line,
 			})
 		}

@@ -384,7 +384,7 @@ func isWorkspaceSnapshotCommit(repoDir, sha string) (bool, error) {
 			author = true
 		}
 	}
-	return author && parents == 1 && string(message) == "sparkwing working-tree snapshot\n", nil
+	return author && parents == 0 && string(message) == "sparkwing working-tree snapshot\n", nil
 }
 
 func restoreRawCheckout(repoDir, sha string) error {

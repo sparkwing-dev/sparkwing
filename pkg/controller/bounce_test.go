@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -13,7 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func newBounceTestServer(t *testing.T) (*Server, string, *store.Store) {
+func newBounceTestServer(t *testing.T) (*Server, string, *store.Store, store.NodeClaimFence) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -43,13 +44,22 @@ func newBounceTestServer(t *testing.T) (*Server, string, *store.Store) {
 	if err := st.MarkNodeReady(ctx, "run-1", "build"); err != nil {
 		t.Fatalf("MarkNodeReady: %v", err)
 	}
-	if _, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "alice", TokenPrefix: tok.Prefix}, "holder-1", time.Minute, nil); err != nil {
+	claimed, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "alice", TokenPrefix: tok.Prefix}, "holder-1", time.Minute, nil)
+	if err != nil {
 		t.Fatalf("ClaimNextReadyNode: %v", err)
 	}
-	return New(st, nil).WithAuthenticator(NewAuthenticator(st, 0)), raw, st
+	fence := store.NodeClaimFence{
+		Claimant: store.ClaimIdentity{Principal: "alice", TokenPrefix: tok.Prefix},
+		HolderID: "holder-1", ClaimGeneration: claimed.ClaimGeneration,
+	}
+	return New(st, nil).WithAuthenticator(NewAuthenticator(st, 0)), raw, st, fence
 }
 
 func bounceRequest(t *testing.T, srv *Server, token, method, path, body string) *httptest.ResponseRecorder {
+	return bounceRequestWithFence(t, srv, token, method, path, body, nil)
+}
+
+func bounceRequestWithFence(t *testing.T, srv *Server, token, method, path, body string, fence *store.NodeClaimFence) *httptest.ResponseRecorder {
 	t.Helper()
 	var reader *strings.Reader
 	if body != "" {
@@ -63,13 +73,17 @@ func bounceRequest(t *testing.T, srv *Server, token, method, path, body string) 
 		req = httptest.NewRequest(method, path, nil)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	if fence != nil {
+		req.Header.Set(store.ClaimHolderHeader, fence.HolderID)
+		req.Header.Set(store.ClaimGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
+	}
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	return rec
 }
 
 func TestBounce_RequestPollConsumeOverHTTP(t *testing.T) {
-	srv, token, st := newBounceTestServer(t)
+	srv, token, st, fence := newBounceTestServer(t)
 
 	rec := bounceRequest(t, srv, token, http.MethodPost, "/api/v1/runs/run-1/nodes/build/bounce", "{}")
 	if rec.Code != http.StatusOK {
@@ -95,8 +109,8 @@ func TestBounce_RequestPollConsumeOverHTTP(t *testing.T) {
 		t.Errorf("polled seq = %d, want %d", polled.Seq, created.Seq)
 	}
 
-	rec = bounceRequest(t, srv, token, http.MethodPost,
-		"/api/v1/runs/run-1/nodes/build/bounce/consume", `{"seq":1,"outcome":"bounced"}`)
+	rec = bounceRequestWithFence(t, srv, token, http.MethodPost,
+		"/api/v1/runs/run-1/nodes/build/bounce/consume", `{"seq":1,"outcome":"bounced"}`, &fence)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("consume status = %d, body %s; want 204", rec.Code, rec.Body.String())
 	}
@@ -113,7 +127,7 @@ func TestBounce_RequestPollConsumeOverHTTP(t *testing.T) {
 }
 
 func TestBounce_RefusalsCarryTheirStatusAndReason(t *testing.T) {
-	srv, token, st := newBounceTestServer(t)
+	srv, token, st, _ := newBounceTestServer(t)
 
 	rec := bounceRequest(t, srv, token, http.MethodPost, "/api/v1/runs/run-9/nodes/build/bounce", "{}")
 	if rec.Code != http.StatusNotFound {

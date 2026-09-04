@@ -16,7 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func stuckOlderDaemon(t *testing.T, home, version string) *atomic.Int64 {
+func stuckOlderDaemon(t *testing.T, home, version, buildIdentity string) *atomic.Int64 {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)
 	if err != nil {
@@ -49,6 +49,7 @@ func stuckOlderDaemon(t *testing.T, home, version string) *atomic.Int64 {
 					ProtocolMajor:       wingd.ProtocolMajor,
 					NativeProtocolMajor: wingd.ProtocolMajor,
 					BinaryVersion:       version,
+					BuildIdentity:       buildIdentity,
 				})
 				if _, err := nc.Write(line); err != nil {
 					return
@@ -62,7 +63,7 @@ func stuckOlderDaemon(t *testing.T, home, version string) *atomic.Int64 {
 
 func TestTakeoverStopsAfterItsAttemptBudget(t *testing.T) {
 	home := shortHome(t)
-	handshakes := stuckOlderDaemon(t, home, "v0.1.0")
+	handshakes := stuckOlderDaemon(t, home, "v0.1.0", wingwire.BuildIdentity)
 	spawns := &atomic.Int64{}
 
 	_, err := EnsureDaemon(context.Background(), Options{
@@ -83,6 +84,32 @@ func TestTakeoverStopsAfterItsAttemptBudget(t *testing.T) {
 	}
 	if got := handshakes.Load(); got > int64(maxTakeoverAttempts)+2 {
 		t.Fatalf("handshakes = %d; the takeover loop is unbounded", got)
+	}
+}
+
+func TestTakeoverReplacesSameVersionDaemonWithoutNonBlockingAdmission(t *testing.T) {
+	for _, buildIdentity := range []string{"wingwire-v1-liveness", ""} {
+		t.Run(buildIdentity, func(t *testing.T) {
+			home := shortHome(t)
+			handshakes := stuckOlderDaemon(t, home, "v1.0.0", buildIdentity)
+			spawns := &atomic.Int64{}
+
+			_, err := EnsureDaemon(context.Background(), Options{
+				Home: home, Version: "v1.0.0",
+				Spawn:       func(string, string) error { spawns.Add(1); return nil },
+				DialTimeout: 200 * time.Millisecond,
+				Backoff:     5 * time.Millisecond,
+			})
+			if !errors.Is(err, ErrTakeoverExhausted) {
+				t.Fatalf("same-version old daemon result = %v, want ErrTakeoverExhausted", err)
+			}
+			if got := spawns.Load(); got != int64(maxTakeoverAttempts) {
+				t.Fatalf("successor spawns = %d, want %d", got, maxTakeoverAttempts)
+			}
+			if got := handshakes.Load(); got > int64(maxTakeoverAttempts)+2 {
+				t.Fatalf("handshakes = %d; same-version takeover loop is unbounded", got)
+			}
+		})
 	}
 }
 
@@ -117,13 +144,16 @@ func TestTakeoverBudgetRestartsForADifferentDaemon(t *testing.T) {
 					return
 				}
 				version := "v9.9.9"
+				buildIdentity := wingwire.BuildIdentity
 				if seen <= predecessors {
 					version = fmt.Sprintf("v0.%d.0", seen)
+					buildIdentity = ""
 				}
 				line, _ := wingwire.Encode(&wingwire.HelloAck{
 					ProtocolMajor:       wingd.ProtocolMajor,
 					NativeProtocolMajor: wingd.ProtocolMajor,
 					BinaryVersion:       version,
+					BuildIdentity:       buildIdentity,
 				})
 				if _, err := nc.Write(line); err != nil {
 					return

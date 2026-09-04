@@ -130,6 +130,11 @@
           "omitempty": true
         },
         {
+          "name": "non_blocking",
+          "kind": "bool",
+          "omitempty": true
+        },
+        {
           "name": "cost_source",
           "kind": "string",
           "omitempty": true

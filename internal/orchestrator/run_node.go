@@ -1,15 +1,18 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -35,6 +39,14 @@ func RunNodeOnce(
 	var cfg runNodeConfig
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+	if cfg.claimed {
+		if cfg.claimFence.ClaimGeneration < 1 {
+			return runner.Result{}, errors.New("claimed node is missing its claim-generation fence")
+		}
+		cfg.claimFence.HolderID = holderID
+		ctx = withNodeClaimHolder(ctx, holderID)
+		ctx = store.WithNodeClaimFence(ctx, cfg.claimFence)
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -74,7 +86,19 @@ func RunNodeOnce(
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
 
-	if shouldRunRemote(trigger) {
+	if cfg.claimed && !cfg.brokeredChild {
+		if shouldRunRemote(trigger, false) {
+			if controllerURL == "" {
+				return runner.Result{}, fmt.Errorf(
+					"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
+					runID, nodeID)
+			}
+			return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheToken,
+				runID, nodeID, token, logger)
+		}
+		return runNodeIsolatedFn(ctx, controllerURL, logsURL, runID, nodeID, token, logger)
+	}
+	if shouldRunRemote(trigger, cfg.brokeredChild) {
 		if controllerURL == "" {
 			return runner.Result{}, fmt.Errorf(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
@@ -98,6 +122,8 @@ func RunNodeOnce(
 		if profileLogs != nil {
 			logsBackend = profileLogs
 		}
+	} else if cfg.brokeredChild && cfg.brokerArtifact {
+		art = sparkwingcache.New(controllerURL, token, httpClient)
 	} else {
 		art, err = resolveArtifactStoreFromEnv(ctx)
 		if err != nil {
@@ -421,11 +447,17 @@ func RunNodeOnce(
 	}
 
 	if admission != nil {
-		lease, aerr := admission.admitNode(ctx, backends, run.Pipeline, runID, nodeID, node, planPriorityFromSnapshot(run.PlanSnapshot))
-		if aerr != nil {
-			return runner.Result{}, fmt.Errorf("local admission: %w", aerr)
+		priority := planPriorityFromSnapshot(run.PlanSnapshot)
+		if reservedCtx, ok := admission.attachReservedNode(ctx, priority); ok {
+			ctx = reservedCtx
+		} else {
+			lease, aerr := admission.admitNode(ctx, backends, run.Pipeline, runID, nodeID, node, priority)
+			if aerr != nil {
+				return runner.Result{}, fmt.Errorf("local admission: %w", aerr)
+			}
+			defer lease.release()
+			ctx = withLocalAdmission(ctx, admission, lease.token, lease.childToken, lease.hostAdmitted, priority)
 		}
-		defer lease.release()
 	}
 
 	if cfg.coordinated {
@@ -511,6 +543,42 @@ func runNodeCLI(args []string) error {
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
 	var runOpts []RunNodeOption
+	brokeredChild := os.Getenv(remoteExecutionCapabilityInputEnv) == "1"
+	if brokeredChild {
+		capability, err := io.ReadAll(io.LimitReader(os.Stdin, 4097))
+		if err != nil {
+			return fmt.Errorf("read execution capability: %w", err)
+		}
+		token = string(bytes.TrimSpace(capability))
+		if len(token) < 32 || len(capability) > 4096 {
+			return errors.New("execution capability input is invalid")
+		}
+		runOpts = append(runOpts, brokeredExecutionChild(os.Getenv(remoteBrokeredArtifactEnv) == "1"))
+	}
+	if os.Getenv(remoteBrokeredClaimEnv) == "1" {
+		holderID = "brokered-execution"
+		runOpts = append(runOpts, func(c *runNodeConfig) {
+			c.claimed = true
+			c.claimFence = store.NodeClaimFence{
+				HolderID: "brokered-execution", MembershipID: "brokered-membership",
+				ReservationID: "brokered-reservation", ClaimGeneration: 1,
+			}
+		})
+	} else if claimedHolder := os.Getenv("SPARKWING_NODE_CLAIM_HOLDER"); claimedHolder != "" {
+		holderID = claimedHolder
+		generation, err := strconv.ParseInt(os.Getenv("SPARKWING_NODE_CLAIM_GENERATION"), 10, 64)
+		if err != nil || generation < 1 {
+			return errors.New("SPARKWING_NODE_CLAIM_GENERATION must name the awarded claim generation")
+		}
+		runOpts = append(runOpts, func(c *runNodeConfig) {
+			c.claimed = true
+			c.claimFence = store.NodeClaimFence{
+				ClaimGeneration: generation,
+				MembershipID:    os.Getenv("SPARKWING_NODE_CLAIM_MEMBERSHIP"),
+				ReservationID:   os.Getenv("SPARKWING_NODE_CLAIM_RESERVATION"),
+			}
+		})
+	}
 	if apiSocket != "" {
 		runOpts = append(runOpts, OverAPISocket(apiSocket))
 		token = ""
@@ -522,6 +590,11 @@ func runNodeCLI(args []string) error {
 		ctx, abandon = context.WithCancel(ctx)
 		defer abandon()
 		defer WatchParentLiveness(abandon)()
+	}
+	if brokeredChild {
+		for name := range remoteExecutionPrivateEnv {
+			_ = os.Unsetenv(name)
+		}
 	}
 	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID, holderID, token,
 		selectLocalRenderer(), slog.Default(), nil, runOpts...)

@@ -43,23 +43,64 @@ func (s e2eSampler) Sample() (wingd.HostStat, error) {
 	return wingd.HostStat{TotalCores: s.cores, TotalMemoryBytes: 16 << 30, FreeMemoryBytes: 16 << 30, LoadMeasured: true, MemoryMeasured: true}, nil
 }
 
-func startE2EDaemon(t *testing.T, home string, cores float64) {
+type e2eDaemon struct {
+	done     chan error
+	finished chan struct{}
+	stop     context.CancelFunc
+}
+
+func startE2EDaemon(t *testing.T, home string, cores float64) *e2eDaemon {
 	t.Helper()
-	d, err := wingd.New(wingd.Config{
+	return startE2EDaemonConfig(t, wingd.Config{
 		Home: home, Version: "v1", GraceWindow: -1,
 		HeadroomFraction: -1,
 		Sampler:          e2eSampler{cores: cores},
 	})
+}
+
+func startE2EDaemonConfig(t *testing.T, cfg wingd.Config) *e2eDaemon {
+	t.Helper()
+	d, err := wingd.New(cfg)
 	if err != nil {
 		t.Fatalf("new daemon: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go func() { _ = d.Run(ctx) }()
+	td := &e2eDaemon{done: make(chan error, 1), finished: make(chan struct{}), stop: cancel}
+	go func() {
+		defer close(td.finished)
+		td.done <- d.Run(ctx)
+	}()
+	t.Cleanup(func() { td.stopAndWait(t) })
 	select {
 	case <-d.Ready():
+	case err := <-td.done:
+		t.Fatalf("daemon exited before ready: %v", err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("daemon never became ready")
+	}
+	return td
+}
+
+func (d *e2eDaemon) stopAndWait(t *testing.T) {
+	t.Helper()
+	d.stop()
+	select {
+	case <-d.finished:
+	case <-time.After(3 * time.Second):
+		t.Error("daemon did not stop")
+	}
+
+}
+
+func (d *e2eDaemon) waitExit(t *testing.T) error {
+	t.Helper()
+	d.stop()
+	select {
+	case err := <-d.done:
+		return err
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not stop")
+		return nil
 	}
 }
 
@@ -103,9 +144,9 @@ func TestRunnerAdmissionE2E(t *testing.T) {
 	ctx := context.Background()
 
 	rv := reserve{cores: 1}
-	provider := newHeadroomProvider(home, "v1", rv)
+	provider := newHeadroomProvider(home, "v1", rv, reserve{}, reserve{})
 
-	idle := provider(ctx)
+	idle := provider(ctx).headroom
 	if idle == nil {
 		t.Fatal("provider returned nil against a live daemon")
 	}
@@ -116,7 +157,7 @@ func TestRunnerAdmissionE2E(t *testing.T) {
 	holdLease(t, home, "local-run", 4, wingwire.OriginLocal)
 	holdLease(t, home, "ctrl-run", 1, wingwire.OriginController)
 
-	held := provider(ctx)
+	held := provider(ctx).headroom
 	if held == nil {
 		t.Fatal("provider returned nil while leases held")
 	}

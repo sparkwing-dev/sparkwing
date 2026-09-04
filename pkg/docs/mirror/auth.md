@@ -69,8 +69,10 @@ token**: the controller records that token's prefix segment alongside the
 principal name and the client-supplied `holder_id`. The prefix is what the
 gate matches on, because it is unique per token while a principal name is a
 free-form label two tokens may share; the name stays for display. Afterwards
-the per-node write routes admit only that token while the lease is unexpired:
-another runner token gets `403` with `"error": "claim_required"`, and
+the per-node write routes require that token plus the exact holder,
+membership, reservation, and claim generation while the lease is unexpired.
+A missing fence gets `403` with `"error": "claim_required"`; an expired or
+stale fence gets `409 Conflict`. Another runner token is refused, and
 `POST /runs/{id}/nodes/{nodeID}/heartbeat` answers `409` unless the token, the
 principal, and the holder id all match. `admin` bypasses the check, which is
 what lets a dispatcher mark a node ready, start it, and finish it.
@@ -79,22 +81,34 @@ The lease is an authorization window, so the claimant does not choose how long
 it lasts. `lease_secs` above the server cap of 10 minutes is clamped, on the
 claim and on every heartbeat; a runner renews well inside that.
 
-`POST /api/v1/triggers/claim` binds the same way: the controller records the
-claiming token's prefix on the trigger row. A trigger's id is the id of the run
-it creates, so that claim is what a dispatcher owns a run by before any node of
-it is claimed.
+`POST /api/v1/triggers/claim` binds the same way and increments a claim
+generation. A trigger's id is the id of the run it creates, so trigger-driven
+node mutations carry that exact generation and are accepted only while the
+same token holds the live claim for that run. A stale generation gets `409`.
 
 `GET /api/v1/runs/{id}` accepts `runs.read` or a live `nodes.claim` or
 `triggers.claim` owner of that run. `GET /api/v1/triggers/{id}` likewise
 accepts `triggers.read` or either live claim. Claim-scoped access expires with
 the lease and never widens list routes.
 
-Every `runs.state` write names a run, and the caller must own that run: hold an
-unexpired claim on one of its nodes, or hold the unexpired claim on its
-trigger. That covers run create, run finish, plan snapshot, node create, event
-append, and the per-node `start`, `finish`, `deps`, and `status` writes. A
-runner with the scope and no claim gets `403 claim_required`, so one pool token
-cannot finish, re-plan, or forge events on another run.
+Run-definition writes -- run create and finish, plan snapshot, node create, and
+run-level events -- require the source trigger's exact live generation.
+Per-node writes accept either the node's exact live claim or that source
+trigger generation. A run heartbeat likewise accepts one exact live node claim
+from the run or the source trigger generation. A runner with `runs.state` but
+without the applicable fence gets `403 claim_required`; a stale generation
+gets `409 Conflict`.
+
+An assisted executor acknowledges its claim generation and next monotonic
+attempt ordinal immediately before each job-body invocation. Node log appends
+must carry that started ordinal in addition to the exact claim fence. The logs
+service validates it against the controller and stores it in an immutable
+attempt substream. Trigger-owned node logs carry the trigger generation and
+started attempt ordinal; trigger-generation-only logs are reserved for the
+coordinator's `_compile` output.
+Ordinary node reads return executor and attempt attribution but remove holder
+and reservation values; claim responses still return the fence the winner must
+present.
 
 `PUT /pipelines/{name}/profile/pin` is the one `runs.state` write that names a
 pipeline instead of a run, and a pin becomes a hard Kubernetes limit for every
@@ -118,12 +132,11 @@ an unexpired claim on some node of that run. `admin` bypasses; so does
 `runs.read` on the reads, which already grants the wider view through
 `GET /runs/{id}/nodes`.
 
-The ownership check runs in its own statement ahead of the handler's write, so
-a claim that expires in the microseconds between the two still admits one
-stale write. The store's write methods each open their own transaction and
-take no ownership predicate, so folding the check into the write would mean
-threading a claimant through every one of them; the exposure is bounded to a
-single write that a live claim authorized moments earlier.
+Node mutations validate the exact fence in the same transaction as the write.
+If the lease expires or another generation wins while an old executor is
+paused, the old write cannot land. An append already accepted by the log
+service remains confined to the old attempt substream rather than entering the
+replacement's log.
 
 The execution view (`GET /api/v1/runs/{id}?include=secret_values`) follows the
 same rule: it returns plaintext argument values to an `admin` principal, or to
@@ -471,8 +484,13 @@ signs in again. An embedder changes the cap with
   `secrets.read` carved the runner's work out of `admin`. What remains can be
   split further into `cache.write`, `locks.admin`, and similar when a real
   caller needs that narrower trust.
-- **Keeping the bearer away from the pipeline body**: a runner's token still
-  sits in the environment of the process that executes pipeline code, so that
-  code can call every route the token unlocks. Brokering secret and node-state
-  calls through a supervisor process the body cannot reach is the remaining
-  design step.
+- **Execution capabilities beyond assisted nodes**: workstation and gateway
+  agents keep their enrollment bearer in the supervisor and give each
+  job-body child a process-lifetime loopback capability for its exact run,
+  node, and acknowledged attempt log/lifecycle. Schema 30 is the internal
+  current-node dependency; schema 31 adds the current-attempt mutation fence and
+  durable grants for `Memoize`, `Concurrency`, `ToolSlot`, `RunAndAwait`,
+  cross-pipeline references, and dynamic `SpawnNode` before this path can ship.
+  Other execution modes retain their documented credential boundary. A future
+  capability service could make the same split portable across container and
+  process boundaries that do not share one supervisor.

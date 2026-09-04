@@ -72,7 +72,7 @@ var ErrBuildMismatch = errors.New("wingd/client: daemon build differs from this 
 func buildMismatch(selfVersion string, ack wingwire.HelloAck) error {
 	self := strings.TrimSpace(selfVersion)
 	daemon := strings.TrimSpace(ack.BinaryVersion)
-	if self == daemon || (ack.BuildIdentity != "" && ack.BuildIdentity == wingwire.BuildIdentity) || supersedes(daemon, self) {
+	if ack.BuildIdentity == wingwire.BuildIdentity {
 		return nil
 	}
 	if self == "" {
@@ -83,6 +83,11 @@ func buildMismatch(selfVersion string, ack wingwire.HelloAck) error {
 	}
 	return fmt.Errorf("%w: this build is %s and the daemon is %s; the same protocol major does not prove same-build compatibility. Restart the daemon with this build or use a separate SPARKWING_HOME",
 		ErrBuildMismatch, self, daemon)
+}
+
+func sameVersionBuildReplacement(selfVersion string, ack wingwire.HelloAck) bool {
+	return ack.BuildIdentity != wingwire.BuildIdentity &&
+		strings.TrimSpace(selfVersion) == strings.TrimSpace(ack.BinaryVersion)
 }
 
 const FirstHostingRelease = "v0.27.0"
@@ -459,7 +464,8 @@ func (cl *Client) connect(ctx context.Context) error {
 			cl.Close()
 			return protocolTooOld(opts.Version, ack)
 		}
-		if !opts.NoTakeover && !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
+		if !opts.NoTakeover && !servedDownLevel(ack) &&
+			(supersedes(opts.Version, ack.BinaryVersion) || sameVersionBuildReplacement(opts.Version, ack)) {
 			cl.ack = ack
 			if !takeovers.spend(ack.BinaryVersion) {
 				_ = cl.Close()

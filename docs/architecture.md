@@ -214,7 +214,7 @@ These are set on every runner pod:
 | `SPARKWING_RUN_ID` | The run this node belongs to |
 | `SPARKWING_NODE_ID` | The node being executed |
 | `SPARKWING_HOME` | State / cache / logs root |
-| `SPARKWING_AGENT_TOKEN` | Bearer token for controller + logs calls |
+| `SPARKWING_AGENT_TOKEN` | Supervisor bearer for controller + logs calls; assisted job-body children receive a scoped loopback capability instead |
 
 ### Environment variables set on a local node process
 

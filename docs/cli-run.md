@@ -50,6 +50,7 @@ the default for managed git hooks.
 | `--sw-only GLOB` | Run only jobs whose ID matches GLOB (plus their Needs ancestors) |
 | `--sw-no-cache` | Ignore cached per-node results (writes still happen) |
 | `--sw-local-only` | Force local secrets, state, cache, and logs for this run; ignore any configured shared backends |
+| `--sw-fleet` | Let explicitly enrolled helpers execute nodes under this foreground process's authority |
 | `--sw-dry-run` | Run each step's dry-run probe instead of its real action |
 | `--sw-allow LABEL[,LABEL...]` | Authorize risk-labeled steps (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |

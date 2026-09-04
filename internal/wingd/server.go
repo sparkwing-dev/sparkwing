@@ -929,6 +929,17 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	switch dec.Kind {
 	case admission.DecisionQueued:
+		if req.NonBlocking {
+			events = append(events, d.ledger.CancelWaiter(req.RunID)...)
+			delete(d.byRun, req.RunID)
+			deliveries := d.routeLocked(events)
+			snap := d.ledger.Snapshot()
+			d.touchLocked()
+			d.mu.Unlock()
+			d.flush(deliveries, snap)
+			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "capacity", Policy: wingwire.PolicyFail, Reason: "capacity is not immediately available"})
+			return
+		}
 		c.role = roleWaiter
 	case admission.DecisionFailed, admission.DecisionSkipped:
 		delete(d.byRun, req.RunID)

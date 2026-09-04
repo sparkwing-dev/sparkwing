@@ -29,6 +29,7 @@ type PoolLoopConfig struct {
 	HolderPrefix      string
 	Labels            []string
 	MaxConcurrent     int
+	SharedSlots       chan struct{}
 	PollInterval      time.Duration
 	Lease             time.Duration
 	HeartbeatInterval time.Duration
@@ -41,6 +42,13 @@ type PoolLoopConfig struct {
 
 	LocalReserve string
 
+	Contribution           string
+	MembershipContribution string
+
+	// ExecutorName marks an enrolled membership, which must use the separate
+	// reservation-backed offer path instead of this legacy FIFO poller.
+	ExecutorName string
+
 	Home string
 
 	Version string
@@ -48,6 +56,10 @@ type PoolLoopConfig struct {
 
 type nodeClaimer interface {
 	ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error)
+}
+
+type executorNodeClaimer interface {
+	ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom, executor store.ExecutorIdentity) (*store.Node, error)
 }
 
 type poolExecFn func(ctx context.Context, n *store.Node, holderID string)
@@ -76,7 +88,15 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 			Version: cfg.Version,
 			Origin:  wingwire.OriginController,
 		}
-		provider = newHeadroomProvider(cfg.Home, cfg.Version, rv)
+		contribution, err := parseReserve(cfg.Contribution)
+		if err != nil {
+			return fmt.Errorf("pool loop: contribution: %w", err)
+		}
+		membershipContribution, err := parseReserve(cfg.MembershipContribution)
+		if err != nil {
+			return fmt.Errorf("pool loop: membership contribution: %w", err)
+		}
+		provider = newHeadroomProvider(cfg.Home, cfg.Version, rv, contribution, membershipContribution)
 		logger.Info("local admission engaged; controller work shares the local daemon",
 			"reserve", cfg.LocalReserve, "source", cfg.SourceName)
 	}
@@ -125,6 +145,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	)
 
 	sem := make(chan struct{}, cfg.MaxConcurrent)
+	sharedSlots := cfg.SharedSlots
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -145,11 +166,33 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		case <-ctx.Done():
 			return nil
 		}
+		if sharedSlots != nil {
+			select {
+			case sharedSlots <- struct{}{}:
+			case <-ctx.Done():
+				<-sem
+				return nil
+			}
+		}
 
 		holderID := fmt.Sprintf("%s:%d", cfg.HolderPrefix, time.Now().UnixNano())
-		n, err := claimer.ClaimNode(ctx, holderID, cfg.Labels, cfg.Lease, currentHeadroom(ctx, provider))
+		report := currentCapacity(ctx, provider)
+		if cfg.ExecutorName != "" {
+			<-sem
+			if sharedSlots != nil {
+				<-sharedSlots
+			}
+			observeClaimOutcome("assisted-offer-required")
+			logger.Error("claim withheld; enrolled executors require the assisted offer protocol", "source", cfg.SourceName)
+			sleepOrCancel(ctx, cfg.PollInterval)
+			continue
+		}
+		n, err := claimer.ClaimNode(ctx, holderID, cfg.Labels, cfg.Lease, report.headroom)
 		if err != nil {
 			<-sem
+			if sharedSlots != nil {
+				<-sharedSlots
+			}
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
@@ -160,6 +203,9 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		}
 		if n == nil {
 			<-sem
+			if sharedSlots != nil {
+				<-sharedSlots
+			}
 			observeClaimOutcome("empty")
 			sleepOrCancel(ctx, cfg.PollInterval)
 			continue
@@ -175,9 +221,19 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		go func(n *store.Node, holderID string) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			if sharedSlots != nil {
+				defer func() { <-sharedSlots }()
+			}
 			exec(ctx, n, holderID)
 		}(n, holderID)
 	}
+}
+
+func executorKind(source string) string {
+	if source == "agent" {
+		return "agent"
+	}
+	return "runner"
 }
 
 func runRunnerCLI(args []string) error {
@@ -360,9 +416,9 @@ func runRunnerCLI(args []string) error {
 	}, slog.Default())
 }
 
-func currentHeadroom(ctx context.Context, provider headroomProvider) *client.Headroom {
+func currentCapacity(ctx context.Context, provider headroomProvider) capacityReport {
 	if provider == nil {
-		return nil
+		return capacityReport{}
 	}
 	return provider(ctx)
 }
@@ -388,16 +444,20 @@ func executePooledNode(
 
 	execCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	heartbeatCtx := store.WithNodeClaimFence(execCtx, store.NodeClaimFence{
+		HolderID: holderID, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	})
 
 	var hbWG sync.WaitGroup
 	hbWG.Add(1)
 	go func() {
 		defer hbWG.Done()
-		runPoolHeartbeat(execCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
+		runPoolHeartbeat(heartbeatCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
 	}()
 
 	res, err := orchestrator.RunNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
-		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken))
+		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken), orchestrator.ClaimedNodeAttempt(n))
 	cancel()
 	hbWG.Wait()
 
@@ -437,7 +497,8 @@ func runPoolHeartbeat(
 			return
 		case <-t.C:
 			hbCtx, cancel := context.WithTimeout(ctx, poolHeartbeatTimeout)
-			err := ctrl.HeartbeatNodeClaim(hbCtx, runID, nodeID, holderID, lease, currentHeadroom(hbCtx, provider))
+			report := currentCapacity(hbCtx, provider)
+			err := ctrl.HeartbeatNodeClaim(hbCtx, runID, nodeID, holderID, lease, report.headroom)
 			cancel()
 			if err == nil {
 				lastOK = time.Now()

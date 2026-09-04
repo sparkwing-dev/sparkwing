@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -255,6 +256,34 @@ pipelines:
 
 	if got := capturedRegion(); got != "eu-west" {
 		t.Fatalf("retry ran with region=%q, want the original's eu-west; log:\n%s", got, rig.logs.String())
+	}
+}
+
+func TestExecuteClaimedTrigger_RetryPlanDriftFailsBeforeNodeExecution(t *testing.T) {
+	registerTriggerRetryPipe(t)
+	triggerCheckout(t, `pipelines:
+  - name: trigger-retry-pipe
+    entrypoint: TriggerRetryPipe
+`)
+	workerRig := newTriggerWorkerRig(t)
+	trig := workerRig.claim(t, store.Trigger{
+		ID: "trg-retry-plan-drift", Pipeline: "trigger-retry-pipe", TriggerSource: "retry",
+		RetryOf: "source", RetrySource: store.RetrySourceAuto,
+		TriggerEnv: map[string]string{retryprovenance.PlanHashKey: "sha256:not-the-current-plan"},
+	})
+	setCapturedRegion("")
+	orchestrator.ExecuteClaimedTrigger(context.Background(),
+		orchestrator.WorkerOptions{Logger: workerRig.logger}, workerRig.backend, workerRig.client, trig)
+
+	if got := capturedRegion(); got != "" {
+		t.Fatalf("retry plan drift executed the job body with region %q", got)
+	}
+	run, err := workerRig.st.GetRun(context.Background(), trig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "failed" || !strings.Contains(run.Error, "retry provenance drift") {
+		t.Fatalf("run = %+v, want retry provenance drift failure", run)
 	}
 }
 

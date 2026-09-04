@@ -8,6 +8,8 @@ Every route the controller and logs service register, with the scope each requir
 | Method | Path | Scope |
 |---|---|---|
 | `GET` | `/api/v1/agents` | `runs.read` |
+| `PUT` | `/api/v1/agents/{name}` | `admin` |
+| `POST` | `/api/v1/agents/{name}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/approvals/pending` | `runs.read` |
 | `GET` | `/api/v1/artifacts/{key}` | `runs.read` |
 | `GET` | `/api/v1/auth/bootstrap-needed` | `public` |
@@ -32,6 +34,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
+| `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
 | `POST` | `/api/v1/pipelines/{name}/profile/contention` | `runs.state` |
@@ -68,14 +71,19 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/annotations` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `runs.write` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce/consume` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/validate` | `logs.write` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/debug-pause` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatches` | `runs.read` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-finish` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `admin` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `admin` |

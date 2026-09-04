@@ -100,7 +100,10 @@ func TestJoinStepsByNode_Wrapping(t *testing.T) {
 	start := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	end := start.Add(time.Second)
 	nodes := []*store.Node{
-		{NodeID: "a", Status: "done"},
+		{NodeID: "a", Status: "done", ClaimedBy: "private-holder", ClaimGeneration: 4,
+			ClaimWorkerID: "desktop-public", ClaimMembershipID: "private-membership",
+			ExecutorKind: "agent", ExecutorID: "private-executor", ExecutorLocation: "local",
+			ReservationID: "private-reservation"},
 		{NodeID: "b", Status: "done"},
 	}
 	steps := []*store.NodeStep{
@@ -116,6 +119,13 @@ func TestJoinStepsByNode_Wrapping(t *testing.T) {
 	}
 	if len(wrapped[1].Steps) != 1 || wrapped[1].Steps[0].StepID != "s2" {
 		t.Errorf("node b steps wrong: %+v", wrapped[1].Steps)
+	}
+	if wrapped[0].ExecutorName != "desktop-public" || wrapped[0].ClaimedBy != "" ||
+		wrapped[0].ClaimGeneration != 0 || wrapped[0].ExecutorID != "" || wrapped[0].ReservationID != "" {
+		t.Errorf("CLI node projection = %+v", wrapped[0].Node)
+	}
+	if nodes[0].ClaimedBy != "private-holder" {
+		t.Error("CLI projection mutated the state row")
 	}
 }
 

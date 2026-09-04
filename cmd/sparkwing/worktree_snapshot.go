@@ -3,17 +3,34 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-const maxWorktreeSnapshotBytes int64 = 500 << 20
+const (
+	maxWorktreeSnapshotBytes int64 = 500 << 20
+	maxWorktreeSnapshotFiles       = 100_000
+)
+
+type worktreeSnapshotLimits struct {
+	bytes int64
+	files int
+}
+
+var defaultWorktreeSnapshotLimits = worktreeSnapshotLimits{
+	bytes: maxWorktreeSnapshotBytes,
+	files: maxWorktreeSnapshotFiles,
+}
 
 type worktreeSnapshot struct {
 	RepoRoot   string
@@ -22,6 +39,7 @@ type worktreeSnapshot struct {
 	BundlePath string
 	FileCount  int
 	Size       int64
+	BundleSize int64
 	tempDir    string
 }
 
@@ -34,7 +52,42 @@ func (s *worktreeSnapshot) close() error {
 	return os.RemoveAll(dir)
 }
 
+func (s *worktreeSnapshot) materialize(ctx context.Context) (string, string, error) {
+	if s == nil || s.tempDir == "" || s.BundlePath == "" || s.SHA == "" {
+		return "", "", fmt.Errorf("working-tree snapshot is incomplete")
+	}
+	checkout := filepath.Join(s.tempDir, "checkout")
+	if err := os.WriteFile(filepath.Join(s.tempDir, ".sparkwing-fleet-owned"), []byte(s.SHA+"\n"), 0o600); err != nil {
+		return "", "", fmt.Errorf("mark exact source ownership: %w", err)
+	}
+	if out, err := exec.CommandContext(ctx, "git", "init", "--quiet", checkout).CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("initialize exact source checkout: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	ref := bincache.SeedRef(s.SHA)
+	if out, err := exec.CommandContext(ctx, "git", "-C", checkout, "fetch", "--quiet", s.BundlePath, ref).CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("import exact source checkout: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	if _, err := exec.CommandContext(ctx, "git", "-C", checkout, "checkout", "--detach", "--quiet", s.SHA).CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("materialize exact source checkout: %w", snapshotGitError(err))
+	}
+	repoURL := ""
+	if out, err := exec.CommandContext(ctx, "git", "-C", s.RepoRoot, "remote", "get-url", "origin").Output(); err == nil {
+		repoURL, _ = sourceurl.ValidateCloneURL(strings.TrimSpace(string(out)))
+	}
+	if repoURL == "" {
+		repoURL = "https://source.sparkwing.invalid/workspace-" + s.SHA[:16] + ".git"
+	}
+	if out, err := exec.CommandContext(ctx, "git", "-C", checkout, "remote", "add", "origin", repoURL).CombinedOutput(); err != nil {
+		return "", "", fmt.Errorf("bind exact source identity: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return checkout, repoURL, nil
+}
+
 func captureWorktreeSnapshot(ctx context.Context, start string) (*worktreeSnapshot, error) {
+	return captureWorktreeSnapshotWithLimits(ctx, start, defaultWorktreeSnapshotLimits)
+}
+
+func captureWorktreeSnapshotWithLimits(ctx context.Context, start string, limits worktreeSnapshotLimits) (*worktreeSnapshot, error) {
 	repoRoot, err := gitOutput(ctx, start, nil, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, fmt.Errorf("working-tree snapshot requires a Git checkout: %w", err)
@@ -81,6 +134,9 @@ func captureWorktreeSnapshot(ctx context.Context, start string) (*worktreeSnapsh
 		_ = snapshot.close()
 		return nil, err
 	}
+	if err := fssecure.SecurePrivateDir(tempDir); err != nil {
+		return fail(fmt.Errorf("secure snapshot workspace: %w", err))
+	}
 
 	gitDir := filepath.Join(tempDir, "repo.git")
 	if out, ierr := exec.CommandContext(ctx, "git", "init", "--bare", "--quiet", gitDir).CombinedOutput(); ierr != nil {
@@ -125,7 +181,14 @@ func captureWorktreeSnapshot(ctx context.Context, start string) (*worktreeSnapsh
 	if err := rejectGitlinks(ctx, gitDir, tree); err != nil {
 		return fail(err)
 	}
-	sha, err := commitSnapshotTree(ctx, repoRoot, tree, baseSHA, objectEnv)
+	if err := rejectUnsafeSymlinks(ctx, gitDir, tree); err != nil {
+		return fail(err)
+	}
+	fileCount, sourceBytes, err := measureSnapshotTree(ctx, gitDir, tree, limits)
+	if err != nil {
+		return fail(err)
+	}
+	sha, err := commitSnapshotTree(ctx, repoRoot, tree, objectEnv)
 	if err != nil {
 		return fail(err)
 	}
@@ -144,16 +207,41 @@ func captureWorktreeSnapshot(ctx context.Context, start string) (*worktreeSnapsh
 	if info.Size() > maxWorktreeSnapshotBytes {
 		return fail(fmt.Errorf("working-tree snapshot bundle is %d bytes; limit is %d bytes", info.Size(), maxWorktreeSnapshotBytes))
 	}
-	files, err := gitDirOutput(ctx, gitDir, "ls-tree", "-r", "--name-only", "-z", sha)
-	if err != nil {
-		return fail(fmt.Errorf("count snapshot files: %w", err))
-	}
-
 	snapshot.SHA = sha
 	snapshot.BundlePath = bundlePath
-	snapshot.Size = info.Size()
-	snapshot.FileCount = bytes.Count([]byte(files), []byte{0})
+	snapshot.Size = sourceBytes
+	snapshot.BundleSize = info.Size()
+	snapshot.FileCount = fileCount
 	return snapshot, nil
+}
+
+func measureSnapshotTree(ctx context.Context, gitDir, tree string, limits worktreeSnapshotLimits) (int, int64, error) {
+	out, err := gitDirOutput(ctx, gitDir, "ls-tree", "-rlz", "--full-tree", tree)
+	if err != nil {
+		return 0, 0, fmt.Errorf("measure snapshot tree: %w", err)
+	}
+	count := 0
+	var total int64
+	for _, raw := range bytes.Split([]byte(out), []byte{0}) {
+		if len(raw) == 0 {
+			continue
+		}
+		meta, _, ok := bytes.Cut(raw, []byte{'\t'})
+		fields := bytes.Fields(meta)
+		if !ok || len(fields) != 4 || string(fields[1]) != "blob" {
+			return 0, 0, errors.New("measure snapshot tree: malformed blob entry")
+		}
+		size, err := strconv.ParseInt(string(fields[3]), 10, 64)
+		if err != nil || size < 0 || total > limits.bytes-size {
+			return 0, 0, fmt.Errorf("working-tree snapshot exceeds the %d-byte uncompressed source limit", limits.bytes)
+		}
+		count++
+		if count > limits.files {
+			return 0, 0, fmt.Errorf("working-tree snapshot has more than %d files", limits.files)
+		}
+		total += size
+	}
+	return count, total, nil
 }
 
 func captureSnapshotTree(ctx context.Context, repoRoot, baseSHA, indexPath string, env []string) (string, error) {
@@ -164,7 +252,7 @@ func captureSnapshotTree(ctx context.Context, repoRoot, baseSHA, indexPath strin
 		return "", fmt.Errorf("seed snapshot index: %w", err)
 	}
 	if _, err := gitOutput(ctx, repoRoot, env, "-c", "core.safecrlf=false", "add", "-A", "--", "."); err != nil {
-		return "", fmt.Errorf("capture working tree: %w", err)
+		return "", fmt.Errorf("capture working tree: %w", snapshotGitError(err))
 	}
 	if err := restoreRawSnapshotBlobs(ctx, repoRoot, env); err != nil {
 		return "", err
@@ -185,7 +273,7 @@ type snapshotIndexEntry struct {
 func restoreRawSnapshotBlobs(ctx context.Context, repoRoot string, env []string) error {
 	out, err := gitOutput(ctx, repoRoot, env, "ls-files", "--stage", "-z")
 	if err != nil {
-		return fmt.Errorf("inspect snapshot index: %w", err)
+		return fmt.Errorf("inspect snapshot index: %w", snapshotGitError(err))
 	}
 	var entries []snapshotIndexEntry
 	for _, raw := range bytes.Split([]byte(out), []byte{0}) {
@@ -199,7 +287,7 @@ func restoreRawSnapshotBlobs(ctx context.Context, repoRoot string, env []string)
 		}
 		info, statErr := os.Lstat(filepath.Join(repoRoot, string(path)))
 		if statErr != nil {
-			return fmt.Errorf("inspect snapshot file %q: %w", path, statErr)
+			return fmt.Errorf("inspect snapshot file metadata: %w", pathlessError(statErr))
 		}
 		if info.Mode().IsRegular() {
 			entries = append(entries, snapshotIndexEntry{mode: string(fields[0]), sha: string(fields[1]), path: string(path)})
@@ -208,19 +296,28 @@ func restoreRawSnapshotBlobs(ctx context.Context, repoRoot string, env []string)
 		if info.Mode()&os.ModeSymlink != 0 || string(fields[0]) == "160000" {
 			continue
 		}
-		return fmt.Errorf("working-tree snapshot does not support non-regular file %q", path)
+		return errors.New("working-tree snapshot does not support a non-regular file")
 	}
 
 	var updates bytes.Buffer
-	for start := 0; start < len(entries); start += 256 {
-		end := min(start+256, len(entries))
+	for start := 0; start < len(entries); {
+		end := start
+		argumentBytes := 0
+		for end < len(entries) && end-start < 64 {
+			next := len(entries[end].path) + 1
+			if end > start && argumentBytes+next > 8<<10 {
+				break
+			}
+			argumentBytes += next
+			end++
+		}
 		args := []string{"hash-object", "-w", "--no-filters", "--"}
 		for _, entry := range entries[start:end] {
 			args = append(args, entry.path)
 		}
 		hashes, hashErr := gitOutput(ctx, repoRoot, env, args...)
 		if hashErr != nil {
-			return fmt.Errorf("hash raw snapshot files: %w", hashErr)
+			return errors.New("hash raw snapshot files failed")
 		}
 		fields := strings.Fields(hashes)
 		if len(fields) != end-start {
@@ -232,6 +329,7 @@ func restoreRawSnapshotBlobs(ctx context.Context, repoRoot string, env []string)
 			}
 			fmt.Fprintf(&updates, "%s %s 0\t%s%c", entry.mode, fields[i], entry.path, byte(0))
 		}
+		start = end
 	}
 	if updates.Len() == 0 {
 		return nil
@@ -239,13 +337,13 @@ func restoreRawSnapshotBlobs(ctx context.Context, repoRoot string, env []string)
 	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "update-index", "-z", "--index-info")
 	cmd.Env = appendGitEnv(env)
 	cmd.Stdin = &updates
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("restore raw snapshot files: %w: %s", err, strings.TrimSpace(string(out)))
+	if _, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("restore raw snapshot files: %w", snapshotGitError(err))
 	}
 	return nil
 }
 
-func commitSnapshotTree(ctx context.Context, repoRoot, tree, parent string, env []string) (string, error) {
+func commitSnapshotTree(ctx context.Context, repoRoot, tree string, env []string) (string, error) {
 	identity := []string{
 		"GIT_AUTHOR_NAME=Sparkwing",
 		"GIT_AUTHOR_EMAIL=workspace@sparkwing.dev",
@@ -254,7 +352,7 @@ func commitSnapshotTree(ctx context.Context, repoRoot, tree, parent string, env 
 		"GIT_COMMITTER_EMAIL=workspace@sparkwing.dev",
 		"GIT_COMMITTER_DATE=2000-01-01T00:00:00Z",
 	}
-	cmd := exec.CommandContext(ctx, "git", "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree, "-p", parent)
+	cmd := exec.CommandContext(ctx, "git", "-c", "commit.gpgsign=false", "-C", repoRoot, "commit-tree", tree)
 	cmd.Env = appendGitEnv(append(env, identity...))
 	cmd.Stdin = strings.NewReader("sparkwing working-tree snapshot\n")
 	out, err := cmd.CombinedOutput()
@@ -277,6 +375,86 @@ func rejectGitlinks(ctx context.Context, gitDir, tree string) error {
 	return nil
 }
 
+func rejectUnsafeSymlinks(ctx context.Context, gitDir, tree string) error {
+	out, err := gitDirOutput(ctx, gitDir, "ls-tree", "-rz", "--full-tree", tree)
+	if err != nil {
+		return fmt.Errorf("inspect snapshot symlinks: %w", err)
+	}
+	targets := map[string]string{}
+	for _, record := range strings.Split(out, "\x00") {
+		meta, name, ok := strings.Cut(record, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) != 3 || fields[0] != "120000" {
+			continue
+		}
+		target, err := gitDirOutput(ctx, gitDir, "cat-file", "blob", fields[2])
+		if err != nil {
+			return fmt.Errorf("read snapshot symlink: %w", snapshotGitError(err))
+		}
+		if symlinkTargetAbsolute(target) {
+			return errors.New("working-tree snapshot refuses an absolute symlink")
+		}
+		targets[name] = strings.ReplaceAll(target, "\\", "/")
+	}
+	for name := range targets {
+		if err := resolveSnapshotSymlink(name, targets); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func symlinkTargetAbsolute(target string) bool {
+	target = strings.TrimSpace(target)
+	if strings.HasPrefix(target, "/") || strings.HasPrefix(target, "\\") {
+		return true
+	}
+	return len(target) >= 2 && ((target[0] >= 'a' && target[0] <= 'z') || (target[0] >= 'A' && target[0] <= 'Z')) && target[1] == ':'
+}
+
+func resolveSnapshotSymlink(name string, targets map[string]string) error {
+	stack := splitSnapshotPath(pathpkg.Dir(name))
+	pending := splitSnapshotPath(targets[name])
+	visited := map[string]bool{name: true}
+	for len(pending) > 0 {
+		part := pending[0]
+		pending = pending[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if len(stack) == 0 {
+				return errors.New("working-tree snapshot refuses an escaping symlink")
+			}
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		stack = append(stack, part)
+		candidate := strings.Join(stack, "/")
+		target, ok := targets[candidate]
+		if !ok {
+			continue
+		}
+		if visited[candidate] {
+			return errors.New("working-tree snapshot refuses a symlink cycle")
+		}
+		visited[candidate] = true
+		stack = stack[:len(stack)-1]
+		pending = append(splitSnapshotPath(target), pending...)
+	}
+	return nil
+}
+
+func splitSnapshotPath(value string) []string {
+	if value == "." || value == "" {
+		return nil
+	}
+	return strings.Split(value, "/")
+}
+
 func rejectWorktreeFilters(ctx context.Context, repoRoot string) error {
 	out, err := gitOutput(ctx, repoRoot, nil, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
@@ -289,7 +467,7 @@ func rejectWorktreeFilters(ctx context.Context, repoRoot string) error {
 	cmd.Stdin = strings.NewReader(out)
 	checked, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("inspect Git content filters: %w", err)
+		return fmt.Errorf("inspect Git content filters: %w", snapshotGitError(err))
 	}
 	parts := bytes.Split(checked, []byte{0})
 	for i := 0; i+2 < len(parts); i += 3 {
@@ -299,11 +477,33 @@ func rejectWorktreeFilters(ctx context.Context, repoRoot string) error {
 		}
 		attribute := string(parts[i+1])
 		if attribute == "filter" {
-			return fmt.Errorf("working-tree snapshot refuses Git content filter %q on %q; remote materialization would not guarantee the same bytes", value, string(parts[i]))
+			return fmt.Errorf("working-tree snapshot refuses Git content filter %q; remote materialization would not guarantee the same bytes", value)
 		}
-		return fmt.Errorf("working-tree snapshot refuses Git %s=%q on %q; remote materialization would not guarantee the same bytes", attribute, value, string(parts[i]))
+		return fmt.Errorf("working-tree snapshot refuses Git %s=%q; remote materialization would not guarantee the same bytes", attribute, value)
 	}
 	return nil
+}
+
+func pathlessError(err error) error {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
+	}
+	return err
+}
+
+func snapshotGitError(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return fmt.Errorf("git exited with status %d", exitErr.ExitCode())
+	}
+	return errors.New("git command failed")
 }
 
 func gitOutput(ctx context.Context, repoRoot string, env []string, args ...string) (string, error) {

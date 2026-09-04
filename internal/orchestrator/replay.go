@@ -219,11 +219,15 @@ func MintReplayRun(ctx context.Context, st *store.Store, originalRunID, nodeID s
 		return "", fmt.Errorf("create replay run: %w", err)
 	}
 	if err := st.CreateNode(ctx, store.Node{
-		RunID:       newRunID,
-		NodeID:      nodeID,
-		Status:      "pending",
-		Deps:        origNode.Deps,
-		NeedsLabels: origNode.NeedsLabels,
+		RunID:                newRunID,
+		NodeID:               nodeID,
+		Status:               "pending",
+		Deps:                 origNode.Deps,
+		NeedsLabels:          origNode.NeedsLabels,
+		PrefersLabels:        origNode.PrefersLabels,
+		RequestedCores:       origNode.RequestedCores,
+		RequestedMemoryBytes: origNode.RequestedMemoryBytes,
+		RequestedSlots:       origNode.RequestedSlots,
 	}); err != nil {
 		return "", fmt.Errorf("create replay node: %w", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -67,12 +68,16 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	}
 	args := resolveTriggerArgs(runCtx, backends.State, trigger, logger)
 	runOpts := Options{
-		Pipeline:    trigger.Pipeline,
-		RunID:       trigger.ID,
-		Args:        args,
-		ParentRunID: trigger.ParentRunID,
-		RetryOf:     trigger.RetryOf,
-		RetrySource: trigger.RetrySource,
+		Pipeline:          trigger.Pipeline,
+		RunID:             trigger.ID,
+		Args:              args,
+		ParentRunID:       trigger.ParentRunID,
+		RetryOf:           trigger.RetryOf,
+		RetrySource:       trigger.RetrySource,
+		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],
+		RetryRepoIdentity: trigger.TriggerEnv[retryprovenance.RepoIdentityKey],
+		RetryRevision:     trigger.TriggerEnv[retryprovenance.RevisionKey],
+		RetryPlanHash:     trigger.TriggerEnv[retryprovenance.PlanHashKey],
 		Trigger: sparkwing.TriggerInfo{
 			Source:      trigger.TriggerSource,
 			User:        trigger.TriggerUser,
@@ -162,6 +167,7 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	if err != nil {
 		return fmt.Errorf("get trigger %s: %w", triggerID, err)
 	}
+	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trigger.ClaimSeq})
 	opts.Logger.Info(
 		"handling claimed trigger",
 		"run_id", trigger.ID,

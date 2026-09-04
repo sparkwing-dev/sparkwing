@@ -1,13 +1,19 @@
 # pkg/controller
 
 type Agent struct {
-	Name          string
-	Type          string
-	Labels        map[string]string
-	LastSeen      string
-	Status        string
-	ActiveJobs    []string
-	MaxConcurrent int
+	Name            string
+	Type            string
+	Location        string
+	Labels          map[string]string
+	Capabilities    []string
+	LastSeen        string
+	Status          string
+	ActiveJobs      []string
+	ActiveSlots     *int
+	MaxConcurrent   int
+	BasePriority    int
+	PriorityCeiling int
+	Budget          AgentResources
 
 	Headroom *AgentHeadroom
 }
@@ -15,6 +21,12 @@ type AgentHeadroom struct {
 	Cores       float64
 	MemoryBytes int64
 	QueueDepth  int
+
+	ObservedAt string
+}
+type AgentResources struct {
+	Cores       float64
+	MemoryBytes int64
 }
 func AuditFields(ctx context.Context) []slog.Attr
 type Authenticator struct {
@@ -123,14 +135,18 @@ func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logge
 func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {
 }
+func (s *Server) AssistedRunHandler() http.Handler
 func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) Shutdown(ctx context.Context) error
+func (s *Server) StopAssistedClaims()
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
+func (s *Server) WithAssistedRunScope(runID string) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
+func (s *Server) WithCacheCredentials(url, token string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server

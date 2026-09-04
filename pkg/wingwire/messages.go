@@ -11,9 +11,9 @@ const (
 	// `sparkwing run` or a local trigger. The default when a request names
 	// no origin.
 	OriginLocal Origin = "local"
-	// OriginController marks controller-dispatched work claimed by a
-	// registered runner on this box, admitted through the same daemon as
-	// local work.
+	// OriginController marks controller-directed work on this box, admitted
+	// through the same daemon as local work. The dispatch protocol decides how
+	// the work reached the executor.
 	OriginController Origin = "controller"
 )
 
@@ -220,6 +220,10 @@ type AdmissionRequest struct {
 	// SubLease marks an internal lease whose parent run owns finalization.
 	// The daemon releases it on disconnect but never finalizes a run row for it.
 	SubLease bool `json:"sub_lease,omitempty"`
+	// NonBlocking refuses immediately when this request cannot be granted.
+	// Helper executors use it because they may offer only work they can
+	// start now and therefore must never enter wingd's local wait queue.
+	NonBlocking bool `json:"non_blocking,omitempty"`
 	// CostSource names how Resources was resolved so the queue view can show
 	// where a charge came from. The daemon may cap measured costs to the
 	// largest idle-grantable request.

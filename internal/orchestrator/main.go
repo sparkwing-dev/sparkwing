@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/term"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -140,6 +143,15 @@ func Main() {
 		NoCache:             os.Getenv("SPARKWING_NO_CACHE") == "1",
 		DryRun:              os.Getenv("SPARKWING_DRY_RUN") == "1",
 		LocalOnly:           os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
+		Fleet:               os.Getenv("SPARKWING_FLEET") == "1",
+		FleetConfigPath:     os.Getenv("SPARKWING_FLEET_CONFIG"),
+		FleetSourceRoot:     os.Getenv("SPARKWING_FLEET_SOURCE_ROOT"),
+		FleetSourceBundle:   os.Getenv("SPARKWING_FLEET_SOURCE_BUNDLE"),
+		FleetSourceSHA:      os.Getenv("SPARKWING_FLEET_SOURCE_SHA"),
+		FleetSourceRepoURL:  os.Getenv("SPARKWING_FLEET_SOURCE_REPO_URL"),
+		FleetSourceFiles:    positiveEnvInt("SPARKWING_FLEET_SOURCE_FILES"),
+		FleetSourceBytes:    positiveEnvInt64("SPARKWING_FLEET_SOURCE_BYTES"),
+		FleetBundleBytes:    positiveEnvInt64("SPARKWING_FLEET_SOURCE_BUNDLE_BYTES"),
 		MaxParallel:         runtime.NumCPU(),
 		DispatchWaitTimeout: parseDispatchWaitTimeout(os.Getenv("SPARKWING_DISPATCH_WAIT_TIMEOUT")),
 		PipelineYAML:        pipelineYAML,
@@ -147,7 +159,22 @@ func Main() {
 		// re-enter itself for each node.
 		ProcessPerNode: true,
 	}
-	opts.Admission = pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal)
+	cleanupFleet := func() {}
+	if opts.Fleet {
+		var once sync.Once
+		cleanupFleet = func() {
+			once.Do(func() { cleanupFleetSource(opts.FleetSourceRoot, opts.FleetSourceSHA) })
+		}
+		if err := validateFleetSourceOwnership(opts.FleetSourceRoot, opts.FleetSourceBundle, opts.FleetSourceSHA); err != nil {
+			fmt.Fprintln(os.Stderr, "sparkwing run --sw-fleet:", err)
+			cleanupFleet()
+			os.Exit(1)
+		}
+		defer cleanupFleet()
+	}
+	if !opts.Fleet {
+		opts.Admission = pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal)
+	}
 	if projectCfg != nil {
 		opts.DefaultArgs = projectCfg.Defaults.Args
 		if pipelineYAML != nil {
@@ -170,30 +197,68 @@ func Main() {
 	prof, profChain, profErr := resolveActiveProfile(pipelineYAML, projectCfg)
 	if profErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", profErr)
+		cleanupFleet()
 		os.Exit(1)
 	}
 	opts.Profile = prof
 	opts.ProfileChain = profChain
+	if opts.Fleet && !opts.LocalOnly && fleetProfileUsesRemoteAuthority(prof) {
+		fmt.Fprintln(os.Stderr, "sparkwing run --sw-fleet: the foreground coordinator requires local state, logs, cache, and secrets; use a local profile or --sw-local-only")
+		cleanupFleet()
+		os.Exit(1)
+	}
 	if applyErr := applyCIEmbeddedEnv(&opts); applyErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run:", applyErr)
+		cleanupFleet()
 		os.Exit(1)
 	}
 	if secretsErr := applySecretsProfileOverride(&opts); secretsErr != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing run: --sw-secrets:", secretsErr)
+		cleanupFleet()
 		os.Exit(1)
 	}
 
-	res, err := RunLocal(context.Background(), paths, opts)
+	runCtx := context.Background()
+	stopParentGuard := func() {}
+	if opts.Fleet {
+		runCtx, stopParentGuard, err = fleet.JoinParentGuard(runCtx,
+			os.Getenv("SPARKWING_FLEET_PARENT_GUARD"), os.Getenv("SPARKWING_FLEET_PARENT_TOKEN"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "sparkwing run --sw-fleet:", err)
+			cleanupFleet()
+			os.Exit(1)
+		}
+		defer stopParentGuard()
+	}
+	res, err := RunLocal(runCtx, paths, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "run:", err)
+		cleanupFleet()
 		os.Exit(1)
 	}
 	if res != nil && res.Error != nil {
 		fmt.Fprintln(os.Stderr, "run:", res.Error)
 	}
 	if res != nil && res.Status != "success" {
+		cleanupFleet()
 		os.Exit(1)
 	}
+}
+
+func positiveEnvInt(key string) int {
+	value, _ := strconv.ParseInt(os.Getenv(key), 10, 32)
+	if value < 0 {
+		return 0
+	}
+	return int(value)
+}
+
+func positiveEnvInt64(key string) int64 {
+	value, _ := strconv.ParseInt(os.Getenv(key), 10, 64)
+	if value < 0 {
+		return 0
+	}
+	return value
 }
 
 func bindProjectPipelines() *projectconfig.Config {

@@ -458,7 +458,7 @@ func TestFetchPipelineWorkspaceSource_RestoresRawGitBlobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commit := exec.Command("git", "-C", bareRepo, "commit-tree", strings.TrimSpace(string(tree)), "-p", tipSHA)
+	commit := exec.Command("git", "-C", bareRepo, "commit-tree", strings.TrimSpace(string(tree)))
 	commit.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=Sparkwing", "GIT_AUTHOR_EMAIL=workspace@sparkwing.dev", "GIT_AUTHOR_DATE=2000-01-01T00:00:00Z",
 		"GIT_COMMITTER_NAME=Sparkwing", "GIT_COMMITTER_EMAIL=workspace@sparkwing.dev", "GIT_COMMITTER_DATE=2000-01-01T00:00:00Z",

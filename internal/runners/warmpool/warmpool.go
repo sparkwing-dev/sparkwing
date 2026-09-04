@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -18,20 +18,30 @@ type Config struct {
 
 	ClaimWaitTimeout  time.Duration
 	HeartbeatInterval time.Duration
+	FallbackLabels    []string
 }
 
 type Runner struct {
-	ctrl     *client.Client
+	ctrl     coordinator
 	fallback runner.Runner
 	cfg      Config
 	logger   *slog.Logger
 }
 
-func New(ctrl *client.Client, fallback runner.Runner, cfg Config, logger *slog.Logger) *Runner {
+type coordinator interface {
+	MarkNodeReady(context.Context, string, string) error
+	UpdateNodeActivity(context.Context, string, string, string) error
+	TouchNodeHeartbeat(context.Context, string, string) error
+	GetNode(context.Context, string, string) (*store.Node, error)
+	RevokeNodeReady(context.Context, string, string) (bool, error)
+	FinalizeNodeReady(context.Context, string, string) (store.ExecutorClaimRoundResult, error)
+}
+
+func New(ctrl coordinator, fallback runner.Runner, cfg Config, logger *slog.Logger) *Runner {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 500 * time.Millisecond
 	}
-	if cfg.ClaimWaitTimeout <= 0 {
+	if cfg.ClaimWaitTimeout <= 0 || cfg.ClaimWaitTimeout > 5*time.Second {
 		cfg.ClaimWaitTimeout = 5 * time.Second
 	}
 	if cfg.HeartbeatInterval <= 0 {
@@ -40,6 +50,7 @@ func New(ctrl *client.Client, fallback runner.Runner, cfg Config, logger *slog.L
 	if logger == nil {
 		logger = slog.Default()
 	}
+	cfg.FallbackLabels = append([]string(nil), cfg.FallbackLabels...)
 	return &Runner{ctrl: ctrl, fallback: fallback, cfg: cfg, logger: logger}
 }
 
@@ -83,35 +94,38 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			if n.Status == "done" {
 				return resultFromNode(n)
 			}
-			if n.ClaimedBy != "" {
+			if n.Claimed {
 				if !claimedSeen {
 					stopHB()
-					_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID,
-						fmt.Sprintf("claimed by %s", n.ClaimedBy))
+					_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID, "claimed by remote executor")
 				}
 				claimedSeen = true
 				continue
 			}
-			// safety: labeled nodes must not fall back to K8sRunner; fallback Jobs don't advertise labels
-			if len(n.NeedsLabels) > 0 {
+			// safety: a labeled node may fall back only when the fallback explicitly
+			// advertises every label. Most callers configure none.
+			if !sparkwingruntime.MatchLabels(n.NeedsLabels, r.cfg.FallbackLabels) {
 				if time.Since(lastUnmatchableLog) >= unmatchableLogEvery {
 					r.logger.Warn("warmpool: labeled node unclaimed",
 						"run_id", req.RunID, "node_id", req.NodeID,
 						"needs_labels", n.NeedsLabels,
-						"hint", "no warm runner advertises these labels; start a runner with --label matching or remove .Requires()")
+						"hint", "no warm runner or configured fallback advertises these labels; start a runner with matching labels or remove .Requires()")
 					lastUnmatchableLog = time.Now()
 				}
 				continue
 			}
 			if !claimedSeen && time.Now().After(waitDeadline) {
-				revoked, rerr := r.ctrl.RevokeNodeReady(ctx, req.RunID, req.NodeID)
+				resolution, rerr := r.ctrl.FinalizeNodeReady(ctx, req.RunID, req.NodeID)
 				if rerr != nil {
-					r.logger.Warn("warmpool: revoke failed",
+					r.logger.Warn("warmpool: offer finalization failed",
 						"run_id", req.RunID, "node_id", req.NodeID, "err", rerr)
 					continue
 				}
-				if !revoked {
-					// safety: an agent claimed between GetNode and RevokeNodeReady; let it finish
+				if resolution.Pending {
+					continue
+				}
+				if !resolution.Revoked {
+					// safety: fallback must yield after the controller awards an offer
 					stopHB()
 					claimedSeen = true
 					continue
@@ -133,7 +147,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 
 func heartbeatLoop(
 	ctx context.Context,
-	ctrl *client.Client,
+	ctrl coordinator,
 	runID, nodeID string,
 	interval time.Duration,
 	logger *slog.Logger,

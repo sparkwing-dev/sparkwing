@@ -8,7 +8,7 @@ import (
 
 func TestShouldRunRemoteAcceptsStoredRepoURL(t *testing.T) {
 	trigger := &store.Trigger{RepoURL: "https://git.example.com/acme/widgets.git"}
-	if !shouldRunRemote(trigger) {
+	if !shouldRunRemote(trigger, false) {
 		t.Fatal("shouldRunRemote = false, want true for stored repo URL")
 	}
 }

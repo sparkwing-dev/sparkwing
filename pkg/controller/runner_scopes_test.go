@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -88,6 +89,7 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 	if trig == nil {
 		t.Fatal("ClaimTrigger returned no trigger; the queue was seeded with one")
 	}
+	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trig.ClaimSeq})
 	gotTrigger, err := c.GetTrigger(ctx, trig.ID)
 	if err != nil {
 		t.Fatalf("GetTrigger while holding the trigger claim: %v", err)
@@ -177,6 +179,173 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 	}
 	if run.Repo != "acme/web" {
 		t.Errorf("run repo = %q, want the trigger's acme/web", run.Repo)
+	}
+}
+
+func TestTriggerClaimMutation_RequiresExactTokenAndGeneration(t *testing.T) {
+	f, ownerRaw := newScopedFixture(t, runnerScopes)
+	otherRaw, _, err := f.store.CreateToken("other-pool", store.TokenKindRunner,
+		runnerScopes, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateToken other-pool: %v", err)
+	}
+	owner := client.NewWithToken(f.url, nil, ownerRaw)
+	other := client.NewWithToken(f.url, nil, otherRaw)
+	ctx := context.Background()
+
+	seedRepoTrigger(t, f.store, "heartbeat-trigger", "acme/web")
+	claimed, err := owner.ClaimTrigger(ctx)
+	if err != nil || claimed == nil {
+		t.Fatalf("ClaimTrigger heartbeat-trigger = (%+v, %v)", claimed, err)
+	}
+	claimCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
+	if _, err := owner.HeartbeatTrigger(claimCtx, claimed.ID); err != nil {
+		t.Fatalf("owner heartbeat: %v", err)
+	}
+	if _, err := other.HeartbeatTrigger(claimCtx, claimed.ID); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("other-token heartbeat = %v, want ErrLockHeld", err)
+	}
+	if _, err := f.store.DB().Exec(`UPDATE triggers SET claim_seq = claim_seq + 1 WHERE id = ?`, claimed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.HeartbeatTrigger(claimCtx, claimed.ID); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("stale-generation heartbeat = %v, want ErrLockHeld", err)
+	}
+	currentCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq + 1})
+	if _, err := owner.HeartbeatTrigger(currentCtx, claimed.ID); err != nil {
+		t.Fatalf("current-generation heartbeat: %v", err)
+	}
+
+	seedRepoTrigger(t, f.store, "finish-trigger", "acme/web")
+	claimed, err = owner.ClaimTrigger(ctx)
+	if err != nil || claimed == nil {
+		t.Fatalf("ClaimTrigger finish-trigger = (%+v, %v)", claimed, err)
+	}
+	claimCtx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
+	if err := other.FinishTrigger(claimCtx, claimed.ID); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("other-token finish = %v, want ErrLockHeld", err)
+	}
+	if err := owner.FinishTrigger(claimCtx, claimed.ID); err != nil {
+		t.Fatalf("owner finish: %v", err)
+	}
+	if err := owner.FinishTrigger(claimCtx, claimed.ID); err != nil {
+		t.Fatalf("owner finish retry after a lost response: %v", err)
+	}
+	got, err := f.store.GetTrigger(ctx, claimed.ID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if got.Status != "done" {
+		t.Fatalf("trigger status = %q, want done", got.Status)
+	}
+}
+
+func TestRunnerScopes_TriggerOwnedExecutionAttemptRoundTrips(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+	seedRepoTrigger(t, f.store, "trigger-attempt", "acme/web")
+	trigger, err := c.ClaimTrigger(ctx)
+	if err != nil || trigger == nil {
+		t.Fatalf("ClaimTrigger = (%+v, %v)", trigger, err)
+	}
+	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trigger.ClaimSeq})
+	if err := c.CreateRun(ctx, store.Run{
+		ID: trigger.ID, Pipeline: trigger.Pipeline, Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.CreateNode(ctx, store.Node{RunID: trigger.ID, NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.StartNode(ctx, trigger.ID, "build"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AcknowledgeNodeExecutionStart(ctx, trigger.ID, "build", store.ExecutionStart{
+		ClaimGeneration: trigger.ClaimSeq, AttemptOrdinal: 1,
+	}); err != nil {
+		t.Fatalf("AcknowledgeNodeExecutionStart: %v", err)
+	}
+	if err := c.FinishNodeExecutionAttempt(ctx, trigger.ID, "build", store.ExecutionAttemptFinish{
+		ClaimGeneration: trigger.ClaimSeq, AttemptOrdinal: 1,
+		Outcome: "failed", FailureReason: store.FailureVerify,
+	}); err != nil {
+		t.Fatalf("FinishNodeExecutionAttempt: %v", err)
+	}
+	node, err := f.store.GetNode(context.Background(), trigger.ID, "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.AttemptsConsumed != 1 || len(node.ExecutionAttempts) != 1 ||
+		node.ExecutionAttempts[0].Outcome != "failed" {
+		t.Fatalf("stored trigger attempt = %+v", node)
+	}
+}
+
+func TestRunMutationFence_RechecksAfterRequestBodyUnblocks(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+	seedRepoTrigger(t, f.store, "slow-finish", "acme/web")
+	trigger, err := c.ClaimTrigger(ctx)
+	if err != nil || trigger == nil {
+		t.Fatalf("ClaimTrigger = (%+v, %v)", trigger, err)
+	}
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: trigger.ID, Pipeline: "deploy", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reader, writer := io.Pipe()
+	req, err := http.NewRequest(http.MethodPost, f.url+"/api/v1/runs/"+trigger.ID+"/finish", reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+raw)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(store.TriggerGenerationHeader, fmt.Sprint(trigger.ClaimSeq))
+	response := make(chan *http.Response, 1)
+	requestErr := make(chan error, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			requestErr <- err
+			return
+		}
+		response <- resp
+	}()
+	if _, err := writer.Write([]byte(`{"status":"`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.DB().Exec(`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`,
+		time.Now().Add(-time.Second).UnixNano(), trigger.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write([]byte(`success"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-requestErr:
+		t.Fatal(err)
+	case resp := <-response:
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusConflict {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("finish status = %d body %q, want 409", resp.StatusCode, body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("blocked finish request did not return")
+	}
+	run, err := f.store.GetRun(ctx, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "running" {
+		t.Fatalf("run status = %q, want running after rejected stale finish", run.Status)
 	}
 }
 
@@ -278,6 +447,7 @@ func TestRunnerScopes_RunRepositoryComesFromTheTrigger(t *testing.T) {
 	if err != nil || trig == nil {
 		t.Fatalf("ClaimTrigger: %v (trigger %v)", err, trig)
 	}
+	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trig.ClaimSeq})
 	if err := c.CreateRun(ctx, store.Run{
 		ID: "run-web", Pipeline: "deploy", Status: "running", StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -654,6 +824,8 @@ func TestRunnerScopes_CoordinationRoutesRunOnATriggerClaim(t *testing.T) {
 	if err != nil || claimed == nil {
 		t.Fatalf("ClaimSpecificTrigger: %v", err)
 	}
+	parentCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
+	var childCtx context.Context
 
 	for _, step := range []struct {
 		name string
@@ -663,15 +835,15 @@ func TestRunnerScopes_CoordinationRoutesRunOnATriggerClaim(t *testing.T) {
 			return c.RecordWaitObservation(ctx, "deploy", 250*time.Millisecond)
 		}},
 		{"create the run the claim names", func() error {
-			return c.CreateRun(ctx, store.Run{
+			return c.CreateRun(parentCtx, store.Run{
 				ID: "run-1", Pipeline: "deploy", Status: "running", StartedAt: time.Now().UTC(),
 			})
 		}},
 		{"create the build node", func() error {
-			return c.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"})
+			return c.CreateNode(parentCtx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"})
 		}},
 		{"list the run's own nodes", func() error {
-			nodes, err := c.ListNodes(ctx, "run-1")
+			nodes, err := c.ListNodes(parentCtx, "run-1")
 			if err != nil {
 				return err
 			}
@@ -681,7 +853,7 @@ func TestRunnerScopes_CoordinationRoutesRunOnATriggerClaim(t *testing.T) {
 			return nil
 		}},
 		{"list the children this run spawned", func() error {
-			ids, err := c.ListPendingTriggersForParent(ctx, "run-1")
+			ids, err := c.ListPendingTriggersForParent(parentCtx, "run-1")
 			if err != nil {
 				return err
 			}
@@ -691,24 +863,27 @@ func TestRunnerScopes_CoordinationRoutesRunOnATriggerClaim(t *testing.T) {
 			return nil
 		}},
 		{"claim the child trigger by id", func() error {
-			_, err := c.ClaimSpecificTrigger(ctx, "child-1", time.Minute)
+			child, err := c.ClaimSpecificTrigger(parentCtx, "child-1", time.Minute)
+			if err == nil {
+				childCtx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: child.ClaimSeq})
+			}
 			return err
 		}},
 		{"create the child run the new claim names", func() error {
-			return c.CreateRun(ctx, store.Run{
+			return c.CreateRun(childCtx, store.Run{
 				ID: "child-1", Pipeline: "child", Status: "running", StartedAt: time.Now().UTC(),
 			})
 		}},
 		{"create a node on the child run", func() error {
-			return c.CreateNode(ctx, store.Node{RunID: "child-1", NodeID: "build", Status: "pending"})
+			return c.CreateNode(childCtx, store.Node{RunID: "child-1", NodeID: "build", Status: "pending"})
 		}},
 		{"sample the node's resources", func() error {
-			return c.AddNodeMetricSample(ctx, "run-1", "build", store.MetricSample{
+			return c.AddNodeMetricSample(parentCtx, "run-1", "build", store.MetricSample{
 				TS: time.Now().UTC(), CPUMillicores: 500, MemoryBytes: 1 << 20,
 			})
 		}},
 		{"read the samples back at run end", func() error {
-			samples, err := c.ListNodeMetrics(ctx, "run-1", "build")
+			samples, err := c.ListNodeMetrics(parentCtx, "run-1", "build")
 			if err != nil {
 				return err
 			}
@@ -718,7 +893,7 @@ func TestRunnerScopes_CoordinationRoutesRunOnATriggerClaim(t *testing.T) {
 			return nil
 		}},
 		{"fold the reaped process's accounting into the node", func() error {
-			return c.AddNodeUsage(ctx, "run-1", "build", store.NodeUsage{
+			return c.AddNodeUsage(parentCtx, "run-1", "build", store.NodeUsage{
 				CPUTime: time.Second, MaxRSSBytes: 1 << 20, Wall: 2 * time.Second,
 			})
 		}},
@@ -731,9 +906,9 @@ func TestRunnerScopes_CoordinationRoutesRunOnATriggerClaim(t *testing.T) {
 		{"pin what the run was charged", func() error {
 			return c.SetPipelinePin(ctx, "deploy", "", 2, 1<<30)
 		}},
-		{"finish the child trigger", func() error { return c.FinishTrigger(ctx, "child-1") }},
-		{"finish the run", func() error { return c.FinishRun(ctx, "run-1", "success", "") }},
-		{"finish the trigger", func() error { return c.FinishTrigger(ctx, "run-1") }},
+		{"finish the child trigger", func() error { return c.FinishTrigger(childCtx, "child-1") }},
+		{"finish the run", func() error { return c.FinishRun(parentCtx, "run-1", "success", "") }},
+		{"finish the trigger", func() error { return c.FinishTrigger(parentCtx, "run-1") }},
 	} {
 		if err := step.call(); err != nil {
 			t.Fatalf("%s on the documented runner scope set: %v", step.name, err)

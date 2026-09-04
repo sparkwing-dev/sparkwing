@@ -164,8 +164,13 @@ func TestNodeClaim_HeartbeatExtendsLeaseForHolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstLease := *n.LeaseExpiresAt
+	heartbeatCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		Claimant: store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"},
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	})
 
-	if err := s.HeartbeatNodeClaim(ctx, "run-1", "node-a", store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-1", 10*time.Second); err != nil {
+	if err := s.HeartbeatNodeClaim(heartbeatCtx, "run-1", "node-a", store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-1", 10*time.Second); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
 	n2, _ := s.GetNode(ctx, "run-1", "node-a")
@@ -173,9 +178,66 @@ func TestNodeClaim_HeartbeatExtendsLeaseForHolder(t *testing.T) {
 		t.Fatalf("lease did not extend by at least 7s: %v -> %v", firstLease, n2.LeaseExpiresAt)
 	}
 
-	err = s.HeartbeatNodeClaim(ctx, "run-1", "node-a", store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-2", 10*time.Second)
+	err = s.HeartbeatNodeClaim(heartbeatCtx, "run-1", "node-a", store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}, "pod-2", 10*time.Second)
 	if !errors.Is(err, store.ErrLockHeld) {
 		t.Fatalf("expected ErrLockHeld, got %v", err)
+	}
+}
+
+func TestNodeClaim_HeartbeatRejectsPriorGenerationWithSameHolder(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	claimant := store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}
+	seedRunAndNode(t, s, "run-1", "node-a")
+	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		Claimant: claimant, HolderID: first.ClaimedBy, MembershipID: first.ClaimMembershipID,
+		ReservationID: first.ReservationID, ClaimGeneration: first.ClaimGeneration,
+	})
+	if _, err := s.DB().ExecContext(ctx, `UPDATE nodes
+SET claim_generation = claim_generation + 1, lease_expires_at = ?
+WHERE run_id = 'run-1' AND node_id = 'node-a'`, time.Now().Add(time.Minute).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.HeartbeatNodeClaim(staleCtx, "run-1", "node-a", claimant, "pod-1", time.Minute); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("stale generation heartbeat = %v, want ErrLockHeld", err)
+	}
+	currentCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		Claimant: claimant, HolderID: first.ClaimedBy, MembershipID: first.ClaimMembershipID,
+		ReservationID: first.ReservationID, ClaimGeneration: first.ClaimGeneration + 1,
+	})
+	if err := s.HeartbeatNodeClaim(currentCtx, "run-1", "node-a", claimant, "pod-1", time.Minute); err != nil {
+		t.Fatalf("current generation heartbeat: %v", err)
+	}
+}
+
+func TestNodeClaim_HeartbeatCannotReviveExpiredLease(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	claimant := store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"}
+	seedRunAndNode(t, s, "run-1", "node-a")
+	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
+		t.Fatal(err)
+	}
+	node, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	heartbeatCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		Claimant: claimant, HolderID: node.ClaimedBy, MembershipID: node.ClaimMembershipID,
+		ReservationID: node.ReservationID, ClaimGeneration: node.ClaimGeneration,
+	})
+	if _, err := s.DB().ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ? WHERE run_id = 'run-1' AND node_id = 'node-a'`, time.Now().Add(-time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.HeartbeatNodeClaim(heartbeatCtx, "run-1", "node-a", claimant, "pod-1", time.Minute); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("expired heartbeat = %v, want ErrLockHeld", err)
 	}
 }
 
@@ -222,7 +284,11 @@ func TestNodeClaim_PrincipalBindingGatesClaimOwnership(t *testing.T) {
 		})
 	}
 
-	if err := s.HeartbeatNodeClaim(ctx, "run-1", "node-a", store.ClaimIdentity{Principal: "runner-b", TokenPrefix: "swr_runner-b"}, "pod-1", time.Minute); !errors.Is(err, store.ErrLockHeld) {
+	wrongCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		Claimant: store.ClaimIdentity{Principal: "runner-b", TokenPrefix: "swr_runner-b"},
+		HolderID: "pod-1", ClaimGeneration: 1,
+	})
+	if err := s.HeartbeatNodeClaim(wrongCtx, "run-1", "node-a", store.ClaimIdentity{Principal: "runner-b", TokenPrefix: "swr_runner-b"}, "pod-1", time.Minute); !errors.Is(err, store.ErrLockHeld) {
 		t.Errorf("heartbeat from another principal holding the same holder id = %v, want ErrLockHeld", err)
 	}
 }
@@ -398,6 +464,22 @@ func TestNodeClaim_UnlabeledNodeAlwaysClaimable(t *testing.T) {
 	}
 }
 
+func TestNodeClaim_LegacyRunnerCannotSelfAssertReservedLocation(t *testing.T) {
+	for _, selector := range []string{"local", "location=coordinator", "location=local", "location=cloud"} {
+		t.Run(selector, func(t *testing.T) {
+			s := newStoreT(t)
+			ctx := context.Background()
+			seedNodeWithLabels(t, s, "run", "work", []string{selector})
+			node, err := s.ClaimNextReadyNode(ctx,
+				store.ClaimIdentity{Principal: "runner-principal", TokenPrefix: "swr_runner-principal"},
+				"pod", 30*time.Second, []string{selector})
+			if !errors.Is(err, store.ErrNotFound) || node != nil {
+				t.Fatalf("self-asserted %q claim = %+v, %v", selector, node, err)
+			}
+		})
+	}
+}
+
 func TestNodeClaim_LeaseIsClampedToTheServerCap(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -417,7 +499,11 @@ func TestNodeClaim_LeaseIsClampedToTheServerCap(t *testing.T) {
 		t.Errorf("claim lease = %v, want no later than %s", n.LeaseExpiresAt, limit)
 	}
 
-	if err := s.HeartbeatNodeClaim(ctx, "run-1", "node-a", claimant, "pod-1", day); err != nil {
+	heartbeatCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		Claimant: claimant, HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	})
+	if err := s.HeartbeatNodeClaim(heartbeatCtx, "run-1", "node-a", claimant, "pod-1", day); err != nil {
 		t.Fatalf("HeartbeatNodeClaim: %v", err)
 	}
 	held, err := s.PrincipalHoldsNodeClaim(ctx, "run-1", "node-a", claimant,

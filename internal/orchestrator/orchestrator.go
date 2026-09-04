@@ -13,12 +13,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/api"
+	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
@@ -76,6 +79,16 @@ type Options struct {
 	NoCache bool
 
 	LocalOnly bool
+	Fleet     bool
+
+	FleetConfigPath    string
+	FleetSourceRoot    string
+	FleetSourceBundle  string
+	FleetSourceSHA     string
+	FleetSourceRepoURL string
+	FleetSourceFiles   int
+	FleetSourceBytes   int64
+	FleetBundleBytes   int64
 
 	DryRun bool
 
@@ -139,6 +152,14 @@ type Result struct {
 }
 
 func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) {
+	var fleetRuntime *localFleetRuntime
+	if opts.Fleet {
+		var err error
+		fleetRuntime, err = prepareLocalFleetRuntime(backends, opts)
+		if err != nil {
+			return nil, fmt.Errorf("fleet coordinator: %w", err)
+		}
+	}
 	reg, ok := sparkwing.Lookup(opts.Pipeline)
 	if !ok {
 		return nil, fmt.Errorf("pipeline %q is not registered", opts.Pipeline)
@@ -222,6 +243,13 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
+	if opts.Fleet {
+		payload := fleetSourceSnapshotPayload(opts)
+		if err := backends.State.AppendEvent(ctx, runID, "", "fleet_source_snapshot", payload); err != nil {
+			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("record fleet source snapshot: %v", err))
+			return &Result{RunID: runID, Status: "failed", Error: err}, nil
+		}
+	}
 	if opts.RunHandlePath != "" {
 		handle := NewRunHandle(runID, opts.Pipeline, localRunLogDir(backends.Logs, runID), "running")
 		if err := publishRunHandle(opts.RunHandlePath, handle); err != nil {
@@ -286,13 +314,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
 	for _, n := range plan.Nodes() {
-		if err := backends.State.CreateNode(ctx, store.Node{
-			RunID:       runID,
-			NodeID:      n.ID(),
-			Status:      "pending",
-			Deps:        n.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(n, snapMeta.PipelineRequires),
-		}); err != nil {
+		if err := backends.State.CreateNode(ctx, pendingStoreNode(runID, n, snapMeta.PipelineRequires)); err != nil {
 			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("create node %s: %v", n.ID(), err))
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
@@ -450,6 +472,19 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 	}
 
+	var fleetAuthority *localFleetAuthority
+	if fleetRuntime != nil {
+		var err error
+		fleetAuthority, r, err = fleetRuntime.start(runID, &opts, r, nil)
+		if err != nil {
+			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("start fleet coordinator: %v", err))
+			return &Result{RunID: runID, Status: "failed", Error: err}, nil
+		}
+		// safety: foreground resources outlive dispatch, durable FinishRun, and
+		// final reporting. Close also revokes the process-only local credential.
+		defer fleetAuthority.Close()
+	}
+
 	execStart := time.Now()
 	var runErr error
 	if !skipDispatch {
@@ -458,6 +493,11 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			opts.Pipeline, opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
 			dispatchWaitTimeout, opts.Admission, leaseToken, leaseChildToken, leaseHostAdmitted,
 		)
+	}
+	if fleetAuthority != nil {
+		// safety: every dispatcher-owned runner call has returned, so freeze the
+		// offer loop before the durable run ending and final reports are written.
+		fleetAuthority.StopClaims()
 	}
 
 	finalStatus := statusForRunError(runErr)
@@ -595,7 +635,7 @@ func statusForRunError(err error) string {
 	var superseded *nodeSupersededError
 	var canceled *runDaemonCanceledError
 	if errors.As(err, &evicted) || errors.As(err, &interrupted) ||
-		errors.As(err, &superseded) || errors.As(err, &canceled) {
+		errors.As(err, &superseded) || errors.As(err, &canceled) || errors.Is(err, fleet.ErrCoordinatorProcessGone) {
 		return "cancelled"
 	}
 	return "failed"
@@ -753,7 +793,7 @@ func dumpRunState(ctx context.Context, state StateBackend, runID string, art sto
 		return err
 	}
 	for _, n := range nodes {
-		if err := enc.Encode(map[string]any{"kind": "node", "data": n}); err != nil {
+		if err := enc.Encode(map[string]any{"kind": "node", "data": api.PublicNode(n)}); err != nil {
 			return err
 		}
 	}
@@ -810,9 +850,25 @@ func dispatch(
 	state.pipelineRequires = snapMeta.PipelineRequires
 	state.snapMeta = snapMeta
 	state.onlySkip = onlySkip
+	primary := make(map[string]bool, len(plan.Nodes()))
+	for _, n := range plan.Nodes() {
+		primary[n.ID()] = true
+	}
+	for _, n := range dispatchPlanNodes(plan) {
+		if primary[n.ID()] {
+			continue
+		}
+		if err := backends.State.CreateNode(ctx, pendingStoreNode(runID, n, state.pipelineRequires)); err != nil {
+			planReleaseOutcome = "failed"
+			return fmt.Errorf("create recovery node %s: %w", n.ID(), err)
+		}
+	}
 
 	if retryOf != "" && !full {
-		state.rehydrateFromRetry(dispatchCtx, retryOf)
+		if err := state.rehydrateFromRetry(dispatchCtx, retryOf); err != nil {
+			planReleaseOutcome = "failed"
+			return fmt.Errorf("rehydrate retry from %s: %w", retryOf, err)
+		}
 	}
 
 	seen := make(map[string]bool, len(plan.Nodes()))
@@ -826,13 +882,6 @@ func dispatch(
 		if rec == nil || seen[rec.ID()] {
 			continue
 		}
-		_ = backends.State.CreateNode(ctx, store.Node{
-			RunID:       runID,
-			NodeID:      rec.ID(),
-			Status:      "pending",
-			Deps:        rec.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(rec, state.pipelineRequires),
-		})
 		state.scheduleNode(rec)
 		seen[rec.ID()] = true
 	}
@@ -1471,6 +1520,12 @@ type dispatchState struct {
 	claimedBy map[string]string
 	scheduled map[string]*sparkwing.JobNode
 
+	retryStrict         bool
+	retryPriorRunID     string
+	retryRerun          map[string]bool
+	retrySourceNodes    map[string]*store.Node
+	retrySourceSnapshot map[string]snapshotNode
+
 	inlineRunner runner.Runner
 	debug        DebugDirectives
 
@@ -1870,26 +1925,140 @@ func (s *dispatchState) pipelineRef() sparkwing.PipelineResolver {
 	})
 }
 
-func (s *dispatchState) rehydrateFromRetry(ctx context.Context, priorRunID string) {
-	successOutcome := string(sparkwing.Success)
-	for _, n := range s.plan.Nodes() {
-		prior, err := s.backends.State.GetNode(ctx, priorRunID, n.ID())
-		if err != nil || prior == nil {
-			continue
-		}
-		if prior.Outcome != successOutcome {
-			continue
-		}
-		s.outputsJS[n.ID()] = prior.Output
-		s.outcomes[n.ID()] = sparkwing.Success
-		_ = s.backends.State.FinishNode(ctx, s.runID, n.ID(),
-			successOutcome, "", prior.Output)
-		payload, _ := json.Marshal(map[string]any{
-			"prior_run_id": priorRunID,
-		})
-		_ = s.backends.State.AppendEvent(ctx, s.runID, n.ID(),
-			"node_skipped_from_retry", payload)
+func (s *dispatchState) rehydrateFromRetry(ctx context.Context, priorRunID string) error {
+	rerun := map[string]bool{}
+	nodes := dispatchPlanNodes(s.plan)
+	current, err := s.backends.State.GetRun(ctx, s.runID)
+	if err != nil {
+		return fmt.Errorf("read retry run: %w", err)
 	}
+	strict := current.RetrySource == store.RetrySourceAuto && len(current.RetryCauseNodeIDs) > 0
+	if strict {
+		priorRun, err := s.backends.State.GetRun(ctx, priorRunID)
+		if err != nil {
+			return fmt.Errorf("read source run: %w", err)
+		}
+		var sourceSnapshot planSnapshot
+		if err := json.Unmarshal(priorRun.PlanSnapshot, &sourceSnapshot); err != nil {
+			return fmt.Errorf("read source plan snapshot: %w", err)
+		}
+		sourceRows, err := listRetryNodes(ctx, s.backends.State, priorRunID)
+		if err != nil {
+			return fmt.Errorf("list source nodes: %w", err)
+		}
+		s.retryStrict = true
+		s.retryPriorRunID = priorRunID
+		s.retryRerun = rerun
+		s.retrySourceNodes = make(map[string]*store.Node, len(sourceRows))
+		for _, sourceNode := range sourceRows {
+			s.retrySourceNodes[sourceNode.NodeID] = sourceNode
+		}
+		s.retrySourceSnapshot = make(map[string]snapshotNode, len(sourceSnapshot.Nodes))
+		for _, sourceNode := range sourceSnapshot.Nodes {
+			s.retrySourceSnapshot[sourceNode.ID] = sourceNode
+		}
+		for _, id := range current.RetryCauseNodeIDs {
+			rerun[id] = true
+		}
+		for changed := true; changed; {
+			changed = false
+			for _, sourceNode := range sourceRows {
+				if rerun[sourceNode.NodeID] {
+					continue
+				}
+				snapshotNode := s.retrySourceSnapshot[sourceNode.NodeID]
+				if snapshotNode.OnFailureOf != "" && rerun[snapshotNode.OnFailureOf] {
+					rerun[sourceNode.NodeID] = true
+					changed = true
+					continue
+				}
+				for _, dep := range sourceNode.Deps {
+					if rerun[dep] {
+						rerun[sourceNode.NodeID] = true
+						changed = true
+						break
+					}
+				}
+			}
+		}
+	}
+	for _, n := range nodes {
+		if rerun[n.ID()] {
+			continue
+		}
+		if strict {
+			if err := s.rehydrateRetryNode(ctx, n.ID()); err != nil {
+				return err
+			}
+			continue
+		}
+		prior, err := s.backends.State.GetNode(ctx, priorRunID, n.ID())
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read source node %s: %w", n.ID(), err)
+		}
+		if prior == nil || prior.Outcome != string(sparkwing.Success) {
+			continue
+		}
+		if err := s.copyRetryNode(ctx, priorRunID, prior); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *dispatchState) rehydrateRetryNode(ctx context.Context, nodeID string) error {
+	prior := s.retrySourceNodes[nodeID]
+	if prior == nil {
+		return fmt.Errorf("source node %s is absent from the immutable retry snapshot", nodeID)
+	}
+	if prior.Outcome == "" {
+		return fmt.Errorf("source node %s is not terminal", nodeID)
+	}
+	return s.copyRetryNode(ctx, s.retryPriorRunID, prior)
+}
+
+func (s *dispatchState) copyRetryNode(ctx context.Context, priorRunID string, prior *store.Node) error {
+	if prior.ArtifactManifest != "" {
+		if err := s.backends.State.SetNodeArtifactManifest(ctx, s.runID, prior.NodeID, prior.ArtifactManifest); err != nil {
+			return fmt.Errorf("copy source node %s artifact: %w", prior.NodeID, err)
+		}
+	}
+	if err := s.backends.State.FinishNodeWithReason(ctx, s.runID, prior.NodeID,
+		prior.Outcome, prior.Error, prior.Output, prior.FailureReason, prior.ExitCode); err != nil {
+		return fmt.Errorf("copy source node %s outcome: %w", prior.NodeID, err)
+	}
+	payload, _ := json.Marshal(map[string]any{"prior_run_id": priorRunID})
+	if err := s.backends.State.AppendEvent(ctx, s.runID, prior.NodeID,
+		"node_skipped_from_retry", payload); err != nil {
+		return fmt.Errorf("record source node %s rehydration: %w", prior.NodeID, err)
+	}
+	s.mu.Lock()
+	s.outputsJS[prior.NodeID] = prior.Output
+	s.outcomes[prior.NodeID] = sparkwing.Outcome(prior.Outcome)
+	if prior.Error != "" {
+		s.errors[prior.NodeID] = prior.Error
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+func dispatchPlanNodes(plan *sparkwing.Plan) []*sparkwing.JobNode {
+	seen := map[string]bool{}
+	var nodes []*sparkwing.JobNode
+	for _, node := range plan.Nodes() {
+		if !seen[node.ID()] {
+			nodes = append(nodes, node)
+			seen[node.ID()] = true
+		}
+		if recovery := node.OnFailureNode(); recovery != nil && !seen[recovery.ID()] {
+			nodes = append(nodes, recovery)
+			seen[recovery.ID()] = true
+		}
+	}
+	return nodes
 }
 
 func (s *dispatchState) resolveJSON(id string) ([]byte, bool) {
@@ -2036,24 +2205,47 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, err)
 		return
 	}
+	if err := s.validateRetryExpansion(exp, children); err != nil {
+		sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, err)
+		return
+	}
 	_ = s.backends.State.AppendEvent(s.ctx, s.runID, exp.Source.ID(), "expansion_generated",
 		fmt.Appendf(nil, "%d children", len(children)))
 
+	expandedNodes := make([]*sparkwing.JobNode, 0, len(children)*2)
 	for _, child := range children {
-		if err := s.backends.State.CreateNode(s.ctx, store.Node{
-			RunID:       s.runID,
-			NodeID:      child.ID(),
-			Status:      "pending",
-			Deps:        child.DepIDs(),
-			NeedsLabels: effectiveClaimLabels(child, s.pipelineRequires),
-		}); err != nil {
-			sparkwing.LoggerFromContext(s.resolverCtx).Log("error",
-				fmt.Sprintf("ExpandFrom(%s): store child %s: %v", exp.Source.ID(), child.ID(), err))
+		if err := s.backends.State.CreateNode(s.ctx, pendingStoreNode(s.runID, child, s.pipelineRequires)); err != nil {
+			sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil,
+				fmt.Errorf("store expanded child %s: %w", child.ID(), err))
+			return
 		}
-		s.scheduleNode(child)
+		if s.retryStrict && !s.retryRerun[child.ID()] {
+			if err := s.rehydrateRetryNode(s.ctx, child.ID()); err != nil {
+				sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, err)
+				return
+			}
+		}
+		expandedNodes = append(expandedNodes, child)
+		if recovery := child.OnFailureNode(); recovery != nil {
+			if err := s.backends.State.CreateNode(s.ctx, pendingStoreNode(s.runID, recovery, s.pipelineRequires)); err != nil {
+				sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil,
+					fmt.Errorf("store expanded recovery node %s: %w", recovery.ID(), err))
+				return
+			}
+			if s.retryStrict && !s.retryRerun[recovery.ID()] {
+				if err := s.rehydrateRetryNode(s.ctx, recovery.ID()); err != nil {
+					sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, nil, err)
+					return
+				}
+			}
+			s.mu.Lock()
+			s.claimedBy[recovery.ID()] = child.ID()
+			s.mu.Unlock()
+			expandedNodes = append(expandedNodes, recovery)
+		}
 	}
-	if snap, merr := marshalPlanSnapshot(s.plan, sparkwing.RunContext{Pipeline: "", RunID: s.runID}, s.snapMeta); merr == nil {
-		_ = s.backends.State.UpdatePlanSnapshot(s.ctx, s.runID, snap)
+	for _, node := range expandedNodes {
+		s.scheduleNode(node)
 	}
 
 	childIDs := make([]string, len(children))
@@ -2065,12 +2257,78 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 			if grp != exp.Group {
 				continue
 			}
-			merged := append(append([]string{}, waiter.DepIDs()...), childIDs...)
+			merged := append(append(append([]string{}, waiter.DepIDs()...), waiter.OptionalDepIDs()...), childIDs...)
 			_ = s.backends.State.UpdateNodeDeps(s.ctx, s.runID, waiter.ID(), merged)
 		}
 	}
 
 	sparkwing.RuntimePlumbing.Fns.JobGroupFinalize(exp.Group, children, nil)
+	if snap, merr := marshalPlanSnapshot(s.plan, sparkwing.RunContext{Pipeline: "", RunID: s.runID}, s.snapMeta); merr == nil {
+		_ = s.backends.State.UpdatePlanSnapshot(s.ctx, s.runID, snap)
+	}
+}
+
+func (s *dispatchState) validateRetryExpansion(exp sparkwing.Expansion, children []*sparkwing.JobNode) error {
+	if !s.retryStrict {
+		return nil
+	}
+	expected := map[string]bool{}
+	for id, node := range s.retrySourceSnapshot {
+		if slices.Contains(node.Groups, exp.Group.Name()) {
+			expected[id] = true
+		}
+	}
+	actual := make(map[string]bool, len(children))
+	for _, child := range children {
+		actual[child.ID()] = true
+	}
+	if !maps.Equal(expected, actual) {
+		return fmt.Errorf("expanded node set for %s changed across retry: source=%v retry=%v",
+			exp.Source.ID(), sortedMapKeys(expected), sortedMapKeys(actual))
+	}
+	raw, err := marshalPlanSnapshot(s.plan, sparkwing.RunContext{RunID: s.runID}, s.snapMeta)
+	if err != nil {
+		return fmt.Errorf("snapshot regenerated expansion %s: %w", exp.Source.ID(), err)
+	}
+	var current planSnapshot
+	if err := json.Unmarshal(raw, &current); err != nil {
+		return fmt.Errorf("read regenerated expansion %s: %w", exp.Source.ID(), err)
+	}
+	currentByID := make(map[string]snapshotNode, len(current.Nodes))
+	for _, node := range current.Nodes {
+		currentByID[node.ID] = node
+	}
+	for _, child := range children {
+		ids := []string{child.ID()}
+		if recovery := child.OnFailureNode(); recovery != nil {
+			ids = append(ids, recovery.ID())
+		}
+		for _, id := range ids {
+			sourceNode, ok := s.retrySourceSnapshot[id]
+			if !ok {
+				return fmt.Errorf("expanded node %s is absent from the immutable retry snapshot", id)
+			}
+			currentNode, ok := currentByID[id]
+			if !ok {
+				return fmt.Errorf("expanded node %s is absent from the regenerated retry snapshot", id)
+			}
+			sourceNode.Groups = nil
+			currentNode.Groups = nil
+			if !reflect.DeepEqual(sourceNode, currentNode) {
+				return fmt.Errorf("expanded node %s semantics changed across retry", id)
+			}
+		}
+	}
+	return nil
+}
+
+func sortedMapKeys(values map[string]bool) []string {
+	out := make([]string, 0, len(values))
+	for key := range values {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (s *dispatchState) invokeGenerator(exp sparkwing.Expansion) (out []*sparkwing.JobNode, err error) {
@@ -2087,13 +2345,14 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	if _, prerendered := s.getOutcome(node.ID()); prerendered {
 		return
 	}
-	if _, claimed := s.claimedBy[node.ID()]; !claimed {
+	parentID, claimed := s.claimedParent(node.ID())
+	if !claimed {
 		if reason, ok := s.onlySkip[node.ID()]; ok {
 			s.markSkipped(node.ID(), reason)
 			return
 		}
 	}
-	if parentID, claimed := s.claimedBy[node.ID()]; claimed {
+	if claimed {
 		parentCh, ok := s.lookupDoneCh(parentID)
 		if !ok {
 			s.markFailed(node.ID(), fmt.Errorf("OnFailure parent %q not found", parentID))
@@ -2216,17 +2475,41 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		autoBackoff = retryCfg.Backoff
 	}
 	totalAutoAttempts := autoAttempts + 1
+	autoConsumed := 0
 	var res runner.Result
+	if retryCfg.Auto {
+		stored, err := s.backends.State.GetNode(s.ctx, s.runID, node.ID())
+		if err != nil {
+			res = runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("read execution attempt budget: %w", err)}
+			totalAutoAttempts = 0
+		} else {
+			autoConsumed = stored.AttemptsConsumed
+			totalAutoAttempts = retryCfg.Attempts + 1 - stored.AttemptsConsumed
+			if totalAutoAttempts < 1 {
+				res = runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("node %s exhausted its %d execution-attempt budget", node.ID(), retryCfg.Attempts+1)}
+				totalAutoAttempts = 0
+			}
+		}
+	}
 	for autoAttempt := range totalAutoAttempts {
+		if retryCfg.Auto {
+			stored, err := s.backends.State.GetNode(s.ctx, s.runID, node.ID())
+			if err == nil && stored.AttemptsConsumed >= retryCfg.Attempts+1 {
+				res = runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("node %s exhausted its %d execution-attempt budget", node.ID(), retryCfg.Attempts+1)}
+				break
+			}
+		}
 		if autoAttempt > 0 {
 			wait := scaledBackoff(autoBackoff, autoAttempt)
-			msg := fmt.Sprintf("auto-retry dispatch %d/%d", autoAttempt+1, totalAutoAttempts)
+			ordinal := autoConsumed + autoAttempt + 1
+			budget := retryCfg.Attempts + 1
+			msg := fmt.Sprintf("auto-retry dispatch %d/%d", ordinal, budget)
 			if wait > 0 {
-				msg = fmt.Sprintf("auto-retry dispatch %d/%d after %s", autoAttempt+1, totalAutoAttempts, wait)
+				msg = fmt.Sprintf("auto-retry dispatch %d/%d after %s", ordinal, budget, wait)
 			}
 			sparkwing.LoggerFromContext(s.resolverCtx).Log("info", msg)
 			_ = s.backends.State.AppendEvent(s.ctx, s.runID, node.ID(), "node_auto_retry",
-				fmt.Appendf(nil, "dispatch %d/%d", autoAttempt+1, totalAutoAttempts))
+				fmt.Appendf(nil, "dispatch %d/%d", ordinal, budget))
 			if wait > 0 {
 				select {
 				case <-time.After(wait):
@@ -2235,10 +2518,18 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 					return
 				}
 			}
+			if err := resetNodeForAutoRetry(s.ctx, s.backends.State, s.runID, node.ID()); err != nil {
+				res = runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("reset node for auto-retry: %w", err)}
+				break
+			}
 		}
 
+		dispatchCtx := runnerCtx
+		if retryCfg.Auto {
+			dispatchCtx = store.WithExecutionAttemptOrdinal(dispatchCtx, autoConsumed+autoAttempt+1)
+		}
 		res = s.runWithCap(node, func(slot *workerSlot) runner.Result {
-			return activeRunner.RunNode(runnerCtx, runner.Request{
+			return activeRunner.RunNode(dispatchCtx, runner.Request{
 				RunID:               s.runID,
 				NodeID:              node.ID(),
 				Pipeline:            s.pipeline,
@@ -2252,10 +2543,16 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		if res.Outcome != sparkwing.Failed || res.Err == nil {
 			break
 		}
-		if autoAttempt < autoAttempts {
+		if errors.Is(res.Err, store.ErrLockHeld) {
+			break
+		}
+		if stored, err := s.backends.State.GetNode(s.ctx, s.runID, node.ID()); err == nil && stored.FailureReason == store.FailureAgentLost {
+			break
+		}
+		if autoAttempt < totalAutoAttempts-1 {
 			sparkwing.LoggerFromContext(s.resolverCtx).Log("warn",
 				fmt.Sprintf("node %s auto-retry dispatch %d/%d failed: %v",
-					node.ID(), autoAttempt+1, totalAutoAttempts, res.Err))
+					node.ID(), autoConsumed+autoAttempt+1, retryCfg.Attempts+1, res.Err))
 		}
 	}
 
@@ -2278,6 +2575,13 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	}
 
 	s.applyResult(node.ID(), res)
+}
+
+func (s *dispatchState) claimedParent(nodeID string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	parentID, ok := s.claimedBy[nodeID]
+	return parentID, ok
 }
 
 var defaultPauseTimeout = 30 * time.Minute
@@ -2375,7 +2679,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 		return runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("approval node %q has nil config", node.ID())}
 	}
 
-	nlog, err := s.backends.Logs.OpenNodeLog(s.runID, node.ID(), s.delegate)
+	nlog, err := s.backends.Logs.OpenNodeLog(s.ctx, s.runID, node.ID(), s.delegate)
 	if err == nil {
 		nlog = wrapNodeLogWithMasker(nlog, s.masker)
 	}
@@ -2807,6 +3111,7 @@ type planSnapshot struct {
 	Pipeline  string         `json:"pipeline"`
 	RunID     string         `json:"run_id"`
 	Priority  int            `json:"priority,omitempty"`
+	Requires  []string       `json:"requires,omitempty"`
 	Nodes     []snapshotNode `json:"nodes"`
 	PlanConc  *snapshotConc  `json:"plan_concurrency,omitempty"`
 	PlanConcs []snapshotConc `json:"plan_concurrency_groups,omitempty"`
@@ -2817,9 +3122,10 @@ type planSnapshot struct {
 }
 
 type snapshotNode struct {
-	ID   string            `json:"id"`
-	Deps []string          `json:"deps"`
-	Env  map[string]string `json:"env,omitempty"`
+	ID           string            `json:"id"`
+	Deps         []string          `json:"deps"`
+	OptionalDeps []string          `json:"optional_deps,omitempty"`
+	Env          map[string]string `json:"env,omitempty"`
 
 	Groups   []string          `json:"groups,omitempty"`
 	Dynamic  bool              `json:"dynamic,omitempty"`
@@ -2929,6 +3235,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 		Pipeline: rc.Pipeline,
 		RunID:    rc.RunID,
 		Priority: p.PriorityValue(),
+		Requires: slices.Clone(meta.PipelineRequires),
 		Secrets:  meta.Secrets,
 	}
 	if group := p.ConcurrencyGroupRef(); group != nil {
@@ -2954,11 +3261,12 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 	seen := make(map[string]bool)
 	for _, n := range p.Nodes() {
 		sn := snapshotNode{
-			ID:      n.ID(),
-			Deps:    n.DepIDs(),
-			Env:     n.EnvMap(),
-			Groups:  p.JobGroupNames(n.ID()),
-			Dynamic: p.IsDynamicNode(n.ID()),
+			ID:           n.ID(),
+			Deps:         n.DepIDs(),
+			OptionalDeps: n.OptionalDepIDs(),
+			Env:          n.EnvMap(),
+			Groups:       p.JobGroupNames(n.ID()),
+			Dynamic:      p.IsDynamicNode(n.ID()),
 		}
 		if cfg := n.ApprovalConfig(); cfg != nil {
 			sn.Approval = &snapshotApproval{
@@ -2984,12 +3292,13 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 			continue
 		}
 		recSnap := snapshotNode{
-			ID:          rec.ID(),
-			Deps:        rec.DepIDs(),
-			Env:         rec.EnvMap(),
-			Groups:      p.JobGroupNames(rec.ID()),
-			OnFailureOf: n.ID(),
-			Modifiers:   nodeModifiersSnapshot(rec),
+			ID:           rec.ID(),
+			Deps:         rec.DepIDs(),
+			OptionalDeps: rec.OptionalDepIDs(),
+			Env:          rec.EnvMap(),
+			Groups:       p.JobGroupNames(rec.ID()),
+			OnFailureOf:  n.ID(),
+			Modifiers:    nodeModifiersSnapshot(rec),
 		}
 		if w := rec.Work(); w != nil {
 			work, err := walker.walk(w, rec.ResultStep())
@@ -3037,6 +3346,24 @@ func effectiveClaimLabels(n *sparkwing.JobNode, pipelineRequires []string) []str
 		out = append(out, l)
 	}
 	return out
+}
+
+func pendingStoreNode(runID string, node *sparkwing.JobNode, pipelineRequires []string) store.Node {
+	deps := append(append([]string{}, node.DepIDs()...), node.OptionalDepIDs()...)
+	record := store.Node{
+		RunID:          runID,
+		NodeID:         node.ID(),
+		Status:         "pending",
+		Deps:           deps,
+		NeedsLabels:    effectiveClaimLabels(node, pipelineRequires),
+		PrefersLabels:  node.PrefersLabels(),
+		RequestedSlots: 1,
+	}
+	if resources := node.ResourceHints(); resources != nil {
+		record.RequestedCores = resources.Cores
+		record.RequestedMemoryBytes = resources.MemoryBytes
+	}
+	return record
 }
 
 func effectiveJobRequires(n *sparkwing.JobNode, pipelineRequires []string) []string {

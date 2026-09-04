@@ -214,3 +214,20 @@ func TestMissingRequirements_ReportsWhatTheOtherSideLacks(t *testing.T) {
 		t.Errorf("UnknownRequirements(KnownRequirements()) = %v, want nil", got)
 	}
 }
+
+func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
+	preFleet := []string{
+		"inherited-holder-marker",
+		"repo-scoped-secrets",
+		"session-token-digest",
+		"unique-token-prefix",
+	}
+	want := []string{
+		"agent-loss-attempt-fencing-v1",
+		"executor-enrollment-v1",
+		"executor-offer-arbitration-v1",
+	}
+	if got := store.MissingRequirements(preFleet, store.KnownRequirements()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("requirements unknown to a pre-fleet binary = %v, want %v", got, want)
+	}
+}

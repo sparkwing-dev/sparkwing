@@ -12,11 +12,11 @@ type summarizingNodeLog struct {
 	persistStep func(stepID, md string)
 }
 
-func wrapNodeLogWithSummary(inner NodeLog, state StateBackend, runID, nodeID string) NodeLog {
+func wrapNodeLogWithSummary(ctx context.Context, inner NodeLog, state StateBackend, runID, nodeID string) NodeLog {
 	if inner == nil || state == nil {
 		return inner
 	}
-	ctx := context.Background()
+	ctx = context.WithoutCancel(ctx)
 	return &summarizingNodeLog{
 		inner: inner,
 		persistNode: func(md string) {
@@ -48,6 +48,14 @@ func (l *summarizingNodeLog) Emit(rec sparkwing.LogRecord) {
 }
 
 func (l *summarizingNodeLog) Close() error { return l.inner.Close() }
+
+func (l *summarizingNodeLog) BindExecutionAttempt(ordinal int) error {
+	return bindNodeLogExecutionAttempt(l.inner, ordinal)
+}
+
+func (l *summarizingNodeLog) FlushExecutionAttempt() error {
+	return flushNodeLogExecutionAttempt(l.inner)
+}
 
 func (l *summarizingNodeLog) Fatal() error {
 	if f, ok := l.inner.(interface{ Fatal() error }); ok {

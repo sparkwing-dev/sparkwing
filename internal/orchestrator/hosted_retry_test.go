@@ -263,7 +263,7 @@ func TestNodeTransports_LogsLeaveTheAPISocketAlone(t *testing.T) {
 	}
 
 	backend := NewHTTPLogsWithToken(logs.URL, transports.plain, "svc_tok", nil)
-	nodeLog, err := backend.OpenNodeLog("r1", "n1", nil)
+	nodeLog, err := backend.OpenNodeLog(context.Background(), "r1", "n1", nil)
 	if err != nil {
 		t.Fatalf("OpenNodeLog: %v", err)
 	}
