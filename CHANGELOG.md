@@ -360,6 +360,12 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** A run's detail read no longer drops the connection when the
+  run has an approval gate or a spawned child pipeline but no plan snapshot.
+  The decorations the snapshot supplies are absent in that case, and joining
+  the approval and spawned-pipeline rows onto them panicked, so
+  `GET /api/v1/runs/{id}?include=nodes` -- the dashboard's run page -- failed
+  for that run on every retry.
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
   that node as cancelled, and an `OnFailure` child skipped because its cancelled

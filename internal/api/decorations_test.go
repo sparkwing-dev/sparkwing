@@ -160,3 +160,29 @@ func TestDecorateNodes_NoSnapshot(t *testing.T) {
 		t.Errorf("id=%v want a", roundtrip[0]["id"])
 	}
 }
+
+func TestDecorateNodes_NoSnapshotWithApprovalsAndSpawned(t *testing.T) {
+	nodes := []*store.Node{
+		{NodeID: "gate", Status: "pending", Deps: []string{}},
+		{NodeID: "fanout", Status: "running", Deps: []string{}},
+	}
+	approvals := []*store.Approval{{RunID: "run-1", NodeID: "gate", Resolution: "approved", Approver: "ada"}}
+	spawned := []store.SpawnedChild{{ParentNodeID: "fanout", Pipeline: "child", ChildRunID: "run-2"}}
+
+	wrapped := api.DecorateNodes(nodes, nil, nil, approvals, spawned)
+	if len(wrapped) != 2 {
+		t.Fatalf("len=%d want 2", len(wrapped))
+	}
+	if wrapped[0].Decorations == nil || wrapped[0].Decorations.ApprovalState == nil {
+		t.Fatalf("gate approval state missing: %+v", wrapped[0].Decorations)
+	}
+	if got := wrapped[0].Decorations.ApprovalState.Approver; got != "ada" {
+		t.Errorf("approver=%q want ada", got)
+	}
+	if wrapped[1].Decorations == nil || len(wrapped[1].Decorations.SpawnedPipelines) != 1 {
+		t.Fatalf("fanout spawned pipelines missing: %+v", wrapped[1].Decorations)
+	}
+	if got := wrapped[1].Decorations.SpawnedPipelines[0].ChildRunID; got != "run-2" {
+		t.Errorf("child run id=%q want run-2", got)
+	}
+}
