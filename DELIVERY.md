@@ -35,8 +35,9 @@ this file is a menu and checklist, not a command that every change must run.
   mirrors, and source policy. It also runs `go test -race` on the packages
   whose Go files changed (staged, or since origin/main when nothing is
   staged), so a change never reaches main without the race detector having
-  seen its own package. Unit and ESLint run in parallel; the production
-  build then feeds the browser suite.
+  seen its own package, and runs `store-postgres` when that change touches
+  `pkg/store`. Unit and ESLint run in parallel; the production build then
+  feeds the browser suite.
 - **Gating a branch beside a released daemon:** when the branch's pipeline
   binary carries a newer runs-store schema than the sparkwing hosting this
   machine's admission daemon, admission refuses the run. Give the gate a home
