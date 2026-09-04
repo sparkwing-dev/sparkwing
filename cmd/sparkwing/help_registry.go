@@ -2293,11 +2293,11 @@ timestamped on disk). --events-only and --no-events are mutually
 exclusive views of the unified stream.
 
 --events-only emits the envelope records the dispatcher writes beside a
-local run (run_start, node_start, run_finish, ...). Against a profile
-whose state lives in a shared database or an object store it emits that
-run's stored event records instead (admission_wait, concurrency_wait,
-cache_hit, ...) -- a different record shape. Against a controller it is
-refused.`,
+local run (run_start, node_start, run_finish, ...). A run read through a
+backend emits that run's stored event records instead (admission_wait,
+concurrency_wait, cache_hit, ...) -- a different record shape. That is
+any profile whose state is a shared database, an object store or a
+controller, and any profile that declares its own logs surface.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "node", Argument: "NODE_ID", Desc: "Limit output to one node id", Group: "Filter"},

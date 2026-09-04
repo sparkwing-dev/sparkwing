@@ -66,12 +66,18 @@ func writeEventsViaBackend(ctx context.Context, b backend.Backend, runID string,
 		if len(events) == 0 {
 			break
 		}
+		// safety: the contract is seq > after, ascending; a backend that
+		// ignores after would otherwise replay one page forever.
+		last := events[len(events)-1].Seq
+		if last <= after {
+			break
+		}
 		for _, e := range events {
 			if err := enc.Encode(e); err != nil {
 				return err
 			}
-			after = e.Seq
 		}
+		after = last
 		if len(events) < page {
 			break
 		}

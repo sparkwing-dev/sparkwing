@@ -386,12 +386,16 @@ code change to unlock.
   one goroutine per node, until the run reached a terminal status. It now waits
   250ms between reconnects, the same as the reader for every other backend.
 
-- **cli:** `sparkwing runs logs --events-only` against a profile whose state
-  lives in a shared database or an object store no longer stops at the first
-  500 events. It made one unpaginated call, and every backend caps that at 500,
-  so a busy run lost everything past the cap without a word. The help now also
-  says what that path emits -- the run's stored event records, not the local
-  envelope stream -- since the three modes genuinely differ.
+- **cli:** `sparkwing runs logs --events-only` on a run read through a backend
+  no longer stops at the first 500 events. It made one unpaginated call, and
+  every backend caps that at 500, so a busy run lost everything past the cap
+  without a word. The reader now pages, and stops if a page fails to advance
+  rather than replaying it. The help says what that path emits, which is the
+  run's stored event records rather than the envelope stream a local run
+  writes: that covers any profile whose state is a shared database, an object
+  store or a controller, and any profile that declares its own logs surface.
+  `JobLogsRemoteWithTokens` refused the flag outright; it now serves the same
+  stored event records as every other backend-read run.
 
 - **cli:** `sparkwing runs list --by-pipeline` now honours `--limit`. A
   client-side filter -- `--started-after`, `--search`, `--error`, a
@@ -399,7 +403,10 @@ code change to unlock.
   over-fetch, and the rollup counted the whole over-fetch, so the RUNS and FAIL
   columns and the JSON changed fiftyfold depending on whether an unrelated flag
   was present. The over-fetch is now trimmed back to `--limit` before the
-  rollup, in local and controller mode both.
+  rollup, in local and controller mode both. `--sparkline N` is bounded by
+  `--limit` as a result -- it drew on up to 1000 runs in the filtered case, and
+  now draws on the same window the RUNS column counts, which is what it already
+  did with no filter set.
 
 - **cli:** `sparkwing runs logs --profile <name>` now reads the run and its
   nodes from that profile's state store. It listed nodes from the default local
