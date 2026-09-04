@@ -3109,11 +3109,10 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// safety: DO UPDATE rather than DO NOTHING because only the update branch
-	// waits on a conflicting insert that has not committed. DO NOTHING skips
-	// it, and the read that followed then saw no row at all and dropped the
-	// annotation. The assignment rewrites status to itself; the row, not the
-	// value, is what this needs.
+	// safety: only DO UPDATE waits on a conflicting insert that has not
+	// committed; DO NOTHING skips it and the read that followed saw no row,
+	// dropping the annotation. The assignment rewrites status to itself
+	// because the row, not the value, is what this needs.
 	var current []byte
 	if err := tx.QueryRowContext(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status)
