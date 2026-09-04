@@ -335,6 +335,10 @@ code change to unlock.
   pre-commit browser gate now also clears both directories before it starts and
   after it passes; a failed run still keeps them, because that is what the
   hosted gate uploads.
+- **tooling:** `bin/` scripts resolve the repository root from their own
+  location, so running one by absolute path from another checkout or a
+  worktree operates on the script's own tree.
+
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,

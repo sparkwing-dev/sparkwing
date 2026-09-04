@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$ROOT"
+
 GREEN="\033[32m"
 RED="\033[31m"
 DIM="\033[2m"

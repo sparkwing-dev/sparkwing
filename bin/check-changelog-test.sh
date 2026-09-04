@@ -109,6 +109,14 @@ if ! cmp -s "$fixture/CHANGELOG.want" "$fixture/CHANGELOG.md"; then
   exit 1
 fi
 
+# The working directory here is another repository, so a copy that resolved
+# its root from the cwd would sync that tree instead of its own.
+rm -rf "$fixture/pkg/docs/mirror"
+/bin/bash "$fixture/bin/sync-docs.sh" >/dev/null
+if [ ! -f "$fixture/pkg/docs/mirror/index.md" ]; then
+  echo "check-changelog-test: sync-docs did not anchor on its own location" >&2
+  exit 1
+fi
 # Parallel landings all add bullets under [Unreleased]. The union merge driver
 # in .gitattributes has to resolve that without a conflict, and has to keep the
 # embedded mirror byte-identical to the source it is copied from.
