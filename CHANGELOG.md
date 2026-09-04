@@ -311,6 +311,13 @@ code change to unlock.
 
 ### Fixed
 
+- **web:** ESLint no longer reads Playwright's output. `playwright-report/` and
+  `test-results/` join the dashboard's ESLint ignore list, so a browser run that
+  left its HTML report and traces behind no longer fails the next lint step with
+  thousands of findings from Playwright's own minified trace viewer. The
+  pre-commit browser gate now also clears both directories before it starts and
+  after it passes; a failed run still keeps them, because that is what the
+  hosted gate uploads.
 - **cache:** `--git-fork-limit` (`$SPARKWING_GITCACHE_CONCURRENCY`) now bounds
   every git subprocess the cache server spawns, which is what it always claimed
   to do. Nine call sites -- the archive, file, tree-hash, branch-contains,

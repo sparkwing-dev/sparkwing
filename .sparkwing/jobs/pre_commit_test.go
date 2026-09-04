@@ -515,6 +515,47 @@ func TestFrontendBrowserMarksOnlyFailedRunsForHostedArtifacts(t *testing.T) {
 	}
 }
 
+func TestFrontendBrowserClearsReportDirectoriesOnlyWhenTheSuitePasses(t *testing.T) {
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	if err := os.MkdirAll(web, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previous := sparkwing.WorkDir()
+	sparkwing.SetWorkDir(root)
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	report := filepath.Join(web, "playwright-report")
+	results := filepath.Join(web, "test-results")
+
+	seed := func() {
+		writeGoFile(t, filepath.Join(report, "index.js"), "var stale = 1\n")
+		writeGoFile(t, filepath.Join(results, "case", "trace.js"), "var stale = 2\n")
+	}
+
+	seed()
+	writeGoFile(t, filepath.Join(web, "package.json"), `{"scripts":{"test:browser:gate":"node -e \"process.exit(0)\""}}`)
+	if err := runFrontendBrowser(context.Background()); err != nil {
+		t.Fatalf("frontend-browser rejected a passing npm script: %v", err)
+	}
+	for _, dir := range []string{report, results} {
+		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("passing browser run left %s for the next ESLint run: %v", dir, err)
+		}
+	}
+
+	failing := `{"scripts":{"test:browser:gate":"node -e \"require('fs').mkdirSync('playwright-report',{recursive:true});require('fs').writeFileSync('playwright-report/index.js','var t = 3');process.exit(1)\""}}`
+	writeGoFile(t, filepath.Join(web, "package.json"), failing)
+	if err := runFrontendBrowser(context.Background()); err == nil {
+		t.Fatal("frontend-browser accepted a failing npm script")
+	}
+	if _, err := os.Stat(filepath.Join(report, "index.js")); err != nil {
+		t.Fatalf("failed browser run dropped the report the hosted gate uploads: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(results, ".sparkwing-browser-failed")); err != nil {
+		t.Fatalf("failed browser run dropped the hosted upload marker: %v", err)
+	}
+}
+
 const (
 	emDash    = "\u2014"
 	trackerID = "TOD" + "-42"
