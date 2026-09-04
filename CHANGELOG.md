@@ -360,6 +360,11 @@ code change to unlock.
 
 ### Fixed
 
+- **wingd:** A run no longer hangs indefinitely when the admission daemon
+  accepts its connection and then stalls. Client frames now carry the same
+  bounded write deadline the daemon applies to its own side, so a full socket
+  buffer fails the exchange into the existing retry path instead of blocking
+  admission, release, cancel and queue-state writes with no diagnostic.
 - **wingd:** Ctrl-C again ends a queued run after the admission daemon has
   restarted under it. The waiter armed cancellation against the connection it
   held when the wait began, so once a reconnect replaced that socket the

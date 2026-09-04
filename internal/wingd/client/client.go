@@ -187,6 +187,9 @@ type Client struct {
 	dec           *frameReader
 	waitCancelled bool
 
+	writeMu      sync.Mutex
+	writeTimeout time.Duration
+
 	ack  wingwire.HelloAck
 	opts Options
 	sock string
@@ -519,10 +522,7 @@ func (cl *Client) recoverConn(ctx context.Context) error {
 
 func (cl *Client) takeover(ctx context.Context, opts Options) error {
 	opts.logf("taking over daemon %s with %s", cl.ack.BinaryVersion, opts.Version)
-	if nc := cl.conn(); nc != nil {
-		_ = nc.SetWriteDeadline(time.Now().Add(opts.dialTimeout()))
-	}
-	_ = cl.write(&wingwire.DrainRequest{SuccessorVersion: opts.Version})
+	_ = cl.writeWithin(&wingwire.DrainRequest{SuccessorVersion: opts.Version}, opts.dialTimeout())
 	if nc := cl.conn(); nc != nil {
 		_ = nc.SetReadDeadline(time.Now().Add(opts.dialTimeout()))
 	}
@@ -584,7 +584,23 @@ func (cl *Client) APIError() string { return cl.ack.APIError }
 // API, derived from the admission socket this client reached.
 func (cl *Client) APISocket() string { return wingd.APISocketBeside(cl.sock) }
 
+// safety: the daemon drops a peer that stops reading after its own
+// connWriteTimeout; a client without the mirror image of that bound blocks a
+// run forever on a daemon that accepts and then stalls.
+const clientWriteTimeout = 10 * time.Second
+
 func (cl *Client) write(msg wingwire.Message) error {
+	return cl.writeWithin(msg, cl.writeBudget())
+}
+
+func (cl *Client) writeBudget() time.Duration {
+	if cl.writeTimeout > 0 {
+		return cl.writeTimeout
+	}
+	return clientWriteTimeout
+}
+
+func (cl *Client) writeWithin(msg wingwire.Message, timeout time.Duration) error {
 	line, err := wingwire.Encode(msg)
 	if err != nil {
 		return err
@@ -593,8 +609,16 @@ func (cl *Client) write(msg wingwire.Message) error {
 	if nc == nil {
 		return net.ErrClosed
 	}
-	_, err = nc.Write(line)
-	return err
+	cl.writeMu.Lock()
+	defer cl.writeMu.Unlock()
+	if err := nc.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return err
+	}
+	if _, err := nc.Write(line); err != nil {
+		return err
+	}
+	_ = nc.SetWriteDeadline(time.Time{})
+	return nil
 }
 
 // safety: a reconnect replaces the socket a waiting caller is blocked on, so
