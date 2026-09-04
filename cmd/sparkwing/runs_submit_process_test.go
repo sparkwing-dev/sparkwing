@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -31,6 +33,12 @@ var (
 func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(submitCLIDir)
+	if code == 0 {
+		if err := testleak.Check(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			code = 1
+		}
+	}
 	os.Exit(code)
 }
 

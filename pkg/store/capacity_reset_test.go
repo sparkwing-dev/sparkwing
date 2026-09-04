@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestResetPipelineProfile_DropsLearnedRowsAndReLearns(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	ctx := context.Background()
 
 	for _, obs := range []store.ProfileObservation{
@@ -70,7 +71,7 @@ func TestResetPipelineProfile_DropsLearnedRowsAndReLearns(t *testing.T) {
 }
 
 func TestResetPipelineProfile_KeepsPin(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	ctx := context.Background()
 
 	if err := st.RecordProfileObservation(ctx, "pinned", "", store.ProfileObservation{Duration: 10 * time.Second, PeakCores: 50, PeakMemoryBytes: 8 << 30, CPUMeasured: true}); err != nil {
@@ -104,7 +105,7 @@ func TestResetPipelineProfile_KeepsPin(t *testing.T) {
 }
 
 func TestResetAllProfiles_ClearsEverythingKeepingPins(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	ctx := context.Background()
 
 	for _, name := range []string{"a", "b", "c"} {
@@ -140,7 +141,7 @@ func TestResetAllProfiles_ClearsEverythingKeepingPins(t *testing.T) {
 }
 
 func TestResetPipelineProfile_NoProfileIsNoOp(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	summary, err := st.ResetPipelineProfile(context.Background(), "absent")
 	if err != nil {
 		t.Fatalf("ResetPipelineProfile: %v", err)

@@ -1254,6 +1254,14 @@ func TestConcurrency_PlanLevelEvictedBeforeDispatchCancelsRun(t *testing.T) {
 		})
 		leaderDone <- res
 	}()
+	t.Cleanup(func() {
+		releaseLeaderBarrier()
+		select {
+		case <-leaderDone:
+		case <-time.After(15 * time.Second):
+			t.Error("timed out waiting for the held leader run to finish")
+		}
+	})
 	waitForLeaderHolding(t)
 
 	victimDone := make(chan *orchestrator.Result, 1)
@@ -1453,7 +1461,9 @@ func TestDispatchWatchdog_UnclaimedUnboundedChildStillTimesOutParent(t *testing.
 		if res == nil || res.Status != "failed" || res.Error == nil || !strings.Contains(res.Error.Error(), "dispatch_wait_timeout") {
 			t.Fatalf("result = %+v, want dispatch_wait_timeout for unclaimed unbounded child", res)
 		}
-	case <-time.After(500 * time.Millisecond):
+	// safety: the 100 ms watchdog needs about 650 ms end to end under the race
+	// detector, so the budget proves the watchdog fired without timing it.
+	case <-time.After(5 * time.Second):
 		t.Fatal("unclaimed unbounded child disabled the parent dispatch watchdog")
 	}
 }

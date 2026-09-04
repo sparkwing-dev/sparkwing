@@ -2,16 +2,16 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestSchemaV16_UpgradeOfARealV15ShapeAddsTheBounceTable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "real15.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestSchemaV16_UpgradeOfARealV15ShapeAddsTheBounceTable(t *testing.T) {
 	}
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (upgrade): %v", err)
 	}
@@ -53,8 +53,8 @@ func TestSchemaV16_UpgradeOfARealV15ShapeAddsTheBounceTable(t *testing.T) {
 }
 
 func TestSchemaV16_UpgradeIsSafeToReplay(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "replay16.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestSchemaV16_UpgradeIsSafeToReplay(t *testing.T) {
 	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (replay): %v", err)
 	}

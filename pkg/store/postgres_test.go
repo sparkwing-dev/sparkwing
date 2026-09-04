@@ -4,94 +4,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
-
-const requirePGEnv = "SPARKWING_REQUIRE_PG"
 
 func pgTestDSN(t *testing.T) string {
 	t.Helper()
-	dsn := os.Getenv("SPARKWING_TEST_PG_URL")
-	if dsn == "" {
-		if os.Getenv(requirePGEnv) != "" {
-			t.Fatalf("%s is set, so SPARKWING_TEST_PG_URL must name a reachable Postgres", requirePGEnv)
-		}
-		t.Skip("SPARKWING_TEST_PG_URL not set; skipping Postgres conformance test")
-	}
-	return dsn
+	return storetest.PostgresURL(t)
 }
 
 func openPGTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	scoped := pgTestSchemaDSN(t)
-	st, err := store.OpenPostgres(context.Background(), scoped)
-	if err != nil {
-		t.Fatalf("open postgres: %v", err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	return st
+	return storetest.OpenPostgres(t)
 }
 
 func pgTestSchemaDSN(t *testing.T) string {
 	t.Helper()
-	baseDSN := pgTestDSN(t)
-	schema := "sw_test_" + sanitize(t.Name()) + "_" + uniq()
-
-	adminCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	admin, err := store.OpenPostgres(adminCtx, baseDSN)
-	if err != nil {
-		t.Fatalf("open admin postgres: %v", err)
-	}
-	if _, err := admin.DB().ExecContext(adminCtx, `CREATE SCHEMA IF NOT EXISTS `+schema); err != nil {
-		_ = admin.Close()
-		t.Fatalf("create schema %s: %v", schema, err)
-	}
-	_ = admin.Close()
-
-	scoped := withSearchPath(baseDSN, schema)
-	t.Cleanup(func() {
-		if cleanup, e := store.OpenPostgres(context.Background(), baseDSN); e == nil {
-			_, _ = cleanup.DB().Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
-			_ = cleanup.Close()
-		}
-	})
-	return scoped
-}
-
-var uniqCounter struct {
-	sync.Mutex
-	n int
-}
-
-func uniq() string {
-	uniqCounter.Lock()
-	defer uniqCounter.Unlock()
-	uniqCounter.n++
-	return fmt.Sprintf("%d_%d", time.Now().UnixNano()&0xffffff, uniqCounter.n)
-}
-
-func sanitize(s string) string {
-	r := strings.NewReplacer("/", "_", " ", "_", "-", "_", ".", "_", "#", "_", "(", "_", ")", "_")
-	out := r.Replace(s)
-	if len(out) > 40 {
-		out = out[:40]
-	}
-	return strings.ToLower(out)
-}
-
-func withSearchPath(dsn, schema string) string {
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
-	}
-	return fmt.Sprintf("%s%ssearch_path=%s", dsn, sep, schema)
+	return storetest.NewPostgres(t).DSN()
 }
 
 func TestPostgresOpenAndMigrate(t *testing.T) {

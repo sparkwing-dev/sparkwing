@@ -76,6 +76,7 @@ func TestS3Sharing_TwoRunsBothSucceed(t *testing.T) {
 
 	for _, label := range []string{"A", "B"} {
 		state := s3state.New(art, s3state.WithFlushInterval(20*time.Millisecond))
+		t.Cleanup(func() { _ = state.Close() })
 		res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 			Pipeline:      "s3-integ-cache",
 			State:         state,
@@ -101,6 +102,7 @@ func TestS3Sharing_StateVisibleToDashboard(t *testing.T) {
 	paths := newPaths(t)
 
 	state := s3state.New(art, s3state.WithFlushInterval(20*time.Millisecond))
+	t.Cleanup(func() { _ = state.Close() })
 	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 		Pipeline:      "s3-integ-cache",
 		State:         state,
@@ -156,6 +158,7 @@ func TestS3Sharing_TriggerEnqueuesChildRecord(t *testing.T) {
 	paths := newPaths(t)
 
 	state := s3state.New(art, s3state.WithFlushInterval(20*time.Millisecond))
+	t.Cleanup(func() { _ = state.Close() })
 	started := time.Now()
 	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 		Pipeline:      "s3-integ-trigger",

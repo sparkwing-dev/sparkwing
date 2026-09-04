@@ -2,16 +2,16 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestSchemaV15_UpgradeOfARealV14ShapeAddsUsageColumns(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "real14.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestSchemaV15_UpgradeOfARealV14ShapeAddsUsageColumns(t *testing.T) {
 	}
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (upgrade): %v", err)
 	}
@@ -69,8 +69,8 @@ func TestSchemaV15_UpgradeOfARealV14ShapeAddsUsageColumns(t *testing.T) {
 }
 
 func TestSchemaV15_UpgradeIsSafeToReplay(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "replay.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestSchemaV15_UpgradeIsSafeToReplay(t *testing.T) {
 	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#2 (replay): %v", err)
 	}
@@ -108,7 +108,7 @@ func TestSchemaV15_UpgradeIsSafeToReplay(t *testing.T) {
 }
 
 func TestAddNodeUsage_RoundTripsAndSurvivesFinishNode(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestAddNodeUsage_RoundTripsAndSurvivesFinishNode(t *testing.T) {
 }
 
 func TestAddNodeUsage_RejectsNegativeFigures(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestAddNodeUsage_RejectsNegativeFigures(t *testing.T) {
 }
 
 func TestAddNodeUsage_AccumulatesAcrossAttempts(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestAddNodeUsage_AccumulatesAcrossAttempts(t *testing.T) {
 }
 
 func TestNodeMetricSample_CPUTimeRoundTrips(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}

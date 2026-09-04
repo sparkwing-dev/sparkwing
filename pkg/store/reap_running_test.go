@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestReapStaleRunningRuns_FlipsOrphanedRunsToFailed(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	const runID, nodeRunning, nodePending = "run-orphan", "node-running", "node-pending"
@@ -28,8 +29,8 @@ func TestReapStaleRunningRuns_FlipsOrphanedRunsToFailed(t *testing.T) {
 		t.Fatalf("TouchRunHeartbeat: %v", err)
 	}
 
-	if _, err := s.DB().ExecContext(ctx,
-		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`),
 		time.Now().Add(-10*time.Minute).UnixNano(), runID); err != nil {
 		t.Fatalf("backdate heartbeat: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestReapStaleRunningRuns_FlipsOrphanedRunsToFailed(t *testing.T) {
 }
 
 func TestReapStaleRunningRuns_IgnoresFreshHeartbeat(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	const runID, nodeID = "run-fresh", "node-a"
@@ -110,13 +111,13 @@ func TestReapStaleRunningRuns_IgnoresFreshHeartbeat(t *testing.T) {
 }
 
 func TestReapStaleRunningRuns_IgnoresNullHeartbeat(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	const runID, nodeID = "run-noheartbeat", "node-a"
 	seedRunAndNode(t, s, runID, nodeID)
-	if _, err := s.DB().ExecContext(ctx,
-		`UPDATE runs SET last_heartbeat_at = NULL WHERE id = ?`, runID); err != nil {
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`UPDATE runs SET last_heartbeat_at = NULL WHERE id = ?`), runID); err != nil {
 		t.Fatalf("clear heartbeat: %v", err)
 	}
 	ids, err := store.Maintenance.ReapStaleRunningRuns(s, ctx,
@@ -137,7 +138,7 @@ func TestReapStaleRunningRuns_IgnoresNullHeartbeat(t *testing.T) {
 }
 
 func TestReapStaleRunningRuns_IgnoresTerminalRuns(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	const runID, nodeID = "run-already-done", "node-a"
@@ -148,8 +149,8 @@ func TestReapStaleRunningRuns_IgnoresTerminalRuns(t *testing.T) {
 	if err := s.FinishRun(ctx, runID, "success", ""); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
-	if _, err := s.DB().ExecContext(ctx,
-		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`,
+	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+		`UPDATE runs SET last_heartbeat_at = ? WHERE id = ?`),
 		time.Now().Add(-10*time.Minute).UnixNano(), runID); err != nil {
 		t.Fatalf("backdate heartbeat: %v", err)
 	}

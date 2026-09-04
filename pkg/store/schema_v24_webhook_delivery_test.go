@@ -3,16 +3,16 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestSchemaV24_AddsWebhookDeliveryConstraintToAnOlderDatabase(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "webhook-delivery.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,16 +30,13 @@ func TestSchemaV24_AddsWebhookDeliveryConstraintToAnOlderDatabase(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen at schema %d: %v", store.ExpectedSchemaVersion(), err)
 	}
 	defer func() { _ = up.Close() }()
 
-	var indexName string
-	if err := up.DB().QueryRow(
-		`SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?`,
-		store.TriggerWebhookDeliveryIndexName).Scan(&indexName); err != nil {
+	if _, err := indexDefinition(t, up, store.TriggerWebhookDeliveryIndexName); err != nil {
 		t.Fatalf("migrated database has no %s index: %v", store.TriggerWebhookDeliveryIndexName, err)
 	}
 
@@ -55,7 +52,7 @@ func TestSchemaV24_AddsWebhookDeliveryConstraintToAnOlderDatabase(t *testing.T) 
 }
 
 func TestCreateTrigger_WebhookDeliveryUniqueness(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}

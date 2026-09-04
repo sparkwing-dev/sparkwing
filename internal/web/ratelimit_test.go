@@ -114,3 +114,24 @@ func TestRateLimitMiddleware_MalformedLeftPrefixDoesNotCollapseClients(t *testin
 		}
 	}
 }
+
+func TestRateLimitMiddleware_SweepsIdleBucketsWithoutATicker(t *testing.T) {
+	l := ratelimit.New(2, time.Minute)
+	stale := time.Unix(0, 0)
+	l.Allow("10.0.0.1", stale)
+	l.Allow("10.0.0.2", stale)
+	if l.Len() != 2 {
+		t.Fatalf("seeded %d buckets, want 2", l.Len())
+	}
+
+	h := rateLimitMiddlewareEvery(l, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), 0)
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	req.RemoteAddr = "10.0.0.3:5000"
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if l.Len() != 0 {
+		t.Fatalf("%d buckets survived the request-path sweep, want 0", l.Len())
+	}
+}

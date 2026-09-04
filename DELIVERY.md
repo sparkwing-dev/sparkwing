@@ -9,6 +9,11 @@ this file is a menu and checklist, not a command that every change must run.
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
+- **Goroutine leaks:** every package with tests carries a `leak_test.go` whose
+  `TestMain` hands the suite to `internal/testleak`, so a package fails when a
+  goroutine outlives its tests. A new test package needs that file too; copy an
+  existing one. A package that must tolerate a goroutine passes its own
+  `goleak` option from its `TestMain` and says why in a `safety:` comment.
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured alone on an
   idle 16-core Linux box, `GOWORK=off go test -count=1 <pkg>`:
@@ -27,8 +32,12 @@ this file is a menu and checklist, not a command that every change must run.
 - **Normal broad check:** `sparkwing run pre-commit` covers every committed Go
   module, the dashboard TypeScript unit, full ESLint, production build,
   and browser smoke suites, formatting, vet, build, tests, documentation
-  mirrors, and source policy. Unit and ESLint run in parallel; the production
-  build then feeds the browser suite.
+  mirrors, and source policy. It also runs `go test -race` on the packages
+  whose Go files changed (staged, or since origin/main when nothing is
+  staged), so a change never reaches main without the race detector having
+  seen its own package, and runs `store-postgres` when that change touches
+  `pkg/store`. Unit and ESLint run in parallel; the production build then
+  feeds the browser suite.
 - **Gating a branch beside a released daemon:** when the branch's pipeline
   binary carries a newer runs-store schema than the sparkwing hosting this
   machine's admission daemon, admission refuses the run. Give the gate a home
@@ -36,6 +45,10 @@ this file is a menu and checklist, not a command that every change must run.
   `sparkwing run pre-commit --sw-isolated-home "$(mktemp -d)"`, run from a
   sparkwing built from this checkout, which points that run's state and config
   at the directory and hosts a daemon there from that binary.
+- **Lint rules:** golangci-lint judges only code new since origin/main. Among
+  the family set it also rejects `_ = call()` on an error-returning call, nil
+  returned after an error was observed, and work started on a context that is
+  not the caller's. Drop an error only through a helper that logs why.
 - **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
@@ -98,6 +111,21 @@ this file is a menu and checklist, not a command that every change must run.
   file that does not parse or carries another proof format is ignored, writes
   are atomic, and recording prunes anything older than 14 days. Delete the
   directory to force full verification without `--exhaustive`.
+
+- **Store dialect matrix:** `sparkwing run store-postgres` runs
+  `go test ./pkg/store/...` with `SPARKWING_TEST_STORE=postgres`, so every
+  store test that opens through `pkg/store/storetest` exercises the Postgres
+  dialect instead of a SQLite file. It reuses `SPARKWING_TEST_PG_URL` when
+  that is set and otherwise starts an embedded Postgres on a free port (data
+  under a temporary root, binaries cached in `$TMPDIR`), then stops it and
+  removes the data directory whether the suite passes, fails, or is
+  interrupted; a run killed outright before its teardown finishes can leave a
+  `sparkwing-store-postgres-*` directory under `TMPDIR`. No Docker. A failing suite prints the tail of the server log,
+  which embedded-postgres only makes available once the server has stopped.
+  A server that will not start is retried once on a fresh port and then
+  fails the step. `pre-push` runs it after the race gate, under a
+  thirty-minute timeout. Roughly 80 seconds on a warm cache and an idle box;
+  the first run downloads the Postgres binaries.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is

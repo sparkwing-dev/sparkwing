@@ -102,6 +102,8 @@ func TestResetStatsReportsAnUnsupportedReplyWithoutRetrying(t *testing.T) {
 
 func TestStopReportsADaemonThatRefusesTheDrain(t *testing.T) {
 	home := shortHome(t)
+	held := make(chan struct{})
+	t.Cleanup(func() { close(held) })
 	serveFakeDaemon(t, home, func(nc net.Conn, r *frameReader) {
 		if _, err := r.read(); err != nil {
 			return
@@ -111,7 +113,10 @@ func TestStopReportsADaemonThatRefusesTheDrain(t *testing.T) {
 			return
 		}
 		_, _ = nc.Write(line)
-		time.Sleep(2 * time.Second)
+		// safety: the refusal only proves Stop gave up if the connection is still
+		// open when Stop returns, and holding it to the end of the test rather than
+		// for a fixed span leaves no goroutine behind.
+		<-held
 	})
 
 	err := Stop(context.Background(), Options{Home: home, Version: fakeDaemonVersion, DialTimeout: 500 * time.Millisecond})

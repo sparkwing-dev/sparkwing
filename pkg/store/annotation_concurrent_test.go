@@ -3,12 +3,12 @@ package store_test
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 const (
@@ -90,7 +90,7 @@ func TestPostgresAppendNodeAnnotationKeepsEveryEntry(t *testing.T) {
 // TestAppendNodeAnnotationKeepsEveryEntry is the SQLite half, where immediate
 // transactions already serialized the read and the write.
 func TestAppendNodeAnnotationKeepsEveryEntry(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "annotations.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -198,7 +198,7 @@ VALUES ($1,$2,$3,$4)`, "run-1", "build", "step-1", "running"); err != nil {
 // of the placeholder upsert on the dialect the default suite runs: the second
 // append finds the row the first one created, and both messages survive.
 func TestAppendStepAnnotationUpsertsAnExistingStep(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "steps.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

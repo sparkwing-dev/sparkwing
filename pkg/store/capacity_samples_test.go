@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestProfileSamples_ReturnsWindowOldestFirst(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	ctx := context.Background()
 
 	for _, obs := range []store.ProfileObservation{
@@ -41,7 +42,7 @@ func TestProfileSamples_ReturnsWindowOldestFirst(t *testing.T) {
 }
 
 func TestProfileSamples_ReproduceStoredCharges(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	ctx := context.Background()
 
 	for i := 1; i <= 12; i++ {
@@ -88,7 +89,7 @@ func TestProfileSamples_ReproduceStoredCharges(t *testing.T) {
 }
 
 func TestProfileSamples_AbsentProfileReturnsNil(t *testing.T) {
-	samples, err := openTestStore(t).ProfileSamples(context.Background(), "never-run", "")
+	samples, err := storetest.Open(t).ProfileSamples(context.Background(), "never-run", "")
 	if err != nil {
 		t.Fatal(err)
 	}

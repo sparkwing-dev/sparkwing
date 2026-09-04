@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestCreateFirstUser_ConcurrentBootstrapAdmitsOneAdmin(t *testing.T) {
@@ -15,8 +16,8 @@ func TestCreateFirstUser_ConcurrentBootstrapAdmitsOneAdmin(t *testing.T) {
 		name string
 		open func(t *testing.T) *store.Store
 	}{
-		{name: "sqlite", open: newStoreT},
-		{name: "postgres", open: openPGTestStore},
+		{name: "sqlite", open: storetest.OpenSQLite},
+		{name: "postgres", open: storetest.OpenPostgres},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raceBootstrap(t, tc.open(t), 8)

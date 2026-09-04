@@ -5,10 +5,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestConcurrency_PromoteOntoSupersededHolderDoesNotCrash(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -41,7 +42,7 @@ func TestConcurrency_PromoteOntoSupersededHolderDoesNotCrash(t *testing.T) {
 }
 
 func TestConcurrency_PromoteOntoExpiredHolderReclaimsRow(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: time.Nanosecond,

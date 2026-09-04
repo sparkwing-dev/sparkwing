@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func claimTrigger(t *testing.T, s *store.Store, id, pipeline string) {
@@ -45,7 +46,7 @@ func TestRequeueUnstartedClaim_AnswersByRunStatus(t *testing.T) {
 		{name: "trigger was never claimed", runStatus: "pending", claim: false, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newStoreT(t)
+			s := storetest.Open(t)
 			if tc.claim {
 				claimTrigger(t, s, "run-1", "deploy")
 			} else if err := s.CreateTrigger(ctx, store.Trigger{

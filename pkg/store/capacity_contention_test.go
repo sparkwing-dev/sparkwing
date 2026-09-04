@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestRecordContention_IncrementsRollupCount(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	ctx := context.Background()
 
 	if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{Duration: 10 * time.Second}); err != nil {
@@ -31,7 +32,7 @@ func TestRecordContention_IncrementsRollupCount(t *testing.T) {
 }
 
 func TestRecordContention_NoProfileIsNoOp(t *testing.T) {
-	st := openTestStore(t)
+	st := storetest.Open(t)
 	ctx := context.Background()
 	if err := st.RecordContention(ctx, "never-run"); err != nil {
 		t.Fatalf("RecordContention on absent profile should be a no-op, got %v", err)

@@ -2,16 +2,16 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestSchemaV12_UpgradePreservesImplicitAwaitRepositoryProvenance(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "schema11.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestSchemaV12_UpgradePreservesImplicitAwaitRepositoryProvenance(t *testing.
 	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("upgrade v11 store: %v", err)
 	}

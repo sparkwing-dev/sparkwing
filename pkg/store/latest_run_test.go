@@ -3,22 +3,12 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
-
-func openStore(t *testing.T) *store.Store {
-	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
-}
 
 func seedRun(t *testing.T, s *store.Store, id, pipeline, status string, startedAgo, finishedAgo time.Duration) {
 	t.Helper()
@@ -30,8 +20,8 @@ func seedRun(t *testing.T, s *store.Store, id, pipeline, status string, startedA
 		t.Fatalf("CreateRun: %v", err)
 	}
 	if status != "running" {
-		_, err := s.DB().ExecContext(ctx, `
-UPDATE runs SET status = ?, error = '', finished_at = ? WHERE id = ?`,
+		_, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `
+UPDATE runs SET status = ?, error = '', finished_at = ? WHERE id = ?`),
 			status, time.Now().Add(-finishedAgo).UnixNano(), id)
 		if err != nil {
 			t.Fatalf("set finish: %v", err)
@@ -40,7 +30,7 @@ UPDATE runs SET status = ?, error = '', finished_at = ? WHERE id = ?`,
 }
 
 func TestGetLatestRun_ReturnsNewest(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	seedRun(t, s, "old", "build", "success", 2*time.Hour, 90*time.Minute)
 	seedRun(t, s, "mid", "build", "success", 1*time.Hour, 45*time.Minute)
 	seedRun(t, s, "new", "build", "success", 10*time.Minute, 5*time.Minute)
@@ -55,7 +45,7 @@ func TestGetLatestRun_ReturnsNewest(t *testing.T) {
 }
 
 func TestGetLatestRun_FiltersStatus(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	seedRun(t, s, "older-success", "deploy", "success", 1*time.Hour, 45*time.Minute)
 	seedRun(t, s, "newer-failure", "deploy", "failed", 10*time.Minute, 5*time.Minute)
 
@@ -69,7 +59,7 @@ func TestGetLatestRun_FiltersStatus(t *testing.T) {
 }
 
 func TestGetLatestRun_NotFound(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	_, err := s.GetLatestRun(context.Background(), "never-ran", []string{"success"}, 0)
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
@@ -77,7 +67,7 @@ func TestGetLatestRun_NotFound(t *testing.T) {
 }
 
 func TestGetLatestRun_MaxAgeRespected(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	seedRun(t, s, "stale", "build", "success", 2*time.Hour, 90*time.Minute)
 
 	_, err := s.GetLatestRun(context.Background(), "build", []string{"success"}, 1*time.Hour)
@@ -94,7 +84,7 @@ func TestGetLatestRun_MaxAgeRespected(t *testing.T) {
 }
 
 func TestGetLatestRun_EmptyStatusesMatchesAny(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	seedRun(t, s, "older-success", "mix", "success", 1*time.Hour, 45*time.Minute)
 	seedRun(t, s, "newer-failed", "mix", "failed", 10*time.Minute, 5*time.Minute)
 
@@ -108,7 +98,7 @@ func TestGetLatestRun_EmptyStatusesMatchesAny(t *testing.T) {
 }
 
 func TestGetLatestRun_RejectsEmptyPipeline(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	if _, err := s.GetLatestRun(context.Background(), "", nil, 0); err == nil {
 		t.Fatal("expected error for empty pipeline")
 	}

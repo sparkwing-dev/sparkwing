@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func reclaimAndSucceed(t *testing.T, s *store.Store, id string) {
@@ -19,12 +20,12 @@ func reclaimAndSucceed(t *testing.T, s *store.Store, id string) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec(
-		`UPDATE triggers SET claim_seq = claim_seq + 1 WHERE id = ?`, id); err != nil {
+		storetest.Rebind(s, `UPDATE triggers SET claim_seq = claim_seq + 1 WHERE id = ?`), id); err != nil {
 		t.Errorf("re-claim %s: %v", id, err)
 		return
 	}
 	if _, err := tx.Exec(
-		`UPDATE runs SET status = 'success', error = '', finished_at = ? WHERE id = ?`,
+		storetest.Rebind(s, `UPDATE runs SET status = 'success', error = '', finished_at = ? WHERE id = ?`),
 		time.Now().UnixNano(), id); err != nil {
 		t.Errorf("current claim finishes %s: %v", id, err)
 		return
@@ -43,7 +44,7 @@ func reclaimAndSucceed(t *testing.T, s *store.Store, id string) {
 // read and the write is what makes that true. Split into two statements, the
 // superseded dispatch's "failed" lands on top of the live "success".
 func TestFinishAtGeneration_ConcurrentReclaimKeepsTheCurrentOutcome(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	const rounds = 500

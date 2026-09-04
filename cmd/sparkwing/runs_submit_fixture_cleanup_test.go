@@ -32,7 +32,7 @@ func TestSubmitCLIFixtureOwnsTemporaryDirectory(t *testing.T) {
 		t.Fatal("buildSubmitCLI must retain the shared temporary directory for suite cleanup")
 	}
 	if !cleansDirectory {
-		t.Fatal("TestMain must remove the shared CLI directory after the suite and preserve its exit code")
+		t.Fatal("TestMain must remove the shared CLI directory after the suite, run the leak check, and preserve its exit code")
 	}
 }
 
@@ -100,7 +100,7 @@ func formatNode(node ast.Node) string {
 }
 
 func submitCLITestMainOwnsCleanup(fn *ast.FuncDecl) bool {
-	if fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || len(fn.Body.List) != 3 {
+	if fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || len(fn.Body.List) != 4 {
 		return false
 	}
 	param := fn.Type.Params.List[0]
@@ -129,8 +129,22 @@ func submitCLITestMainOwnsCleanup(fn *ast.FuncDecl) bool {
 	if !ok || !isDirectCall(remove.X, "os", "RemoveAll", []string{"submitCLIDir"}) {
 		return false
 	}
-	exit, ok := fn.Body.List[2].(*ast.ExprStmt)
+	if leak, ok := fn.Body.List[2].(*ast.IfStmt); !ok || !callsLeakCheck(leak) {
+		return false
+	}
+	exit, ok := fn.Body.List[3].(*ast.ExprStmt)
 	return ok && isDirectCall(exit.X, "os", "Exit", []string{"code"})
+}
+
+func callsLeakCheck(stmt ast.Stmt) bool {
+	found := false
+	ast.Inspect(stmt, func(node ast.Node) bool {
+		if call, ok := node.(*ast.CallExpr); ok && isSubmitCleanupSelector(call.Fun, "testleak", "Check") {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 func isDirectCall(expr ast.Expr, receiver, method string, args []string) bool {

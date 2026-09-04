@@ -9,6 +9,7 @@ linters:
   enable:
     - bidichk # CVE-2021-42574 Trojan Source defense
     - bodyclose # missing http response body Close()
+    - contextcheck # work started on a context that ignores the caller's cancellation
     - copyloopvar # loop-variable capture bugs (Go 1.22+ semantics)
     - depguard # banned imports (deprecated / wrong-version modules)
     - errcheck # unchecked error returns
@@ -17,6 +18,7 @@ linters:
     - govet # default vet + extras enabled below
     - ineffassign # assignments whose value is never read
     - misspell # common english spelling errors
+    - nilerr # nil returned after a non-nil error was observed
     - nolintlint # stale / malformed nolint directives
     - staticcheck # SA + S + ST + QF rule families
     - unconvert # redundant type conversions
@@ -46,6 +48,9 @@ linters:
         - -ST1020
         - -ST1021
     errcheck:
+      # `_ = f()` hides an error as surely as ignoring the call does; drop one only
+      # through a helper that logs why. The exclude list keeps the accepted idioms quiet.
+      check-blank: true
       exclude-functions:
         - fmt.Print
         - fmt.Printf

@@ -1,18 +1,18 @@
 package store_test
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestSchemaV27_RewritesTheNULInheritedHolderMarker(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "inherited-marker.db")
+	target := storetest.NewSQLite(t)
 	ctx := ctxT(t)
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,8 +24,8 @@ func TestSchemaV27_RewritesTheNULInheritedHolderMarker(t *testing.T) {
 		Key: "k", HolderID: "child", RunID: "r1", NodeID: "n",
 		InheritedHolderID: "leader", Capacity: 1, Policy: store.OnLimitQueue,
 	})
-	if _, err := st.DB().ExecContext(ctx,
-		`UPDATE concurrency_holders SET node_id = ? WHERE key = ? AND holder_id = ?`,
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
+		`UPDATE concurrency_holders SET node_id = ? WHERE key = ? AND holder_id = ?`),
 		"\x00inherited:leader", "k", "child"); err != nil {
 		t.Fatalf("seed legacy marker: %v", err)
 	}
@@ -38,15 +38,15 @@ func TestSchemaV27_RewritesTheNULInheritedHolderMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	up, err := store.Open(path)
+	up, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("reopen at schema %d: %v", store.ExpectedSchemaVersion(), err)
 	}
 	defer func() { _ = up.Close() }()
 
 	var nodeID string
-	if err := up.DB().QueryRowContext(ctx,
-		`SELECT node_id FROM concurrency_holders WHERE key = ? AND holder_id = ?`,
+	if err := up.DB().QueryRowContext(ctx, storetest.Rebind(up,
+		`SELECT node_id FROM concurrency_holders WHERE key = ? AND holder_id = ?`),
 		"k", "child").Scan(&nodeID); err != nil {
 		t.Fatalf("read migrated marker: %v", err)
 	}

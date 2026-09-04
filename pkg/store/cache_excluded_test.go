@@ -3,15 +3,15 @@ package store_test
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestCacheExcludedCounts_CountsCacheDominantRunsPerPipeline(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "cache.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

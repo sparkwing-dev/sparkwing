@@ -5,10 +5,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestConcurrency_CostWeightedAdmission(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	mk := func(run string) store.AcquireSlotRequest {
 		return store.AcquireSlotRequest{
 			Key: "db", HolderID: run + "/n", RunID: run, NodeID: "n",
@@ -32,7 +33,7 @@ func TestConcurrency_CostWeightedAdmission(t *testing.T) {
 }
 
 func TestConcurrency_InheritedHolderExtendsAdmissionWithoutRechargingCost(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	parent := acquireT(t, s, store.AcquireSlotRequest{
 		Key:      "db",
 		HolderID: "parent/-",
@@ -128,7 +129,7 @@ func TestConcurrency_InheritedHolderExtendsAdmissionWithoutRechargingCost(t *tes
 }
 
 func TestConcurrency_TerminalReaperTransfersInheritedHolderCost(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	createRunningRunT(t, s, "parent")
 	createRunningRunT(t, s, "child")
 	parent := acquireT(t, s, store.AcquireSlotRequest{
@@ -182,7 +183,7 @@ func TestConcurrency_TerminalReaperTransfersInheritedHolderCost(t *testing.T) {
 }
 
 func TestConcurrency_ReleaseTransfersCostToSiblingInheritedHolder(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	parent := acquireT(t, s, store.AcquireSlotRequest{
 		Key:      "db",
 		HolderID: "parent/-",
@@ -241,7 +242,7 @@ func TestConcurrency_ReleaseTransfersCostToSiblingInheritedHolder(t *testing.T) 
 }
 
 func TestConcurrency_CancelOthersSupersedesSiblingInheritedHolders(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	parent := acquireT(t, s, store.AcquireSlotRequest{
 		Key:      "db",
 		HolderID: "parent/-",
@@ -314,7 +315,7 @@ func containsString(list []string, target string) bool {
 }
 
 func TestConcurrency_CancelOthersSupersedesInheritedHolder(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	parent := acquireT(t, s, store.AcquireSlotRequest{
 		Key:      "db",
 		HolderID: "parent/-",
@@ -375,7 +376,7 @@ func releaseAndPromoteT(t *testing.T, s *store.Store, key, holderID string) []st
 }
 
 func TestConcurrency_CostHeavyWaiterHoldsFIFO(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "db", HolderID: "r1/n", RunID: "r1", NodeID: "n",
 		Capacity: 4, Cost: 4, Policy: store.OnLimitQueue,
@@ -398,7 +399,7 @@ func TestConcurrency_CostHeavyWaiterHoldsFIFO(t *testing.T) {
 }
 
 func TestConcurrency_CostBackfillsBehindNonFittingHeavyWaiter(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "db", HolderID: "holder/n", RunID: "holder", NodeID: "n",
 		Capacity: 8, Cost: 6, Policy: store.OnLimitQueue,
@@ -431,7 +432,7 @@ func TestConcurrency_CostBackfillsBehindNonFittingHeavyWaiter(t *testing.T) {
 }
 
 func TestConcurrency_CostPromotionBackfillsBehindNonFittingHeavyWaiter(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "db", HolderID: "holder-heavy/n", RunID: "holder-heavy", NodeID: "n",
 		Capacity: 8, Cost: 6, Policy: store.OnLimitQueue,
@@ -470,7 +471,7 @@ func TestConcurrency_CostPromotionBackfillsBehindNonFittingHeavyWaiter(t *testin
 }
 
 func TestConcurrency_CostBackfillStopsWhenYoungerHolderBlocksOldestWaiter(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "db", HolderID: "older/n", RunID: "older", NodeID: "n",
 		Capacity: 10, Cost: 5, Policy: store.OnLimitQueue,
@@ -504,7 +505,7 @@ func TestConcurrency_CostBackfillStopsWhenYoungerHolderBlocksOldestWaiter(t *tes
 }
 
 func TestConcurrency_CostBackfillDeletesDeadEarlierWaiter(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "db", HolderID: "holder/n", RunID: "holder", NodeID: "n",
 		Capacity: 8, Cost: 6, Policy: store.OnLimitQueue,
@@ -536,7 +537,7 @@ func TestConcurrency_CostBackfillDeletesDeadEarlierWaiter(t *testing.T) {
 }
 
 func TestConcurrency_MostRestrictiveCapacityWins(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "db", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 5, Cost: 1, Policy: store.OnLimitQueue,

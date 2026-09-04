@@ -3,18 +3,18 @@ package store_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestMinVersion_FreshOpenStampsBinaryVersion(t *testing.T) {
 	store.SetBinaryVersion("v0.16.0")
 	t.Cleanup(func() { store.SetBinaryVersion("") })
 
-	path := filepath.Join(t.TempDir(), "stamp.db")
-	st, err := store.Open(path)
+	target := storetest.New(t)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -31,9 +31,9 @@ func TestMinVersion_FreshOpenStampsBinaryVersion(t *testing.T) {
 }
 
 func TestSkew_MessageNamesRequirementsAndVersions(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "skew_stamped.db")
+	target := storetest.New(t)
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestSkew_MessageNamesRequirementsAndVersions(t *testing.T) {
 	store.SetBinaryVersion("v0.38.2")
 	t.Cleanup(func() { store.SetBinaryVersion("") })
 
-	_, err = store.Open(path)
+	_, err = target.TryOpen()
 	if err == nil {
 		t.Fatal("Open against a DB listing unknown requirements should fail")
 	}
@@ -69,9 +69,9 @@ func TestSkew_MessageNamesRequirementsAndVersions(t *testing.T) {
 }
 
 func TestSkew_DevelStampNamesANewerBuild(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "skew_unstamped.db")
+	target := storetest.New(t)
 
-	st, err := store.Open(path)
+	st, err := target.TryOpen()
 	if err != nil {
 		t.Fatalf("Open#1: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestSkew_DevelStampNamesANewerBuild(t *testing.T) {
 	store.SetBinaryVersion("v0.38.2")
 	t.Cleanup(func() { store.SetBinaryVersion("") })
 
-	_, err = store.Open(path)
+	_, err = target.TryOpen()
 	var skew *store.SkewError
 	if !errors.As(err, &skew) {
 		t.Fatalf("err = %v, want *SkewError", err)
@@ -101,7 +101,7 @@ func TestSkew_DevelStampNamesANewerBuild(t *testing.T) {
 }
 
 func TestCurrentSchemaVersion_ReportsRecorded(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "current.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

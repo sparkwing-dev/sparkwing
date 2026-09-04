@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 // A trigger returned to the queue and taken by another consumer must
 // stop answering to the previous claimant's token, because that claim
 // is what authorizes the run's writes and its secret reads.
 func TestTriggerClaim_ReclaimDropsPreviousClaimant(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
 
@@ -44,7 +45,7 @@ func TestTriggerClaim_ReclaimDropsPreviousClaimant(t *testing.T) {
 }
 
 func TestTriggerClaim_RequeueUnstartedClaimDropsClaimant(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
 
@@ -73,7 +74,7 @@ func TestTriggerClaim_RequeueUnstartedClaimDropsClaimant(t *testing.T) {
 }
 
 func TestTriggerClaim_ReleaseAtGenerationDropsClaimant(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
 
@@ -109,7 +110,7 @@ func TestTriggerClaim_ReleaseAtGenerationDropsClaimant(t *testing.T) {
 // the trigger's own completion, which is what lets the holder close out
 // or retry a close.
 func TestTriggerClaim_ClaimantOutlivesLeaseAndCompletion(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
 
@@ -140,7 +141,7 @@ func TestTriggerClaim_ClaimantOutlivesLeaseAndCompletion(t *testing.T) {
 // A trigger nobody holds and a trigger that does not exist are different
 // answers: the first is the zero identity, the second is ErrNotFound.
 func TestTriggerClaim_ClaimantClearedByRequeue(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	runnerA := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_aaaaaaaa"}
 

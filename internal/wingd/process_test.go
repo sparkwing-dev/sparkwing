@@ -2,6 +2,7 @@ package wingd_test
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testleak"
 )
 
 var (
@@ -22,6 +25,12 @@ var (
 func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(fixtureDir)
+	if code == 0 {
+		if err := testleak.Check(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			code = 1
+		}
+	}
 	os.Exit(code)
 }
 

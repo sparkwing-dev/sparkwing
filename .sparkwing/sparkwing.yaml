@@ -23,6 +23,9 @@ pipelines:
   - name: integration
     entrypoint: Integration
 
+  - name: store-postgres
+    entrypoint: StorePostgres
+
   - name: build
     entrypoint: Build
 

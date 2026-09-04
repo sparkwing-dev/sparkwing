@@ -19,6 +19,7 @@ func ExampleNew() {
 		fmt.Println("store:", err)
 		return
 	}
+	defer st.Close()
 
 	srv := controller.New(st, nil)
 	ts := httptest.NewServer(srv.Handler())
@@ -49,7 +50,12 @@ func (passthroughCipher) Open(envelope string) (string, error) {
 func ExampleServer_WithSecretsCipher() {
 	dir, _ := os.MkdirTemp("", "sparkwing-cipher-")
 	defer os.RemoveAll(dir)
-	st, _ := store.Open(filepath.Join(dir, "state.db"))
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		fmt.Println("store:", err)
+		return
+	}
+	defer st.Close()
 
 	srv := controller.New(st, nil).WithSecretsCipher(passthroughCipher{})
 	_ = srv

@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestReapTimedOutApprovals_ResolvesElapsedApprovals(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-stuck", "gate")
 
@@ -47,7 +48,7 @@ func TestReapTimedOutApprovals_ResolvesElapsedApprovals(t *testing.T) {
 }
 
 func TestReapTimedOutApprovals_LeavesInsideWindow(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-active", "gate")
 
@@ -71,7 +72,7 @@ func TestReapTimedOutApprovals_LeavesInsideWindow(t *testing.T) {
 }
 
 func TestReapTimedOutApprovals_IgnoresResolved(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	seedRunAndNode(t, s, "run-done", "gate")
 

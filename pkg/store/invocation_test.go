@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestCreateRun_InvocationRoundTrip(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 
 	want := map[string]any{
@@ -69,7 +70,7 @@ func TestCreateRun_InvocationRoundTrip(t *testing.T) {
 }
 
 func TestCreateRun_NoInvocationLeavesColumnNil(t *testing.T) {
-	s := openStore(t)
+	s := storetest.Open(t)
 	ctx := context.Background()
 	if err := s.CreateRun(ctx, store.Run{
 		ID: "run-Y", Pipeline: "p", Status: "running", StartedAt: time.Now(),

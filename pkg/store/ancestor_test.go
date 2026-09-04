@@ -2,22 +2,12 @@ package store_test
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
-
-func openAncestorStore(t *testing.T) *store.Store {
-	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatalf("store.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
-}
 
 func insertChain(t *testing.T, s *store.Store, entries []struct{ id, pipeline string }) {
 	t.Helper()
@@ -38,7 +28,7 @@ func insertChain(t *testing.T, s *store.Store, entries []struct{ id, pipeline st
 }
 
 func TestAncestor_EmptyWhenNoParent(t *testing.T) {
-	s := openAncestorStore(t)
+	s := storetest.Open(t)
 	insertChain(t, s, []struct{ id, pipeline string }{
 		{"only", "build"},
 	})
@@ -52,7 +42,7 @@ func TestAncestor_EmptyWhenNoParent(t *testing.T) {
 }
 
 func TestAncestor_ReturnsChain(t *testing.T) {
-	s := openAncestorStore(t)
+	s := storetest.Open(t)
 	insertChain(t, s, []struct{ id, pipeline string }{
 		{"root", "A"},
 		{"mid", "B"},
@@ -74,7 +64,7 @@ func TestAncestor_ReturnsChain(t *testing.T) {
 }
 
 func TestAncestor_TerminatesOnMissingParent(t *testing.T) {
-	s := openAncestorStore(t)
+	s := storetest.Open(t)
 	insertChain(t, s, []struct{ id, pipeline string }{
 		{"root", "A"},
 		{"mid", "B"},
@@ -92,7 +82,7 @@ func TestAncestor_TerminatesOnMissingParent(t *testing.T) {
 }
 
 func TestAncestor_RunIDNotFound(t *testing.T) {
-	s := openAncestorStore(t)
+	s := storetest.Open(t)
 	got, err := s.GetRunAncestorPipelines(context.Background(), "does-not-exist")
 	if err != nil {
 		t.Fatalf("walk: %v", err)

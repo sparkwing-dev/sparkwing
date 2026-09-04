@@ -4,10 +4,11 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func TestConcurrency_QueuedResponseCarriesPositionAndHolders(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 
 	h := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
@@ -50,7 +51,7 @@ func TestConcurrency_QueuedResponseCarriesPositionAndHolders(t *testing.T) {
 }
 
 func TestConcurrency_StateDerivesWaiterPositions(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",

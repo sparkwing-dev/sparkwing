@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func ctxT(t *testing.T) context.Context {
@@ -52,7 +53,7 @@ func createLiveRunT(t *testing.T, s *store.Store, runID string) {
 }
 
 func TestConcurrency_GrantedWhenSlotAvailable(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	resp := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -66,7 +67,7 @@ func TestConcurrency_GrantedWhenSlotAvailable(t *testing.T) {
 }
 
 func TestConcurrencyHolderPreservesCost(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	resp := acquireT(t, s, store.AcquireSlotRequest{
 		Key:      "k-cost",
 		HolderID: "r1/n1",
@@ -93,7 +94,7 @@ func TestConcurrencyHolderPreservesCost(t *testing.T) {
 }
 
 func TestConcurrency_QueueWhenFull(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	r1 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -128,7 +129,7 @@ func finishRunT(t *testing.T, s *store.Store, runID string) {
 }
 
 func TestConcurrency_AcquireReapsTerminalHolderBeforeAccounting(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	r1 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "terminal-holder", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: time.Hour,
@@ -151,7 +152,7 @@ func TestConcurrency_AcquireReapsTerminalHolderBeforeAccounting(t *testing.T) {
 }
 
 func TestConcurrency_ResolveWaiterReapsTerminalHolderAndPromotes(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	r1 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "terminal-promote", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: time.Hour,
@@ -181,7 +182,7 @@ func TestConcurrency_ResolveWaiterReapsTerminalHolderAndPromotes(t *testing.T) {
 }
 
 func TestConcurrency_Semaphore(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	for i := range 3 {
 		holder := store.AcquireSlotRequest{
 			Key: "k", HolderID: id("r", i), RunID: id("r", i), NodeID: "n1",
@@ -202,7 +203,7 @@ func TestConcurrency_Semaphore(t *testing.T) {
 }
 
 func TestConcurrency_CoalesceReturnsLeader(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -220,7 +221,7 @@ func TestConcurrency_CoalesceReturnsLeader(t *testing.T) {
 }
 
 func TestConcurrency_Skip(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -242,7 +243,7 @@ func TestConcurrency_Skip(t *testing.T) {
 }
 
 func TestConcurrency_Fail(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -257,7 +258,7 @@ func TestConcurrency_Fail(t *testing.T) {
 }
 
 func TestConcurrency_CancelOthersMarksOldestSuperseded(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -295,7 +296,7 @@ func TestConcurrency_CancelOthersMarksOldestSuperseded(t *testing.T) {
 }
 
 func TestConcurrency_CacheHitShortCircuits(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	r1 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
@@ -322,7 +323,7 @@ func TestConcurrency_CacheHitShortCircuits(t *testing.T) {
 }
 
 func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	r1 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
@@ -364,7 +365,7 @@ func TestConcurrency_BypassReadSkipsCacheHitButPreservesWrite(t *testing.T) {
 }
 
 func TestConcurrency_DriftWarnOnCapacityChange(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	r1 := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -385,7 +386,7 @@ func TestConcurrency_DriftWarnOnCapacityChange(t *testing.T) {
 }
 
 func TestConcurrency_PromoteNextWaiters(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
@@ -420,7 +421,7 @@ func TestConcurrency_PromoteNextWaiters(t *testing.T) {
 }
 
 func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	started := time.Now()
 	for _, id := range []string{"r2", "r3"} {
@@ -472,7 +473,7 @@ func TestConcurrency_PromoteSkipsAndDeletesFinishedRunWaiter(t *testing.T) {
 }
 
 func TestConcurrency_CoalesceFollowersResolvedByLeader(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",
@@ -504,7 +505,7 @@ func TestConcurrency_CoalesceFollowersResolvedByLeader(t *testing.T) {
 }
 
 func TestConcurrency_HeartbeatReportsSuperseded(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "r1/n1", RunID: "r1", NodeID: "n1",

@@ -23,7 +23,7 @@ func (PreCommit) ShortHelp() string {
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-) over the staged files, or over the files changed since origin/main when nothing is staged, and on the staged change, no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs go test -race on the packages that hold the staged Go files (or the Go files changed since origin/main when nothing is staged), runs the pkg/store suite against an embedded Postgres when that change touches pkg/store, runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus the configured formatters (gofumpt + goimports), no em dashes, and no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-) over the staged files, or over the files changed since origin/main when nothing is staged, and on the staged change, no disallowed comments (only GoDoc on exported APIs and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The formatters, em-dash, and tracker-ID steps name the mode they ran in, and the lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -61,6 +61,8 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	buildStep := sparkwing.Step(w, "build", runBuild).Needs(vetStep)
 	testStep := sparkwing.Step(w, "test", runTest).Needs(buildStep)
 	sparkwing.Step(w, "lint", runGolangciLint).Needs(testStep)
+	sparkwing.Step(w, "race-touched", runRaceTouched).Needs(testStep)
+	sparkwing.Step(w, "store-postgres", runStorePostgresIfTouched).Needs(testStep)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)

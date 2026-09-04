@@ -5,12 +5,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 // A memo entry outlives its origin run's rows, so a later hit hands the
 // consumer an output_ref whose node row is gone and the node fails.
 func TestDeleteRun_DropsMemoEntriesFromDeletedRun(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -39,7 +40,7 @@ func TestDeleteRun_DropsMemoEntriesFromDeletedRun(t *testing.T) {
 }
 
 func TestPruneRunsOlderThan_DropsMemoEntriesFromPrunedRuns(t *testing.T) {
-	s := newStoreT(t)
+	s := storetest.Open(t)
 	ctx := ctxT(t)
 
 	acquireT(t, s, store.AcquireSlotRequest{

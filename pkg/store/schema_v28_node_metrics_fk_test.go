@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
 func countNodeMetrics(t *testing.T, db *sql.DB) int {
@@ -40,7 +41,7 @@ func seedRunWithMetricSample(t *testing.T, st *store.Store, runID string, starte
 }
 
 func TestDeleteRunRemovesItsNodeMetrics(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestDeleteRunRemovesItsNodeMetrics(t *testing.T) {
 }
 
 func TestPruneRunsOlderThanRemovesNodeMetrics(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
