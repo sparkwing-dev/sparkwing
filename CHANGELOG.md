@@ -422,8 +422,10 @@ code change to unlock.
   then updated the trigger as two statements against two tables, so at READ
   COMMITTED a run that started in between was requeued anyway and a second
   copy of live work went back on the pending queue. The run status is now a
-  correlated subquery in the requeue's own WHERE, leaving no window between
-  the check and the write.
+  correlated subquery in the requeue's own WHERE, which narrows that window
+  from a round trip to a single statement. A run whose start commits after
+  that statement's snapshot is still invisible to it; closing that remainder
+  needs the consumer's start-of-run path to touch the trigger row.
 
 - **store:** Concurrent `sparkwing.Annotate` calls no longer lose entries on
   Postgres. The node, step and run annotation appends are read-modify-write
@@ -431,7 +433,10 @@ code change to unlock.
   read the same list and the second write is computed from the stale copy,
   while `annotation_count` -- a real atomic increment -- counts both, leaving
   a run whose counter exceeds the annotations it can show. The reads now take
-  the row lock they always needed.
+  the row lock they always needed, and the step append's placeholder insert
+  upserts rather than skipping on conflict, so an appender that loses the
+  insert waits for the winner's row instead of reading past it and dropping
+  the message.
 
 - **store:** A superseded dispatch can no longer stamp its outcome over the
   run the current claim is producing. `FinishRunAtGeneration` read the

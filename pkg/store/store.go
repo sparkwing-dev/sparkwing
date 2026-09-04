@@ -3115,29 +3115,26 @@ ORDER BY node_id, started_at`, runID)
 // yet exist (annotations may fire before step_start lands in the
 // rare reorder case). Read-modify-write inside one transaction that
 // holds the rows it rewrites, which is what keeps concurrent
-// appenders from losing entries.
+// appenders from losing entries: the placeholder upsert returns the
+// row it locked, so an appender that lost the insert waits for the
+// winner rather than reading past it.
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `
+	// safety: only DO UPDATE waits on a conflicting insert that has not
+	// committed; DO NOTHING skips it and the read that followed saw no row,
+	// dropping the annotation. The assignment rewrites status to itself
+	// because the row, not the value, is what this needs.
+	var current []byte
+	if err := tx.QueryRowContext(ctx, `
 INSERT INTO node_steps (run_id, node_id, step_id, status)
 VALUES (?,?,?,?)
-ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, nodeID, stepID, StepRunning); err != nil {
-		return err
-	}
-	var current []byte
-	row := tx.QueryRowContext(ctx, `
-SELECT annotations_json FROM node_steps
-WHERE run_id = ? AND node_id = ? AND step_id = ?`+tx.forUpdate(),
-		runID, nodeID, stepID)
-	if err := row.Scan(&current); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
+ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
+RETURNING annotations_json`,
+		runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
 		return err
 	}
 	var list []string
@@ -4287,9 +4284,13 @@ func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
 // alone cannot see, so requeueing it would put a second copy of live
 // work on the queue; that case belongs to the orphan reaper, which
 // judges by heartbeat. The run's status is a correlated subquery inside
-// the requeue's own WHERE rather than a read before it, so there is no
-// window between the check and the write for a run to start in. A run
-// with no row at all reads as not started, which is what an unclaimed
+// the requeue's own WHERE rather than a read before it, which narrows
+// the window a run can start in from a round trip to a single
+// statement. It does not close it: the subquery reads that statement's
+// snapshot, so a run that commits its start afterwards is invisible
+// here, and nothing this function locks would make it visible -- the
+// consumer that starts a run does not touch the trigger row. A run with
+// no row at all reads as not started, which is also what an unclaimed
 // trigger looks like before its consumer gets that far.
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
 	res, err := s.exec(ctx,
