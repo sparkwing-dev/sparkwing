@@ -4,6 +4,7 @@ package procgroup
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,54 @@ import (
 )
 
 func TestKillAnswersWhileCleanupWaitsOnStubbornDescendants(t *testing.T) {
+	g, releaseDescendants := parkCleanupOnStubbornDescendants(t)
+
+	killed := make(chan error, 1)
+	go func() { killed <- g.Kill() }()
+	select {
+	case err := <-killed:
+		if err != nil {
+			t.Fatalf("kill during cleanup: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("kill blocked behind the descendant wait it exists to shortcut")
+	}
+
+	releaseDescendants()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for !g.Reaped() {
+		select {
+		case <-deadline.C:
+			t.Fatalf("group %d was not reaped after the descendants cleared", g.ID())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestTerminateLeavesOnItsOwnDeadlineWhileCleanupIsParked(t *testing.T) {
+	g, _ := parkCleanupOnStubbornDescendants(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	terminated := make(chan error, 1)
+	start := time.Now()
+	go func() { terminated <- g.Terminate(ctx, 10*time.Millisecond) }()
+	select {
+	case err := <-terminated:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("terminate during a parked cleanup = %v, want its own deadline", err)
+		}
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("terminate took %s to honour a 500ms deadline", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("terminate blocked past its deadline behind a parked cleanup")
+	}
+}
+
+func parkCleanupOnStubbornDescendants(t *testing.T) (*Group, func()) {
+	t.Helper()
 	g := startHelper(t, "short")
 	t.Cleanup(func() {
 		if !g.Reaped() {
@@ -64,28 +113,5 @@ func TestKillAnswersWhileCleanupWaitsOnStubbornDescendants(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("cleanup never reached the descendant wait")
 	}
-
-	killed := make(chan error, 1)
-	go func() { killed <- g.Kill() }()
-	select {
-	case err := <-killed:
-		if err != nil {
-			t.Fatalf("kill during cleanup: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("kill blocked behind the descendant wait it exists to shortcut")
-	}
-
-	releaseDescendants()
-	select {
-	case err := <-finished:
-		if err != nil {
-			t.Fatalf("cleanup after the descendants cleared: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("cleanup did not complete after the descendants cleared")
-	}
-	if !g.Reaped() {
-		t.Fatalf("group %d was not reaped", g.ID())
-	}
+	return g, releaseDescendants
 }

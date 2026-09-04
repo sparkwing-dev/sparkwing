@@ -54,7 +54,7 @@ type Group struct {
 	leaderDone chan struct{}
 	leaderErr  error
 	leaderMu   sync.Mutex
-	cleanupMu  sync.Mutex
+	cleanup    chan struct{}
 	finishMu   sync.Mutex
 	reaped     bool
 	reapedFlag atomic.Bool
@@ -306,6 +306,7 @@ func start(cmd *exec.Cmd, session bool) (*Group, error) {
 		cmd:        cmd,
 		id:         cmd.Process.Pid,
 		leaderDone: make(chan struct{}),
+		cleanup:    make(chan struct{}, 1),
 		session:    session,
 		inspect:    descendantsEmpty,
 	}
@@ -395,11 +396,17 @@ func (g *Group) Terminate(ctx context.Context, grace time.Duration) error {
 }
 
 func (g *Group) finish(ctx context.Context, grace time.Duration) error {
-	// safety: cleanupMu serialises cleanups so only one reaps, while finishMu
-	// stays free during the descendant wait, which has no bound. Kill and
-	// Terminate exist to shortcut that wait and must never queue behind it.
-	g.cleanupMu.Lock()
-	defer g.cleanupMu.Unlock()
+	// safety: the cleanup slot serialises cleanups so only one reaps, while
+	// finishMu stays free during the descendant wait, which has no bound. Kill
+	// signals without either, and Terminate leaves on its own deadline rather
+	// than queueing behind a wait it cannot shorten.
+	if err := g.acquireCleanup(ctx); err != nil {
+		if reaped, reapErr := g.reapedResult(); reaped {
+			return reapErr
+		}
+		return fmt.Errorf("%w: await group %d cleanup: %w", ErrCleanup, g.id, err)
+	}
+	defer func() { <-g.cleanup }()
 	if reaped, err := g.reapedResult(); reaped {
 		return err
 	}
@@ -418,6 +425,20 @@ func (g *Group) finish(ctx context.Context, grace time.Duration) error {
 	g.reaped = true
 	g.reapedFlag.Store(true)
 	return g.waitErr
+}
+
+func (g *Group) acquireCleanup(ctx context.Context) error {
+	select {
+	case g.cleanup <- struct{}{}:
+		return nil
+	default:
+	}
+	select {
+	case g.cleanup <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (g *Group) reapedResult() (bool, error) {
