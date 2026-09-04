@@ -116,3 +116,65 @@ func TestFinishRun_FollowUpsSurviveARequestCancel(t *testing.T) {
 		t.Errorf("the profile fold stopped before %s when the client went away", lastNode)
 	}
 }
+
+func queuedCommitStatusServer(t *testing.T, apiBase string, httpClient *http.Client, logs *lockedBuffer) *Server {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	s := New(st, slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	s.githubCommitStatuses = newGitHubCommitStatusReporter("github-token", "", apiBase, httpClient)
+	t.Cleanup(s.githubCommitStatuses.stop)
+	s.githubCommitStatuses.enqueue(s.logger, githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: strings.Repeat("1", 40),
+		Pipeline: "pr-gate", RunID: "run-drain", State: "pending",
+		Description: "Sparkwing pipeline is running",
+	})
+	return s
+}
+
+// The status queue holds work a finished run has no other producer for, so
+// its drain carries a budget of its own; ServeWith used to hand it the one
+// the listener's own shutdown had already spent.
+func TestDrainGitHubCommitStatuses_DoesNotInheritASpentBudget(t *testing.T) {
+	if finishRunFollowUpTimeout >= controllerShutdownBudget {
+		t.Fatalf("finishRunFollowUpTimeout %s must stay under the shutdown budget %s",
+			finishRunFollowUpTimeout, controllerShutdownBudget)
+	}
+
+	posted := make(chan struct{}, 4)
+	release := make(chan struct{})
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		posted <- struct{}{}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	spentLogs := &lockedBuffer{}
+	spent := queuedCommitStatusServer(t, github.URL, github.Client(), spentLogs)
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := spent.Shutdown(expired); err == nil {
+		t.Error("draining on an already-spent budget reported a clean drain")
+	}
+
+	liveLogs := &lockedBuffer{}
+	live := queuedCommitStatusServer(t, github.URL, github.Client(), liveLogs)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		close(release)
+	}()
+	live.drainGitHubCommitStatuses()
+	if got := liveLogs.String(); strings.Contains(got, "github commit status shutdown incomplete") {
+		t.Errorf("the drain ran out of budget: %s", got)
+	}
+	select {
+	case <-posted:
+	case <-time.After(2 * time.Second):
+		t.Error("the queued commit status was never posted")
+	}
+}

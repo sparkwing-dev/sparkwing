@@ -375,8 +375,10 @@ code change to unlock.
   drops -- plausible whenever the fold is slow, which it is, since it walks
   every node's metric series before the status call. Nothing else produces a
   finished run's status, so the check on the pull request stayed `pending`
-  forever. The follow-ups now run detached from the request, under a bound of
-  their own.
+  forever. The follow-ups now run detached from the request, under a bound
+  that sits inside the shutdown budget, and the commit-status queue's drain
+  at shutdown gets a budget of its own instead of whatever the HTTP
+  listener's own shutdown left of one.
 - **controller:** A chunked request body is no longer ignored on the two routes
   whose body is optional. `POST /api/v1/triggers/claim` and
   `POST /api/v1/tokens/{prefix}/rotate` decoded only when the request carried a

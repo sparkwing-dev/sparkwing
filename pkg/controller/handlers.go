@@ -167,8 +167,9 @@ type finishRunReq struct {
 
 // safety: the run row is terminal before the follow-ups run, and nothing else
 // produces the terminal commit status for a finished run, so a client that
-// goes away must not take them with it; the bound stands in for the request's.
-const finishRunFollowUpTimeout = 30 * time.Second
+// goes away must not take them with it. Staying under the shutdown budget
+// keeps a drain that starts mid-handler from ending one.
+const finishRunFollowUpTimeout = controllerShutdownBudget - time.Second
 
 func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
