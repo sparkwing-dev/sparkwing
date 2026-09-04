@@ -94,8 +94,6 @@ func TestPruneRunsOlderThanRemovesNodeMetrics(t *testing.T) {
 	}
 }
 
-// v27 shape: node_metrics with no foreign key, the state every database
-// created before this migration is in.
 const nodeMetricsV27Shape = `
 CREATE TABLE node_metrics (
     run_id          TEXT NOT NULL,
