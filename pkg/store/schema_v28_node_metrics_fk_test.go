@@ -196,9 +196,6 @@ func TestSchemaV28_UpgradeIsSafeToReplay(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "replay28.db")
 	downgradeNodeMetricsToV27(t, path)
 
-	// The first attempt rebuilds the table; every later one re-enters the
-	// migration against a table that already carries the constraint, which is
-	// the path the pragma_foreign_key_list guard exists for.
 	for attempt := 1; attempt <= 3; attempt++ {
 		st, err := store.Open(path)
 		if err != nil {
