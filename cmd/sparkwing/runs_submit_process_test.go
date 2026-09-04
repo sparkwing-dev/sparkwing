@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -257,8 +256,7 @@ func (e *submitTestEnv) stopConsumer() {
 		deadline := time.NewTimer(5 * time.Second)
 		defer deadline.Stop()
 		for {
-			err := syscall.Kill(pid, 0)
-			if errors.Is(err, syscall.ESRCH) {
+			if !processAlive(pid) {
 				return
 			}
 			select {
@@ -403,7 +401,7 @@ func TestRunsSubmit_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 	if !ok {
 		t.Fatal("no consumer to kill")
 	}
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+	if err := signalKill(pid); err != nil {
 		t.Fatalf("kill consumer: %v", err)
 	}
 	waitUntil(t, "the killed consumer's lock to be released", 10*time.Second, func() bool {

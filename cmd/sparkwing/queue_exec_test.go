@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -373,8 +372,8 @@ func TestQueueExecLeaseLossTerminatesBeforePromotingNextCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse child pid %q: %v", startedBody, err)
 	}
-	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("child %d survived lease loss: %v", pid, err)
+	if processAlive(pid) {
+		t.Fatalf("child %d survived lease loss", pid)
 	}
 	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
 		return len(qs.Holders) == 0 && len(qs.Waiters) == 0
@@ -558,8 +557,8 @@ func TestQueueExecRejectsReattachWhileExactSessionIsLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse child pid %q: %v", startedBody, err)
 	}
-	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("child %d survived authoritative rejection: %v", pid, err)
+	if processAlive(pid) {
+		t.Fatalf("child %d survived authoritative rejection", pid)
 	}
 	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
 		return len(qs.Holders) == 0
@@ -1019,7 +1018,7 @@ func waitForQueueExecProcessExit(t *testing.T, pidFile string) {
 	deadline := time.NewTimer(2 * time.Second)
 	defer deadline.Stop()
 	for {
-		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+		if !processAlive(pid) {
 			return
 		}
 		select {
