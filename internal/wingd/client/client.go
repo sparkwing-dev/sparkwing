@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -189,6 +190,11 @@ type Client struct {
 
 	writeMu      sync.Mutex
 	writeTimeout time.Duration
+
+	// safety: a caller that already bounded the whole socket owns the
+	// budget; a per-frame deadline may only tighten it, and must be put
+	// back afterwards rather than cleared.
+	connDeadline time.Time
 
 	ack  wingwire.HelloAck
 	opts Options
@@ -611,13 +617,23 @@ func (cl *Client) writeWithin(msg wingwire.Message, timeout time.Duration) error
 	}
 	cl.writeMu.Lock()
 	defer cl.writeMu.Unlock()
-	if err := nc.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+	deadline := time.Now().Add(timeout)
+	if !cl.connDeadline.IsZero() && cl.connDeadline.Before(deadline) {
+		deadline = cl.connDeadline
+	}
+	if err := nc.SetWriteDeadline(deadline); err != nil {
 		return err
 	}
 	if _, err := nc.Write(line); err != nil {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			// safety: the frame stopped part-written, so everything after it
+			// on this socket is misframed; the retry loops recover by
+			// reconnecting, which they cannot do while it still reads clean.
+			_ = nc.Close()
+		}
 		return err
 	}
-	_ = nc.SetWriteDeadline(time.Time{})
+	_ = nc.SetWriteDeadline(cl.connDeadline)
 	return nil
 }
 
