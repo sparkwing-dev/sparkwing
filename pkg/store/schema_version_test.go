@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/storetest"
 )
 
 func TestSchemaVersion_FreshSQLiteRecordsExpected(t *testing.T) {
@@ -139,7 +140,7 @@ func TestSchemaVersion_PostgresUnknownRequirementRefuses(t *testing.T) {
 
 func TestSchemaVersion_ConcurrentPostgresOpens(t *testing.T) {
 	dsn := pgTestDSN(t)
-	schema := "sw_test_concurrent_" + uniq()
+	schema := "sw_test_concurrent_" + storetest.Unique()
 	admin, err := store.OpenPostgres(context.Background(), dsn)
 	if err != nil {
 		t.Fatalf("admin open: %v", err)
