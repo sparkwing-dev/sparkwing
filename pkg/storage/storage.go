@@ -96,9 +96,13 @@ type ConditionalWriter interface {
 	PutIfMatch(ctx context.Context, key string, r io.Reader, expect ETag) (ETag, error)
 
 	// ConditionalWritesSupported reports whether the configured
-	// endpoint actually enforces write preconditions. Implementations
-	// probe once and memoize. A false result means the caller must
-	// fall back to last-write-wins.
+	// endpoint actually enforces write preconditions. A false result
+	// means the caller must fall back to last-write-wins. An
+	// implementation may answer from a live probe on every call, so a
+	// caller that asks repeatedly memoizes the answer itself -- and
+	// only an answer: an error is not one, and asking again after it is
+	// how a transient failure stops costing the caller its
+	// preconditions for the life of the process.
 	ConditionalWritesSupported(ctx context.Context) (bool, error)
 }
 

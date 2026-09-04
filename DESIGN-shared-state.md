@@ -166,12 +166,16 @@ Notes:
   today, but appended throughout the run rather than dumped at
   the end. Each runner only writes its own run paths; no
   cross-runner contention on a single key.
-- **Offline buffering** is supported. When the object store is
-  unreachable, state writes, cache PUTs, and log appends stage to
-  a local SQLite buffer (`~/.sparkwing/outbox.db`) and replay
-  when connectivity returns. Safe because all keys are
-  per-runner (`runs/<runID>/...`) or content-addressed; no
-  conflicts on replay. No schema or API negotiation needed.
+- **Offline buffering** is supported for state writes. When the
+  object store is unreachable, they stage to a local SQLite buffer
+  (`~/.sparkwing/outbox.db`) and replay when connectivity returns.
+  Safe because all keys are per-runner (`runs/<runID>/...`); no
+  conflicts on replay, and no schema or API negotiation needed. Cache
+  PUTs and log appends do not stage: they fail to their own callers,
+  because the outbox replays a blob to a key and neither has that
+  shape. A run whose state reached only the buffer is reported as an
+  error by `FinishRun` and by `Backend.Close`, since the buffer lives
+  on a disk a CI runner discards at job end.
 - **`s3Concurrency`** coordinates cross-runner reservation over the
   object store's conditional-write CAS, no database. It holds each
   concurrency key's full state -- holders, waiters, memoized output --
@@ -206,16 +210,29 @@ Notes:
 - **Provider support and capability detection**: S3 is the object
   store that enforces these preconditions today (`If-None-Match: *`
   for create-once, `If-Match: <etag>` for compare-and-swap); the
-  filesystem backend enforces them locally for single-host runs. The
+  filesystem backend enforces them for single-host runs by holding a
+  file lock per key, which serializes the processes sharing that path
+  and not only the writers inside one of them. Single-host is the
+  limit, and the probe cannot raise it: a mount whose kernel refuses
+  the lock answers false, but a mount that keeps its locks node-local
+  answers true while enforcing nothing between hosts. NFS mounted
+  `local_lock=flock` or `local_lock=all` is the case to watch -- it is
+  indistinguishable from a local disk here, so two hosts pointed at
+  one NFS path both take the same slot. Use `s3` for state shared
+  across hosts. The
   `ConditionalWriter` contract is provider-agnostic and names the GCS
   generation-match and Azure ETag equivalents, but those backends are
   not yet implemented -- declaring `gcs` or `azure-blob` surfaces an
   unimplemented error at run start. Two checks gate every coordinated
   operation: a static type check that the backend exposes
-  `ConditionalWriter`, and a one-time live probe
+  `ConditionalWriter`, and a live probe
   (`ConditionalWritesSupported`) that catches S3-compatible gateways
-  which accept precondition headers and silently ignore them. Either
-  check failing routes the operation to the last-write-wins fallback.
+  which accept precondition headers and silently ignore them. A
+  backend that fails the type check, and a probe that answers that
+  preconditions are ignored, route every later operation to the
+  last-write-wins fallback. A probe that cannot reach the store has
+  not answered: that operation returns the error and the next one
+  probes again.
 - **Dashboard live updates**: `S3Backend` polls
   `runs/<id>/state.ndjson` for changes. Refresh latency = poll
   interval (default 2-5s), with cache invalidation on a per-run

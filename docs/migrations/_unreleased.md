@@ -113,6 +113,40 @@ CHANGELOG links here.
   It should not be a copy of every credential that shell happened to export,
   and losing the snapshot should narrow what a run can reach, not widen it.
 
+## (Breaking) Clone hosts in inward-only name spaces are refused
+
+- **Before:** A clone URL was checked against the loopback, private,
+  link-local, carrier-grade-NAT, and metadata rules only when its host parsed
+  as an IP address. Any name passed: a forge under `.internal`, a `.local` box on the
+  LAN, `ip6-localhost`. An scp-like URL carrying a second `@`
+  (`git@a@127.0.0.1:repo.git`) was checked as a host named `a@127.0.0.1`,
+  which parses as no address at all, while ssh split the destination at the
+  last `@` and dialled the loopback address.
+- **After:** A host that is, or ends in, `internal`, `local`, `localdomain`,
+  or `home.arpa` is refused, as are the `ip6-*` aliases from the standard
+  `/etc/hosts`. An scp-like host must read as a hostname, so a second `@` is
+  refused outright. `POST /api/v1/triggers` answers 400 for these, as do the
+  `sparkwing-cache` routes `/git/register`, `/archive`, and `/sync/seed`.
+- **Migration:** A deployment that clones from an internal forge under one of
+  those suffixes -- a forge named under `.internal` or `.local` -- stops being able to
+  submit triggers or register repositories for it. Give the forge a name
+  outside those name spaces, which is what a name resolvable off the LAN
+  already needs.
+
+  `sparkwing-cache` revalidates `repo-names.json` when it starts, so an entry
+  registered before this release under such a name is dropped with a
+  `warning: dropping repo "<name>" from repo-names.json` line and its cached
+  clone stops being served. Check the log after upgrading:
+
+  ```bash
+  kubectl logs deploy/sparkwing-cache | grep 'dropping repo'
+  ```
+
+  Re-register anything listed there under a name the validator accepts. The
+  check is deliberately a name check and not an address check; see
+  [docs/security.md](../security.md) for what it does not cover and why
+  egress policy is the control that does.
+
 ## (Breaking) Runner scopes split out of admin
 
 - **Before:** The routes a runner calls to do its job all required `admin`:

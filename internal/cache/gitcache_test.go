@@ -3,7 +3,6 @@ package cache
 import (
 	"archive/tar"
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -1484,9 +1483,7 @@ func TestMetricsDoNotEnumerateMirrors(t *testing.T) {
 	repoNamesMu.Unlock()
 	runGit(t, filepath.Join(repoDir, hash+".git"), "init", "--bare")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go backgroundFetchLoop(ctx, time.Millisecond)
+	startBackgroundFetch(t, time.Millisecond)
 
 	deadline := time.Now().Add(10 * time.Second)
 	var body string

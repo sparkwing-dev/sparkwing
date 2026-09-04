@@ -402,6 +402,12 @@ uploaded the binary, because the cache derives the digest from the body it was
 handed. The bearer token on `PUT /bin/<name>` is what keeps an attacker from
 uploading a poisoned binary along with a digest that attests it.
 
+A `<name>` is one to four hyphen-joined groups of eight hex digits, optionally
+suffixed `.sha256`. That suffix is the digest sidecar a cache-backed artifact
+store writes beside the blob: it reaches the cache through the generic artifact
+store interface, which carries no `Digest` header, so it keeps its own copy of
+the digest under its own key.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/bin/<name>` | Download cached binary; carries `Digest: sha-256=<base64>` and `ETag` (auth required) |

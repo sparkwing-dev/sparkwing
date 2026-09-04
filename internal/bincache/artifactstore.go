@@ -16,6 +16,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
+// DigestBackfillEnv names the variable that lets a fetch accept a blob
+// whose digest sidecar is missing and write the sidecar from the bytes
+// it just downloaded. Unset, a missing sidecar fails the fetch.
+const DigestBackfillEnv = "SPARKWING_ARTIFACT_DIGEST_BACKFILL"
+
 func digestKey(key string) string { return "bin/" + key + ".sha256" }
 
 func storedDigest(ctx context.Context, store storage.ArtifactStore, key string) ([]byte, error) {
@@ -40,10 +45,18 @@ func storedDigest(ctx context.Context, store storage.ArtifactStore, key string) 
 
 func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, key, dest string) error {
 	want, err := storedDigest(ctx, store, key)
-	// safety: a blob published before the companion object existed heals on this fetch rather than failing forever.
-	backfill := errors.Is(err, storage.ErrNotFound)
-	if err != nil && !backfill {
-		return err
+	backfill := false
+	if err != nil {
+		if !errors.Is(err, storage.ErrNotFound) {
+			return err
+		}
+		// safety: with no companion object nothing outside the fetched bytes attests them, so healing is opt-in.
+		if os.Getenv(DigestBackfillEnv) == "" {
+			slog.Default().Warn("artifact-store blob has no stored digest; refusing it",
+				"hash", key, "opt_in", DigestBackfillEnv)
+			return err
+		}
+		backfill = true
 	}
 	rc, err := store.Get(ctx, "bin/"+key)
 	if err != nil {
@@ -55,7 +68,8 @@ func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, ke
 		return err
 	}
 	tmp := dest + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	// safety: the blob earns its execute bit after the digest settles, never while it is still unverified.
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -74,12 +88,16 @@ func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, ke
 		if err := store.Put(ctx, digestKey(key), strings.NewReader(hex.EncodeToString(got))); err != nil {
 			slog.Default().Warn("artifact-store digest backfill failed", "err", err, "hash", key)
 		}
-		return os.Rename(tmp, dest)
+	} else {
+		// safety: the key folds source inputs, not content, so only this digest ties the bytes to the cache entry.
+		if !bytes.Equal(got, want) {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("%w: bin/%s", ErrDigest, key)
+		}
 	}
-	// safety: the key folds source inputs, not content, so only this digest ties the bytes to the cache entry.
-	if !bytes.Equal(got, want) {
+	if err := os.Chmod(tmp, 0o755); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("%w: bin/%s", ErrDigest, key)
+		return err
 	}
 	return os.Rename(tmp, dest)
 }

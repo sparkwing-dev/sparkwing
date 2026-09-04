@@ -28,6 +28,22 @@ func TestConformance_ConditionalWriter(t *testing.T) {
 	})
 }
 
+func TestConformance_ConditionalWriterAcrossHandles(t *testing.T) {
+	conformance.TestConditionalWriterAcrossHandles(t, func() (storage.ArtifactStore, storage.ArtifactStore) {
+		dir := t.TempDir()
+		return newArtifactStore(t, dir), newArtifactStore(t, dir)
+	})
+}
+
+func newArtifactStore(t *testing.T, dir string) storage.ArtifactStore {
+	t.Helper()
+	s, err := fs.NewArtifactStore(dir)
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
+	return s
+}
+
 func TestConformance_LogStore(t *testing.T) {
 	conformance.TestLogStore(t, func() storage.LogStore {
 		s, err := fs.NewLogStore(t.TempDir())

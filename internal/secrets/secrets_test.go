@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,4 +207,83 @@ func contains(xs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+var awkwardDotenvValues = map[string]string{
+	"NEWLINE":   "line1\nline2",
+	"QUOTED":    `say "hi"`,
+	"DQUOTE":    `"json string"`,
+	"BACKSLASH": `C:\path\to`,
+	"EQUALS":    "a=b=c",
+	"SPACES":    "  padded  ",
+	"HASH":      "value # not a comment",
+	"TAB":       "a\tb",
+	"PEM":       "-----BEGIN KEY-----\nabc=\ndef\n-----END KEY-----\n",
+	"EMPTY":     "",
+	"PLAIN":     "abc123",
+}
+
+func TestDotenvEntry_RoundTripsAwkwardValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.env")
+	for name, want := range awkwardDotenvValues {
+		if err := WriteDotenvEntry(path, name, want); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	got, err := ListDotenvEntries(path)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for name, want := range awkwardDotenvValues {
+		if got[name] != want {
+			t.Errorf("%s = %q, want %q", name, got[name], want)
+		}
+	}
+}
+
+func TestDotenvEntry_UnrelatedWritesDoNotReEscape(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.env")
+	const want = `"json string"`
+	if err := WriteDotenvEntry(path, "DQUOTE", want); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for i := range 5 {
+		if err := WriteDotenvEntry(path, fmt.Sprintf("OTHER%d", i), "x"); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+	}
+
+	entries, err := ListDotenvEntries(path)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if entries["DQUOTE"] != want {
+		t.Fatalf("DQUOTE = %q after five unrelated writes, want %q", entries["DQUOTE"], want)
+	}
+}
+
+func TestParseDotenv_ReadsHandWrittenFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secrets.env")
+	body := "# comment\nBARE=abc123\nSPACED = spaced value \nSINGLE='raw \\n stays'\nDOUBLE=\"escaped \\n newline\"\nUNDECODABLE=\"C:\\path\"\n\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ListDotenvEntries(path)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	want := map[string]string{
+		"BARE":        "abc123",
+		"SPACED":      "spaced value",
+		"SINGLE":      `raw \n stays`,
+		"DOUBLE":      "escaped \n newline",
+		"UNDECODABLE": `C:\path`,
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
 }
