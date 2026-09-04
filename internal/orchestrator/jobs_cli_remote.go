@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
@@ -263,12 +264,12 @@ func JobLogsRemote(ctx context.Context, controllerURL, logsURL, runID string, op
 }
 
 func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token, runID string, opts LogsOpts, out io.Writer) error {
-	if opts.EventsOnly {
-		return errors.New("--events-only is local-mode only today (remote envelope ingestion is a follow-up)")
-	}
 	ctrl := client.NewWithToken(controllerURL, nil, token)
 	var logc storage.LogStore = sparkwinglogs.New(logsURL, nil, token)
 
+	if opts.EventsOnly {
+		return writeEventsViaBackend(ctx, backend.NewClientBackend(ctrl, logc), runID, opts, out)
+	}
 	if !opts.Follow {
 		nodes, err := ctrl.ListNodes(ctx, runID)
 		if err != nil {
