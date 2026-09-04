@@ -51,11 +51,10 @@ func lintCommandFor(holdsBudget bool) string {
 }
 
 func shouldLeaseLintPath(string) bool {
-	// safety: the slot's cache is shared by every worktree that leases it, and
-	// golangci-lint answers from cached findings whose paths belonged to the
-	// tree the slot pointed at last, so a leased lint reported 0 issues for a
-	// tree with eight. Each checkout keeps its own cache until the slot keys
-	// its cache by tree.
+	// safety: the slot cache is shared by every worktree that leases it, and
+	// golangci-lint answers from findings cached under the tree the slot pointed
+	// at last: a leased lint reported 0 issues for a tree with eight. Each
+	// checkout keeps its own cache until the slot keys its cache by tree.
 	return false
 }
 
