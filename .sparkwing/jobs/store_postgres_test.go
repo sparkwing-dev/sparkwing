@@ -220,20 +220,3 @@ func TestStorePostgresRunKeepsRemovingWhenTheServerWillNotStart(t *testing.T) {
 		t.Error("a failed start left the data directory behind")
 	}
 }
-
-func TestWithTempDirRestoresTheCallersSetting(t *testing.T) {
-	scratch := t.TempDir()
-	t.Setenv("TMPDIR", "/original")
-	var seen string
-
-	if err := withTempDir(scratch, func() error { seen = os.TempDir(); return nil }); err != nil {
-		t.Fatalf("withTempDir: %v", err)
-	}
-
-	if seen != scratch {
-		t.Errorf("TMPDIR inside the call = %q, want %q", seen, scratch)
-	}
-	if got := os.Getenv("TMPDIR"); got != "/original" {
-		t.Errorf("TMPDIR after the call = %q, want /original", got)
-	}
-}

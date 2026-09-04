@@ -143,7 +143,7 @@ func (p *StorePostgres) run(ctx context.Context) error {
 				layout := storePostgresLayout(root, sparkwing.ToolCacheDir("embedded-postgres"), port)
 				sparkwing.Info(ctx, "starting embedded postgres on :%d (data=%s)", layout.Port, layout.Data)
 				candidate := embeddedpostgres.NewDatabase(layout.config(&serverLog))
-				if err := withTempDir(root, candidate.Start); err != nil {
+				if err := candidate.Start(); err != nil {
 					lastErr = fmt.Errorf("start embedded postgres on :%d: %w", layout.Port, err)
 					continue
 				}
@@ -227,24 +227,6 @@ func runStorePostgresSuite(ctx context.Context, r storePostgresRun) (err error) 
 		stop()
 		return fmt.Errorf("interrupted by %s while the store suite was running", sig)
 	}
-}
-
-func withTempDir(dir string, run func() error) error {
-	// safety: embedded-postgres creates its own log file under TMPDIR and
-	// never removes it, so the start runs with TMPDIR inside the root that
-	// this pipeline deletes.
-	previous, had := os.LookupEnv("TMPDIR")
-	if err := os.Setenv("TMPDIR", dir); err != nil {
-		return err
-	}
-	defer func() {
-		if had {
-			_ = os.Setenv("TMPDIR", previous)
-			return
-		}
-		_ = os.Unsetenv("TMPDIR")
-	}()
-	return run()
 }
 
 func lastLines(text string, n int) string {
