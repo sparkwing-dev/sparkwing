@@ -112,9 +112,15 @@ this file is a menu and checklist, not a command that every change must run.
   `pkg/docs/mirror/`, and the vendored runner-bundle tarball) in one pass and
   is a no-op on a clean tree. Resolve a merge conflict in any of them by
   taking either side, running that script, and committing the result.
-  `bash bin/check-changelog.sh --fix` does the same for `CHANGELOG.md`,
-  collapsing the duplicate `###` headings that parallel landings leave under
-  `[Unreleased]`.
+  `CHANGELOG.md` and the mirror `pkg/docs` embeds resolve themselves instead:
+  `.gitattributes` marks both `merge=union`, so a merge of two branches that
+  each added `[Unreleased]` bullets keeps both sides with no conflict. Union
+  merge gets two cases wrong. Two branches that reword the same bullet produce
+  both wordings, and two branches that each rename `[Unreleased]` to their own
+  version stack both headings on adjacent lines -- `bin/check-changelog.sh`
+  fails on the stacked pair, and the reworded pair needs a reader. Where both
+  sides opened the same `###` heading, `bash bin/check-changelog.sh --fix`
+  collapses it into one block and re-syncs the mirror.
 - **Changelog:** notable adopter-facing behavior belongs in `[Unreleased]` and
   follows `docs/changelog-style.md`. Mark breaking changes and supply migration
   guidance before release. Keep the embedded changelog mirror byte-identical.
