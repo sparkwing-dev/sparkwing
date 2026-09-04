@@ -1321,11 +1321,9 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 }
 
 // safety: a nested run's parent and child present the same lease token, so each
-// reattach claims one member and leaves the rest reclaimable; one connection
-// owning every member releases the whole lease as soon as any one run finishes.
-// hack: the frame names no run, so members go out in order after the lease's own
-// request; a child that reattaches before its parent is handed the parent's id
-// and is finalized under it, until the frame can name the run reclaiming.
+// reattach claims one member; one connection owning them all releases the whole
+// lease when any one run ends. The frame names no run, so members go out in order
+// after the lease's request, and a child reattaching first is finalized under it.
 func (d *Daemon) claimUnreclaimedMemberLocked(id admission.LeaseID, requestID string) string {
 	remaining := d.reattachMembers[id]
 	if len(remaining) == 0 {
