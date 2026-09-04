@@ -175,6 +175,13 @@ code change to unlock.
 
 ### Changed
 
+- **controller:** A plan snapshot upload is capped at 4 MiB, the same ceiling
+  the store puts on a node's dispatch envelope. `POST /api/v1/runs/{id}/plan`
+  is the one write path that stores its body verbatim rather than decoding it,
+  and it read the body whole with no limit, so a caller holding a claim on a
+  run could make the controller buffer and persist a body of any size. An
+  over-cap body is now refused with 400 and the stored snapshot is left alone.
+  The same cap applies on the loopback controller a local run talks to.
 - **cli:** The read verbs see runs that went standalone. `runs list`, `jobs`,
   `runs find`, and `runs failures` merge this home's own store with every
   standalone store under it, newest first, and tag each row with the store it

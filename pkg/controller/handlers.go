@@ -202,7 +202,7 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	defer r.Body.Close()
-	snapshot, err := io.ReadAll(r.Body)
+	snapshot, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPlanSnapshotBody))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -995,6 +995,10 @@ const (
 	// safety: a secret value is caller data, so it gets its own ceiling
 	// rather than an exemption from the shared decode path.
 	maxSecretJSONBody = 8 << 20
+	// safety: a plan snapshot is stored verbatim rather than decoded, so it
+	// needs a ceiling of its own; it matches the store's envelope ceiling
+	// because both bound one blob on a run's row.
+	maxPlanSnapshotBody = store.MaxNodeDispatchEnvelope
 )
 
 func decodeJSON(r *http.Request, v any) error {
