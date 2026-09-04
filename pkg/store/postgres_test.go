@@ -836,13 +836,19 @@ func TestPostgresHeartbeatNodeClaimUsesExecutorEligibilityLock(t *testing.T) {
 	}
 	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
 	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET claimed_by = 'holder',
- claim_principal = $1, claim_token_prefix = $2, lease_expires_at = $3
+ claim_principal = $1, claim_token_prefix = $2,
+ claim_membership_id = 'heartbeat-membership', reservation_id = 'heartbeat-reservation',
+ claim_generation = 1, lease_expires_at = $3
  WHERE run_id = 'heartbeat-run' AND node_id = 'work'`,
 		identity.Principal, identity.TokenPrefix, time.Now().Add(time.Minute).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
+	heartbeatCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		Claimant: identity, HolderID: "holder", MembershipID: "heartbeat-membership",
+		ReservationID: "heartbeat-reservation", ClaimGeneration: 1,
+	})
 	assertPostgresEligibilityMutationWaits(t, st, func() error {
-		return st.HeartbeatNodeClaim(ctx, "heartbeat-run", "work", identity, "holder", time.Minute)
+		return st.HeartbeatNodeClaim(heartbeatCtx, "heartbeat-run", "work", identity, "holder", time.Minute)
 	})
 }
 
@@ -878,7 +884,9 @@ func TestPostgresDeadlineAwardDoesNotBlockUnrelatedClaimHeartbeat(t *testing.T) 
 		t.Fatal(err)
 	}
 	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET claimed_by = 'heartbeat-holder',
- claim_principal = $1, claim_token_prefix = $2, lease_expires_at = $3
+ claim_principal = $1, claim_token_prefix = $2,
+ claim_membership_id = 'heartbeat-membership', reservation_id = 'heartbeat-reservation',
+ claim_generation = 1, lease_expires_at = $3
  WHERE run_id = 'heartbeat-progress' AND node_id = 'work'`,
 		claimant.Principal, claimant.TokenPrefix, time.Now().Add(time.Minute).UnixNano()); err != nil {
 		t.Fatal(err)
@@ -899,7 +907,11 @@ func TestPostgresDeadlineAwardDoesNotBlockUnrelatedClaimHeartbeat(t *testing.T) 
 		finalized <- err
 	}()
 	waitForPostgresSharedEligibilityLock(t, st)
-	heartbeatCtx, cancel := context.WithTimeout(ctx, time.Second)
+	heartbeatBaseCtx, cancel := context.WithTimeout(ctx, time.Second)
+	heartbeatCtx := store.WithNodeClaimFence(heartbeatBaseCtx, store.NodeClaimFence{
+		Claimant: claimant, HolderID: "heartbeat-holder", MembershipID: "heartbeat-membership",
+		ReservationID: "heartbeat-reservation", ClaimGeneration: 1,
+	})
 	heartbeatErr := st.HeartbeatNodeClaim(heartbeatCtx, "heartbeat-progress", "work", claimant, "heartbeat-holder", time.Minute)
 	cancel()
 	if heartbeatErr != nil {
@@ -1028,6 +1040,11 @@ func TestPostgresExecutorOffersOnDifferentClaimantsDoNotDeadlock(t *testing.T) {
 		for range 2 {
 			if err := <-errs; err != nil {
 				t.Fatalf("iteration %d offer: %v", iteration, err)
+			}
+		}
+		for _, runID := range []string{runAlpha, runZeta} {
+			if err := st.FinishNode(ctx, runID, "work", "success", "", nil); err != nil {
+				t.Fatalf("iteration %d finish %s: %v", iteration, runID, err)
 			}
 		}
 	}
