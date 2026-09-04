@@ -360,6 +360,13 @@ code change to unlock.
 
 ### Fixed
 
+- **local admission:** The extra concurrency lease a nested run takes for a
+  `.Concurrency()` group its parent does not already hold now records the run
+  that owns it. A child attaches to its parent's lease and is handed that
+  lease's token, but the daemon accepted that token as proof of ownership only
+  from the lease's original run, so the sub-lease was admitted ownerless and
+  both the queue view and the stall probe's owner check lost track of it.
+
 - **orchestrator:** A run cancelled while a node was still waiting on a
   dependency, a `NeedsGroup`, an `OnFailure` parent or a debug pause now records
   that node as cancelled, and an `OnFailure` child skipped because its cancelled

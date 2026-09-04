@@ -417,6 +417,10 @@ func (l *Ledger) ownerAdmissionRank(ownerID string) uint64 {
 	return l.leases[leaseID].admit
 }
 
+// ProvesOwner reports whether token belongs to a lease ownerID holds, either
+// as the lease's own request or as a member attached to it. An attached member
+// is handed the lease's token verbatim, so membership is the only proof it can
+// present.
 func (l *Ledger) ProvesOwner(token, ownerID string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -426,6 +430,9 @@ func (l *Ledger) ProvesOwner(token, ownerID string) bool {
 		return false
 	}
 	proof := l.leases[leaseID]
+	if _, joined := proof.members[ownerID]; joined {
+		return true
+	}
 	canonicalOwnerID := proof.ownerID
 	if canonicalOwnerID == "" {
 		canonicalOwnerID = proof.requestID
