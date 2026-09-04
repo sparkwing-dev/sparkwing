@@ -37,7 +37,7 @@ func TestLintCommandNeverDropsTheToolLockWithoutABudget(t *testing.T) {
 	}
 }
 
-func TestLinkedWorktreeLeasesReusableLintPath(t *testing.T) {
+func TestLinkedWorktreeKeepsItsOwnLintCache(t *testing.T) {
 	worktree := t.TempDir()
 	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: elsewhere"), 0o600); err != nil {
 		t.Fatal(err)
@@ -46,8 +46,8 @@ func TestLinkedWorktreeLeasesReusableLintPath(t *testing.T) {
 	sparkwing.SetWorkDir(worktree)
 	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
 
-	if !shouldLeaseLintPath("") {
-		t.Fatal("a disposable linked worktree would keep paying for a private cold cache")
+	if shouldLeaseLintPath("") {
+		t.Fatal("a linked worktree would answer lint from findings cached for another tree")
 	}
 	if shouldLeaseLintPath("https://cache.invalid") {
 		t.Fatal("a blob-backed worktree would restore a cache directory lint does not read")
