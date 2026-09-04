@@ -136,7 +136,9 @@ func TestDaemonStoreSchemaSkewNamesTheRequirementTheDaemonLacks(t *testing.T) {
 		known[0] + ", which this binary (v0.39.0) stamps into the store they share. " +
 		"Install a sparkwing that understands schema 27, or set " + wingdclient.HostBinEnv +
 		" to a binary that does and stop the daemon so the next run brings it up. " +
-		"`sparkwing daemon restart` respawns the same build, and a fresh SPARKWING_HOME still hosts the daemon from the sparkwing on PATH"
+		"To leave this machine's daemon where it is, give the run a home of its own and start it from " +
+		"a sparkwing that understands schema 27: " + isolatedHomeCommand() + ". " +
+		"`sparkwing daemon restart` respawns the same build"
 	if got := err.Error(); got != want {
 		t.Fatalf("skew error =\n%s\nwant\n%s", got, want)
 	}
@@ -171,5 +173,45 @@ func TestNodeAdmissionFailureSeparatesTheClaimFromTheDaemonsOwnKeys(t *testing.T
 	var wrapped *wingdclient.AdmissionError
 	if !errors.As(got, &wrapped) || wrapped != admErr {
 		t.Fatalf("node failure %q lost the wrapped admission error", got)
+	}
+}
+
+func withInvokedPipeline(t *testing.T, name string) {
+	t.Helper()
+	prev := invokedPipeline.Load()
+	recordInvokedPipeline(name)
+	t.Cleanup(func() { invokedPipeline.Store(prev) })
+}
+
+func TestIsolatedHomeCommandNamesTheInvokedPipeline(t *testing.T) {
+	withInvokedPipeline(t, "pre-commit")
+	want := `sparkwing run pre-commit --sw-isolated-home "$(mktemp -d)"`
+	if got := isolatedHomeCommand(); got != want {
+		t.Fatalf("isolated-home command = %q, want %q", got, want)
+	}
+}
+
+func TestIsolatedHomeCommandFallsBackToAPlaceholderPipeline(t *testing.T) {
+	withInvokedPipeline(t, "")
+	want := `sparkwing run <pipeline> --sw-isolated-home "$(mktemp -d)"`
+	if got := isolatedHomeCommand(); got != want {
+		t.Fatalf("isolated-home command = %q, want %q", got, want)
+	}
+}
+
+func TestStoreSchemaSkewOffersTheIsolatedHomeCommand(t *testing.T) {
+	withInvokedPipeline(t, "pre-commit")
+	err := daemonStoreSchemaSkew("v0.38.2", "v0.39.0", 17, nil, 26)
+	if !strings.Contains(err.Error(), isolatedHomeCommand()) {
+		t.Fatalf("skew error = %q, want the isolated-home command", err)
+	}
+}
+
+func TestTerminalCheckRefusalOffersTheIsolatedHomeCommand(t *testing.T) {
+	withInvokedPipeline(t, "pre-commit")
+	err := admissionFailure(semaphoreClaims("deploy-lock"),
+		&wingdclient.AdmissionError{Policy: wingwire.PolicyFail, Key: terminalCheckKey})
+	if !strings.Contains(err.Error(), isolatedHomeCommand()) {
+		t.Fatalf("terminal-check refusal = %q, want the isolated-home command", err)
 	}
 }

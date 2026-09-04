@@ -277,6 +277,9 @@ const agentBlockBody = "- `sparkwing commands` -- one-line index of every verb; 
 	"  narrow, `<path> --help` for one verb, `-o json` for the full records\n" +
 	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
 	"- `sparkwing run <name>` -- run a pipeline\n" +
+	"- `sparkwing run <name> --sw-isolated-home <dir>` -- gate a branch whose pipeline binary\n" +
+	"  is newer than this machine's admission daemon: the run keeps its state and config under\n" +
+	"  <dir> and hosts a daemon there from the sparkwing you invoked\n" +
 	"- `sparkwing docs search -q <symbol-or-key>` -- the section that answers it, not the whole page\n" +
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n" +
 	"- `sparkwing info -o json` -- this same context as JSON, when you want to parse it\n"

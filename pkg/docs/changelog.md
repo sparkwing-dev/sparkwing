@@ -155,6 +155,15 @@ code change to unlock.
 - **s3state:** `WithReadCacheTTL` bounds how stale a read of a run this process
   does not write may be, `DefaultDrainTimeout` bounds a synchronous outbox
   drain, and `DefaultOutboxMaxRows` caps the outbox queue.
+- **cli:** `sparkwing run --sw-isolated-home DIR` keeps one run's state and
+  config under `DIR`, so it hosts an admission daemon from the sparkwing you
+  invoked instead of joining the machine's. It is the way to gate a branch
+  whose pipeline binary carries a newer runs-store schema than the installed
+  release hosting the daemon, without replacing that daemon for every other
+  repository on the box. The admission refusals that skew produces -- the
+  daemon-store-schema error and a `terminal-check` eviction -- now print the
+  command, naming the pipeline being run. `sparkwing runs submit` refuses the
+  flag, because a detached run executes against the resident consumer's home.
 
 ### Changed
 

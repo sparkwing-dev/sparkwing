@@ -1,9 +1,14 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
 func TestParseRunFlags_Only(t *testing.T) {
@@ -137,5 +142,81 @@ func TestRetiredFlagYieldsToTheCommandThatDeclaresIt(t *testing.T) {
 	}
 	if err := checkRetiredWhereFlags([]string{"--on=prod"}, nil); err == nil {
 		t.Error("--on=value form escaped the guard")
+	}
+}
+
+func TestParseRunFlags_IsolatedHome(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"space-separated", []string{"--sw-isolated-home", "/tmp/gate"}, "/tmp/gate"},
+		{"equals-form", []string{"--sw-isolated-home=/tmp/gate"}, "/tmp/gate"},
+		{"empty-trailing-flag-falls-through", []string{"--sw-isolated-home"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wf, pass := parseRunFlags(tc.args)
+			if wf.isolatedHome != tc.want {
+				t.Errorf("isolatedHome = %q, want %q", wf.isolatedHome, tc.want)
+			}
+			if tc.want == "" && !slices.Contains(pass, "--sw-isolated-home") {
+				t.Errorf("incomplete --sw-isolated-home should pass through; got passthrough=%v", pass)
+			}
+			if tc.want != "" && len(pass) != 0 {
+				t.Errorf("passthrough should be empty, got %v", pass)
+			}
+		})
+	}
+}
+
+func TestApplyIsolatedHomeMovesStateAndConfigResolution(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	root := filepath.Join(t.TempDir(), "gate")
+
+	if err := applyIsolatedHome(root); err != nil {
+		t.Fatalf("applyIsolatedHome(%s): %v", root, err)
+	}
+
+	p, err := paths.DefaultPaths()
+	if err != nil {
+		t.Fatalf("DefaultPaths: %v", err)
+	}
+	if p.Root != root {
+		t.Errorf("state home = %q, want %q", p.Root, root)
+	}
+	config, err := fssecure.ConfigDir()
+	if err != nil {
+		t.Fatalf("ConfigDir: %v", err)
+	}
+	if want := filepath.Join(root, "config", "sparkwing"); config != want {
+		t.Errorf("config dir = %q, want %q", config, want)
+	}
+	for _, dir := range []string{root, isolatedHomeConfigDir(root)} {
+		info, statErr := os.Stat(dir)
+		if statErr != nil {
+			t.Fatalf("stat %s: %v", dir, statErr)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("%s mode = %04o, want no group or other access", dir, perm)
+		}
+	}
+}
+
+func TestApplyIsolatedHomeReportsADirectoryItCannotPrepare(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatalf("write %s: %v", file, err)
+	}
+	err := applyIsolatedHome(file)
+	if err == nil {
+		t.Fatal("applyIsolatedHome accepted a path that is a file")
+	}
+	if !strings.Contains(err.Error(), "--sw-isolated-home") {
+		t.Errorf("error = %q, want it to name the flag", err)
 	}
 }
