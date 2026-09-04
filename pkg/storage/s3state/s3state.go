@@ -87,11 +87,12 @@ const (
 // object store. Safe for concurrent use by orchestrator goroutines on
 // the same process.
 type Backend struct {
-	art           storage.ArtifactStore
-	flushInterval time.Duration
-	bufferLimit   int
-	readTTL       time.Duration
-	outbox        *Outbox
+	art             storage.ArtifactStore
+	flushInterval   time.Duration
+	bufferLimit     int
+	readTTL         time.Duration
+	outbox          *Outbox
+	triggerIDMinter func() (string, error)
 
 	mu   sync.Mutex
 	runs map[string]*runState
@@ -143,12 +144,13 @@ func WithOutbox(o *Outbox) Option {
 // Close to stop it.
 func New(art storage.ArtifactStore, opts ...Option) *Backend {
 	b := &Backend{
-		art:           art,
-		flushInterval: DefaultFlushInterval,
-		bufferLimit:   DefaultBufferThreshold,
-		readTTL:       DefaultReadCacheTTL,
-		runs:          map[string]*runState{},
-		stopCh:        make(chan struct{}),
+		art:             art,
+		flushInterval:   DefaultFlushInterval,
+		bufferLimit:     DefaultBufferThreshold,
+		readTTL:         DefaultReadCacheTTL,
+		triggerIDMinter: triggerRunID,
+		runs:            map[string]*runState{},
+		stopCh:          make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(b)

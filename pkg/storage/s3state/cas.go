@@ -641,7 +641,10 @@ func (b *Backend) EnqueueTriggerWithEnv(
 		}
 	}
 
-	runID := triggerRunID()
+	runID, err := b.triggerIDMinter()
+	if err != nil {
+		return "", fmt.Errorf("mint trigger run id: %w", err)
+	}
 	tg := store.Trigger{
 		ID:            runID,
 		Pipeline:      pipeline,
@@ -694,7 +697,10 @@ func (b *Backend) EnqueueTriggerWithEnv(
 		if !errors.Is(err, storage.ErrPreconditionFailed) || attempt == maxTriggerIDAttempts {
 			return "", err
 		}
-		runID = triggerRunID()
+		runID, err = b.triggerIDMinter()
+		if err != nil {
+			return "", fmt.Errorf("remint trigger run id after collision: %w", err)
+		}
 	}
 
 	if parentRunID != "" && parentNodeID != "" {
@@ -743,11 +749,13 @@ func (b *Backend) ancestorPipelines(ctx context.Context, runID string) ([]string
 	return out, nil
 }
 
-func triggerRunID() string {
+func triggerRunID() (string, error) {
 	ts := time.Now().UTC().Format("20060102-150405")
-	var suffix [4]byte
-	_, _ = rand.Read(suffix[:])
-	return fmt.Sprintf("run-%s-%s", ts, hex.EncodeToString(suffix[:]))
+	var suffix [16]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("run-%s-%s", ts, hex.EncodeToString(suffix[:])), nil
 }
 
 func firstNonEmpty(a, b string) string {
