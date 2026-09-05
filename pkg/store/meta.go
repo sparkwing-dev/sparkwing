@@ -15,23 +15,12 @@ func (s *Store) claimSweepWindow(ctx context.Context, key, claimKey string, minI
 		return false, "", err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `SELECT key FROM sparkwing_meta WHERE key = ?`+s.forUpdate(), key); err != nil {
+	// safety: the claim row is taken before the stamp is read, under an
+	// advisory lock on Postgres, so a claimant that finds the row free has
+	// outlived the previous holder's stamp and reads it; reading first let two
+	// callers both see "never swept" and both run.
+	if err := lockSweepWindowTx(ctx, tx, key); err != nil {
 		return false, "", err
-	}
-	var prev string
-	err = tx.QueryRowContext(ctx,
-		`SELECT value FROM sparkwing_meta WHERE key = ?`, key).Scan(&prev)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-	case err != nil:
-		return false, "", err
-	default:
-		if minInterval > 0 {
-			if lastNS, perr := strconv.ParseInt(prev, 10, 64); perr == nil &&
-				now.Sub(time.Unix(0, lastNS)) < minInterval {
-				return false, "", nil
-			}
-		}
 	}
 	claimCutoff := int64(0)
 	if claimTTL > 0 {
@@ -53,6 +42,21 @@ func (s *Store) claimSweepWindow(ctx context.Context, key, claimKey string, minI
 	if changed == 0 {
 		return false, "", nil
 	}
+	var prev string
+	err = tx.QueryRowContext(ctx,
+		`SELECT value FROM sparkwing_meta WHERE key = ?`, key).Scan(&prev)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return false, "", err
+	default:
+		if minInterval > 0 {
+			if lastNS, perr := strconv.ParseInt(prev, 10, 64); perr == nil &&
+				now.Sub(time.Unix(0, lastNS)) < minInterval {
+				return false, "", nil
+			}
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, "", err
 	}
@@ -70,5 +74,13 @@ func (s *Store) stampSweepWindow(ctx context.Context, key string) error {
 
 func (s *Store) clearSweepClaim(ctx context.Context, claimKey, token string) error {
 	_, err := s.exec(ctx, `DELETE FROM sparkwing_meta WHERE key = ? AND value = ?`, claimKey, token)
+	return err
+}
+
+func lockSweepWindowTx(ctx context.Context, tx *storeTx, key string) error {
+	if tx.dialect != DialectPostgres {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/sweep-window/"+key)
 	return err
 }
