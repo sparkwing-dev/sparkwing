@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.42.0] - 2026-09-05
 ### Added
 
 - **pipelines:** `sparkwing run store-postgres` runs the `pkg/store` suite
