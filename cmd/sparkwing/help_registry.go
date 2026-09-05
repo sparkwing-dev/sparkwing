@@ -2700,7 +2700,13 @@ same name, separate the two with '--':
 
   sparkwing runs submit deploy -- --request-id its-own
 
-Flags that a detached run cannot honor (--sw-index, --sw-ref,
+--sw-ref REF submits a worktree of that ref instead of the
+checkout you are standing in. The ref resolves to a commit
+when you submit, so the run executes that commit even if the
+ref moves first. The consumer executes the worktree and
+removes it when the run ends.
+
+Flags that a detached run cannot honor (--sw-index,
 --sw-dry-run, --sw-only, --profile, and the other run-shaping
 --sw- flags) are refused with the reason rather than ignored;
 run those in the foreground with 'sparkwing run'.
@@ -2743,6 +2749,7 @@ on its own after five idle minutes. See 'sparkwing runs consumer'.`,
 	UsageSuffix: "<pipeline> [pipeline-flags...]",
 	Flags: []FlagSpec{
 		{Name: "idempotency-key", Argument: "KEY", Desc: "Deduplication token; a repeat submission with this key returns the original run", Group: "Input"},
+		{Name: "sw-ref", Argument: "REF", Desc: "Submit a worktree of REF (branch/tag/SHA); the consumer removes it when the run ends", Group: "Input"},
 		{Name: "request-id", Argument: "ID", Desc: "Tracing identifier recorded on the run; never affects deduplication", Group: "Input"},
 		{Name: "cd", Short: "C", Argument: "PATH", Desc: "Resolve the pipeline from this directory instead of the current one", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},

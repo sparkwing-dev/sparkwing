@@ -58,11 +58,22 @@ code change to unlock.
   that directory under `TMPDIR`. A failing suite prints the tail of the server
   log. `pre-push` runs it after the race gate, and `pre-commit` runs it when
   the change touches `pkg/store`.
+- **cli + orchestrator:** `sparkwing runs submit --sw-ref REF` submits a worktree
+  of that ref. The ref resolves to a commit when you submit, so the run executes
+  that commit even if the ref moves before a consumer claims it. The consumer
+  executes the worktree and removes it once the run reaches a terminal state, and
+  a consumer starting up reclaims a worktree an earlier consumer died holding, so
+  the tree belongs to the consumer rather than to the submitting shell.
+  Submission refused the flag before, because nothing would have removed the
+  worktree after a detached run. `--idempotency-key` covers the resolved commit:
+  a repeat key naming a different tree is refused rather than answered with the
+  first run.
 
 ### Fixed
 
-- **cli (Security):** `sparkwing run --sw-ref` passes the ref to `git fetch`
-  after `--`, and refuses a ref beginning with a dash. Git reads a leading-dash
+- **cli (Security):** `sparkwing run --sw-ref` and `sparkwing runs submit --sw-ref`
+  pass the ref to `git fetch`
+  after `--`, and refuse a ref beginning with a dash. Git reads a leading-dash
   refspec as an option, so a ref supplied by automation could run a command
   through the fetch.
 - **cli:** `sparkwing run --sw-ref` accepts a branch that only the remote has.

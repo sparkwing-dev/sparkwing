@@ -42,6 +42,8 @@ func runRunsSubmit(ctx context.Context, args []string) error {
 		"deduplication token: a repeat submission carrying this key returns the original run instead of starting a second one")
 	requestID := fs.String("request-id", "",
 		"tracing identifier recorded on the run; never affects deduplication")
+	ref := fs.String("sw-ref", "",
+		"submit a worktree of REF (branch/tag/SHA); the consumer executes it and removes it when the run ends")
 	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	changeDir := fs.StringP("cd", "C", "", "resolve the pipeline from this directory instead of the current one")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
@@ -99,6 +101,7 @@ func runRunsSubmit(ctx context.Context, args []string) error {
 		Pipeline:       pipeline,
 		Args:           collectPipelineArgs(passthrough),
 		RepoDir:        repoDir,
+		Ref:            strings.TrimSpace(*ref),
 		IdempotencyKey: strings.TrimSpace(*idempotencyKey),
 		RequestID:      strings.TrimSpace(*requestID),
 	})
@@ -125,24 +128,47 @@ type submission struct {
 	Pipeline       string
 	Args           map[string]string
 	RepoDir        string
+	Ref            string
 	IdempotencyKey string
 	RequestID      string
 }
 
 func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.Paths, sub submission) (submitResult, error) {
+	var rev string
+	if sub.Ref != "" {
+		resolved, rerr := orchestrator.ResolveRefCommit(ctx, sub.RepoDir, sub.Ref, slog.Default())
+		if rerr != nil {
+			return submitResult{}, fmt.Errorf("--sw-ref %s: %w", sub.Ref, rerr)
+		}
+		rev = resolved
+	}
 	if existing, err := findExistingSubmission(ctx, st, sub.Pipeline, sub.IdempotencyKey); err != nil {
 		return submitResult{}, err
 	} else if existing != nil {
-		return existingSubmissionResult(ctx, st, paths, existing, sub)
+		return existingSubmissionResult(ctx, st, paths, existing, sub, rev)
 	}
 
 	runID := orchestrator.NewLocalRunID()
+	repoDir := sub.RepoDir
+	var worktree string
+	if sub.Ref != "" {
+		built, werr := orchestrator.CreateRefWorktree(ctx, paths, sub.RepoDir, rev, runID, slog.Default())
+		if werr != nil {
+			return submitResult{}, fmt.Errorf("--sw-ref %s: %w", sub.Ref, werr)
+		}
+		worktree = built
+		repoDir = built
+	}
 	if err := orchestrator.CaptureSubmissionEnvironment(paths.Root, runID, os.Environ(), slog.Default()); err != nil {
+		discardRefWorktree(ctx, paths, worktree)
 		return submitResult{}, fmt.Errorf("capture submission environment: %w", err)
 	}
 	triggerEnv := map[string]string{
-		orchestrator.SubmitRepoDirKey:                 sub.RepoDir,
+		orchestrator.SubmitRepoDirKey:                 repoDir,
 		orchestrator.SubmissionEnvironmentCapturedKey: "1",
+	}
+	if rev != "" {
+		triggerEnv[orchestrator.RefWorktreeRevKey] = rev
 	}
 	if sub.RequestID != "" {
 		triggerEnv[SubmitRequestIDKey] = sub.RequestID
@@ -151,7 +177,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	if u, uerr := user.Current(); uerr == nil {
 		userName = u.Username
 	}
-	branch, sha, repoSlug, repoURL := submitGitContext(sub.RepoDir)
+	branch, sha, repoSlug, repoURL := submitGitContext(repoDir)
 	now := time.Now()
 
 	trigger := store.Trigger{
@@ -174,11 +200,12 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 
 	if err := st.CreateTrigger(ctx, trigger); err != nil {
 		_ = orchestrator.DiscardSubmissionEnvironment(paths.Root, runID)
+		discardRefWorktree(ctx, paths, worktree)
 
 		if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
 			existing, ferr := st.FindTriggerByIdempotencyKey(ctx, sub.Pipeline, sub.IdempotencyKey)
 			if ferr == nil {
-				return existingSubmissionResult(ctx, st, paths, existing, sub)
+				return existingSubmissionResult(ctx, st, paths, existing, sub, rev)
 			}
 			return submitResult{}, fmt.Errorf("persist trigger: %w", err)
 		}
@@ -200,6 +227,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		CreatedAt:     now,
 		StartedAt:     now,
 	}); err != nil {
+		discardRefWorktree(ctx, paths, worktree)
 		return submitResult{}, fmt.Errorf("persist run: %w", err)
 	}
 
@@ -208,6 +236,40 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		IdempotencyKey: sub.IdempotencyKey,
 		RequestID:      sub.RequestID,
 	}, nil
+}
+
+func discardRefWorktree(ctx context.Context, paths orchestrator.Paths, dir string) {
+	if dir == "" {
+		return
+	}
+	if err := orchestrator.RemoveRefWorktree(ctx, paths, dir, slog.Default()); err != nil {
+		slog.Default().Warn("submission left a ref worktree behind", "dir", dir, "error", err)
+	}
+}
+
+func checkRefMatchesOriginal(existing *store.Trigger, sub submission, rev string) error {
+	// safety: comparing resolved commits rather than ref names catches a branch
+	// that moved between the two submissions.
+	original := strings.TrimSpace(existing.TriggerEnv[orchestrator.RefWorktreeRevKey])
+	if original == rev {
+		return nil
+	}
+	return fmt.Errorf(
+		"runs submit: idempotency key %q already ran pipeline %q against a different tree, "+
+			"so answering this submission with that run would report a verdict for code it never executed.\n"+
+			"  original: %s\n"+
+			"  this one: %s\n"+
+			"Original run: %s\n"+
+			"Use a new key for the new tree, or resubmit against the original commit",
+		sub.IdempotencyKey, existing.Pipeline,
+		describeRefTree(original), describeRefTree(rev), existing.ID)
+}
+
+func describeRefTree(rev string) string {
+	if rev == "" {
+		return "the checkout it was submitted from (no --sw-ref)"
+	}
+	return "commit " + rev
 }
 
 func findExistingSubmission(ctx context.Context, st *store.Store, pipeline, key string) (*store.Trigger, error) {
@@ -226,8 +288,11 @@ func findExistingSubmission(ctx context.Context, st *store.Store, pipeline, key 
 
 func existingSubmissionResult(
 	ctx context.Context, st *store.Store, paths orchestrator.Paths,
-	existing *store.Trigger, sub submission,
+	existing *store.Trigger, sub submission, rev string,
 ) (submitResult, error) {
+	if err := checkRefMatchesOriginal(existing, sub, rev); err != nil {
+		return submitResult{}, err
+	}
 	if diff := describeArgsMismatch(existing.Args, sub.Args); diff != "" {
 		return submitResult{}, fmt.Errorf(
 			"runs submit: idempotency key %q was already used for pipeline %q with different arguments, "+
@@ -352,8 +417,6 @@ func localRepoDeclaring(start, pipeline string) (string, bool) {
 var undetachableFlags = map[string]string{
 	"--sw-index": "an index binding is a live path this process holds open for the run; " +
 		"a detached run outlives the submitting process. Run it in the foreground with `sparkwing run --sw-index`",
-	"--sw-ref": "a --sw-ref worktree is created and removed around a foreground run; " +
-		"nothing would clean it up after a detached one. Check the ref out and submit from that checkout",
 	"--sw-dry-run": "a dry run finishes in seconds and reports to your terminal; submit it with `sparkwing run --sw-dry-run`",
 
 	"--profile": "the resident consumer executes against this home's local store, " +
@@ -374,6 +437,7 @@ var undetachableFlags = map[string]string{
 
 var submitOwnedFlags = map[string]string{
 	"--idempotency-key": "",
+	"--sw-ref":          "",
 	"--request-id":      "",
 	"--home":            "",
 	"--consumer-idle":   "",

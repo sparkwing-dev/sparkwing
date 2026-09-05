@@ -180,12 +180,18 @@ request id per attempt and a stable idempotency key per intent.
 Flags that change what a run *does* but cannot survive detachment are
 refused with the reason rather than silently ignored: `--sw-index`
 (the index binding is a live path the submitting process holds open),
-`--sw-ref` (nothing would clean up the worktree afterward),
 `--sw-dry-run`, `--sw-start-at`, `--sw-stop-at`, `--sw-only`,
 `--sw-no-cache`, `--sw-mode`, `--sw-workers`, `--sw-allow`,
 `--sw-local-only`, `--sw-secrets`, and `--profile`. Run those in the
 foreground with `sparkwing run`. Everything else after the pipeline name
 is passed to the pipeline as its own arguments.
+
+`--sw-ref` is the exception. Submission resolves the ref to a commit, builds
+the worktree, and records it as the run's checkout, so the run executes that
+commit even if the ref moves before a consumer claims it, and the tree belongs
+to the consumer rather than to the submitting shell. The consumer removes it
+when the run reaches a terminal state, and a consumer reclaims any tree an
+earlier one died holding as it starts.
 
 Submission is local-only. To hand a run to a cluster, use
 `sparkwing pipeline trigger --profile <p> --detach`.

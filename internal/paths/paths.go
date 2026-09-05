@@ -46,6 +46,15 @@ func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 
 func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
 
+// RefWorktreesDir holds the git worktrees `runs submit --sw-ref` checks out for
+// detached runs. Every one sits under this root, which is what lets a sweep
+// decide ownership by containment rather than by a record it has to trust.
+func (p Paths) RefWorktreesDir() string { return filepath.Join(p.Root, "ref-worktrees") }
+
+func (p Paths) RefWorktreeDir(runID string) string {
+	return filepath.Join(p.RefWorktreesDir(), runID)
+}
+
 // StandaloneDir holds the runs stores written by pipeline binaries that could
 // not reach the admission daemon. The read verbs merge these with
 // [Paths.StateDB]; [Paths.StandaloneStores] enumerates them.
