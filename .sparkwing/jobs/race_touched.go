@@ -31,7 +31,10 @@ func runRaceTouched(ctx context.Context) error {
 		for _, module := range mapKeys(targets) {
 			pkgs := targets[module]
 			sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(pkgs, " "))
-			cmd := boundedGoCommand(runtime.NumCPU(), "test", "-race -count=1 "+strings.Join(pkgs, " "))
+			// safety: go test's default 10-minute budget is per package binary and
+			// pkg/store under the race detector outlives it on a one-core hosted
+			// runner; the pipeline's own timeout still bounds the step.
+			cmd := boundedGoCommand(runtime.NumCPU(), "test", "-race -count=1 -timeout 30m "+strings.Join(pkgs, " "))
 			script := withoutInherited(fmt.Sprintf("cd %q && %s", module, cmd), productTestUnset)
 			if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
