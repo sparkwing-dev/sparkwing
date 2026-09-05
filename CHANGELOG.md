@@ -59,6 +59,17 @@ code change to unlock.
   log. `pre-push` runs it after the race gate, and `pre-commit` runs it when
   the change touches `pkg/store`.
 
+### Fixed
+
+- **cli (Security):** `sparkwing run --sw-ref` passes the ref to `git fetch`
+  after `--`, and refuses a ref beginning with a dash. Git reads a leading-dash
+  refspec as an option, so a ref supplied by automation could run a command
+  through the fetch.
+- **cli:** `sparkwing run --sw-ref` accepts a branch that only the remote has.
+  The ref now resolves to a commit before checkout, where `git worktree add` had
+  refused a bare remote branch name and only a commit or an already-local ref
+  worked.
+
 ## [v0.41.0] - 2026-09-04
 ### Added
 
