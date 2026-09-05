@@ -263,6 +263,12 @@ func consumeLocalTriggers(
 
 	inFlight := newInFlightSet()
 
+	if n, err := SweepRefWorktrees(ctx, Paths{Root: rt.home}, st, logger); err != nil {
+		logger.Warn("could not sweep ref worktrees left by an earlier consumer", "error", err)
+	} else if n > 0 {
+		logger.Info("reclaimed ref worktrees whose runs had ended", "count", n)
+	}
+
 	ticker := time.NewTicker(consumerPollInterval)
 	defer ticker.Stop()
 	lastWork := time.Now()
@@ -361,6 +367,7 @@ func runClaimedTrigger(
 	cache *localCompileCache, logger *slog.Logger, home string, lease time.Duration,
 ) {
 	book := context.WithoutCancel(ctx)
+	defer cleanupRefWorktree(book, st, Paths{Root: home}, trig, logger)
 	if cancelClaimedTriggerIfRequested(book, st, trig, home, lease, logger) {
 		return
 	}
@@ -384,6 +391,24 @@ func runClaimedTrigger(
 	env = submissionExecutionEnvironment(env, home)
 	err := dispatchLocalTrigger(dispatchCtx, trig, "", "", cache, logger, env)
 	settleClaimedTriggerDispatch(book, st, trig, err, cancelled.Load(), ctx.Err() != nil, logger)
+}
+
+func cleanupRefWorktree(
+	ctx context.Context, st *store.Store, p Paths, trig *store.Trigger, logger *slog.Logger,
+) {
+	dir := strings.TrimSpace(trig.TriggerEnv[SubmitRepoDirKey])
+	if dir == "" || !withinRefWorktrees(p, dir) {
+		return
+	}
+	// safety: this returns while a run is requeued or owned by a newer claim,
+	// and that run still executes in this tree; the sweep reclaims it later.
+	run, err := st.GetRun(ctx, trig.ID)
+	if err != nil || !isTerminalRunStatus(run.Status) {
+		return
+	}
+	if err := RemoveRefWorktree(ctx, p, dir, logger); err != nil {
+		logger.Warn("ref worktree outlived its run", "trigger_id", trig.ID, "dir", dir, "error", err)
+	}
 }
 
 func settleClaimedTriggerDispatch(

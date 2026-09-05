@@ -511,15 +511,22 @@ func TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement(t *testing.T)
 func TestRunsSubmit_RefusesASubmitFlagPlacedAfterThePipelineName(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
+	for _, flag := range []string{"--idempotency-key", "--sw-ref"} {
+		out, err := e.run("runs", "submit", "--home", e.home, "-C", e.repoDir,
+			"fixture", flag, "misplaced")
+		if err == nil {
+			t.Fatalf("a misplaced %s was accepted:\n%s", flag, out)
+		}
+		for _, want := range []string{flag, "before the pipeline name", "--"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("refusal missing %q:\n%s", want, out)
+			}
+		}
+	}
 	out, err := e.run("runs", "submit", "--home", e.home, "-C", e.repoDir,
 		"fixture", "--idempotency-key", "misplaced")
 	if err == nil {
 		t.Fatalf("a misplaced --idempotency-key was accepted:\n%s", out)
-	}
-	for _, want := range []string{"--idempotency-key", "before the pipeline name", "--"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("refusal missing %q:\n%s", want, out)
-		}
 	}
 	triggers, terr := e.store().ListTriggers(context.Background(), store.TriggerFilter{Limit: 10})
 	if terr != nil {
@@ -921,5 +928,48 @@ func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
 		if cerr != nil || n == 0 {
 			t.Fatalf("trigger reads pending but the queue is empty (n=%d err=%v)", n, cerr)
 		}
+	}
+}
+
+func TestRunsSubmit_RefIsNoLongerUndetachable(t *testing.T) {
+	t.Parallel()
+	if err := refuseUndetachableFlags([]string{"--sw-ref", "main"}); err != nil {
+		t.Fatalf("--sw-ref is still refused as undetachable: %v", err)
+	}
+}
+
+func TestRunsSubmit_RepeatKeyAgainstADifferentTreeIsRefused(t *testing.T) {
+	t.Parallel()
+	const first, second = "aaaaaaaaaaaa", "bbbbbbbbbbbb"
+	cases := []struct {
+		name    string
+		stored  string
+		next    string
+		refused bool
+	}{
+		{"same commit is a retry", first, first, false},
+		{"different commit is a different request", first, second, true},
+		{"ref added to a ref-less original", "", second, true},
+		{"ref dropped from a ref original", first, "", true},
+		{"neither names a ref", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			existing := &store.Trigger{ID: "run-1", Pipeline: "deploy"}
+			if tc.stored != "" {
+				existing.TriggerEnv = map[string]string{orchestrator.RefWorktreeRevKey: tc.stored}
+			}
+			err := checkRefMatchesOriginal(existing, submission{IdempotencyKey: "k"}, tc.next)
+			if tc.refused && err == nil {
+				t.Fatal("a repeat naming a different tree was answered with the original run")
+			}
+			if !tc.refused && err != nil {
+				t.Fatalf("a genuine retry was refused: %v", err)
+			}
+			if tc.refused && !strings.Contains(err.Error(), "run-1") {
+				t.Errorf("refusal does not name the original run: %v", err)
+			}
+		})
 	}
 }

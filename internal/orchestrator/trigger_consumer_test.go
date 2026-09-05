@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"testing"
 	"time"
 
@@ -831,5 +833,71 @@ func TestConsumer_FailureRacingACancelStaysFailed(t *testing.T) {
 	}
 	if run.Status != "failed" {
 		t.Fatalf("run status = %q, want failed: the child reached its own failure, the cancel did not kill it", run.Status)
+	}
+}
+
+func refWorktreeTrigger(id, dir string) *store.Trigger {
+	return &store.Trigger{ID: id, TriggerEnv: map[string]string{SubmitRepoDirKey: dir}}
+}
+
+func TestCleanupRefWorktreeRemovesATerminalRunsWorktree(t *testing.T) {
+	repo := gitRepoWithProject(t, true)
+	p := paths.Paths{Root: t.TempDir()}
+	st := testStore(t)
+	ctx := context.Background()
+	dir := buildWorktree(t, p, repo, "run-done")
+	if err := st.CreateRun(ctx, store.Run{ID: "run-done", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	cleanupRefWorktree(ctx, st, p, refWorktreeTrigger("run-done", dir), slog.New(slog.DiscardHandler))
+
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Error("a finished run's worktree was not removed")
+	}
+	if worktreeRegistered(t, repo, dir) {
+		t.Error("the registration survived, so the path cannot be reused")
+	}
+	if _, err := os.Stat(repo); err != nil {
+		t.Fatalf("the origin repository was deleted: %v", err)
+	}
+}
+
+func TestCleanupRefWorktreeKeepsAWorktreeWhoseRunIsNotOver(t *testing.T) {
+	repo := gitRepoWithProject(t, true)
+	p := paths.Paths{Root: t.TempDir()}
+	st := testStore(t)
+	ctx := context.Background()
+	dir := buildWorktree(t, p, repo, "run-requeued")
+	if err := st.CreateRun(ctx, store.Run{ID: "run-requeued", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	cleanupRefWorktree(ctx, st, p, refWorktreeTrigger("run-requeued", dir), slog.New(slog.DiscardHandler))
+
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("a requeued or superseded run lost the tree it still executes in: %v", err)
+	}
+}
+
+func TestCleanupRefWorktreeLeavesAnOperatorCheckoutAlone(t *testing.T) {
+	p := paths.Paths{Root: t.TempDir()}
+	st := testStore(t)
+	checkout := t.TempDir()
+	work := filepath.Join(checkout, "work.txt")
+	if err := os.WriteFile(work, []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(context.Background(), store.Run{
+		ID: "run-plain", Pipeline: "p", Status: "success", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	cleanupRefWorktree(context.Background(), st, p,
+		refWorktreeTrigger("run-plain", checkout), slog.New(slog.DiscardHandler))
+
+	if _, err := os.Stat(work); err != nil {
+		t.Fatalf("a plain submission's own checkout was deleted: %v", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/user"
@@ -17,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -355,15 +357,18 @@ func announceIndexBound(out io.Writer, abs, logFormat string) error {
 func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub string, cleanup func(), err error) {
 	repoRoot := filepath.Dir(sparkwingDir)
 
+	rev, err := orchestrator.ResolveRefCommit(context.Background(), repoRoot, ref, slog.Default())
+	if err != nil {
+		return "", "", nil, err
+	}
+
 	tmpDir, err := os.MkdirTemp("", "sparkwing-from-*")
 	if err != nil {
 		return "", "", nil, fmt.Errorf("mkdir tmp: %w", err)
 	}
 
-	_ = exec.Command("git", "-C", repoRoot, "fetch", "--quiet", "origin", ref).Run()
-
 	out, err := exec.Command("git", "-C", repoRoot,
-		"worktree", "add", "--detach", "--quiet", "--", tmpDir, ref).CombinedOutput()
+		"worktree", "add", "--detach", "--quiet", "--", tmpDir, rev).CombinedOutput()
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
 		return "", "", nil, fmt.Errorf("git worktree add %s: %w: %s",
