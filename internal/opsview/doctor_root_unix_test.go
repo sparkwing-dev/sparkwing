@@ -7,6 +7,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -128,12 +130,13 @@ func TestOpenDoctorStateRefusesReplacedHomeBeforeStoreOpen(t *testing.T) {
 	}
 }
 
-func TestScanDanglingDirsReportsASettledDirectoryWithNoRun(t *testing.T) {
+func TestScanUnreclaimedRefWorktreesReportsWhatTheSweepWillReclaim(t *testing.T) {
 	root := t.TempDir()
 	stale := filepath.Join(root, "run-gone")
 	live := filepath.Join(root, "run-live")
 	fresh := filepath.Join(root, "run-fresh")
-	for _, d := range []string{stale, live, fresh} {
+	finished := filepath.Join(root, "run-finished")
+	for _, d := range []string{stale, live, fresh, finished} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -156,18 +159,23 @@ func TestScanDanglingDirsReportsASettledDirectoryWithNoRun(t *testing.T) {
 	}
 	defer st.Close()
 	ctx := context.Background()
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-live", Pipeline: "p", Status: "running", StartedAt: time.Now(),
-	}); err != nil {
+	for _, id := range []string{"run-live", "run-finished"} {
+		if err := st.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "p", CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.FinishTrigger(ctx, "run-finished"); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := scanDanglingDirs(ctx, st, dirRoot)
+	got, err := scanUnreclaimedRefWorktrees(ctx, st, dirRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0] != "run-gone" {
-		t.Fatalf("scanDanglingDirs = %v, want [run-gone]: a run still in the store or a directory "+
-			"still settling must not be reported", got)
+	sort.Strings(got)
+	want := []string{"run-finished", "run-gone"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("scanUnreclaimedRefWorktrees = %v, want %v: doctor reports what the sweep "+
+			"reclaims, so a claimable trigger and a directory still settling stay off the list", got, want)
 	}
 }

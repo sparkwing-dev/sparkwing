@@ -1204,14 +1204,14 @@ func scanRefWorktrees(ctx context.Context, st *store.Store, homeRoot *os.Root) (
 	if err != nil || root == nil {
 		return nil, err
 	}
-	stale, scanErr := scanDanglingDirs(ctx, st, root)
+	stale, scanErr := scanUnreclaimedRefWorktrees(ctx, st, root)
 	if cerr := root.Close(); cerr != nil && scanErr == nil {
 		scanErr = cerr
 	}
 	return stale, scanErr
 }
 
-func scanDanglingDirs(ctx context.Context, st *store.Store, root *os.Root) ([]string, error) {
+func scanUnreclaimedRefWorktrees(ctx context.Context, st *store.Store, root *os.Root) ([]string, error) {
 	if root == nil {
 		return nil, nil
 	}
@@ -1231,17 +1231,22 @@ func scanDanglingDirs(ctx context.Context, st *store.Store, root *os.Root) ([]st
 		if !e.IsDir() {
 			continue
 		}
-		if _, err := st.GetRun(ctx, e.Name()); err == nil {
+		trig, err := st.GetTrigger(ctx, e.Name())
+		if err == nil {
+			if store.TriggerIsFinished(trig) {
+				stale = append(stale, e.Name())
+			}
 			continue
-		} else if !errors.Is(err, store.ErrNotFound) {
+		}
+		if !errors.Is(err, store.ErrNotFound) {
 			return nil, err
 		}
-		settled, err := runDirSettled(root, e.Name())
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+		settled, serr := runDirSettled(root, e.Name())
+		if serr != nil {
+			if errors.Is(serr, os.ErrNotExist) {
 				continue
 			}
-			return nil, err
+			return nil, serr
 		}
 		if time.Since(settled) < doctorRunDirGrace {
 			continue
@@ -1330,6 +1335,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "dead_concurrency_waiters\t%d\n", r.DeadConcurrencyWaiters)
 	fmt.Fprintf(w, "dangling_run_dirs\t%d\n", len(r.DanglingRunDirs))
 	fmt.Fprintf(w, "unknown_run_dirs\t%d\n", len(r.UnknownRunDirs))
+	fmt.Fprintf(w, "stale_ref_worktrees\t%d\n", len(r.StaleRefWorktrees))
 	rejections := 0
 	for _, rej := range r.AdmissionRejections {
 		rejections += rej.Count

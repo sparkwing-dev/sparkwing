@@ -16,11 +16,10 @@ import (
 )
 
 // RefWorktreeRevKey names the trigger environment entry holding the commit a
-// --sw-ref submission resolved to. Deduplication compares it, so a repeat key
-// naming a different tree is refused rather than answered with the first run.
+// --sw-ref submission resolved to.
 const RefWorktreeRevKey = "_SPARKWING_SUBMIT_REF_REV"
 
-const refWorktreeAbsentRunGrace = 10 * time.Minute
+const refWorktreeAbsentTriggerGrace = 10 * time.Minute
 
 const refWorktreeGitTimeout = 10 * time.Second
 
@@ -103,9 +102,8 @@ func refWorktreeOrigin(dir string) string {
 	return ""
 }
 
-// SweepRefWorktrees reclaims worktrees whose runs have ended, or whose
-// submissions never produced one, and reports how many it removed. It recovers
-// a worktree whose consumer died before it could clean up.
+// SweepRefWorktrees reclaims worktrees whose triggers have finished, or whose
+// submissions never wrote one, and reports how many it removed.
 func SweepRefWorktrees(ctx context.Context, p Paths, st *store.Store, logger *slog.Logger) (int, error) {
 	entries, err := os.ReadDir(p.RefWorktreesDir())
 	if err != nil {
@@ -135,26 +133,16 @@ func SweepRefWorktrees(ctx context.Context, p Paths, st *store.Store, logger *sl
 }
 
 func refWorktreeIsReclaimable(ctx context.Context, st *store.Store, entry os.DirEntry) (bool, error) {
-	// safety: a run row reads terminal while a re-dispatch of it executes, because
-	// CreateRun refuses to move a terminal row, so a tree in use can look finished.
-	settled, err := refWorktreeSettled(entry)
-	if err != nil || !settled {
+	trig, err := st.GetTrigger(ctx, entry.Name())
+	if err == nil {
+		return store.TriggerIsFinished(trig), nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
 		return false, err
 	}
-	run, gerr := st.GetRun(ctx, entry.Name())
-	if errors.Is(gerr, store.ErrNotFound) {
-		return true, nil
+	info, ierr := entry.Info()
+	if ierr != nil {
+		return false, ierr
 	}
-	if gerr != nil {
-		return false, gerr
-	}
-	return isTerminalRunStatus(run.Status), nil
-}
-
-func refWorktreeSettled(entry os.DirEntry) (bool, error) {
-	info, err := entry.Info()
-	if err != nil {
-		return false, err
-	}
-	return time.Since(info.ModTime()) > refWorktreeAbsentRunGrace, nil
+	return time.Since(info.ModTime()) > refWorktreeAbsentTriggerGrace, nil
 }

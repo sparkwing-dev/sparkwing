@@ -54,10 +54,16 @@ code change to unlock.
   The worker built its run options without the trigger's `full` flag, so a full
   rerun rehydrated the source run's passed nodes and behaved as `--failed`. The
   local consumer already carried the flag, so only remote execution was affected.
-- **orchestrator:** the ref worktree sweep leaves a tree alone until it stops
-  changing. A run row reads terminal while a re-dispatch of it executes, because
-  a terminal row is not moved back to running, so reclaiming on terminal status
-  alone could remove a worktree from under a live process.
+- **orchestrator:** the ref worktree sweep no longer removes a tree a live run is
+  executing in. It reclaimed on the run row's terminal status, which a requeued or
+  re-dispatched run still reads while it executes; reclaim now waits for the
+  trigger to finish, after which nothing claims it again.
+- **cli:** `sparkwing doctor` lists the ref worktrees a consumer will actually
+  reclaim. It keyed on the run row while the sweep keys on the trigger, so it
+  reported a submission still in flight and omitted a tree the sweep would take.
+- **cli:** `sparkwing doctor -o plain` reports stale ref worktrees. The count was
+  missing from plain output while it counted toward the unclean verdict, so the
+  machine-readable view showed nothing to act on.
 
 ## [v0.43.0] - 2026-09-06
 ### Added

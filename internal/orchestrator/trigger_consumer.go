@@ -400,10 +400,8 @@ func cleanupRefWorktree(
 	if dir == "" || !withinRefWorktrees(p, dir) {
 		return
 	}
-	// safety: this returns while a run is requeued or owned by a newer claim,
-	// and that run still executes in this tree; the sweep reclaims it later.
-	run, err := st.GetRun(ctx, trig.ID)
-	if err != nil || !isTerminalRunStatus(run.Status) {
+	current, err := st.GetTrigger(ctx, trig.ID)
+	if err != nil || !store.TriggerIsFinished(current) {
 		return
 	}
 	if err := RemoveRefWorktree(ctx, p, dir, logger); err != nil {

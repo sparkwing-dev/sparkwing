@@ -34,3 +34,9 @@ const (
 )
 
 const runTerminalIn = `status IN ('success','failed','cancelled')`
+
+// TriggerIsFinished reports whether a trigger reached its absorbing state,
+// after which nothing claims or executes it again.
+func TriggerIsFinished(t *Trigger) bool {
+	return t != nil && t.Status == triggerStatusDone
+}

@@ -127,18 +127,24 @@ func TestRemoveRefWorktreeDeletesTheTreeWhenTheOriginIsGone(t *testing.T) {
 	}
 }
 
-func TestSweepRefWorktreesReclaimsATerminalRun(t *testing.T) {
+func submitTrigger(t *testing.T, st *store.Store, id string) {
+	t.Helper()
+	if err := st.CreateTrigger(context.Background(), store.Trigger{
+		ID: id, Pipeline: "p", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+}
+
+func TestSweepRefWorktreesReclaimsAFinishedTrigger(t *testing.T) {
 	repo := gitRepoWithProject(t, true)
 	p := paths.Paths{Root: t.TempDir()}
 	st := testStore(t)
 	ctx := context.Background()
 	dir := buildWorktree(t, p, repo, "run-term")
-	if err := st.CreateRun(ctx, store.Run{ID: "run-term", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	settled := time.Now().Add(-2 * refWorktreeAbsentRunGrace)
-	if err := os.Chtimes(dir, settled, settled); err != nil {
-		t.Fatal(err)
+	submitTrigger(t, st, "run-term")
+	if err := st.FinishTrigger(ctx, "run-term"); err != nil {
+		t.Fatalf("FinishTrigger: %v", err)
 	}
 
 	n, err := SweepRefWorktrees(ctx, p, st, nil)
@@ -149,25 +155,58 @@ func TestSweepRefWorktreesReclaimsATerminalRun(t *testing.T) {
 		t.Errorf("reclaimed %d, want 1", n)
 	}
 	if _, serr := os.Stat(dir); !os.IsNotExist(serr) {
-		t.Error("a finished run's worktree survived the sweep")
+		t.Error("a finished trigger's worktree survived the sweep")
 	}
 }
 
-func TestSweepRefWorktreesKeepsARunningRun(t *testing.T) {
+func TestSweepRefWorktreesKeepsAClaimedTrigger(t *testing.T) {
 	repo := gitRepoWithProject(t, true)
 	p := paths.Paths{Root: t.TempDir()}
 	st := testStore(t)
 	ctx := context.Background()
 	dir := buildWorktree(t, p, repo, "run-live")
-	if err := st.CreateRun(ctx, store.Run{ID: "run-live", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
+	submitTrigger(t, st, "run-live")
+	if _, err := st.ClaimNextTrigger(ctx, time.Minute); err != nil {
+		t.Fatalf("ClaimNextTrigger: %v", err)
 	}
 
 	if n, err := SweepRefWorktrees(ctx, p, st, nil); err != nil || n != 0 {
 		t.Fatalf("SweepRefWorktrees = %d, %v; want 0, nil", n, err)
 	}
 	if _, err := os.Stat(dir); err != nil {
-		t.Error("the sweep deleted a worktree its run was still executing")
+		t.Error("the sweep deleted a worktree a claimed trigger was executing in")
+	}
+}
+
+func TestSweepRefWorktreesKeepsAWorktreeBeingWrittenUnderAQueuedTrigger(t *testing.T) {
+	repo := gitRepoWithProject(t, true)
+	p := paths.Paths{Root: t.TempDir()}
+	st := testStore(t)
+	ctx := context.Background()
+	dir := buildWorktree(t, p, repo, "run-requeued")
+	submitTrigger(t, st, "run-requeued")
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-requeued", Pipeline: "p", Status: "failed", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	stale := time.Now().Add(-2 * refWorktreeAbsentTriggerGrace)
+	if err := os.MkdirAll(filepath.Join(dir, "_build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "_build", "out.o"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(dir, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, err := SweepRefWorktrees(ctx, p, st, nil); err != nil || n != 0 {
+		t.Fatalf("SweepRefWorktrees = %d, %v; want 0, nil", n, err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("a claimable trigger's tree executes again, so a stale run row and a quiet "+
+			"top level must not reclaim it: %v", err)
 	}
 }
 
@@ -181,7 +220,7 @@ func TestSweepRefWorktreesSparesASubmissionStillInFlight(t *testing.T) {
 		t.Fatalf("SweepRefWorktrees = %d, %v; want 0, nil", n, err)
 	}
 	if _, err := os.Stat(dir); err != nil {
-		t.Error("the sweep raced a submission and deleted its worktree before the run row landed")
+		t.Error("the sweep raced a submission and deleted its worktree before the trigger row landed")
 	}
 }
 
@@ -190,7 +229,7 @@ func TestSweepRefWorktreesReclaimsAnAbandonedSubmission(t *testing.T) {
 	p := paths.Paths{Root: t.TempDir()}
 	st := testStore(t)
 	dir := buildWorktree(t, p, repo, "run-abandoned")
-	stale := time.Now().Add(-2 * refWorktreeAbsentRunGrace)
+	stale := time.Now().Add(-2 * refWorktreeAbsentTriggerGrace)
 	if err := os.Chtimes(dir, stale, stale); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +242,7 @@ func TestSweepRefWorktreesReclaimsAnAbandonedSubmission(t *testing.T) {
 		t.Errorf("reclaimed %d, want 1", n)
 	}
 	if _, serr := os.Stat(dir); !os.IsNotExist(serr) {
-		t.Error("a worktree whose submission never produced a run survived")
+		t.Error("a worktree whose submission never wrote a trigger survived")
 	}
 }
 
@@ -217,26 +256,5 @@ func TestCreateRefWorktreeRefusesARunIDThatEscapesTheRoot(t *testing.T) {
 		if _, err := CreateRefWorktree(context.Background(), p, repo, rev, runID, nil); err == nil {
 			t.Errorf("run id %q built a worktree outside the root", runID)
 		}
-	}
-}
-
-func TestSweepRefWorktreesKeepsATerminalRunWhoseTreeIsStillChanging(t *testing.T) {
-	repo := gitRepoWithProject(t, true)
-	p := paths.Paths{Root: t.TempDir()}
-	st := testStore(t)
-	ctx := context.Background()
-	dir := buildWorktree(t, p, repo, "run-redispatched")
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-redispatched", Pipeline: "p", Status: "success", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-
-	if n, err := SweepRefWorktrees(ctx, p, st, nil); err != nil || n != 0 {
-		t.Fatalf("SweepRefWorktrees = %d, %v; want 0, nil", n, err)
-	}
-	if _, err := os.Stat(dir); err != nil {
-		t.Fatalf("a run row can read terminal while a re-dispatch of it executes, so a tree still "+
-			"being written must not be reclaimed: %v", err)
 	}
 }

@@ -846,8 +846,9 @@ func TestCleanupRefWorktreeRemovesATerminalRunsWorktree(t *testing.T) {
 	st := testStore(t)
 	ctx := context.Background()
 	dir := buildWorktree(t, p, repo, "run-done")
-	if err := st.CreateRun(ctx, store.Run{ID: "run-done", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
+	submitTrigger(t, st, "run-done")
+	if err := st.FinishTrigger(ctx, "run-done"); err != nil {
+		t.Fatalf("FinishTrigger: %v", err)
 	}
 
 	cleanupRefWorktree(ctx, st, p, refWorktreeTrigger("run-done", dir), slog.New(slog.DiscardHandler))
@@ -863,13 +864,14 @@ func TestCleanupRefWorktreeRemovesATerminalRunsWorktree(t *testing.T) {
 	}
 }
 
-func TestCleanupRefWorktreeKeepsAWorktreeWhoseRunIsNotOver(t *testing.T) {
+func TestCleanupRefWorktreeKeepsAWorktreeItsTriggerCanStillReach(t *testing.T) {
 	repo := gitRepoWithProject(t, true)
 	p := paths.Paths{Root: t.TempDir()}
 	st := testStore(t)
 	ctx := context.Background()
 	dir := buildWorktree(t, p, repo, "run-requeued")
-	if err := st.CreateRun(ctx, store.Run{ID: "run-requeued", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+	submitTrigger(t, st, "run-requeued")
+	if err := st.CreateRun(ctx, store.Run{ID: "run-requeued", Pipeline: "p", Status: "failed", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
@@ -888,10 +890,9 @@ func TestCleanupRefWorktreeLeavesAnOperatorCheckoutAlone(t *testing.T) {
 	if err := os.WriteFile(work, []byte("mine\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateRun(context.Background(), store.Run{
-		ID: "run-plain", Pipeline: "p", Status: "success", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
+	submitTrigger(t, st, "run-plain")
+	if err := st.FinishTrigger(context.Background(), "run-plain"); err != nil {
+		t.Fatalf("FinishTrigger: %v", err)
 	}
 
 	cleanupRefWorktree(context.Background(), st, p,
