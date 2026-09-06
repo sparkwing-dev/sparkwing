@@ -385,8 +385,13 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, sparkwingSub strin
 
 	cleanup = func() {
 		_ = exec.Command("git", "-C", repoRoot,
-			"worktree", "remove", "--force", tmpDir).Run()
+			"worktree", "remove", "--force", "--", tmpDir).Run()
 		_ = os.RemoveAll(tmpDir)
+		// safety: git keeps the registration under the origin repository, where a
+		// leftover one blocks adding the same path again.
+		if err := exec.Command("git", "-C", repoRoot, "worktree", "prune").Run(); err != nil {
+			slog.Default().Debug("ref worktree prune did not apply", "repo", repoRoot, "error", err)
+		}
 	}
 	return tmpDir, sub, cleanup, nil
 }

@@ -415,8 +415,9 @@ func localRepoDeclaring(start, pipeline string) (string, bool) {
 }
 
 var undetachableFlags = map[string]string{
-	"--sw-index": "an index binding is a live path this process holds open for the run; " +
-		"a detached run outlives the submitting process. Run it in the foreground with `sparkwing run --sw-index`",
+	"--sw-index": "an index binding names a file in your filesystem that sparkwing neither creates nor can " +
+		"reproduce, so a detached run would read whatever that path holds when it starts, or nothing. " +
+		"Run it in the foreground with `sparkwing run --sw-index`",
 	"--sw-dry-run": "a dry run finishes in seconds and reports to your terminal; submit it with `sparkwing run --sw-dry-run`",
 
 	"--profile": "the resident consumer executes against this home's local store, " +
