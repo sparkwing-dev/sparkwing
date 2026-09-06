@@ -10,6 +10,7 @@ import (
 func TestLongSubmitProcessRegressionsRunInParallel(t *testing.T) {
 	targets := map[string]bool{
 		"TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess":          false,
+		"TestRunsRetry_HeadlessLocalQueueExecutesFailedAndFullScopes":   false,
 		"TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun":              false,
 		"TestRunsSubmit_DistinctKeysAreDistinctRuns":                    false,
 		"TestRunsSubmit_RequestIDDoesNotDeduplicate":                    false,

@@ -58,6 +58,9 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `sparkwing runs retry` queues local retries and starts the resident
+  consumer without requiring a running dashboard or a storage profile. `--home`
+  selects the local runs store; remote retries continue to use `--profile`.
 - **orchestrator:** `runs retry --all` re-executes every node on a cluster worker.
   The worker built its run options without the trigger's `full` flag, so a full
   rerun rehydrated the source run's passed nodes and behaved as `--failed`. The

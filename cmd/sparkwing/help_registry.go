@@ -2639,7 +2639,9 @@ var cmdJobsRetry = Command{
 	Description: `Issues a new trigger per source run with the same pipeline, args,
 branch, and SHA. Each new run is tagged with retry_of=<old-id>.
 
-On a local dashboard, the retry is bound to the source run's full origin
+For local runs, Sparkwing queues the retry in the same local store as
+runs submit and starts the resident consumer when no dashboard is running.
+The retry is bound to the source run's full origin
 identity, Git revision, and complete plan snapshot. Sparkwing compiles and runs
 an immutable detached snapshot of that recorded revision; uncommitted or later
 working-tree edits are deliberately excluded. If the source checkout is gone or
@@ -2664,6 +2666,7 @@ only when at least one id failed.`,
 		{Name: "failed", Desc: "Rerun from failed: reuse passed nodes, re-execute only failed/unreached", ConflictsWith: []string{"all"}, Group: "Input"},
 		{Name: "all", Desc: "Rerun all: re-execute every node from scratch", ConflictsWith: []string{"failed"}, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
+		{Name: "home", Argument: "PATH", Desc: "Sparkwing home holding local runs (default: $SPARKWING_HOME or ~/.sparkwing)", ConflictsWith: []string{"profile"}, Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
