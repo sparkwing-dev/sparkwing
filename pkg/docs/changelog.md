@@ -48,16 +48,48 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **store:** a lookup that matches nothing says what it looked for. Every
+  not-found error was the bare text `not found`, with no resource, no id and no
+  operation, so a log line naming one told an operator nothing about which
+  lookup missed. Errors still satisfy `errors.Is(err, store.ErrNotFound)`;
+  code comparing with `==` must move to `errors.Is`.
+
 ### Fixed
 
 - **orchestrator:** `runs retry --all` re-executes every node on a cluster worker.
   The worker built its run options without the trigger's `full` flag, so a full
   rerun rehydrated the source run's passed nodes and behaved as `--failed`. The
   local consumer already carried the flag, so only remote execution was affected.
-- **orchestrator:** the ref worktree sweep leaves a tree alone until it stops
-  changing. A run row reads terminal while a re-dispatch of it executes, because
-  a terminal row is not moved back to running, so reclaiming on terminal status
-  alone could remove a worktree from under a live process.
+- **orchestrator:** the ref worktree sweep no longer removes a tree a live run is
+  executing in. It reclaimed on the run row's terminal status, which a requeued or
+  re-dispatched run still reads while it executes, and on a directory timestamp no
+  build below the top level moves. A process now takes a lock before it builds a
+  worktree and keeps it until it is done, the sweep holds that lock across the
+  removal itself, and a dispatch that cannot take it refuses rather than running
+  in a tree something else may reclaim.
+- **orchestrator:** a lapsed claim is no longer closed out on an earlier attempt's
+  run row. A re-dispatch inherits the previous attempt's terminal row, so a
+  consumer whose heartbeat stalled had its trigger marked done while its child was
+  still running.
+- **orchestrator:** a local dispatch that loses its claim can no longer write the
+  run's outcome. It ran unfenced while the cluster worker and the controller both
+  fenced on the claim generation, so a superseded dispatch could stamp its own
+  result over the run the current claim was producing.
+- **store:** a run created in a terminal status carries a finish time. It was left
+  unset, so a reader could not tell a finished run from an earlier attempt's
+  leftover row, and a claim whose run ended that way was never closed out.
+- **cli:** `sparkwing doctor` keys its ref worktree report on the trigger, as the
+  sweep does. It read the run row, so it reported a submission still in flight.
+  It does not check whether a process holds a worktree, so it still reports one
+  the sweep will leave alone.
+- **orchestrator:** one unreadable worktree no longer stops the sweep. It gave up
+  at the first it could not judge, so a single unusable entry kept every later
+  one, and a full disk disabled the reclaim that frees disk.
+- **cli:** `sparkwing doctor -o plain` reports stale ref worktrees. The count was
+  missing from plain output while it counted toward the unclean verdict, so the
+  machine-readable view showed nothing to act on.
 
 ## [v0.43.0] - 2026-09-06
 ### Added
