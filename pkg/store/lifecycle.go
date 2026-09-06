@@ -35,8 +35,8 @@ const (
 
 const runTerminalIn = `status IN ('success','failed','cancelled')`
 
-// IsFinished reports whether a trigger reached its absorbing state, after
-// which nothing claims or executes it again.
+// IsFinished reports whether this trigger has reached the state it never
+// leaves, so what is keyed to it can be reclaimed.
 func (t Trigger) IsFinished() bool {
 	return t.Status == triggerStatusDone
 }

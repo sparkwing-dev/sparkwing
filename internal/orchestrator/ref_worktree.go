@@ -26,22 +26,22 @@ const refWorktreeGitTimeout = 10 * time.Second
 // CreateRefWorktree checks commit out into a worktree owned by runID. Nothing
 // here removes it: the tree outlives this process so a detached run can execute it.
 func CreateRefWorktree(
-	ctx context.Context, p Paths, originRepo string, rev Commit, runID string, logger *slog.Logger,
+	ctx context.Context, p Paths, originRepo string, commit Commit, runID string, logger *slog.Logger,
 ) (string, error) {
 	if err := fssecure.EnsureDir(p.RefWorktreesDir()); err != nil {
 		return "", fmt.Errorf("secure ref worktree directory: %w", err)
 	}
 	dir := p.RefWorktreeDir(runID)
 	out, err := exec.CommandContext(ctx, "git", "-C", originRepo,
-		"worktree", "add", "--detach", "--quiet", "--", dir, string(rev)).CombinedOutput()
+		"worktree", "add", "--detach", "--quiet", "--", dir, string(commit)).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git worktree add %s: %w: %s", rev, err, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("git worktree add %s: %w: %s", commit, err, strings.TrimSpace(string(out)))
 	}
 	if info, serr := os.Stat(filepath.Join(dir, ".sparkwing")); serr != nil || !info.IsDir() {
 		if rerr := RemoveRefWorktree(ctx, p, dir, logger); rerr != nil {
 			return "", rerr
 		}
-		return "", fmt.Errorf("commit %s has no .sparkwing/ directory, so no pipeline can be resolved from it", rev)
+		return "", fmt.Errorf("commit %s has no .sparkwing/ directory, so no pipeline can be resolved from it", commit)
 	}
 	return dir, nil
 }

@@ -8,8 +8,7 @@ import (
 	"strings"
 )
 
-// Commit is a resolved commit id. Only [ResolveRefCommit] produces one, so a
-// caller cannot reach a worktree with a bare ref name.
+// Commit is a commit id, as [ResolveRefCommit] returns it.
 type Commit string
 
 // ResolveRefCommit turns ref into a commit id, fetching first so a ref this
