@@ -362,6 +362,8 @@ func (rt consumerRuntime) shouldExit(ctx context.Context, st *store.Store, logge
 	return true
 }
 
+var dispatchLocalTriggerFn = dispatchLocalTrigger
+
 func runClaimedTrigger(
 	ctx context.Context, st *store.Store, trig *store.Trigger,
 	cache *localCompileCache, logger *slog.Logger, home string, lease time.Duration,
@@ -405,7 +407,7 @@ func runClaimedTrigger(
 		return
 	}
 	env = submissionExecutionEnvironment(env, home)
-	err := dispatchLocalTrigger(dispatchCtx, trig, "", "", cache, logger, env)
+	err := dispatchLocalTriggerFn(dispatchCtx, trig, "", "", cache, logger, env)
 	settleClaimedTriggerDispatch(book, st, trig, err, cancelled.Load(), ctx.Err() != nil, logger)
 }
 

@@ -162,3 +162,83 @@ func TestDispatchContextCarriesTheClaimItRunsUnder(t *testing.T) {
 		t.Errorf("ClaimGeneration = %d, want 7", fence.ClaimGeneration)
 	}
 }
+
+func TestAClaimedTriggerRefusesADispatchItCannotHoldTheTreeFor(t *testing.T) {
+	repo := gitRepoWithProject(t, true)
+	home := t.TempDir()
+	p := paths.Paths{Root: home}
+	st := testStore(t)
+	ctx := context.Background()
+
+	dir := buildWorktree(t, p, repo, "run-contended")
+	rival, held, herr := HoldRefWorktree(p, "run-contended")
+	if herr != nil || !held {
+		t.Fatalf("HoldRefWorktree = %v, %v; want a hold", held, herr)
+	}
+	t.Cleanup(func() { _ = ReleaseRefWorktree(rival) })
+
+	submitTrigger(t, st, "run-contended")
+	claimed, err := st.ClaimNextTrigger(ctx, time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimNextTrigger: %v", err)
+	}
+	claimed.TriggerEnv = map[string]string{SubmitRepoDirKey: dir}
+
+	runClaimedTrigger(ctx, st, claimed, nil, slog.New(slog.DiscardHandler), home, time.Minute)
+
+	run, gerr := st.GetRun(ctx, "run-contended")
+	if gerr != nil {
+		t.Fatalf("GetRun: %v", gerr)
+	}
+	if run.Status != "failed" {
+		t.Errorf("run status = %q, want failed: a dispatch that cannot hold its tree must refuse "+
+			"rather than execute one another process may reclaim", run.Status)
+	}
+	if _, serr := os.Stat(dir); serr != nil {
+		t.Errorf("the refused dispatch removed the tree its rival is holding: %v", serr)
+	}
+}
+
+func TestAClaimedTriggerHoldsItsTreeAgainstTheSweep(t *testing.T) {
+	repo := gitRepoWithProject(t, true)
+	home := t.TempDir()
+	p := paths.Paths{Root: home}
+	st := testStore(t)
+	ctx := context.Background()
+
+	dir := buildWorktree(t, p, repo, "run-dispatching")
+	submitTrigger(t, st, "run-dispatching")
+	claimed, err := st.ClaimNextTrigger(ctx, time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimNextTrigger: %v", err)
+	}
+	claimed.TriggerEnv = map[string]string{SubmitRepoDirKey: dir}
+
+	swept := make(chan int, 1)
+	sweepErr := make(chan error, 1)
+	origin := dispatchLocalTriggerFn
+	dispatchLocalTriggerFn = func(
+		context.Context, *store.Trigger, string, string, *localCompileCache, *slog.Logger, []string,
+	) error {
+		if ferr := st.FinishTrigger(ctx, "run-dispatching"); ferr != nil {
+			sweepErr <- ferr
+			swept <- 0
+			return ferr
+		}
+		n, serr := SweepRefWorktrees(ctx, p, st, nil)
+		swept <- n
+		sweepErr <- serr
+		return serr
+	}
+	t.Cleanup(func() { dispatchLocalTriggerFn = origin })
+
+	runClaimedTrigger(ctx, st, claimed, nil, slog.New(slog.DiscardHandler), home, time.Minute)
+
+	if serr := <-sweepErr; serr != nil {
+		t.Fatalf("SweepRefWorktrees during dispatch: %v", serr)
+	}
+	if n := <-swept; n != 0 {
+		t.Errorf("the sweep reclaimed %d worktrees while a dispatch was executing in one; "+
+			"its trigger reads finished, so the hold is the only thing left to spare it", n)
+	}
+}
