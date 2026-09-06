@@ -168,7 +168,7 @@ func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID str
 	if err != nil {
 		return fmt.Errorf("get trigger %s: %w", triggerID, err)
 	}
-	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trigger.ClaimSeq})
+	ctx = DispatchContext(ctx, trigger)
 	opts.Logger.Info(
 		"handling claimed trigger",
 		"run_id", trigger.ID,

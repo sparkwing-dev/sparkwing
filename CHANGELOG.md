@@ -63,6 +63,10 @@ code change to unlock.
   run row. A re-dispatch inherits the previous attempt's terminal row, so a
   consumer whose heartbeat stalled had its trigger marked done while its child was
   still running.
+- **orchestrator:** a local dispatch that loses its claim can no longer write the
+  run's outcome. It ran unfenced while the cluster worker and the controller both
+  fenced on the claim generation, so a superseded dispatch could stamp its own
+  result over the run the current claim was producing.
 - **cli:** `sparkwing doctor` keys its ref worktree report on the trigger, as the
   sweep does. It read the run row, so it reported a submission still in flight.
   It still measures a settling directory differently from the sweep, so the two

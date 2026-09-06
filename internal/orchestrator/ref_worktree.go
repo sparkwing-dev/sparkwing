@@ -183,3 +183,10 @@ func refWorktreeIsHeld(p Paths, runID string) (bool, error) {
 	free, lerr := flockTry(file)
 	return !free, errors.Join(lerr, file.Close())
 }
+
+// DispatchContext carries the claim a dispatch runs under, so a write it makes
+// after losing that claim is refused rather than applied over the dispatch that
+// took it. Every path executing a claimed trigger builds its context here.
+func DispatchContext(ctx context.Context, trig *store.Trigger) context.Context {
+	return store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trig.ClaimSeq})
+}

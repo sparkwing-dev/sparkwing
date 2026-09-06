@@ -388,6 +388,7 @@ func runClaimedTrigger(
 	}
 
 	dispatchCtx, stopHeartbeat := context.WithCancel(ctx)
+	dispatchCtx = DispatchContext(dispatchCtx, trig)
 	defer stopHeartbeat()
 	cancelled := &atomic.Bool{}
 	go heartbeatClaimedTrigger(dispatchCtx, st, trig.ID, trig.ClaimSeq, lease, logger, func() {
