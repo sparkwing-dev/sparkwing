@@ -3019,12 +3019,19 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 	if r.Status == runStatusRunning {
 		heartbeat = sql.NullInt64{Int64: time.Now().UnixNano(), Valid: true}
 	}
+	// safety: a terminal run with no finish time is indistinguishable from an
+	// earlier attempt's leftover row, and every caller that reads one to decide
+	// whether work ended reads it wrongly.
+	finished := nullableTimeNS(r.FinishedAt)
+	if finished == nil && isTerminalRunStatus(r.Status) {
+		finished = time.Now().UnixNano()
+	}
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `
-INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     pipeline        = excluded.pipeline,
     status          = excluded.status,
@@ -3034,6 +3041,7 @@ ON CONFLICT(id) DO UPDATE SET
     args_json       = excluded.args_json,
     plan_json       = excluded.plan_json,
     started_at      = excluded.started_at,
+    finished_at     = excluded.finished_at,
     parent_run_id   = excluded.parent_run_id,
     repo            = CASE WHEN runs.repo = '' THEN excluded.repo ELSE runs.repo END,
     repo_url        = CASE WHEN runs.repo_url = '' THEN excluded.repo_url ELSE runs.repo_url END,
@@ -3053,7 +3061,7 @@ ON CONFLICT(id) DO UPDATE SET
     last_heartbeat_at = COALESCE(excluded.last_heartbeat_at, runs.last_heartbeat_at)
 WHERE runs.status = '`+runStatusPending+`'`,
 		r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
-		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), parent,
+		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), finished, parent,
 		r.Repo, r.RepoURL, r.GithubOwner, r.GithubRepo,
 		r.RetryOf, r.RetriedAs, r.RetrySource, r.RetryCauseNodeID,
 		r.RetryAvoidCoordinatorID, r.RetryAvoidExecutorKind, r.RetryAvoidExecutorID, nullableTimeNS(r.RetryAvoidUntil),

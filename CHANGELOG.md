@@ -67,6 +67,9 @@ code change to unlock.
   run's outcome. It ran unfenced while the cluster worker and the controller both
   fenced on the claim generation, so a superseded dispatch could stamp its own
   result over the run the current claim was producing.
+- **store:** a run created in a terminal status carries a finish time. It was left
+  unset, so a reader could not tell a finished run from an earlier attempt's
+  leftover row, and a claim whose run ended that way was never closed out.
 - **cli:** `sparkwing doctor` keys its ref worktree report on the trigger, as the
   sweep does. It read the run row, so it reported a submission still in flight.
   It still measures a settling directory differently from the sweep, so the two
