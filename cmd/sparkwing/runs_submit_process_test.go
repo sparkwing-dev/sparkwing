@@ -334,6 +334,62 @@ func TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 	})
 }
 
+func TestRunsRetry_HeadlessLocalQueueExecutesFailedAndFullScopes(t *testing.T) {
+	t.Parallel()
+	e := newSubmitTestEnv(t)
+	e.extraEnv = []string{"SPARKWING_CONTROLLER_URL=http://127.0.0.1:1", "SPARKWING_LOGS_URL="}
+	runSnapshotGit(t, e.repoDir, "init")
+	runSnapshotGit(t, e.repoDir, "config", "user.email", "retry@example.test")
+	runSnapshotGit(t, e.repoDir, "config", "user.name", "Retry Test")
+	runSnapshotGit(t, e.repoDir, "remote", "add", "origin", "https://example.test/acme/retry-fixture.git")
+	runSnapshotGit(t, e.repoDir, "add", ".sparkwing")
+	runSnapshotGit(t, e.repoDir, "commit", "-m", "fixture")
+	revision := strings.TrimSpace(runSnapshotGit(t, e.repoDir, "rev-parse", "HEAD"))
+
+	const sourceID = "run-headless-retry-source"
+	st := e.store()
+	if err := st.CreateRun(context.Background(), store.Run{
+		ID:           sourceID,
+		Pipeline:     "fixture",
+		Status:       "failed",
+		GitBranch:    "main",
+		GitSHA:       revision,
+		Repo:         "acme/retry-fixture",
+		RepoURL:      "https://example.test/acme/retry-fixture.git",
+		PlanSnapshot: []byte(`{"pipeline":"fixture","nodes":[]}`),
+		Invocation:   map[string]any{"cwd": e.repoDir},
+		StartedAt:    time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		flag string
+		full bool
+	}{
+		{flag: "--failed"},
+		{flag: "--all", full: true},
+	} {
+		out := e.mustRun("runs", "retry", tc.flag, "--run", sourceID)
+		fields := strings.Fields(out)
+		if len(fields) < 2 || fields[0] != "run" {
+			t.Fatalf("retry output did not start with the new run id:\n%s", out)
+		}
+		retryID := fields[1]
+		trigger, err := st.GetTrigger(context.Background(), retryID)
+		if err != nil {
+			t.Fatalf("retry %s has no trigger: %v", retryID, err)
+		}
+		if trigger.RetryOf != sourceID || trigger.Full != tc.full {
+			t.Fatalf("retry trigger = retry_of %q full %v, want %q/%v",
+				trigger.RetryOf, trigger.Full, sourceID, tc.full)
+		}
+		waitUntil(t, tc.flag+" retry to execute without a dashboard", 90*time.Second, func() bool {
+			return slices.Contains(e.markerLines(), retryID)
+		})
+	}
+}
+
 func TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)

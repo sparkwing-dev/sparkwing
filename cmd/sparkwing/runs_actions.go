@@ -13,6 +13,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/runretry"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -120,6 +121,7 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsRetry.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "source run id (repeatable; can also be a positional or `-` for stdin)")
 	on := fs.String("profile", "", "profile name for remote runs; omit for local runs")
+	home := fs.String("home", "", "sparkwing home holding local runs (default: $SPARKWING_HOME or ~/.sparkwing)")
 	fromFailed := fs.Bool("failed", false, "rerun from failed: reuse passed nodes, re-execute only failed or unreached")
 	all := fs.Bool("all", false, "rerun all: re-execute every node from scratch")
 	if err := parseAndCheck(cmdJobsRetry, fs, args); err != nil {
@@ -136,6 +138,8 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		return fmt.Errorf("%s: --failed and --all are mutually exclusive", cmdJobsRetry.Path)
 	case !*fromFailed && !*all:
 		return fmt.Errorf("%s: pass --failed (reuse passed nodes) or --all (re-execute everything)", cmdJobsRetry.Path)
+	case *on != "" && *home != "":
+		return fmt.Errorf("%s: --home and --profile are mutually exclusive", cmdJobsRetry.Path)
 	}
 	full := *all
 	ids, err := collectRunIDs(*runIDs, os.Stdin)
@@ -149,7 +153,7 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	requested := len(ids)
 	if *on == "" {
 		var refused []runResult
-		refused, ids = standaloneLocalRuns(ctx, "", ids, cmdJobsRetry.Path,
+		refused, ids = standaloneLocalRuns(ctx, *home, ids, cmdJobsRetry.Path,
 			orchestrator.StandaloneSubmitRefusal)
 		for _, r := range refused {
 			failures++
@@ -158,6 +162,30 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		if len(ids) == 0 {
 			return fmt.Errorf("retry: %d of %d failed", failures, requested)
 		}
+		results, consumerErr, localErr := retryLocalRuns(ctx, *home, ids, full)
+		if localErr != nil {
+			return localErr
+		}
+		localSuccesses := 0
+		for _, result := range results {
+			if result.Error != "" {
+				failures++
+				fmt.Fprintf(os.Stderr, "rerun of %s failed: %s\n", result.RunID, result.Error)
+				continue
+			}
+			localSuccesses++
+			fmt.Fprintf(os.Stdout, "run %s submitted successfully\n", result.NewRunID)
+			fmt.Fprintf(os.Stdout, "follow: sparkwing runs logs --run %s --follow\n", result.NewRunID)
+		}
+		if consumerErr != nil {
+			return fmt.Errorf("retry: %d run(s) persisted but no consumer could be started: %w\n"+
+				"Start one with `sparkwing runs consumer start`; the retries are queued and will execute when it comes up",
+				localSuccesses, consumerErr)
+		}
+		if failures > 0 {
+			return fmt.Errorf("retry: %d of %d failed", failures, requested)
+		}
+		return nil
 	}
 	c, _, err := resolveRunsClient(*on, cmdJobsRetry.Path)
 	if err != nil {
@@ -179,6 +207,44 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		return fmt.Errorf("retry: %d of %d failed", failures, requested)
 	}
 	return nil
+}
+
+func retryLocalRuns(ctx context.Context, home string, ids []string, full bool) ([]runResult, error, error) {
+	paths, err := submitPaths(home)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := os.Stat(paths.StateDB()); err != nil {
+		return nil, nil, fmt.Errorf("no local runs store at %s (is this the home the run is using?)", paths.StateDB())
+	}
+	//nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		return nil, nil, fmt.Errorf("open %s: %w", paths.StateDB(), err)
+	}
+
+	results := make([]runResult, 0, len(ids))
+	successes := 0
+	for _, sourceID := range ids {
+		created, createErr := runretry.Create(ctx, st, sourceID, orchestrator.NewLocalRunID(), full, time.Now())
+		if createErr != nil {
+			results = append(results, runResult{RunID: sourceID, Error: createErr.Error()})
+			continue
+		}
+		successes++
+		results = append(results, runResult{RunID: sourceID, OK: true, NewRunID: created.ID})
+	}
+	if err := st.Close(); err != nil {
+		return results, nil, fmt.Errorf("close %s: %w", paths.StateDB(), err)
+	}
+	if successes == 0 {
+		return results, nil, nil
+	}
+	//nolint:contextcheck // The resident consumer lifecycle predates a context-aware process-table API.
+	if err := ensureTriggerConsumer(paths.Root, 0, 0); err != nil {
+		return results, err, nil
+	}
+	return results, nil, nil
 }
 
 func profileSuffix(on string) string {
