@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.43.0] - 2026-09-06
 ### Added
 
 - **cli:** `sparkwing doctor` reports ref worktrees left behind by a submission
