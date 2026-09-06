@@ -146,7 +146,7 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 		}
 	}
 	if executor.Name == "" {
-		return nil, ErrNotFound
+		return nil, notFound("executor claim candidate", "")
 	}
 	if claimant.TokenPrefix == "" || executor.TokenPrefix != claimant.TokenPrefix || executor.Principal != claimant.Principal {
 		return nil, ErrExecutorCredentialMismatch
@@ -175,7 +175,7 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 		return nil, err
 	}
 	if len(page) == 0 {
-		return nil, ErrNotFound
+		return nil, notFound("executor claim candidate", "")
 	}
 
 	hardEligible := make([]executorPrepareCandidate, 0, len(page))
@@ -289,7 +289,7 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 	if runtimeRefusal != nil {
 		return nil, runtimeRefusal
 	}
-	return nil, ErrNotFound
+	return nil, notFound("executor claim candidate", "")
 }
 
 func (s *Store) loadExecutorPrepareCandidates(ctx context.Context, runID, executorName string, now time.Time,
@@ -750,7 +750,7 @@ func (s *Store) rejectUnattestedExecutorOffer(ctx context.Context, claimant Clai
 		return err
 	}
 	if !sealed {
-		return ErrNotFound
+		return notFound("executor offer", "")
 	}
 	runtimeReport, err := executorRuntimeReportTx(ctx, tx, offer.ExecutorName)
 	if err != nil {
@@ -869,7 +869,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 			now.Add(-ExecutorRegistrationActiveWindow),
 		)
 		if !found {
-			err = ErrNotFound
+			err = notFound("executor offer", "")
 		}
 		if err != nil && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrExecutorCredentialMismatch) {
 			return nil, err
@@ -946,7 +946,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 		return left.HolderID < right.HolderID
 	})
 	if len(candidates) == 0 {
-		return nil, ErrNotFound
+		return nil, notFound("executor offer", "")
 	}
 	item := &candidates[0]
 	n := &nodeRecord{}

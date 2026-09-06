@@ -2,6 +2,7 @@ package warmpool
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -404,7 +405,7 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 			}
 			break
 		}
-		if err != store.ErrNotFound {
+		if !errors.Is(err, store.ErrNotFound) {
 			t.Fatal(err)
 		}
 		select {

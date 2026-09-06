@@ -323,7 +323,7 @@ func (s *Store) concurrencyHolder(ctx context.Context, key, holderID string, now
 	)
 	holder, err := scanHolder(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, notFound("concurrency holder", key+"/"+holderID)
 	}
 	if err != nil {
 		return nil, err
@@ -2139,7 +2139,7 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 		`SELECT capacity FROM concurrency_entries WHERE key = ?`, key,
 	).Scan(&capacity)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, notFound("concurrency state", key)
 	}
 	if err != nil {
 		return nil, err
