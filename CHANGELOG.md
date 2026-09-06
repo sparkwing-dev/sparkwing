@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.44.0] - 2026-09-06
 ### Added
 
 - **store:** `Trigger.IsFinished` reports whether anything will claim or execute a
