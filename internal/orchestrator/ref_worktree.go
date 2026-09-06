@@ -19,9 +19,9 @@ import (
 // --sw-ref submission resolved to.
 const RefWorktreeRevKey = "_SPARKWING_SUBMIT_REF_REV"
 
-const refWorktreeAbsentTriggerGrace = 10 * time.Minute
-
 const refWorktreeGitTimeout = 10 * time.Second
+
+const refWorktreeLeaseSuffix = ".lease"
 
 // CreateRefWorktree checks commit out into a worktree owned by runID. Nothing
 // here removes it: the tree outlives this process so a detached run can execute it.
@@ -74,6 +74,9 @@ func RemoveRefWorktree(ctx context.Context, p Paths, dir string, logger *slog.Lo
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("remove ref worktree %s: %w", dir, err)
 	}
+	if err := os.Remove(dir + refWorktreeLeaseSuffix); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove ref worktree lease for %s: %w", dir, err)
+	}
 	return nil
 }
 
@@ -111,7 +114,7 @@ func SweepRefWorktrees(ctx context.Context, p Paths, st *store.Store, logger *sl
 		if !entry.IsDir() {
 			continue
 		}
-		reclaimable, rerr := refWorktreeIsReclaimable(ctx, st, entry)
+		reclaimable, rerr := refWorktreeIsReclaimable(ctx, p, st, entry)
 		if rerr != nil {
 			return removed, fmt.Errorf("ref worktree %s: %w", entry.Name(), rerr)
 		}
@@ -126,7 +129,11 @@ func SweepRefWorktrees(ctx context.Context, p Paths, st *store.Store, logger *sl
 	return removed, nil
 }
 
-func refWorktreeIsReclaimable(ctx context.Context, st *store.Store, entry os.DirEntry) (bool, error) {
+func refWorktreeIsReclaimable(ctx context.Context, p Paths, st *store.Store, entry os.DirEntry) (bool, error) {
+	held, herr := refWorktreeIsHeld(p, entry.Name())
+	if herr != nil || held {
+		return false, herr
+	}
 	trig, err := st.GetTrigger(ctx, entry.Name())
 	if err == nil {
 		return trig.IsFinished(), nil
@@ -134,9 +141,45 @@ func refWorktreeIsReclaimable(ctx context.Context, st *store.Store, entry os.Dir
 	if !errors.Is(err, store.ErrNotFound) {
 		return false, err
 	}
-	info, ierr := entry.Info()
-	if ierr != nil {
-		return false, ierr
+	return true, nil
+}
+
+func refWorktreeLeasePath(p Paths, runID string) string {
+	return filepath.Join(p.RefWorktreesDir(), runID+refWorktreeLeaseSuffix)
+}
+
+// HoldRefWorktree marks a worktree in use for as long as the returned file
+// stays open, and reports false when another process already holds it. The
+// operating system releases the hold when its holder dies, so a worktree a
+// crashed process was writing becomes reclaimable without waiting out a timer.
+func HoldRefWorktree(p Paths, runID string) (*os.File, bool, error) {
+	if err := fssecure.EnsureDir(p.RefWorktreesDir()); err != nil {
+		return nil, false, fmt.Errorf("secure ref worktree directory: %w", err)
 	}
-	return time.Since(info.ModTime()) > refWorktreeAbsentTriggerGrace, nil
+	file, err := os.OpenFile(refWorktreeLeasePath(p, runID), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, false, err
+	}
+	held, lerr := flockTry(file)
+	if lerr != nil || !held {
+		return nil, false, errors.Join(lerr, file.Close())
+	}
+	return file, true, nil
+}
+
+// ReleaseRefWorktree drops a hold taken by [HoldRefWorktree].
+func ReleaseRefWorktree(file *os.File) error {
+	if file == nil {
+		return nil
+	}
+	return errors.Join(flockUnlock(file), file.Close())
+}
+
+func refWorktreeIsHeld(p Paths, runID string) (bool, error) {
+	file, err := os.OpenFile(refWorktreeLeasePath(p, runID), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return false, err
+	}
+	free, lerr := flockTry(file)
+	return !free, errors.Join(lerr, file.Close())
 }

@@ -158,6 +158,18 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		}
 		worktree = built
 		repoDir = built
+
+		hold, held, herr := orchestrator.HoldRefWorktree(paths, runID)
+		if herr != nil || !held {
+			discardRefWorktree(ctx, paths, worktree)
+			return submitResult{}, fmt.Errorf("--sw-ref %s: could not hold the worktree this submission built: %w",
+				sub.Ref, herr)
+		}
+		defer func() {
+			if rerr := orchestrator.ReleaseRefWorktree(hold); rerr != nil {
+				slog.Default().Warn("release worktree hold", "run_id", runID, "error", rerr)
+			}
+		}()
 	}
 	if err := orchestrator.CaptureSubmissionEnvironment(paths.Root, runID, os.Environ(), slog.Default()); err != nil {
 		discardRefWorktree(ctx, paths, worktree)

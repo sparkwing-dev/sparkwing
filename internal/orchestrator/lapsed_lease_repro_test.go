@@ -78,3 +78,40 @@ func TestALapsedLeaseFinishesAClaimWhoseRunEndedUnderIt(t *testing.T) {
 			"holds and the queue keeps a trigger no dispatch will finish", after.Status)
 	}
 }
+
+func TestASupersededDispatchFinishingDoesNotReclaimTheLiveTree(t *testing.T) {
+	repo := gitRepoWithProject(t, true)
+	p := paths.Paths{Root: t.TempDir()}
+	st := testStore(t)
+	ctx := context.Background()
+
+	dir := buildWorktree(t, p, repo, "run-superseded")
+	submitTrigger(t, st, "run-superseded")
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-superseded", Pipeline: "p", Status: "pending", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := st.ClaimNextTrigger(ctx, time.Millisecond); err != nil {
+		t.Fatalf("ClaimNextTrigger: %v", err)
+	}
+	hold, held, herr := HoldRefWorktree(p, "run-superseded")
+	if herr != nil || !held {
+		t.Fatalf("HoldRefWorktree = %v, %v; want a hold", held, herr)
+	}
+	t.Cleanup(func() { _ = ReleaseRefWorktree(hold) })
+
+	if err := st.FinishRun(ctx, "run-superseded", "failed", "the dispatch this claim superseded"); err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	requeueExpiredClaims(ctx, st, newInFlightSet(), slog.New(slog.DiscardHandler))
+
+	if _, err := SweepRefWorktrees(ctx, p, st, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("SweepRefWorktrees: %v", err)
+	}
+	if _, serr := os.Stat(dir); os.IsNotExist(serr) {
+		t.Fatal("a superseded dispatch's finish moved this trigger to done, and the sweep took " +
+			"the tree the live dispatch still holds")
+	}
+}

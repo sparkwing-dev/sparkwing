@@ -367,7 +367,22 @@ func runClaimedTrigger(
 	cache *localCompileCache, logger *slog.Logger, home string, lease time.Duration,
 ) {
 	book := context.WithoutCancel(ctx)
-	defer cleanupRefWorktree(book, st, Paths{Root: home}, trig, logger)
+	p := Paths{Root: home}
+	if withinRefWorktrees(p, strings.TrimSpace(trig.TriggerEnv[SubmitRepoDirKey])) {
+		hold, ok, herr := HoldRefWorktree(p, trig.ID)
+		if herr != nil {
+			logger.Warn("could not hold this run's worktree against reclaim",
+				"trigger_id", trig.ID, "error", herr)
+		}
+		if ok {
+			defer func() {
+				if rerr := ReleaseRefWorktree(hold); rerr != nil {
+					logger.Warn("release worktree hold", "trigger_id", trig.ID, "error", rerr)
+				}
+			}()
+		}
+	}
+	defer cleanupRefWorktree(book, st, p, trig, logger)
 	if cancelClaimedTriggerIfRequested(book, st, trig, home, lease, logger) {
 		return
 	}

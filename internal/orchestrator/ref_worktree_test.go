@@ -178,35 +178,84 @@ func TestSweepRefWorktreesKeepsAClaimedTrigger(t *testing.T) {
 	}
 }
 
-func TestSweepRefWorktreesKeepsAWorktreeBeingWrittenUnderAQueuedTrigger(t *testing.T) {
+func TestSweepRefWorktreesKeepsAWorktreeAQueuedTriggerWillReach(t *testing.T) {
 	repo := gitRepoWithProject(t, true)
 	p := paths.Paths{Root: t.TempDir()}
 	st := testStore(t)
 	ctx := context.Background()
 	dir := buildWorktree(t, p, repo, "run-requeued")
 	submitTrigger(t, st, "run-requeued")
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "run-requeued", Pipeline: "p", Status: "failed", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("CreateRun: %v", err)
-	}
-	stale := time.Now().Add(-2 * refWorktreeAbsentTriggerGrace)
-	if err := os.MkdirAll(filepath.Join(dir, "_build"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "_build", "out.o"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(dir, stale, stale); err != nil {
-		t.Fatal(err)
-	}
 
 	if n, err := SweepRefWorktrees(ctx, p, st, nil); err != nil || n != 0 {
 		t.Fatalf("SweepRefWorktrees = %d, %v; want 0, nil", n, err)
 	}
 	if _, err := os.Stat(dir); err != nil {
-		t.Fatalf("a claimable trigger's tree executes again, so a stale run row and a quiet "+
-			"top level must not reclaim it: %v", err)
+		t.Fatalf("a claimable trigger's tree executes again, so reclaiming it drops work: %v", err)
+	}
+}
+
+func TestSweepRefWorktreesKeepsAHeldWorktreeWhateverItsTriggerSays(t *testing.T) {
+	repo := gitRepoWithProject(t, true)
+	p := paths.Paths{Root: t.TempDir()}
+	st := testStore(t)
+	ctx := context.Background()
+	dir := buildWorktree(t, p, repo, "run-held")
+	submitTrigger(t, st, "run-held")
+	if err := st.FinishTrigger(ctx, "run-held"); err != nil {
+		t.Fatalf("FinishTrigger: %v", err)
+	}
+	hold, held, err := HoldRefWorktree(p, "run-held")
+	if err != nil || !held {
+		t.Fatalf("HoldRefWorktree = %v, %v; want a hold", held, err)
+	}
+	t.Cleanup(func() { _ = ReleaseRefWorktree(hold) })
+
+	if n, serr := SweepRefWorktrees(ctx, p, st, nil); serr != nil || n != 0 {
+		t.Fatalf("SweepRefWorktrees = %d, %v; want 0, nil", n, serr)
+	}
+	if _, serr := os.Stat(dir); serr != nil {
+		t.Fatalf("a finished trigger says the work ended, but a live process still holds this "+
+			"tree and its writes are below the top level where no timestamp shows them: %v", serr)
+	}
+}
+
+func TestSweepRefWorktreesReclaimsAWorktreeOnceItsHolderIsGone(t *testing.T) {
+	repo := gitRepoWithProject(t, true)
+	p := paths.Paths{Root: t.TempDir()}
+	st := testStore(t)
+	ctx := context.Background()
+	dir := buildWorktree(t, p, repo, "run-released")
+	submitTrigger(t, st, "run-released")
+	if err := st.FinishTrigger(ctx, "run-released"); err != nil {
+		t.Fatalf("FinishTrigger: %v", err)
+	}
+	hold, held, err := HoldRefWorktree(p, "run-released")
+	if err != nil || !held {
+		t.Fatalf("HoldRefWorktree = %v, %v; want a hold", held, err)
+	}
+	if rerr := ReleaseRefWorktree(hold); rerr != nil {
+		t.Fatalf("ReleaseRefWorktree: %v", rerr)
+	}
+
+	n, serr := SweepRefWorktrees(ctx, p, st, nil)
+	if serr != nil || n != 1 {
+		t.Fatalf("SweepRefWorktrees = %d, %v; want 1, nil", n, serr)
+	}
+	if _, serr := os.Stat(dir); !os.IsNotExist(serr) {
+		t.Error("a released hold leaves nothing owning the tree, so it must be reclaimed")
+	}
+}
+
+func TestHoldRefWorktreeRefusesATreeAnotherHolderOwns(t *testing.T) {
+	p := paths.Paths{Root: t.TempDir()}
+	first, held, err := HoldRefWorktree(p, "run-contended")
+	if err != nil || !held {
+		t.Fatalf("HoldRefWorktree = %v, %v; want a hold", held, err)
+	}
+	t.Cleanup(func() { _ = ReleaseRefWorktree(first) })
+
+	if _, second, serr := HoldRefWorktree(p, "run-contended"); serr != nil || second {
+		t.Fatalf("HoldRefWorktree = %v, %v; a second holder took a tree already in use", second, serr)
 	}
 }
 
@@ -215,6 +264,11 @@ func TestSweepRefWorktreesSparesASubmissionStillInFlight(t *testing.T) {
 	p := paths.Paths{Root: t.TempDir()}
 	st := testStore(t)
 	dir := buildWorktree(t, p, repo, "run-inflight")
+	hold, held, herr := HoldRefWorktree(p, "run-inflight")
+	if herr != nil || !held {
+		t.Fatalf("HoldRefWorktree = %v, %v; want a hold", held, herr)
+	}
+	t.Cleanup(func() { _ = ReleaseRefWorktree(hold) })
 
 	if n, err := SweepRefWorktrees(context.Background(), p, st, nil); err != nil || n != 0 {
 		t.Fatalf("SweepRefWorktrees = %d, %v; want 0, nil", n, err)
@@ -229,10 +283,6 @@ func TestSweepRefWorktreesReclaimsAnAbandonedSubmission(t *testing.T) {
 	p := paths.Paths{Root: t.TempDir()}
 	st := testStore(t)
 	dir := buildWorktree(t, p, repo, "run-abandoned")
-	stale := time.Now().Add(-2 * refWorktreeAbsentTriggerGrace)
-	if err := os.Chtimes(dir, stale, stale); err != nil {
-		t.Fatal(err)
-	}
 
 	n, err := SweepRefWorktrees(context.Background(), p, st, nil)
 	if err != nil {
