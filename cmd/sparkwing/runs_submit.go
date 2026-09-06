@@ -152,24 +152,27 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	repoDir := sub.RepoDir
 	var worktree string
 	if sub.Ref != "" {
-		built, werr := orchestrator.CreateRefWorktree(ctx, paths, sub.RepoDir, rev, runID, slog.Default())
-		if werr != nil {
-			return submitResult{}, fmt.Errorf("--sw-ref %s: %w", sub.Ref, werr)
-		}
-		worktree = built
-		repoDir = built
-
 		hold, held, herr := orchestrator.HoldRefWorktree(paths, runID)
-		if herr != nil || !held {
-			discardRefWorktree(ctx, paths, worktree)
-			return submitResult{}, fmt.Errorf("--sw-ref %s: could not hold the worktree this submission built: %w",
+		if herr != nil {
+			return submitResult{}, fmt.Errorf("--sw-ref %s: could not hold a worktree for this run: %w",
 				sub.Ref, herr)
+		}
+		if !held {
+			return submitResult{}, fmt.Errorf("--sw-ref %s: another process already holds a worktree for run %s",
+				sub.Ref, runID)
 		}
 		defer func() {
 			if rerr := orchestrator.ReleaseRefWorktree(hold); rerr != nil {
 				slog.Default().Warn("release worktree hold", "run_id", runID, "error", rerr)
 			}
 		}()
+
+		built, werr := orchestrator.CreateRefWorktree(ctx, paths, sub.RepoDir, rev, runID, slog.Default())
+		if werr != nil {
+			return submitResult{}, fmt.Errorf("--sw-ref %s: %w", sub.Ref, werr)
+		}
+		worktree = built
+		repoDir = built
 	}
 	if err := orchestrator.CaptureSubmissionEnvironment(paths.Root, runID, os.Environ(), slog.Default()); err != nil {
 		discardRefWorktree(ctx, paths, worktree)

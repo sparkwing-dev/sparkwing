@@ -57,8 +57,10 @@ code change to unlock.
 - **orchestrator:** the ref worktree sweep no longer removes a tree a live run is
   executing in. It reclaimed on the run row's terminal status, which a requeued or
   re-dispatched run still reads while it executes, and on a directory timestamp no
-  build below the top level moves. A worktree is now held for as long as a process
-  is using it, and reclaim skips one anything still holds.
+  build below the top level moves. A process now takes a lock before it builds a
+  worktree and keeps it until it is done, the sweep holds that lock across the
+  removal itself, and a dispatch that cannot take it refuses rather than running
+  in a tree something else may reclaim.
 - **orchestrator:** a lapsed claim is no longer closed out on an earlier attempt's
   run row. A re-dispatch inherits the previous attempt's terminal row, so a
   consumer whose heartbeat stalled had its trigger marked done while its child was
@@ -72,8 +74,11 @@ code change to unlock.
   leftover row, and a claim whose run ended that way was never closed out.
 - **cli:** `sparkwing doctor` keys its ref worktree report on the trigger, as the
   sweep does. It read the run row, so it reported a submission still in flight.
-  It still measures a settling directory differently from the sweep, so the two
-  can disagree about a worktree whose trigger row is gone.
+  It does not check whether a process holds a worktree, so it still reports one
+  the sweep will leave alone.
+- **orchestrator:** one unreadable worktree no longer stops the sweep. It gave up
+  at the first it could not judge, so a single unusable entry kept every later
+  one, and a full disk disabled the reclaim that frees disk.
 - **cli:** `sparkwing doctor -o plain` reports stale ref worktrees. The count was
   missing from plain output while it counted toward the unclean verdict, so the
   machine-readable view showed nothing to act on.

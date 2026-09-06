@@ -110,31 +110,47 @@ func SweepRefWorktrees(ctx context.Context, p Paths, st *store.Store, logger *sl
 		return 0, fmt.Errorf("read ref worktree directory: %w", err)
 	}
 	removed := 0
+	var failures []error
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || strings.HasSuffix(entry.Name(), refWorktreeLeaseSuffix) {
 			continue
 		}
-		reclaimable, rerr := refWorktreeIsReclaimable(ctx, p, st, entry)
+		done, rerr := reclaimRefWorktree(ctx, p, st, entry.Name(), logger)
 		if rerr != nil {
-			return removed, fmt.Errorf("ref worktree %s: %w", entry.Name(), rerr)
-		}
-		if !reclaimable {
+			failures = append(failures, fmt.Errorf("ref worktree %s: %w", entry.Name(), rerr))
 			continue
 		}
-		if err := RemoveRefWorktree(ctx, p, p.RefWorktreeDir(entry.Name()), logger); err != nil {
-			return removed, err
+		if done {
+			removed++
 		}
-		removed++
 	}
-	return removed, nil
+	return removed, errors.Join(failures...)
 }
 
-func refWorktreeIsReclaimable(ctx context.Context, p Paths, st *store.Store, entry os.DirEntry) (bool, error) {
-	held, herr := refWorktreeIsHeld(p, entry.Name())
-	if herr != nil || held {
+func reclaimRefWorktree(
+	ctx context.Context, p Paths, st *store.Store, runID string, logger *slog.Logger,
+) (bool, error) {
+	settled, err := refWorktreeTriggerSettled(ctx, st, runID)
+	if err != nil || !settled {
+		return false, err
+	}
+	hold, held, herr := HoldRefWorktree(p, runID)
+	if herr != nil || !held {
 		return false, herr
 	}
-	trig, err := st.GetTrigger(ctx, entry.Name())
+	defer func() {
+		if rerr := ReleaseRefWorktree(hold); rerr != nil && logger != nil {
+			logger.Warn("release worktree hold", "run_id", runID, "error", rerr)
+		}
+	}()
+	if rerr := RemoveRefWorktree(ctx, p, p.RefWorktreeDir(runID), logger); rerr != nil {
+		return false, rerr
+	}
+	return true, nil
+}
+
+func refWorktreeTriggerSettled(ctx context.Context, st *store.Store, runID string) (bool, error) {
+	trig, err := st.GetTrigger(ctx, runID)
 	if err == nil {
 		return trig.IsFinished(), nil
 	}
@@ -153,6 +169,10 @@ func refWorktreeLeasePath(p Paths, runID string) string {
 // operating system releases the hold when its holder dies, so a worktree a
 // crashed process was writing becomes reclaimable without waiting out a timer.
 func HoldRefWorktree(p Paths, runID string) (*os.File, bool, error) {
+	if runID == "" || runID != filepath.Base(runID) || runID == "." || runID == ".." {
+		return nil, false, fmt.Errorf("run id %q does not name one directory under %s",
+			runID, p.RefWorktreesDir())
+	}
 	if err := fssecure.EnsureDir(p.RefWorktreesDir()); err != nil {
 		return nil, false, fmt.Errorf("secure ref worktree directory: %w", err)
 	}
@@ -173,15 +193,6 @@ func ReleaseRefWorktree(file *os.File) error {
 		return nil
 	}
 	return errors.Join(flockUnlock(file), file.Close())
-}
-
-func refWorktreeIsHeld(p Paths, runID string) (bool, error) {
-	file, err := os.OpenFile(refWorktreeLeasePath(p, runID), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return false, err
-	}
-	free, lerr := flockTry(file)
-	return !free, errors.Join(lerr, file.Close())
 }
 
 // DispatchContext carries the claim a dispatch runs under, so a write it makes

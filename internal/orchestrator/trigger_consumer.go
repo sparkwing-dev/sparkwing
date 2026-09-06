@@ -370,17 +370,17 @@ func runClaimedTrigger(
 	p := Paths{Root: home}
 	if withinRefWorktrees(p, strings.TrimSpace(trig.TriggerEnv[SubmitRepoDirKey])) {
 		hold, ok, herr := HoldRefWorktree(p, trig.ID)
-		if herr != nil {
-			logger.Warn("could not hold this run's worktree against reclaim",
-				"trigger_id", trig.ID, "error", herr)
+		if herr != nil || !ok {
+			finishClaimedTriggerFailure(book, st, trig, logger,
+				fmt.Errorf("another process holds this run's worktree, so dispatching would "+
+					"execute a tree something else may reclaim: %w", errors.Join(herr, store.ErrLockHeld)))
+			return
 		}
-		if ok {
-			defer func() {
-				if rerr := ReleaseRefWorktree(hold); rerr != nil {
-					logger.Warn("release worktree hold", "trigger_id", trig.ID, "error", rerr)
-				}
-			}()
-		}
+		defer func() {
+			if rerr := ReleaseRefWorktree(hold); rerr != nil {
+				logger.Warn("release worktree hold", "trigger_id", trig.ID, "error", rerr)
+			}
+		}()
 	}
 	defer cleanupRefWorktree(book, st, p, trig, logger)
 	if cancelClaimedTriggerIfRequested(book, st, trig, home, lease, logger) {
@@ -694,14 +694,6 @@ func (s *inFlightSet) len() int {
 	return len(s.ids)
 }
 
-func isTerminalRunStatus(status string) bool {
-	switch status {
-	case "success", "failed", "cancelled":
-		return true
-	default:
-		return false
-	}
-}
 
 func RunLocalTriggerConsumer(ctx context.Context, home string, st *store.Store, logger *slog.Logger) error {
 	_, err := runLocalTriggerConsumerWithRetryInterval(ctx, home, st, logger, consumerElectionRetryInterval)

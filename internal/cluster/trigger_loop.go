@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -130,7 +131,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			claimCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trigger.ClaimSeq})
+			claimCtx := orchestrator.DispatchContext(ctx, trigger)
 			selfTerminate, err := handleOneTrigger(claimCtx, cli, trigger, opts, logger)
 			if err != nil {
 				logger.Error("trigger loop: trigger failed",
@@ -162,7 +163,7 @@ func ensureTriggerWorkRoot(path string, private bool) error {
 var BakedBinary = os.Getenv("SPARKWING_BAKED_BINARY")
 
 func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) (selfTerminate bool, err error) {
-	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trigger.ClaimSeq})
+	ctx = orchestrator.DispatchContext(ctx, trigger)
 	ctx, span := otelutil.Tracer("sparkwing-trigger-loop").Start(ctx, "handleOneTrigger")
 	defer span.End()
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{
