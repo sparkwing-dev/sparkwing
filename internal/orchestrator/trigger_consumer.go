@@ -610,29 +610,28 @@ func requeueExpiredClaims(ctx context.Context, st *store.Store, inFlight *inFlig
 		if inFlight.has(id) {
 			continue
 		}
+		closed, ferr := st.FinishLapsedClaim(ctx, id)
+		if ferr != nil {
+			logger.Warn("close out stale claim", "trigger_id", id, "err", ferr)
+			continue
+		}
+		if closed {
+			logger.Warn("closed stale claim whose run ended under it", "trigger_id", id)
+			continue
+		}
 		run, gerr := st.GetRun(ctx, id)
-		switch {
-		case gerr == nil && run != nil && isTerminalRunStatus(run.Status):
-
-			if _, ferr := st.FinishTriggerAtGeneration(ctx, id, claimGenerationOf(ctx, st, id)); ferr != nil {
-				logger.Warn("close out stale claim", "trigger_id", id, "err", ferr)
-				continue
-			}
-			logger.Warn("closed stale claim whose run already ended",
-				"trigger_id", id, "status", run.Status)
-		case gerr == nil && run != nil && run.Status != "pending":
-
+		if gerr == nil && run != nil && run.Status != "pending" {
 			logger.Debug("leaving a started run to the orphan reaper",
 				"trigger_id", id, "status", run.Status)
-		default:
-			requeued, rerr := st.RequeueUnstartedClaim(ctx, id)
-			if rerr != nil {
-				logger.Warn("requeue stale claim", "trigger_id", id, "err", rerr)
-				continue
-			}
-			if requeued {
-				logger.Warn("requeued a claim whose run never started", "trigger_id", id)
-			}
+			continue
+		}
+		requeued, rerr := st.RequeueUnstartedClaim(ctx, id)
+		if rerr != nil {
+			logger.Warn("requeue stale claim", "trigger_id", id, "err", rerr)
+			continue
+		}
+		if requeued {
+			logger.Warn("requeued a claim whose run never started", "trigger_id", id)
 		}
 	}
 }

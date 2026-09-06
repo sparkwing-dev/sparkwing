@@ -5791,6 +5791,32 @@ func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq in
 	return n > 0, nil
 }
 
+// FinishLapsedClaim closes out a claimed trigger whose lease expired and whose
+// run ended under that same claim, reporting false without writing when it did
+// not. A re-dispatch inherits the previous attempt's terminal run row, so a run
+// that ended before this claim began says nothing about the dispatch holding it.
+func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) {
+	res, err := s.exec(ctx,
+		`UPDATE triggers SET status = ?, lease_expires_at = NULL
+		  WHERE id = ? AND status = ?
+		    AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
+		    AND claimed_at IS NOT NULL
+		    AND EXISTS (SELECT 1 FROM runs
+		                 WHERE runs.id = triggers.id
+		                   AND runs.finished_at IS NOT NULL
+		                   AND runs.finished_at > triggers.claimed_at
+		                   AND `+runTerminalIn+`)`,
+		triggerStatusDone, id, triggerStatusClaimed, time.Now().UnixNano())
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // FinishRunAtGeneration writes a run's terminal status only while seq is
 // still its trigger's current claim generation.
 //
