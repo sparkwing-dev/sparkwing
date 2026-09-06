@@ -48,6 +48,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **store:** `Trigger.IsFinished` reports whether anything will claim or execute a
+  trigger again, and `Store.FinishLapsedClaim` closes out a claim whose lease
+  expired and whose run ended under it.
+
 ### Changed
 
 - **store:** a lookup that matches nothing says what it looked for. Every

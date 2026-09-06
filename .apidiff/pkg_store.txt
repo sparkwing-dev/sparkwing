@@ -747,6 +747,7 @@ func (s *Store) FinalizeExecutorClaimRound(ctx context.Context, runID, nodeID st
 func (s *Store) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
+func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
 func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, finish ExecutionAttemptFinish) error
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
@@ -935,6 +936,7 @@ type Trigger struct {
 
 	WebhookReplayKey string
 }
+func (t Trigger) IsFinished() bool
 type TriggerClaimFence struct {
 	Claimant        ClaimIdentity
 	ClaimGeneration int64
