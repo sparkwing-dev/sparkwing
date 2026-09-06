@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"

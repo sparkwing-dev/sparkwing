@@ -23,6 +23,7 @@ func runGitFixture(t *testing.T, dir string, args ...string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
 func gitRepoWithProject(t *testing.T, withProject bool) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -45,6 +46,7 @@ func gitRepoWithProject(t *testing.T, withProject bool) string {
 	runGitFixture(t, repo, "commit", "--quiet", "-m", "seed")
 	return repo
 }
+
 func headCommit(t *testing.T, repo string) Commit {
 	t.Helper()
 	return Commit(runGitFixture(t, repo, "rev-parse", "HEAD"))
@@ -67,6 +69,7 @@ func TestResolveRefCommitFindsABranchOnlyTheRemoteHas(t *testing.T) {
 		t.Errorf("rev = %s, want %s", rev, want)
 	}
 }
+
 func TestResolveRefCommitRefusesADashLedRef(t *testing.T) {
 	repo := gitRepoWithProject(t, true)
 	marker := filepath.Join(t.TempDir(), "executed")
