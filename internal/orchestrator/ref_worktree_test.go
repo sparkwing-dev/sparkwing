@@ -136,6 +136,10 @@ func TestSweepRefWorktreesReclaimsATerminalRun(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{ID: "run-term", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
+	settled := time.Now().Add(-2 * refWorktreeAbsentRunGrace)
+	if err := os.Chtimes(dir, settled, settled); err != nil {
+		t.Fatal(err)
+	}
 
 	n, err := SweepRefWorktrees(ctx, p, st, nil)
 	if err != nil {
@@ -213,5 +217,26 @@ func TestCreateRefWorktreeRefusesARunIDThatEscapesTheRoot(t *testing.T) {
 		if _, err := CreateRefWorktree(context.Background(), p, repo, rev, runID, nil); err == nil {
 			t.Errorf("run id %q built a worktree outside the root", runID)
 		}
+	}
+}
+
+func TestSweepRefWorktreesKeepsATerminalRunWhoseTreeIsStillChanging(t *testing.T) {
+	repo := gitRepoWithProject(t, true)
+	p := paths.Paths{Root: t.TempDir()}
+	st := testStore(t)
+	ctx := context.Background()
+	dir := buildWorktree(t, p, repo, "run-redispatched")
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-redispatched", Pipeline: "p", Status: "success", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	if n, err := SweepRefWorktrees(ctx, p, st, nil); err != nil || n != 0 {
+		t.Fatalf("SweepRefWorktrees = %d, %v; want 0, nil", n, err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("a run row can read terminal while a re-dispatch of it executes, so a tree still "+
+			"being written must not be reclaimed: %v", err)
 	}
 }

@@ -48,6 +48,16 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **orchestrator:** `runs retry --all` re-executes every node on a cluster worker.
+  The worker built its run options without the trigger's `full` flag, so a full
+  rerun rehydrated the source run's passed nodes and behaved as `--failed`. The
+  local consumer already carried the flag, so only remote execution was affected.
+- **orchestrator:** the ref worktree sweep leaves a tree alone until it stops
+  changing. A run row reads terminal while a re-dispatch of it executes, because
+  a terminal row is not moved back to running, so reclaiming on terminal status
+  alone could remove a worktree from under a live process.
 
 ## [v0.43.0] - 2026-09-06
 ### Added
