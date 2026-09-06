@@ -48,6 +48,23 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cli:** `sparkwing doctor` reports ref worktrees left behind by a submission
+  whose run the store no longer holds. It reports them rather than removing
+  them, because deregistering a worktree needs git and doctor deliberately does
+  not reach the orchestrator; a consumer reclaims them as it starts.
+
+### Fixed
+
+- **cli:** the foreground `--sw-ref` worktree is deregistered when its run ends.
+  Cleanup removed the directory but never pruned, so a `git worktree remove`
+  that failed left the origin repository holding a registration that blocked
+  adding the same path again.
+- **cli:** `runs submit` explains its `--sw-index` refusal in terms of what the
+  flag does. It described the index as a path the submitting process holds open;
+  the binding is an environment variable naming a file sparkwing neither creates
+  nor can reproduce, which is the reason a detached run cannot honor it.
 
 ## [v0.42.0] - 2026-09-05
 ### Added

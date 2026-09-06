@@ -127,3 +127,47 @@ func TestOpenDoctorStateRefusesReplacedHomeBeforeStoreOpen(t *testing.T) {
 		t.Fatalf("replacement state changed: before=%+v after=%+v", before, after)
 	}
 }
+
+func TestScanDanglingDirsReportsASettledDirectoryWithNoRun(t *testing.T) {
+	root := t.TempDir()
+	stale := filepath.Join(root, "run-gone")
+	live := filepath.Join(root, "run-live")
+	fresh := filepath.Join(root, "run-fresh")
+	for _, d := range []string{stale, live, fresh} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settled := time.Now().Add(-time.Hour)
+	for _, d := range []string{stale, live} {
+		if err := os.Chtimes(d, settled, settled); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dirRoot, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dirRoot.Close()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-live", Pipeline: "p", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := scanDanglingDirs(ctx, st, dirRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "run-gone" {
+		t.Fatalf("scanDanglingDirs = %v, want [run-gone]: a run still in the store or a directory "+
+			"still settling must not be reported", got)
+	}
+}

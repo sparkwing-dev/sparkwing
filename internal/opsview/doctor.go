@@ -60,6 +60,8 @@ type DoctorReport struct {
 
 	UnknownRunDirs []string `json:"unknown_run_dirs,omitempty"`
 
+	StaleRefWorktrees []string `json:"stale_ref_worktrees,omitempty"`
+
 	AdmissionRejections []DoctorRejection `json:"admission_rejections,omitempty"`
 
 	DaemonVersionSkew *DoctorVersionSkew `json:"daemon_version_skew,omitempty"`
@@ -244,6 +246,7 @@ func (r DoctorReport) Clean() bool {
 		r.DeadConcurrencyHolders == 0 &&
 		r.DeadConcurrencyWaiters == 0 &&
 		len(r.DanglingRunDirs) == 0 &&
+		len(r.StaleRefWorktrees) == 0 &&
 		len(r.AdmissionRejections) == 0 &&
 		r.DaemonVersionSkew == nil &&
 		len(r.LockedOutRepos) == 0 &&
@@ -355,6 +358,11 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 		if err := diagnoseDanglingRunDirs(ctx, st, runsRoot, localStoreOwnsRunRows(ctx, p, st), dryRun, &report); err != nil {
 			return report, err
 		}
+		stale, err := scanRefWorktrees(ctx, st, homeRoot)
+		if err != nil {
+			return report, err
+		}
+		report.StaleRefWorktrees = stale
 		if err := diagnosePoisonedProfiles(ctx, st, queueState, queueRead, &report); err != nil {
 			return report, err
 		}
@@ -1191,6 +1199,58 @@ func runDirSettled(runsRoot *os.Root, name string) (time.Time, error) {
 	return newest, nil
 }
 
+func scanRefWorktrees(ctx context.Context, st *store.Store, homeRoot *os.Root) ([]string, error) {
+	root, _, err := openDoctorChildRoot(homeRoot, "ref-worktrees")
+	if err != nil || root == nil {
+		return nil, err
+	}
+	stale, scanErr := scanDanglingDirs(ctx, st, root)
+	if cerr := root.Close(); cerr != nil && scanErr == nil {
+		scanErr = cerr
+	}
+	return stale, scanErr
+}
+
+func scanDanglingDirs(ctx context.Context, st *store.Store, root *os.Root) ([]string, error) {
+	if root == nil {
+		return nil, nil
+	}
+	dir, err := root.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	entries, readErr := dir.ReadDir(-1)
+	if cerr := dir.Close(); cerr != nil && readErr == nil {
+		readErr = cerr
+	}
+	if readErr != nil {
+		return nil, readErr
+	}
+	var stale []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := st.GetRun(ctx, e.Name()); err == nil {
+			continue
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		settled, err := runDirSettled(root, e.Name())
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		if time.Since(settled) < doctorRunDirGrace {
+			continue
+		}
+		stale = append(stale, e.Name())
+	}
+	return stale, nil
+}
+
 func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, runsRoot *os.Root, localOwnsRows, dryRun bool, report *DoctorReport) error {
 	if runsRoot == nil {
 		return nil
@@ -1368,6 +1428,9 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	if n := len(r.UnknownRunDirs); n > 0 {
 		fmt.Fprintf(tw, "run directories left in place\t%d\n", n)
+	}
+	if n := len(r.StaleRefWorktrees); n > 0 {
+		fmt.Fprintf(tw, "stale ref worktrees\t%d (a consumer reclaims these as it starts)\n", n)
 	}
 	_ = tw.Flush()
 	if len(r.PermissionRepairs) > 0 {
