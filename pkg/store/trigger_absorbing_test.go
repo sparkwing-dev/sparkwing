@@ -31,14 +31,6 @@ func TestFinishedTriggerIsNeverReturnedToTheQueue(t *testing.T) {
 			_, err = s.ReleaseClaimAtGeneration(ctx, id, seq)
 			return err
 		},
-		"CancelPendingTrigger": func(s *store.Store, ctx context.Context, id string) error {
-			_, err := s.CancelPendingTrigger(ctx, id)
-			return err
-		},
-		"ReapExpiredTriggers": func(s *store.Store, ctx context.Context, id string) error {
-			_, err := store.Maintenance.ReapExpiredTriggers(s, ctx)
-			return err
-		},
 	}
 
 	for name, revive := range revivals {
@@ -68,5 +60,91 @@ func TestFinishedTriggerIsNeverReturnedToTheQueue(t *testing.T) {
 					"trigger owns, so reviving one hands a live dispatch a deleted tree", name, got.Status)
 			}
 		})
+	}
+}
+
+func TestCancellingAFinishedTriggerReachesNeitherItNorItsRun(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	const id = "run-settled"
+	if err := s.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "p", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	if err := s.CreateRun(ctx, store.Run{
+		ID: id, Pipeline: "p", Status: "success", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := s.FinishTrigger(ctx, id); err != nil {
+		t.Fatalf("FinishTrigger: %v", err)
+	}
+
+	cancelled, err := s.CancelPendingTrigger(ctx, id)
+	if err != nil {
+		t.Fatalf("CancelPendingTrigger: %v", err)
+	}
+	if cancelled {
+		t.Error("cancelling reported it reached a trigger that had already finished")
+	}
+
+	run, gerr := s.GetRun(ctx, id)
+	if gerr != nil {
+		t.Fatalf("GetRun: %v", gerr)
+	}
+	if run.Status != "success" {
+		t.Errorf("run status = %q, want success: a cancel must not overwrite an outcome "+
+			"the finished trigger already produced", run.Status)
+	}
+}
+
+func TestFinishingATriggerClearsItsLease(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	const id = "run-leased"
+	if err := s.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "p", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	if _, err := s.ClaimNextTrigger(ctx, time.Minute); err != nil {
+		t.Fatalf("ClaimNextTrigger: %v", err)
+	}
+	if err := s.FinishTrigger(ctx, id); err != nil {
+		t.Fatalf("FinishTrigger: %v", err)
+	}
+
+	trig, err := s.GetTrigger(ctx, id)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trig.LeaseExpiresAt != nil {
+		t.Error("a finished trigger kept its lease, so the expired-claim reaper can still reach it")
+	}
+}
+
+func TestTheExpiredClaimReaperLeavesAFinishedTriggerAlone(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	const id = "run-reaped"
+	if err := s.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "p", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	if _, err := s.ClaimNextTrigger(ctx, time.Millisecond); err != nil {
+		t.Fatalf("ClaimNextTrigger: %v", err)
+	}
+	if err := s.FinishTrigger(ctx, id); err != nil {
+		t.Fatalf("FinishTrigger: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	if _, err := store.Maintenance.ReapExpiredTriggers(s, ctx); err != nil {
+		t.Fatalf("ReapExpiredTriggers: %v", err)
+	}
+
+	trig, err := s.GetTrigger(ctx, id)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if !trig.IsFinished() {
+		t.Fatalf("the reaper returned a finished trigger to %q; a consumer would dispatch work "+
+			"whose outcome is already recorded", trig.Status)
 	}
 }

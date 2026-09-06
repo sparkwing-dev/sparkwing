@@ -295,3 +295,24 @@ func TestSweepRefWorktreesReclaimsAnAbandonedSubmission(t *testing.T) {
 		t.Error("a worktree whose submission never wrote a trigger survived")
 	}
 }
+
+func TestSweepRefWorktreesFailsClosedWhenTheStoreCannotAnswer(t *testing.T) {
+	repo := gitRepoWithProject(t, true)
+	p := paths.Paths{Root: t.TempDir()}
+	st := testStore(t)
+	dir := buildWorktree(t, p, repo, "run-unanswerable")
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	n, err := SweepRefWorktrees(context.Background(), p, st, nil)
+	if err == nil {
+		t.Error("the sweep reported success while the store could not say whether the run had ended")
+	}
+	if n != 0 {
+		t.Errorf("reclaimed %d worktrees without a verdict on any of them", n)
+	}
+	if _, serr := os.Stat(dir); serr != nil {
+		t.Error("a worktree was deleted on a store the sweep could not read")
+	}
+}
