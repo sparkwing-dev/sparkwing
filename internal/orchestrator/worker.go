@@ -72,6 +72,7 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		RunID:             trigger.ID,
 		Args:              args,
 		ParentRunID:       trigger.ParentRunID,
+		Full:              trigger.Full,
 		RetryOf:           trigger.RetryOf,
 		RetrySource:       trigger.RetrySource,
 		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],

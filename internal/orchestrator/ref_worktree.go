@@ -135,18 +135,26 @@ func SweepRefWorktrees(ctx context.Context, p Paths, st *store.Store, logger *sl
 }
 
 func refWorktreeIsReclaimable(ctx context.Context, st *store.Store, entry os.DirEntry) (bool, error) {
-	run, err := st.GetRun(ctx, entry.Name())
-	if errors.Is(err, store.ErrNotFound) {
-		// safety: a submission builds the worktree before it inserts the run, so
-		// a sweep racing one would delete the tree out from under it.
-		info, ierr := entry.Info()
-		if ierr != nil {
-			return false, ierr
-		}
-		return time.Since(info.ModTime()) > refWorktreeAbsentRunGrace, nil
+	// safety: a run row reads terminal while a re-dispatch of it executes, because
+	// CreateRun refuses to move a terminal row, so a tree in use can look finished.
+	settled, err := refWorktreeSettled(entry)
+	if err != nil || !settled {
+		return false, err
 	}
+	run, gerr := st.GetRun(ctx, entry.Name())
+	if errors.Is(gerr, store.ErrNotFound) {
+		return true, nil
+	}
+	if gerr != nil {
+		return false, gerr
+	}
+	return isTerminalRunStatus(run.Status), nil
+}
+
+func refWorktreeSettled(entry os.DirEntry) (bool, error) {
+	info, err := entry.Info()
 	if err != nil {
 		return false, err
 	}
-	return isTerminalRunStatus(run.Status), nil
+	return time.Since(info.ModTime()) > refWorktreeAbsentRunGrace, nil
 }
