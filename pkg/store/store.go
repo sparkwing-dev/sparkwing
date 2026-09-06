@@ -3159,7 +3159,7 @@ SELECT id, ? FROM runs WHERE id = ? ON CONFLICT(run_id) DO NOTHING`, planHash, r
 		return err
 	}
 	if changed != 1 {
-		return ErrNotFound
+		return notFound("run", runID)
 	}
 	return tx.Commit()
 }
@@ -3256,6 +3256,9 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
   FROM runs WHERE id = ?`, runID)
 	run, err := scanRun(row)
+	if errors.Is(err, ErrNotFound) {
+		return nil, notFound("run", runID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -3512,7 +3515,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 		&heartbeatNS)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, notFound("run", "")
 		}
 		return nil, err
 	}
@@ -4042,7 +4045,7 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		&bodyRequirementsJSON, &bodyRequirementsHash,
 		&n.AvoidCoordinatorID, &n.AvoidExecutorKind, &n.AvoidExecutorID, &avoidUntilNS, &pipeline)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return notFound("node", "")
 	}
 	if err != nil {
 		return err
@@ -4128,7 +4131,7 @@ func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg str
 		runID, nodeID)
 	if err := row.Scan(&current); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return notFound("node", runID+"/"+nodeID)
 		}
 		return err
 	}
@@ -4177,7 +4180,7 @@ func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) er
 		return ErrLockHeld
 	}
 	if n == 0 {
-		return ErrNotFound
+		return notFound("node", runID+"/"+nodeID)
 	}
 	return nil
 }
@@ -4437,7 +4440,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	}
 	var pipeline string
 	if err := tx.QueryRowContext(ctx, `SELECT pipeline FROM runs WHERE id = ?`, runID).Scan(&pipeline); errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return notFound("node", runID+"/"+nodeID)
 	} else if err != nil {
 		return err
 	}
@@ -4569,7 +4572,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 		return err
 	}
 	if n == 0 {
-		return ErrNotFound
+		return notFound("node", runID+"/"+nodeID)
 	}
 	if !opened {
 		if _, err := appendEventTx(ctx, tx, runID, nodeID, "executor_offer_round_opened", map[string]any{
@@ -4610,7 +4613,7 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
   FROM nodes WHERE run_id = ? AND node_id = ?`+s.forUpdate(), runID, nodeID).Scan(
 		&status, &outcome, &failureReason, &claimedBy, &executorName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return notFound("node", runID+"/"+nodeID)
 		}
 		return err
 	}
@@ -4796,7 +4799,7 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 		n.ClaimGeneration++
 		return &n.Node, nil
 	}
-	return nil, ErrNotFound
+	return nil, notFound("ready node", "")
 }
 
 func labelsSatisfied(needed []string, have map[string]struct{}) bool {
@@ -5358,6 +5361,13 @@ func lockEventSequenceTx(ctx context.Context, tx *storeTx, runID string) error {
 // ErrNotFound is returned when a lookup misses.
 var ErrNotFound = errors.New("not found")
 
+func notFound(resource, id string) error {
+	if id == "" {
+		return fmt.Errorf("%s: %w", resource, ErrNotFound)
+	}
+	return fmt.Errorf("%s %q: %w", resource, id, ErrNotFound)
+}
+
 // Pause reasons; exported wire values.
 const (
 	PauseReasonBefore    = "pause-before"
@@ -5447,7 +5457,7 @@ UPDATE debug_pauses
 		return err
 	}
 	if n == 0 {
-		return ErrNotFound
+		return notFound("debug pause", runID+"/"+nodeID)
 	}
 	return nil
 }
@@ -5459,7 +5469,7 @@ func scanDebugPause(rs rowScanner) (*DebugPause, error) {
 	err := rs.Scan(&p.RunID, &p.NodeID, &p.Reason,
 		&pausedNS, &expiresNS, &releasedNS, &p.ReleasedBy, &p.ReleaseKind)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, notFound("debug pause", "")
 	}
 	if err != nil {
 		return nil, err
@@ -5725,7 +5735,7 @@ func isUniqueViolation(err error) bool {
 // requested pipeline never runs at all.
 func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error) {
 	if key == "" || pipeline == "" {
-		return nil, ErrNotFound
+		return nil, notFound("trigger for idempotency key", key)
 	}
 	var id string
 	err := s.queryRow(ctx,
@@ -5733,7 +5743,7 @@ func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key s
 		pipeline, key).Scan(&id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, notFound("trigger for idempotency key", key)
 		}
 		return nil, err
 	}
@@ -5749,7 +5759,7 @@ func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key s
 // provider is then answered with that run's id instead of a dead end.
 func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error) {
 	if replayKey == "" && delivery == "" {
-		return nil, ErrNotFound
+		return nil, notFound("trigger for webhook delivery", delivery)
 	}
 	var id string
 	err := s.queryRow(ctx,
@@ -5760,7 +5770,7 @@ func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deliv
 		replayKey, delivery).Scan(&id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, notFound("trigger for webhook delivery", delivery)
 		}
 		return nil, err
 	}
@@ -6127,7 +6137,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 			if commitErr := tx.Commit(); commitErr != nil {
 				return nil, commitErr
 			}
-			return nil, ErrNotFound
+			return nil, notFound("claimable trigger", "")
 		}
 		return nil, err
 	}
@@ -6233,7 +6243,7 @@ func (s *Store) RequestCancel(ctx context.Context, id string) error {
 		return err
 	}
 	if n == 0 {
-		return ErrNotFound
+		return notFound("trigger", id)
 	}
 	return nil
 }
@@ -6661,7 +6671,7 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		return nil, ErrNotFound
+		return nil, notFound("trigger", id)
 	}
 
 	var t Trigger
@@ -6723,7 +6733,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, notFound("trigger", id)
 		}
 		return nil, err
 	}
@@ -7075,7 +7085,7 @@ func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, 
 	).Scan(&pkRun, &pkNode, &resolvedNS)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, notFound("approval", runID+"/"+nodeID)
 		}
 		return nil, err
 	}
@@ -7150,7 +7160,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 		&a.Resolution, &a.Comment)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, notFound("approval", "")
 		}
 		return nil, err
 	}

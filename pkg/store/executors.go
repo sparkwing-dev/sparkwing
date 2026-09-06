@@ -1135,7 +1135,7 @@ func lockExecutorRowsTx(ctx context.Context, tx *storeTx, requireAll bool, names
 		return err
 	}
 	if requireAll && locked != len(ordered) {
-		return ErrNotFound
+		return notFound("executor", "")
 	}
 	return nil
 }
@@ -1225,7 +1225,7 @@ func (s *Store) claimReadyNodeForExecutorTx(ctx context.Context, tx *storeTx, cl
   FROM nodes
  WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+tx.forUpdate(), runID, nodeID), n)
 	if errors.Is(err, ErrNotFound) {
-		return nil, ErrNotFound
+		return nil, notFound("ready node for executor", "")
 	}
 	if err != nil {
 		return nil, err
@@ -1253,7 +1253,7 @@ SELECT executor_id, token_prefix, kind, location, capabilities_json, base_priori
 		&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
 		&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, notFound("ready node for executor", "")
 	}
 	if err != nil {
 		return nil, err
@@ -1269,7 +1269,7 @@ SELECT executor_id, token_prefix, kind, location, capabilities_json, base_priori
 
 	now := time.Now()
 	if !e.HeadroomReported || time.Unix(0, seen).Before(now.Add(-ExecutorRegistrationActiveWindow)) || slot >= e.MaxConcurrent {
-		return nil, ErrNotFound
+		return nil, notFound("ready node for executor", "")
 	}
 	var duplicate int
 	if err := tx.QueryRowContext(ctx, `
@@ -1294,7 +1294,7 @@ SELECT COUNT(*), COALESCE(SUM(claim_cores), 0), COALESCE(SUM(claim_memory_bytes)
 		return nil, err
 	}
 	if active >= e.MaxConcurrent {
-		return nil, ErrNotFound
+		return nil, notFound("ready node for executor", "")
 	}
 
 	charge, err := s.executorNodeCharge(ctx, tx, &n.Node)
@@ -1313,7 +1313,7 @@ SELECT COUNT(*), COALESCE(SUM(claim_cores), 0), COALESCE(SUM(claim_memory_bytes)
 		return nil, err
 	}
 	if executorExclusionReason(e, summary, active, usedCores, usedMemory, now.Add(-ExecutorRegistrationActiveWindow), coordinatorID) != "" {
-		return nil, ErrNotFound
+		return nil, notFound("ready node for executor", "")
 	}
 	authorityID, err := controllerAuthorityIDTx(ctx, tx)
 	if err != nil {
@@ -1392,7 +1392,7 @@ SELECT claim_principal, claim_token_prefix, claim_executor, claim_reservation, c
   FROM nodes WHERE run_id = ? AND node_id = ? AND claimed_by IS NOT NULL`, runID, nodeID).Scan(
 		&principal, &tokenPrefix, &gotExecutor, &gotReservation, &gotSlot, &cores, &memory, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return notFound("executor claim reservation", "")
 	}
 	if err != nil {
 		return err

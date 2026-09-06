@@ -39,7 +39,7 @@ func scanAgentLossRetryNodeSource(row rowScanner, retryRunID string) (*agentLoss
 		&supervisorJSON, &supervisorHash, &bodyJSON, &bodyHash,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, notFound("agent loss retry source", retryRunID)
 		}
 		return nil, err
 	}

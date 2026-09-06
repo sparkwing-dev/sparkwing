@@ -225,7 +225,7 @@ func scanNodeBounce(rs rowScanner) (*NodeBounce, error) {
 	err := rs.Scan(&b.RunID, &b.NodeID, &b.Seq, &requestedNS, &b.RequestedBy,
 		&consumedNS, &b.Outcome)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, notFound("node bounce", "")
 	}
 	if err != nil {
 		return nil, err

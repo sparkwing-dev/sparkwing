@@ -86,7 +86,7 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
 		&holder, &principal, &prefix, &coordinator, &membership, &kind, &executorName, &executor, &location,
 		&reservation, &root, &generation, &consumed, &lease, &status, &outcome)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return notFound("node", runID+"/"+nodeID)
 	}
 	if err != nil {
 		return err
@@ -179,7 +179,7 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
        status, outcome, executor_location FROM nodes WHERE run_id = ? AND node_id = ?`+s.forUpdate(),
 		runID, nodeID).Scan(&consumed, &root, &status, &outcome, &location); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return notFound("node", runID+"/"+nodeID)
 		}
 		return err
 	}
@@ -383,7 +383,7 @@ func (s *Store) ListNodeExecutionAttempts(ctx context.Context, runID, nodeID str
 	var root string
 	err := s.queryRow(ctx, `SELECT retry_root_run_id FROM nodes WHERE run_id = ? AND node_id = ?`, runID, nodeID).Scan(&root)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, notFound("node", runID+"/"+nodeID)
 	}
 	if err != nil {
 		return nil, err

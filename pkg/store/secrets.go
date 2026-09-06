@@ -100,7 +100,7 @@ func (s *Store) GetSecretForRun(name, repo string) (*Secret, error) {
 		return nil, err
 	}
 	if !sec.Shared {
-		return nil, ErrNotFound
+		return nil, notFound("secret", name)
 	}
 	return sec, nil
 }
@@ -117,7 +117,7 @@ func (s *Store) readSecret(name, repo string) (*Secret, error) {
 	err := row.Scan(&sec.Name, &sec.Value, &sec.Principal, &sec.Repo, &maskedInt, &sharedInt, &created, &updated)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, notFound("secret", name)
 		}
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func (s *Store) DeleteSecret(name, repo string) error {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return ErrNotFound
+		return notFound("secret", name)
 	}
 	return nil
 }

@@ -48,6 +48,14 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **store:** a lookup that matches nothing says what it looked for. Every
+  not-found error was the bare text `not found`, with no resource, no id and no
+  operation, so a log line naming one told an operator nothing about which
+  lookup missed. Errors still satisfy `errors.Is(err, store.ErrNotFound)`;
+  code comparing with `==` must move to `errors.Is`.
+
 ### Fixed
 
 - **orchestrator:** `runs retry --all` re-executes every node on a cluster worker.

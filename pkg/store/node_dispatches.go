@@ -105,7 +105,7 @@ func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq i
 	}
 	d, err := scanNodeDispatch(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, notFound("node dispatch", runID+"/"+nodeID)
 	}
 	if err != nil {
 		return nil, err
