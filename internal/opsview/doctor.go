@@ -1233,7 +1233,7 @@ func scanUnreclaimedRefWorktrees(ctx context.Context, st *store.Store, root *os.
 		}
 		trig, err := st.GetTrigger(ctx, e.Name())
 		if err == nil {
-			if store.TriggerIsFinished(trig) {
+			if trig.IsFinished() {
 				stale = append(stale, e.Name())
 			}
 			continue

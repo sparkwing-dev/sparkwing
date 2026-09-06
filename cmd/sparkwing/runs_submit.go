@@ -134,7 +134,7 @@ type submission struct {
 }
 
 func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.Paths, sub submission) (submitResult, error) {
-	var rev string
+	var rev orchestrator.Commit
 	if sub.Ref != "" {
 		resolved, rerr := orchestrator.ResolveRefCommit(ctx, sub.RepoDir, sub.Ref, slog.Default())
 		if rerr != nil {
@@ -168,7 +168,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		orchestrator.SubmissionEnvironmentCapturedKey: "1",
 	}
 	if rev != "" {
-		triggerEnv[orchestrator.RefWorktreeRevKey] = rev
+		triggerEnv[orchestrator.RefWorktreeRevKey] = string(rev)
 	}
 	if sub.RequestID != "" {
 		triggerEnv[SubmitRequestIDKey] = sub.RequestID
@@ -247,11 +247,11 @@ func discardRefWorktree(ctx context.Context, paths orchestrator.Paths, dir strin
 	}
 }
 
-func checkRefMatchesOriginal(existing *store.Trigger, sub submission, rev string) error {
+func checkRefMatchesOriginal(existing *store.Trigger, sub submission, rev orchestrator.Commit) error {
 	// safety: comparing resolved commits rather than ref names catches a branch
 	// that moved between the two submissions.
 	original := strings.TrimSpace(existing.TriggerEnv[orchestrator.RefWorktreeRevKey])
-	if original == rev {
+	if original == string(rev) {
 		return nil
 	}
 	return fmt.Errorf(
@@ -262,7 +262,7 @@ func checkRefMatchesOriginal(existing *store.Trigger, sub submission, rev string
 			"Original run: %s\n"+
 			"Use a new key for the new tree, or resubmit against the original commit",
 		sub.IdempotencyKey, existing.Pipeline,
-		describeRefTree(original), describeRefTree(rev), existing.ID)
+		describeRefTree(original), describeRefTree(string(rev)), existing.ID)
 }
 
 func describeRefTree(rev string) string {
@@ -288,7 +288,7 @@ func findExistingSubmission(ctx context.Context, st *store.Store, pipeline, key 
 
 func existingSubmissionResult(
 	ctx context.Context, st *store.Store, paths orchestrator.Paths,
-	existing *store.Trigger, sub submission, rev string,
+	existing *store.Trigger, sub submission, rev orchestrator.Commit,
 ) (submitResult, error) {
 	if err := checkRefMatchesOriginal(existing, sub, rev); err != nil {
 		return submitResult{}, err

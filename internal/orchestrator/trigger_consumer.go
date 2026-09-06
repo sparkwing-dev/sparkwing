@@ -401,7 +401,12 @@ func cleanupRefWorktree(
 		return
 	}
 	current, err := st.GetTrigger(ctx, trig.ID)
-	if err != nil || !store.TriggerIsFinished(current) {
+	if err != nil {
+		logger.Warn("could not read a trigger's state, so its worktree stays",
+			"trigger_id", trig.ID, "dir", dir, "error", err)
+		return
+	}
+	if !current.IsFinished() {
 		return
 	}
 	if err := RemoveRefWorktree(ctx, p, dir, logger); err != nil {

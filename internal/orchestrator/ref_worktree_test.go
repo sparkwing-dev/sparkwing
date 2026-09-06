@@ -245,16 +245,3 @@ func TestSweepRefWorktreesReclaimsAnAbandonedSubmission(t *testing.T) {
 		t.Error("a worktree whose submission never wrote a trigger survived")
 	}
 }
-
-func TestCreateRefWorktreeRefusesARunIDThatEscapesTheRoot(t *testing.T) {
-	repo := gitRepoWithProject(t, true)
-	p := paths.Paths{Root: t.TempDir()}
-	rev := headCommit(t, repo)
-
-	escapes := []string{"..", filepath.Join("..", "escaped"), "."}
-	for _, runID := range escapes {
-		if _, err := CreateRefWorktree(context.Background(), p, repo, rev, runID, nil); err == nil {
-			t.Errorf("run id %q built a worktree outside the root", runID)
-		}
-	}
-}

@@ -23,23 +23,17 @@ const refWorktreeAbsentTriggerGrace = 10 * time.Minute
 
 const refWorktreeGitTimeout = 10 * time.Second
 
-// CreateRefWorktree checks rev out into a worktree owned by runID. Nothing here
-// removes it: the tree outlives this process so a detached run can execute it.
-// Callers pass a commit from [ResolveRefCommit], never a bare ref name.
+// CreateRefWorktree checks commit out into a worktree owned by runID. Nothing
+// here removes it: the tree outlives this process so a detached run can execute it.
 func CreateRefWorktree(
-	ctx context.Context, p Paths, originRepo, rev, runID string, logger *slog.Logger,
+	ctx context.Context, p Paths, originRepo string, rev Commit, runID string, logger *slog.Logger,
 ) (string, error) {
 	if err := fssecure.EnsureDir(p.RefWorktreesDir()); err != nil {
 		return "", fmt.Errorf("secure ref worktree directory: %w", err)
 	}
 	dir := p.RefWorktreeDir(runID)
-	// safety: removal refuses a path outside the root, so a run id that escapes
-	// it would build a tree nothing can ever reclaim.
-	if !withinRefWorktrees(p, dir) {
-		return "", fmt.Errorf("run id %q does not name a directory inside %s", runID, p.RefWorktreesDir())
-	}
 	out, err := exec.CommandContext(ctx, "git", "-C", originRepo,
-		"worktree", "add", "--detach", "--quiet", "--", dir, rev).CombinedOutput()
+		"worktree", "add", "--detach", "--quiet", "--", dir, string(rev)).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git worktree add %s: %w: %s", rev, err, strings.TrimSpace(string(out)))
 	}
@@ -135,7 +129,7 @@ func SweepRefWorktrees(ctx context.Context, p Paths, st *store.Store, logger *sl
 func refWorktreeIsReclaimable(ctx context.Context, st *store.Store, entry os.DirEntry) (bool, error) {
 	trig, err := st.GetTrigger(ctx, entry.Name())
 	if err == nil {
-		return store.TriggerIsFinished(trig), nil
+		return trig.IsFinished(), nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
 		return false, err

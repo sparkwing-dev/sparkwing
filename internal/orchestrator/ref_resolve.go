@@ -8,10 +8,14 @@ import (
 	"strings"
 )
 
+// Commit is a resolved commit id. Only [ResolveRefCommit] produces one, so a
+// caller cannot reach a worktree with a bare ref name.
+type Commit string
+
 // ResolveRefCommit turns ref into a commit id, fetching first so a ref this
 // checkout has never seen still resolves. A ref the working tree already knows
 // wins, so a submission runs the commit the operator can see.
-func ResolveRefCommit(ctx context.Context, originRepo, ref string, logger *slog.Logger) (string, error) {
+func ResolveRefCommit(ctx context.Context, originRepo, ref string, logger *slog.Logger) (Commit, error) {
 	// safety: git reads a leading dash as an option, so a ref like
 	// --upload-pack=CMD would run CMD; -- alone does not stop every git verb.
 	if strings.HasPrefix(ref, "-") {
@@ -29,7 +33,7 @@ func ResolveRefCommit(ctx context.Context, originRepo, ref string, logger *slog.
 		rev, err := exec.CommandContext(ctx, "git", "-C", originRepo,
 			"rev-parse", "--verify", "--end-of-options", candidate).Output()
 		if err == nil {
-			return strings.TrimSpace(string(rev)), nil
+			return Commit(strings.TrimSpace(string(rev))), nil
 		}
 	}
 	return "", fmt.Errorf("ref %s names no commit in this checkout, and fetching it from origin produced none", ref)

@@ -960,7 +960,7 @@ func TestRunsSubmit_RepeatKeyAgainstADifferentTreeIsRefused(t *testing.T) {
 			if tc.stored != "" {
 				existing.TriggerEnv = map[string]string{orchestrator.RefWorktreeRevKey: tc.stored}
 			}
-			err := checkRefMatchesOriginal(existing, submission{IdempotencyKey: "k"}, tc.next)
+			err := checkRefMatchesOriginal(existing, submission{IdempotencyKey: "k"}, orchestrator.Commit(tc.next))
 			if tc.refused && err == nil {
 				t.Fatal("a repeat naming a different tree was answered with the original run")
 			}

@@ -45,9 +45,9 @@ func gitRepoWithProject(t *testing.T, withProject bool) string {
 	runGitFixture(t, repo, "commit", "--quiet", "-m", "seed")
 	return repo
 }
-func headCommit(t *testing.T, repo string) string {
+func headCommit(t *testing.T, repo string) Commit {
 	t.Helper()
-	return runGitFixture(t, repo, "rev-parse", "HEAD")
+	return Commit(runGitFixture(t, repo, "rev-parse", "HEAD"))
 }
 
 func TestResolveRefCommitFindsABranchOnlyTheRemoteHas(t *testing.T) {

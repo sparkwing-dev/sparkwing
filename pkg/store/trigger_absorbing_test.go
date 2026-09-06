@@ -63,7 +63,7 @@ func TestFinishedTriggerIsNeverReturnedToTheQueue(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetTrigger: %v", err)
 			}
-			if !store.TriggerIsFinished(got) {
+			if !got.IsFinished() {
 				t.Fatalf("%s moved a finished trigger to %q; callers reclaim what a finished "+
 					"trigger owns, so reviving one hands a live dispatch a deleted tree", name, got.Status)
 			}
