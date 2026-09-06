@@ -696,7 +696,6 @@ func (s *inFlightSet) len() int {
 	return len(s.ids)
 }
 
-
 func RunLocalTriggerConsumer(ctx context.Context, home string, st *store.Store, logger *slog.Logger) error {
 	_, err := runLocalTriggerConsumerWithRetryInterval(ctx, home, st, logger, consumerElectionRetryInterval)
 	return err
