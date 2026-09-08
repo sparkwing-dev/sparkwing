@@ -51,6 +51,10 @@ code change to unlock.
 
 ### Changed
 
+- **cli:** the pretty run renderer no longer colors node names red, orange,
+  or yellow. Those hues mark failures, retries, and approval prompts, so a
+  node whose name shared one read as a problem before its lines were read.
+  The per-node palette is now blues, greens, purples, and pinks only.
 - **cli:** `sparkwing repos update` logs its progress to stderr, one line per
   step: the repo being walked with its position in the fleet, each plan
   construction before and after the bump, the bump itself, the gate, the

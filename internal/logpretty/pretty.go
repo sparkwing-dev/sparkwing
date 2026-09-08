@@ -81,23 +81,21 @@ const (
 	ansiCyan   = "\x1b[36m"
 )
 
+// Warm hues stay out: red, orange, and yellow already mean failure, retry,
+// and approval on these lines, so a node name must never borrow them.
 var nodePalette = []string{
-	"\x1b[38;5;214m",
 	"\x1b[38;5;117m",
 	"\x1b[38;5;114m",
 	"\x1b[38;5;212m",
-	"\x1b[38;5;208m",
 	"\x1b[38;5;141m",
-	"\x1b[38;5;173m",
 	"\x1b[38;5;109m",
 	"\x1b[38;5;183m",
 	"\x1b[38;5;115m",
-	"\x1b[38;5;174m",
 	"\x1b[38;5;147m",
-	"\x1b[38;5;178m",
 	"\x1b[38;5;108m",
 	"\x1b[38;5;176m",
-	"\x1b[38;5;202m",
+	"\x1b[38;5;75m",
+	"\x1b[38;5;80m",
 }
 
 func (p *PrettyRenderer) color(s, code string) string {
