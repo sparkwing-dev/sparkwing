@@ -543,6 +543,11 @@ func (execOps) Commit(dir, message string) error {
 		return err
 	}
 	if _, err := runGit(dir, "commit", "-m", message); err != nil {
+		// A refused commit (a pre-commit hook, usually) leaves the bump
+		// staged; the restore that follows only rewrites the worktree.
+		if _, rerr := runGit(dir, "reset", "-q", "--", ".sparkwing/go.mod", ".sparkwing/go.sum"); rerr != nil {
+			return fmt.Errorf("%w (and unstaging failed: %v)", err, rerr)
+		}
 		return err
 	}
 	return nil

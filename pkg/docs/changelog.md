@@ -80,7 +80,9 @@ code change to unlock.
   the next run then reported that repo as up-to-date or skipped it as dirty.
   The first Ctrl-C now restores the module files, prints the verdicts so far,
   and exits 130; a second Ctrl-C kills outright. A failed restore is named in
-  the verdict instead of dropped.
+  the verdict instead of dropped. A commit refused by the repo's pre-commit
+  hook also left the bump staged while the worktree was restored; the index
+  is now reset with it.
 - **cli:** auto-registration skipped scratch checkouts under `$TMPDIR` but not
   under the shared `/tmp` (`/private/tmp` on macOS), so agent scratchpads and
   repro trees accumulated in the repo registry and in the fleet report.
