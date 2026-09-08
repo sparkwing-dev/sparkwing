@@ -51,6 +51,20 @@ code change to unlock.
 
 ### Added
 
+- **runtime + cli:** Every step command a run starts is recorded in a ledger
+  under the sparkwing home while it runs, and a sweep ends any whose node is
+  gone: before every `sparkwing run`, in the admission daemon when a run's
+  connection drops without a clean finish, and in `sparkwing doctor`, which
+  lists them under `stray step cleanups` and only reports them with
+  `--dry-run`. Each step runs in its own process session on Linux and macOS
+  and in a named kill-on-close job object on Windows, so the sweep ends the
+  whole tree the node left behind on every platform. This closes the case the
+  node's own cleanup cannot reach -- a node that is SIGKILLed, OOM-killed, or
+  crashes -- so a `go build` or `go test` it started stops with the run
+  instead of compiling on unowned. Every session ended this way is a
+  `stray_session_reaped` event on its node. Steps do not get to daemonize by
+  accident: a process that leaves its step session with `setsid` is the one
+  thing the sweep cannot see, and that stays unsupported.
 - **sdk:** `sparkwing/cleanup`.`Register` lets a sparks library guarantee a
   resource it starts outside the step's process tree -- a container, cluster,
   or release -- is torn down if the step's node dies before the library's own
@@ -62,17 +76,6 @@ code change to unlock.
   helm, or kind. `docker.Run` is the first user -- it registers `docker rm -f`
   for its container, so a one-shot container no longer outlives a node killed
   mid-run.
-- **runtime + cli:** Step sessions are recorded in a ledger under the
-  sparkwing home while they run, and a sweep ends any whose node is gone:
-  before every `sparkwing run`, in the admission daemon when a run's
-  connection drops without a clean finish, and in `sparkwing doctor`, which
-  lists them under `stray step sessions` and only reports them with
-  `--dry-run`. This closes the case the node's own cleanup cannot reach, a
-  node that is SIGKILLed, OOM-killed, or crashes, so a `go build` or `go test`
-  it started stops with the run on Linux and macOS. Every session ended this
-  way is a `stray_session_reaped` event on its node. Steps do not get to
-  daemonize by accident: a process that leaves its step session with `setsid`
-  is the one thing the sweep cannot see, and that stays unsupported.
 - **cli:** `--sw-priority VALUE` on `sparkwing run` and `sparkwing pipeline
   run` sets the run's local admission priority from the command line. VALUE is an integer, or `front` / `back` for one step past the
   highest or lowest priority waiting when the run starts (an empty queue
