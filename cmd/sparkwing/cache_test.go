@@ -11,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
 
-func TestCacheExplainJSONUsesStableEnvelope(t *testing.T) {
+func TestCacheExplainJSONEmitsReport(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\n"), 0o644); err != nil {
@@ -41,15 +41,8 @@ func TestCacheExplainJSONReportsParseFailureBeforeOutputFlag(t *testing.T) {
 	if runErr == nil {
 		t.Fatal("cache explain hid parse failure")
 	}
-	var envelope struct {
-		Payload any            `json:"payload"`
-		Error   map[string]any `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
-		t.Fatalf("decode error envelope %q: %v", out, err)
-	}
-	if envelope.Payload != nil || envelope.Error["message"] == nil {
-		t.Fatalf("error envelope = %#v", envelope)
+	if out != "" {
+		t.Fatalf("failure polluted stdout: %q", out)
 	}
 }
 
@@ -70,17 +63,14 @@ func seedCommandCacheEntry(t *testing.T, body string) *bincache.Lease {
 
 func decodeCachePayload(t *testing.T, raw string) map[string]any {
 	t.Helper()
-	var envelope struct {
-		Payload map[string]any `json:"payload"`
-		Error   any            `json:"error"`
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatalf("decode cache report: %v", err)
 	}
-	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
-		t.Fatalf("decode cache output %q: %v", raw, err)
+	if _, ok := payload["payload"]; ok {
+		t.Fatal("report wrapped in envelope")
 	}
-	if envelope.Error != nil {
-		t.Fatalf("cache output error = %#v", envelope.Error)
-	}
-	return envelope.Payload
+	return payload
 }
 
 func TestCacheInfoJSONReportsManagedBytes(t *testing.T) {
@@ -126,15 +116,8 @@ func TestCachePruneRejectsInvalidLimit(t *testing.T) {
 	if runErr == nil {
 		t.Fatal("cache prune accepted an invalid byte ceiling")
 	}
-	var envelope struct {
-		Payload any `json:"payload"`
-		Error   any `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
-		t.Fatalf("decode error envelope %q: %v", out, err)
-	}
-	if envelope.Payload != nil || envelope.Error == nil {
-		t.Fatalf("error envelope = %#v", envelope)
+	if out != "" {
+		t.Fatalf("failure polluted stdout: %q", out)
 	}
 }
 
@@ -151,15 +134,8 @@ func TestCachePruneJSONReportsAPIFailure(t *testing.T) {
 	if runErr == nil {
 		t.Fatal("cache prune hid API failure")
 	}
-	var envelope struct {
-		Payload any            `json:"payload"`
-		Error   map[string]any `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
-		t.Fatalf("decode error envelope %q: %v", out, err)
-	}
-	if envelope.Payload != nil || envelope.Error["message"] != "cache prune: store unavailable" {
-		t.Fatalf("error envelope = %#v", envelope)
+	if out != "" {
+		t.Fatalf("failure polluted stdout: %q", out)
 	}
 }
 
@@ -171,15 +147,8 @@ func TestCachePruneJSONReportsParseFailure(t *testing.T) {
 	if runErr == nil {
 		t.Fatal("cache prune hid parse failure")
 	}
-	var envelope struct {
-		Payload any            `json:"payload"`
-		Error   map[string]any `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
-		t.Fatalf("decode error envelope %q: %v", out, err)
-	}
-	if envelope.Payload != nil || envelope.Error["message"] == nil {
-		t.Fatalf("error envelope = %#v", envelope)
+	if out != "" {
+		t.Fatalf("failure polluted stdout: %q", out)
 	}
 }
 
@@ -198,15 +167,8 @@ func TestCachePruneJSONReportsParseFailureBeforeOutputFlag(t *testing.T) {
 		if runErr == nil {
 			t.Fatalf("cache prune hid parse failure for %q", args)
 		}
-		var envelope struct {
-			Payload any            `json:"payload"`
-			Error   map[string]any `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(out), &envelope); err != nil {
-			t.Fatalf("decode error envelope %q: %v", out, err)
-		}
-		if envelope.Payload != nil || envelope.Error["message"] == nil {
-			t.Fatalf("error envelope = %#v", envelope)
+		if out != "" {
+			t.Fatalf("failure polluted stdout: %q", out)
 		}
 	}
 }

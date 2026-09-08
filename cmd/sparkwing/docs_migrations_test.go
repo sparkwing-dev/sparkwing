@@ -8,7 +8,7 @@ import (
 
 func TestRunDocsMigrationsList_TableMentionsKnownVersion(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrationsList(nil); err != nil {
+		if err := runDocsMigrationsList([]string{"--output", "pretty"}); err != nil {
 			t.Fatalf("list: %v", err)
 		}
 	})
@@ -195,7 +195,7 @@ func TestRunDocsMigrationsRead_RequiresVersion(t *testing.T) {
 
 func TestRunDocsMigrationsBetween_RangeHeaderAndBody(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrationsBetween([]string{"--from", "v0.3.0", "--to", "v0.4.0"}); err != nil {
+		if err := runDocsMigrationsBetween([]string{"--from", "v0.3.0", "--to", "v0.4.0", "--output", "plain"}); err != nil {
 			t.Fatalf("between: %v", err)
 		}
 	})
@@ -212,7 +212,7 @@ func TestRunDocsMigrationsBetween_RangeHeaderAndBody(t *testing.T) {
 
 func TestRunDocsMigrationsBetween_DefaultsWork(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := runDocsMigrationsBetween(nil); err != nil {
+		if err := runDocsMigrationsBetween([]string{"--output", "plain"}); err != nil {
 			t.Fatalf("between (no args): %v", err)
 		}
 	})

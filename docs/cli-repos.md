@@ -1,4 +1,4 @@
-<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
+<!-- GENERATED from the CLI command registry by `sparkwing commands --format markdown --output plain`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # CLI reference: sparkwing repos
 
@@ -35,7 +35,7 @@ with a compiled per-repo verdict.
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 
@@ -72,7 +72,7 @@ Read-only: it never builds, bumps, or commits anything.
 | Flag | Description |
 |---|---|
 | `--repo NAME_OR_PATH` | Repo by name or checkout path. Default: the repo containing the current directory. |
-| `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 
@@ -101,7 +101,7 @@ so the listing has a name alongside 'info' and 'update'.
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 
@@ -160,7 +160,7 @@ leads with that when pins would diverge.
 | `--apply` | Write the bumps and commit per repo (default is a dry run) |
 | `--verify` | Run each repo's pre-commit gate after the bump |
 | `--repo NAME_OR_PATH` | Scope to a single repo by name or checkout path |
-| `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 

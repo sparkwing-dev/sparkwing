@@ -32,7 +32,6 @@ func Main() {
 			os.Exit(1)
 		}
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		if err := enc.Encode(described); err != nil {
 			fmt.Fprintln(os.Stderr, "describe encode:", err)
 			os.Exit(1)

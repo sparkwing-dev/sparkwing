@@ -16,6 +16,7 @@ import (
 
 func runCompletion(args []string) error {
 	fs := flag.NewFlagSet(cmdCompletion.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "pretty | json | plain")
 	shell := fs.String("shell", "", "shell to emit completion for (bash | zsh | fish)")
 	if err := parseAndCheck(cmdCompletion, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -33,15 +34,14 @@ func runCompletion(args []string) error {
 	}
 	switch *shell {
 	case "bash":
-		fmt.Print(renderBash())
+		return writeText(os.Stdout, "artifact", renderBash(), *output)
 	case "zsh":
-		fmt.Print(renderZsh())
+		return writeText(os.Stdout, "artifact", renderZsh(), *output)
 	case "fish":
-		fmt.Print(renderFish())
+		return writeText(os.Stdout, "artifact", renderFish(), *output)
 	default:
 		return fmt.Errorf("completion: unknown shell %q (expected bash|zsh|fish)", *shell)
 	}
-	return nil
 }
 
 func runInternalCompleteProfiles(_ []string) error {

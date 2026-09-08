@@ -78,7 +78,6 @@ func renderProfileJSON(p *profile.Profile, chain profile.Chain, out io.Writer) e
 		Considered: chainRows(chain),
 	}
 	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
 	return enc.Encode(report)
 }
 

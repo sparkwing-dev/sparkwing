@@ -80,7 +80,6 @@ func runConcurrency(args []string) error {
 
 	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(st)
 	}
 	renderConcurrencyState(os.Stdout, st)

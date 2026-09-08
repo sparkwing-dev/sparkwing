@@ -48,7 +48,7 @@ func TestCommandsPathSelectsTheSameSubtreeEitherWay(t *testing.T) {
 }
 
 func TestCommandsRefusesAPathThatMatchesNothing(t *testing.T) {
-	for _, output := range []string{"pretty", "json", "plain", "markdown"} {
+	for _, output := range []string{"pretty", "json", "plain"} {
 		err := runCommandsQuiet(t, "--path", "nosuchsubtree", "-o", output)
 		if err == nil {
 			t.Fatalf("-o %s: unmatched --path returned no error", output)

@@ -566,7 +566,6 @@ func emitSubmitResult(r submitResult, format string) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(r)
 	case "plain":
 		fmt.Fprintln(os.Stdout, r.RunID)

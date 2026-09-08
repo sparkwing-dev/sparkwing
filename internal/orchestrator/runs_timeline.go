@@ -94,7 +94,6 @@ func renderTimeline(
 			rows = []TimelineRow{}
 		}
 		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
 		return enc.Encode(map[string]any{
 			"run_id":      run.ID,
 			"started_at":  run.StartedAt,

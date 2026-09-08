@@ -119,6 +119,14 @@ code change to unlock.
 ## [v0.45.0] - 2026-09-08
 ### Changed
 
+- **cli (Breaking):** Discovery and report commands default to compact JSON when piped
+  Explicit `--output pretty|json|plain` wins over terminal detection. Help,
+  docs, agent cards and completion scripts carry typed text records in JSON.
+  Use `completion --shell SHELL --output plain` when sourcing a script, and
+  `commands --format markdown --output plain` to export Markdown. Cache
+  reports expose fields directly and report failures only on stderr.
+  See [CLI output migration](docs/cli.md#output).
+
 - **cli:** the pretty run renderer no longer colors node names red, orange,
   or yellow. Those hues mark failures, retries, and approval prompts, so a
   node whose name shared one read as a problem before its lines were read.

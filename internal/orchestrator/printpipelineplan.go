@@ -39,7 +39,6 @@ func printPipelineRuntimePlan(pipeline string, rest []string) error {
 	}
 
 	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
 	if err := enc.Encode(preview); err != nil {
 		return fmt.Errorf("encode preview: %w", err)
 	}

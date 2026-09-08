@@ -96,7 +96,6 @@ func runReposInfo(args []string) error {
 	info := buildRepoInfo(context.Background(), repo, latest)
 	if strings.ToLower(output) == "json" {
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(info)
 	}
 	printRepoInfo(info)

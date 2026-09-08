@@ -3,8 +3,6 @@ package color
 import (
 	"fmt"
 	"os"
-	"runtime"
-	"strings"
 
 	"golang.org/x/term"
 )
@@ -24,44 +22,10 @@ func detectEnabled() bool {
 	return IsInteractiveStdout()
 }
 
-// IsInteractiveStdout reports whether stdout looks like an interactive
-// terminal. Wraps golang.org/x/term.IsTerminal with a Windows-specific
-// fallback for Git Bash, MSYS2, Cygwin, and similar frontends that
-// use mintty (or another non-Console pty layer) over a pipe to the
-// underlying process: term.IsTerminal's Console-mode check returns
-// false there even when the user is typing into a real interactive
-// shell. We accept any of:
-//
-//   - MSYSTEM set       -- Git Bash sets MINGW64, MSYS2 sets MSYS, etc.
-//   - TERM_PROGRAM=mintty -- set by Git Bash even when MSYSTEM isn't.
-//   - TERM contains "xterm" or "cygwin" -- catches stripped-down
-//     Cygwin / MSYS environments that lose the brand-name vars but
-//     still report a terminal-ish TERM.
-//
-// Use this anywhere you'd otherwise call term.IsTerminal on stdout
-// (pkg/color, orchestrator format-selection, etc.) so every code path
-// shares one definition of "interactive" and can't drift on what
-// counts as "agent" vs. "human".
+// IsInteractiveStdout checks stdout itself: terminal branding also survives
+// redirection and must not turn a machine-readable pipe into terminal output.
 func IsInteractiveStdout() bool {
-	if term.IsTerminal(int(os.Stdout.Fd())) {
-		return true
-	}
-	if runtime.GOOS != "windows" {
-		return false
-	}
-	if os.Getenv("MSYSTEM") != "" {
-		return true
-	}
-	if os.Getenv("TERM_PROGRAM") == "mintty" {
-		return true
-	}
-	switch t := os.Getenv("TERM"); {
-	case t == "":
-		return false
-	case strings.Contains(t, "xterm"), strings.Contains(t, "cygwin"):
-		return true
-	}
-	return false
+	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 // SetEnabled overrides the auto-detected setting. Mostly for tests

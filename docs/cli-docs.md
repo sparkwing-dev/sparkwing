@@ -1,4 +1,4 @@
-<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
+<!-- GENERATED from the CLI command registry by `sparkwing commands --format markdown --output plain`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # CLI reference: sparkwing docs
 
@@ -26,9 +26,9 @@ returns the whole set in one call.
 ### Subcommands
 
 - `list` -- Enumerate every doc topic
-- `read` -- Print one doc's raw markdown to stdout
+- `read` -- Read one document
 - `guides` -- List the task-sized doc sets (--guide on `docs read`)
-- `all` -- Concatenate every doc to stdout (full corpus dump)
+- `all` -- Read every embedded document
 - `search` -- Find the section that answers a question
 - `migrations` -- Per-version migration guides (agent-friendly)
 - `versions` -- List doc versions known to this CLI (and sparkwing.dev with --web)
@@ -67,11 +67,16 @@ sparkwing docs versions --web
 
 ## `sparkwing docs all`
 
-Concatenate every doc to stdout (full corpus dump)
+Read every embedded document
 
-Prints every embedded doc to stdout, separated by short ASCII
-headers. The "give me everything" path for an agent that wants
-the full corpus in context with one Bash invocation.
+Reads every embedded document, one JSON record per page when piped.
+--output plain prints the full Markdown corpus with page headers.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (pretty on a terminal, json when piped) |
 
 ### Examples
 
@@ -135,7 +140,7 @@ the cached versions.json (24h TTL).
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 
@@ -164,7 +169,7 @@ read end to end; reach those with `sparkwing docs search`.
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 
@@ -192,7 +197,7 @@ to fetch from sparkwing.dev for another version.
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--web` | Fetch from sparkwing.dev instead of the embedded corpus |
 | `--version vX.Y.Z` | Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version. |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
@@ -271,7 +276,7 @@ migration context for an N-version jump in a form ready to pipe.
 |---|---|
 | `--from vX.Y.Z` | Exclusive lower bound (default v0.0.0) |
 | `--to vA.B.C` | Inclusive upper bound (default = latest embedded version) |
-| `-o, --output FORMAT` | Output format: markdown \| plain (default: markdown) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--web` | Fetch every guide in the range from sparkwing.dev |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
 
@@ -307,7 +312,7 @@ guide a one-line stderr note suggests rebuilding.
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--web` | Fetch the index from sparkwing.dev/migrations/index.json instead of the embed |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
 
@@ -331,9 +336,8 @@ sparkwing docs migrations list --web
 
 Print one migration guide's markdown to stdout
 
-Outputs the markdown body for a single migration guide. Default
-output is the raw markdown so an agent can pipe straight into
-its context. Cross-doc markdown links to other topics are
+Reads a single migration guide as a JSON document record when piped.
+Use --output plain for its raw Markdown. Cross-doc links to other topics are
 rewritten into `sparkwing docs read --topic <slug>` form
 (same transform as `sparkwing docs read`).
 
@@ -346,7 +350,7 @@ rewritten into `sparkwing docs read --topic <slug>` form
 | Flag | Description |
 |---|---|
 | `--version vX.Y.Z` | Migration guide version (e.g. v0.4.0). Positional fallback accepted. |
-| `-o, --output FORMAT` | Output format: markdown \| plain (default: markdown) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--web` | Fetch from sparkwing.dev instead of the embedded corpus |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
 
@@ -365,9 +369,10 @@ sparkwing docs migrations read --version v0.5.0 --web
 
 ## `sparkwing docs read`
 
-Print one doc's raw markdown to stdout
+Read one document
 
-Prints the raw markdown body for the named topic. The slug is
+Reads the named topic. Piped output is one JSON document record;
+--output plain prints raw Markdown. The slug is
 the filename under /docs/ minus .md (run `sparkwing docs list` to
 see them all). Subdirs use slash-separated paths (e.g.
 design/remote-retry).
@@ -380,6 +385,7 @@ from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 
 | Flag | Description |
 |---|---|
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (pretty on a terminal, json when piped) |
 | `--topic NAME` | Doc slug (e.g. getting-started, pipelines, mcp) |
 | `--guide NAME` | Read a task-sized set of topics instead of one (`sparkwing docs guides`) |
 | `--web` | Fetch from sparkwing.dev instead of the embedded corpus |
@@ -396,7 +402,7 @@ sparkwing docs read --topic getting-started
 sparkwing docs read --guide authoring
 
 # Pipe through a pager
-sparkwing docs read --topic pipelines | less
+sparkwing docs read --topic pipelines --output plain | less
 
 # Read v0.3.0's pipelines page online
 sparkwing docs read --topic pipelines --version v0.3.0 --web
@@ -429,7 +435,7 @@ same shape as `sparkwing docs list`.
 | `-q, --query TEXT` | Search terms (every token must match) (required) |
 | `--body` | Print each matching section in full instead of a snippet |
 | `--topics` | List whole matching topics instead of sections |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 
@@ -464,7 +470,7 @@ this CLI can render via --web on the read / list verbs.
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--web` | Merge in sparkwing.dev/versions.json (network) |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
 

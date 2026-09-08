@@ -21,6 +21,38 @@ intentional exception is the pipeline name on `sparkwing run <pipeline>`
 (and its `sparkwing pipeline run <pipeline>` long form), which is
 positional because operators type it all day.
 
+## Output
+
+Commands with `--output` use `pretty` on stdout terminals and compact JSON
+when stdout is redirected. `--output pretty|json|plain` (or `-o`) overrides
+the default. JSON reports occupy one line; JSON lists emit one object per
+line, with an empty stream for no results. Errors go to stderr.
+
+Help, documentation, onboarding cards and completion scripts emit records
+with `kind` and `text` in JSON mode. Help also carries command metadata.
+Use explicit plain output when consuming their original text:
+
+```sh
+source <(sparkwing completion --shell zsh --output plain)
+sparkwing docs read --topic pipelines --output plain | less
+sparkwing info --for-agent --output plain
+sparkwing commands --format markdown --output plain
+```
+
+`commands --format markdown --split-dir DIR` writes reference pages into
+files and reports the result in the selected output mode. The former
+`--output markdown` spelling is removed. Canonical output modes are
+`pretty`, `json` and `plain`; other spellings fail before work begins.
+
+Cache JSON reports now expose their fields directly. Read `.entries` rather
+than `.payload.entries`; cache failures return a nonzero status with no
+stdout record. Plain cache output is the cache directory for `cache info`,
+the key for `cache explain`, and the reclaimed entry count for `cache prune`.
+
+Some lifecycle, mutation and streaming commands still lack the shared
+output selector. Their remaining conversion is tracked separately from
+these discovery and report changes.
+
 ## sparkwing run
 
 ```
