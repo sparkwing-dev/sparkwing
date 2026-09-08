@@ -1801,6 +1801,7 @@ The listener accepts loopback Host headers and rejects a browser Origin
 that is neither loopback, the --addr host, nor listed in --allow-origin.
 --allow-remote widens the Host check only.`,
 	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
 		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets.", Group: "Bind"},
 		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
@@ -1829,6 +1830,7 @@ $SPARKWING_HOME/dashboard.pid, polls for exit, escalates to SIGKILL
 after 5s if necessary, and removes the PID file. No-op (exit 0)
 when nothing is running.`,
 	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
@@ -1843,6 +1845,7 @@ var cmdDashboardStatus = Command{
 with kill(0), and reports running state + URL. Exit code 0 when
 running, 1 when not.`,
 	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
@@ -2814,6 +2817,7 @@ home's queue. A no-op when one is already running.
 Rarely needed by hand: 'sparkwing run --sw-detached' does this
 before it acknowledges a run.`,
 	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "idle", Argument: "DUR", Desc: "Exit after this long with no work (default 5m)", Group: "System"},
 		{Name: "claim-lease", Argument: "DUR", Desc: "Lease stamped on each claimed run, renewed while it executes (default 3m)", Group: "System"},
@@ -2830,6 +2834,7 @@ var cmdJobsConsumerStatus = Command{
 	Description: `Prints the resident consumer's pid, home, and log path. Exits 1
 when no consumer is running, so it composes in shell conditions.`,
 	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
@@ -2846,6 +2851,7 @@ comes back, which the next 'sparkwing run --sw-detached' arranges.
 
 To cancel a queued run instead, use 'sparkwing runs cancel'.`,
 	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	Examples: []Example{
@@ -3074,6 +3080,7 @@ var cmdHooksStatus = Command{
 	Synopsis:    "Report declared, installed, and missing sparkwing hooks",
 	Description: `Lists every managed hook file under .git/hooks/ along with the pipelines it invokes. Declared hooks that are missing, shadowed, or borrowed are named with the command that repairs them.`,
 	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints hook names.", Group: "Output"},
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 	},
 	Examples: []Example{

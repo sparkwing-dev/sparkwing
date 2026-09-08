@@ -97,6 +97,7 @@ func readLivePID(pidPath string) (int, bool) {
 
 func runDashboardStart(args []string) error {
 	fs := flag.NewFlagSet(cmdDashboardStart.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	var addr, home, logStore, artifactStore, profileName, allowOrigins string
 	var readOnly, noLocalStore, allowRemote bool
 	fs.StringVar(&addr, "addr", "127.0.0.1:4343", "bind address for the unified dashboard+api server")
@@ -119,6 +120,10 @@ func runDashboardStart(args []string) error {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
+		return err
+	}
+	mode, err := resolveOutputFormat(*output, fs.Name())
+	if err != nil {
 		return err
 	}
 
@@ -153,7 +158,7 @@ func runDashboardStart(args []string) error {
 					"or stop it first with `sparkwing dashboard kill`",
 				running.Version, pid, mine)
 		}
-		fmt.Fprintf(os.Stdout, "==> draining previous dashboard (pid %d) for replacement\n", pid)
+		fmt.Fprintf(os.Stderr, "==> draining previous dashboard (pid %d) for replacement\n", pid)
 		if err := stopSupervisor(pid, dp.pid); err != nil {
 			return fmt.Errorf("restart: %w", err)
 		}
@@ -241,19 +246,13 @@ func runDashboardStart(args []string) error {
 		_ = signalTerminate(pid)
 		return fmt.Errorf("dashboard supervisor came up but never wrote %s; check %s", dp.pid, dp.log)
 	}
-	fmt.Fprintln(os.Stdout, bannerLine())
-	fmt.Fprintf(os.Stdout, "  dashboard:  %s\n", baseURL)
-	fmt.Fprintf(os.Stdout, "  api:        %s/api/v1\n", baseURL)
-	fmt.Fprintf(os.Stdout, "  home:       %s\n", dp.home)
-	fmt.Fprintf(os.Stdout, "  log:        %s\n", dp.log)
-	fmt.Fprintf(os.Stdout, "  pid:        %d\n", pid)
-	fmt.Fprintln(os.Stdout, bannerLine())
-	fmt.Fprintln(os.Stdout, "stop with: sparkwing dashboard kill")
-	return nil
+	pretty := fmt.Sprintf("%s\n  dashboard:  %s\n  api:        %s/api/v1\n  home:       %s\n  log:        %s\n  pid:        %d\n%s\nstop with: sparkwing dashboard kill\n", bannerLine(), baseURL, baseURL, dp.home, dp.log, pid, bannerLine())
+	return writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "running", PID: pid, Home: dp.home, Log: dp.log, URL: baseURL, API: baseURL + "/api/v1"}, mode, pretty)
 }
 
 func runDashboardKill(args []string) error {
 	fs := flag.NewFlagSet(cmdDashboardKill.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	var home string
 	fs.StringVar(&home, "home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	if err := parseAndCheck(cmdDashboardKill, fs, args); err != nil {
@@ -262,6 +261,11 @@ func runDashboardKill(args []string) error {
 		}
 		return err
 	}
+	mode, err := resolveOutputFormat(*output, fs.Name())
+	if err != nil {
+		return err
+	}
+
 	dp, err := resolveDashboardPaths(home)
 	if err != nil {
 		return err
@@ -269,14 +273,12 @@ func runDashboardKill(args []string) error {
 	pid, alive := readLivePID(dp.pid)
 	if !alive {
 		_ = os.Remove(dp.pid)
-		fmt.Fprintln(os.Stdout, "dashboard not running")
-		return nil
+		return writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "stopped", Home: dp.home, Log: dp.log}, mode, "dashboard not running\n")
 	}
 	if err := stopSupervisor(pid, dp.pid); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "dashboard stopped (pid %d)\n", pid)
-	return nil
+	return writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "stopped", PID: pid, Home: dp.home, Log: dp.log}, mode, fmt.Sprintf("dashboard stopped (pid %d)\n", pid))
 }
 
 func stopSupervisor(pid int, pidPath string) error {
@@ -298,6 +300,7 @@ func stopSupervisor(pid int, pidPath string) error {
 
 func runDashboardStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdDashboardStatus.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	var home string
 	fs.StringVar(&home, "home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	if err := parseAndCheck(cmdDashboardStatus, fs, args); err != nil {
@@ -306,23 +309,29 @@ func runDashboardStatus(args []string) error {
 		}
 		return err
 	}
+	mode, err := resolveOutputFormat(*output, fs.Name())
+	if err != nil {
+		return err
+	}
+
 	dp, err := resolveDashboardPaths(home)
 	if err != nil {
 		return err
 	}
 	pid, alive := readLivePID(dp.pid)
 	if !alive {
-		fmt.Fprintln(os.Stdout, "dashboard not running")
+		if err := writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "stopped", Home: dp.home, Log: dp.log}, mode, "dashboard not running\n"); err != nil {
+			return err
+		}
 		return exitErrorf(1, "not running")
 	}
 	baseURL := readBaseURL(dp.home)
-	if baseURL == "" {
-		baseURL = "(unknown URL; dev.env missing)"
+	label := baseURL
+	if label == "" {
+		label = "(unknown URL; dev.env missing)"
 	}
-	fmt.Fprintf(os.Stdout, "dashboard running (pid %d) at %s\n", pid, baseURL)
-	fmt.Fprintf(os.Stdout, "  home:  %s\n", dp.home)
-	fmt.Fprintf(os.Stdout, "  log:   %s\n", dp.log)
-	return nil
+	pretty := fmt.Sprintf("dashboard running (pid %d) at %s\n  home:  %s\n  log:   %s\n", pid, label, dp.home, dp.log)
+	return writeServiceStatus(os.Stdout, serviceStatus{Service: "dashboard", State: "running", PID: pid, Home: dp.home, Log: dp.log, URL: baseURL}, mode, pretty)
 }
 
 func runDashboardSupervise(args []string) error {

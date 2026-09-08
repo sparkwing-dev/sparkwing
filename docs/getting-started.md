@@ -129,7 +129,11 @@ subprocess. Run state lives under `~/.sparkwing/` (SQLite + log files).
 embedded in the CLI) against the same SQLite store, exposing the dashboard
 plus the JSON / logs APIs on one port - useful when several runs are going
 in parallel and the terminal gets crowded. `sparkwing dashboard status` /
-`kill` manage its lifecycle.
+`kill` manage its lifecycle. These commands print a compact status record when
+piped, including `service`, `state`, `pid` when known, `home`, and `log`.
+Dashboard records include `url` when known. Use `--output plain` for a single
+`running` or `stopped` value, or `--output pretty` for the terminal layout.
+A stopped `status` still exits 1; stopping an absent server exits 0.
 
 If you want a local Kubernetes cluster as a deploy target for user apps
 (not for sparkwing itself), bring your own - any local Kubernetes setup

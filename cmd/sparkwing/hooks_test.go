@@ -199,7 +199,7 @@ func TestHooksInstall_WritesPostCommitHook(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := statusHooks((&fakeGit{}).run, repo); err != nil {
+		if err := statusHooks((&fakeGit{}).run, repo, "pretty"); err != nil {
 			t.Fatalf("status: %v", err)
 		}
 	})
@@ -413,7 +413,7 @@ func TestHooksStatus_ReportsTheChain(t *testing.T) {
 	installInto(t, (&fakeGit{global: global}).run, repo)
 
 	out := captureStdout(t, func() {
-		if err := statusHooks((&fakeGit{global: global}).run, repo); err != nil {
+		if err := statusHooks((&fakeGit{global: global}).run, repo, "pretty"); err != nil {
 			t.Fatalf("status: %v", err)
 		}
 	})
@@ -441,7 +441,7 @@ func TestHooksStatus_ReportsMissingDeclaredHooks(t *testing.T) {
 		renderHookScript("pre-commit", []string{"lint"}, false, ""))
 
 	out := captureStdout(t, func() {
-		if err := statusHooks((&fakeGit{}).run, repo); err != nil {
+		if err := statusHooks((&fakeGit{}).run, repo, "pretty"); err != nil {
 			t.Fatalf("status: %v", err)
 		}
 	})
@@ -463,7 +463,7 @@ func TestHooksStatus_ReportsAGlobalHookNothingHandsOffTo(t *testing.T) {
 	writeRepoFile(t, filepath.Join(repo, ".git", "hooks", "prepare-commit-msg"), "#!/bin/sh\necho hand written\n")
 
 	out := captureStdout(t, func() {
-		if err := statusHooks(git.run, repo); err != nil {
+		if err := statusHooks(git.run, repo, "pretty"); err != nil {
 			t.Fatalf("status: %v", err)
 		}
 	})
@@ -482,7 +482,7 @@ func TestHooksStatus_QuietAboutGlobalHooksItStillForwards(t *testing.T) {
 	installInto(t, git.run, repo)
 
 	out := captureStdout(t, func() {
-		if err := statusHooks(git.run, repo); err != nil {
+		if err := statusHooks(git.run, repo, "pretty"); err != nil {
 			t.Fatalf("status: %v", err)
 		}
 	})
@@ -590,7 +590,7 @@ func TestHooksGuidance_NamesCommandsTheCLIDispatches(t *testing.T) {
 		"install refusing the claim":         installInto(t, (&fakeGit{global: global}).run, repo),
 		"rendered hook script":               renderHookScript("pre-commit", []string{"lint"}, true, ""),
 		"status with nothing installed": captureStdout(t, func() {
-			if err := statusHooks((&fakeGit{}).run, empty); err != nil {
+			if err := statusHooks((&fakeGit{}).run, empty, "pretty"); err != nil {
 				t.Fatalf("status: %v", err)
 			}
 		}),
