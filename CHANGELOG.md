@@ -78,8 +78,9 @@ code change to unlock.
   stable. Every participant of the run moves together, the daemon remembers
   the rank until the run has released every lease and has nothing waiting,
   so a node admitting later lands there too, and the rank survives a daemon
-  restart. A run that already holds a lease is told so: only its later node
-  admissions move. Exit 1 names a run the daemon does not know (a submitted
+  restart. A run that already holds its run lease is told so: its waiting
+  node participants still move, and the ones it has yet to admit land at the
+  new rank. Exit 1 names a run the daemon does not know (a submitted
   run the consumer has not claimed is not visible here); exit 4 is an
   unreachable daemon, as for `sparkwing queue`. The queue header counts
   reprioritized runs in its outcome summary.
