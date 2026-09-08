@@ -1742,7 +1742,7 @@ func (d *Daemon) handleSetPriority(c *conn, req *wingwire.SetPriority) {
 	targets := d.runConnsLocked(req.RunID)
 	if len(targets) == 0 {
 		d.mu.Unlock()
-		_ = c.send(&wingwire.SetPriorityAck{Found: false, Reason: "not in local admission"})
+		d.sendPriorityAck(c, req.RunID, &wingwire.SetPriorityAck{Found: false, Reason: "not in local admission"})
 		return
 	}
 	priority := req.Priority
@@ -1750,7 +1750,7 @@ func (d *Daemon) handleSetPriority(c *conn, req *wingwire.SetPriority) {
 		resolved, ok := resolveRelativePriority(d.ledger.Snapshot(), req.RunID, req.Mode)
 		if !ok {
 			d.mu.Unlock()
-			_ = c.send(&wingwire.SetPriorityAck{Found: false, Reason: "unknown priority mode " + req.Mode})
+			d.sendPriorityAck(c, req.RunID, &wingwire.SetPriorityAck{Found: false, Reason: "unknown priority mode " + req.Mode})
 			return
 		}
 		priority = resolved
@@ -1774,7 +1774,7 @@ func (d *Daemon) handleSetPriority(c *conn, req *wingwire.SetPriority) {
 
 	d.flush(deliveries, snap)
 	d.cfg.logf("priority: run %s re-ranked %d -> %d across %d participant(s)", req.RunID, previous, priority, len(targets))
-	_ = c.send(&wingwire.SetPriorityAck{
+	d.sendPriorityAck(c, req.RunID, &wingwire.SetPriorityAck{
 		Found:        true,
 		Previous:     previous,
 		Priority:     priority,
@@ -1782,6 +1782,14 @@ func (d *Daemon) handleSetPriority(c *conn, req *wingwire.SetPriority) {
 		Participants: len(targets),
 		Holding:      holding,
 	})
+}
+
+// sendPriorityAck logs a lost ack instead of failing the re-rank: the ledger
+// has already moved the run, and the operator's next queue view shows it.
+func (d *Daemon) sendPriorityAck(c *conn, runID string, ack *wingwire.SetPriorityAck) {
+	if err := c.send(ack); err != nil {
+		d.cfg.logf("priority: ack for run %s lost: %v", runID, err)
+	}
 }
 
 func (d *Daemon) runConnsLocked(runID string) []*conn {

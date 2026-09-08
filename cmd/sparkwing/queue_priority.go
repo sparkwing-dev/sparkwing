@@ -102,7 +102,11 @@ func applyQueuePriority(ctx context.Context, home, runID string, priority int, m
 	if err != nil {
 		return queuePriorityResult{}, err
 	}
-	defer func() { _ = cl.Close() }()
+	defer func() {
+		if err := cl.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "queue priority: closing the daemon connection: %v\n", err)
+		}
+	}()
 
 	res := queuePriorityResult{RunID: runID}
 	// The ack carries the rank's landing place; the position it left comes from
