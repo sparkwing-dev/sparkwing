@@ -114,7 +114,7 @@ code change to unlock.
   `--sw-output` for the handle's format. `--sw-ref`, `--sw-priority`, and
   `--sw-cd` work detached; flags a detached run cannot honor are refused with
   the same reasons as before. See the [migration
-  guide](docs/migrations/_unreleased.md#runs-submit-becomes-run---sw-detached).
+  guide](docs/migrations/v0.46.0.md#runs-submit-becomes-run---sw-detached).
 
 ## [v0.45.0] - 2026-09-08
 ### Changed
