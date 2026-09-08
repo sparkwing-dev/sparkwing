@@ -47,6 +47,7 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-stop-at", Argument: "STEP", Desc: "Stop the run after STEP", Group: "System", Hot: true},
 	{Name: "sw-only", Argument: "GLOB", Desc: "Run only jobs whose ID matches GLOB (plus their Needs ancestors)", Group: "System", Hot: true},
 	{Name: "sw-no-cache", Desc: "Ignore cached per-node results (writes still happen)", Group: "System", Hot: true},
+	{Name: "sw-priority", Argument: "VALUE", Desc: "Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority", Group: "System", Hot: true},
 	{Name: "sw-local-only", Desc: "Force local secrets, state, cache, and logs for this run; ignore any configured shared backends", Group: "System"},
 	{Name: "sw-fleet", Desc: "Let explicitly enrolled helpers execute nodes under this foreground process's authority", Group: "System"},
 	{Name: "sw-dry-run", Desc: "Run each step's dry-run probe instead of its real action", Group: "System", Hot: true},

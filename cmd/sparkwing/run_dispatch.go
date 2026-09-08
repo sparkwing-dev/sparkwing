@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -50,6 +51,9 @@ type runFlags struct {
 
 	workers int
 
+	priority    string
+	prioritySet bool
+
 	startAt string
 	stopAt  string
 
@@ -69,6 +73,22 @@ type runFlags struct {
 	runHandleFile string
 
 	isolatedHome string
+}
+
+// validatePriorityFlag accepts the three forms --sw-priority takes and returns
+// the value the pipeline program receives verbatim: `front` and `back` resolve
+// against the live queue there, an integer is already the answer.
+func validatePriorityFlag(v string) (string, error) {
+	s := strings.TrimSpace(v)
+	switch s {
+	case wingwire.PriorityFront, wingwire.PriorityBack:
+		return s, nil
+	}
+	if _, err := strconv.Atoi(s); err == nil {
+		return s, nil
+	}
+	return "", fmt.Errorf("--sw-priority %q: expected an integer, %q, or %q",
+		v, wingwire.PriorityFront, wingwire.PriorityBack)
 }
 
 func isolatedHomeConfigDir(root string) string { return filepath.Join(root, "config") }
@@ -208,6 +228,21 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			if n, err := atoiNonNeg(strings.TrimPrefix(a, "--sw-workers=")); err == nil {
 				wf.workers = n
 			}
+			i++
+		// safety: an unusable value is peeled and refused at validation rather
+		// than forwarded, because a run that silently kept the author's
+		// priority would look admitted in the order the operator asked for.
+		case a == "--sw-priority":
+			wf.prioritySet = true
+			if i+1 < len(args) {
+				wf.priority = args[i+1]
+				i += 2
+				continue
+			}
+			i++
+		case strings.HasPrefix(a, "--sw-priority="):
+			wf.priority = strings.TrimPrefix(a, "--sw-priority=")
+			wf.prioritySet = true
 			i++
 		case a == "--sw-start-at":
 			if i+1 < len(args) {

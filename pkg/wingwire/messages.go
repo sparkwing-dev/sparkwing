@@ -754,6 +754,9 @@ type EventsWindow struct {
 	// backfill threshold and became protected from further bypass in the
 	// window.
 	BackfillProtections int `json:"backfill_protections,omitempty"`
+	// Reprioritized is how many runs an operator re-ranked in the window
+	// with sparkwing queue priority.
+	Reprioritized int `json:"reprioritized,omitempty"`
 	// Rejections counts requests the daemon refused as malformed, per
 	// cause, so a repeated invalid-request pattern is visible to the queue
 	// view and doctor. Empty when no request was rejected and for older
@@ -793,6 +796,40 @@ type CancelLeaseAck struct {
 	Found bool `json:"found"`
 }
 
+// SetPriority re-ranks a run the daemon is already arbitrating, by run
+// id, on a dedicated control connection. Mode is empty for an absolute
+// Priority; "front" or "back" resolves the rank against the waiters that
+// do not belong to this run, so the run lands ahead of or behind all of
+// them and Priority is ignored. Every participant of the run -- the run
+// itself and each node admitting under it -- is re-ranked together, and
+// the rank is remembered until the run has released every lease and has
+// no participant waiting, so a participant admitting later lands at it
+// too. The daemon answers with [SetPriorityAck]. It is the after-the-fact
+// companion to the priority a run carried when it was launched.
+type SetPriority struct {
+	RunID    string `json:"run_id"`
+	Priority int    `json:"priority,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+}
+
+// SetPriorityAck answers a [SetPriority]. Found reports whether the
+// daemon knew the run; when false, Reason names why in a short phrase
+// and every other field is zero. Previous and Priority are the run's
+// rank before and after. Position is the run's best queue position
+// afterwards, 1-based, and zero when nothing of the run is waiting.
+// Participants counts the connections re-ranked. Holding is true when
+// the run already holds a lease, which means the change reaches only the
+// node admissions it has yet to make.
+type SetPriorityAck struct {
+	Found        bool   `json:"found"`
+	Reason       string `json:"reason,omitempty"`
+	Previous     int    `json:"previous"`
+	Priority     int    `json:"priority"`
+	Position     int    `json:"position"`
+	Participants int    `json:"participants,omitempty"`
+	Holding      bool   `json:"holding,omitempty"`
+}
+
 // Cancel is the daemon's push to a run's holding connection telling it to
 // wind down cleanly, as if it had received an operator interrupt. Reason
 // is a short human phrase for the run's terminal record.
@@ -820,6 +857,8 @@ type Unsupported struct {
 func (*StatsReset) wireType() MessageType       { return TypeStatsReset }
 func (*Unsupported) wireType() MessageType      { return TypeUnsupported }
 func (*StatsResetAck) wireType() MessageType    { return TypeStatsResetAck }
+func (*SetPriority) wireType() MessageType      { return TypeSetPriority }
+func (*SetPriorityAck) wireType() MessageType   { return TypeSetPriorityAck }
 func (*CancelLease) wireType() MessageType      { return TypeCancelLease }
 func (*CancelLeaseAck) wireType() MessageType   { return TypeCancelLeaseAck }
 func (*Cancel) wireType() MessageType           { return TypeCancel }

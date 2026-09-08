@@ -44,6 +44,8 @@ func runRunsSubmit(ctx context.Context, args []string) error {
 		"tracing identifier recorded on the run; never affects deduplication")
 	ref := fs.String("sw-ref", "",
 		"submit a worktree of REF (branch/tag/SHA); the consumer executes it and removes it when the run ends")
+	priority := fs.String("sw-priority", "",
+		"local admission priority: an integer, or front/back, resolved against the queue when the consumer launches the run")
 	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	changeDir := fs.StringP("cd", "C", "", "resolve the pipeline from this directory instead of the current one")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
@@ -84,6 +86,14 @@ func runRunsSubmit(ctx context.Context, args []string) error {
 		return err
 	}
 
+	submitPriority := ""
+	if strings.TrimSpace(*priority) != "" {
+		submitPriority, err = validatePriorityFlag(*priority)
+		if err != nil {
+			return err
+		}
+	}
+
 	paths, err := submitPaths(*home)
 	if err != nil {
 		return err
@@ -102,6 +112,7 @@ func runRunsSubmit(ctx context.Context, args []string) error {
 		Args:           collectPipelineArgs(passthrough),
 		RepoDir:        repoDir,
 		Ref:            strings.TrimSpace(*ref),
+		Priority:       submitPriority,
 		IdempotencyKey: strings.TrimSpace(*idempotencyKey),
 		RequestID:      strings.TrimSpace(*requestID),
 	})
@@ -125,10 +136,17 @@ func runRunsSubmit(ctx context.Context, args []string) error {
 }
 
 type submission struct {
-	Pipeline       string
-	Args           map[string]string
-	RepoDir        string
-	Ref            string
+	Pipeline string
+	Args     map[string]string
+	RepoDir  string
+	Ref      string
+	// Priority is the unresolved --sw-priority value. It rides on the
+	// trigger row, never in Args: it shapes where the run sits in the
+	// admission queue, not what the pipeline does, so two submissions that
+	// differ only here are the same intent and an idempotency key answers
+	// the first one. front/back stay unresolved so the consumer's child
+	// measures the queue it will actually join.
+	Priority       string
 	IdempotencyKey string
 	RequestID      string
 }
@@ -184,6 +202,9 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	}
 	if rev != "" {
 		triggerEnv[orchestrator.RefWorktreeRevKey] = string(rev)
+	}
+	if sub.Priority != "" {
+		triggerEnv[orchestrator.SubmitPriorityKey] = sub.Priority
 	}
 	if sub.RequestID != "" {
 		triggerEnv[SubmitRequestIDKey] = sub.RequestID
@@ -343,6 +364,10 @@ func existingRunLogDir(paths orchestrator.Paths, runID string) string {
 	return dir
 }
 
+// describeArgsMismatch compares only the pipeline's arguments. --sw-priority is
+// absent from that map: a key names one intent, and resubmitting the
+// same work in a hurry is that same intent, so a repeat that differs only in
+// queue position answers with the original run rather than being refused.
 func describeArgsMismatch(original, incoming map[string]string) string {
 	if len(original) == len(incoming) {
 		same := true
@@ -454,6 +479,7 @@ var undetachableFlags = map[string]string{
 var submitOwnedFlags = map[string]string{
 	"--idempotency-key": "",
 	"--sw-ref":          "",
+	"--sw-priority":     "",
 	"--request-id":      "",
 	"--home":            "",
 	"--consumer-idle":   "",

@@ -142,6 +142,7 @@ func Main() {
 		StopAt:                    os.Getenv("SPARKWING_STOP_AT"),
 		Only:                      os.Getenv("SPARKWING_ONLY"),
 		NoCache:                   os.Getenv("SPARKWING_NO_CACHE") == "1",
+		Priority:                  os.Getenv(PriorityEnv),
 		DryRun:                    os.Getenv("SPARKWING_DRY_RUN") == "1",
 		LocalOnly:                 os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
 		Fleet:                     os.Getenv("SPARKWING_FLEET") == "1",

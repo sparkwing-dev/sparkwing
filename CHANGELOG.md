@@ -62,6 +62,31 @@ code change to unlock.
   way is a `stray_session_reaped` event on its node. Steps do not get to
   daemonize by accident: a process that leaves its step session with `setsid`
   is the one thing the sweep cannot see, and that stays unsupported.
+- **cli:** `--sw-priority VALUE` on `sparkwing run`, `sparkwing pipeline run`,
+  and `sparkwing runs submit` sets the run's local admission priority from the
+  command line. VALUE is an integer, or `front` / `back` for one step past the
+  highest or lowest priority waiting when the run starts (an empty queue
+  answers 1 and -1). The flag beats the plan's own `Priority()`, the run and
+  every node it dispatches queue at the same number, and the run record
+  carries the number and where it came from. A submitted run carries the
+  request on its trigger and resolves `front` / `back` when the consumer
+  launches it, against the queue it actually joins; the value never takes
+  part in idempotency-key matching.
+- **cli:** `sparkwing queue priority --run ID --set VALUE` re-ranks a run that
+  is already queued, without restarting it. `front` and `back` resolve
+  against the waiters that are not part of the run, so asking twice is
+  stable. Every participant of the run moves together, the daemon remembers
+  the rank until the run has released every lease and has nothing waiting,
+  so a node admitting later lands there too, and the rank survives a daemon
+  restart. A run that already holds a lease is told so: only its later node
+  admissions move. Exit 1 names a run the daemon does not know (a submitted
+  run the consumer has not claimed is not visible here); exit 4 is an
+  unreachable daemon, as for `sparkwing queue`. The queue header counts
+  reprioritized runs in its outcome summary.
+- **wingd:** `set_priority` / `set_priority_ack` control messages, and a
+  `priority_overrides` map in the persisted ledger snapshot. No protocol
+  major bump: an older daemon answers `unsupported`, and the client says
+  which versions disagree and how to restart the daemon.
 
 ## [v0.45.0] - 2026-09-08
 ### Changed

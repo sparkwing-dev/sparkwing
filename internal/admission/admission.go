@@ -109,6 +109,8 @@ const (
 	EventEvicted EventKind = "evicted"
 
 	EventReleased EventKind = "released"
+
+	EventReprioritized EventKind = "reprioritized"
 )
 
 type Event struct {
@@ -129,4 +131,6 @@ type Event struct {
 	BypassedBy string `json:"bypassed_by,omitempty"`
 
 	BackfillCount uint64 `json:"backfill_count,omitempty"`
+
+	Priority int `json:"priority,omitempty"`
 }

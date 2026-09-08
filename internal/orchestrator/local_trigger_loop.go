@@ -207,6 +207,10 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
 		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, "SPARKWING_SECRETS_PROFILE": {},
 		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {}, "SPARKWING_DISPATCH_WAIT_TIMEOUT": {},
+		// safety: a submitted run's priority rides on the trigger row, so an
+		// ambient one from the submitting shell is the consumer's environment
+		// shaping the run rather than the submission.
+		PriorityEnv:                    {},
 		"SPARKWING_DEBUG_PAUSE_BEFORE": {}, "SPARKWING_DEBUG_PAUSE_AFTER": {},
 		"SPARKWING_DEBUG_PAUSE_ON_FAILURE": {},
 		StandaloneStateDBEnv:               {}, StandaloneReasonEnv: {},
@@ -324,6 +328,19 @@ func triggerUsesParentRepo(trig *store.Trigger) bool {
 }
 
 const SubmitRepoDirKey = "_SPARKWING_SUBMIT_REPO_DIR"
+
+// SubmitPriorityKey carries `runs submit --sw-priority` on the trigger row
+// rather than in the run's arguments: it shapes admission, not the pipeline,
+// so it needs no runs-store column of its own and stays out of the
+// idempotency-key argument comparison.
+const SubmitPriorityKey = "_SPARKWING_SUBMIT_PRIORITY"
+
+func submittedTriggerPriority(trig *store.Trigger) string {
+	if trig == nil {
+		return ""
+	}
+	return strings.TrimSpace(trig.TriggerEnv[SubmitPriorityKey])
+}
 
 func submittedTriggerRepoDir(trig *store.Trigger) (string, error) {
 	raw := strings.TrimSpace(trig.TriggerEnv[SubmitRepoDirKey])

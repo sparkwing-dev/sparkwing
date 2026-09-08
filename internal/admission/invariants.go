@@ -195,6 +195,9 @@ func (l *Ledger) waiterInvariants() error {
 		if err := l.ownerRankInvariant(w.spec.ownerID, w.spec.ownerAdmit, w.spec.admit, "waiter "+w.spec.id); err != nil {
 			return err
 		}
+		if want, ok := l.overrideForSpec(w.spec); ok && w.spec.priority != want {
+			return fmt.Errorf("waiter %q sits at priority %d against its recorded override %d", w.spec.id, w.spec.priority, want)
+		}
 		if seen[w.spec.id] {
 			return fmt.Errorf("participant %q waits twice", w.spec.id)
 		}

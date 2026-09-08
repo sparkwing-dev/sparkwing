@@ -665,6 +665,7 @@ Args.
 | `--sw-stop-at STEP` | Stop the run after STEP |
 | `--sw-only GLOB` | Run only jobs whose ID matches GLOB (plus their Needs ancestors) |
 | `--sw-no-cache` | Ignore cached per-node results (writes still happen) |
+| `--sw-priority VALUE` | Local admission priority: an integer, or front/back for one step past the queue as it stands; overrides the plan's own Priority |
 | `--sw-local-only` | Force local secrets, state, cache, and logs for this run; ignore any configured shared backends |
 | `--sw-fleet` | Let explicitly enrolled helpers execute nodes under this foreground process's authority |
 | `--sw-dry-run` | Run each step's dry-run probe instead of its real action |

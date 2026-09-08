@@ -1009,6 +1009,7 @@ prefixing every one of them with `sw-`:
     --sw-stop-at STEP     // stop the run after STEP
     --sw-only GLOB        // run only matching jobs (+ their Needs)
     --sw-no-cache         // ignore cached per-node results
+    --sw-priority VALUE   // local admission priority: N, front, back
     --sw-local-only       // force local secrets/state/cache/logs
     --sw-dry-run          // run each step's dry-run probe
     --sw-allow LABEL,...  // authorize risk-labeled steps
@@ -1177,6 +1178,39 @@ plan.Concurrency(sw.NewConcurrencyGroup("whole-run-prod", sw.ConcurrencyLimit{
 ```
 
 The `JobGroup` mirror is `group.Concurrency(handle, cost...)`.
+
+### Run priority
+
+Local admission orders queued runs by an integer priority: higher
+admits first, equal priorities keep FIFO order. A plan can declare its
+own:
+
+```go
+plan.Priority(10)
+```
+
+That is the author's default, not the last word. An operator waiting on
+the queue overrides it per run with `sparkwing run --sw-priority VALUE`,
+where VALUE is an integer or one of `front` / `back`:
+
+```sh
+sparkwing run deploy --sw-priority 100   # explicit number
+sparkwing run deploy --sw-priority front # one past the highest queued
+sparkwing run deploy --sw-priority back  # one below the lowest queued
+```
+
+`front` and `back` are resolved once, when the run starts, against the
+queue as it stands then -- an empty queue answers 1 and -1. The
+resolved number is fixed for the life of the run, so the run's own
+admission and every node it later dispatches queue at the same place,
+and the run record carries both the number and where it came from.
+`sparkwing runs submit --sw-priority` carries the request on the
+trigger and resolves it when the consumer launches the run, so `front`
+means ahead of the queue the run actually joins. The flag reaches the
+pipeline program as `SPARKWING_PRIORITY`.
+
+Priority is a whole-run order, separate from `Concurrency()`: a group's
+members still take turns oldest-first inside the group.
 
 ## Discovery
 

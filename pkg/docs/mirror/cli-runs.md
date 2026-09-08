@@ -1009,6 +1009,12 @@ when you submit, so the run executes that commit even if the
 ref moves first. The consumer executes the worktree and
 removes it when the run ends.
 
+--sw-priority VALUE places the run in the local admission queue:
+an integer, or 'front' / 'back' for one step past whatever is
+queued. The relative forms are resolved when the consumer
+launches the run, not when you submit, so 'front' means ahead of
+the queue the run actually joins.
+
 Flags that a detached run cannot honor (--sw-index,
 --sw-dry-run, --sw-only, --profile, and the other run-shaping
 --sw- flags) are refused with the reason rather than ignored;
@@ -1057,6 +1063,7 @@ on its own after five idle minutes. See 'sparkwing runs consumer'.
 |---|---|
 | `--idempotency-key KEY` | Deduplication token; a repeat submission with this key returns the original run |
 | `--sw-ref REF` | Submit a worktree of REF (branch/tag/SHA); the consumer removes it when the run ends |
+| `--sw-priority VALUE` | Local admission priority: an integer, or front/back, resolved when the consumer launches the run; never affects deduplication |
 | `--request-id ID` | Tracing identifier recorded on the run; never affects deduplication |
 | `-C, --cd PATH` | Resolve the pipeline from this directory instead of the current one |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |

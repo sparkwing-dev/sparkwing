@@ -46,6 +46,7 @@ alike.
 ### Subcommands
 
 - `exec` -- Run a command under local machine admission
+- `priority` -- Re-rank a run that is already queued for local admission
 
 ### Flags
 
@@ -69,6 +70,9 @@ sparkwing queue -o plain
 
 # Inspect a controller's admission state
 sparkwing queue --profile prod
+
+# Move a queued run to the front
+sparkwing queue priority --run build-123 --set front
 ```
 
 ## `sparkwing queue exec`
@@ -100,4 +104,60 @@ Submits the command to the local admission daemon before starting it. While bloc
 ```sh
 # Serialize a bootstrap command
 sparkwing queue exec --run-id build-123 --name bootstrap --cores 1 --semaphore bootstrap -- make prepare
+```
+
+## `sparkwing queue priority`
+
+Re-rank a run that is already queued for local admission
+
+Changes the admission priority of a run the local daemon is
+already arbitrating, without restarting it. Higher priorities admit
+first and ties keep their arrival order, exactly as at launch. A raise
+that frees the run to start admits it immediately.
+
+--set takes an integer, or `front` / `back`. The relative forms
+resolve against the waiters that are not part of this run: front is one
+above the highest other waiter's priority, back is one below the lowest,
+and both fall back to a step either side of zero when nothing else is
+waiting. Asking for front twice is therefore stable rather than an
+escalating race with the run's own rank.
+
+One run is several admission participants -- the run itself, and each of
+its nodes admitting on its own. All of them move together, and the new
+rank is remembered, so a node admitting later lands at it too instead of
+at the priority its plan carried. The daemon forgets that rank once the
+run has released every lease and has no participant waiting.
+
+When the run already holds a lease there is nothing to re-order: the
+command says so, and the change reaches only the node admissions the run
+has yet to make.
+
+Exits 0 whether the rank moved or was already what you asked for, 1 when
+the daemon does not know the run -- a submitted run the consumer has not
+claimed yet is not queued here, so it is not visible to local admission --
+and 4 when the daemon's socket cannot be reached at all.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--run ID` | Run id to re-rank (required) |
+| `--set VALUE` | New priority: an integer, front, or back (required) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain |
+| `--home DIR` | Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing) |
+
+### Examples
+
+```sh
+# Send a queued run to the front
+sparkwing queue priority --run build-123 --set front
+
+# Park a run behind everything else
+sparkwing queue priority --run nightly-42 --set back
+
+# Set an explicit rank
+sparkwing queue priority --run build-123 --set 7
+
+# Agent-readable answer
+sparkwing queue priority --run build-123 --set 7 -o json
 ```

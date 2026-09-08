@@ -75,7 +75,9 @@ func runRandomSequence(t *testing.T, seed int64) ledgerTrace {
 		case p < 82:
 			nextID++
 			randomAttach(t, l, rng, nextID)
-		case p < 90:
+		case p < 86:
+			record(randomSetPriority(t, l, rng))
+		case p < 92:
 			events, err := l.SetHeadroom(float64(rng.Intn(int(totalCores*2)+1))*0.5, uint64(rng.Intn(int(totalMemory)+1)))
 			if err != nil {
 				t.Fatalf("SetHeadroom: %v", err)
@@ -159,6 +161,24 @@ func randomRelease(t *testing.T, l *Ledger, rng *rand.Rand) []Event {
 	}
 	ls := snap.Leases[rng.Intn(len(snap.Leases))]
 	return mustRelease(t, l, ls.ID, ls.Members[rng.Intn(len(ls.Members))])
+}
+
+func randomSetPriority(t *testing.T, l *Ledger, rng *rand.Rand) []Event {
+	t.Helper()
+	snap := l.Snapshot()
+	if len(snap.Waiters) == 0 {
+		return nil
+	}
+	target := snap.Waiters[rng.Intn(len(snap.Waiters))]
+	runID := target.RequestID
+	if target.OwnerID != "" && rng.Intn(2) == 0 {
+		runID = target.OwnerID
+	}
+	changed, events := l.SetPriority(runID, rng.Intn(7)-3)
+	if changed < 0 || changed > len(snap.Waiters) {
+		t.Fatalf("SetPriority(%q) changed %d of %d waiters", runID, changed, len(snap.Waiters))
+	}
+	return events
 }
 
 func randomAttach(t *testing.T, l *Ledger, rng *rand.Rand, n int) {

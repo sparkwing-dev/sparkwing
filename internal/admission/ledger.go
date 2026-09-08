@@ -32,6 +32,7 @@ type Ledger struct {
 	tokens             map[string]LeaseID
 	memberOf           map[string]LeaseID
 	waiters            []*waiter
+	priorityOverrides  map[string]int
 	leaseSeq           uint64
 	arrivalSeq         uint64
 	admitSeq           uint64
@@ -123,6 +124,7 @@ func New(cfg Config) (*Ledger, error) {
 		leases:             map[LeaseID]*lease{},
 		tokens:             map[string]LeaseID{},
 		memberOf:           map[string]LeaseID{},
+		priorityOverrides:  map[string]int{},
 		tokenGen:           gen,
 	}, nil
 }
@@ -220,6 +222,7 @@ func (l *Ledger) ReplaceWaiter(req Request) ([]Event, error) {
 		s.admit = w.spec.admit
 		s.ownerID = w.spec.ownerID
 		s.ownerAdmit = w.spec.ownerAdmit
+		l.applyPriorityOverride(&s)
 		w.spec = s
 		l.sortWaiters()
 		events := l.promote()
@@ -239,6 +242,7 @@ func (l *Ledger) CancelWaiter(id string) []Event {
 		}
 		l.waiters = append(l.waiters[:i], l.waiters[i+1:]...)
 		events := l.promote()
+		l.pruneOverrides()
 		l.mustHoldInvariants()
 		return events
 	}
@@ -294,6 +298,7 @@ func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 	ev := l.newEvent(EventReleased, le.requestID)
 	ev.Lease = id
 	events := append([]Event{ev}, l.promote()...)
+	l.pruneOverrides()
 	l.mustHoldInvariants()
 	return events, nil
 }
@@ -406,6 +411,7 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 		return spec{}, fmt.Errorf("%w: needs %s of memory, this machine has %s",
 			ErrNeverAdmissible, gibibytes(s.memory), gibibytes(l.totalMemory))
 	}
+	l.applyPriorityOverride(&s)
 	return s, nil
 }
 
@@ -415,6 +421,107 @@ func (l *Ledger) ownerAdmissionRank(ownerID string) uint64 {
 		return 0
 	}
 	return l.leases[leaseID].admit
+}
+
+// SetPriority re-ranks every participant of runID -- the run itself and
+// any node admitting under it -- and records the rank so a participant
+// admitting later lands at it too rather than at the priority its plan
+// carried. changed counts the waiters whose rank actually moved; a raise
+// that frees a waiter to run is granted before this returns.
+func (l *Ledger) SetPriority(runID string, priority int) (changed int, events []Event) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if runID == "" {
+		return 0, nil
+	}
+	l.priorityOverrides[runID] = priority
+	for _, w := range l.waiters {
+		if !specBelongsToRun(w.spec, runID) {
+			continue
+		}
+		want, ok := l.overrideForSpec(w.spec)
+		if !ok || w.spec.priority == want {
+			continue
+		}
+		w.spec.priority = want
+		changed++
+		ev := l.newEvent(EventReprioritized, w.spec.id)
+		ev.Priority = want
+		events = append(events, ev)
+	}
+	if changed > 0 {
+		l.sortWaiters()
+		events = append(events, l.promote()...)
+	}
+	l.mustHoldInvariants()
+	return changed, events
+}
+
+// EffectivePriority reports the rank a request for id under ownerID is
+// admitted at: a recorded override for the participant, else one for its
+// owning run, else the priority the caller carried.
+func (l *Ledger) EffectivePriority(id, ownerID string, carried int) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if p, ok := l.overrideForSpec(spec{id: id, ownerID: ownerID}); ok {
+		return p
+	}
+	return carried
+}
+
+func specBelongsToRun(s spec, runID string) bool {
+	return s.id == runID || s.ownerID == runID
+}
+
+// overrideForSpec resolves the participant's own override ahead of its
+// run's, so re-ranking a run never overwrites a rank set on one node.
+func (l *Ledger) overrideForSpec(s spec) (int, bool) {
+	if p, ok := l.priorityOverrides[s.id]; ok {
+		return p, true
+	}
+	if s.ownerID != "" {
+		if p, ok := l.priorityOverrides[s.ownerID]; ok {
+			return p, true
+		}
+	}
+	return 0, false
+}
+
+func (l *Ledger) applyPriorityOverride(s *spec) {
+	if p, ok := l.overrideForSpec(*s); ok {
+		s.priority = p
+	}
+}
+
+// pruneOverrides forgets the rank of a run that has nothing left in the
+// ledger, so an override cannot outlive its run and re-rank a later run
+// that reuses the id.
+func (l *Ledger) pruneOverrides() {
+	for runID := range l.priorityOverrides {
+		if l.runPresent(runID) {
+			continue
+		}
+		delete(l.priorityOverrides, runID)
+	}
+}
+
+func (l *Ledger) runPresent(runID string) bool {
+	for _, w := range l.waiters {
+		if specBelongsToRun(w.spec, runID) {
+			return true
+		}
+	}
+	for _, le := range l.leases {
+		if le.requestID == runID || le.ownerID == runID {
+			return true
+		}
+		if _, member := le.members[runID]; member {
+			return true
+		}
+	}
+	return false
 }
 
 // ProvesOwner reports whether token belongs to a lease ownerID holds, either

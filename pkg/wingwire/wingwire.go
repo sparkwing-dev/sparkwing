@@ -173,6 +173,8 @@ const (
 	TypeQueueState       MessageType = "queue_state"
 	TypeCancelLease      MessageType = "cancel_lease"
 	TypeCancelLeaseAck   MessageType = "cancel_lease_ack"
+	TypeSetPriority      MessageType = "set_priority"
+	TypeSetPriorityAck   MessageType = "set_priority_ack"
 	TypeCancel           MessageType = "cancel"
 	TypeStatsReset       MessageType = "stats_reset"
 	TypeStatsResetAck    MessageType = "stats_reset_ack"
@@ -278,6 +280,8 @@ var messageRegistry = map[MessageType]func() Message{
 	TypeQueueState:       func() Message { return &QueueState{} },
 	TypeCancelLease:      func() Message { return &CancelLease{} },
 	TypeCancelLeaseAck:   func() Message { return &CancelLeaseAck{} },
+	TypeSetPriority:      func() Message { return &SetPriority{} },
+	TypeSetPriorityAck:   func() Message { return &SetPriorityAck{} },
 	TypeCancel:           func() Message { return &Cancel{} },
 	TypeStatsReset:       func() Message { return &StatsReset{} },
 	TypeStatsResetAck:    func() Message { return &StatsResetAck{} },

@@ -17,6 +17,11 @@ type Snapshot struct {
 	Leases              []LeaseState     `json:"leases,omitempty"`
 	Semaphores          []SemaphoreState `json:"semaphores,omitempty"`
 	Waiters             []WaiterState    `json:"waiters,omitempty"`
+	// PriorityOverrides is the rank an operator set on a run after it was
+	// submitted, keyed by run id. It outlives the run's waiters -- which
+	// are not persisted -- so a participant admitting after a daemon
+	// restart still lands at the rank the operator chose.
+	PriorityOverrides map[string]int `json:"priority_overrides,omitempty"`
 }
 
 type LeaseState struct {
@@ -84,6 +89,12 @@ func (l *Ledger) Snapshot() Snapshot {
 		ArrivalSeq:          l.arrivalSeq,
 		AdmitSeq:            l.admitSeq,
 		EventSeq:            l.eventSeq,
+	}
+	if len(l.priorityOverrides) > 0 {
+		snap.PriorityOverrides = make(map[string]int, len(l.priorityOverrides))
+		for runID, p := range l.priorityOverrides {
+			snap.PriorityOverrides[runID] = p
+		}
 	}
 	for _, id := range l.sortedLeaseIDs() {
 		le := l.leases[id]
@@ -171,11 +182,18 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 		leases:             map[LeaseID]*lease{},
 		tokens:             map[string]LeaseID{},
 		memberOf:           map[string]LeaseID{},
+		priorityOverrides:  map[string]int{},
 		leaseSeq:           snap.LeaseSeq,
 		arrivalSeq:         snap.ArrivalSeq,
 		admitSeq:           snap.AdmitSeq,
 		eventSeq:           snap.EventSeq,
 		tokenGen:           tokenGen,
+	}
+	for runID, p := range snap.PriorityOverrides {
+		if runID == "" {
+			return nil, fmt.Errorf("%w: priority override with an empty run id", ErrInvalidSnapshot)
+		}
+		l.priorityOverrides[runID] = p
 	}
 	for _, ls := range snap.Leases {
 		if err := l.restoreLease(ls); err != nil {

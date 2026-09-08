@@ -575,6 +575,8 @@ func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 		d.handleQueueState(c)
 	case *wingwire.CancelLease:
 		d.handleCancelLease(c, m)
+	case *wingwire.SetPriority:
+		d.handleSetPriority(c, m)
 	case *wingwire.StatsReset:
 		d.handleStatsReset(c)
 	case *wingwire.DrainRequest:
@@ -782,6 +784,10 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		charged, pinClamped = d.clampHostChargeLocked(charged, req.CostSource)
 	}
 	req.OwnerRunID = d.validatedOwnerRunIDLocked(req.OwnerRunID, req.OwnerLeaseToken)
+	// safety: an operator re-rank outranks the priority the plan carried, and
+	// requestIdentityMatches compares the connection's, so both sides of a
+	// reconnect have to see the same resolved rank.
+	req.Priority = d.ledger.EffectivePriority(req.RunID, req.OwnerRunID, req.Priority)
 	ar := requestFromWire(req.RunID, req.OwnerRunID, charged, req.Semaphores, req.CostSource, req.Priority)
 	c.runID = req.RunID
 	c.ownerRunID = req.OwnerRunID
@@ -1729,4 +1735,103 @@ func submitErrorKey(err error) string {
 	default:
 		return "invalid"
 	}
+}
+
+func (d *Daemon) handleSetPriority(c *conn, req *wingwire.SetPriority) {
+	d.mu.Lock()
+	targets := d.runConnsLocked(req.RunID)
+	if len(targets) == 0 {
+		d.mu.Unlock()
+		_ = c.send(&wingwire.SetPriorityAck{Found: false, Reason: "not in local admission"})
+		return
+	}
+	priority := req.Priority
+	if req.Mode != "" {
+		resolved, ok := resolveRelativePriority(d.ledger.Snapshot(), req.RunID, req.Mode)
+		if !ok {
+			d.mu.Unlock()
+			_ = c.send(&wingwire.SetPriorityAck{Found: false, Reason: "unknown priority mode " + req.Mode})
+			return
+		}
+		priority = resolved
+	}
+	previous := targets[0].priority
+	holding := false
+	for _, t := range targets {
+		if t.runID == req.RunID {
+			previous = t.priority
+			holding = t.role == roleHolder
+		}
+		t.priority = priority
+	}
+	_, events := d.ledger.SetPriority(req.RunID, priority)
+	deliveries := d.routeLocked(events)
+	snap := d.ledger.Snapshot()
+	position := runQueuePosition(snap, req.RunID)
+	d.events.record(d.now(), admissionEvent{Kind: eventReprioritize})
+	d.touchLocked()
+	d.mu.Unlock()
+
+	d.flush(deliveries, snap)
+	d.cfg.logf("priority: run %s re-ranked %d -> %d across %d participant(s)", req.RunID, previous, priority, len(targets))
+	_ = c.send(&wingwire.SetPriorityAck{
+		Found:        true,
+		Previous:     previous,
+		Priority:     priority,
+		Position:     position,
+		Participants: len(targets),
+		Holding:      holding,
+	})
+}
+
+func (d *Daemon) runConnsLocked(runID string) []*conn {
+	if runID == "" {
+		return nil
+	}
+	var out []*conn
+	if own := d.byRun[runID]; own != nil {
+		out = append(out, own)
+	}
+	for c := range d.conns {
+		if c.ownerRunID != runID || c.runID == runID {
+			continue
+		}
+		if c.role != roleWaiter && c.role != roleHolder {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// resolveRelativePriority answers the rank front or back means for runID: the
+// launch-side rule in wingwire, applied to the waiters that are not this run's
+// own participants, so asking for front twice is stable rather than a run
+// chasing its own rank upward.
+func resolveRelativePriority(snap admission.Snapshot, runID, mode string) (int, bool) {
+	switch mode {
+	case wingwire.PriorityFront, wingwire.PriorityBack:
+	default:
+		return 0, false
+	}
+	others := make([]wingwire.Waiter, 0, len(snap.Waiters))
+	for _, w := range snap.Waiters {
+		if w.RequestID == runID || w.OwnerID == runID {
+			continue
+		}
+		others = append(others, wingwire.Waiter{Priority: w.Priority})
+	}
+	return wingwire.ResolveRelativePriority(others, mode), true
+}
+
+// runQueuePosition reports the best 1-based queue position any participant of
+// runID holds, or zero when none of them is waiting. It is the position the
+// queue view prints, so an operator can compare the two.
+func runQueuePosition(snap admission.Snapshot, runID string) int {
+	for i, w := range snap.Waiters {
+		if w.RequestID == runID || w.OwnerID == runID {
+			return i + 1
+		}
+	}
+	return 0
 }

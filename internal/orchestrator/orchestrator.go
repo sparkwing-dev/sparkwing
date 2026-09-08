@@ -111,9 +111,19 @@ type Options struct {
 
 	DefaultStateDB string
 
+	// Priority is the operator's --sw-priority request, unresolved: an
+	// integer, or "front" / "back". Empty leaves the plan's own priority
+	// alone.
+	Priority string
+
 	// safety: set only after a store is chosen, so a caller that builds its
 	// own Options cannot claim a run reached the standalone store.
 	standalone *standaloneRun
+
+	// safety: set only by Run, after the queue answered, so buildRunFlags
+	// records the number the run actually carries rather than the request.
+	priority    priorityRequest
+	prioritySet bool
 
 	ProfileLookup storeurl.ProfileLookup
 
@@ -215,6 +225,12 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	sparkwing.SetGit(gitOpt)
 
+	// safety: before the run row exists, because a queue-relative request the
+	// daemon cannot answer means this run cannot be admitted either.
+	if opts.priority, opts.prioritySet, err = resolveRunPriority(ctx, opts.Priority, opts.Admission); err != nil {
+		return nil, err
+	}
+
 	owner, repo := sparkwing.GithubOwnerRepo(gitOpt.Repo)
 	invocation := buildRunInvocation(opts, runID, localRunLogDir(backends.Logs, runID), reg.SecretArgNames())
 	runGitSHA := gitOpt.SHA
@@ -285,6 +301,13 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan: %v", err))
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
+	}
+
+	// safety: ahead of the snapshot, so run admission and every node admission
+	// that later reads the snapshot see one priority. The operator's number
+	// beats the author's Plan.Priority.
+	if opts.prioritySet {
+		plan.Priority(opts.priority.value)
 	}
 
 	snapMeta := planSnapshotMeta{
@@ -1225,6 +1248,10 @@ func buildRunFlags(opts Options) map[string]any {
 	if v := os.Getenv("SPARKWING_MODE"); v != "" {
 		flags["mode"] = v
 	}
+	if opts.prioritySet {
+		flags["priority"] = opts.priority.value
+		flags["priority_source"] = opts.priority.source
+	}
 	if os.Getenv("SPARKWING_LOG_LEVEL") == "debug" {
 		flags["verbose"] = true
 	}
@@ -1257,12 +1284,17 @@ func buildReproducer(opts Options, _ string) string {
 	}
 	sort.Strings(flagKeys)
 	for _, k := range flagKeys {
-		if k == "max_parallel" {
+		// safety: priority_source records how the number was reached; only
+		// the number itself is a flag the reader can re-type.
+		if k == "max_parallel" || k == "priority_source" {
 			continue
 		}
 		flagName := "--" + strings.ReplaceAll(k, "_", "-")
 		if k == "local_only" {
 			flagName = "--sw-local-only"
+		}
+		if k == "priority" {
+			flagName = "--sw-priority"
 		}
 		switch v := flags[k].(type) {
 		case bool:

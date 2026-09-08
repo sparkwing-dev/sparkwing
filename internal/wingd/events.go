@@ -29,6 +29,7 @@ const (
 	eventContended    = "contended"
 	eventRejection    = "rejection"
 	eventBackfill     = "backfill"
+	eventReprioritize = "reprioritize"
 )
 
 type eventWindow struct {
@@ -104,6 +105,8 @@ func (w *eventWindow) summary(now time.Time) *wingwire.EventsWindow {
 			out.Contended++
 		case eventRejection:
 			rejections[e.Key]++
+		case eventReprioritize:
+			out.Reprioritized++
 		case eventBackfill:
 			out.Backfills++
 			if e.BackfillCount == 1 {

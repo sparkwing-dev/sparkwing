@@ -30,3 +30,19 @@ func (cl *Client) lacksOperation(msg wingwire.Message) error {
 	}
 	return daemonLacksOperation(unsupported.Type, cl.ack.BinaryVersion)
 }
+
+// unsupportedOperation turns a daemon's refusal into an error that names both
+// versions and the way out, because the operator's fix is to replace the
+// daemon rather than to change the command.
+func (cl *Client) unsupportedOperation(msg wingwire.Message, operation string) error {
+	refusal := cl.lacksOperation(msg)
+	if refusal == nil {
+		return nil
+	}
+	self := cl.opts.Version
+	if self == "" {
+		self = "(unknown)"
+	}
+	return fmt.Errorf("%w; this sparkwing is %s and %s needs a daemon that serves it. Stop the daemon with `sparkwing daemon restart` so the next run brings up a matching one, or run in an isolated SPARKWING_HOME",
+		refusal, self, operation)
+}

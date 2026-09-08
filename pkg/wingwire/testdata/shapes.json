@@ -803,6 +803,11 @@
               "omitempty": true
             },
             {
+              "name": "reprioritized",
+              "kind": "int",
+              "omitempty": true
+            },
+            {
               "name": "rejections",
               "kind": "[]struct",
               "omitempty": true,
@@ -1013,6 +1018,66 @@
           "name": "lease_token",
           "kind": "string",
           "omitempty": false
+        }
+      ]
+    },
+    {
+      "type": "set_priority",
+      "fields": [
+        {
+          "name": "run_id",
+          "kind": "string",
+          "omitempty": false
+        },
+        {
+          "name": "priority",
+          "kind": "int",
+          "omitempty": true
+        },
+        {
+          "name": "mode",
+          "kind": "string",
+          "omitempty": true
+        }
+      ]
+    },
+    {
+      "type": "set_priority_ack",
+      "fields": [
+        {
+          "name": "found",
+          "kind": "bool",
+          "omitempty": false
+        },
+        {
+          "name": "reason",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
+          "name": "previous",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "priority",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "position",
+          "kind": "int",
+          "omitempty": false
+        },
+        {
+          "name": "participants",
+          "kind": "int",
+          "omitempty": true
+        },
+        {
+          "name": "holding",
+          "kind": "bool",
+          "omitempty": true
         }
       ]
     },

@@ -110,6 +110,13 @@ func dispatchRun(args []string) error {
 	if err := checkRetiredWhereFlags(passthrough, nil); err != nil {
 		return err
 	}
+	priority := ""
+	if wf.prioritySet {
+		priority, err = validatePriorityFlag(wf.priority)
+		if err != nil {
+			return err
+		}
+	}
 	// safety: before the toolchain re-exec and the daemon pre-warm, because both
 	// resolve this machine's home from the environment this call rewrites.
 	if wf.isolatedHome != "" {
@@ -279,6 +286,13 @@ func dispatchRun(args []string) error {
 		if wf.workers > 0 {
 			env = append(env, fmt.Sprintf("SPARKWING_WORKERS=%d", wf.workers))
 		}
+	}
+
+	// safety: `front` and `back` travel unresolved because the queue they are
+	// measured against is the one standing when the pipeline program asks for
+	// admission, not the one standing when this process parsed a flag.
+	if priority != "" {
+		env = setEnv(env, orchestrator.PriorityEnv, priority)
 	}
 
 	if runNeedsDaemon(wf, passthrough) {

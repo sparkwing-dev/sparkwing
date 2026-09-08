@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,5 +159,40 @@ func TestWatchGuardReportsARefusedGuardCompletion(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("WatchGuard is still waiting for an acknowledgement the daemon refused")
+	}
+}
+
+func TestSetPriorityReportsAnOlderDaemonAndHowToReplaceIt(t *testing.T) {
+	home := shortHome(t)
+	frames := make(chan int, 8)
+	serveFakeDaemon(t, home, func(nc net.Conn, r *frameReader) {
+		for {
+			if _, err := r.read(); err != nil {
+				return
+			}
+			frames <- 1
+			line, err := wingwire.Encode(&wingwire.Unsupported{Type: string(wingwire.TypeSetPriority)})
+			if err != nil {
+				return
+			}
+			if _, err := nc.Write(line); err != nil {
+				return
+			}
+		}
+	})
+
+	cl := connectToFakeDaemon(t, home)
+	_, err := cl.SetPriority(context.Background(), "run-1", 3, "")
+	if !errors.Is(err, ErrDaemonLacksOperation) {
+		t.Fatalf("SetPriority error = %v, want ErrDaemonLacksOperation", err)
+	}
+	if !strings.Contains(err.Error(), fakeDaemonVersion) {
+		t.Errorf("error does not name the daemon version: %v", err)
+	}
+	if !strings.Contains(err.Error(), "sparkwing daemon restart") {
+		t.Errorf("error does not say how to replace the daemon: %v", err)
+	}
+	if len(frames) != 1 {
+		t.Errorf("client sent %d frames; a refusal is terminal, not transient", len(frames))
 	}
 }

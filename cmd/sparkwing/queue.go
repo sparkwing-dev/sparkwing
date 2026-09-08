@@ -22,6 +22,9 @@ func runQueue(args []string) error {
 	if len(args) > 0 && args[0] == "exec" {
 		return runQueueExec(args[1:])
 	}
+	if len(args) > 0 && args[0] == "priority" {
+		return runQueuePriority(args[1:])
+	}
 	fs := flag.NewFlagSet(cmdQueue.Path, flag.ContinueOnError)
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")

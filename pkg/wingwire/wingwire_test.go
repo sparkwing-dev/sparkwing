@@ -37,6 +37,8 @@ func roundTripMessages() []Message {
 		&DrainAck{HoldersRemaining: 3},
 		&CancelLease{RunID: "deploy-20260710-120000"},
 		&CancelLeaseAck{Found: true},
+		&SetPriority{RunID: "deploy-20260710-120000", Priority: 7},
+		&SetPriorityAck{Found: true, Previous: 0, Priority: 7, Position: 1, Participants: 3},
 		&StatsReset{},
 		&StatsResetAck{},
 		&LivenessProbe{Nonce: 7},

@@ -487,7 +487,7 @@ same renderer prints the controller's admission state -- every
 concurrency key, its holders and waiters, and each registered runner's
 free capacity -- so one vocabulary reads local and cluster admission
 alike.`,
-	SubcommandOrder:    []string{"exec"},
+	SubcommandOrder:    []string{"exec", "priority"},
 	SubcommandOptional: true,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
@@ -500,6 +500,7 @@ alike.`,
 		{"Agent-readable snapshot", "sparkwing queue -o json"},
 		{"One record per line for shell pipelines", "sparkwing queue -o plain"},
 		{"Inspect a controller's admission state", "sparkwing queue --profile prod"},
+		{"Move a queued run to the front", "sparkwing queue priority --run build-123 --set front"},
 	},
 }
 
@@ -525,6 +526,50 @@ var cmdQueueExec = Command{
 	UsageSuffix: "-- <command> [args...]",
 	Examples: []Example{
 		{"Serialize a bootstrap command", "sparkwing queue exec --run-id build-123 --name bootstrap --cores 1 --semaphore bootstrap -- make prepare"},
+	},
+}
+
+var cmdQueuePriority = Command{
+	Path:     "sparkwing queue priority",
+	Synopsis: "Re-rank a run that is already queued for local admission",
+	Description: `Changes the admission priority of a run the local daemon is
+already arbitrating, without restarting it. Higher priorities admit
+first and ties keep their arrival order, exactly as at launch. A raise
+that frees the run to start admits it immediately.
+
+--set takes an integer, or ` + "`front`" + ` / ` + "`back`" + `. The relative forms
+resolve against the waiters that are not part of this run: front is one
+above the highest other waiter's priority, back is one below the lowest,
+and both fall back to a step either side of zero when nothing else is
+waiting. Asking for front twice is therefore stable rather than an
+escalating race with the run's own rank.
+
+One run is several admission participants -- the run itself, and each of
+its nodes admitting on its own. All of them move together, and the new
+rank is remembered, so a node admitting later lands at it too instead of
+at the priority its plan carried. The daemon forgets that rank once the
+run has released every lease and has no participant waiting.
+
+When the run already holds a lease there is nothing to re-order: the
+command says so, and the change reaches only the node admissions the run
+has yet to make.
+
+Exits 0 whether the rank moved or was already what you asked for, 1 when
+the daemon does not know the run -- a submitted run the consumer has not
+claimed yet is not queued here, so it is not visible to local admission --
+and 4 when the daemon's socket cannot be reached at all.`,
+	Flags: []FlagSpec{
+		{Name: "run", Argument: "ID", Desc: "Run id to re-rank", Required: true, Group: "Identity"},
+		{Name: "set", Argument: "VALUE", Desc: "New priority: an integer, front, or back", Required: true, Group: "Identity"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
+		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
+	},
+	GroupOrder: []string{"Identity", "Output", "System", "Other"},
+	Examples: []Example{
+		{"Send a queued run to the front", "sparkwing queue priority --run build-123 --set front"},
+		{"Park a run behind everything else", "sparkwing queue priority --run nightly-42 --set back"},
+		{"Set an explicit rank", "sparkwing queue priority --run build-123 --set 7"},
+		{"Agent-readable answer", "sparkwing queue priority --run build-123 --set 7 -o json"},
 	},
 }
 
@@ -2709,6 +2754,12 @@ when you submit, so the run executes that commit even if the
 ref moves first. The consumer executes the worktree and
 removes it when the run ends.
 
+--sw-priority VALUE places the run in the local admission queue:
+an integer, or 'front' / 'back' for one step past whatever is
+queued. The relative forms are resolved when the consumer
+launches the run, not when you submit, so 'front' means ahead of
+the queue the run actually joins.
+
 Flags that a detached run cannot honor (--sw-index,
 --sw-dry-run, --sw-only, --profile, and the other run-shaping
 --sw- flags) are refused with the reason rather than ignored;
@@ -2753,6 +2804,7 @@ on its own after five idle minutes. See 'sparkwing runs consumer'.`,
 	Flags: []FlagSpec{
 		{Name: "idempotency-key", Argument: "KEY", Desc: "Deduplication token; a repeat submission with this key returns the original run", Group: "Input"},
 		{Name: "sw-ref", Argument: "REF", Desc: "Submit a worktree of REF (branch/tag/SHA); the consumer removes it when the run ends", Group: "Input"},
+		{Name: "sw-priority", Argument: "VALUE", Desc: "Local admission priority: an integer, or front/back, resolved when the consumer launches the run; never affects deduplication", Group: "Input"},
 		{Name: "request-id", Argument: "ID", Desc: "Tracing identifier recorded on the run; never affects deduplication", Group: "Input"},
 		{Name: "cd", Short: "C", Argument: "PATH", Desc: "Resolve the pipeline from this directory instead of the current one", Group: "Target"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},

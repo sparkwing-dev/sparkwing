@@ -95,6 +95,8 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 					Policy:       wingwire.PolicyCancelOthers,
 				}})
 			}
+		case admission.EventReprioritized:
+			queueChanged = true
 		case admission.EventReleased:
 			queueChanged = true
 			delete(d.leaseRun, ev.Lease)

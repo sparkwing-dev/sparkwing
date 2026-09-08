@@ -57,6 +57,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		Pipeline:          trigger.Pipeline,
 		RunID:             trigger.ID,
 		Args:              args,
+		Priority:          submittedTriggerPriority(trigger),
 		ParentRunID:       trigger.ParentRunID,
 		Admission:         pipelineAdmission(childAttachTokenFromEnv(trigger.TriggerEnv), wingwire.OriginLocal),
 		RetryOf:           trigger.RetryOf,

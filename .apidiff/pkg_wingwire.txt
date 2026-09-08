@@ -133,6 +133,8 @@ type EventsWindow struct {
 
 	BackfillProtections int
 
+	Reprioritized int
+
 	Rejections []RejectionCount
 }
 type Evicted struct {
@@ -268,6 +270,8 @@ const PolicyCancelOthers Policy = "cancel_others"
 const PolicyFail Policy = "fail"
 const PolicyQueue Policy = "queue"
 const PolicySkip Policy = "skip"
+const PriorityBack = "back"
+const PriorityFront = "front"
 type ProcessSession struct {
 	LeaderPID  int
 	SessionID  int
@@ -328,6 +332,7 @@ type Release struct {
 	LeaseToken string
 }
 func ReleasedProtocolFloors() ProtocolFloors
+func ResolveRelativePriority(waiters []Waiter, mode string) int
 type ResourceState struct {
 	Key      string
 	Capacity float64
@@ -358,6 +363,20 @@ type SemaphoreClaim struct {
 	CancelTimeoutMS int64
 }
 func ServedMajor(client int) int
+type SetPriority struct {
+	RunID    string
+	Priority int
+	Mode     string
+}
+type SetPriorityAck struct {
+	Found        bool
+	Reason       string
+	Previous     int
+	Priority     int
+	Position     int
+	Participants int
+	Holding      bool
+}
 type StatsReset struct{}
 type StatsResetAck struct{}
 const TypeAdmissionRequest MessageType = "admission_request"
@@ -379,6 +398,8 @@ const TypeQueueState MessageType = "queue_state"
 const TypeQueued MessageType = "queued"
 const TypeReattach MessageType = "reattach"
 const TypeRelease MessageType = "release"
+const TypeSetPriority MessageType = "set_priority"
+const TypeSetPriorityAck MessageType = "set_priority_ack"
 const TypeStatsReset MessageType = "stats_reset"
 const TypeStatsResetAck MessageType = "stats_reset_ack"
 const TypeUnsupported MessageType = "unsupported"
