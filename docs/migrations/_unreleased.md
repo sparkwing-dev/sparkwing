@@ -5,6 +5,25 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## Scheduled pipelines and runs-store schema 32
+
+- **Before:** The runs store was at schema 31 and had nowhere to keep a
+  pipeline schedule; nothing in `state.db` described one.
+- **After:** Schema 32 adds two tables. `cron_schedules` holds one row per
+  armed repository checkout and pipeline -- the cron expression, zone,
+  overlap policy, and catch-up window the repository declares, plus the
+  host state around them: paused, still declared, when it was armed and by
+  whom, the cursor naming the last due instant resolved, the last fire, and
+  the next matching instant. `cron_fires` holds one row per resolved
+  instant (`fired`, `skipped_overlap`, `missed`, or `failed`), pruned to the
+  newest 200 per schedule. Tick bookkeeping lives in `sparkwing_meta` under
+  the `crons.last_tick_at`, `crons.last_tick_host`, `crons.last_tick_version`,
+  and `crons.last_tick_error` keys.
+- **Migration:** None to perform. The migration is additive: it declares no
+  schema requirement and alters no existing table, so a binary built before
+  it opens and writes the same database exactly as it did, never reading the
+  two new tables. The store creates them on the next open.
+
 ## `runs submit` becomes `run --sw-detached`
 
 - **Before:** `sparkwing runs submit [submit flags] <pipeline> [pipeline

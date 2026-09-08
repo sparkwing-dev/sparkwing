@@ -38,6 +38,17 @@ var enumGroups = map[string]struct {
 			"WaiterLeaderFinished", "WaiterCancelled",
 		},
 	},
+	"store.CronOverlap": {
+		file:   "pkg/store/crons.go",
+		values: []string{"CronOverlapSkip", "CronOverlapQueue"},
+	},
+	"store.CronOutcome": {
+		file: "pkg/store/crons.go",
+		values: []string{
+			"CronOutcomeFired", "CronOutcomeSkippedOverlap",
+			"CronOutcomeMissed", "CronOutcomeFailed",
+		},
+	},
 	"store.OnLimit": {
 		file: "pkg/store/concurrency.go",
 		values: []string{
