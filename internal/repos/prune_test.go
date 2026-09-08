@@ -45,3 +45,15 @@ func TestPruneDropsOnlyStaleCheckouts(t *testing.T) {
 		t.Fatalf("fallback paths = %v, want %v", got.FallbackPaths, want.FallbackPaths)
 	}
 }
+
+func TestUnderTempDir_CoversSharedTmpAsWellAsTMPDIR(t *testing.T) {
+	for _, p := range []string{filepath.Join(os.TempDir(), "scratch"), "/tmp/scratch", "/private/tmp/scratch"} {
+		if !underTempDir(p) {
+			t.Errorf("underTempDir(%q) = false, want true", p)
+		}
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" && underTempDir(filepath.Join(home, "code", "app")) {
+		t.Errorf("a checkout under the home directory is not scratch")
+	}
+}
