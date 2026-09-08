@@ -686,7 +686,6 @@ func runSparksInflate(args []string) error {
 
 	if format == "json" {
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(map[string]any{
 			"module":  res.ModulePath,
 			"version": res.Version,

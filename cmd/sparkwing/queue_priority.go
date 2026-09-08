@@ -176,6 +176,5 @@ func queuePositionWord(n int) string {
 
 func queuePriorityJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }

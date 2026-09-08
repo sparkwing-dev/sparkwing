@@ -1,4 +1,4 @@
-<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
+<!-- GENERATED from the CLI command registry by `sparkwing commands --format markdown --output plain`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # CLI reference: sparkwing commands
 
@@ -31,8 +31,7 @@ Hidden commands are dispatchable but stay out of every
 listing, because their help points at what to use instead;
 --include-hidden lists them, flagged.
 
--o plain is one path per line for shell consumption; -o
-markdown renders the full reference page, and with --split-dir
+-o plain is one path per line for shell consumption; --format markdown renders the full reference page, and with --split-dir
 writes the docs/cli-*.md reference (one page per top-level
 command group plus a cli-reference.md index).
 
@@ -40,8 +39,9 @@ command group plus a cli-reference.md index).
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| markdown \| plain (default: pretty) |
-| `--split-dir DIR` | With -o markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages |
+| `--format markdown` | Export the full command reference as Markdown |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
+| `--split-dir DIR` | With --format markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages |
 | `--path PREFIX` | Only emit commands at or under PREFIX, matched by whole path components, with or without the leading 'sparkwing' (runs, sparkwing runs, runs list); a prefix matching nothing is an error |
 | `--include-hidden` | Also emit Hidden:true commands (default: skip) |
 

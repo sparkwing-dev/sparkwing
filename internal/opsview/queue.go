@@ -15,7 +15,6 @@ func RenderQueue(w io.Writer, qs wingwire.QueueState, format string) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
 		return enc.Encode(qs)
 	case "plain":
 		return renderQueuePlain(w, qs)
@@ -64,7 +63,6 @@ func RenderLocalQueue(w io.Writer, qs wingwire.QueueState, reach DaemonReach, fo
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
 		return enc.Encode(queueView{QueueState: qs, Daemon: reach})
 	case "plain":
 		fmt.Fprintf(w, "daemon\t%s\n", reach.State)

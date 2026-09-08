@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -211,13 +212,11 @@ func runInfo(args []string) error {
 	}
 
 	if *forAgent {
-		printAgentBlock()
-		return nil
+		return writeRenderedText(os.Stdout, "document", *output, printAgentBlock)
 	}
 
 	if *firstTime {
-		printFirstTimeCard()
-		return nil
+		return writeRenderedText(os.Stdout, "document", *output, printFirstTimeCard)
 	}
 
 	format, err := resolveOutputFormat(*output, cmdInfo.Path)
@@ -230,7 +229,6 @@ func runInfo(args []string) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(info)
 	case "plain":
 		for _, ns := range info.NextSteps {
@@ -284,110 +282,110 @@ const agentBlockBody = "- `sparkwing commands` -- one-line index of every verb; 
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n" +
 	"- `sparkwing info -o json` -- this same context as JSON, when you want to parse it\n"
 
-func printAgentBlock() {
-	fmt.Println(agentBlockHeader)
-	fmt.Println()
-	fmt.Println(durableMarkerOpen)
-	fmt.Print(agentBlockDurable)
-	fmt.Println(durableMarkerClose)
-	fmt.Println()
-	fmt.Println("## This wake only")
-	fmt.Println()
-	fmt.Print(agentBlockBody)
+func printAgentBlock(w io.Writer) {
+	fmt.Fprintln(w, agentBlockHeader)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, durableMarkerOpen)
+	fmt.Fprint(w, agentBlockDurable)
+	fmt.Fprintln(w, durableMarkerClose)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "## This wake only")
+	fmt.Fprintln(w)
+	fmt.Fprint(w, agentBlockBody)
 
 	info := gatherInfo()
-	fmt.Println()
-	fmt.Println("### This repo, right now")
-	fmt.Println()
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "### This repo, right now")
+	fmt.Fprintln(w)
 	switch {
 	case !info.Project.Found:
-		fmt.Println("- No `.sparkwing/` yet. `sparkwing pipeline new` bootstraps one; there is no separate init step.")
+		fmt.Fprintln(w, "- No `.sparkwing/` yet. `sparkwing pipeline new` bootstraps one; there is no separate init step.")
 	default:
 		p := info.Project.Pipelines
-		fmt.Printf("- `%s` -- %d pipeline(s): %d triggered, %d manual. `sparkwing pipeline list -o json` names them.\n",
+		fmt.Fprintf(w, "- `%s` -- %d pipeline(s): %d triggered, %d manual. `sparkwing pipeline list -o json` names them.\n",
 			info.Project.SparkwingDir, p.Total, p.Triggered, p.Manual)
 	}
 	if !info.Toolchain.Go.Found {
-		fmt.Println("- No Go toolchain on PATH. Pipelines are Go programs; authoring one needs it.")
+		fmt.Fprintln(w, "- No Go toolchain on PATH. Pipelines are Go programs; authoring one needs it.")
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		if note := goWorkNote(cwd); note != "" {
-			fmt.Println("- " + note)
+			fmt.Fprintln(w, "- "+note)
 		}
 	}
-	fmt.Printf("- CLI %s, running from %s. Docs shipped in this binary match it exactly.\n",
+	fmt.Fprintf(w, "- CLI %s, running from %s. Docs shipped in this binary match it exactly.\n",
 		info.Version.Installed, info.Executable.Path)
 	if line := sdkPinLine(info.SDKPin); line != "" {
-		fmt.Println("- " + line)
+		fmt.Fprintln(w, "- "+line)
 	}
 	if n := len(info.Executable.OtherInstalls); n > 0 {
-		fmt.Printf("- %d other sparkwing install(s) on this machine: %s. A process with a different PATH may run one of those instead; use absolute paths in automation, and `sparkwing doctor` for the full picture.\n",
+		fmt.Fprintf(w, "- %d other sparkwing install(s) on this machine: %s. A process with a different PATH may run one of those instead; use absolute paths in automation, and `sparkwing doctor` for the full picture.\n",
 			n, strings.Join(info.Executable.OtherInstalls, ", "))
 	}
-	fmt.Println()
-	fmt.Print(agentBlockAuthoring)
+	fmt.Fprintln(w)
+	fmt.Fprint(w, agentBlockAuthoring)
 }
 
-func printFirstTimeCard() {
+func printFirstTimeCard(w io.Writer) {
 	tip := func(cmd, pad, note string) string {
 		return color.Cyan(cmd) + pad + color.Dim("# "+note)
 	}
 
-	fmt.Println(color.Bold("Welcome to sparkwing!"))
-	fmt.Println()
+	fmt.Fprintln(w, color.Bold("Welcome to sparkwing!"))
+	fmt.Fprintln(w)
 
 	goMissing := !goOnPath()
 	sparkwingMissing := !sparkwingOnPath()
 	if goMissing || sparkwingMissing {
-		fmt.Println(color.Bold("PREREQUISITES"))
+		fmt.Fprintln(w, color.Bold("PREREQUISITES"))
 		if sparkwingMissing {
-			fmt.Println("  - " + color.Yellow("sparkwing is not on PATH.") + " " +
+			fmt.Fprintln(w, "  - "+color.Yellow("sparkwing is not on PATH.")+" "+
 				color.Dim("typing `sparkwing` in a new shell will fail."))
-			fmt.Println("    " + color.Dim("Add ~/.local/bin to PATH and reload:"))
+			fmt.Fprintln(w, "    "+color.Dim("Add ~/.local/bin to PATH and reload:"))
 			for _, line := range pathHintLines() {
-				fmt.Println("    " + color.Cyan(line))
+				fmt.Fprintln(w, "    "+color.Cyan(line))
 			}
 		}
 		if goMissing {
-			fmt.Println("  - " + color.Yellow("Go is not on PATH.") + " " +
+			fmt.Fprintln(w, "  - "+color.Yellow("Go is not on PATH.")+" "+
 				color.Dim("`pipeline new` runs `go mod tidy`, and `sparkwing run`"))
-			fmt.Println("    " + color.Dim("compiles `.sparkwing/` via `go build`. Both fail without it."))
-			fmt.Println("    " + goInstallHintForce())
+			fmt.Fprintln(w, "    "+color.Dim("compiles `.sparkwing/` via `go build`. Both fail without it."))
+			fmt.Fprintln(w, "    "+goInstallHintForce())
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 	}
 
-	fmt.Println(color.Bold("NEXT STEPS"))
-	fmt.Println("  1. cd into a code repo")
-	fmt.Println("  2. " + tip("sparkwing pipeline new --name release", "      ", "bootstrap .sparkwing/ + a minimal pipeline"))
-	fmt.Println("  3. " + tip("sparkwing run release", "                      ", "run it - first time downloads dependencies"))
-	fmt.Println("  4. " + tip("sparkwing docs read --topic sdk", "            ", "or https://sparkwing.dev/sdk"))
-	fmt.Println()
-	fmt.Println("  For a build/test/deploy DAG instead:")
-	fmt.Println("    " + color.Cyan("sparkwing pipeline new --name release --template build-test-deploy"))
-	fmt.Println()
-	fmt.Println(color.Bold("TIPS"))
+	fmt.Fprintln(w, color.Bold("NEXT STEPS"))
+	fmt.Fprintln(w, "  1. cd into a code repo")
+	fmt.Fprintln(w, "  2. "+tip("sparkwing pipeline new --name release", "      ", "bootstrap .sparkwing/ + a minimal pipeline"))
+	fmt.Fprintln(w, "  3. "+tip("sparkwing run release", "                      ", "run it - first time downloads dependencies"))
+	fmt.Fprintln(w, "  4. "+tip("sparkwing docs read --topic sdk", "            ", "or https://sparkwing.dev/sdk"))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  For a build/test/deploy DAG instead:")
+	fmt.Fprintln(w, "    "+color.Cyan("sparkwing pipeline new --name release --template build-test-deploy"))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, color.Bold("TIPS"))
 	tips := []InfoNextStep{
 		{Command: "sparkwing dashboard start", Purpose: "run the dashboard locally to watch runs in a browser"},
 		{Command: "sparkwing info", Purpose: "surveys the current repo + suggests next commands"},
 	}
 	cmpCmd, cmpNote := firstTimeCompletionHint()
 	tips = append(tips, InfoNextStep{Command: cmpCmd, Purpose: cmpNote})
-	printAlignedSteps(tips)
-	fmt.Println()
+	printAlignedStepsTo(w, tips)
+	fmt.Fprintln(w)
 
-	fmt.Println(color.Bold("DOCS"))
-	fmt.Printf("  cli:        %s %s\n", color.Cyan("sparkwing docs read --topic <slug>"), color.Dim("(offline, version-locked)"))
-	fmt.Printf("  web:        %s\n", color.Cyan("https://sparkwing.dev/docs/"))
-	fmt.Printf("  llms-full:  %s %s\n", color.Cyan("https://sparkwing.dev/llms-full.txt"), color.Dim("(full corpus, one fetch)"))
-	fmt.Printf("  llms.txt:   %s %s\n", color.Cyan("https://sparkwing.dev/llms.txt"), color.Dim("(short index)"))
-	fmt.Println()
+	fmt.Fprintln(w, color.Bold("DOCS"))
+	fmt.Fprintf(w, "  cli:        %s %s\n", color.Cyan("sparkwing docs read --topic <slug>"), color.Dim("(offline, version-locked)"))
+	fmt.Fprintf(w, "  web:        %s\n", color.Cyan("https://sparkwing.dev/docs/"))
+	fmt.Fprintf(w, "  llms-full:  %s %s\n", color.Cyan("https://sparkwing.dev/llms-full.txt"), color.Dim("(full corpus, one fetch)"))
+	fmt.Fprintf(w, "  llms.txt:   %s %s\n", color.Cyan("https://sparkwing.dev/llms.txt"), color.Dim("(short index)"))
+	fmt.Fprintln(w)
 
-	fmt.Println(color.Bold("SEE ALSO"))
-	fmt.Println("  Different tools for different jobs: sparkwing runs Go pipelines (DAGs,")
-	fmt.Println("  retries, run records); for one-off bash chores in a repo (formatters,")
-	fmt.Println("  port-forwards) a plain shell-script runner (just / make / a thin")
-	fmt.Println("  wrapper over ./bin/*.sh) is probably a better fit - no compile cycle.")
+	fmt.Fprintln(w, color.Bold("SEE ALSO"))
+	fmt.Fprintln(w, "  Different tools for different jobs: sparkwing runs Go pipelines (DAGs,")
+	fmt.Fprintln(w, "  retries, run records); for one-off bash chores in a repo (formatters,")
+	fmt.Fprintln(w, "  port-forwards) a plain shell-script runner (just / make / a thin")
+	fmt.Fprintln(w, "  wrapper over ./bin/*.sh) is probably a better fit - no compile cycle.")
 }
 
 func userShellBase() string {
@@ -401,11 +399,11 @@ func userShellBase() string {
 func firstTimeCompletionHint() (cmd, note string) {
 	switch userShellBase() {
 	case "bash":
-		return "echo 'source <(sparkwing completion --shell bash)' >> ~/.bashrc", "enable cli tab auto completion"
+		return "echo 'source <(sparkwing completion --shell bash --output plain)' >> ~/.bashrc", "enable cli tab auto completion"
 	case "zsh":
-		return "echo 'source <(sparkwing completion --shell zsh)' >> ~/.zshrc", "enable cli tab auto completion"
+		return "echo 'source <(sparkwing completion --shell zsh --output plain)' >> ~/.zshrc", "enable cli tab auto completion"
 	case "fish":
-		return "sparkwing completion --shell fish > ~/.config/fish/completions/sparkwing.fish", "enable cli tab auto completion"
+		return "sparkwing completion --shell fish --output plain > ~/.config/fish/completions/sparkwing.fish", "enable cli tab auto completion"
 	default:
 		return "sparkwing completion --help", "enable cli tab auto completion (bash | zsh | fish)"
 	}
@@ -582,7 +580,7 @@ func tipTabComplete() (InfoTip, bool) {
 		return InfoTip{
 			ID:      "tab-complete",
 			Title:   "Tab-complete is not set up",
-			Command: "echo 'source <(sparkwing completion --shell bash)' >> ~/.bashrc",
+			Command: "echo 'source <(sparkwing completion --shell bash --output plain)' >> ~/.bashrc",
 		}, true
 	case "zsh":
 		if completionConfigured(zshInitCandidates(home)) {
@@ -591,7 +589,7 @@ func tipTabComplete() (InfoTip, bool) {
 		return InfoTip{
 			ID:      "tab-complete",
 			Title:   "Tab-complete is not set up",
-			Command: "echo 'source <(sparkwing completion --shell zsh)' >> ~/.zshrc",
+			Command: "echo 'source <(sparkwing completion --shell zsh --output plain)' >> ~/.zshrc",
 		}, true
 	case "fish":
 		rc := home + "/.config/fish/completions/sparkwing.fish"
@@ -601,7 +599,7 @@ func tipTabComplete() (InfoTip, bool) {
 		return InfoTip{
 			ID:      "tab-complete",
 			Title:   "Tab-complete is not set up",
-			Command: "sparkwing completion --shell fish > ~/.config/fish/completions/sparkwing.fish",
+			Command: "sparkwing completion --shell fish --output plain > ~/.config/fish/completions/sparkwing.fish",
 		}, true
 	}
 	return InfoTip{}, false
@@ -929,7 +927,9 @@ func wrapLinesAt(s string, width int) []string {
 	return out
 }
 
-func printAlignedSteps(steps []InfoNextStep) {
+func printAlignedSteps(steps []InfoNextStep) { printAlignedStepsTo(os.Stdout, steps) }
+
+func printAlignedStepsTo(w io.Writer, steps []InfoNextStep) {
 	width := 0
 	for _, ns := range steps {
 		if n := len(ns.Command); n > width {
@@ -938,6 +938,6 @@ func printAlignedSteps(steps []InfoNextStep) {
 	}
 	for _, ns := range steps {
 		pad := strings.Repeat(" ", width-len(ns.Command))
-		fmt.Printf("  %s%s  %s\n", color.Cyan(ns.Command), pad, color.Dim(ns.Purpose))
+		fmt.Fprintf(w, "  %s%s  %s\n", color.Cyan(ns.Command), pad, color.Dim(ns.Purpose))
 	}
 }

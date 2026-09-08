@@ -84,6 +84,5 @@ func printConfigInspectJSON(pipeline string, secFields []sparkwing.SecretField) 
 		"secrets":  secFields,
 	}
 	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
 	return enc.Encode(out)
 }

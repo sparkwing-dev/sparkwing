@@ -1370,7 +1370,6 @@ func RenderDoctor(w io.Writer, r DoctorReport, format, legacyLine string) error 
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
 		return enc.Encode(r)
 	case "plain":
 		return renderDoctorPlain(w, r)

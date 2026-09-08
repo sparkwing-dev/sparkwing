@@ -165,7 +165,6 @@ func runOpsVersion(args []string) error {
 	v := sparkwingModuleVersion()
 	if resolveOpsFormat(getOut()) == "json" {
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(map[string]string{"version": v})
 	}
 	fmt.Fprintln(os.Stdout, v)

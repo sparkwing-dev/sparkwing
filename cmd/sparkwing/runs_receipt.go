@@ -54,7 +54,6 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 			return fmt.Errorf("decode receipt: %w", err)
 		}
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(v)
 	}
 
@@ -78,7 +77,6 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	rec := receipt.BuildReceipt(run, nodes, rate, source)
 	rec.Store = label
 	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
 	return enc.Encode(rec)
 }
 

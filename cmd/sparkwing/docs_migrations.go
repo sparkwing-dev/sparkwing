@@ -74,7 +74,7 @@ func runDocsMigrationsRead(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsMigrationsRead.Path, flag.ContinueOnError)
 	var output string
 	var wf docsWebFlags
-	fs.StringVarP(&output, "output", "o", "markdown", "markdown | plain")
+	fs.StringVarP(&output, "output", "o", "", "pretty | json | plain")
 	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsMigrationsRead, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -122,16 +122,10 @@ func runDocsMigrationsRead(args []string) error {
 		body = b
 	}
 
-	switch strings.ToLower(output) {
-	case "markdown", "plain", "":
-		fmt.Print(body)
-		if !strings.HasSuffix(body, "\n") {
-			fmt.Println()
-		}
-	default:
-		return fmt.Errorf("unknown output format %q (valid: markdown, plain)", output)
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
 	}
-	return nil
+	return writeText(os.Stdout, "document", body, output)
 }
 
 func runDocsMigrationsBetween(args []string) error {
@@ -140,7 +134,7 @@ func runDocsMigrationsBetween(args []string) error {
 	to := fs.String("to", "", "inclusive upper bound (default = highest version this CLI knows about)")
 	var output string
 	var wf docsWebFlags
-	fs.StringVarP(&output, "output", "o", "markdown", "markdown | plain")
+	fs.StringVarP(&output, "output", "o", "", "pretty | json | plain")
 	registerWebFlags(fs, &wf, false)
 	if err := parseAndCheck(cmdDocsMigrationsBetween, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -182,20 +176,14 @@ func runDocsMigrationsBetween(args []string) error {
 		bodyFetcher = docs.MigrationsRead
 	}
 
-	switch strings.ToLower(output) {
-	case "markdown", "plain", "":
-		body, err := renderBetweenMarkdown(*from, *to, entries, bodyFetcher)
-		if err != nil {
-			return fmt.Errorf("docs migrations between: %w", err)
-		}
-		fmt.Print(body)
-		if !strings.HasSuffix(body, "\n") {
-			fmt.Println()
-		}
-	default:
-		return fmt.Errorf("unknown output format %q (valid: markdown, plain)", output)
+	body, err := renderBetweenMarkdown(*from, *to, entries, bodyFetcher)
+	if err != nil {
+		return fmt.Errorf("docs migrations between: %w", err)
 	}
-	return nil
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	return writeText(os.Stdout, "document", body, output)
 }
 
 func filterAndOrderBetween(all []docs.MigrationEntry, from, to string) []docs.MigrationEntry {

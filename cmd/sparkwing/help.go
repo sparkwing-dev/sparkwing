@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -116,34 +117,46 @@ func (c Command) declaredFlags() map[string]bool {
 
 func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	fs.SetOutput(io.Discard)
-
-	if err := checkRetiredWhereFlags(args, cmd.declaredFlags()); err != nil {
-		return err
+	hasOutput := fs.Lookup("output") != nil
+	if !hasOutput {
+		fs.StringP("output", "o", "", "pretty | json | plain")
 	}
-
-	if wantsHelp(args) {
-		renderHelp(cmd, args, os.Stdout)
-		return errHelpRequested
-	}
-
 	if fs.Lookup("help") == nil {
 		fs.BoolP("help", "h", false, helpFlag.Desc)
 	}
-
 	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			renderHelp(cmd, args, os.Stdout)
-			return errHelpRequested
+		if strings.Contains(err.Error(), "needs an argument") && (strings.Contains(err.Error(), "output") || strings.Contains(err.Error(), "-o")) {
+			return fmt.Errorf("%s: --output requires pretty|json|plain", cmd.Path)
 		}
-		PrintHelp(cmd, os.Stderr)
 		return fmt.Errorf("%s: %w", cmd.Path, err)
 	}
-
-	if v, err := fs.GetBool("help"); err == nil && v {
-		renderHelp(cmd, args, os.Stdout)
+	requested := ""
+	f := fs.Lookup("output")
+	if fs.Changed("output") {
+		requested = f.Value.String()
+		if requested == "" {
+			return fmt.Errorf("%s: --output requires pretty|json|plain", cmd.Path)
+		}
+	}
+	mode, err := resolveOutputFormat(requested, cmd.Path)
+	if err != nil {
+		return err
+	}
+	if err := f.Value.Set(mode); err != nil {
+		return err
+	}
+	if help, err := fs.GetBool("help"); err == nil && help {
+		if err := writeCommandHelp(cmd, os.Stdout, mode); err != nil {
+			return err
+		}
 		return errHelpRequested
 	}
-
+	if !hasOutput && fs.Changed("output") {
+		return fmt.Errorf("%s: --output is not supported", cmd.Path)
+	}
+	if err := checkRetiredWhereFlags(args, cmd.declaredFlags()); err != nil {
+		return err
+	}
 	return validateFlagDeps(cmd, fs)
 }
 
@@ -522,20 +535,40 @@ func handleParentHelp(cmd Command, args []string) bool {
 	}
 	switch args[0] {
 	case "-h", "--help", "help":
-		renderHelp(cmd, args, os.Stdout)
+		if err := renderHelp(cmd, args, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		return true
 	}
 	return false
 }
 
-func renderHelp(cmd Command, args []string, w io.Writer) {
-	if wantsJSONHelp(args) {
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(toCommandJSON(&cmd))
-		return
+func renderHelp(cmd Command, args []string, w io.Writer) error {
+	requested, _, err := requestedOutput(args)
+	if err != nil {
+		return err
 	}
-	PrintHelp(cmd, w)
+	mode, err := resolveOutputFormat(requested, cmd.Path)
+	if err != nil {
+		return err
+	}
+	return writeCommandHelp(cmd, w, mode)
+}
+
+func writeCommandHelp(cmd Command, w io.Writer, mode string) error {
+	if mode == "json" {
+		var text bytes.Buffer
+		PrintHelp(cmd, &text)
+		return json.NewEncoder(w).Encode(struct {
+			Kind string `json:"kind"`
+			Text string `json:"text"`
+			CommandJSON
+		}{Kind: "help", Text: text.String(), CommandJSON: toCommandJSON(&cmd)})
+	}
+	var text bytes.Buffer
+	PrintHelp(cmd, &text)
+	_, err := io.Copy(w, &text)
+	return err
 }
 
 func visibleFlagsForHelp(cmd Command, hotOnly bool) []FlagSpec {
@@ -562,21 +595,4 @@ func visibleFlagsForHelp(cmd Command, hotOnly bool) []FlagSpec {
 		out = append(out, helpFlag)
 	}
 	return out
-}
-
-func wantsJSONHelp(args []string) bool {
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "--json":
-			return true
-		case a == "--output=json", a == "-o=json":
-			return true
-		case a == "--output", a == "-o":
-			if i+1 < len(args) && args[i+1] == "json" {
-				return true
-			}
-		}
-	}
-	return false
 }

@@ -1,4 +1,4 @@
-<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
+<!-- GENERATED from the CLI command registry by `sparkwing commands --format markdown --output plain`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # CLI reference: sparkwing version
 
@@ -31,7 +31,7 @@ latest) for shell pipelines.
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--offline` | Skip the network fetch for latest release |
 | `--changelog` | Print the changelog for the installed release |
 

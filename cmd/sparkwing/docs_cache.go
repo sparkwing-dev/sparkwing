@@ -52,7 +52,6 @@ func runDocsCacheInfo(args []string) error {
 	switch output {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(stats)
 	case "pretty", "":
 		fmt.Println(color.Bold("CACHE"))

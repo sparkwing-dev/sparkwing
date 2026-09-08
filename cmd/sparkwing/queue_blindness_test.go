@@ -128,10 +128,10 @@ func TestRunQueue_NoDaemonDoesNotPrintWhatAnIdleDaemonPrints(t *testing.T) {
 	if strings.TrimSpace(withoutDaemon) == "{}" {
 		t.Fatalf("queue with no daemon still prints a bare {}:\n%s", withoutDaemon)
 	}
-	if !strings.Contains(withoutDaemon, `"reachable": false`) {
+	if !strings.Contains(withoutDaemon, `"reachable":false`) {
 		t.Errorf("queue with no daemon does not say the daemon was not reached:\n%s", withoutDaemon)
 	}
-	if !strings.Contains(withIdleDaemon, `"reachable": true`) {
+	if !strings.Contains(withIdleDaemon, `"reachable":true`) {
 		t.Errorf("queue against a live daemon does not say the daemon was reached:\n%s", withIdleDaemon)
 	}
 }
@@ -153,7 +153,7 @@ func TestRunQueue_UnreachableDaemonExitsWithTheInfrastructureCode(t *testing.T) 
 	if code := exitCodeFor(err); code != 4 {
 		t.Errorf("exit code = %d, want 4 (infrastructure)", code)
 	}
-	if !strings.Contains(out, `"state": "unreachable"`) {
+	if !strings.Contains(out, `"state":"unreachable"`) {
 		t.Errorf("queue did not print the unreachable state:\n%s", out)
 	}
 	if strings.TrimSpace(out) == "{}" {

@@ -163,22 +163,26 @@ func commandIndex(picked []*Command) []CommandIndexJSON {
 func runCommands(args []string) error {
 	fs := flag.NewFlagSet(cmdCommands.Path, flag.ContinueOnError)
 	var output string
-	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | markdown | plain")
+	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
+	artifactFormat := fs.String("format", "", "artifact format: markdown")
 	includeHidden := fs.Bool("include-hidden", false, "also emit Hidden:true commands (default: skip)")
 	pathPrefix := fs.String("path", "", "only emit commands whose Path starts with this prefix")
-	splitDir := fs.String("split-dir", "", "with -o markdown: write one page per top-level command group into this directory")
+	splitDir := fs.String("split-dir", "", "with --format markdown: write one page per top-level command group into this directory")
 	if err := parseAndCheck(cmdCommands, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
+	if *artifactFormat != "" && *artifactFormat != "markdown" {
+		return fmt.Errorf("commands: --format must be markdown")
+	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("commands: unexpected positional %q", fs.Arg(0))
 	}
 	if *splitDir != "" {
-		if o := strings.ToLower(output); o != "markdown" && o != "md" {
-			return fmt.Errorf("commands: --split-dir requires -o markdown")
+		if *artifactFormat != "markdown" {
+			return fmt.Errorf("commands: --split-dir requires --format markdown")
 		}
 
 		if *pathPrefix != "" {
@@ -211,6 +215,17 @@ func runCommands(args []string) error {
 		return unmatchedPathError(prefix, hiddenMatches)
 	}
 
+	if *artifactFormat == "markdown" {
+		full := make([]CommandJSON, 0, len(picked))
+		for _, c := range picked {
+			full = append(full, toCommandJSON(c))
+		}
+		if *splitDir != "" {
+			return writeSplitMarkdownOutput(*splitDir, full, output)
+		}
+		return writeText(os.Stdout, "artifact", renderCommandsMarkdown(full), output)
+	}
+
 	switch strings.ToLower(output) {
 	case "json":
 
@@ -221,22 +236,12 @@ func runCommands(args []string) error {
 			}
 		}
 		return nil
-	case "markdown", "md":
-		full := make([]CommandJSON, 0, len(picked))
-		for _, c := range picked {
-			full = append(full, toCommandJSON(c))
-		}
-		if *splitDir != "" {
-			return writeSplitMarkdown(*splitDir, full)
-		}
-		fmt.Print(renderCommandsMarkdown(full))
-		return nil
 	case "plain":
 		for _, c := range picked {
 			fmt.Println(c.Path)
 		}
 		return nil
-	case "pretty", "table", "":
+	case "pretty":
 		w := 0
 		for _, c := range picked {
 			if n := len(c.Path); n > w {
@@ -257,7 +262,7 @@ func runCommands(args []string) error {
 		})
 		return nil
 	default:
-		return fmt.Errorf("unknown output format %q (valid: pretty, json, markdown, plain)", output)
+		return fmt.Errorf("unknown output format %q (valid: pretty, json, plain)", output)
 	}
 }
 
@@ -296,7 +301,7 @@ func renderCommandsMarkdown(cmds []CommandJSON) string {
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
-const generatedPageMarker = "<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->\n" +
+const generatedPageMarker = "<!-- GENERATED from the CLI command registry by `sparkwing commands --format markdown --output plain`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->\n" +
 	"<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n"
 
 func writeCommandSection(b *strings.Builder, c CommandJSON, withSubcommands bool) {
@@ -438,7 +443,11 @@ func splitCommandsMarkdown(cmds []CommandJSON) (map[string]string, error) {
 	return files, nil
 }
 
-func writeSplitMarkdown(dir string, cmds []CommandJSON) error {
+func writeSplitMarkdown(dir string, commands []CommandJSON) error {
+	return writeSplitMarkdownOutput(dir, commands, "plain")
+}
+
+func writeSplitMarkdownOutput(dir string, cmds []CommandJSON, output string) error {
 	files, err := splitCommandsMarkdown(cmds)
 	if err != nil {
 		return err
@@ -479,8 +488,21 @@ func writeSplitMarkdown(dir string, cmds []CommandJSON) error {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			return fmt.Errorf("commands: %w", err)
 		}
-		fmt.Printf("removed stale generated page %s\n", filepath.Join(dir, name))
+		fmt.Fprintf(os.Stderr, "removed stale generated page %s\n", filepath.Join(dir, name))
 		removed++
+	}
+	if output == "json" {
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Kind      string `json:"kind"`
+			Directory string `json:"directory"`
+			Written   int    `json:"written"`
+			Unchanged int    `json:"unchanged"`
+			Removed   int    `json:"removed"`
+		}{"artifact", dir, wrote, unchanged, removed})
+	}
+	if output == "plain" {
+		fmt.Println(dir)
+		return nil
 	}
 	fmt.Printf("cli reference: wrote %d, unchanged %d, removed %d page(s) in %s\n", wrote, unchanged, removed, dir)
 	return nil

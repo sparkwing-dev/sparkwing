@@ -76,8 +76,8 @@ func TestRunJobsReceipt_RejectsBadOutput(t *testing.T) {
 	paths := orchestrator.PathsAt(dir)
 	err := runJobsReceipt(context.Background(), paths,
 		[]string{"--run", "x", "--output", "table"})
-	if err == nil || !strings.Contains(err.Error(), "only supports json") {
-		t.Fatalf("want only-json error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "pretty|json|plain") {
+		t.Fatalf("want canonical output error, got %v", err)
 	}
 }
 
