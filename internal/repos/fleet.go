@@ -2,6 +2,7 @@ package repos
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -218,7 +219,9 @@ func runMatchesRepo(obs RunObservation, r Repo) bool {
 	if obs.Repo == "" {
 		return false
 	}
-	if strings.EqualFold(obs.Repo, r.Name) {
+	// Runs name a repo by its remote slug (owner/name); a checkout only
+	// knows its directory name.
+	if strings.EqualFold(obs.Repo, r.Name) || strings.EqualFold(path.Base(obs.Repo), r.Name) {
 		return true
 	}
 	if obs.RepoURL != "" {
@@ -231,14 +234,18 @@ func runMatchesRepo(obs RunObservation, r Repo) bool {
 }
 
 func runsOnly(byPrimary map[string]*Repo, runs []RunObservation, latest string) []Repo {
-	haveName := map[string]bool{}
-	for _, r := range byPrimary {
-		haveName[strings.ToLower(r.Name)] = true
+	hasCheckout := func(obs RunObservation) bool {
+		for _, r := range byPrimary {
+			if runMatchesRepo(obs, *r) {
+				return true
+			}
+		}
+		return false
 	}
 	agg := map[string]*Repo{}
 	var names []string
 	for _, obs := range runs {
-		if obs.Repo == "" || haveName[strings.ToLower(obs.Repo)] {
+		if obs.Repo == "" || hasCheckout(obs) {
 			continue
 		}
 		key := strings.ToLower(obs.Repo)

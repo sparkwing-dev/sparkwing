@@ -111,3 +111,22 @@ func TestPinsDiverge(t *testing.T) {
 		t.Error("mismatched pins should diverge")
 	}
 }
+
+func TestDeriveFleet_FoldsRemoteSlugIntoCheckout(t *testing.T) {
+	base := t.TempDir()
+	primary := filepath.Join(base, "app")
+	writeSparkwingPin(t, primary, "v0.15.6")
+	git := fakeGit(map[string]string{primary: filepath.Join(primary, ".git")})
+
+	runs := []RunObservation{
+		{Repo: "someone/app", RepoURL: "git@github.com:someone/app.git", Pipeline: "gate", At: time.Unix(1000, 0)},
+		{Repo: "someone/app", Pipeline: "build", At: time.Unix(2000, 0)},
+	}
+	fleet := DeriveFleet([]Candidate{{Path: primary}}, runs, git, "", nil)
+	if len(fleet) != 1 {
+		t.Fatalf("want the slug folded into the checkout row, got %d rows: %+v", len(fleet), fleet)
+	}
+	if fleet[0].LastPipeline != "build" {
+		t.Errorf("checkout row should carry the newest slug-named run: %+v", fleet[0])
+	}
+}
