@@ -8,6 +8,7 @@ Every exported symbol in the `sparkwing` package (the SDK you import as `sw`), g
 
 Part of the authoring surface too -- a pipeline that builds an image or reads the branch imports these. Each has its own page:
 
+- [`sparkwing/cleanup`](sdk-cleanup.md) -- Package cleanup lets a sparks library guarantee that a resource it starts -- a container, a cluster, a release -- is torn down if the step's node dies before the library's own cleanup runs.
 - [`sparkwing/docker`](sdk-docker.md) -- Package docker is the sparkwing SDK's Docker-shelling helper layer: build, push, login, and deterministic tag computation.
 - [`sparkwing/git`](sdk-git.md) -- Package git is the sparkwing SDK's repo-inspection helper layer: commit SHA, branch, dirty-tree detection, deterministic fileset hash, tag listing, and safe tag push.
 - [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs provides sparkwing.CacheKeyFn helpers for declaring "what changed" inputs to a node's cache.
