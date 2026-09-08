@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
@@ -263,6 +265,15 @@ func runReposUpdate(args []string) error {
 		}
 	}
 
+	// The first Ctrl-C ends the walk and lets the repo in flight restore
+	// its module files; the second one, with the handler gone, kills.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
 	cfg := repos.UpdateConfig{
 		Target:    target,
 		Apply:     apply,
@@ -271,13 +282,20 @@ func runReposUpdate(args []string) error {
 		Progress: func(repo, msg string) {
 			fmt.Fprintf(os.Stderr, "%s: %s\n", repo, msg)
 		},
+		Context: ctx,
 	}
-	verdicts := repos.UpdateFleet(&execOps{}, fleet, cfg)
+	verdicts := repos.UpdateFleet(&execOps{ctx: ctx}, fleet, cfg)
 
 	if strings.ToLower(output) == "json" {
-		return ndjson.Write(os.Stdout, verdicts)
+		if err := ndjson.Write(os.Stdout, verdicts); err != nil {
+			return err
+		}
+	} else {
+		printVerdicts(verdicts, fleet, cfg)
 	}
-	printVerdicts(verdicts, fleet, cfg)
+	if ctx.Err() != nil {
+		return exitErrorf(130, "interrupted after %d of %d repo(s); the repo in flight had its module files restored", len(verdicts), len(fleet))
+	}
 	if brokenCount(verdicts) > 0 {
 		return exitErrorf(1, "%d repo(s) broke on the bump", brokenCount(verdicts))
 	}
@@ -344,6 +362,8 @@ func printOneVerdict(v repos.Verdict) {
 		label = color.Red("broken")
 	case repos.VerdictUpToDate:
 		label = color.Dim("up-to-date")
+	case repos.VerdictInterrupted:
+		label = color.Yellow("interrupted")
 	default:
 		label = color.Dim(string(v.Kind))
 	}
@@ -367,6 +387,9 @@ func printOneVerdict(v repos.Verdict) {
 			fmt.Printf("    %s\n", line)
 		}
 	}
+	for _, u := range v.Uncompared {
+		fmt.Printf("      %s\n", color.Dim("not compared: "+u.Pipeline+" -- "+compactReason(u.Reason)))
+	}
 	if len(v.Guides) > 0 {
 		fmt.Printf("      %s\n", color.Dim("migration guides in range:"))
 		for _, g := range v.Guides {
@@ -379,7 +402,47 @@ func printOneVerdict(v repos.Verdict) {
 	}
 }
 
-type execOps struct{}
+// compactReason picks the line of a captured plan failure that names the
+// cause; the subprocess wraps it in workspace warnings and a generic
+// trailer.
+func compactReason(reason string) string {
+	first := ""
+	for _, line := range strings.Split(reason, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "exit status ") {
+			if i := strings.Index(line, ": "); i > 0 {
+				line = line[i+2:]
+			}
+		}
+		if line == "" {
+			continue
+		}
+		if first == "" {
+			first = line
+		}
+		switch {
+		case strings.HasPrefix(line, "warning:"),
+			strings.HasPrefix(line, "sparks:"),
+			strings.HasPrefix(line, "==>"),
+			strings.HasPrefix(line, "sparkwing error:"),
+			strings.HasPrefix(line, "exit status"):
+			continue
+		}
+		return line
+	}
+	return first
+}
+
+type execOps struct {
+	ctx context.Context
+}
+
+func (o execOps) context() context.Context {
+	if o.ctx == nil {
+		return context.Background()
+	}
+	return o.ctx
+}
 
 func (execOps) Dirty(dir string) (bool, error) {
 	out, err := runGit(dir, "status", "--porcelain")
@@ -397,12 +460,12 @@ func (execOps) Pipelines(sparkwingDir string) ([]string, error) {
 	return repos.PipelineNamesForRepo(filepath.Dir(sparkwingDir))
 }
 
-func (execOps) Plan(sparkwingDir, pipeline string) (repos.Plan, error) {
+func (o execOps) Plan(sparkwingDir, pipeline string) (repos.Plan, error) {
 	self, err := os.Executable()
 	if err != nil {
 		self = "sparkwing"
 	}
-	cmd := exec.Command(self, "pipeline", "plan", "--name", pipeline, "-o", "json")
+	cmd := exec.CommandContext(o.context(), self, "pipeline", "plan", "--name", pipeline, "-o", "json")
 	cmd.Dir = filepath.Dir(sparkwingDir)
 	cmd.Env = os.Environ()
 	var stdout, stderr bytes.Buffer
@@ -446,25 +509,25 @@ func (execOps) Restore(sparkwingDir string, raw []byte) error {
 	return nil
 }
 
-func (execOps) Bump(sparkwingDir, version string) error {
+func (o execOps) Bump(sparkwingDir, version string) error {
 	target := "github.com/sparkwing-dev/sparkwing@" + version
-	if out, err := runGoModCmd(sparkwingDir, "get", target); err != nil {
+	if out, err := runGoModCmd(o.context(), sparkwingDir, "get", target); err != nil {
 		return fmt.Errorf("go get %s: %v: %s", target, err, out)
 	}
-	if out, err := runGoModCmd(sparkwingDir, "mod", "tidy"); err != nil {
+	if out, err := runGoModCmd(o.context(), sparkwingDir, "mod", "tidy"); err != nil {
 		return fmt.Errorf("go mod tidy: %v: %s", err, out)
 	}
 	return nil
 }
 
-func (execOps) Verify(dir string) error {
+func (o execOps) Verify(dir string) error {
 	if _, err := os.Stat(filepath.Join(dir, ".pre-commit-config.yaml")); err != nil {
 		return fmt.Errorf("no cheap gate found (add a .pre-commit-config.yaml or drop --verify)")
 	}
 	if _, err := exec.LookPath("pre-commit"); err != nil {
 		return fmt.Errorf("pre-commit not on PATH; install it or drop --verify")
 	}
-	cmd := exec.Command("pre-commit", "run", "--all-files")
+	cmd := exec.CommandContext(o.context(), "pre-commit", "run", "--all-files")
 	cmd.Dir = dir
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -491,8 +554,8 @@ type modSnapshot struct {
 	HadSum bool   `json:"had_sum"`
 }
 
-func runGoModCmd(dir string, args ...string) (string, error) {
-	cmd := exec.Command("go", args...)
+func runGoModCmd(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = dir
 	cmd.Env = os.Environ()
 	var out bytes.Buffer

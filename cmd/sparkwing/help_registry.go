@@ -4033,7 +4033,14 @@ additionally runs each repo's pre-commit gate after the bump.
 Progress goes to stderr one line per step -- the repo being
 walked, each plan construction, the bump, the verdict -- because
 a fleet-wide run compiles every clean repo twice and holds the
-report until the last repo is done.
+report until the last repo is done. Ctrl-C ends the walk after
+the repo in flight has restored its module files and prints the
+verdicts so far; a second Ctrl-C kills outright.
+
+A pipeline whose plan already fails before the bump -- one that
+needs inputs, most often -- is set aside as "not compared" rather
+than counted against the bump; the repo's verdict then rests on
+the remaining pipelines and on the post-bump compile.
 
 Because a shared state database refuses an older pin against a
 migrated schema, the fleet is meant to move together; the report

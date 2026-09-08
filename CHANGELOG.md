@@ -56,6 +56,25 @@ code change to unlock.
   construction before and after the bump, the bump itself, the gate, the
   commit, and the verdict. A fleet-wide dry run compiles every clean repo
   twice and previously printed nothing until the whole report was ready.
+- **cli:** `sparkwing repos update` no longer calls a repo broken because one
+  of its pipelines cannot be plan-constructed without inputs. A pipeline whose
+  baseline plan already fails is listed as "not compared" under the verdict,
+  and the verdict rests on the remaining pipelines plus the post-bump compile.
+- **cli:** `sparkwing repos` no longer lists a repo twice when runs recorded it
+  by remote slug (`owner/name`) and the checkout is registered by directory
+  name; the run-observed identity now folds into the checkout's row.
+
+### Fixed
+
+- **cli:** `sparkwing repos update` interrupted with Ctrl-C mid-bump left the
+  repo in flight with its `.sparkwing/go.mod` and `go.sum` already bumped, and
+  the next run then reported that repo as up-to-date or skipped it as dirty.
+  The first Ctrl-C now restores the module files, prints the verdicts so far,
+  and exits 130; a second Ctrl-C kills outright. A failed restore is named in
+  the verdict instead of dropped.
+- **cli:** auto-registration skipped scratch checkouts under `$TMPDIR` but not
+  under the shared `/tmp` (`/private/tmp` on macOS), so agent scratchpads and
+  repro trees accumulated in the repo registry and in the fleet report.
 
 ## [v0.44.0] - 2026-09-06
 ### Added

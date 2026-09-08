@@ -1,6 +1,7 @@
 package repos
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -16,6 +17,8 @@ type fakeOps struct {
 	afterBump  bool
 	bumpErr    error
 	planErr    error
+	beforeErr  map[string]error
+	onBump     func()
 	verifyErr  error
 	commitErr  error
 	committed  bool
@@ -33,12 +36,18 @@ func (f *fakeOps) Plan(_, pipeline string) (Plan, error) {
 	if f.afterBump {
 		return f.planAfter[pipeline], nil
 	}
+	if err := f.beforeErr[pipeline]; err != nil {
+		return Plan{}, err
+	}
 	return f.planBefore[pipeline], nil
 }
 func (f *fakeOps) Snapshot(string) ([]byte, error) { return []byte("snap"), nil }
 func (f *fakeOps) Restore(string, []byte) error    { f.restored = true; return nil }
 func (f *fakeOps) Bump(string, string) error {
 	f.afterBump = true
+	if f.onBump != nil {
+		f.onBump()
+	}
 	return f.bumpErr
 }
 func (f *fakeOps) Verify(string) error { return f.verifyErr }
@@ -201,6 +210,7 @@ func TestUpdateRepo_ReportsEachStep(t *testing.T) {
 		"my-app: plan 1/2 a (before bump)",
 		"my-app: plan 2/2 b (before bump)",
 		"my-app: bumping v0.15.6 -> v0.15.8 and tidying modules",
+		"my-app: compiling pipelines after bump",
 		"my-app: plan 1/2 a (after bump)",
 		"my-app: plan 2/2 b (after bump)",
 		"my-app: running pre-commit gate",
@@ -233,5 +243,84 @@ func TestUpdateFleet_SilentWithoutProgress(t *testing.T) {
 	vs := UpdateFleet(f, []Repo{{Name: "same", Primary: "/same"}}, UpdateConfig{Target: "v0.15.8"})
 	if len(vs) != 1 || vs[0].Kind != VerdictUpToDate {
 		t.Fatalf("verdicts = %+v", vs)
+	}
+}
+
+func TestUpdateRepo_BaselineUnplannableIsSetAside(t *testing.T) {
+	f := &fakeOps{
+		pin:        "v0.15.6",
+		pipelines:  []string{"deploy", "gate"},
+		beforeErr:  map[string]error{"deploy": errors.New("inputs for pipeline \"deploy\": --tag is required")},
+		planBefore: map[string]Plan{"gate": planWith("a")},
+		planAfter:  map[string]Plan{"gate": planWith("a")},
+	}
+	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
+	if v.Kind != VerdictClean {
+		t.Fatalf("kind = %s (%s), want clean", v.Kind, v.Err)
+	}
+	if len(v.Diffs) != 1 || v.Diffs[0].Pipeline != "gate" {
+		t.Fatalf("diffs = %+v, want only gate", v.Diffs)
+	}
+	if len(v.Uncompared) != 1 || v.Uncompared[0].Pipeline != "deploy" || !strings.Contains(v.Uncompared[0].Reason, "--tag") {
+		t.Fatalf("uncompared = %+v", v.Uncompared)
+	}
+	if !strings.Contains(verdictLine(v), "1 pipeline(s) not compared") {
+		t.Errorf("verdict line = %q", verdictLine(v))
+	}
+}
+
+func TestUpdateRepo_InterruptMidBumpRestoresInsteadOfBroken(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := &fakeOps{
+		pin:        "v0.15.6",
+		pipelines:  []string{"p"},
+		planBefore: map[string]Plan{"p": planWith("a")},
+		planErr:    errors.New("signal: interrupt"),
+	}
+	f.onBump = cancel
+	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8", Context: ctx})
+	if v.Kind != VerdictInterrupted {
+		t.Fatalf("kind = %s (%s), want interrupted", v.Kind, v.Err)
+	}
+	if !f.restored {
+		t.Error("interrupt must restore the module files")
+	}
+	if v.Err != "" {
+		t.Errorf("an interrupt is not a broken bump: %q", v.Err)
+	}
+}
+
+func TestUpdateFleet_StopsWalkingAfterInterrupt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := &fakeOps{
+		pin:        "v0.15.6",
+		pipelines:  []string{"p"},
+		planBefore: map[string]Plan{"p": planWith("a")},
+		planAfter:  map[string]Plan{"p": planWith("a")},
+	}
+	f.onBump = cancel
+	fleet := []Repo{{Name: "first", Primary: "/first"}, {Name: "second", Primary: "/second"}}
+	vs := UpdateFleet(f, fleet, UpdateConfig{Target: "v0.15.8", Context: ctx})
+	if len(vs) != 1 || vs[0].Kind != VerdictInterrupted {
+		t.Fatalf("verdicts = %+v, want one interrupted verdict", vs)
+	}
+}
+
+type restoreFailOps struct{ fakeOps }
+
+func (r *restoreFailOps) Restore(string, []byte) error { return errors.New("disk full") }
+
+func TestUpdateRepo_RestoreFailureIsNamed(t *testing.T) {
+	f := &restoreFailOps{fakeOps{
+		pin:        "v0.15.6",
+		pipelines:  []string{"p"},
+		planBefore: map[string]Plan{"p": planWith("a")},
+		planAfter:  map[string]Plan{"p": planWith("a")},
+	}}
+	v := UpdateRepo(f, "/repo", "my-app", UpdateConfig{Target: "v0.15.8"})
+	if !strings.Contains(v.Detail, "restore failed") || !strings.Contains(v.Detail, "disk full") {
+		t.Fatalf("detail = %q, want the restore failure named", v.Detail)
 	}
 }

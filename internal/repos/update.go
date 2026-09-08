@@ -1,6 +1,7 @@
 package repos
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -19,7 +20,16 @@ const (
 	VerdictSkippedMissing VerdictKind = "skipped-missing"
 
 	VerdictUpToDate VerdictKind = "up-to-date"
+
+	VerdictInterrupted VerdictKind = "interrupted"
 )
+
+// UncomparedPipeline is a pipeline whose baseline plan already failed, so
+// the bump could not be judged against it.
+type UncomparedPipeline struct {
+	Pipeline string
+	Reason   string
+}
 
 type PipelineDiff struct {
 	Pipeline string
@@ -33,16 +43,17 @@ type Guide struct {
 }
 
 type Verdict struct {
-	Repo      string
-	Primary   string
-	Kind      VerdictKind
-	FromPin   string
-	ToPin     string
-	Err       string
-	Diffs     []PipelineDiff
-	Guides    []Guide
-	Committed bool
-	Detail    string
+	Repo       string
+	Primary    string
+	Kind       VerdictKind
+	FromPin    string
+	ToPin      string
+	Err        string
+	Diffs      []PipelineDiff
+	Uncompared []UncomparedPipeline
+	Guides     []Guide
+	Committed  bool
+	Detail     string
 }
 
 type Ops interface {
@@ -70,6 +81,18 @@ type UpdateConfig struct {
 	// clean repo twice and can hold the report for half an hour, so without
 	// this the command looks hung. Nil is silent.
 	Progress func(repo, msg string)
+
+	// Context ends the walk early. The repo in flight restores its module
+	// files before its verdict comes back, so a Ctrl-C mid-bump does not
+	// leave the tree bumped. Nil never ends.
+	Context context.Context
+}
+
+func (cfg UpdateConfig) ctx() context.Context {
+	if cfg.Context == nil {
+		return context.Background()
+	}
+	return cfg.Context
 }
 
 func (cfg UpdateConfig) progress(repo, format string, args ...any) {
@@ -81,6 +104,7 @@ func (cfg UpdateConfig) progress(repo, format string, args ...any) {
 func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 	v := Verdict{Repo: name, Primary: dir, ToPin: cfg.Target}
 	sparkwingDir := dir + "/.sparkwing"
+	ctx := cfg.ctx()
 
 	pin, replace := ops.Pin(sparkwingDir)
 	v.FromPin = pin
@@ -119,41 +143,77 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 		return broken(v, "snapshot: "+err.Error(), cfg)
 	}
 	restore := func() {
-		_ = ops.Restore(sparkwingDir, snap)
+		if rerr := ops.Restore(sparkwingDir, snap); rerr != nil {
+			v.Detail = "restore failed, .sparkwing/go.mod may still carry the bump: " + rerr.Error()
+		}
+	}
+	interrupted := func() Verdict {
+		restore()
+		v.Kind = VerdictInterrupted
+		if v.Detail == "" {
+			v.Detail = ".sparkwing module files restored"
+		}
+		return v
+	}
+	// A step that died because the walk was interrupted is not evidence
+	// against the bump.
+	fail := func(msg string) Verdict {
+		if ctx.Err() != nil {
+			return interrupted()
+		}
+		restore()
+		return broken(v, msg, cfg)
 	}
 
 	cfg.progress(name, "listing pipelines")
 	pipelines, err := ops.Pipelines(sparkwingDir)
 	if err != nil {
-		restore()
-		return broken(v, "list pipelines: "+err.Error(), cfg)
+		return fail("list pipelines: " + err.Error())
 	}
 
+	// A pipeline whose baseline plan already fails -- required inputs, most
+	// often -- says nothing about the bump, so it is set aside rather than
+	// counted against it.
 	before := map[string]Plan{}
+	var compared []string
 	for i, p := range pipelines {
+		if ctx.Err() != nil {
+			return interrupted()
+		}
 		cfg.progress(name, "plan %d/%d %s (before bump)", i+1, len(pipelines), p)
 		plan, perr := ops.Plan(sparkwingDir, p)
 		if perr != nil {
-			restore()
-			return broken(v, "plan "+p+" (before bump): "+perr.Error(), cfg)
+			if ctx.Err() != nil {
+				return interrupted()
+			}
+			v.Uncompared = append(v.Uncompared, UncomparedPipeline{Pipeline: p, Reason: perr.Error()})
+			continue
 		}
 		before[p] = plan
+		compared = append(compared, p)
 	}
 
 	cfg.progress(name, "bumping %s -> %s and tidying modules", pin, cfg.Target)
 	if err := ops.Bump(sparkwingDir, cfg.Target); err != nil {
-		restore()
-		return broken(v, "bump pin: "+err.Error(), cfg)
+		return fail("bump pin: " + err.Error())
+	}
+	// Compiling against the new pin is the evidence a repo with nothing
+	// left to compare still needs.
+	cfg.progress(name, "compiling pipelines after bump")
+	if _, err := ops.Pipelines(sparkwingDir); err != nil {
+		return fail("compile after bump: " + err.Error())
 	}
 
 	var diffs []PipelineDiff
 	allIdentical := true
-	for i, p := range pipelines {
-		cfg.progress(name, "plan %d/%d %s (after bump)", i+1, len(pipelines), p)
+	for i, p := range compared {
+		if ctx.Err() != nil {
+			return interrupted()
+		}
+		cfg.progress(name, "plan %d/%d %s (after bump)", i+1, len(compared), p)
 		after, perr := ops.Plan(sparkwingDir, p)
 		if perr != nil {
-			restore()
-			return broken(v, "plan "+p+" (after bump): "+perr.Error(), cfg)
+			return fail("plan " + p + " (after bump): " + perr.Error())
 		}
 		diff := DiffPlans(before[p], after)
 		if !diff.Identical {
@@ -165,9 +225,11 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 	if cfg.Verify {
 		cfg.progress(name, "running pre-commit gate")
 		if err := ops.Verify(dir); err != nil {
-			restore()
-			return broken(v, "verify: "+err.Error(), cfg)
+			return fail("verify: " + err.Error())
 		}
+	}
+	if ctx.Err() != nil {
+		return interrupted()
 	}
 
 	v.Diffs = diffs
@@ -183,8 +245,7 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 	if cfg.Apply {
 		cfg.progress(name, "committing")
 		if err := ops.Commit(dir, commitMessage(cfg.Target)); err != nil {
-			restore()
-			return broken(v, "commit: "+err.Error(), cfg)
+			return fail("commit: " + err.Error())
 		}
 		v.Committed = true
 	} else {
@@ -195,7 +256,11 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 
 func UpdateFleet(ops Ops, repos []Repo, cfg UpdateConfig) []Verdict {
 	out := make([]Verdict, 0, len(repos))
+	ctx := cfg.ctx()
 	for i, r := range repos {
+		if ctx.Err() != nil {
+			break
+		}
 		scoped := cfg
 		if cfg.Progress != nil {
 			label := fmt.Sprintf("[%d/%d] %s", i+1, len(repos), r.Name)
@@ -226,6 +291,9 @@ func verdictLine(v Verdict) string {
 			}
 		}
 		line += fmt.Sprintf(" (%d pipeline(s) changed shape)", n)
+	}
+	if len(v.Uncompared) > 0 {
+		line += fmt.Sprintf(" (%d pipeline(s) not compared)", len(v.Uncompared))
 	}
 	if v.Detail != "" {
 		line += ": " + v.Detail
@@ -281,7 +349,7 @@ func SummarizeVerdicts(vs []Verdict) string {
 		counts[v.Kind]++
 	}
 	order := []VerdictKind{
-		VerdictClean, VerdictPlanDiffers, VerdictBroken,
+		VerdictClean, VerdictPlanDiffers, VerdictBroken, VerdictInterrupted,
 		VerdictUpToDate, VerdictSkippedDirty, VerdictSkippedMissing,
 	}
 	var parts []string
