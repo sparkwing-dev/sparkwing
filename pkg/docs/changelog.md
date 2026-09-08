@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.45.0] - 2026-09-08
 ### Changed
 
 - **cli:** the pretty run renderer no longer colors node names red, orange,
