@@ -50,7 +50,7 @@ when nothing is running.
 
 | Flag | Description |
 |---|---|
-| `-o, --output pretty|json|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
+| `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 
 ### Examples
@@ -82,7 +82,7 @@ that is neither loopback, the --addr host, nor listed in --allow-origin.
 
 | Flag | Description |
 |---|---|
-| `-o, --output pretty|json|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
+| `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
 | `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets. |
 | `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host. |
@@ -124,7 +124,7 @@ running, 1 when not.
 
 | Flag | Description |
 |---|---|
-| `-o, --output pretty|json|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
+| `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 
 ### Examples

@@ -353,7 +353,7 @@ func writeCommandSection(b *strings.Builder, c CommandJSON, withSubcommands bool
 				if len(extra) > 0 {
 					desc += " (" + strings.Join(extra, "; ") + ")"
 				}
-				b.WriteString("| `" + name + "` | " + cell(desc) + " |\n")
+				b.WriteString("| `" + cell(name) + "` | " + cell(desc) + " |\n")
 			}
 			b.WriteString("\n")
 		}
