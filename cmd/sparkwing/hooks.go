@@ -817,26 +817,13 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 		}
 		hooks = append(hooks, managedHookStatus{Kind: "hook", Name: e.Name(), Pipelines: pipes, ChainsGlobal: chained})
 	}
-	declared, err := declaredHookNames(repoRoot)
-	if err != nil {
-		return err
-	}
-	survey := githooks.Survey(git, repoRoot, declared)
-	silenced := []string{}
-	active, _ := githooks.ActivePath(git, repoRoot)
-	if active != "" && githooks.SameDir(active, hooksDir) {
-		silenced = append(silenced, unforwardedGlobalHooks(chainableGlobalHooks(git, hooksDir), hooksDir)...)
-	}
-	if mode == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		for _, hook := range hooks {
-			if err := enc.Encode(hook); err != nil {
+	for _, hook := range hooks {
+		if mode == "json" {
+			if err := json.NewEncoder(os.Stdout).Encode(hook); err != nil {
 				return err
 			}
+			continue
 		}
-		return enc.Encode(hooksStatusSummary{Kind: "summary", Repo: repoRoot, Installed: len(hooks), Gates: survey, SilencedGlobal: silenced})
-	}
-	for _, hook := range hooks {
 		if mode == "plain" {
 			if _, err := fmt.Fprintln(os.Stdout, hook.Name); err != nil {
 				return err
@@ -852,12 +839,25 @@ func statusHooks(git githooks.Git, repoRoot, mode string) error {
 			fmt.Fprintf(os.Stdout, "%s (managed)\n", hook.Name)
 		}
 	}
+	if mode == "pretty" && len(hooks) == 0 {
+		fmt.Fprintln(os.Stdout, "no sparkwing hooks installed")
+		fmt.Fprintln(os.Stdout, "run: sparkwing pipeline hooks install")
+	}
+	declared, err := declaredHookNames(repoRoot)
+	if err != nil {
+		return err
+	}
 	if mode == "plain" {
 		return nil
 	}
-	if len(hooks) == 0 {
-		fmt.Fprintln(os.Stdout, "no sparkwing hooks installed")
-		fmt.Fprintln(os.Stdout, "run: sparkwing pipeline hooks install")
+	survey := githooks.Survey(git, repoRoot, declared)
+	if mode == "json" {
+		silenced := []string{}
+		active, _ := githooks.ActivePath(git, repoRoot)
+		if active != "" && githooks.SameDir(active, hooksDir) {
+			silenced = append(silenced, unforwardedGlobalHooks(chainableGlobalHooks(git, hooksDir), hooksDir)...)
+		}
+		return json.NewEncoder(os.Stdout).Encode(hooksStatusSummary{Kind: "summary", Repo: repoRoot, Installed: len(hooks), Gates: survey, SilencedGlobal: silenced})
 	}
 	if len(survey.NotFiring()) > 0 || len(survey.Borrowed) > 0 {
 		fmt.Fprintf(os.Stdout, "\nwarning: %s\n  %s\n", survey.Summary(), survey.Remedy())

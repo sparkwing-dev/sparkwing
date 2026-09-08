@@ -122,3 +122,38 @@ func TestHooksStatusOutputRoute(t *testing.T) {
 		}
 	}
 }
+
+func TestHooksStatusOutputKeepsHooksWhenConfigFails(t *testing.T) {
+	repo := gateRepo(t)
+	installInto(t, (&fakeGit{}).run, repo)
+	writeRepoFile(t, filepath.Join(repo, ".sparkwing", "sparkwing.yaml"), unloadableProject)
+	for _, mode := range []string{"json", "plain", "pretty"} {
+		cmd := outputContractCommand(t, "pipeline", "hooks", "status", "--repo", repo, "--output", mode)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err == nil || !strings.Contains(stderr.String(), "config does not load") {
+			t.Fatalf("%s: error=%v stderr=%s", mode, err, &stderr)
+		}
+		switch mode {
+		case "json":
+			records := decodeOutputRecords(t, out)
+			if len(records) != 2 {
+				t.Fatalf("missing hooks: %s", out)
+			}
+			for _, record := range records {
+				if record["kind"] != "hook" {
+					t.Fatalf("failed config produced a summary: %v", record)
+				}
+			}
+		case "plain":
+			if string(out) != "post-commit\npre-commit\n" {
+				t.Fatalf("missing hooks: %q", out)
+			}
+		case "pretty":
+			if !strings.Contains(string(out), "pre-commit -> lint") {
+				t.Fatalf("missing hooks: %q", out)
+			}
+		}
+	}
+}
