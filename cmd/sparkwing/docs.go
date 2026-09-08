@@ -109,6 +109,7 @@ func runDocsGuides(args []string) error {
 
 func runDocsRead(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsRead.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "pretty | json | plain")
 	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, mcp)")
 	guide := fs.String("guide", "", "read a named set of topics instead of one (see `sparkwing docs guides`)")
 	var wf docsWebFlags
@@ -130,8 +131,7 @@ func runDocsRead(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Print(body)
-		return nil
+		return writeDocument(os.Stdout, *topic, body, *output)
 	}
 	if *topic == "" {
 		PrintHelp(cmdDocsRead, os.Stderr)
@@ -154,25 +154,24 @@ func runDocsRead(args []string) error {
 			}
 			return errors.New(strings.TrimRight(b.String(), "\n"))
 		}
-		fmt.Print(body)
 		if !strings.HasSuffix(body, "\n") {
-			fmt.Println()
+			body += "\n"
 		}
-		return nil
+		return writeDocument(os.Stdout, *topic, body, *output)
 	}
 	body, err := fetchDocWeb(ctx, resolution, *topic)
 	if err != nil {
 		return err
 	}
-	fmt.Print(body)
 	if !strings.HasSuffix(body, "\n") {
-		fmt.Println()
+		body += "\n"
 	}
-	return nil
+	return writeDocument(os.Stdout, *topic, body, *output)
 }
 
 func runDocsAll(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsAll.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "pretty | json | plain")
 	if err := parseAndCheck(cmdDocsAll, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -182,8 +181,19 @@ func runDocsAll(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("docs all: unexpected positional %q", fs.Arg(0))
 	}
-	fmt.Print(docs.All())
-	return nil
+	if *output == "json" {
+		for _, entry := range docs.List() {
+			body, err := docs.Read(entry.Slug)
+			if err != nil {
+				return err
+			}
+			if err := writeDocument(os.Stdout, entry.Slug, body, *output); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return writeText(os.Stdout, "document", docs.All(), *output)
 }
 
 func runDocsSearch(args []string) error {

@@ -1,4 +1,4 @@
-<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
+<!-- GENERATED from the CLI command registry by `sparkwing commands --format markdown --output plain`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # CLI reference: sparkwing queue
 

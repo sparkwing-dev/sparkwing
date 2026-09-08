@@ -1578,7 +1578,6 @@ func prettyJSON(raw []byte) (string, bool) {
 
 func writeJSON(out io.Writer, v any) error {
 	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }
 

@@ -972,7 +972,6 @@ func shortSHAOrDash(s string) string {
 
 func jsonEncode(w *os.File, v any) error {
 	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
 	return enc.Encode(v)
 }
 

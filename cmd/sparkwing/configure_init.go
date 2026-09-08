@@ -69,7 +69,6 @@ func runConfigureInit(args []string) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(info)
 	case "plain":
 		for _, ns := range info.NextSteps {

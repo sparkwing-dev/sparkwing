@@ -1,4 +1,4 @@
-<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
+<!-- GENERATED from the CLI command registry by `sparkwing commands --format markdown --output plain`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # CLI reference: sparkwing cache
 
@@ -56,7 +56,7 @@ answer to why a rebuild happened.
 | Flag | Description |
 |---|---|
 | `--dir PATH` | Pipeline module directory (default: ./.sparkwing) |
-| `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 
@@ -81,7 +81,7 @@ pruning evicts on -- not by when they were built.
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--all` | List every entry rather than the ten most recent |
 
 ### Examples
@@ -118,7 +118,7 @@ decisions remeasure filesystem capacity after pruning.
 | `--max-bytes SIZE` | Byte ceiling, e.g. 512MiB |
 | `--max-entries N` | Entry ceiling |
 | `--all` | Remove every entry, ignoring both ceilings |
-| `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 

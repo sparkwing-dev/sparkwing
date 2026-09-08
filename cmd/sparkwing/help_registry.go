@@ -104,7 +104,7 @@ Use -o json for structured output that an agent can parse, or
 -o plain to emit one next-step command per line for shell
 pipelines (head -n1 yields the most-likely next command).`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "for-agent", Desc: "Emit current discovery context for one agent wake (no ANSI, no extras)", Group: "Output"},
 		{Name: "first-time", Desc: "Print the post-install onboarding card (used by install.sh; re-runnable any time)", Group: "Output"},
 	},
@@ -253,7 +253,7 @@ Re-running on an already-set-up laptop re-applies 0700 to
 that group or other users can read. --dry-run skips both the mkdir
 and the permission fix so the command pure-probes.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "dry-run", Desc: "Probe + report without creating or tightening ~/.config/sparkwing/", Group: "Behavior"},
 	},
 	GroupOrder: []string{"Output", "Behavior", "Other"},
@@ -283,7 +283,7 @@ latest) for shell pipelines.`,
 	SubcommandOrder:    []string{"update", "hold"},
 	SubcommandOptional: true,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "offline", Desc: "Skip the network fetch for latest release", Group: "Behavior"},
 		{Name: "changelog", Desc: "Print the changelog for the installed release", Group: "Behavior"},
 	},
@@ -431,13 +431,13 @@ Hidden commands are dispatchable but stay out of every
 listing, because their help points at what to use instead;
 --include-hidden lists them, flagged.
 
--o plain is one path per line for shell consumption; -o
-markdown renders the full reference page, and with --split-dir
+-o plain is one path per line for shell consumption; --format markdown renders the full reference page, and with --split-dir
 writes the docs/cli-*.md reference (one page per top-level
 command group plus a cli-reference.md index).`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | markdown | plain", Default: "pretty", Group: "Output"},
-		{Name: "split-dir", Argument: "DIR", Desc: "With -o markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages", Group: "Output"},
+		{Name: "format", Argument: "markdown", Desc: "Export the full command reference as Markdown", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
+		{Name: "split-dir", Argument: "DIR", Desc: "With --format markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages", Group: "Output"},
 		{Name: "path", Argument: "PREFIX", Desc: "Only emit commands at or under PREFIX, matched by whole path components, with or without the leading 'sparkwing' (runs, sparkwing runs, runs list); a prefix matching nothing is an error", Group: "Filter"},
 		{Name: "include-hidden", Desc: "Also emit Hidden:true commands (default: skip)", Group: "Filter"},
 	},
@@ -613,7 +613,7 @@ slug, first-H1 title, and first-paragraph summary. By default reads
 the binary's embedded copy (hermetic, version-locked); pass --web
 to fetch from sparkwing.dev for another version.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
 		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version.", Group: "Source"},
 		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
@@ -629,8 +629,9 @@ to fetch from sparkwing.dev for another version.`,
 
 var cmdDocsRead = Command{
 	Path:     "sparkwing docs read",
-	Synopsis: "Print one doc's raw markdown to stdout",
-	Description: `Prints the raw markdown body for the named topic. The slug is
+	Synopsis: "Read one document",
+	Description: `Reads the named topic. Piped output is one JSON document record;
+--output plain prints raw Markdown. The slug is
 the filename under /docs/ minus .md (run ` + "`sparkwing docs list`" + ` to
 see them all). Subdirs use slash-separated paths (e.g.
 design/remote-retry).
@@ -639,6 +640,7 @@ Default source is the binary's embedded corpus. Use --web to fetch
 from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 --version latest.`,
 	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain (pretty on a terminal, json when piped)", Group: "Output"},
 		{Name: "topic", Argument: "NAME", Desc: "Doc slug (e.g. getting-started, pipelines, mcp)", Group: "Selection"},
 		{Name: "guide", Argument: "NAME", Desc: "Read a task-sized set of topics instead of one (`sparkwing docs guides`)", Group: "Selection"},
 		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
@@ -649,7 +651,7 @@ from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 	Examples: []Example{
 		{"Read the getting-started page", "sparkwing docs read --topic getting-started"},
 		{"Everything needed to write a pipeline, one call", "sparkwing docs read --guide authoring"},
-		{"Pipe through a pager", "sparkwing docs read --topic pipelines | less"},
+		{"Pipe through a pager", "sparkwing docs read --topic pipelines --output plain | less"},
 		{"Read v0.3.0's pipelines page online", "sparkwing docs read --topic pipelines --version v0.3.0 --web"},
 		{"Always fetch the freshest version", "sparkwing docs read --topic pipelines --version latest --web"},
 	},
@@ -657,10 +659,10 @@ from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 
 var cmdDocsAll = Command{
 	Path:     "sparkwing docs all",
-	Synopsis: "Concatenate every doc to stdout (full corpus dump)",
-	Description: `Prints every embedded doc to stdout, separated by short ASCII
-headers. The "give me everything" path for an agent that wants
-the full corpus in context with one Bash invocation.`,
+	Synopsis: "Read every embedded document",
+	Description: `Reads every embedded document, one JSON record per page when piped.
+--output plain prints the full Markdown corpus with page headers.`,
+	Flags: []FlagSpec{{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain (pretty on a terminal, json when piped)", Group: "Output"}},
 	Examples: []Example{
 		{"Slurp every doc into context", "sparkwing docs all"},
 	},
@@ -678,7 +680,7 @@ Guides carry narrative topics only. The generated references
 (sdk-reference, cli-reference) are lookup tables rather than pages to
 read end to end; reach those with ` + "`sparkwing docs search`" + `.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	Examples: []Example{
 		{"What sets exist", "sparkwing docs guides"},
@@ -706,7 +708,7 @@ same shape as ` + "`sparkwing docs list`" + `.`,
 		{Name: "query", Short: "q", Argument: "TEXT", Desc: "Search terms (every token must match)", Required: true, Group: "Selection"},
 		{Name: "body", Desc: "Print each matching section in full instead of a snippet", Group: "Selection"},
 		{Name: "topics", Desc: "List whole matching topics instead of sections", Group: "Selection"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Selection", "Output", "Other"},
 	Examples: []Example{
@@ -750,7 +752,7 @@ agent-readable array of {version, date, summary, slug, bytes}.
 When the CLI's own version is older than the newest embedded
 guide a one-line stderr note suggests rebuilding.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "web", Desc: "Fetch the index from sparkwing.dev/migrations/index.json instead of the embed", Group: "Source"},
 		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
@@ -766,9 +768,8 @@ guide a one-line stderr note suggests rebuilding.`,
 var cmdDocsMigrationsRead = Command{
 	Path:     "sparkwing docs migrations read",
 	Synopsis: "Print one migration guide's markdown to stdout",
-	Description: `Outputs the markdown body for a single migration guide. Default
-output is the raw markdown so an agent can pipe straight into
-its context. Cross-doc markdown links to other topics are
+	Description: `Reads a single migration guide as a JSON document record when piped.
+Use --output plain for its raw Markdown. Cross-doc links to other topics are
 rewritten into ` + "`sparkwing docs read --topic <slug>`" + ` form
 (same transform as ` + "`sparkwing docs read`" + `).`,
 	PosArgs: []PosArg{
@@ -776,7 +777,7 @@ rewritten into ` + "`sparkwing docs read --topic <slug>`" + ` form
 	},
 	Flags: []FlagSpec{
 		{Name: "version", Argument: "vX.Y.Z", Desc: "Migration guide version (e.g. v0.4.0). Positional fallback accepted.", Group: "Selection"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: markdown | plain", Default: "markdown", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
 		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
@@ -804,7 +805,7 @@ migration context for an N-version jump in a form ready to pipe.
 	Flags: []FlagSpec{
 		{Name: "from", Argument: "vX.Y.Z", Desc: "Exclusive lower bound (default v0.0.0)", Group: "Selection"},
 		{Name: "to", Argument: "vA.B.C", Desc: "Inclusive upper bound (default = latest embedded version)", Group: "Selection"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: markdown | plain", Default: "markdown", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "web", Desc: "Fetch every guide in the range from sparkwing.dev", Group: "Source"},
 		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
@@ -829,7 +830,7 @@ With --web, fetches sparkwing.dev/versions.json and merges in every
 release available online -- useful for discovering newer versions
 this CLI can render via --web on the read / list verbs.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "web", Desc: "Merge in sparkwing.dev/versions.json (network)", Group: "Source"},
 		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
@@ -863,7 +864,7 @@ var cmdDocsCacheInfo = Command{
 broken down by doc / migration / index, and the freshness state of
 the cached versions.json (24h TTL).`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
@@ -913,7 +914,7 @@ ceilings, and the most recently used entries with their sizes and
 last-use times. Entries are ordered by last use, which is what
 pruning evicts on -- not by when they were built.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "all", Argument: "", Desc: "List every entry rather than the ten most recent", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
@@ -940,7 +941,7 @@ decisions remeasure filesystem capacity after pruning.`,
 		{Name: "max-bytes", Argument: "SIZE", Desc: "Byte ceiling, e.g. 512MiB", Group: "Limits"},
 		{Name: "max-entries", Argument: "N", Desc: "Entry ceiling", Group: "Limits"},
 		{Name: "all", Argument: "", Desc: "Remove every entry, ignoring both ceilings", Group: "Limits"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Limits", "Output", "Other"},
 	Examples: []Example{
@@ -967,7 +968,7 @@ with the inputs that differ from the current key. That is the direct
 answer to why a rebuild happened.`,
 	Flags: []FlagSpec{
 		{Name: "dir", Argument: "PATH", Desc: "Pipeline module directory", Default: "./.sparkwing", Group: "Target"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},
 	Examples: []Example{
@@ -1295,7 +1296,7 @@ metadata, and prints a grouped aligned table.
 --all includes entries marked 'hidden: true'. By default they're
 omitted.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "all", Desc: "Include entries marked hidden", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
@@ -1316,7 +1317,7 @@ hidden entries -- if you're asking for a name explicitly, the
 hidden flag shouldn't surprise you.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Pipeline name to describe", Required: true, Group: "Target"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},
 	Examples: []Example{
@@ -1337,7 +1338,7 @@ in prose so direct hits surface first.
 score descending; agents should prefer -o json for consumption.`,
 	Flags: []FlagSpec{
 		{Name: "query", Argument: "TEXT", Desc: "Search query (one or more tokens, all must hit some field)", Required: true, Group: "Target"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Target", "Output", "Other"},
 	Examples: []Example{
@@ -1480,7 +1481,7 @@ rendered with each parameter's default.
 		{Name: "body", Desc: "With --name, print the pipeline source (default + <placeholder> params)", Group: "Target"},
 		{Name: "category", Argument: "CATEGORY", Desc: "Filter the list by applicability category", Group: "Filter"},
 		{Name: "cloud", Argument: "CLOUD", Desc: "Filter the list by cloud (aws | gcp); cloud-agnostic examples always match", Group: "Filter"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	Examples: []Example{
 		{"Browse them", "sparkwing examples"},
@@ -1512,7 +1513,7 @@ pipeline ever runs.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Pipeline to explain (one of --name or --all required)", Group: "Target"},
 		{Name: "all", Desc: "Validate every pipeline in this repo's sparkwing.yaml; non-zero exit on any failure", Group: "Target"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder:  []string{"Target", "Output", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
@@ -1572,7 +1573,7 @@ override with --dir.`,
 		{Name: "all", Desc: "Lint every pipeline in this repo's sparkwing.yaml; the default, non-zero exit on any violation", Group: "Target"},
 		{Name: "rules", Desc: "Print each rule's charter (what it forbids and why) and exit", Group: "Target"},
 		{Name: "dir", Argument: "DIR", Desc: "Directory of pipeline source to scan (default: <.sparkwing>/jobs)", Group: "Target"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory (re-anchors the .sparkwing search)", Group: "System"},
 	},
 	GroupOrder: []string{"Target", "Output", "System", "Other"},
@@ -1614,7 +1615,7 @@ with 'sparkwing run <name>' to actually dispatch.`,
 		{Name: "name", Argument: "NAME", Desc: "Pipeline to plan", Group: "Target"},
 		{Name: "start-at", Argument: "STEP", Desc: "Skip every WorkStep upstream of STEP in the resulting plan", Group: "Range"},
 		{Name: "stop-at", Argument: "STEP", Desc: "Skip every WorkStep downstream of STEP in the resulting plan", Group: "Range"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder:  []string{"Target", "Range", "Output", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
@@ -1637,7 +1638,7 @@ dispatches, nothing mutates.
 Invocation: ` + "`sparkwing run <pipeline> config`" + ` -- the
 pipeline binary handles the subverb directly.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
@@ -1753,7 +1754,7 @@ With no flag it shows the active no-flag resolution. With
 to your next command would select. Tokens are never printed.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Show the hypothetical resolution for `--profile NAME`", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
 	Examples: []Example{
@@ -1972,23 +1973,24 @@ var cmdCompletion = Command{
 from your shell rc:
 
   # bash
-  source <(sparkwing completion --shell bash)
+  source <(sparkwing completion --shell bash --output plain)
 
   # zsh (add 'autoload -U compinit; compinit' once above)
-  source <(sparkwing completion --shell zsh)
+  source <(sparkwing completion --shell zsh --output plain)
 
   # fish
-  sparkwing completion --shell fish | source
+  sparkwing completion --shell fish --output plain | source
 
 zsh and fish get per-item descriptions; bash is name-only because
 compgen lacks the facility.`,
 	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain (pretty on a terminal, json when piped)", Group: "Output"},
 		{Name: "shell", Argument: "NAME", Desc: "bash | zsh | fish", Required: true, Group: "Target"},
 	},
 	GroupOrder: []string{"Target", "Other"},
 	Examples: []Example{
-		{"Wire completion for the current zsh session", "source <(sparkwing completion --shell zsh)"},
-		{"Install persistent completion for fish", "sparkwing completion --shell fish > ~/.config/fish/completions/sparkwing.fish"},
+		{"Wire completion for the current zsh session", "source <(sparkwing completion --shell zsh --output plain)"},
+		{"Install persistent completion for fish", "sparkwing completion --shell fish --output plain > ~/.config/fish/completions/sparkwing.fish"},
 	},
 }
 
@@ -2036,7 +2038,7 @@ var cmdProfilesList = Command{
 token. JSON is one profile per line; the token is redacted in
 every mode.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
@@ -2157,7 +2159,7 @@ scope arrays, suitable for piping into jq.`,
 	Flags: []FlagSpec{
 		{Name: "type", Argument: "KIND", Desc: "Filter by token type", Group: "Filter"},
 		{Name: "include-revoked", Desc: "Include revoked tokens in the output", Group: "Filter"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
@@ -3954,7 +3956,7 @@ with a compiled per-repo verdict.`,
 	SubcommandOrder:    []string{"list", "info", "update"},
 	SubcommandOptional: true,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
@@ -3972,7 +3974,7 @@ migration guides sit between its pin and the latest release. This is
 the same output as bare 'sparkwing repos'; the explicit verb exists
 so the listing has a name alongside 'info' and 'update'.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
@@ -4001,7 +4003,7 @@ something is off it prints one suggested next step.
 Read-only: it never builds, bumps, or commits anything.`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "NAME_OR_PATH", Desc: "Repo by name or checkout path. Default: the repo containing the current directory.", Group: "Filter"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Filter", "Output", "Other"},
 	Examples: []Example{
@@ -4053,7 +4055,7 @@ leads with that when pins would diverge.`,
 		{Name: "apply", Desc: "Write the bumps and commit per repo (default is a dry run)", Group: "Behavior"},
 		{Name: "verify", Desc: "Run each repo's pre-commit gate after the bump", Group: "Behavior"},
 		{Name: "repo", Argument: "NAME_OR_PATH", Desc: "Scope to a single repo by name or checkout path", Group: "Filter"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Behavior", "Filter", "Output", "Other"},
 	Examples: []Example{

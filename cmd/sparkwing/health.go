@@ -90,7 +90,6 @@ func runHealth(args []string) error {
 
 	if *outputFormat == "json" {
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
 			return err
 		}
