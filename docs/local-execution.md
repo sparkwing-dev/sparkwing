@@ -315,7 +315,12 @@ restarted without touching the run around it. `sparkwing runs bounce
 SIGKILL after the grace period -- and runs the job again in place. The
 job never reaches a terminal state, so nothing downstream sees a
 failure and no other job is disturbed; the run finishes normally on the
-attempt that survives.
+attempt that survives. Stopping the job stops the commands its steps
+started too: each runs in its own session, and the job kills those
+sessions before the signal ends it, and again if its dispatcher dies
+under it. The same holds when a run's CLI is interrupted or the run is
+cancelled, so an interrupted `go build` or `go test` does not keep
+compiling on its own.
 
 Reach for it when a job is wedged or misbehaving and cancelling the
 whole run would cost more than it saves -- a fifty-minute pipeline

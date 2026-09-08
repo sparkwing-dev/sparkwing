@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/local"
 )
 
@@ -64,6 +65,10 @@ func watchLiveness(f *os.File, onGone func(), grace time.Duration, exit func(int
 			select {
 			case <-done:
 			default:
+				// safety: the step sessions go before anything is logged. The
+				// log writes to pipes the dead dispatcher held, and a write that
+				// raises SIGPIPE ends the node right there.
+				procgroup.KillOwned()
 				slog.Default().Warn("dispatcher process is gone; abandoning node",
 					"grace", grace, "exit_code_if_unresponsive", OrphanExitCode)
 				onGone()
@@ -84,6 +89,7 @@ func exitIfStillAlive(done <-chan struct{}, grace time.Duration, exit func(int))
 		return
 	case <-time.After(grace):
 	}
+	procgroup.KillOwned()
 	slog.Default().Error("node did not stop after its dispatcher died; exiting",
 		"grace", grace, "exit_code", OrphanExitCode)
 	exit(OrphanExitCode)

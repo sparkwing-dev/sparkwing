@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -530,8 +531,12 @@ func runNodeCLI(args []string) error {
 		return errors.New("--controller (or " + wingwire.APISocketEnv + ") + <runID> + <nodeID> are required (or SPARKWING_CONTROLLER_URL + SPARKWING_RUN_ID + SPARKWING_NODE_ID env)")
 	}
 
-	// safety: leave SIGTERM unhandled; bounce, cancellation, and pod termination
-	// rely on the supervisor rather than the killed node to record the outcome.
+	// safety: SIGTERM still ends the node by its default action; bounce,
+	// cancellation, and pod termination rely on the supervisor rather than the
+	// killed node to record the outcome. The forwarder only reaps the step
+	// sessions first: the SDK isolates each one, so no group kill aimed at the
+	// node reaches them.
+	procgroup.ForwardTerminationToOwned()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if *timeout > 0 {

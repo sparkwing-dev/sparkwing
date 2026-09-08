@@ -66,6 +66,15 @@ code change to unlock.
 
 ### Fixed
 
+- **sdk + runner:** A node that is stopped from outside -- the run's CLI
+  interrupted by SIGTERM, a harness timeout killing the CLI and its
+  dispatcher, or `sparkwing runs cancel` -- no longer leaves the step's
+  command tree running. Each step command runs in its own session so that a
+  timeout can kill the whole tree, which also put it beyond the reach of the
+  process-group kill the dispatcher aims at the node. The node now records
+  the sessions it started and reaps them before SIGTERM ends it and before it
+  abandons itself after its dispatcher dies, so a `go build` or `go test`
+  interrupted mid-run stops with the run instead of compiling on unowned.
 - **cli:** `sparkwing repos update` interrupted with Ctrl-C mid-bump left the
   repo in flight with its `.sparkwing/go.mod` and `go.sum` already bumped, and
   the next run then reported that repo as up-to-date or skipped it as dirty.

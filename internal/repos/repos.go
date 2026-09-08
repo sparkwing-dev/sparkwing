@@ -336,8 +336,11 @@ func hasSparkwingDir(absPath string) bool {
 
 func underTempDir(abs string) bool {
 	// macOS hands out a per-user TMPDIR, so scratch trees under the shared
-	// /tmp (really /private/tmp) slipped past a TMPDIR-only check.
+	// /tmp (really /private/tmp) slipped past a TMPDIR-only check. The
+	// resolved form is named too, so the rule reads the same on a host
+	// where /tmp is a plain directory and /private/tmp does not exist.
 	roots := append(symlinkForms(os.TempDir()), symlinkForms("/tmp")...)
+	roots = append(roots, symlinkForms("/private/tmp")...)
 	targets := symlinkForms(abs)
 	for _, root := range roots {
 		for _, target := range targets {
