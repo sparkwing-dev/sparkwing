@@ -61,11 +61,28 @@ func decodeOutputRecords(t *testing.T, output []byte) []map[string]any {
 
 func TestOutputContractPipeRoutes(t *testing.T) {
 	for _, args := range [][]string{
-		{}, {"--output", "json"}, {"commands"}, {"version", "--offline"}, {"info"}, {"info", "--for-agent"}, {"info", "--first-time"},
-		{"--output=json", "version", "--offline"}, {"profile"}, {"docs", "list"}, {"docs", "guides"}, {"docs", "versions"},
-		{"docs", "all"}, {"docs", "read", "--topic", "getting-started"}, {"docs", "migrations", "read", "--version", "v0.37.3"},
-		{"--help"}, {"docs", "--help"}, {"pipeline", "list", "--help"},
-		{"completion", "--shell", "bash"}, {"cache", "info"}, {"daemon", "status"}, {"queue"},
+		{},
+		{"--output", "json"},
+		{"commands"},
+		{"version", "--offline"},
+		{"info"},
+		{"info", "--for-agent"},
+		{"info", "--first-time"},
+		{"--output=json", "version", "--offline"},
+		{"profile"},
+		{"docs", "list"},
+		{"docs", "guides"},
+		{"docs", "versions"},
+		{"docs", "all"},
+		{"docs", "read", "--topic", "getting-started"},
+		{"docs", "migrations", "read", "--version", "v0.37.3"},
+		{"--help"},
+		{"docs", "--help"},
+		{"pipeline", "list", "--help"},
+		{"completion", "--shell", "bash"},
+		{"cache", "info"},
+		{"daemon", "status"},
+		{"queue"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cmd := outputContractCommand(t, args...)

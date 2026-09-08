@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"io"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
 type textRecord struct {
