@@ -255,8 +255,9 @@ its needed labels.
 
 ## Schedule triggers (cron)
 
-A pipeline records its intended cadence with the `schedule` trigger in
-`sparkwing.yaml`:
+A pipeline declares its cadence with the `schedule` trigger in
+`sparkwing.yaml`. The short form is a five-field cron expression, read
+in UTC:
 
 ```yaml
 pipelines:
@@ -266,16 +267,39 @@ pipelines:
       schedule: "0 3 * * *"   # 03:00 daily
 ```
 
-`schedule:` records the cadence the pipeline is meant to run at, and
-`sparkwing pipeline explain` echoes it. sparkwing does not evaluate the
-expression -- triggers are created from delivered events and explicit
-calls, never from a clock -- so a pipeline whose only trigger is
-`schedule:` does not fire on its own. Drive the cadence from an external
-timer that calls
-`sparkwing pipeline trigger <pipeline> --profile <profile>` (a systemd
-timer, a Kubernetes CronJob, or whatever scheduler the platform already
-runs); the run then schedules onto a runner by the same label rules as
-any other dispatched run.
+The long form is a mapping that sets the zone and the policies:
+
+```yaml
+pipelines:
+  - name: nightly-rebuild
+    entrypoint: NightlyRebuild
+    on:
+      schedule:
+        cron: "0 3 * * *"
+        tz: America/Denver
+        overlap: queue
+        catch_up: 6h
+```
+
+- `cron` takes lists, ranges, steps, month and day names, and the
+  `@hourly` / `@daily` / `@weekly` / `@monthly` / `@yearly` aliases.
+- `tz` is an IANA zone name. Default `UTC`; `local` means the zone of
+  the host running the schedule.
+- `overlap` decides a fire that comes due while the previous scheduled
+  run is still running: `skip` (default) records it as skipped, `queue`
+  launches it and lets admission order the two.
+- `catch_up` is how long after its due minute a fire may still happen
+  when the host was asleep or the timer ran late. Default `1h`, floor
+  `2m`. An older due minute is recorded as missed.
+
+The expression is validated when the config loads, so a malformed cron
+fails the command that reads it rather than the run.
+
+Declaring the cadence does not arm it. Arming is explicit and per host:
+the host where the schedule is installed evaluates the expression, runs
+the pipeline locally at each due minute, and the run schedules onto a
+runner by the same label rules as any other run. Another host reading
+the same repository stays idle until it is armed too.
 
 ## Worked examples
 

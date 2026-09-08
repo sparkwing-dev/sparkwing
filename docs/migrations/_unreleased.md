@@ -24,6 +24,39 @@ CHANGELOG links here.
   it opens and writes the same database exactly as it did, never reading the
   two new tables. The store creates them on the next open.
 
+## `on.schedule` takes a mapping
+
+- **Before:** `on.schedule` was a cron string that sparkwing recorded and
+  displayed. Nothing evaluated it, so the cadence came from an external
+  timer. In Go, `pipelines.Triggers.Schedule` was a `string`.
+- **After:** `on.schedule` still accepts the bare cron string, and also a
+  mapping:
+
+  ```yaml
+  on:
+    schedule:
+      cron: "0 3 * * *"
+      tz: America/Denver
+      overlap: queue
+      catch_up: 6h
+  ```
+
+  `tz` defaults to `UTC` and takes `local` for the host's own zone.
+  `overlap` is `skip` (default) or `queue`, and decides a fire that comes
+  due while the previous scheduled run is still running. `catch_up`
+  defaults to `1h` with a `2m` floor, and bounds how late a due minute may
+  still fire. Sparkwing validates the cron expression when the config
+  loads, so a malformed one now fails the command that reads the config.
+
+  In Go, `pipelines.Triggers.Schedule` is a `*pipelines.ScheduleTrigger`.
+- **Migration:** YAML needs no change. Go callers read `t.Schedule.Cron`
+  where they read `t.Schedule`, and test `t.Schedule != nil` where they
+  tested `t.Schedule != ""`.
+- **Why:** A recorded-but-unevaluated field could not say which host runs
+  the cadence, what a late tick should do, or what an overlapping run
+  should do. The mapping carries those answers, and arming a host is a
+  separate, explicit step on that host.
+
 ## `runs submit` becomes `run --sw-detached`
 
 - **Before:** `sparkwing runs submit [submit flags] <pipeline> [pipeline

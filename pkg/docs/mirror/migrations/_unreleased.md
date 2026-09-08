@@ -5,6 +5,58 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## Scheduled pipelines and runs-store schema 32
+
+- **Before:** The runs store was at schema 31 and had nowhere to keep a
+  pipeline schedule; nothing in `state.db` described one.
+- **After:** Schema 32 adds two tables. `cron_schedules` holds one row per
+  armed repository checkout and pipeline -- the cron expression, zone,
+  overlap policy, and catch-up window the repository declares, plus the
+  host state around them: paused, still declared, when it was armed and by
+  whom, the cursor naming the last due instant resolved, the last fire, and
+  the next matching instant. `cron_fires` holds one row per resolved
+  instant (`fired`, `skipped_overlap`, `missed`, or `failed`), pruned to the
+  newest 200 per schedule. Tick bookkeeping lives in `sparkwing_meta` under
+  the `crons.last_tick_at`, `crons.last_tick_host`, `crons.last_tick_version`,
+  and `crons.last_tick_error` keys.
+- **Migration:** None to perform. The migration is additive: it declares no
+  schema requirement and alters no existing table, so a binary built before
+  it opens and writes the same database exactly as it did, never reading the
+  two new tables. The store creates them on the next open.
+
+## `on.schedule` takes a mapping
+
+- **Before:** `on.schedule` was a cron string that sparkwing recorded and
+  displayed. Nothing evaluated it, so the cadence came from an external
+  timer. In Go, `pipelines.Triggers.Schedule` was a `string`.
+- **After:** `on.schedule` still accepts the bare cron string, and also a
+  mapping:
+
+  ```yaml
+  on:
+    schedule:
+      cron: "0 3 * * *"
+      tz: America/Denver
+      overlap: queue
+      catch_up: 6h
+  ```
+
+  `tz` defaults to `UTC` and takes `local` for the host's own zone.
+  `overlap` is `skip` (default) or `queue`, and decides a fire that comes
+  due while the previous scheduled run is still running. `catch_up`
+  defaults to `1h` with a `2m` floor, and bounds how late a due minute may
+  still fire. Sparkwing validates the cron expression when the config
+  loads, so a malformed one now fails the command that reads the config.
+
+  In Go, `pipelines.Triggers.Schedule` is a `*pipelines.ScheduleTrigger`.
+- **Migration:** YAML needs no change. Go callers read `t.Schedule.Cron`
+  where they read `t.Schedule`, and test `t.Schedule != nil` where they
+  tested `t.Schedule != ""`.
+- **Why:** A recorded-but-unevaluated field could not say which host runs
+  the cadence, what a late tick should do, or what an overlapping run
+  should do. The mapping carries those answers, and arming a host is a
+  separate, explicit step on that host.
+
 ## `runs submit` becomes `run --sw-detached`
 
 - **Before:** `sparkwing runs submit [submit flags] <pipeline> [pipeline

@@ -381,8 +381,8 @@ func summarizeTriggerList(t pipelines.Triggers) []string {
 	if t.Webhook != nil {
 		out = append(out, "webhook:"+t.Webhook.Path)
 	}
-	if t.Schedule != "" {
-		out = append(out, "schedule:"+t.Schedule)
+	if t.Schedule != nil {
+		out = append(out, "schedule:"+t.Schedule.Cron)
 	}
 	if t.PreHook != nil {
 		out = append(out, "pre-commit")

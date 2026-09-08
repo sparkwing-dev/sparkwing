@@ -98,6 +98,30 @@ code change to unlock.
   `priority_overrides` map in the persisted ledger snapshot. No protocol
   major bump: an older daemon answers `unsupported`, and the client says
   which versions disagree and how to restart the daemon.
+- **store:** The runs store advances to schema 32 with two tables for
+  pipeline schedules: `cron_schedules`, one row per armed repository
+  checkout and pipeline, and `cron_fires`, its history of resolved due
+  instants pruned to the newest 200 per schedule. The migration is additive
+  -- it declares no schema requirement and alters no existing table -- so a
+  binary built before it keeps opening and writing the same database. See
+  the [migration note](docs/migrations/_unreleased.md#scheduled-pipelines-and-runs-store-schema-32).
+
+### Changed
+
+- **config + sdk (Breaking):** `on.schedule` accepts a mapping as well as a
+  cron string. `cron` sets the cadence, `tz` the IANA zone it is read in
+  (default `UTC`; `local` means the host's own), `overlap` what happens when
+  a fire comes due while the previous scheduled run is still running (`skip`
+  records it as skipped, `queue` launches it and lets admission order the
+  two), and `catch_up` how long after a due minute a late fire may still
+  happen (default `1h`, floor `2m`). The bare cron string still parses and
+  means the same thing. Sparkwing validates the expression when the config
+  loads, so a malformed cron fails the command that reads it rather than the
+  run. For Go callers `pipelines.Triggers.Schedule` changed from `string` to
+  `*pipelines.ScheduleTrigger`: read `t.Schedule.Cron` where you read
+  `t.Schedule`, and test `t.Schedule != nil` where you tested `!= ""`. See
+  the [migration
+  guide](docs/migrations/_unreleased.md#onschedule-takes-a-mapping).
 
 ### Removed
 

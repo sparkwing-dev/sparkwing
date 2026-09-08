@@ -44,7 +44,7 @@ hard parse error):
 - **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", ...)` string and match `^[A-Za-z0-9][A-Za-z0-9._-]*$`
 - **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
-- **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (cron expression, UTC; declarative -- recorded, not evaluated), `webhook`, `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
+- **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (a cron string, or a mapping of `cron`, `tz`, `overlap`, `catch_up`), `webhook`, `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
 - **guards** - gate dispatch on profile, args, and git branch (`reject` / `require` token lists)
 - **args** - per-arg default values, keyed by CLI flag name
 - **profile** - the project profile this pipeline uses (from the `profiles:` map)
@@ -84,8 +84,8 @@ pipelines:
       webhook:
         path: /review
 
-  # Cron in UTC, declarative -- nothing evaluates it; invoke with
-  # `sparkwing run nightly` or an external scheduler
+  # Cron in UTC. A host runs it once armed there; until then invoke
+  # it with `sparkwing run nightly`
   - name: nightly
     entrypoint: Nightly
     on:
