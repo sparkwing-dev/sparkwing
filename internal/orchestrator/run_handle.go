@@ -29,7 +29,9 @@ func NewRunHandle(runID, pipeline, logPath, status string) RunHandle {
 	}
 }
 
-func reserveRunHandle(path string) (func(), error) {
+// ReserveRunHandle refuses a destination that already exists, so two runs never
+// answer to one handle file.
+func ReserveRunHandle(path string) (func(), error) {
 	if _, err := os.Lstat(path); err == nil {
 		return nil, os.ErrExist
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -38,7 +40,8 @@ func reserveRunHandle(path string) (func(), error) {
 	return func() {}, nil
 }
 
-func publishRunHandle(path string, handle RunHandle) error {
+// PublishRunHandle writes handle to path atomically, mode 0600.
+func PublishRunHandle(path string, handle RunHandle) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".sparkwing-run-handle-*")
 	if err != nil {

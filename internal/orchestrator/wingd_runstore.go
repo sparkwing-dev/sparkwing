@@ -426,11 +426,6 @@ func (h *HeldRunStore) sweepStraySessions(runID string) {
 		slog.Info("wingd: stray step session", "run_id", runID, "node", o.Record.Node,
 			"verdict", o.Verdict, "owner_pid", o.Record.OwnerPID, "command", o.Record.Command, "err", o.Err)
 	}
-	if removed, derr := sessionledger.RemoveContainersForRun(ctx, runID); derr != nil {
-		slog.Warn("wingd: remove stray containers", "run_id", runID, "err", derr)
-	} else if len(removed) > 0 {
-		slog.Info("wingd: removed stray containers", "run_id", runID, "count", len(removed))
-	}
 	if !sessionledger.Acted(outcomes) {
 		return
 	}

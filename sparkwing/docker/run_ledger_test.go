@@ -18,9 +18,15 @@ func dockerReachable(t *testing.T) {
 	if err := exec.Command("docker", "info").Run(); err != nil {
 		t.Skip("docker daemon not reachable")
 	}
+	// safety: these tests start a container from a registry image; skip
+	// where a pull cannot complete (e.g. a locked credential helper) rather
+	// than fail on an environment the code under test does not control.
+	if err := exec.Command("docker", "pull", "busybox").Run(); err != nil {
+		t.Skip("docker cannot pull busybox in this environment")
+	}
 }
 
-func TestRun_RecordsWhileRunningAndClearsAfter(t *testing.T) {
+func TestRun_RegistersADockerCleanupWhileRunningAndClearsAfter(t *testing.T) {
 	dockerReachable(t)
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
@@ -33,40 +39,43 @@ func TestRun_RecordsWhileRunningAndClearsAfter(t *testing.T) {
 		done <- Run(context.Background(), RunOptions{Image: "busybox", Cmd: []string{"sleep", "3"}})
 	}()
 
-	var recorded sessionledger.Record
+	var rec sessionledger.Record
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		recs, _ := ledger.List()
 		if len(recs) == 1 {
-			recorded = recs[0]
+			rec = recs[0]
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("docker.Run never wrote a ledger record while the container ran")
+			t.Fatal("docker.Run never registered a cleanup while the container ran")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if recorded.Handle.Kind != "docker" || recorded.Handle.Container == "" {
-		t.Fatalf("recorded handle = %+v, want a docker container", recorded.Handle)
+	if rec.Handle.Kind != "command" {
+		t.Fatalf("handle kind = %q, want command", rec.Handle.Kind)
 	}
-	if recorded.Run != "run-dtest" || recorded.Node != "build" {
-		t.Fatalf("record run/node = %s/%s", recorded.Run, recorded.Node)
+	argv := rec.Handle.Argv
+	if len(argv) != 4 || argv[0] != "docker" || argv[1] != "rm" || argv[2] != "-f" || argv[3] == "" {
+		t.Fatalf("cleanup argv = %v, want docker rm -f <name>", argv)
+	}
+	if rec.Run != "run-dtest" || rec.Node != "build" {
+		t.Fatalf("record run/node = %s/%s", rec.Run, rec.Node)
 	}
 
 	if err := <-done; err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if recs, _ := ledger.List(); len(recs) != 0 {
-		t.Fatalf("ledger still holds a record after Run returned: %+v", recs)
+		t.Fatalf("cleanup still registered after Run returned: %+v", recs)
 	}
-	// the container it created must carry the run label
-	name := recorded.Handle.Container
-	if out, err := exec.Command("docker", "inspect", "-f", "{{index .Config.Labels \"sparkwing.run\"}}", name).CombinedOutput(); err == nil {
-		t.Fatalf("container %s still exists after Run (label=%s); it should have been removed", name, out)
+	name := argv[3]
+	if err := exec.Command("docker", "inspect", name).Run(); err == nil {
+		t.Fatalf("container %s still exists after Run; it should have been removed", name)
 	}
 }
 
-func TestRun_OutsideARunWritesNoRecord(t *testing.T) {
+func TestRun_OutsideARunRegistersNothing(t *testing.T) {
 	dockerReachable(t)
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
@@ -76,6 +85,6 @@ func TestRun_OutsideARunWritesNoRecord(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if recs, _ := sessionledger.Open(paths.PathsAt(home).SessionLedgerDir()).List(); len(recs) != 0 {
-		t.Fatalf("a run outside a pipeline wrote a ledger record: %+v", recs)
+		t.Fatalf("a run outside a pipeline registered a cleanup: %+v", recs)
 	}
 }

@@ -73,6 +73,30 @@ type runFlags struct {
 	runHandleFile string
 
 	isolatedHome string
+
+	detached           bool
+	idempotencyKey     string
+	requestID          string
+	consumerIdle       string
+	consumerClaimLease string
+	outputFormat       string
+}
+
+// detachedOnlyFlag names one flag that only a detached launch reads, so the
+// refusal can name it back to the caller.
+type detachedOnlyFlag struct {
+	name  string
+	value string
+}
+
+func (wf runFlags) detachedOnlyFlags() []detachedOnlyFlag {
+	return []detachedOnlyFlag{
+		{"--sw-idempotency-key", wf.idempotencyKey},
+		{"--sw-request-id", wf.requestID},
+		{"--sw-consumer-idle", wf.consumerIdle},
+		{"--sw-consumer-claim-lease", wf.consumerClaimLease},
+		{"--sw-output", wf.outputFormat},
+	}
 }
 
 // validatePriorityFlag accepts the three forms --sw-priority takes and returns
@@ -122,6 +146,12 @@ func collectPipelineArgs(passthrough []string) map[string]string {
 	i := 0
 	for i < len(passthrough) {
 		tok := passthrough[i]
+		// A bare separator ends sparkwing's own flags; recording it would put an
+		// empty-named argument on the run.
+		if tok == "--" {
+			i++
+			continue
+		}
 		if !strings.HasPrefix(tok, "--") {
 			i++
 			continue
@@ -335,6 +365,64 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			i++
 		case strings.HasPrefix(a, "--sw-isolated-home="):
 			wf.isolatedHome = strings.TrimPrefix(a, "--sw-isolated-home=")
+			i++
+		case a == "--sw-detached":
+			wf.detached = true
+			i++
+		case a == "--sw-idempotency-key":
+			if i+1 < len(args) {
+				wf.idempotencyKey = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--sw-idempotency-key="):
+			wf.idempotencyKey = strings.TrimPrefix(a, "--sw-idempotency-key=")
+			i++
+		case a == "--sw-request-id":
+			if i+1 < len(args) {
+				wf.requestID = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--sw-request-id="):
+			wf.requestID = strings.TrimPrefix(a, "--sw-request-id=")
+			i++
+		case a == "--sw-consumer-idle":
+			if i+1 < len(args) {
+				wf.consumerIdle = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--sw-consumer-idle="):
+			wf.consumerIdle = strings.TrimPrefix(a, "--sw-consumer-idle=")
+			i++
+		case a == "--sw-consumer-claim-lease":
+			if i+1 < len(args) {
+				wf.consumerClaimLease = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--sw-consumer-claim-lease="):
+			wf.consumerClaimLease = strings.TrimPrefix(a, "--sw-consumer-claim-lease=")
+			i++
+		case a == "--sw-output":
+			if i+1 < len(args) {
+				wf.outputFormat = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--sw-output="):
+			wf.outputFormat = strings.TrimPrefix(a, "--sw-output=")
 			i++
 		case a == "-C", a == "--sw-cd":
 			if i+1 < len(args) {

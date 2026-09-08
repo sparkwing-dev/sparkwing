@@ -1671,7 +1671,54 @@ consumers get a stable JSONL stream). Force a format with
 SPARKWING_LOG_FORMAT=pretty|json|quiet. quiet collapses the
 run to a progress line plus a one-line pass/fail status with
 the run id, surfacing the failing step only on failure; it is
-the default for managed git hooks.`,
+the default for managed git hooks.
+
+--sw-detached queues the run instead of executing it here. It
+returns as soon as the run is durable, and a resident consumer
+process on this machine owns it from then on: close the
+terminal, drop the ssh session, log out -- the run keeps going.
+The acknowledgment is a run id and the directory its logs land
+in. Address the run by that id afterwards:
+
+  sparkwing runs status --run RUN_ID
+  sparkwing runs logs   --run RUN_ID --follow
+  sparkwing runs cancel --run RUN_ID
+
+Five flags are read only by a detached launch and are refused
+without --sw-detached: --sw-idempotency-key, --sw-request-id,
+--sw-consumer-idle, --sw-consumer-claim-lease, and --sw-output,
+which picks the acknowledgment's format (pretty on a TTY, json
+when piped; plain prints the bare id for scripting).
+
+--sw-idempotency-key deduplicates on key plus pipeline: a repeat
+carrying a key an earlier launch used returns the original run
+id and its current status and creates nothing, which is what
+makes a retry after a dropped connection safe. Reusing a key
+with different arguments is refused, because a key names one
+intent and different arguments are a different request.
+--sw-request-id is tracing only and never affects deduplication.
+
+--sw-ref and --sw-priority both work detached. The ref resolves
+to a commit when you launch, so the run executes that commit
+even if the ref moves first; the consumer executes the worktree
+and removes it when the run ends. 'front' and 'back' stay
+unresolved until the consumer launches the run, so 'front' means
+ahead of the queue the run actually joins.
+
+A flag a detached run cannot carry (--sw-index, --sw-dry-run,
+--profile, --sw-fleet, --sw-isolated-home, and the other
+run-shaping --sw- flags) is refused with the reason rather than
+ignored; run those in the foreground.
+
+PIPELINE resolves against the checkout you are standing in (or
+--sw-cd PATH) first, then the repo registry, and the chosen
+checkout is recorded on the run. A detached run executes with an
+allow-listed snapshot of the launching environment -- SPARKWING_*,
+GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
+every credential-shaped name -- widened by naming variables in
+SPARKWING_SUBMIT_ENV_ALLOW. A consumer starts automatically if none
+is running and exits after five idle minutes; see
+'sparkwing runs consumer'.`,
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
 	},
@@ -1684,6 +1731,10 @@ the default for managed git hooks.`,
 		{"Run with no flags", "sparkwing run build-test-deploy"},
 		{"Pass a typed pipeline arg", "sparkwing run release --version v0.28.1"},
 		{"Run from a different git ref", "sparkwing run build-test-deploy --sw-ref feature/xyz"},
+		{"Queue a run that outlives the terminal", "sparkwing run nightly-report --sw-detached"},
+		{"Capture the id for scripting", "RUN=$(sparkwing run build --sw-detached --sw-output plain)"},
+		{"Make a detached retry safe to repeat", "sparkwing run deploy --sw-detached --sw-idempotency-key deploy-2026-08-11-a --env staging"},
+		{"Detach a pipeline from another checkout", "sparkwing run lint --sw-detached --sw-cd ~/code/other-project"},
 		{"Retry a failed run", "sparkwing runs retry RUN_ID --failed"},
 		{"Submit to a remote controller", "sparkwing pipeline trigger deploy --profile prod"},
 	},
@@ -2236,7 +2287,7 @@ the same runs remotely via the controller.
 Local-mode subcommands (list, status, logs, errors) read from
 ~/.sparkwing/runs/. Controller-mode subcommands (cancel, retry,
 prune) require a profile; 'runs logs' supports both.`,
-	SubcommandOrder: []string{"submit", "consumer", "list", "status", "summary", "timeline", "wait", "find", "grep", "logs", "errors", "failures", "stats", "last", "tree", "get", "receipt", "annotations", "approvals", "triggers", "retry", "cancel", "bounce", "prune"},
+	SubcommandOrder: []string{"consumer", "list", "status", "summary", "timeline", "wait", "find", "grep", "logs", "errors", "failures", "stats", "last", "tree", "get", "receipt", "annotations", "approvals", "triggers", "retry", "cancel", "bounce", "prune"},
 }
 
 var cmdJobsList = Command{
@@ -2687,7 +2738,8 @@ var cmdJobsRetry = Command{
 branch, and SHA. Each new run is tagged with retry_of=<old-id>.
 
 For local runs, Sparkwing queues the retry in the same local store as
-runs submit and starts the resident consumer when no dashboard is running.
+'sparkwing run --sw-detached' and starts the resident consumer when no
+dashboard is running.
 The retry is bound to the source run's full origin
 identity, Git revision, and complete plan snapshot. Sparkwing compiles and runs
 an immutable detached snapshot of that recorded revision; uncommitted or later
@@ -2723,113 +2775,12 @@ only when at least one id failed.`,
 	},
 }
 
-var cmdJobsSubmit = Command{
-	Path:     "sparkwing runs submit",
-	Synopsis: "Queue a local run and return its id immediately",
-	Description: `Submits PIPELINE for local execution and returns as soon as the
-run is durable. Unlike 'sparkwing run', which executes in your
-terminal and dies with it, a submitted run is owned by a resident
-consumer process: close the terminal, drop the ssh session, log
-out -- the run keeps going.
-
-The acknowledgment is a run id and the directory its logs land
-in. Address the run by that id afterwards:
-
-  sparkwing runs status --run RUN_ID
-  sparkwing runs logs   --run RUN_ID --follow
-  sparkwing runs cancel --run RUN_ID
-
-Everything after PIPELINE is passed to the pipeline as arguments, so
-this command's own flags go BEFORE the pipeline name:
-
-  sparkwing runs submit --idempotency-key k deploy --env staging
-
-A submit flag typed after the pipeline name is refused rather than
-quietly handed to the pipeline. If a pipeline declares a flag by the
-same name, separate the two with '--':
-
-  sparkwing runs submit deploy -- --request-id its-own
-
---sw-ref REF submits a worktree of that ref instead of the
-checkout you are standing in. The ref resolves to a commit
-when you submit, so the run executes that commit even if the
-ref moves first. The consumer executes the worktree and
-removes it when the run ends.
-
---sw-priority VALUE places the run in the local admission queue:
-an integer, or 'front' / 'back' for one step past whatever is
-queued. The relative forms are resolved when the consumer
-launches the run, not when you submit, so 'front' means ahead of
-the queue the run actually joins.
-
-Flags that a detached run cannot honor (--sw-index,
---sw-dry-run, --sw-only, --profile, and the other run-shaping
---sw- flags) are refused with the reason rather than ignored;
-run those in the foreground with 'sparkwing run'.
-
-Resolution order for PIPELINE: the checkout you are standing in
-(or -C PATH) first, then the repo registry. The chosen checkout
-is recorded on the run, so the consumer executes the tree you
-submitted from even when another registered checkout declares the
-same pipeline name.
-
-Each submitted run executes with an allow-listed snapshot of the
-submitting environment: SPARKWING_*, GITHUB_*, PATH, HOME, HOSTNAME,
-and KUBERNETES_SERVICE_HOST, minus every credential-shaped name and
-value. Widen it by naming variables in SPARKWING_SUBMIT_ENV_ALLOW,
-comma separated, an entry ending in '*' matching a prefix:
-
-  SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,DOCKER_*' \
-    sparkwing runs submit deploy
-
-The owner-only snapshot is a 0600 file outside the runs database,
-never stored in the run or trigger row, and it is removed when the
-consumer starts the run. A run that comes back to the queue without
-it fails rather than running with the consumer's own environment.
-
-Deduplication is opt-in via --idempotency-key, scoped to the
-pipeline. A second submission of the SAME pipeline carrying a key
-an earlier one used returns the original run id, its current
-status, and creates nothing -- which is what makes a retry after a
-dropped connection safe. Reusing a key with different arguments is
-refused, because a key names one intent and different arguments
-are a different request. --request-id is a separate, tracing-only
-field: it is recorded on the run and never affects deduplication.
-
-A consumer is started automatically if none is running, and exits
-on its own after five idle minutes. See 'sparkwing runs consumer'.`,
-	PosArgs: []PosArg{
-		{Name: "pipeline", Desc: "Pipeline to run (see `sparkwing pipeline list`)", Required: true},
-		{Name: "[args...]", Desc: "Arguments passed through to the pipeline"},
-	},
-	UsageSuffix: "<pipeline> [pipeline-flags...]",
-	Flags: []FlagSpec{
-		{Name: "idempotency-key", Argument: "KEY", Desc: "Deduplication token; a repeat submission with this key returns the original run", Group: "Input"},
-		{Name: "sw-ref", Argument: "REF", Desc: "Submit a worktree of REF (branch/tag/SHA); the consumer removes it when the run ends", Group: "Input"},
-		{Name: "sw-priority", Argument: "VALUE", Desc: "Local admission priority: an integer, or front/back, resolved when the consumer launches the run; never affects deduplication", Group: "Input"},
-		{Name: "request-id", Argument: "ID", Desc: "Tracing identifier recorded on the run; never affects deduplication", Group: "Input"},
-		{Name: "cd", Short: "C", Argument: "PATH", Desc: "Resolve the pipeline from this directory instead of the current one", Group: "Target"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
-		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
-		{Name: "consumer-idle", Argument: "DUR", Desc: "If this starts a consumer: how long it stays alive with no work (default 5m). A resident consumer keeps its own settings.", Group: "System"},
-		{Name: "consumer-claim-lease", Argument: "DUR", Desc: "If this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m)", Group: "System"},
-	},
-	GroupOrder: []string{"Input", "Target", "Output", "System", "Other"},
-	Examples: []Example{
-		{"Submit a run and keep the id", "sparkwing runs submit nightly-report"},
-		{"Submit with pipeline arguments", "sparkwing runs submit deploy --env staging"},
-		{"Capture the id for scripting", "RUN=$(sparkwing runs submit -o plain build)"},
-		{"Make a retry safe to repeat", "sparkwing runs submit --idempotency-key deploy-2026-08-11-a deploy"},
-		{"Submit from another checkout", "sparkwing runs submit -C ~/code/other-project lint"},
-	},
-}
-
 var cmdJobsConsumer = Command{
 	Path:     "sparkwing runs consumer",
 	Synopsis: "Inspect or control the process that executes submitted runs",
 	Description: `One consumer process per sparkwing home claims queued triggers
-and executes them. 'sparkwing runs submit' starts one when none
-is running and the consumer exits after a quiet window, so these
+and executes them. 'sparkwing run --sw-detached' starts one when
+none is running and the consumer exits after a quiet window, so these
 verbs are for inspection and deliberate control rather than
 routine use.
 
@@ -2847,7 +2798,7 @@ queue, not failed -- it never reached a verdict, so the next
 consumer re-executes it. To stop a run for good, cancel it.
 
 A consumer records the sparkwing version it was built from. A
-submission from a different build replaces it, so an upgrade takes
+detached launch from a different build replaces it, so an upgrade takes
 effect instead of the first build serving the home forever;
 replacing one interrupts whatever it was executing, and that run
 returns to the queue for the new consumer to re-execute.`,
@@ -2860,8 +2811,8 @@ var cmdJobsConsumerStart = Command{
 	Description: `Starts the resident trigger consumer and waits until it owns the
 home's queue. A no-op when one is already running.
 
-Rarely needed by hand: 'sparkwing runs submit' does this before
-it acknowledges a run.`,
+Rarely needed by hand: 'sparkwing run --sw-detached' does this
+before it acknowledges a run.`,
 	Flags: []FlagSpec{
 		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "idle", Argument: "DUR", Desc: "Exit after this long with no work (default 5m)", Group: "System"},
@@ -2891,7 +2842,7 @@ var cmdJobsConsumerStop = Command{
 	Synopsis: "Stop the resident consumer",
 	Description: `Signals the resident consumer to drain and exit. Queued runs are
 not cancelled -- they stay queued and execute when a consumer
-comes back, which the next 'sparkwing runs submit' arranges.
+comes back, which the next 'sparkwing run --sw-detached' arranges.
 
 To cancel a queued run instead, use 'sparkwing runs cancel'.`,
 	Flags: []FlagSpec{

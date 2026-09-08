@@ -329,7 +329,7 @@ func triggerUsesParentRepo(trig *store.Trigger) bool {
 
 const SubmitRepoDirKey = "_SPARKWING_SUBMIT_REPO_DIR"
 
-// SubmitPriorityKey carries `runs submit --sw-priority` on the trigger row
+// SubmitPriorityKey carries `run --sw-detached --sw-priority` on the trigger row
 // rather than in the run's arguments: it shapes admission, not the pipeline,
 // so it needs no runs-store column of its own and stays out of the
 // idempotency-key argument comparison.

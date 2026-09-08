@@ -119,7 +119,7 @@ func runRunsConsumerStop(args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stdout, "trigger consumer stopped (pid %d)\n", pid)
-	fmt.Fprintln(os.Stdout, "queued runs stay queued; the next `sparkwing runs submit` starts a consumer again")
+	fmt.Fprintln(os.Stdout, "queued runs stay queued; the next `sparkwing run <pipeline> --sw-detached` starts a consumer again")
 	return nil
 }
 
@@ -165,11 +165,11 @@ func rotateOutdatedConsumer(home string) bool {
 		return false
 	}
 	fmt.Fprintf(os.Stderr,
-		"sparkwing runs submit: replacing the resident consumer (pid %d, %s) with this build (%s)\n",
+		"sparkwing run --sw-detached: replacing the resident consumer (pid %d, %s) with this build (%s)\n",
 		info.PID, consumerVersionLabel(info.Version), mine)
 	if err := stopSupervisor(info.PID, ""); err != nil {
 		fmt.Fprintf(os.Stderr,
-			"sparkwing runs submit: could not stop the older consumer (%v); it keeps serving this home\n", err)
+			"sparkwing run --sw-detached: could not stop the older consumer (%v); it keeps serving this home\n", err)
 		return false
 	}
 	deadline := time.Now().Add(consumerStartTimeout)

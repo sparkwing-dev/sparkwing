@@ -660,6 +660,12 @@ Args.
 |---|---|
 | `-C, --sw-cd PATH` | Run as if started in PATH |
 | `--sw-ref REF` | Run the pipeline at REF (branch/tag/SHA) instead of the working tree |
+| `--sw-detached` | Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal |
+| `--sw-idempotency-key KEY` | Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one |
+| `--sw-request-id ID` | Detached only: tracing identifier recorded on the run; never affects deduplication |
+| `--sw-consumer-idle DUR` | Detached only, and only if this starts a consumer: how long it stays alive with no work (default 5m) |
+| `--sw-consumer-claim-lease DUR` | Detached only, and only if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m) |
+| `--sw-output FORMAT` | Detached only: run-handle format, pretty\|json\|plain (default: pretty on a TTY, json when piped) |
 | `-v, --sw-verbose` | Enable debug logging |
 | `--sw-start-at STEP` | Start the run at STEP |
 | `--sw-stop-at STEP` | Stop the run after STEP |

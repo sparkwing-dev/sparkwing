@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-func TestSubmitCLIFixtureOwnsTemporaryDirectory(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "runs_submit_process_test.go", nil, 0)
+func TestDetachedCLIFixtureOwnsTemporaryDirectory(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "run_detached_process_test.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

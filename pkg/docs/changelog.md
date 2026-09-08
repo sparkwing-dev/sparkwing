@@ -51,17 +51,17 @@ code change to unlock.
 
 ### Added
 
-- **sdk + cli:** Containers started by `docker.Run` are labelled
-  `sparkwing.run` / `sparkwing.node` and recorded in the step-session ledger,
-  so a container is removed with `docker rm -f` if the node that started it
-  dies before its own cleanup runs -- swept before every `sparkwing run`, in
-  the admission daemon when a run's connection drops, and in `sparkwing
-  doctor`. The daemon and doctor also remove any container carrying a terminal
-  run's `sparkwing.run` label, so a hand-rolled `docker run --label
-  sparkwing.run=$SPARKWING_RUN_ID` is covered too; `doctor` lists them under
-  `stray containers` and only reports them with `--dry-run`. A container a step
-  means to outlive the run must not carry the label, the same rule that keeps a
-  `setsid` process out of the session sweep.
+- **sdk:** `sparkwing/cleanup`.`Register` lets a sparks library guarantee a
+  resource it starts outside the step's process tree -- a container, cluster,
+  or release -- is torn down if the step's node dies before the library's own
+  cleanup runs. The library registers a cleanup command; the same sweeps that
+  reap step processes (before each run, in the daemon when a run's connection
+  drops, and `sparkwing doctor`) run it once, best-effort, when the owning node
+  is gone. This keeps such resource types out of the core SDK: core reaps the
+  processes a step spawns with no registration, and knows nothing about docker,
+  helm, or kind. `docker.Run` is the first user -- it registers `docker rm -f`
+  for its container, so a one-shot container no longer outlives a node killed
+  mid-run.
 - **runtime + cli:** Step sessions are recorded in a ledger under the
   sparkwing home while they run, and a sweep ends any whose node is gone:
   before every `sparkwing run`, in the admission daemon when a run's
@@ -73,16 +73,15 @@ code change to unlock.
   way is a `stray_session_reaped` event on its node. Steps do not get to
   daemonize by accident: a process that leaves its step session with `setsid`
   is the one thing the sweep cannot see, and that stays unsupported.
-- **cli:** `--sw-priority VALUE` on `sparkwing run`, `sparkwing pipeline run`,
-  and `sparkwing runs submit` sets the run's local admission priority from the
-  command line. VALUE is an integer, or `front` / `back` for one step past the
+- **cli:** `--sw-priority VALUE` on `sparkwing run` and `sparkwing pipeline
+  run` sets the run's local admission priority from the command line. VALUE is an integer, or `front` / `back` for one step past the
   highest or lowest priority waiting when the run starts (an empty queue
   answers 1 and -1). The flag beats the plan's own `Priority()`, the run and
   every node it dispatches queue at the same number, and the run record
-  carries the number and where it came from. A submitted run carries the
-  request on its trigger and resolves `front` / `back` when the consumer
-  launches it, against the queue it actually joins; the value never takes
-  part in idempotency-key matching.
+  carries the number and where it came from. A detached run (`--sw-detached`)
+  carries the request on its trigger and resolves `front` / `back` when the
+  consumer launches it, against the queue it actually joins; the value never
+  takes part in idempotency-key matching.
 - **cli:** `sparkwing queue priority --run ID --set VALUE` re-ranks a run that
   is already queued, without restarting it. `front` and `back` resolve
   against the waiters that are not part of the run, so asking twice is
@@ -99,6 +98,20 @@ code change to unlock.
   `priority_overrides` map in the persisted ledger snapshot. No protocol
   major bump: an older daemon answers `unsupported`, and the client says
   which versions disagree and how to restart the daemon.
+
+### Removed
+
+- **cli (Breaking):** `sparkwing runs submit` is gone. Detaching is a way of
+  running a pipeline, so it is now `sparkwing run <pipeline> --sw-detached`:
+  the run is persisted, handed to the resident consumer, and the command
+  returns the run id and log directory at once, exactly as submit did. The
+  submit-only flags moved into the `--sw-` namespace and sit after the
+  pipeline name like every other run flag: `--sw-idempotency-key`,
+  `--sw-request-id`, `--sw-consumer-idle`, `--sw-consumer-claim-lease`, and
+  `--sw-output` for the handle's format. `--sw-ref`, `--sw-priority`, and
+  `--sw-cd` work detached; flags a detached run cannot honor are refused with
+  the same reasons as before. See the [migration
+  guide](docs/migrations/_unreleased.md#runs-submit-becomes-run---sw-detached).
 
 ## [v0.45.0] - 2026-09-08
 ### Changed
