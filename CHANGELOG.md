@@ -49,6 +49,20 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **runtime + cli:** Step sessions are recorded in a ledger under the
+  sparkwing home while they run, and a sweep ends any whose node is gone:
+  before every `sparkwing run`, in the admission daemon when a run's
+  connection drops without a clean finish, and in `sparkwing doctor`, which
+  lists them under `stray step sessions` and only reports them with
+  `--dry-run`. This closes the case the node's own cleanup cannot reach, a
+  node that is SIGKILLed, OOM-killed, or crashes, so a `go build` or `go test`
+  it started stops with the run on Linux and macOS. Every session ended this
+  way is a `stray_session_reaped` event on its node. Steps do not get to
+  daemonize by accident: a process that leaves its step session with `setsid`
+  is the one thing the sweep cannot see, and that stays unsupported.
+
 ## [v0.45.0] - 2026-09-08
 ### Changed
 

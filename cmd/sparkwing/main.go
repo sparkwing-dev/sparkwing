@@ -294,6 +294,7 @@ func dispatchRun(args []string) error {
 		env = setEnv(env, "SPARKWING_FLEET_PARENT_GUARD", fleetParentGuard.Address)
 		env = setEnv(env, "SPARKWING_FLEET_PARENT_TOKEN", fleetParentGuard.Token)
 	}
+	sweepStraySessionsBeforeRun()
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
 		compileOptions{NoUpdate: wf.noUpdate || wf.fleet})
 }

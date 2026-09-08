@@ -416,7 +416,8 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	cmd.Stdout, cmd.Stderr = outW, errW
 
 	startedAt := time.Now()
-	if err := cmd.Start(); err != nil {
+	job, err := startStepCommand(cmd, display)
+	if err != nil {
 		closeFiles(outR, outW, errR, errW)
 		return ExecResult{Command: display}, &ExecError{Command: display, ExitCode: ExitNotStarted, Cause: err}
 	}
@@ -427,6 +428,7 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	// kills this process's group; owning it is what lets a SIGTERM or a lost
 	// dispatcher reap it.
 	disown := ownCommandGroup(cmd)
+	unrecord := recordStepSession(ctx, cmd, display, job)
 
 	var outBuf, errBuf strings.Builder
 	limiter := newDiagnosticOutputLimiter(ctx)
@@ -441,6 +443,8 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 
 	waitErr := cmd.Wait()
 	disown()
+	unrecord()
+	job.close()
 	wall := time.Since(startedAt)
 	// safety: report at reap before draining so a sampler tick cannot charge the
 	// same RUSAGE_CHILDREN delta again during the drain window.

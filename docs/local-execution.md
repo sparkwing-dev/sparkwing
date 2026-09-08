@@ -322,6 +322,21 @@ under it. The same holds when a run's CLI is interrupted or the run is
 cancelled, so an interrupted `go build` or `go test` does not keep
 compiling on its own.
 
+A node that dies without running any code -- SIGKILL, the OOM killer, a
+crash -- cannot clean up after itself, so the node also leaves a record
+of every step session it starts in `<home>/sessions/`, removed when the
+command is reaped. Three sweeps read that ledger and end every session
+whose node is gone: `sparkwing run` before it dispatches, the admission
+daemon when a run's connection drops without a clean finish, and
+`sparkwing doctor`, which lists what it ended under `stray step sessions`
+and only reports under `--dry-run`. Each session ended this way appends a
+`stray_session_reaped` event to its node. The sweep is keyed on the
+session and the node's process incarnation, never on a process name, so
+a live run's work is never touched and a reused pid is never signalled.
+Steps do not get to daemonize by accident: a process that leaves its step
+session with `setsid` is outside the ledger's view, and that is the one
+unsupported way to outlive a run.
+
 Reach for it when a job is wedged or misbehaving and cancelling the
 whole run would cost more than it saves -- a fifty-minute pipeline
 whose deploy step is stuck on a connection that will never answer.

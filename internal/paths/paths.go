@@ -46,6 +46,11 @@ func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 
 func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
 
+// SessionLedgerDir holds one record per step command still running, written
+// by the node that started it, so a sweep can end sessions whose node died
+// without reaping them.
+func (p Paths) SessionLedgerDir() string { return filepath.Join(p.Root, "sessions") }
+
 // RefWorktreesDir holds the git worktrees `runs submit --sw-ref` checks out for
 // detached runs. Every one sits under this root, which is what lets a sweep
 // decide ownership by containment rather than by a record it has to trust.

@@ -27,6 +27,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
@@ -48,6 +49,8 @@ type DoctorReport struct {
 	PermissionAuditUnverified bool `json:"permission_audit_unverified,omitempty"`
 
 	OrphanedRuns []string `json:"orphaned_runs,omitempty"`
+
+	StrayStepSessions []DoctorStraySession `json:"stray_step_sessions,omitempty"`
 
 	LegacyBoxSlotFilesRemoved int `json:"legacy_box_slot_files_removed"`
 
@@ -241,6 +244,7 @@ func (r DoctorReport) Clean() bool {
 		len(r.PermissionRepairs) == 0 &&
 		!r.PermissionAuditUnverified &&
 		len(r.OrphanedRuns) == 0 &&
+		len(r.StrayStepSessions) == 0 &&
 		r.LegacyBoxSlotFilesRemoved == 0 &&
 		len(r.LiveLegacyHolders) == 0 &&
 		r.DeadConcurrencyHolders == 0 &&
@@ -346,6 +350,9 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 	}
 
 	if err := diagnoseLegacyBoxSlots(boxRoot, p.BoxSlotDir(), boxHolders, dryRun, &report); err != nil {
+		return report, err
+	}
+	if err := diagnoseStraySessions(ctx, p, st, dryRun, &report); err != nil {
 		return report, err
 	}
 	if st != nil {
@@ -999,6 +1006,47 @@ func probeDaemonQueue(ctx context.Context, report *DoctorReport) (wingwire.Queue
 	return wingwire.QueueState{}, false
 }
 
+// DoctorStraySession is a step session whose node died without reaping it.
+type DoctorStraySession struct {
+	Run      string `json:"run"`
+	Node     string `json:"node"`
+	OwnerPID int    `json:"owner_pid"`
+	Command  string `json:"command"`
+	// Verdict is reaped, would-reap under --dry-run, or failed.
+	Verdict string `json:"verdict"`
+	Error   string `json:"error,omitempty"`
+}
+
+// diagnoseStraySessions ends step sessions left behind by nodes that are
+// gone, so a build a dead run started stops using the machine. Sessions
+// whose node still runs are not reported: they are live work.
+func diagnoseStraySessions(ctx context.Context, p paths.Paths, st *store.Store, dryRun bool, report *DoctorReport) error {
+	outcomes, err := sessionledger.Open(p.SessionLedgerDir()).Sweep(ctx, sessionledger.SweepOptions{DryRun: dryRun})
+	for _, o := range outcomes {
+		if o.Verdict == sessionledger.VerdictLive {
+			continue
+		}
+		entry := DoctorStraySession{
+			Run: o.Record.Run, Node: o.Record.Node, OwnerPID: o.Record.OwnerPID,
+			Command: o.Record.Command, Verdict: string(o.Verdict),
+		}
+		if o.Err != nil {
+			entry.Error = o.Err.Error()
+		}
+		report.StrayStepSessions = append(report.StrayStepSessions, entry)
+	}
+	if err != nil {
+		return err
+	}
+	if dryRun || st == nil || !sessionledger.Acted(outcomes) {
+		return nil
+	}
+	if errs := sessionledger.RecordOutcomes(ctx, st, "doctor", outcomes); len(errs) > 0 {
+		return errs[0]
+	}
+	return nil
+}
+
 func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive, legacyRuns map[string]struct{}, blind, dryRun bool, report *DoctorReport) error {
 	if blind {
 		return nil
@@ -1329,6 +1377,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	}
 	fmt.Fprintf(w, "permission_audit_unverified\t%d\n", permissionUnverified)
 	fmt.Fprintf(w, "orphaned_runs\t%d\n", len(r.OrphanedRuns))
+	fmt.Fprintf(w, "stray_step_sessions\t%d\n", len(r.StrayStepSessions))
 	fmt.Fprintf(w, "legacy_box_slot_files_removed\t%d\n", r.LegacyBoxSlotFilesRemoved)
 	fmt.Fprintf(w, "live_legacy_holders\t%d\n", len(r.LiveLegacyHolders))
 	fmt.Fprintf(w, "dead_concurrency_holders\t%d\n", r.DeadConcurrencyHolders)
@@ -1421,6 +1470,20 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	if n := len(r.OrphanedRuns); n > 0 {
 		fmt.Fprintf(tw, "orphaned runs finalized\t%d\n", n)
+	}
+	if n := len(r.StrayStepSessions); n > 0 {
+		sessionVerb := "ended"
+		if r.DryRun {
+			sessionVerb = "found"
+		}
+		fmt.Fprintf(tw, "stray step sessions %s\t%d\n", sessionVerb, n)
+		for _, s := range r.StrayStepSessions {
+			line := fmt.Sprintf("  %s/%s (node %d gone): %s", s.Run, s.Node, s.OwnerPID, s.Command)
+			if s.Error != "" {
+				line += " -- " + s.Error
+			}
+			fmt.Fprintf(tw, "%s\n", line)
+		}
 	}
 	if r.LegacyBoxSlotFilesRemoved > 0 {
 		fmt.Fprintf(tw, "legacy box-slot files %s\t%d\n", verb, r.LegacyBoxSlotFilesRemoved)
