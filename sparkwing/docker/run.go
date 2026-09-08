@@ -11,9 +11,7 @@ import (
 	"os/exec"
 	"sort"
 
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
-	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/cleanup"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
@@ -112,7 +110,6 @@ func Run(ctx context.Context, opts RunOptions) error {
 
 	name := "sparkwing-run-" + randomSuffix()
 	createArgs := []string{"create", "--name", name, "-w", opts.WorkDir}
-	createArgs = append(createArgs, runScopeLabels()...)
 	if opts.User != "" {
 		createArgs = append(createArgs, "--user", opts.User)
 	}
@@ -128,10 +125,16 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if _, err := runDocker(ctx, nil, createArgs...); err != nil {
 		return fmt.Errorf("docker create: %w", err)
 	}
-	unrecord := recordContainer(ctx, name, opts.Image)
+	// safety: if this node is killed before the rm below runs, a later
+	// sweep runs this same command; docker rm -f is registered, not the
+	// step's own cleanup, so the container never outlives the run.
+	release, _ := cleanup.Register(ctx, cleanup.Spec{
+		Argv:        []string{"docker", "rm", "-f", name},
+		Description: "docker run " + opts.Image,
+	})
 	defer func() {
 		_, _ = runDocker(context.Background(), nil, "rm", "-f", name)
-		unrecord()
+		release()
 	}()
 
 	if opts.InputDir != "" {
@@ -173,50 +176,4 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-// runScopeLabels tags a container with the run and node that started it, so a
-// sweep can find and remove it by label even when the ledger record is lost,
-// and so an operator can see which run a stray container belongs to.
-func runScopeLabels() []string {
-	var out []string
-	if run := os.Getenv("SPARKWING_RUN_ID"); run != "" {
-		out = append(out, "--label", "sparkwing.run="+run)
-	}
-	if node := os.Getenv("SPARKWING_NODE_ID"); node != "" {
-		out = append(out, "--label", "sparkwing.node="+node)
-	}
-	return out
-}
-
-// recordContainer writes the ledger record a sweep outside this process needs
-// to remove the container if this process dies before its own `docker rm`
-// defer runs. Outside a run there is no owner to sweep for, so nothing is
-// written. The returned release removes the record once the container is gone.
-func recordContainer(ctx context.Context, name, image string) func() {
-	run := os.Getenv("SPARKWING_RUN_ID")
-	node := os.Getenv("SPARKWING_NODE_ID")
-	if run == "" || node == "" {
-		return func() {}
-	}
-	p, err := paths.DefaultPaths()
-	if err != nil {
-		return func() {}
-	}
-	birth, err := procgroup.ProcessBirth(os.Getpid())
-	if err != nil {
-		return func() {}
-	}
-	release, err := sessionledger.Open(p.SessionLedgerDir()).Record(sessionledger.Record{
-		Run:        run,
-		Node:       node,
-		OwnerPID:   os.Getpid(),
-		OwnerBirth: birth,
-		Handle:     sessionledger.Handle{Kind: "docker", Container: name},
-		Command:    "docker run " + image,
-	})
-	if err != nil {
-		return func() {}
-	}
-	return release
 }

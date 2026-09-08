@@ -52,8 +52,6 @@ type DoctorReport struct {
 
 	StrayStepSessions []DoctorStraySession `json:"stray_step_sessions,omitempty"`
 
-	StrayContainers []string `json:"stray_containers,omitempty"`
-
 	LegacyBoxSlotFilesRemoved int `json:"legacy_box_slot_files_removed"`
 
 	LiveLegacyHolders []DoctorLegacyHolder `json:"live_legacy_holders,omitempty"`
@@ -247,7 +245,6 @@ func (r DoctorReport) Clean() bool {
 		!r.PermissionAuditUnverified &&
 		len(r.OrphanedRuns) == 0 &&
 		len(r.StrayStepSessions) == 0 &&
-		len(r.StrayContainers) == 0 &&
 		r.LegacyBoxSlotFilesRemoved == 0 &&
 		len(r.LiveLegacyHolders) == 0 &&
 		r.DeadConcurrencyHolders == 0 &&
@@ -1075,19 +1072,11 @@ func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive, legacy
 		}
 		report.OrphanedRuns = append(report.OrphanedRuns, r.ID)
 		if dryRun {
-			if ids, cerr := sessionledger.ContainersForRun(ctx, r.ID); cerr == nil {
-				report.StrayContainers = append(report.StrayContainers, ids...)
-			}
 			continue
 		}
 		if err := st.FinishRun(ctx, r.ID, "cancelled",
 			"interrupted: no live process or daemon lease (finalized by sparkwing doctor)"); err != nil {
 			return err
-		}
-		if removed, cerr := sessionledger.RemoveContainersForRun(ctx, r.ID); cerr != nil {
-			return cerr
-		} else {
-			report.StrayContainers = append(report.StrayContainers, removed...)
 		}
 	}
 	return nil
@@ -1389,7 +1378,6 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "permission_audit_unverified\t%d\n", permissionUnverified)
 	fmt.Fprintf(w, "orphaned_runs\t%d\n", len(r.OrphanedRuns))
 	fmt.Fprintf(w, "stray_step_sessions\t%d\n", len(r.StrayStepSessions))
-	fmt.Fprintf(w, "stray_containers\t%d\n", len(r.StrayContainers))
 	fmt.Fprintf(w, "legacy_box_slot_files_removed\t%d\n", r.LegacyBoxSlotFilesRemoved)
 	fmt.Fprintf(w, "live_legacy_holders\t%d\n", len(r.LiveLegacyHolders))
 	fmt.Fprintf(w, "dead_concurrency_holders\t%d\n", r.DeadConcurrencyHolders)
@@ -1488,7 +1476,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 		if r.DryRun {
 			sessionVerb = "found"
 		}
-		fmt.Fprintf(tw, "stray step sessions %s\t%d\n", sessionVerb, n)
+		fmt.Fprintf(tw, "stray step cleanups %s\t%d\n", sessionVerb, n)
 		for _, s := range r.StrayStepSessions {
 			line := fmt.Sprintf("  %s/%s (node %d gone): %s", s.Run, s.Node, s.OwnerPID, s.Command)
 			if s.Error != "" {
@@ -1496,13 +1484,6 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 			}
 			fmt.Fprintf(tw, "%s\n", line)
 		}
-	}
-	if n := len(r.StrayContainers); n > 0 {
-		containerVerb := "removed"
-		if r.DryRun {
-			containerVerb = "found"
-		}
-		fmt.Fprintf(tw, "stray containers %s\t%d\n", containerVerb, n)
 	}
 	if r.LegacyBoxSlotFilesRemoved > 0 {
 		fmt.Fprintf(tw, "legacy box-slot files %s\t%d\n", verb, r.LegacyBoxSlotFilesRemoved)

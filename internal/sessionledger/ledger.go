@@ -21,9 +21,10 @@ import (
 // Handle names what the sweep must kill to end the session.
 type Handle struct {
 	// Kind is the sweep boundary: "session" on unix (the step's own
-	// session, keyed by its leader), "job" on Windows (a named Job
-	// Object), or "docker" (a container the step started), which is
-	// ended the same way on every platform.
+	// session, keyed by its leader) or "job" on Windows (a named Job
+	// Object) -- core's own process ownership, reaped reliably -- or
+	// "command", a cleanup argv a sparks library registered, run once on
+	// a best-effort basis when the owner is gone.
 	Kind string `json:"kind"`
 	// LeaderPID is the session leader's pid; the step command itself.
 	LeaderPID int `json:"leader_pid,omitempty"`
@@ -34,9 +35,12 @@ type Handle struct {
 	LeaderBirth string `json:"leader_birth,omitempty"`
 	// JobName names the Windows Job Object the step runs inside.
 	JobName string `json:"job_name,omitempty"`
-	// Container names the docker container the step started, ended with
-	// `docker rm -f` regardless of platform.
-	Container string `json:"container,omitempty"`
+	// ID identifies a "command" handle so many cleanups from one owner do
+	// not collide; ignored for session/job handles.
+	ID string `json:"id,omitempty"`
+	// Argv is the cleanup command a library registered for a "command"
+	// handle, run once when the owner is gone. Empty for session/job.
+	Argv []string `json:"argv,omitempty"`
 }
 
 // Record is one running step command and the node that owns it.
@@ -84,8 +88,8 @@ type dispatchProbe struct{ platform Probe }
 func (d dispatchProbe) OwnerAlive(rec Record) (bool, error) { return d.platform.OwnerAlive(rec) }
 
 func (d dispatchProbe) Terminate(ctx context.Context, h Handle) error {
-	if h.Kind == "docker" {
-		return terminateContainer(ctx, h.Container)
+	if h.Kind == "command" {
+		return runCleanupCommand(ctx, h.Argv)
 	}
 	return d.platform.Terminate(ctx, h)
 }
@@ -97,7 +101,7 @@ func OpenWithProbe(dir string, probe Probe) *Ledger { return &Ledger{dir: dir, p
 func (l *Ledger) Dir() string { return l.dir }
 
 func recordName(rec Record) string {
-	key := rec.Handle.Container
+	key := rec.Handle.ID
 	if key == "" {
 		key = rec.Handle.JobName
 	}
@@ -252,6 +256,15 @@ func (l *Ledger) Sweep(ctx context.Context, opts SweepOptions) ([]Outcome, error
 			continue
 		}
 		if err := l.probe.Terminate(ctx, rec.Handle); err != nil {
+			// safety: a process handle (session/job) is core's own
+			// guarantee, so a failure keeps the record for the next sweep
+			// to retry. A command is a library's best-effort external
+			// cleanup run in a foreign environment; we attempted it once,
+			// so drop the record rather than retry a failure we cannot
+			// judge and report every sweep thereafter.
+			if rec.Handle.Kind == "command" {
+				_ = os.Remove(rec.path)
+			}
 			out = append(out, Outcome{Record: rec, Verdict: VerdictFailed, Err: err})
 			continue
 		}

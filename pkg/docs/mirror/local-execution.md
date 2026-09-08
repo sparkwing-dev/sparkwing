@@ -337,13 +337,16 @@ Steps do not get to daemonize by accident: a process that leaves its step
 session with `setsid` is outside the ledger's view, and that is the one
 unsupported way to outlive a run.
 
-Containers a step starts through `docker.Run` are covered the same way: each
-is labelled with its run and node and recorded in the ledger, and the three
-sweeps remove it with `docker rm -f` if its node dies first. The daemon and
-`doctor` additionally remove any container labelled with a terminal run's
-`sparkwing.run`, so a container a step launches by hand is reaped too as long
-as it carries that label. A container meant to outlive the run must not carry
-the label -- the same discipline as a `setsid` process leaving its session.
+Resources a step starts *outside* its process tree -- a container, a Kind
+cluster, a Helm release -- are core's blind spot: they live in another daemon,
+not in the session the sweep kills. A sparks library that starts one registers
+a cleanup command with `sparkwing/cleanup`.`Register`, and the same three
+sweeps run that command once, best-effort, when the owning node is gone. Core
+stays out of it -- it reaps processes and knows nothing about docker, helm, or
+kind; the library owns the cleanup. `docker.Run` uses this to register `docker
+rm -f`, so a one-shot container does not outlive a node killed mid-run. A
+resource a step means to keep must not be registered, the same discipline as a
+`setsid` process leaving its session.
 
 Reach for it when a job is wedged or misbehaving and cancelling the
 whole run would cost more than it saves -- a fifty-minute pipeline

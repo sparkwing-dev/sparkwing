@@ -51,17 +51,17 @@ code change to unlock.
 
 ### Added
 
-- **sdk + cli:** Containers started by `docker.Run` are labelled
-  `sparkwing.run` / `sparkwing.node` and recorded in the step-session ledger,
-  so a container is removed with `docker rm -f` if the node that started it
-  dies before its own cleanup runs -- swept before every `sparkwing run`, in
-  the admission daemon when a run's connection drops, and in `sparkwing
-  doctor`. The daemon and doctor also remove any container carrying a terminal
-  run's `sparkwing.run` label, so a hand-rolled `docker run --label
-  sparkwing.run=$SPARKWING_RUN_ID` is covered too; `doctor` lists them under
-  `stray containers` and only reports them with `--dry-run`. A container a step
-  means to outlive the run must not carry the label, the same rule that keeps a
-  `setsid` process out of the session sweep.
+- **sdk:** `sparkwing/cleanup`.`Register` lets a sparks library guarantee a
+  resource it starts outside the step's process tree -- a container, cluster,
+  or release -- is torn down if the step's node dies before the library's own
+  cleanup runs. The library registers a cleanup command; the same sweeps that
+  reap step processes (before each run, in the daemon when a run's connection
+  drops, and `sparkwing doctor`) run it once, best-effort, when the owning node
+  is gone. This keeps such resource types out of the core SDK: core reaps the
+  processes a step spawns with no registration, and knows nothing about docker,
+  helm, or kind. `docker.Run` is the first user -- it registers `docker rm -f`
+  for its container, so a one-shot container no longer outlives a node killed
+  mid-run.
 - **runtime + cli:** Step sessions are recorded in a ledger under the
   sparkwing home while they run, and a sweep ends any whose node is gone:
   before every `sparkwing run`, in the admission daemon when a run's
