@@ -51,6 +51,17 @@ code change to unlock.
 
 ### Added
 
+- **sdk + cli:** Containers started by `docker.Run` are labelled
+  `sparkwing.run` / `sparkwing.node` and recorded in the step-session ledger,
+  so a container is removed with `docker rm -f` if the node that started it
+  dies before its own cleanup runs -- swept before every `sparkwing run`, in
+  the admission daemon when a run's connection drops, and in `sparkwing
+  doctor`. The daemon and doctor also remove any container carrying a terminal
+  run's `sparkwing.run` label, so a hand-rolled `docker run --label
+  sparkwing.run=$SPARKWING_RUN_ID` is covered too; `doctor` lists them under
+  `stray containers` and only reports them with `--dry-run`. A container a step
+  means to outlive the run must not carry the label, the same rule that keeps a
+  `setsid` process out of the session sweep.
 - **runtime + cli:** Step sessions are recorded in a ledger under the
   sparkwing home while they run, and a sweep ends any whose node is gone:
   before every `sparkwing run`, in the admission daemon when a run's

@@ -337,6 +337,14 @@ Steps do not get to daemonize by accident: a process that leaves its step
 session with `setsid` is outside the ledger's view, and that is the one
 unsupported way to outlive a run.
 
+Containers a step starts through `docker.Run` are covered the same way: each
+is labelled with its run and node and recorded in the ledger, and the three
+sweeps remove it with `docker rm -f` if its node dies first. The daemon and
+`doctor` additionally remove any container labelled with a terminal run's
+`sparkwing.run`, so a container a step launches by hand is reaped too as long
+as it carries that label. A container meant to outlive the run must not carry
+the label -- the same discipline as a `setsid` process leaving its session.
+
 Reach for it when a job is wedged or misbehaving and cancelling the
 whole run would cost more than it saves -- a fifty-minute pipeline
 whose deploy step is stuck on a connection that will never answer.

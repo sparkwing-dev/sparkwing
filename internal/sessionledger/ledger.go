@@ -20,8 +20,10 @@ import (
 
 // Handle names what the sweep must kill to end the session.
 type Handle struct {
-	// Kind is "session" on unix (the step's own session, keyed by its
-	// leader) or "job" on Windows (a named Job Object).
+	// Kind is the sweep boundary: "session" on unix (the step's own
+	// session, keyed by its leader), "job" on Windows (a named Job
+	// Object), or "docker" (a container the step started), which is
+	// ended the same way on every platform.
 	Kind string `json:"kind"`
 	// LeaderPID is the session leader's pid; the step command itself.
 	LeaderPID int `json:"leader_pid,omitempty"`
@@ -32,6 +34,9 @@ type Handle struct {
 	LeaderBirth string `json:"leader_birth,omitempty"`
 	// JobName names the Windows Job Object the step runs inside.
 	JobName string `json:"job_name,omitempty"`
+	// Container names the docker container the step started, ended with
+	// `docker rm -f` regardless of platform.
+	Container string `json:"container,omitempty"`
 }
 
 // Record is one running step command and the node that owns it.
@@ -67,7 +72,23 @@ type Ledger struct {
 }
 
 // Open returns the ledger at dir with the platform probe.
-func Open(dir string) *Ledger { return &Ledger{dir: dir, probe: platformProbe{}} }
+func Open(dir string) *Ledger {
+	return &Ledger{dir: dir, probe: dispatchProbe{platform: platformProbe{}}}
+}
+
+// dispatchProbe owns the cross-platform handle kinds (docker) and delegates
+// the rest to the platform probe, so a session or job is ended the way its
+// OS requires while a container is ended the same way everywhere.
+type dispatchProbe struct{ platform Probe }
+
+func (d dispatchProbe) OwnerAlive(rec Record) (bool, error) { return d.platform.OwnerAlive(rec) }
+
+func (d dispatchProbe) Terminate(ctx context.Context, h Handle) error {
+	if h.Kind == "docker" {
+		return terminateContainer(ctx, h.Container)
+	}
+	return d.platform.Terminate(ctx, h)
+}
 
 // OpenWithProbe returns the ledger at dir with a caller-supplied probe.
 func OpenWithProbe(dir string, probe Probe) *Ledger { return &Ledger{dir: dir, probe: probe} }
@@ -76,7 +97,10 @@ func OpenWithProbe(dir string, probe Probe) *Ledger { return &Ledger{dir: dir, p
 func (l *Ledger) Dir() string { return l.dir }
 
 func recordName(rec Record) string {
-	key := rec.Handle.JobName
+	key := rec.Handle.Container
+	if key == "" {
+		key = rec.Handle.JobName
+	}
 	if key == "" {
 		key = fmt.Sprintf("%d", rec.Handle.LeaderPID)
 	}
