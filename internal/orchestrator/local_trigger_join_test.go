@@ -34,8 +34,10 @@ func TestRunLocal_TriggerLoopFinishesBeforeTheStoreCloses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// safety: the child's .sparkwing/ has to compile, which is what keeps the
-	// dispatch running past the point where the parent's own work is done.
+	// safety: the child sleeps so the dispatch is still running when the
+	// parent's own work is done; a child that exits first returns nil and
+	// leaves the trigger claimed, which is the child's bookkeeping, not the
+	// parent's shutdown, and not what this test covers.
 	childRepo := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(childRepo, ".sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
@@ -45,7 +47,7 @@ func TestRunLocal_TriggerLoopFinishesBeforeTheStoreCloses(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(childRepo, ".sparkwing", "main.go"),
-		[]byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		[]byte("package main\n\nimport \"time\"\n\nfunc main() { time.Sleep(time.Minute) }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
