@@ -12,6 +12,7 @@
         "config-reference",
         "sdk",
         "sdk-reference",
+        "sdk-cleanup",
         "sdk-docker",
         "sdk-git",
         "sdk-inputs",
