@@ -136,6 +136,11 @@ bump per repo with a conventional message (no pushes). --verify
 additionally runs each repo's pre-commit gate after the bump.
 --repo scopes to one repo by name or path.
 
+Progress goes to stderr one line per step -- the repo being
+walked, each plan construction, the bump, the verdict -- because
+a fleet-wide run compiles every clean repo twice and holds the
+report until the last repo is done.
+
 Because a shared state database refuses an older pin against a
 migrated schema, the fleet is meant to move together; the report
 leads with that when pins would diverge.

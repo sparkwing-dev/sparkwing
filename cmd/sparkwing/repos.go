@@ -268,6 +268,9 @@ func runReposUpdate(args []string) error {
 		Apply:     apply,
 		Verify:    verify,
 		GuidesFor: guidesFor,
+		Progress: func(repo, msg string) {
+			fmt.Fprintf(os.Stderr, "%s: %s\n", repo, msg)
+		},
 	}
 	verdicts := repos.UpdateFleet(&execOps{}, fleet, cfg)
 

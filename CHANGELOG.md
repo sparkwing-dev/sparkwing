@@ -49,6 +49,14 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **cli:** `sparkwing repos update` logs its progress to stderr, one line per
+  step: the repo being walked with its position in the fleet, each plan
+  construction before and after the bump, the bump itself, the gate, the
+  commit, and the verdict. A fleet-wide dry run compiles every clean repo
+  twice and previously printed nothing until the whole report was ready.
+
 ## [v0.44.0] - 2026-09-06
 ### Added
 

@@ -65,6 +65,17 @@ type UpdateConfig struct {
 	Verify bool
 
 	GuidesFor func(from, to string) []Guide
+
+	// Progress receives one line per step. A fleet-wide run compiles every
+	// clean repo twice and can hold the report for half an hour, so without
+	// this the command looks hung. Nil is silent.
+	Progress func(repo, msg string)
+}
+
+func (cfg UpdateConfig) progress(repo, format string, args ...any) {
+	if cfg.Progress != nil {
+		cfg.Progress(repo, fmt.Sprintf(format, args...))
+	}
 }
 
 func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
@@ -111,6 +122,7 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 		_ = ops.Restore(sparkwingDir, snap)
 	}
 
+	cfg.progress(name, "listing pipelines")
 	pipelines, err := ops.Pipelines(sparkwingDir)
 	if err != nil {
 		restore()
@@ -118,7 +130,8 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 	}
 
 	before := map[string]Plan{}
-	for _, p := range pipelines {
+	for i, p := range pipelines {
+		cfg.progress(name, "plan %d/%d %s (before bump)", i+1, len(pipelines), p)
 		plan, perr := ops.Plan(sparkwingDir, p)
 		if perr != nil {
 			restore()
@@ -127,6 +140,7 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 		before[p] = plan
 	}
 
+	cfg.progress(name, "bumping %s -> %s and tidying modules", pin, cfg.Target)
 	if err := ops.Bump(sparkwingDir, cfg.Target); err != nil {
 		restore()
 		return broken(v, "bump pin: "+err.Error(), cfg)
@@ -134,7 +148,8 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 
 	var diffs []PipelineDiff
 	allIdentical := true
-	for _, p := range pipelines {
+	for i, p := range pipelines {
+		cfg.progress(name, "plan %d/%d %s (after bump)", i+1, len(pipelines), p)
 		after, perr := ops.Plan(sparkwingDir, p)
 		if perr != nil {
 			restore()
@@ -148,6 +163,7 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 	}
 
 	if cfg.Verify {
+		cfg.progress(name, "running pre-commit gate")
 		if err := ops.Verify(dir); err != nil {
 			restore()
 			return broken(v, "verify: "+err.Error(), cfg)
@@ -165,6 +181,7 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 	}
 
 	if cfg.Apply {
+		cfg.progress(name, "committing")
 		if err := ops.Commit(dir, commitMessage(cfg.Target)); err != nil {
 			restore()
 			return broken(v, "commit: "+err.Error(), cfg)
@@ -178,17 +195,45 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 
 func UpdateFleet(ops Ops, repos []Repo, cfg UpdateConfig) []Verdict {
 	out := make([]Verdict, 0, len(repos))
-	for _, r := range repos {
+	for i, r := range repos {
+		scoped := cfg
+		if cfg.Progress != nil {
+			label := fmt.Sprintf("[%d/%d] %s", i+1, len(repos), r.Name)
+			scoped.Progress = func(_, msg string) { cfg.Progress(label, msg) }
+		}
+		var v Verdict
 		if r.Primary == "" {
-			out = append(out, Verdict{
+			v = Verdict{
 				Repo: r.Name, Kind: VerdictSkippedMissing,
 				Detail: "observed in runs but no local checkout registered",
-			})
-			continue
+			}
+		} else {
+			v = UpdateRepo(ops, r.Primary, r.Name, scoped)
 		}
-		out = append(out, UpdateRepo(ops, r.Primary, r.Name, cfg))
+		scoped.progress(r.Name, "%s", verdictLine(v))
+		out = append(out, v)
 	}
 	return out
+}
+
+func verdictLine(v Verdict) string {
+	line := string(v.Kind)
+	if v.Kind == VerdictPlanDiffers {
+		n := 0
+		for _, d := range v.Diffs {
+			if !d.Diff.Identical {
+				n++
+			}
+		}
+		line += fmt.Sprintf(" (%d pipeline(s) changed shape)", n)
+	}
+	if v.Detail != "" {
+		line += ": " + v.Detail
+	}
+	if v.Err != "" {
+		line += ": " + v.Err
+	}
+	return line
 }
 
 func broken(v Verdict, msg string, cfg UpdateConfig) Verdict {

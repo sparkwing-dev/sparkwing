@@ -2,6 +2,7 @@ package repos
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -178,5 +179,59 @@ func TestUpdateRepo_VerifyFailureIsBroken(t *testing.T) {
 	}
 	if !f.restored {
 		t.Error("verify failure should restore")
+	}
+}
+
+func TestUpdateRepo_ReportsEachStep(t *testing.T) {
+	f := &fakeOps{
+		pin:        "v0.15.6",
+		pipelines:  []string{"a", "b"},
+		planBefore: map[string]Plan{"a": planWith("x"), "b": planWith("y")},
+		planAfter:  map[string]Plan{"a": planWith("x"), "b": planWith("y")},
+	}
+	var got []string
+	cfg := UpdateConfig{Target: "v0.15.8", Verify: true, Apply: true, Progress: func(repo, msg string) {
+		got = append(got, repo+": "+msg)
+	}}
+	if v := UpdateRepo(f, "/repo", "my-app", cfg); v.Kind != VerdictClean {
+		t.Fatalf("kind = %s, want clean", v.Kind)
+	}
+	want := []string{
+		"my-app: listing pipelines",
+		"my-app: plan 1/2 a (before bump)",
+		"my-app: plan 2/2 b (before bump)",
+		"my-app: bumping v0.15.6 -> v0.15.8 and tidying modules",
+		"my-app: plan 1/2 a (after bump)",
+		"my-app: plan 2/2 b (after bump)",
+		"my-app: running pre-commit gate",
+		"my-app: committing",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("progress =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestUpdateFleet_NumbersReposAndReportsVerdicts(t *testing.T) {
+	f := &fakeOps{pin: "v0.15.8"}
+	fleet := []Repo{{Name: "ghost"}, {Name: "same", Primary: "/same"}}
+	var got []string
+	cfg := UpdateConfig{Target: "v0.15.8", Progress: func(repo, msg string) {
+		got = append(got, repo+": "+msg)
+	}}
+	UpdateFleet(f, fleet, cfg)
+	want := []string{
+		"[1/2] ghost: skipped-missing: observed in runs but no local checkout registered",
+		"[2/2] same: up-to-date",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("progress =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestUpdateFleet_SilentWithoutProgress(t *testing.T) {
+	f := &fakeOps{pin: "v0.15.8"}
+	vs := UpdateFleet(f, []Repo{{Name: "same", Primary: "/same"}}, UpdateConfig{Target: "v0.15.8"})
+	if len(vs) != 1 || vs[0].Kind != VerdictUpToDate {
+		t.Fatalf("verdicts = %+v", vs)
 	}
 }
