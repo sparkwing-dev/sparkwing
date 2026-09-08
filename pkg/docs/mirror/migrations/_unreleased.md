@@ -5,6 +5,17 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## Lifecycle output
+
+Dashboard and run-consumer start, status, and stop commands now emit compact
+JSON when stdout is piped. `pipeline hooks status` emits hook records followed
+by a summary. Existing status exit codes are unchanged.
+
+Use `--output pretty` when a script needs the previous readable report.
+Use `--output plain` for one `running` or `stopped` value from a service command,
+or one hook name per line from hook status. JSON consumers should select the
+`state` field for services and `kind: hook` records for individual hooks.
+
 ## `runs submit` becomes `run --sw-detached`
 
 - **Before:** `sparkwing runs submit [submit flags] <pipeline> [pipeline

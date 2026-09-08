@@ -342,6 +342,7 @@ before it acknowledges a run.
 
 | Flag | Description |
 |---|---|
+| `-o, --output pretty|json|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--idle DUR` | Exit after this long with no work (default 5m) |
 | `--claim-lease DUR` | Lease stamped on each claimed run, renewed while it executes (default 3m) |
@@ -367,6 +368,7 @@ when no consumer is running, so it composes in shell conditions.
 
 | Flag | Description |
 |---|---|
+| `-o, --output pretty|json|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 
 ### Examples
@@ -390,6 +392,7 @@ To cancel a queued run instead, use 'sparkwing runs cancel'.
 
 | Flag | Description |
 |---|---|
+| `-o, --output pretty|json|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 
 ### Examples

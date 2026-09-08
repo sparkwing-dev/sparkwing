@@ -186,7 +186,7 @@ func TestHooksCommands_InstallStatusAndUninstallDriveTheWholeChain(t *testing.T)
 	}
 
 	out = captureStdout(t, func() {
-		if err := runHooksStatus([]string{"--repo", f.repo}); err != nil {
+		if err := runHooksStatus([]string{"--repo", f.repo, "--output", "pretty"}); err != nil {
 			t.Fatalf("hooks status: %v", err)
 		}
 	})
@@ -338,7 +338,7 @@ func TestHooksStatus_LocalShadowRemedyReachesFiringHooks(t *testing.T) {
 	})
 
 	out := captureStdout(t, func() {
-		if err := statusHooks(f.tryGit, f.repo); err != nil {
+		if err := statusHooks(f.tryGit, f.repo, "pretty"); err != nil {
 			t.Fatalf("status: %v", err)
 		}
 	})

@@ -49,6 +49,14 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **cli (Breaking):** Dashboard and consumer lifecycle commands emit compact
+  JSON when piped. `pipeline hooks status` emits hook records and a summary.
+  `--output pretty` keeps the readable report; plain mode prints a service
+  state or hook names. Status exit codes are unchanged. See the
+  [migration guide](docs/migrations/_unreleased.md#lifecycle-output).
+
 ### Added
 
 - **sdk:** `sparkwing/cleanup`.`Register` lets a sparks library guarantee a

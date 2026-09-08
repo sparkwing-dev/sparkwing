@@ -514,7 +514,7 @@ func TestRunsConsumer_StatusAndStopReportTheResidentProcess(t *testing.T) {
 
 	e.mustRun("runs", "consumer", "start", "--home", e.home)
 	out := e.mustRun("runs", "consumer", "status", "--home", e.home)
-	if !strings.Contains(out, "trigger consumer running") {
+	if records := decodeOutputRecords(t, []byte(out)); len(records) != 1 || records[0]["service"] != "consumer" || records[0]["state"] != "running" {
 		t.Fatalf("status did not report a running consumer:\n%s", out)
 	}
 

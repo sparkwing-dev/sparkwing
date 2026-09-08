@@ -218,7 +218,7 @@ func TestStatusHooks_FailsWhenTheConfigNoLongerLoads(t *testing.T) {
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), unloadableProject)
 
 	var err error
-	out := captureStdout(t, func() { err = statusHooks(f.tryGit, f.repo) })
+	out := captureStdout(t, func() { err = statusHooks(f.tryGit, f.repo, "pretty") })
 	if err == nil {
 		t.Fatalf("status reported an unloadable repo as an ungated but healthy one:\n%s", out)
 	}

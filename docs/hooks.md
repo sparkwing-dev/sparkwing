@@ -145,6 +145,13 @@ sparkwing pipeline hooks survey      # report which registered repos git gates a
 sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 ```
 
+`status` emits one `kind: hook` record per installed hook when piped, followed
+by a `kind: summary` record with the repository, installed count, gate state,
+and silenced global hooks. Hook records contain the name, pipelines, and
+whether the hook calls the global hook. `--output plain` prints only hook
+names. `--output pretty` keeps the readable report and repair instructions.
+
+
 Hooks installed without `--profile` prove and run their pipelines with
 `--sw-local-only`, even when the project selects a default profile. Pass
 `--profile NAME` to install a hook that uses shared storage.
