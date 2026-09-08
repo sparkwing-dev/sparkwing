@@ -155,7 +155,7 @@ func (e *submitTestEnv) env() []string {
 	return append(base, e.extraEnv...)
 }
 
-func TestRunsSubmit_UsesEachSubmissionEnvironment(t *testing.T) {
+func TestRunDetached_UsesEachSubmissionEnvironment(t *testing.T) {
 	e := newSubmitTestEnv(t)
 	e.extraEnv = []string{"SPARKWING_SUBMIT_TEST_ENV=first"}
 	e.submit()
@@ -203,6 +203,13 @@ func (e *submitTestEnv) mustRun(args ...string) string {
 	return out
 }
 
+// detachArgs spells one detached launch: every sparkwing flag follows the
+// pipeline name, and SPARKWING_HOME in the test environment selects the home.
+func (e *submitTestEnv) detachArgs(pipeline string, extra ...string) []string {
+	args := []string{"run", pipeline, "--sw-detached", "--sw-cd", e.repoDir}
+	return append(args, extra...)
+}
+
 func (e *submitTestEnv) submit(extra ...string) submitResult {
 	e.t.Helper()
 	return e.submitWithArgs(extra, nil)
@@ -210,8 +217,7 @@ func (e *submitTestEnv) submit(extra ...string) submitResult {
 
 func (e *submitTestEnv) submitWithArgs(own, pipelineArgs []string) submitResult {
 	e.t.Helper()
-	args := append([]string{"runs", "submit", "-o", "json", "--home", e.home, "-C", e.repoDir}, own...)
-	args = append(args, "fixture")
+	args := append(e.detachArgs("fixture", "--sw-output", "json"), own...)
 	args = append(args, pipelineArgs...)
 	out, errOut, err := e.runStdout(args...)
 	if err != nil {
@@ -295,7 +301,7 @@ func waitUntil(t *testing.T, what string, timeout time.Duration, cond func() boo
 	}
 }
 
-func TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
+func TestRunDetached_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
 
@@ -390,15 +396,15 @@ func TestRunsRetry_HeadlessLocalQueueExecutesFailedAndFullScopes(t *testing.T) {
 	}
 }
 
-func TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
+func TestRunDetached_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
 
-	first := e.submit("--idempotency-key", "deploy-once")
+	first := e.submit("--sw-idempotency-key", "deploy-once")
 	if first.AlreadySubmitted {
 		t.Fatal("the first submission reported itself as a duplicate")
 	}
-	second := e.submit("--idempotency-key", "deploy-once")
+	second := e.submit("--sw-idempotency-key", "deploy-once")
 	if second.RunID != first.RunID {
 		t.Fatalf("resubmission produced %q, want the original %q", second.RunID, first.RunID)
 	}
@@ -415,11 +421,11 @@ func TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 	}
 }
 
-func TestRunsSubmit_DistinctKeysAreDistinctRuns(t *testing.T) {
+func TestRunDetached_DistinctKeysAreDistinctRuns(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
-	a := e.submit("--idempotency-key", "a")
-	b := e.submit("--idempotency-key", "b")
+	a := e.submit("--sw-idempotency-key", "a")
+	b := e.submit("--sw-idempotency-key", "b")
 	if a.RunID == b.RunID {
 		t.Fatalf("distinct keys collapsed onto one run %q", a.RunID)
 	}
@@ -428,11 +434,11 @@ func TestRunsSubmit_DistinctKeysAreDistinctRuns(t *testing.T) {
 	}
 }
 
-func TestRunsSubmit_RequestIDDoesNotDeduplicate(t *testing.T) {
+func TestRunDetached_RequestIDDoesNotDeduplicate(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
-	a := e.submit("--request-id", "trace-1")
-	b := e.submit("--request-id", "trace-1")
+	a := e.submit("--sw-request-id", "trace-1")
+	b := e.submit("--sw-request-id", "trace-1")
 	if a.RunID == b.RunID {
 		t.Fatal("a repeated request id deduplicated the submission")
 	}
@@ -451,7 +457,7 @@ func TestRunsSubmit_RequestIDDoesNotDeduplicate(t *testing.T) {
 	}
 }
 
-func TestRunsSubmit_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
+func TestRunDetached_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
 
@@ -564,46 +570,20 @@ func TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement(t *testing.T)
 	}
 }
 
-func TestRunsSubmit_RefusesASubmitFlagPlacedAfterThePipelineName(t *testing.T) {
+func TestRunDetached_SeparatorHandsAConflictingFlagToThePipeline(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
-	for _, flag := range []string{"--idempotency-key", "--sw-ref"} {
-		out, err := e.run("runs", "submit", "--home", e.home, "-C", e.repoDir,
-			"fixture", flag, "misplaced")
-		if err == nil {
-			t.Fatalf("a misplaced %s was accepted:\n%s", flag, out)
-		}
-		for _, want := range []string{flag, "before the pipeline name", "--"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("refusal missing %q:\n%s", want, out)
-			}
-		}
-	}
-	out, err := e.run("runs", "submit", "--home", e.home, "-C", e.repoDir,
-		"fixture", "--idempotency-key", "misplaced")
-	if err == nil {
-		t.Fatalf("a misplaced --idempotency-key was accepted:\n%s", out)
-	}
-	triggers, terr := e.store().ListTriggers(context.Background(), store.TriggerFilter{Limit: 10})
-	if terr != nil {
-		t.Fatal(terr)
-	}
-	if len(triggers) != 0 {
-		t.Fatalf("a refused submission still queued %d triggers", len(triggers))
-	}
-}
-
-func TestRunsSubmit_SeparatorHandsAConflictingFlagToThePipeline(t *testing.T) {
-	t.Parallel()
-	e := newSubmitTestEnv(t)
-	out := e.mustRun("runs", "submit", "-o", "json", "--home", e.home, "-C", e.repoDir,
-		"fixture", "--", "--request-id", "belongs-to-the-pipeline")
+	out := e.mustRun(append(e.detachArgs("fixture", "--sw-output", "json"),
+		"--", "--request-id", "belongs-to-the-pipeline")...)
 	var r submitResult
 	if err := json.Unmarshal([]byte(out), &r); err != nil {
 		t.Fatalf("decode ack: %v\n%s", err, out)
 	}
 	if r.RequestID != "" {
-		t.Fatalf("a pipeline argument after `--` was read as submit's own request id: %q", r.RequestID)
+		t.Fatalf("a pipeline argument after `--` was read as the launch's own request id: %q", r.RequestID)
+	}
+	if _, ok := trigArgsHas(t, e, r.RunID, ""); ok {
+		t.Fatal("the bare `--` separator was recorded as an empty-named pipeline argument")
 	}
 	trig, err := e.store().GetTrigger(context.Background(), r.RunID)
 	if err != nil {
@@ -614,10 +594,10 @@ func TestRunsSubmit_SeparatorHandsAConflictingFlagToThePipeline(t *testing.T) {
 	}
 }
 
-func TestRunsSubmit_RefusesAPipelineNothingDeclares(t *testing.T) {
+func TestRunDetached_RefusesAPipelineNothingDeclares(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
-	out, err := e.run("runs", "submit", "--home", e.home, "-C", e.repoDir, "no-such-pipeline")
+	out, err := e.run(e.detachArgs("no-such-pipeline")...)
 	if err == nil {
 		t.Fatalf("submitting an unknown pipeline succeeded:\n%s", out)
 	}
@@ -714,12 +694,12 @@ func (e *submitTestEnv) startsInMarker() int {
 	return n
 }
 
-func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
+func TestRunDetached_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
 	holdStarted := e.useBlockingFixture(t)
 
-	ack := e.submit("--consumer-claim-lease", "24s")
+	ack := e.submit("--sw-consumer-claim-lease", "24s")
 	waitUntil(t, "the dispatch to start executing", 120*time.Second, func() bool {
 		return e.startsInMarker() >= 1
 	})
@@ -822,7 +802,7 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 	}
 }
 
-func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
+func TestRunDetached_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
 	other := t.TempDir()
@@ -840,13 +820,13 @@ func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first := e.submit("--idempotency-key", "shared-key")
+	first := e.submit("--sw-idempotency-key", "shared-key")
 	if first.Pipeline != "fixture" {
 		t.Fatalf("first submission is pipeline %q", first.Pipeline)
 	}
 
-	out, errOut, rerr := e.runStdout("runs", "submit", "-o", "json", "--home", e.home,
-		"-C", other, "--idempotency-key", "shared-key", "beta")
+	out, errOut, rerr := e.runStdout("run", "beta", "--sw-detached", "--sw-cd", other,
+		"--sw-output", "json", "--sw-idempotency-key", "shared-key")
 	if rerr != nil {
 		t.Fatalf("submitting beta failed: %v\nstdout:\n%s\nstderr:\n%s", rerr, out, errOut)
 	}
@@ -865,13 +845,13 @@ func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 	}
 }
 
-func TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
+func TestRunDetached_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
-	e.submitWithArgs([]string{"--idempotency-key", "k"}, []string{"--env", "staging"})
+	e.submitWithArgs([]string{"--sw-idempotency-key", "k"}, []string{"--env", "staging"})
 
-	out, err := e.run("runs", "submit", "--home", e.home, "-C", e.repoDir,
-		"--idempotency-key", "k", "fixture", "--env", "production")
+	out, err := e.run(append(e.detachArgs("fixture"),
+		"--sw-idempotency-key", "k", "--env", "production")...)
 	if err == nil {
 		t.Fatalf("a key reused with different arguments was accepted:\n%s", out)
 	}
@@ -882,18 +862,18 @@ func TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
 	}
 }
 
-func TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
+func TestRunDetached_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
-	first := e.submit("--idempotency-key", "k")
+	first := e.submit("--sw-idempotency-key", "k")
 
 	st := e.store()
 	if err := st.FinishRun(context.Background(), first.RunID, "failed", "boom"); err != nil {
 		t.Fatal(err)
 	}
 
-	out, errOut, rerr := e.runStdout("runs", "submit", "-o", "json", "--home", e.home,
-		"-C", e.repoDir, "--idempotency-key", "k", "fixture")
+	out, errOut, rerr := e.runStdout(append(e.detachArgs("fixture", "--sw-output", "json"),
+		"--sw-idempotency-key", "k")...)
 	if rerr != nil {
 		t.Fatalf("resubmit failed: %v\nstdout:\n%s\nstderr:\n%s", rerr, out, errOut)
 	}
@@ -905,8 +885,8 @@ func TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 		t.Fatalf("duplicate ack status = %q, want failed", second.Status)
 	}
 
-	pretty := e.mustRun("runs", "submit", "-o", "pretty", "--home", e.home, "-C", e.repoDir,
-		"--idempotency-key", "k", "fixture")
+	pretty := e.mustRun(append(e.detachArgs("fixture", "--sw-output", "pretty"),
+		"--sw-idempotency-key", "k")...)
 	if !strings.Contains(pretty, "failed") {
 		t.Errorf("pretty duplicate ack hides the original's failure:\n%s", pretty)
 	}
@@ -915,7 +895,7 @@ func TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 	}
 }
 
-func TestRunsSubmit_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
+func TestRunDetached_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
 
@@ -987,14 +967,107 @@ func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
 	}
 }
 
-func TestRunsSubmit_RefIsNoLongerUndetachable(t *testing.T) {
+func TestRunDetached_RefAndPriorityAreCarried(t *testing.T) {
 	t.Parallel()
-	if err := refuseUndetachableFlags([]string{"--sw-ref", "main"}); err != nil {
-		t.Fatalf("--sw-ref is still refused as undetachable: %v", err)
+	if err := refuseForegroundOnlyFlags(runFlags{ref: "main", priority: "front", prioritySet: true}); err != nil {
+		t.Fatalf("--sw-ref/--sw-priority are carried on the trigger but were refused: %v", err)
 	}
 }
 
-func TestRunsSubmit_RepeatKeyAgainstADifferentTreeIsRefused(t *testing.T) {
+func TestRunDetached_RefusesAForegroundOnlyFlag(t *testing.T) {
+	t.Parallel()
+	e := newSubmitTestEnv(t)
+	out, err := e.run(append(e.detachArgs("fixture"), "--sw-dry-run")...)
+	if err == nil {
+		t.Fatalf("--sw-dry-run was accepted for a detached run:\n%s", out)
+	}
+	for _, want := range []string{"--sw-dry-run", "foreground"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("refusal missing %q:\n%s", want, out)
+		}
+	}
+	triggers, terr := e.store().ListTriggers(context.Background(), store.TriggerFilter{Limit: 10})
+	if terr != nil {
+		t.Fatal(terr)
+	}
+	if len(triggers) != 0 {
+		t.Fatalf("a refused launch still queued %d triggers", len(triggers))
+	}
+}
+
+func TestRun_RefusesADetachedOnlyFlagWithoutDetached(t *testing.T) {
+	t.Parallel()
+	e := newSubmitTestEnv(t)
+	for _, flag := range []string{
+		"--sw-idempotency-key", "--sw-request-id",
+		"--sw-consumer-idle", "--sw-consumer-claim-lease", "--sw-output",
+	} {
+		out, err := e.run("run", "fixture", "--sw-cd", e.repoDir, flag, "value")
+		if err == nil {
+			t.Errorf("%s was accepted without --sw-detached:\n%s", flag, out)
+			continue
+		}
+		for _, want := range []string{flag, "--sw-detached"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("refusal for %s missing %q:\n%s", flag, want, out)
+			}
+		}
+	}
+}
+
+func TestRunDetached_PublishesTheRunHandleFile(t *testing.T) {
+	t.Parallel()
+	e := newSubmitTestEnv(t)
+	handle := filepath.Join(t.TempDir(), "handle.json")
+
+	ack := e.submit("--sw-run-handle-file", handle)
+
+	body, err := os.ReadFile(handle)
+	if err != nil {
+		t.Fatalf("read published handle: %v", err)
+	}
+	var published orchestrator.RunHandle
+	if err := json.Unmarshal(body, &published); err != nil {
+		t.Fatalf("decode published handle: %v\n%s", err, body)
+	}
+	if published.RunID != ack.RunID || published.Pipeline != ack.Pipeline {
+		t.Fatalf("published handle = %+v, want the acknowledged run %s (%s)",
+			published, ack.RunID, ack.Pipeline)
+	}
+	if published.SchemaVersion != orchestrator.RunHandleSchemaVersion {
+		t.Errorf("published handle schema_version = %d, want %d",
+			published.SchemaVersion, orchestrator.RunHandleSchemaVersion)
+	}
+
+	out, rerr := e.run(append(e.detachArgs("fixture"), "--sw-run-handle-file", handle)...)
+	if rerr == nil {
+		t.Fatalf("a second launch overwrote an existing handle file:\n%s", out)
+	}
+}
+
+func TestRunsSubmit_IsNoLongerASubcommand(t *testing.T) {
+	t.Parallel()
+	e := newSubmitTestEnv(t)
+	out, err := e.run("runs", "submit", "fixture")
+	if err == nil {
+		t.Fatalf("`runs submit` still runs:\n%s", out)
+	}
+	if !strings.Contains(out, "unknown command") {
+		t.Fatalf("`runs submit` did not report an unknown subcommand:\n%s", out)
+	}
+}
+
+func trigArgsHas(t *testing.T, e *submitTestEnv, runID, key string) (string, bool) {
+	t.Helper()
+	trig, err := e.store().GetTrigger(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok := trig.Args[key]
+	return v, ok
+}
+
+func TestRunDetached_RepeatKeyAgainstADifferentTreeIsRefused(t *testing.T) {
 	t.Parallel()
 	const first, second = "aaaaaaaaaaaa", "bbbbbbbbbbbb"
 	cases := []struct {

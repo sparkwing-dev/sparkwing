@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	flag "github.com/spf13/pflag"
-
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -22,7 +20,11 @@ import (
 
 const SubmitRequestIDKey = "_SPARKWING_SUBMIT_REQUEST_ID"
 
+// submitTriggerSourcePrefix keeps the value written before `runs submit` folded
+// into `run --sw-detached`, so stored rows and `runs find` queries still match.
 const submitTriggerSourcePrefix = "runs-submit"
+
+const detachedPath = "run --sw-detached"
 
 type submitResult struct {
 	orchestrator.RunHandle
@@ -36,91 +38,97 @@ type submitResult struct {
 	ConsumerStarted string `json:"consumer_started,omitempty"`
 }
 
-func runRunsSubmit(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet(cmdJobsSubmit.Path, flag.ContinueOnError)
-	idempotencyKey := fs.String("idempotency-key", "",
-		"deduplication token: a repeat submission carrying this key returns the original run instead of starting a second one")
-	requestID := fs.String("request-id", "",
-		"tracing identifier recorded on the run; never affects deduplication")
-	ref := fs.String("sw-ref", "",
-		"submit a worktree of REF (branch/tag/SHA); the consumer executes it and removes it when the run ends")
-	priority := fs.String("sw-priority", "",
-		"local admission priority: an integer, or front/back, resolved against the queue when the consumer launches the run")
-	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
-	changeDir := fs.StringP("cd", "C", "", "resolve the pipeline from this directory instead of the current one")
-	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
-
-	idle := fs.Duration("consumer-idle", 0,
-		"if this starts a consumer: how long it stays alive with no work (default 5m)")
-	claimLease := fs.Duration("consumer-claim-lease", 0,
-		"if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m)")
-
-	fs.SetInterspersed(false)
-
-	own, forPipeline := splitAtSeparator(args)
-	if err := refuseUndetachableFlags(own); err != nil {
+// runDetached persists PIPELINE as a trigger, hands it to this home's resident
+// consumer, and prints the run handle. Nothing about the run is bound to this
+// process afterward.
+func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthrough []string) error {
+	if err := refuseForegroundOnlyFlags(wf); err != nil {
 		return err
 	}
-	if err := parseAndCheck(cmdJobsSubmit, fs, own); err != nil {
-		if errors.Is(err, errHelpRequested) {
-			return nil
-		}
+	format, err := resolveDetachedOutput(wf.outputFormat)
+	if err != nil {
 		return err
 	}
-	rest := fs.Args()
-	if len(rest) == 0 {
-		return fmt.Errorf("%s: a pipeline name is required (see `sparkwing pipeline list`)", cmdJobsSubmit.Path)
-	}
-	pipeline := rest[0]
-	if err := refuseMisplacedSubmitFlags(rest[1:]); err != nil {
+	idle, err := parseConsumerDuration("--sw-consumer-idle", wf.consumerIdle)
+	if err != nil {
 		return err
 	}
-	passthrough := append(append([]string{}, rest[1:]...), forPipeline...)
-	format, err := resolveTTYAwareOutput(*outFmt, cmdJobsSubmit.Path)
+	claimLease, err := parseConsumerDuration("--sw-consumer-claim-lease", wf.consumerClaimLease)
 	if err != nil {
 		return err
 	}
 
-	repoDir, err := resolveSubmitRepo(pipeline, *changeDir)
+	//nolint:contextcheck // The repo registry read predates a context-aware API.
+	repoDir, err := resolveSubmitRepo(pipelineName, wf.changeDir)
 	if err != nil {
 		return err
 	}
 
-	submitPriority := ""
-	if strings.TrimSpace(*priority) != "" {
-		submitPriority, err = validatePriorityFlag(*priority)
+	priority := ""
+	if strings.TrimSpace(wf.priority) != "" {
+		priority, err = validatePriorityFlag(wf.priority)
 		if err != nil {
 			return err
 		}
 	}
 
-	paths, err := submitPaths(*home)
+	handlePath := ""
+	if wf.runHandleFile != "" {
+		handlePath, err = filepath.Abs(wf.runHandleFile)
+		if err != nil {
+			return fmt.Errorf("--sw-run-handle-file %s: %w", wf.runHandleFile, err)
+		}
+		release, rerr := orchestrator.ReserveRunHandle(handlePath)
+		if rerr != nil {
+			return fmt.Errorf("--sw-run-handle-file %s: %w", wf.runHandleFile, rerr)
+		}
+		defer release()
+	}
+
+	// A detached launch takes no home flag: SPARKWING_HOME selects the home, and
+	// --sw-isolated-home is refused above.
+	paths, err := submitPaths("")
 	if err != nil {
 		return err
 	}
 	if err := paths.EnsureRoot(); err != nil {
 		return fmt.Errorf("ensure %s: %w", paths.Root, err)
 	}
+	//nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
 	st, err := store.Open(paths.StateDB())
 	if err != nil {
 		return fmt.Errorf("open %s: %w", paths.StateDB(), err)
 	}
-	defer func() { _ = st.Close() }()
+	defer func() {
+		if cerr := st.Close(); cerr != nil {
+			slog.Default().Warn("close runs store", "path", paths.StateDB(), "error", cerr)
+		}
+	}()
 
 	result, err := persistSubmission(ctx, st, paths, submission{
-		Pipeline:       pipeline,
+		Pipeline:       pipelineName,
 		Args:           collectPipelineArgs(passthrough),
 		RepoDir:        repoDir,
-		Ref:            strings.TrimSpace(*ref),
-		Priority:       submitPriority,
-		IdempotencyKey: strings.TrimSpace(*idempotencyKey),
-		RequestID:      strings.TrimSpace(*requestID),
+		Ref:            strings.TrimSpace(wf.ref),
+		Priority:       priority,
+		IdempotencyKey: strings.TrimSpace(wf.idempotencyKey),
+		RequestID:      strings.TrimSpace(wf.requestID),
 	})
 	if err != nil {
 		return err
 	}
 
-	if cerr := ensureTriggerConsumer(paths.Root, *idle, *claimLease); cerr != nil {
+	// safety: published before the consumer can start the run, so a caller that
+	// waits on the file never races the run it describes.
+	if handlePath != "" {
+		if perr := orchestrator.PublishRunHandle(handlePath, result.RunHandle); perr != nil {
+			return fmt.Errorf("run %s is persisted but its handle could not be published to %s: %w",
+				result.RunID, wf.runHandleFile, perr)
+		}
+	}
+
+	//nolint:contextcheck // The resident consumer lifecycle predates a context-aware process-table API.
+	if cerr := ensureTriggerConsumer(paths.Root, idle, claimLease); cerr != nil {
 		return fmt.Errorf("run %s is persisted but no consumer could be started to execute it: %w\n"+
 			"Start one with `sparkwing runs consumer start`; the run is queued and will execute when it comes up",
 			result.RunID, cerr)
@@ -133,6 +141,32 @@ func runRunsSubmit(ctx context.Context, args []string) error {
 		}
 	}
 	return emitSubmitResult(result, format)
+}
+
+// resolveDetachedOutput names --sw-output rather than the -o/--output the
+// shared resolver assumes, which a detached launch does not have.
+func resolveDetachedOutput(v string) (string, error) {
+	switch v {
+	case "", "pretty", "json", "plain":
+	default:
+		return "", fmt.Errorf("%s: --sw-output must be one of pretty|json|plain, got %q", detachedPath, v)
+	}
+	return resolveTTYAwareOutput(v, detachedPath)
+}
+
+func parseConsumerDuration(flag, value string) (time.Duration, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("%s %q: expected a duration such as 5m or 90s", flag, value)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("%s %q: must not be negative", flag, value)
+	}
+	return d, nil
 }
 
 type submission struct {
@@ -235,7 +269,9 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	}
 
 	if err := st.CreateTrigger(ctx, trigger); err != nil {
-		_ = orchestrator.DiscardSubmissionEnvironment(paths.Root, runID)
+		if derr := orchestrator.DiscardSubmissionEnvironment(paths.Root, runID); derr != nil {
+			slog.Default().Warn("discard submission environment", "run_id", runID, "error", derr)
+		}
 		discardRefWorktree(ctx, paths, worktree)
 
 		if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
@@ -291,7 +327,7 @@ func checkRefMatchesOriginal(existing *store.Trigger, sub submission, rev orches
 		return nil
 	}
 	return fmt.Errorf(
-		"runs submit: idempotency key %q already ran pipeline %q against a different tree, "+
+		"run --sw-detached: idempotency key %q already ran pipeline %q against a different tree, "+
 			"so answering this submission with that run would report a verdict for code it never executed.\n"+
 			"  original: %s\n"+
 			"  this one: %s\n"+
@@ -331,7 +367,7 @@ func existingSubmissionResult(
 	}
 	if diff := describeArgsMismatch(existing.Args, sub.Args); diff != "" {
 		return submitResult{}, fmt.Errorf(
-			"runs submit: idempotency key %q was already used for pipeline %q with different arguments, "+
+			"run --sw-detached: idempotency key %q was already used for pipeline %q with different arguments, "+
 				"so this is a different request rather than a retry of that one.\n"+
 				"  %s\n"+
 				"Original run: %s\n"+
@@ -427,13 +463,13 @@ func resolveSubmitRepo(pipeline, changeDir string) (string, error) {
 	}
 	if errors.Is(err, repos.ErrNotFound) {
 		return "", fmt.Errorf(
-			"runs submit: no project here or in the repo registry declares a pipeline named %q.\n"+
+			"run --sw-detached: no project here or in the repo registry declares a pipeline named %q.\n"+
 				"Run it from the checkout that defines it, pass -C <path> to point at that checkout, "+
 				"or register it with `sparkwing configure xrepo add <path>`.\n"+
 				"A registered checkout whose pipeline binary has never been built is not searched; "+
 				"run `sparkwing pipeline list` there once first", pipeline)
 	}
-	return "", fmt.Errorf("runs submit: resolve %q: %w", pipeline, err)
+	return "", fmt.Errorf("run --sw-detached: resolve %q: %w", pipeline, err)
 }
 
 func localRepoDeclaring(start, pipeline string) (string, bool) {
@@ -454,80 +490,62 @@ func localRepoDeclaring(start, pipeline string) (string, bool) {
 	return "", false
 }
 
-var undetachableFlags = map[string]string{
-	"--sw-index": "an index binding names a file in your filesystem that sparkwing neither creates nor can " +
-		"reproduce, so a detached run would read whatever that path holds when it starts, or nothing. " +
-		"Run it in the foreground with `sparkwing run --sw-index`",
-	"--sw-dry-run": "a dry run finishes in seconds and reports to your terminal; submit it with `sparkwing run --sw-dry-run`",
+// foregroundOnlyReasons says, per flag, why a detached run cannot honor it.
+// Each is refused rather than ignored: a run that quietly dropped one would
+// report a verdict for work the operator did not ask for.
+func foregroundOnlyReasons(wf runFlags) []struct {
+	name   string
+	set    bool
+	reason string
+} {
+	return []struct {
+		name   string
+		set    bool
+		reason string
+	}{
+		{"--sw-index", wf.index != "", "an index binding names a file in your filesystem that sparkwing neither creates nor can " +
+			"reproduce, so a detached run would read whatever that path holds when it starts, or nothing. " +
+			"Run it in the foreground with `sparkwing run --sw-index`"},
+		{"--sw-dry-run", wf.dryRun, "a dry run finishes in seconds and reports to your terminal; run it in the foreground with `sparkwing run --sw-dry-run`"},
 
-	"--profile": "the resident consumer executes against this home's local store, " +
-		"so a profile's backends would not receive the run; run profile-backed runs in the foreground",
+		{"--profile", wf.profile != "", "the resident consumer executes against this home's local store, " +
+			"so a profile's backends would not receive the run; run profile-backed runs in the foreground"},
 
-	"--sw-start-at":   "step-window selection is not carried on the trigger yet; run it in the foreground",
-	"--sw-stop-at":    "step-window selection is not carried on the trigger yet; run it in the foreground",
-	"--sw-only":       "job filtering is not carried on the trigger yet; run it in the foreground",
-	"--sw-no-cache":   "cache-read suppression is not carried on the trigger yet; run it in the foreground",
-	"--sw-mode":       "execution mode is not carried on the trigger yet; run it in the foreground",
-	"--sw-workers":    "worker capping is not carried on the trigger yet; run it in the foreground",
-	"--sw-allow":      "risk authorization is not carried on the trigger yet; run it in the foreground",
-	"--sw-local-only": "backend overrides are not carried on the trigger yet; run it in the foreground",
-	"--sw-secrets":    "secret-profile selection is not carried on the trigger yet; run it in the foreground",
-	"--sw-isolated-home": "the resident consumer executes against this home's store and daemon, " +
-		"so a home of the run's own would not be the one it uses; run it in the foreground with `sparkwing run --sw-isolated-home`",
+		{"--sw-start-at", wf.startAt != "", "step-window selection is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-stop-at", wf.stopAt != "", "step-window selection is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-only", wf.only != "", "job filtering is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-no-cache", wf.noCache, "cache-read suppression is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-mode", wf.mode != "", "execution mode is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-workers", wf.workers > 0, "worker capping is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-allow", len(wf.allow) > 0, "risk authorization is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-local-only", wf.localOnly, "backend overrides are not carried on the trigger yet; run it in the foreground"},
+		{"--sw-secrets", wf.secrets != "", "secret-profile selection is not carried on the trigger yet; run it in the foreground"},
+		{"--sw-no-update", wf.noUpdate, "the consumer compiles the run, and the flag is not carried on the trigger; " +
+			"set SPARKWING_NO_UPDATE=1 in this shell instead, which the submission environment snapshot carries, " +
+			"or run it in the foreground"},
+		{"--sw-isolated-home", wf.isolatedHome != "", "the resident consumer executes against this home's store and daemon, " +
+			"so a home of the run's own would not be the one it uses; run it in the foreground with `sparkwing run --sw-isolated-home`"},
+		{"--sw-fleet", wf.fleet, "enrolled helpers execute under the lifetime of the coordinating foreground process, " +
+			"which a detached run does not have; run it in the foreground with `sparkwing run --sw-fleet`"},
+	}
 }
 
-var submitOwnedFlags = map[string]string{
-	"--idempotency-key": "",
-	"--sw-ref":          "",
-	"--sw-priority":     "",
-	"--request-id":      "",
-	"--home":            "",
-	"--consumer-idle":   "",
-	"--cd":              "",
-	"-C":                "",
-	"--output":          "",
-	"-o":                "",
-}
-
-func refuseMisplacedSubmitFlags(passthrough []string) error {
-	for _, arg := range passthrough {
-		name := arg
-		if eq := strings.IndexByte(name, '='); eq >= 0 {
-			name = name[:eq]
-		}
-		if _, mine := submitOwnedFlags[name]; !mine {
+func refuseForegroundOnlyFlags(wf runFlags) error {
+	for _, f := range foregroundOnlyReasons(wf) {
+		if !f.set {
 			continue
 		}
-		return fmt.Errorf(
-			"runs submit: %s is a flag of `runs submit`, but it appears after the pipeline name, "+
-				"where every argument belongs to the pipeline.\n"+
-				"Move it before the pipeline name:\n"+
-				"  sparkwing runs submit %s <pipeline> [pipeline-flags...]\n"+
-				"If the pipeline really declares its own %s, separate the two with `--`:\n"+
-				"  sparkwing runs submit <pipeline> -- %s <pipeline-args>",
-			name, name, name, name)
+		return fmt.Errorf("%s: %s cannot be honored by a detached run: %s", detachedPath, f.name, f.reason)
 	}
 	return nil
 }
 
-func splitAtSeparator(args []string) (own, forPipeline []string) {
-	for i, a := range args {
-		if a == "--" {
-			return args[:i], args[i+1:]
+func refuseDetachedOnlyFlags(wf runFlags) error {
+	for _, f := range wf.detachedOnlyFlags() {
+		if f.value == "" {
+			continue
 		}
-	}
-	return args, nil
-}
-
-func refuseUndetachableFlags(passthrough []string) error {
-	for _, arg := range passthrough {
-		name := arg
-		if eq := strings.IndexByte(name, '='); eq >= 0 {
-			name = name[:eq]
-		}
-		if reason, bad := undetachableFlags[name]; bad {
-			return fmt.Errorf("runs submit: %s cannot be honored by a detached run: %s", name, reason)
-		}
+		return fmt.Errorf("run: %s is read only by a detached launch; add --sw-detached, or drop the flag", f.name)
 	}
 	return nil
 }
@@ -576,7 +594,7 @@ func emitSubmitResult(r submitResult, format string) error {
 		if r.AlreadySubmitted && isTerminalRunStatus(r.Status) {
 			fmt.Fprintf(os.Stdout,
 				"  note:   this run already finished (%s); nothing new was queued. "+
-					"Use a different --idempotency-key to run it again.\n", r.Status)
+					"Use a different --sw-idempotency-key to run it again.\n", r.Status)
 		}
 		return nil
 	}

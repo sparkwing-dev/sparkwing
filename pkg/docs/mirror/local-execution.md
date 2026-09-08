@@ -107,15 +107,15 @@ local copy for automated workers that fire off many runs.
 
 See [native-mode.md](native-mode.md) for the full local-mode design.
 
-### Submitting a run and walking away
+### Detaching a run so it outlives the terminal
 
 `sparkwing run` executes in your terminal: close it and the run dies
 with it. When the work outlasts the session you are willing to hold
 open -- a long deploy over ssh, a nightly job kicked off by hand, an
-agent that must not block -- submit it instead:
+agent that must not block -- add `--sw-detached`:
 
 ```bash
-$ sparkwing runs submit nightly-report
+$ sparkwing run nightly-report --sw-detached
 run run-20260811-140322-1f2e3d4a submitted (nightly-report)
   logs:   ~/.sparkwing/runs/run-20260811-140322-1f2e3d4a
   follow: sparkwing runs logs --run run-20260811-140322-1f2e3d4a --follow
@@ -131,30 +131,28 @@ the terminal, drop the ssh connection, log out: the run keeps going, and
 same rule as the `run_start` receipt: present only when the directory
 exists, never a plausible-looking path to nothing.
 
-For scripting, `-o json` gives `{run_id, log_path, ...}` and `-o plain`
-gives the bare id:
+For scripting, `--sw-output json` gives `{run_id, log_path, ...}` and
+`--sw-output plain` gives the bare id:
 
 ```bash
-RUN=$(sparkwing runs submit -o plain build)
+RUN=$(sparkwing run build --sw-detached --sw-output plain)
 sparkwing runs wait --run "$RUN"
 ```
 
-Everything after the pipeline name is the pipeline's own argument list,
-so submit's flags go **before** it:
+Sparkwing's own flags all carry the `--sw-` prefix and all sit after the
+pipeline name, exactly as they do for a foreground run. Anything else
+after the pipeline name is the pipeline's own argument list, so the two
+never collide:
 
 ```bash
-sparkwing runs submit --idempotency-key k deploy --env staging
+sparkwing run deploy --sw-detached --sw-idempotency-key k --env staging
 ```
 
-A submit flag typed after the pipeline name is refused rather than
-quietly passed through as a pipeline argument -- silently accepting
-`--idempotency-key` there would leave a caller believing its retry was
-deduplicated when it was not. If a pipeline genuinely declares a flag by
-the same name, `--` ends submit's arguments:
-
-```bash
-sparkwing runs submit deploy -- --request-id its-own
-```
+Four flags are read only by a detached launch and are refused without
+`--sw-detached` rather than silently ignored: `--sw-idempotency-key`,
+`--sw-request-id`, `--sw-consumer-idle`, and `--sw-consumer-claim-lease`.
+`--sw-output` selects the acknowledgment's format and is likewise
+detached-only.
 
 #### Making a retry safe
 
@@ -163,37 +161,41 @@ was killed after the command left your keyboard -- you cannot tell
 whether the run was created. Pass `--idempotency-key` and stop caring:
 
 ```bash
-sparkwing runs submit deploy --idempotency-key deploy-2026-08-11-a
+sparkwing run deploy --sw-detached --sw-idempotency-key deploy-2026-08-11-a
 ```
 
-A second submission carrying a key an earlier one used returns the
+A second launch carrying a key an earlier one used returns the
 *original* run id, marked `already submitted`, and creates nothing. The
 constraint is enforced by the runs store, not by a check-then-write in
 the CLI, so two callers racing with one key still produce one run.
 
-`--request-id` is a separate field with a separate job: it is recorded on
-the run for tracing and **never** affects deduplication. Use a fresh
+`--sw-request-id` is a separate field with a separate job: it is recorded
+on the run for tracing and **never** affects deduplication. Use a fresh
 request id per attempt and a stable idempotency key per intent.
 
-#### What submission cannot do
+#### What a detached run cannot do
 
 Flags that change what a run *does* but cannot survive detachment are
 refused with the reason rather than silently ignored: `--sw-index`
-(the index binding is a live path the submitting process holds open),
+(the index binding is a live path the launching process holds open),
 `--sw-dry-run`, `--sw-start-at`, `--sw-stop-at`, `--sw-only`,
 `--sw-no-cache`, `--sw-mode`, `--sw-workers`, `--sw-allow`,
-`--sw-local-only`, `--sw-secrets`, and `--profile`. Run those in the
-foreground with `sparkwing run`. Everything else after the pipeline name
-is passed to the pipeline as its own arguments.
+`--sw-local-only`, `--sw-secrets`, `--sw-no-update`, `--sw-isolated-home`,
+`--sw-fleet`, and `--profile`. Run those in the foreground with
+`sparkwing run`. Everything else after the pipeline name is passed to the
+pipeline as its own arguments.
 
-`--sw-ref` is the exception. Submission resolves the ref to a commit, builds
-the worktree, and records it as the run's checkout, so the run executes that
-commit even if the ref moves before a consumer claims it, and the tree belongs
-to the consumer rather than to the submitting shell. The consumer removes it
-when the run reaches a terminal state, and a consumer reclaims any tree an
-earlier one died holding as it starts.
+`--sw-ref` and `--sw-priority` are the exceptions, because both ride on
+the trigger. A detached launch resolves the ref to a commit, builds the
+worktree, and records it as the run's checkout, so the run executes that
+commit even if the ref moves before a consumer claims it, and the tree
+belongs to the consumer rather than to the launching shell. The consumer
+removes it when the run reaches a terminal state, and a consumer reclaims
+any tree an earlier one died holding as it starts. `--sw-priority` stays
+unresolved on the trigger, so `front` and `back` are measured against the
+queue the run actually joins when the consumer launches it.
 
-Submission is local-only. To hand a run to a cluster, use
+Detaching is local-only. To hand a run to a cluster, use
 `sparkwing pipeline trigger --profile <p> --detach`.
 
 #### Publishing a foreground run handle
@@ -207,10 +209,10 @@ The outer CLI passes the path to the pipeline process through
 `SPARKWING_RUN_HANDLE_FILE`; callers should use the flag. The file is mode
 `0600` and replaces its destination atomically.
 
-#### A submitted run uses an allow-listed submission environment
+#### A detached run uses an allow-listed submission environment
 
 A foreground run inherits the whole environment of the shell that starts
-it. A submitted run carries a filtered snapshot of it: every `SPARKWING_*`
+it. A detached run carries a filtered snapshot of it: every `SPARKWING_*`
 and `GITHUB_*` variable, plus `PATH`, `HOME`, `HOSTNAME`, and
 `KUBERNETES_SERVICE_HOST`. Sparkwing drops the credential-shaped part of
 that set -- names carrying `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `AUTH`,
@@ -229,7 +231,7 @@ the submitting shell.
 
 ```bash
 SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK' \
-  sparkwing runs submit deploy
+  sparkwing run deploy --sw-detached
 ```
 
 Sparkwing stores the snapshot outside the runs database with mode `0600`,
@@ -243,13 +245,13 @@ values that should remain independent of a caller's ambient environment.
 
 #### Which checkout runs
 
-The checkout you are standing in wins, and `-C PATH` points at a
+The checkout you are standing in wins, and `--sw-cd PATH` points at a
 different one. Only if neither declares the pipeline does the repo
 registry get consulted. The chosen directory is recorded on the run, so
-the consumer executes the tree you submitted from even when a second
+the consumer executes the tree you launched from even when a second
 checkout of the same project declares the same pipeline name.
 
-#### Cancelling a submitted run
+#### Cancelling a detached run
 
 `sparkwing runs cancel --run <id>` works at both stages. Before a
 consumer claims it, cancellation is a store transaction that marks the
@@ -262,7 +264,7 @@ resubmission is a different run with a different id.
 #### The consumer process
 
 One consumer per sparkwing home claims queued runs and executes them.
-`sparkwing runs submit` starts one when none is resident and confirms it
+`sparkwing run --sw-detached` starts one when none is resident and confirms it
 owns the queue *before* acknowledging your run, so the acknowledgment
 means the machine has taken ownership -- not merely that a child was
 forked. The consumer exits on its own after five idle minutes.
@@ -299,7 +301,7 @@ next consumer re-executes it from the start. If you want it to stop for
 good, cancel it rather than stopping the consumer.
 
 The consumer is also replaced when it is out of date. It records the
-sparkwing version it was built from, and a submission from a different
+sparkwing version it was built from, and a detached launch from a different
 build stops the old consumer and starts one from the new binary --
 otherwise a home with a steady queue would keep serving every run from
 the build that happened to start first, and an upgrade would never take
@@ -649,7 +651,7 @@ without sparkwing.
 A foreground `sparkwing run` executes with the operator's own authority.
 The pipeline process is a child of your shell, holding your kubeconfig,
 your cloud profile, your ssh agent, and your git credentials, and it can do
-anything you can do from that terminal. A submitted run is narrower: it
+anything you can do from that terminal. A detached run is narrower: it
 carries only the allow-listed snapshot described above. Read a pipeline before you run it, and run
 untrusted pipeline code under an account whose reach you accept.
 
@@ -716,7 +718,7 @@ sparkwing to block them.
 |------|--------------|-------|-------------|
 | `sparkwing run <pipeline>` | Your laptop | Fast (local caches) | Day-to-day development, fast iteration, local-only deploys |
 | `sparkwing run <pipeline> --profile prof` | Your laptop | Fast | Local execution that records state to a shared profile's backend |
-| `sparkwing runs submit <pipeline>` | Your laptop, detached | Fast | Work that must outlive the terminal: long deploys over ssh, hand-kicked jobs, agents that must not block |
+| `sparkwing run <pipeline> --sw-detached` | Your laptop, detached | Fast | Work that must outlive the terminal: long deploys over ssh, hand-kicked jobs, agents that must not block |
 | `sparkwing pipeline trigger <pipeline> --profile prof` | Cluster | Medium (remote build) | Production deploys, deploys requiring cluster credentials, parity with webhook flow |
 | Git push -> webhook | Cluster | Medium | Automated CI/CD on every commit |
 
@@ -986,7 +988,7 @@ own: the parent names the file in `SPARKWING_STATE_DB` and its reason in
 child that does reach the daemon ignores both and records nothing about
 being standalone.
 
-Only a parent may set those two. They are denied from a submitted run's
+Only a parent may set those two. They are denied from a detached run's
 captured environment and stripped from what the dashboard's trigger
 consumer hands a child, so a value left in a submitting or dashboard shell
 cannot send an unrelated run into someone else's store. The consumer

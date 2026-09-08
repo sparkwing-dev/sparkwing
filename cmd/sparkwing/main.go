@@ -117,6 +117,15 @@ func dispatchRun(args []string) error {
 			return err
 		}
 	}
+	// safety: ahead of the toolchain re-exec, the isolated home, the daemon
+	// pre-warm, and the fleet guard, none of which a detached launch performs --
+	// the consumer that executes the run does its own.
+	if wf.detached {
+		return runDetached(context.Background(), pipelineName, wf, passthrough)
+	}
+	if err := refuseDetachedOnlyFlags(wf); err != nil {
+		return err
+	}
 	// safety: before the toolchain re-exec and the daemon pre-warm, because both
 	// resolve this machine's home from the environment this call rewrites.
 	if wf.isolatedHome != "" {
@@ -738,8 +747,6 @@ func runJobs(args []string) error {
 		emitJSON := resolvedFmt == "json"
 		return orchestrator.JobErrors(ctx, paths, *runID, emitJSON, os.Stdout)
 
-	case "submit":
-		return runRunsSubmit(ctx, args[1:])
 	case "consumer":
 		return runRunsConsumer(args[1:])
 	case "cancel":
@@ -774,7 +781,7 @@ func runJobs(args []string) error {
 	case "grep":
 		return runJobsGrep(ctx, paths, args[1:])
 	default:
-		return fmt.Errorf("jobs: unknown command %q", args[0])
+		return fmt.Errorf("runs: unknown command %q", args[0])
 	}
 }
 

@@ -51,7 +51,7 @@ func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
 // without reaping them.
 func (p Paths) SessionLedgerDir() string { return filepath.Join(p.Root, "sessions") }
 
-// RefWorktreesDir holds the git worktrees `runs submit --sw-ref` checks out for
+// RefWorktreesDir holds the git worktrees `run --sw-detached --sw-ref` checks out for
 // detached runs. Every one sits under this root, which is what lets a sweep
 // decide ownership by containment rather than by a record it has to trust.
 func (p Paths) RefWorktreesDir() string { return filepath.Join(p.Root, "ref-worktrees") }

@@ -30,6 +30,53 @@ run to a progress line plus a one-line pass/fail status with
 the run id, surfacing the failing step only on failure; it is
 the default for managed git hooks.
 
+--sw-detached queues the run instead of executing it here. It
+returns as soon as the run is durable, and a resident consumer
+process on this machine owns it from then on: close the
+terminal, drop the ssh session, log out -- the run keeps going.
+The acknowledgment is a run id and the directory its logs land
+in. Address the run by that id afterwards:
+
+  sparkwing runs status --run RUN_ID
+  sparkwing runs logs   --run RUN_ID --follow
+  sparkwing runs cancel --run RUN_ID
+
+Five flags are read only by a detached launch and are refused
+without --sw-detached: --sw-idempotency-key, --sw-request-id,
+--sw-consumer-idle, --sw-consumer-claim-lease, and --sw-output,
+which picks the acknowledgment's format (pretty on a TTY, json
+when piped; plain prints the bare id for scripting).
+
+--sw-idempotency-key deduplicates on key plus pipeline: a repeat
+carrying a key an earlier launch used returns the original run
+id and its current status and creates nothing, which is what
+makes a retry after a dropped connection safe. Reusing a key
+with different arguments is refused, because a key names one
+intent and different arguments are a different request.
+--sw-request-id is tracing only and never affects deduplication.
+
+--sw-ref and --sw-priority both work detached. The ref resolves
+to a commit when you launch, so the run executes that commit
+even if the ref moves first; the consumer executes the worktree
+and removes it when the run ends. 'front' and 'back' stay
+unresolved until the consumer launches the run, so 'front' means
+ahead of the queue the run actually joins.
+
+A flag a detached run cannot carry (--sw-index, --sw-dry-run,
+--profile, --sw-fleet, --sw-isolated-home, and the other
+run-shaping --sw- flags) is refused with the reason rather than
+ignored; run those in the foreground.
+
+PIPELINE resolves against the checkout you are standing in (or
+--sw-cd PATH) first, then the repo registry, and the chosen
+checkout is recorded on the run. A detached run executes with an
+allow-listed snapshot of the launching environment -- SPARKWING_*,
+GITHUB_*, PATH, HOME, HOSTNAME, and KUBERNETES_SERVICE_HOST, minus
+every credential-shaped name -- widened by naming variables in
+SPARKWING_SUBMIT_ENV_ALLOW. A consumer starts automatically if none
+is running and exits after five idle minutes; see
+'sparkwing runs consumer'.
+
 ### Subcommands
 
 - `config` -- Print a pipeline's declared Secrets with provenance
@@ -44,6 +91,12 @@ the default for managed git hooks.
 |---|---|
 | `-C, --sw-cd PATH` | Run as if started in PATH |
 | `--sw-ref REF` | Run the pipeline at REF (branch/tag/SHA) instead of the working tree |
+| `--sw-detached` | Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal |
+| `--sw-idempotency-key KEY` | Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one |
+| `--sw-request-id ID` | Detached only: tracing identifier recorded on the run; never affects deduplication |
+| `--sw-consumer-idle DUR` | Detached only, and only if this starts a consumer: how long it stays alive with no work (default 5m) |
+| `--sw-consumer-claim-lease DUR` | Detached only, and only if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m) |
+| `--sw-output FORMAT` | Detached only: run-handle format, pretty\|json\|plain (default: pretty on a TTY, json when piped) |
 | `-v, --sw-verbose` | Enable debug logging |
 | `--sw-start-at STEP` | Start the run at STEP |
 | `--sw-stop-at STEP` | Stop the run after STEP |
@@ -71,6 +124,18 @@ sparkwing run release --version v0.28.1
 
 # Run from a different git ref
 sparkwing run build-test-deploy --sw-ref feature/xyz
+
+# Queue a run that outlives the terminal
+sparkwing run nightly-report --sw-detached
+
+# Capture the id for scripting
+RUN=$(sparkwing run build --sw-detached --sw-output plain)
+
+# Make a detached retry safe to repeat
+sparkwing run deploy --sw-detached --sw-idempotency-key deploy-2026-08-11-a --env staging
+
+# Detach a pipeline from another checkout
+sparkwing run lint --sw-detached --sw-cd ~/code/other-project
 
 # Retry a failed run
 sparkwing runs retry RUN_ID --failed

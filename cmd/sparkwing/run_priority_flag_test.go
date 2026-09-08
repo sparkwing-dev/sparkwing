@@ -76,11 +76,13 @@ func TestValidatePriorityFlag(t *testing.T) {
 	}
 }
 
-func TestRunsSubmitDoesNotRefusePriority(t *testing.T) {
-	if _, refused := undetachableFlags["--sw-priority"]; refused {
-		t.Fatal("--sw-priority is carried on the trigger; it must not be in undetachableFlags")
+func TestRunDetachedDoesNotRefusePriority(t *testing.T) {
+	for _, f := range foregroundOnlyReasons(runFlags{priority: "front", prioritySet: true}) {
+		if f.name == "--sw-priority" {
+			t.Fatal("--sw-priority is carried on the trigger; it must not be refused for a detached run")
+		}
 	}
-	if err := refuseUndetachableFlags([]string{"--sw-priority", "front"}); err != nil {
-		t.Fatalf("refuseUndetachableFlags = %v", err)
+	if err := refuseForegroundOnlyFlags(runFlags{priority: "front", prioritySet: true}); err != nil {
+		t.Fatalf("refuseForegroundOnlyFlags = %v", err)
 	}
 }

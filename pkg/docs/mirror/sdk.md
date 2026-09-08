@@ -1204,7 +1204,7 @@ queue as it stands then -- an empty queue answers 1 and -1. The
 resolved number is fixed for the life of the run, so the run's own
 admission and every node it later dispatches queue at the same place,
 and the run record carries both the number and where it came from.
-`sparkwing runs submit --sw-priority` carries the request on the
+`sparkwing run --sw-detached --sw-priority` carries the request on the
 trigger and resolves it when the consumer launches the run, so `front`
 means ahead of the queue the run actually joins. The flag reaches the
 pipeline program as `SPARKWING_PRIORITY`.

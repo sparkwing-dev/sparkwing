@@ -42,6 +42,12 @@ type SparkwingFlagDoc struct {
 var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-cd", Short: "C", Argument: "PATH", Desc: "Run as if started in PATH", Group: "System"},
 	{Name: "sw-ref", Argument: "REF", Desc: "Run the pipeline at REF (branch/tag/SHA) instead of the working tree", Group: "System", Hot: true},
+	{Name: "sw-detached", Desc: "Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal", Group: "System", Hot: true},
+	{Name: "sw-idempotency-key", Argument: "KEY", Desc: "Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one", Group: "System"},
+	{Name: "sw-request-id", Argument: "ID", Desc: "Detached only: tracing identifier recorded on the run; never affects deduplication", Group: "System"},
+	{Name: "sw-consumer-idle", Argument: "DUR", Desc: "Detached only, and only if this starts a consumer: how long it stays alive with no work (default 5m)", Group: "System"},
+	{Name: "sw-consumer-claim-lease", Argument: "DUR", Desc: "Detached only, and only if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m)", Group: "System"},
+	{Name: "sw-output", Argument: "FORMAT", Desc: "Detached only: run-handle format, pretty|json|plain (default: pretty on a TTY, json when piped)", Group: "System"},
 	{Name: "sw-verbose", Short: "v", Desc: "Enable debug logging", Group: "System"},
 	{Name: "sw-start-at", Argument: "STEP", Desc: "Start the run at STEP", Group: "System", Hot: true},
 	{Name: "sw-stop-at", Argument: "STEP", Desc: "Stop the run after STEP", Group: "System", Hot: true},
