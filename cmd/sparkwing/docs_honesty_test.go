@@ -165,10 +165,11 @@ func TestShippedProseDropsDesignRegionsAndRefusesUnbalancedMarkers(t *testing.T)
 }
 
 func TestHonestyCheckReadsInvocationsAndIgnoresProse(t *testing.T) {
-	dispatch := map[string]bool{
-		"sparkwing run":       true,
-		"sparkwing docs":      true,
-		"sparkwing docs read": true,
+	dispatch := map[string]docDispatch{
+		"sparkwing run":        {acceptsPositionals: true},
+		"sparkwing run config": {},
+		"sparkwing docs":       {},
+		"sparkwing docs read":  {},
 	}
 	cases := []struct {
 		name string
@@ -180,6 +181,7 @@ func TestHonestyCheckReadsInvocationsAndIgnoresProse(t *testing.T) {
 		{"unlabelled fence is read as commands", "```\nsparkwing teleport\n```", []string{"sparkwing teleport"}},
 		{"inline invocation", "Run `sparkwing teleport` first.", []string{"sparkwing teleport"}},
 		{"a subcommand resolves to its parent path", "`sparkwing docs read --topic mcp`", nil},
+		{"unknown child of a group is refused", "`sparkwing docs teleport`", []string{"sparkwing docs teleport"}},
 		{"arguments are not verbs", "`sparkwing run my-pipeline`", nil},
 		{"prose mention is not an invocation", "the sparkwing dashboard shows runs", nil},
 		{"heading mention is not an invocation", "## sparkwing teleport", nil},
@@ -249,7 +251,18 @@ func TestEveryRegistryTopLevelVerbIsDispatched(t *testing.T) {
 	}
 }
 
-func undispatched(units []string, dispatch map[string]bool) []string {
+type docDispatch struct {
+	acceptsPositionals bool
+}
+
+func undispatched(units []string, dispatch map[string]docDispatch) []string {
+	groups := map[string]bool{}
+	for path := range dispatch {
+		words := strings.Fields(path)
+		for n := 2; n < len(words); n++ {
+			groups[strings.Join(words[:n], " ")] = true
+		}
+	}
 	seen := map[string]bool{}
 	var out []string
 	for _, unit := range units {
@@ -259,13 +272,23 @@ func undispatched(units []string, dispatch map[string]bool) []string {
 		}
 		words := strings.Fields(m[1])
 		resolved := false
-		for n := len(words); n >= 1 && !resolved; n-- {
-			resolved = dispatch["sparkwing "+strings.Join(words[:n], " ")]
+		name := "sparkwing " + words[0]
+		for n := len(words); n >= 1; n-- {
+			path := "sparkwing " + strings.Join(words[:n], " ")
+			command, exists := dispatch[path]
+			if !exists {
+				continue
+			}
+			if n < len(words) && groups[path] && !command.acceptsPositionals {
+				name = path + " " + words[n]
+				break
+			}
+			resolved = true
+			break
 		}
 		if resolved {
 			continue
 		}
-		name := "sparkwing " + words[0]
 		if !seen[name] {
 			seen[name] = true
 			out = append(out, name)
@@ -356,14 +379,16 @@ func shellFence(info string) bool {
 	return false
 }
 
-func dispatchedPaths(t *testing.T) map[string]bool {
+func dispatchedPaths(t *testing.T) map[string]docDispatch {
 	t.Helper()
-	out := map[string]bool{}
+	out := map[string]docDispatch{}
 	for _, c := range allCommands {
-		out[c.Path] = true
+		out[c.Path] = docDispatch{acceptsPositionals: len(c.PosArgs) > 0}
 	}
 	for verb := range topLevelSwitchCases(t) {
-		out["sparkwing "+verb] = true
+		if _, exists := out["sparkwing "+verb]; !exists {
+			out["sparkwing "+verb] = docDispatch{}
+		}
 	}
 	if len(out) < 2 {
 		t.Fatal("the command registry is empty, so this check proves nothing")
@@ -406,4 +431,25 @@ func topLevelSwitchCases(t *testing.T) map[string]bool {
 		t.Fatal("no case values found in runSparkwing, so this check proves nothing")
 	}
 	return out
+}
+
+func TestHonestyCheckUsesCurrentCommandGroups(t *testing.T) {
+	dispatch := dispatchedPaths(t)
+	for _, tc := range []struct {
+		invocation string
+		want       string
+	}{
+		{"sparkwing docs teleport", "sparkwing docs teleport"},
+		{"sparkwing docs cache teleport", "sparkwing docs cache teleport"},
+		{"sparkwing docs cache info", ""},
+		{"sparkwing run my-pipeline", ""},
+		{"sparkwing run config", ""},
+	} {
+		t.Run(tc.invocation, func(t *testing.T) {
+			got := undispatched([]string{tc.invocation}, dispatch)
+			if strings.Join(got, "\n") != tc.want {
+				t.Errorf("undispatched = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
