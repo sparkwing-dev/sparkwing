@@ -25,9 +25,9 @@ func gateFixtureRepo(t *testing.T) string {
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs.go"),
 		"package pipelines\n\nfunc Jobs() int { return 1 }\n")
 	gitAddAll(t, root)
-	prev := sparkwing.WorkDir()
+	previous := sparkwing.WorkDir()
 	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
 	return root
 }
 
@@ -47,17 +47,17 @@ func TestPreCommitReservesAndBoundsItsCPU(t *testing.T) {
 	}
 }
 
-func gitInit(t *testing.T, dir string) {
+func gitInit(t *testing.T, directory string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	runTestGit(t, dir, "init")
+	runTestGit(t, directory, "init")
 }
 
-func gitAddAll(t *testing.T, dir string) {
+func gitAddAll(t *testing.T, directory string) {
 	t.Helper()
-	runTestGit(t, dir, "add", "-A")
+	runTestGit(t, directory, "add", "-A")
 }
 
 func writeGoFile(t *testing.T, path, content string) {
@@ -285,10 +285,10 @@ func TestGitStagesIntoThisSuitesOwnIndex(t *testing.T) {
 func gateIndexSnapshot(t *testing.T, root string) string {
 	t.Helper()
 	index := filepath.Join(t.TempDir(), "gate.index")
-	cmd := exec.Command("git", "-C", root, "add", "-A")
-	cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("stage the gate's index: %v: %s", err, out)
+	command := exec.Command("git", "-C", root, "add", "-A")
+	command.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("stage the gate's index: %v: %s", err, output)
 	}
 	return index
 }
@@ -309,56 +309,56 @@ func TestGoStepsSkipACommittedModuleWithNoPackages(t *testing.T) {
 }
 
 func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&PreCommit{}).Work(w); err != nil {
+	work := sparkwing.NewWork()
+	if _, err := (&PreCommit{}).Work(work); err != nil {
 		t.Fatal(err)
 	}
 	chain := []string{"gofmt", "formatters", "vet", "build", "test", "lint"}
-	for i := 1; i < len(chain); i++ {
-		if w.StepByID(chain[i]) == nil {
-			t.Errorf("the gate must run step %q", chain[i])
+	for index := 1; index < len(chain); index++ {
+		if work.StepByID(chain[index]) == nil {
+			t.Errorf("the gate must run step %q", chain[index])
 			continue
 		}
-		if !stepWaitsOn(w, chain[i], chain[i-1]) {
-			t.Errorf("step %q does not wait on %q", chain[i], chain[i-1])
+		if !stepWaitsOn(work, chain[index], chain[index-1]) {
+			t.Errorf("step %q does not wait on %q", chain[index], chain[index-1])
 		}
 	}
 }
 
 func TestPreCommitRunsFrontendUnitSuiteAsAnIndependentStep(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&PreCommit{}).Work(w); err != nil {
+	work := sparkwing.NewWork()
+	if _, err := (&PreCommit{}).Work(work); err != nil {
 		t.Fatal(err)
 	}
-	step := w.StepByID("frontend-unit")
+	step := work.StepByID("frontend-unit")
 	if step == nil {
 		t.Fatal("pre-commit does not run frontend-unit")
 	}
 	if deps := step.DepIDs(); len(deps) != 0 {
-		t.Fatalf("frontend-unit dependencies = %v, want an independent fast check", deps)
+		t.Fatalf("frontend-unit dependencies = %v, want an independent check", deps)
 	}
 }
 
 func TestPreCommitRunsFrontendChecksBeforeBrowserSmoke(t *testing.T) {
-	w := sparkwing.NewWork()
-	if _, err := (&PreCommit{}).Work(w); err != nil {
+	work := sparkwing.NewWork()
+	if _, err := (&PreCommit{}).Work(work); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"frontend-lint", "frontend-build", "frontend-browser"} {
-		if w.StepByID(id) == nil {
+		if work.StepByID(id) == nil {
 			t.Fatalf("pre-commit does not run %s", id)
 		}
 	}
-	if deps := w.StepByID("frontend-lint").DepIDs(); len(deps) != 0 {
-		t.Fatalf("frontend-lint dependencies = %v, want an independent fast check", deps)
+	if deps := work.StepByID("frontend-lint").DepIDs(); len(deps) != 0 {
+		t.Fatalf("frontend-lint dependencies = %v, want an independent check", deps)
 	}
-	if !stepWaitsOn(w, "frontend-build", "frontend-unit") {
+	if !stepWaitsOn(work, "frontend-build", "frontend-unit") {
 		t.Fatal("frontend-build does not wait on frontend-unit")
 	}
-	if !stepWaitsOn(w, "frontend-build", "frontend-lint") {
+	if !stepWaitsOn(work, "frontend-build", "frontend-lint") {
 		t.Fatal("frontend-build does not wait on frontend-lint")
 	}
-	if !stepWaitsOn(w, "frontend-browser", "frontend-build") {
+	if !stepWaitsOn(work, "frontend-browser", "frontend-build") {
 		t.Fatal("frontend-browser does not wait on frontend-build")
 	}
 }
@@ -411,9 +411,9 @@ func TestFrontendUnitRunnerRejectsZeroDiscovery(t *testing.T) {
 	}
 	runnerPath := filepath.Join(fixture, "scripts", "run-tests.mjs")
 	writeGoFile(t, runnerPath, runner)
-	cmd := exec.Command("node", runnerPath)
-	cmd.Dir = filepath.Join(root, "web")
-	output, err := cmd.CombinedOutput()
+	command := exec.Command("node", runnerPath)
+	command.Dir = filepath.Join(root, "web")
+	output, err := command.CombinedOutput()
 	if err == nil {
 		t.Fatal("frontend unit runner accepted an empty source tree")
 	}
@@ -432,8 +432,8 @@ func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
 		{name: "build", script: "build", run: runFrontendBuild, failure: "frontend production build"},
 		{name: "browser", script: "test:browser:gate", run: runFrontendBrowser, failure: "frontend browser smoke suite"},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
 			root := t.TempDir()
 			web := filepath.Join(root, "web")
 			if err := os.MkdirAll(web, 0o755); err != nil {
@@ -443,10 +443,10 @@ func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
 			sparkwing.SetWorkDir(root)
 			t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
 
-			writeGoFile(t, filepath.Join(web, "package.json"), fmt.Sprintf(`{"scripts":{"%s":"node -e \"process.exit(1)\""}}`, tc.script))
-			err := tc.run(context.Background())
-			if err == nil || !strings.Contains(err.Error(), tc.failure) {
-				t.Fatalf("%s failure = %v, want named verdict", tc.name, err)
+			writeGoFile(t, filepath.Join(web, "package.json"), fmt.Sprintf(`{"scripts":{"%s":"node -e \"process.exit(1)\""}}`, testCase.script))
+			err := testCase.run(context.Background())
+			if err == nil || !strings.Contains(err.Error(), testCase.failure) {
+				t.Fatalf("%s failure = %v, want named verdict", testCase.name, err)
 			}
 		})
 	}
@@ -537,9 +537,9 @@ func TestFrontendBrowserClearsReportDirectoriesOnlyWhenTheSuitePasses(t *testing
 	if err := runFrontendBrowser(context.Background()); err != nil {
 		t.Fatalf("frontend-browser rejected a passing npm script: %v", err)
 	}
-	for _, dir := range []string{report, results} {
-		if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("passing browser run left %s for the next ESLint run: %v", dir, err)
+	for _, directory := range []string{report, results} {
+		if _, err := os.Stat(directory); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("passing browser run left %s for the next ESLint run: %v", directory, err)
 		}
 	}
 
@@ -561,10 +561,10 @@ const (
 	trackerID = "TOD" + "-42"
 )
 
-func gitCommitAll(t *testing.T, dir, message string) {
+func gitCommitAll(t *testing.T, directory, message string) {
 	t.Helper()
-	gitAddAll(t, dir)
-	runTestGit(t, dir, "-c", "user.name=gate", "-c", "user.email=gate@example.com",
+	gitAddAll(t, directory)
+	runTestGit(t, directory, "-c", "user.name=gate", "-c", "user.email=gate@example.com",
 		"-c", "commit.gpgsign=false", "commit", "-q", "-m", message)
 }
 
@@ -596,15 +596,15 @@ func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
 		{"em dash", "package internal\n\n// Note " + emDash + " here.\nfunc Bad() int { return 3 }\n", checkEmDashes},
 		{"tracker id", "package internal\n\n// See " + trackerID + ".\nfunc Bad() int { return 3 }\n", checkTrackerIDs},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
 			root := gateFixtureRepo(t)
 			gitCommitAll(t, root, "clean base")
 
-			writeGoFile(t, filepath.Join(root, "internal", "bad.go"), tc.body)
+			writeGoFile(t, filepath.Join(root, "internal", "bad.go"), testCase.body)
 			gitAddAll(t, root)
 
-			if err := tc.check(context.Background()); err == nil {
+			if err := testCase.check(context.Background()); err == nil {
 				t.Fatal("the sweep passed a staged change that introduces the pattern")
 			}
 		})
@@ -773,13 +773,13 @@ func TestStagedScopeSkipsNodeModules(t *testing.T) {
 		"package internal\n\nfunc Mine() int { return 2 }\n")
 	gitAddAll(t, root)
 
-	files, scope, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	files, scope, err := changeScope(context.Background(), "Go file(s)", goSourceFiles)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range files {
-		if strings.Contains(f, "node_modules/") {
-			t.Errorf("the formatters step would format vendored npm Go: %s", f)
+	for _, file := range files {
+		if strings.Contains(file, "node_modules/") {
+			t.Errorf("the formatters step would format vendored npm Go: %s", file)
 		}
 	}
 	if len(files) != 1 || files[0] != "internal/mine.go" {
@@ -797,13 +797,13 @@ func requireGolangciLint(t *testing.T) {
 	}
 }
 
-func stepWaitsOn(w *sparkwing.Work, step, dep string) bool {
-	s := w.StepByID(step)
-	if s == nil {
+func stepWaitsOn(work *sparkwing.Work, step, dependency string) bool {
+	node := work.StepByID(step)
+	if node == nil {
 		return false
 	}
-	for _, id := range s.DepIDs() {
-		if id == dep || stepWaitsOn(w, id, dep) {
+	for _, id := range node.DepIDs() {
+		if id == dependency || stepWaitsOn(work, id, dependency) {
 			return true
 		}
 	}
@@ -922,14 +922,14 @@ func TestHomeResolutionExemptions(t *testing.T) {
 		{"the pipeline module", filepath.Join(".sparkwing", "job.go"), homeEnvViolation},
 		{"setting the variable in product code", filepath.Join("internal", "isolate.go"), setter},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
 			root := gateFixtureRepo(t)
-			writeGoFile(t, filepath.Join(root, tc.path), tc.body)
+			writeGoFile(t, filepath.Join(root, testCase.path), testCase.body)
 			gitAddAll(t, root)
 
 			if err := checkHomeResolution(context.Background()); err != nil {
-				t.Errorf("the gate refused %s: %v", tc.name, err)
+				t.Errorf("the gate refused %s: %v", testCase.name, err)
 			}
 		})
 	}
