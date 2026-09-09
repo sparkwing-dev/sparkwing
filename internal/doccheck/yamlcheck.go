@@ -5,15 +5,15 @@ import (
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 var topLevelPipelinesRE = regexp.MustCompile(`(?m)^pipelines:\s*$`)
 
-func checkYAMLConfigs(contentDir string) bool {
-	blocks, err := extract(contentDir, "yaml")
+func checkYAMLConfigs(documentationDirectory string) bool {
+	blocks, err := extract(documentationDirectory, "yaml")
 	if err != nil {
 		fmt.Println("yaml-config: extract error:", err)
 		return false
@@ -21,26 +21,26 @@ func checkYAMLConfigs(contentDir string) bool {
 
 	var configs, failed int
 	var failures []string
-	for _, b := range blocks {
-		if b.skip != "" || !topLevelPipelinesRE.MatchString(b.body) {
+	for _, example := range blocks {
+		if example.skip != "" || !topLevelPipelinesRE.MatchString(example.body) {
 			continue
 		}
 		configs++
-		var cfg projectconfig.Config
-		dec := yaml.NewDecoder(strings.NewReader(b.body))
-		dec.KnownFields(true)
-		if perr := dec.Decode(&cfg); perr != nil {
+		var config projectconfig.Config
+		decoder := yaml.NewDecoder(strings.NewReader(example.body))
+		decoder.KnownFields(true)
+		if decodeError := decoder.Decode(&config); decodeError != nil {
 			failed++
-			failures = append(failures, fmt.Sprintf("%s:%d\n%s", b.file, b.line, indent(perr.Error())))
+			failures = append(failures, fmt.Sprintf("%s:%d\n%s", example.file, example.line, indent(decodeError.Error())))
 		}
 	}
 
 	fmt.Printf("doccheck/yaml-config: %d sparkwing.yaml block(s) -- %d valid, %d INVALID\n",
 		configs, configs-failed, failed)
 	if failed > 0 {
-		fmt.Printf("\n%d sparkwing.yaml example(s) the strict parser rejects (would hard-error on load):\n\n", failed)
-		for _, f := range failures {
-			fmt.Println(f)
+		fmt.Printf("\n%d sparkwing.yaml example(s) failed strict YAML decoding:\n\n", failed)
+		for _, failure := range failures {
+			fmt.Printf("%s\n", failure)
 		}
 		return false
 	}
