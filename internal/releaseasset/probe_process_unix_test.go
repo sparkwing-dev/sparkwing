@@ -74,17 +74,17 @@ wait
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	cmd := exec.CommandContext(ctx, path)
-	cmd.Env = []string{}
+	command := exec.CommandContext(ctx, path)
+	command.Env = []string{}
 	ready := make(chan string, 1)
 	var stderr bytes.Buffer
-	cmd.Stdout = &probePIDOutput{ready: ready}
-	cmd.Stderr = &stderr
-	cmd.WaitDelay = 100 * time.Millisecond
+	command.Stdout = &probePIDOutput{ready: ready}
+	command.Stderr = &stderr
+	command.WaitDelay = 100 * time.Millisecond
 	finished := make(chan struct{})
 	var runErr error
 	go func() {
-		runErr = runProbeProcess(ctx, cmd, cmd.WaitDelay)
+		runErr = runProbeProcess(ctx, command, command.WaitDelay)
 		close(finished)
 	}()
 	t.Cleanup(func() {
@@ -137,12 +137,12 @@ func (output *probePIDOutput) Write(body []byte) (int, error) {
 func TestIdentityProbeExpiredDeadlinePreventsProcessStart(t *testing.T) {
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "/bin/sleep", "30")
-	err := runProbeProcess(ctx, cmd, 100*time.Millisecond)
+	command := exec.CommandContext(ctx, "/bin/sleep", "30")
+	err := runProbeProcess(ctx, command, 100*time.Millisecond)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("probe error = %v, want expired deadline", err)
 	}
-	if cmd.Process != nil {
+	if command.Process != nil {
 		t.Fatal("probe started with an expired deadline")
 	}
 }
