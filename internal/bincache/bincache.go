@@ -874,13 +874,16 @@ func CompilePipeline(ctx context.Context, sparkwingDir, dest string) error {
 		args = append(args, "-modfile="+overlay)
 	}
 	args = append(args, "-o", dest, ".")
-	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd := exec.Command("go", args...)
 	cmd.Dir = sparkwingDir
 	var captured lockedBuffer
 	cmd.Stdout = io.MultiWriter(os.Stderr, &captured)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &captured)
 	cmd.Env = env
-	if err := cmd.Run(); err != nil {
+	if err := runToolchain(ctx, cmd); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return ErrMissingGoSum
 		}

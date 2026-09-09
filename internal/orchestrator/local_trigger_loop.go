@@ -115,13 +115,17 @@ func recordLocalTriggerFailure(ctx context.Context, state StateBackend, trig *st
 	}
 	logger.Error("local trigger dispatch failed",
 		"trigger_id", trig.ID, "pipeline", trig.Pipeline, "err", dispatchErr)
+	// safety: the dispatched child may already have created this row, and the
+	// terminal write below is the one that has to land.
 	_ = state.CreateRun(book, store.Run{
 		ID:        trig.ID,
 		Pipeline:  trig.Pipeline,
 		Status:    "failed",
 		StartedAt: time.Now(),
 	})
-	_ = state.FinishRun(book, trig.ID, "failed", "local dispatch: "+dispatchErr.Error())
+	if err := state.FinishRun(book, trig.ID, "failed", "local dispatch: "+dispatchErr.Error()); err != nil {
+		noteLostStateWrite(book, "finish run", trig.ID, err)
+	}
 	_ = state.FinishTrigger(book, trig.ID)
 }
 

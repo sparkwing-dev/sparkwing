@@ -363,8 +363,13 @@ environment reads there are idiomatic and never flagged.
 The rule set (see --rules for each rule's charter):
   plan-io              I/O (shell, exec, file, http) in Plan()
   plan-runtime-branch  os.Getenv / runtime.GOOS / IsLocal branching in Plan()
-  runner-label         blank runner labels; Inline + Requires on one job
+  runner-label         blank Requires/Prefers/WhenRunner labels; Inline +
+                       Requires on one job
   unused-ref           a RefTo result discarded into _ or a bare statement
+  group-cache-shared   Memoize on a fan-out or group, whose members then
+                       share one cache entry
+  dynamic-group-inert  a JobGroup setter on a JobFanOutDynamic result, which
+                       has no members to apply it to
   guard-misuse         pipeline guards that can never be satisfied together
 
 With no target it sweeps every pipeline in .sparkwing/sparkwing.yaml
