@@ -9,7 +9,7 @@ this file is a menu and checklist, not a command that every change must run.
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
-- **Orchestrator iteration:** `GOWORK=off go test -short -count=1
+- **Orchestrator iteration:** `GOWORK=off go test -short
   -timeout=5m ./internal/orchestrator` keeps the inexpensive `RunLocal` and
   daemon coverage. It skips the process-per-node binary fixtures, scaffolded
   headless module, and tests that exercise sustained contention or real
