@@ -374,3 +374,70 @@ func TestAppendPipelinesYAML_PreservesOtherSections(t *testing.T) {
 		})
 	}
 }
+
+func TestOnDeclaresTheGitHooksBootstrapCanArm(t *testing.T) {
+	shape, ok := builtinShapeByName("minimal")
+	if !ok {
+		t.Fatal("minimal shape is gone")
+	}
+	for _, tc := range []struct{ event, hook string }{
+		{"pre_commit", "pre-commit"},
+		{"pre_push", "pre-push"},
+		{"post_commit", "post-commit"},
+	} {
+		t.Run(tc.event, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, projectconfig.Filename), []byte("pipelines:\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			trigger, err := resolveTrigger(shape, []string{tc.event}, true)
+			if err != nil {
+				t.Fatalf("--on %s: %v", tc.event, err)
+			}
+			if err := appendPipelinesYAML(dir, "gate", "Gate", false, trigger); err != nil {
+				t.Fatal(err)
+			}
+			declared, err := declaredHooks(dir)
+			if err != nil {
+				t.Fatalf("declaredHooks: %v", err)
+			}
+			if pipes := declared[tc.hook]; len(pipes) != 1 || pipes[0] != "gate" {
+				t.Errorf("--on %s declared %v; want the %s hook to run the scaffolded pipeline", tc.event, declared, tc.hook)
+			}
+			if events := triggerEvents(trigger); len(events) != 1 || events[0] != tc.event {
+				t.Errorf("triggerEvents = %v, want [%s]", events, tc.event)
+			}
+		})
+	}
+}
+
+func TestGateArmingHint_SaysNothingRefusesACommitUntilTheHookIsArmed(t *testing.T) {
+	got, ok := gateArmingHint([]string{"pre_commit"})
+	if !ok {
+		t.Fatal("a scaffolded pre_commit trigger printed no arming hint")
+	}
+	for _, want := range []string{"sparkwing pipeline hooks install", "refuse"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("hint = %q, want it to mention %q", got, want)
+		}
+	}
+}
+
+func TestGateArmingHint_NamesTheInstallForANotifierWithoutPromisingARefusal(t *testing.T) {
+	got, ok := gateArmingHint([]string{"post_commit"})
+	if !ok {
+		t.Fatal("a scaffolded post_commit trigger printed no arming hint")
+	}
+	if !strings.Contains(got, "sparkwing pipeline hooks install") {
+		t.Errorf("hint = %q, want the install command", got)
+	}
+	if strings.Contains(got, "refuse") {
+		t.Errorf("hint = %q, want no refusal promise: post-commit runs after the commit lands", got)
+	}
+}
+
+func TestGateArmingHint_QuietWhenNoGitHookIsDeclared(t *testing.T) {
+	if got, ok := gateArmingHint([]string{"push", "schedule"}); ok {
+		t.Errorf("hint = %q, want none: neither trigger installs a git hook", got)
+	}
+}

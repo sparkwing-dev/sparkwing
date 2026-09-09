@@ -34,6 +34,11 @@ unlock.
   checks, defaulting to the 10 seconds doctor always used. Each check takes a
   slice of it, so one unanswering daemon leaves the rest of the report its
   budget, and a sweep that runs out prints what it reached alongside the error
+- **cli:** `pipeline new --on` accepts `pre_commit`, `pre_push`, and
+  `post_commit`, so a scaffolded gate declares the git hook that runs it. The
+  scaffold declares the trigger and never writes the hook: it prints the
+  `sparkwing pipeline hooks install` command instead, because arming a gate the
+  pipeline has not passed turns every commit in the checkout into a failure
 
 ### Changed
 

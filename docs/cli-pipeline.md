@@ -298,7 +298,9 @@ Report effective gates for registered repositories
 
 Reports declared hooks for every registered repository as armed, shadowed,
 uninstalled, or undeclared. A shadowed hook is installed but core.hooksPath
-selects another location.
+selects another location. The STATE column reads no-gate where every declared
+hook fires and none of them is pre-commit or pre-push, because nothing there
+can refuse a commit.
 
 Coverage includes registered repositories and configured fallback paths.
 Register other checkouts before expecting them in the report. An unreadable
@@ -477,7 +479,7 @@ listings. --short sets its description.
 | `--name NAME` | New pipeline's kebab-case name (a-z, 0-9, -) (required) |
 | `-C, --sw-cd DIR` | Scaffold as if started in this directory (re-anchors the .sparkwing search) |
 | `--template SHAPE` | DAG to scaffold: minimal (1 node) \| build-test-deploy (3) \| ci-pr-check (3) \| release (3) \| scheduled-report (5) (default: minimal) |
-| `--on EVENT` | Trigger(s) to declare: pull_request \| push \| schedule \| manual (repeatable or comma-separated) (default: the shape's own) |
+| `--on EVENT` | Trigger(s) to declare: pull_request \| push \| schedule \| pre_commit \| pre_push \| post_commit \| manual (repeatable or comma-separated) (default: the shape's own) |
 | `--hidden` | Mark the entry hidden in default tab-complete menus |
 | `--short TEXT` | Pre-fill the ShortHelp / desc line |
 
