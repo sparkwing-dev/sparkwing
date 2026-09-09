@@ -6,7 +6,7 @@ Every `sparkwing examples` command, flag, and argument, generated from the CLI's
 
 ## `sparkwing examples`
 
-Worked pipelines to read, not starting points to scaffold
+Read complete example pipelines
 
 Read complete pipelines from the sparks-core example registry. Examples
 cover container deployment, migrations, release publishing, test sharding,
@@ -39,6 +39,6 @@ sparkwing examples
 # Read one
 sparkwing examples --name container-deploy-ecs-fargate --body
 
-# Usually you want this instead
+# Search deployment guidance
 sparkwing docs search -q "ecs fargate"
 ```

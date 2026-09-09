@@ -126,23 +126,18 @@ sparkwing pipeline discover --query deploy -o json
 
 Render the pipeline's Plan DAG without dispatching any jobs
 
-Compiles the nearest .sparkwing/ binary, calls the named
-pipeline's Plan method, and prints the resulting DAG (nodes,
-dependencies, approval gates) without running a single job.
+Compiles the pipeline binary, calls the named pipeline's Plan method, and
+prints its nodes, dependencies, and approval gates. Jobs remain unexecuted.
 
-Any --flag value tokens that are not recognized by explain itself
-(i.e. anything other than --name / --all / -o/--output / --help) are
-forwarded to the pipeline so Plans that branch on --env / --version
-/ etc. can be previewed under realistic inputs. Missing required
-args are non-fatal here -- explain renders a best-effort plan so
-the shape is visible before every flag is provided.
+Arguments other than --name, --all, -o/--output, and --help pass to the
+pipeline. This previews plans controlled by --env, --version, and similar
+inputs. Missing required arguments are tolerated so the plan can be inspected
+before every input is supplied.
 
---all sweeps every pipeline in .sparkwing/sparkwing.yaml, runs
-Plan() on each with no extra args, and exits non-zero if any
-pipeline fails. Designed as a CI gate: a Plan-time validation
-mismatch (sparkwing.RefTo[T] type drift, Produces[T] / SetResult
-asymmetry, duplicate node ID, etc.) blocks merges before the
-pipeline ever runs.
+--all constructs every declared pipeline with no extra arguments and exits
+non-zero if any plan fails validation. Validation detects mismatched typed
+references, inconsistent declared outputs, duplicate node IDs, and similar
+errors.
 
 ### Flags
 
@@ -155,7 +150,7 @@ pipeline ever runs.
 ### Examples
 
 ```sh
-# Inspect release-all's DAG
+# Inspect the example release DAG
 sparkwing pipeline explain --name fictional-release
 
 # Preview with args (forwarded to the pipeline)
@@ -182,7 +177,7 @@ landed, so it runs its pipelines, tolerates failures, and never
 aborts. pre-commit and pre-push abort the git action on the first
 failing pipeline.
 
-Managed hooks carry a "Installed by sparkwing" marker so
+Managed hooks carry an "Installed by sparkwing" marker so
 uninstall and status can tell them apart from hand-written
 hooks. Existing unmanaged hooks are left alone; install skips
 them with a warning.
@@ -357,10 +352,8 @@ Check pipeline source for idiomatic anti-patterns (enforced gate)
 
 Statically analyzes pipeline source for the anti-patterns
 that make a Plan() non-deterministic, impure, or misconfigured,
-and exits non-zero on any violation. Unlike 'explain' (which
-builds and runs Plan to validate the resulting DAG), 'lint' reads
-the Go source with go/ast -- it never compiles or runs anything,
-so it works against a pinned-SDK .sparkwing/ tree.
+and exits non-zero on any violation. It inspects the Go syntax tree without
+compilation or execution, including source pinned to another SDK version.
 
 Only the Plan() body is inspected; code inside job/step closures
 and SkipIf / BeforeRun bodies runs at dispatch, so I/O and
@@ -535,7 +528,7 @@ downstream predicates are evaluated with the resulting state.
 ### Examples
 
 ```sh
-# Resolve cluster-up's DAG with current args
+# Resolve the example cluster DAG with supplied arguments
 sparkwing pipeline plan --name fictional-cluster
 
 # Preview a resume-from-step

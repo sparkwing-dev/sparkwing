@@ -70,7 +70,7 @@ live headroom. Changing the prefix requires a new heartbeat.
 
 Use a distinct revocable token for every coordinator membership. The
 prefix is accepted as input but is never returned by the agents API. A
-controller accepts at most 256 enrolled executors. Adding another returns`executor enrollment limit reached: maximum 256 per controller`.
+controller accepts at most 256 enrolled executors. Adding another returns `executor enrollment limit reached: maximum 256 per controller`.
 
 ### Flags
 
@@ -210,7 +210,7 @@ commands.
 ### Examples
 
 ```sh
-# Bump sparkwing-runner to a new commit tag
+# Update the example runner image
 sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait
 ```
 
@@ -261,7 +261,7 @@ image to the registry before calling rollout.
 ### Examples
 
 ```sh
-# Dry-run against the sparkwing-runner image
+# Preview the example runner image update
 sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --dry-run
 
 # Bump and wait for the rollout
@@ -661,10 +661,8 @@ sparkwing cluster webhooks replay --repo your-org/my-app --hook 123456789 --deli
 Claim triggers from a profile's controller and run them in-process
 
 Polls the trigger queue at the selected profile's
-controller and executes each claimed trigger in-process. Laptop-local:
-no K8s, no warm pool, no image dispatch. For the cluster-mode worker
-with --runner k8s|warm and image / service-account flags, use
-sparkwing-runner.
+controller and executes each claimed trigger in-process on this host.
+Use sparkwing-runner for --runner k8s|warm and image or service-account flags.
 
 Run against a remote controller via --profile prod (or whichever profile),
 or against a local 'sparkwing dashboard start' via --profile local.

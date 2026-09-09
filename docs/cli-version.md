@@ -96,11 +96,11 @@ being deferred.
 # Show the current hold
 sparkwing version hold
 
-# Hold the minor series at v0.15
-sparkwing version hold --set v0.15
+# Hold the minor series at v9.8
+sparkwing version hold --set v9.8
 
 # Pin an exact ceiling
-sparkwing version hold --set v0.15.4
+sparkwing version hold --set v9.8.7
 
 # Lift the hold
 sparkwing version hold --clear
@@ -144,14 +144,14 @@ applies to whichever target is selected.
 sparkwing version update --cli
 
 # Pin the CLI to a specific release
-sparkwing version update --cli --version v0.44.0
+sparkwing version update --cli --version v9.8.7
 
 # Downgrade the CLI
-sparkwing version update --cli --version v0.40.0 --force
+sparkwing version update --cli --version v9.7.6 --force
 
 # Bump the SDK in this project to latest
 sparkwing version update --sdk
 
 # Pin the SDK to a specific release
-sparkwing version update --sdk --version v0.44.0
+sparkwing version update --sdk --version v9.8.7
 ```

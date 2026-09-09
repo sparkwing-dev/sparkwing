@@ -8,22 +8,14 @@ Every `sparkwing repos` command, flag, and argument, generated from the CLI's ow
 
 The machine's fleet of sparkwing repos and their SDK pins
 
-Lists every repo on this machine that carries sparkwing
-pipelines -- derived from the repos this laptop has run pipelines
-for, unioned with the explicit repos.yaml registry. No manual
-registration: a repo shows up once it has run a pipeline or been
-added to repos.yaml.
+Lists registered repositories and repositories with recorded pipeline runs.
+Each row shows the SDK version, last run, and intervening migration guides.
+Linked worktrees appear under their primary checkout, with differing SDK
+versions reported separately.
 
-Each row reports the repo, its .sparkwing SDK pin, the last run
-observed, and how many migration guides sit between its pin and
-the latest release. Linked git worktrees are folded into their
-primary checkout; a worktree pinned differently from its primary
-is reported as a detail line, not a separate repo.
-
-Bare 'sparkwing repos' and 'sparkwing repos list' both print this
-fleet. Use 'sparkwing repos info' for a single-repo deep dive, and
-'sparkwing repos update' to bump the whole fleet in one sitting
-with a compiled per-repo verdict.
+'sparkwing repos' and 'sparkwing repos list' print the same listing.
+Use 'sparkwing repos info' to inspect one repository and 'sparkwing repos
+update' to validate SDK upgrades for selected repositories.
 
 ### Subcommands
 

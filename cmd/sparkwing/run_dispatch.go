@@ -140,7 +140,6 @@ func collectPipelineArgs(passthrough []string) map[string]string {
 	i := 0
 	for i < len(passthrough) {
 		argument := passthrough[i]
-		// safety: the separator has no argument name to record.
 		if argument == "--" {
 			i++
 			continue

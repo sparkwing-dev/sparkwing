@@ -708,8 +708,8 @@ func runJobs(args []string) error {
 		since := fs.Duration("since", 0,
 			"only include output from nodes whose StartedAt >= now-D (5m, 1h, and similar durations)")
 		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
-		eventsOnly := fs.Bool("events-only", false, "filter to run-level envelope events (run_start, node_start, node_end, step_start, step_end, run_finish, plan_warn, ...) -- the bracketing NDJSON the dispatcher streams to stdout; a run read through a backend (shared database, object store, controller, or any profile that declares its own logs surface) emits that run's stored event records instead")
-		noEvents := fs.Bool("no-events", false, "filter to per-node body output only -- useful when scripts depend on the legacy shape")
+		eventsOnly := fs.Bool("events-only", false, "show run and step lifecycle events; stored runs use their recorded events")
+		noEvents := fs.Bool("no-events", false, "show node output only")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}

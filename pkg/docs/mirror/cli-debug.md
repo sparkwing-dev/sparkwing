@@ -201,7 +201,7 @@ pipeline binary; they never land in tracked code.
   pause -- only Run errors.
 
 Paused nodes hold for 30 minutes by default; set
-SPARKWING_PAUSE_TIMEOUT=<duration> to change. A expired pause
+SPARKWING_PAUSE_TIMEOUT=<duration> to change. An expired pause
 is released with reason 'timeout-released' and surfaces in the
 run record.
 

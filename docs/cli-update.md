@@ -45,8 +45,8 @@ sparkwing update --check
 sparkwing update
 
 # Pin to a specific release
-sparkwing update --version v0.44.0
+sparkwing update --version v9.8.7
 
 # Downgrade to an older release
-sparkwing update --version v0.40.0 --force
+sparkwing update --version v9.7.6 --force
 ```

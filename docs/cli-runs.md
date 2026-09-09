@@ -8,13 +8,9 @@ Every `sparkwing runs` command, flag, and argument, generated from the CLI's own
 
 Inspect and control pipeline runs
 
-Runs are the per-invocation records of pipeline execution.
-Every 'sparkwing run <pipeline>' produces a run; cluster mode surfaces
-the same runs remotely via the controller.
-
-Local-mode subcommands (list, status, logs, errors) read from
-~/.sparkwing/runs/. Controller-mode subcommands (cancel, retry,
-prune) require a profile; 'runs logs' supports both.
+Inspect recorded pipeline executions and control their lifecycle.
+Commands support local runs and runs stored through a named profile.
+Pass --profile NAME to select that profile's backend.
 
 ### Subcommands
 
@@ -595,9 +591,9 @@ sparkwing runs last --profile prod --watch
 
 List recent pipeline runs
 
-Without --profile, reads from the local run directory. With --profile NAME,
-fetches from the named profile's controller. Filters compose with
-AND semantics across flag types (pipeline=X AND status=Y), OR
+Reads runs from the selected backend. Pass --profile NAME to select a
+named profile. Filters compose with AND semantics across flag types
+(pipeline=X AND status=Y), OR
 semantics within a repeated flag (pipeline=X OR pipeline=Y).
 
 A local listing merges this home's own store with every standalone
@@ -822,15 +818,10 @@ branch, and SHA. Each new run is tagged with retry_of=<old-id>.
 
 For local runs, Sparkwing queues the retry in the same local store as
 'sparkwing run --sw-detached' and starts the resident consumer when no
-dashboard is running.
-The retry is bound to the source run's full origin
-identity, Git revision, and complete plan snapshot. Sparkwing compiles and
-runs
-an immutable detached snapshot of that recorded revision; uncommitted or later
-working-tree edits are deliberately excluded. If the source checkout is gone
-or
-any identity has drifted, the retry fails before compilation; it never falls
-back to the current directory or another repo.
+dashboard is running. The retry uses the source run's full origin identity,
+Git revision, and complete plan snapshot. Sparkwing compiles and runs an
+immutable detached snapshot of that revision. A missing source checkout or
+changed identity fails the retry before compilation.
 
 Pick a rerun scope explicitly:
   --failed   reuse cached/passed nodes from the source run;
@@ -1106,7 +1097,7 @@ json emits the raw response.
 
 | Flag | Description |
 |---|---|
-| `--id TRIGGER_ID` | Trigger / run identifier (same value 'fire' prints) (required) |
+| `--id TRIGGER_ID` | Trigger / run identifier (the value 'pipeline trigger' prints) (required) |
 | `-o, --output FORMAT` | Output format: json emits the raw response |
 | `--profile NAME` | Profile name (required) |
 
@@ -1133,8 +1124,7 @@ claimed?"): --status pending shows unclaimed work, --status
 claimed shows what a worker has in-flight. The repo filter
 matches GITHUB_REPOSITORY on the trigger env so webhook-driven
 entries match the selected repository; that value is not indexed, so the
-search
-covers the newest 5,000 triggers matching the other filters and
+search covers the newest 5,000 triggers matching the other filters and
 an older entry is not reported.
 
 ### Flags

@@ -31,7 +31,7 @@ flags. --split-dir writes generated files.
 | `--format markdown` | Export the full command reference as Markdown |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--split-dir DIR` | With --format markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages |
-| `--path PREFIX` | Only emit commands at or under PREFIX, matched by whole path components, with or without the leading 'sparkwing' (runs, sparkwing runs, runs list); a prefix matching nothing is an error |
+| `--path PREFIX` | Only emit commands at or under PREFIX, matched by whole path components, with or without the leading 'sparkwing' (runs, sparkwing runs, runs list, and similar paths); a prefix matching nothing is an error |
 | `--include-hidden` | Also emit Hidden:true commands (default: skip) |
 
 ### Examples

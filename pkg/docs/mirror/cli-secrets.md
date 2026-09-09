@@ -16,9 +16,8 @@ invoked through 'sparkwing run <pipeline>' locally.
 
 With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run
-time. Pipelines pull a secret by listing it in the
-sparkwing.yaml 'secrets:' block. Raw values never transit the
-CLI except via 'secrets get'.
+time. Pipelines declare a typed Secrets provider to resolve their secrets.
+'secrets list' masks values; 'secrets get' prints them.
 
 ### Subcommands
 

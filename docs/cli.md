@@ -83,7 +83,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `version` | Composite CLI + SDK + sparks version card; `version update --sdk` bumps the pinned SDK |
 | `update` | Self-update the `sparkwing` CLI binary |
 | `dashboard` | Detached local dashboard server: start / kill / status |
-| `doctor` | Diagnose and repair local state, including unsafe private-home permissions and provably-dead records |
+| `doctor` | Diagnose and repair local state, including unsafe private-home permissions and records whose processes have exited |
 | `cluster` | Cluster ops against a profile's controller: status / agents / worker / gc / users / tokens / image / webhooks / concurrency |
 | `secrets` | Secrets, laptop dotenv or controller-stored with `--profile`: set / get / list / delete |
 | `configure` | Laptop-local config: init / profiles / xrepo |
@@ -103,7 +103,7 @@ indexed in [cli-reference.md](cli-reference.md):
   pretty-printing, so `head -5` returns five whole records instead of a
   truncated document that parses as nothing. Read the stream a line at a
   time (`json.Decoder` in a loop, `jq -c .` with no `-s`, `while read
-  line`). An empty listing is an empty stream. Describe, get, and status verbs return
+  line`, and similar readers). An empty listing is an empty stream. Describe, get, and status verbs return
   one compact JSON object.
 - **Profile addressing.** `--profile NAME` picks the storage/dispatch
   profile. Absent, commands read local state (SQLite under `~/.sparkwing/`).
@@ -153,10 +153,7 @@ own `ops` verbs:
 
 The `ops` verbs share the CLI's output conventions -- `-o pretty|json|plain`,
 the same JSON shapes as `sparkwing queue` / `sparkwing doctor` -- so a
-script written against the CLI works unchanged against the binary. They
-are the field-recovery surface for a host with no browser and no CLI:
-`ops queue` shows why work is stuck, `ops doctor` clears it, and both are
-limited to inspection and abandoned-state repair.
+script written against the CLI works unchanged against the binary. Use these commands to inspect a host and repair abandoned state.
 
 One thing a bare pipeline binary does not do is host the admission
 daemon. **The installed Sparkwing distribution owns daemon lifecycle.
@@ -198,7 +195,7 @@ keeping the same filters and binary version. Command/topic cursors name the
 last lexical path/slug; search cursors name the last ranked section as
 `slug:start_line`. An unknown cursor fails instead of silently restarting.
 Metadata records retain their existing selection fields; readers must
-recognize the final page record instead of treat it as a command/topic.
+recognize the final page record separately from command and topic records.
 
 `--limit 0` explicitly returns every remaining match. Plain mode prints
 paths or selectors only; continuation information goes to stderr. Pretty

@@ -54,8 +54,7 @@ return typed outputs for downstream `Ref[T]` consumers.
 in its own process, and its `Work` method still constructs the graph
 before dispatch.
 
-Consumer-side helper packages (sparks-core libraries, custom
-pipeline libs) can opt their own ctx-taking entry points into the
+Consumer-side helper packages can opt their own ctx-taking entry points into the
 guard by calling `planguard.Guard(ctx, "yourpkg.Helper")` at the top
 (import `github.com/sparkwing-dev/sparkwing/sparkwing/planguard`).
 
@@ -140,9 +139,8 @@ sparkwing.Bash(ctx, "golangci-lint run ./...").
     Run()
 ```
 
-The path is derived from `WorkDir()`, so it is stable run to run in one
-worktree - the cache still earns its keep - and disjoint between
-worktrees.
+The path derives from `WorkDir()`. Runs in one worktree share a cache;
+each worktree has its own cache.
 
 #### Lint slots: giving worktrees the same absolute path
 
@@ -269,11 +267,7 @@ Step boundaries are emitted automatically by `RunWork` as structured
 `step_start` / `step_end` events; the renderer surfaces them as a
 collapsible bucket in the CLI and dashboard.
 
-These four helpers are sparkwing's pipeline-observability channel,
-not a general-purpose logger -- they exist so node output, run
-records, and the dashboard see the same stream. They are the whole
-public logging surface; there is no public installer for swapping in
-your own backend.
+These helpers send node output to run records and the dashboard.
 
 ## Plan - the outer DAG
 
@@ -310,7 +304,7 @@ sw.RefTo[T](node) sw.Ref[T]                                                   //
 
 `sw.Job`'s third argument is `any`: pass either an `sw.Workable`
 implementation (struct with `Work(w *Work) (*WorkStep, error)`) or a
-plain `func(ctx context.Context) error` for the trivial single-closure
+plain `func(ctx context.Context) error` for the single-closure
 case. Reflection at register time accepts either form. Anything else
 panics at materialize time.
 
@@ -327,12 +321,12 @@ approve := sw.JobApproval(plan, "approve-prod", sw.ApprovalConfig{
     OnExpiry: sw.ApprovalFail,
 }).Needs(stagingChecks)
 
-sw.Job(plan, "deploy-prod", &Deploy{}).Needs(approve)
+sw.Job(plan, "fictional-deploy-prod", &Deploy{}).Needs(approve)
 ```
 
 Available modifiers on `*ApprovalGate`: `Needs`, `NeedsOptional`,
 `OnFailure`, `BeforeRun`, `AfterRun`, `SkipIf`, `Optional`,
-`ContinueOnError`. Plus `Job()` as the escape hatch when an author
+`ContinueOnError`. Plus `Job()` as the accessor when an author
 needs the underlying `*JobNode`.
 
 `OnExpiry` defaults to fail; valid values are `sw.ApprovalFail`,
@@ -401,7 +395,7 @@ Pair it with a longer `Timeout` when continuing progress must not make an
 attempt unbounded:
 
 ```go
-sw.Job(plan, "index", &Index{}).
+sw.Job(plan, "fictional-index", &Index{}).
     NoProgressTimeout(2 * time.Minute).
     Timeout(30 * time.Minute)
 ```
@@ -434,12 +428,12 @@ func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
 A typed-output job embeds `sw.Produces[T]` and returns a step producing
 `T` from `Work`. A mismatch panics during materialization.
 
-For trivial single-closure Jobs (one function, no inner DAG, no
+For single-closure Jobs (one function, no inner DAG, no
 struct), pass the closure directly to `sw.Job` and skip the
 Workable entirely:
 
 ```go
-sw.Job(plan, "lint", p.run)
+sw.Job(plan, "fictional-lint", p.run)
 ```
 
 The SDK wraps the closure into a Workable.
@@ -500,7 +494,7 @@ then picks one of three paths:
 - `step.DryRun(fn)` declared -> `fn` runs in place of the apply Fn.
   The closure reports proposed changes without mutating state; it answers "what *would* the
   apply do" the way `terraform plan`, `kubectl apply --dry-run=server`,
-  and `helm upgrade --dry-run` do for their tools.
+  `helm upgrade --dry-run`, and similar tools do.
 - `step.SafeWithoutDryRun()` declared -> the apply Fn runs unchanged,
   for steps whose execution has no side effects.
 - Neither declared -> the step soft-skips with `step_skipped` /
@@ -584,11 +578,9 @@ func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 ```
 
-`StepGet` blocks until the upstream step's terminal completion
-fires, panics on missing or mismatched type. For the common case
-where the Work is one typed step whose return value IS the Job's
-output, you don't need `StepGet` at all -- just return the step
-from `Work`:
+`StepGet` waits for the upstream step to finish and panics on a missing
+or mismatched type. When one step produces the job output, return that
+step from `Work`:
 
 ```go
 func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
@@ -623,8 +615,8 @@ type Deploy struct {
     Manifest sw.Ref[Manifest]
 }
 
-build := sw.Job(plan, "build", &Build{})
-sw.Job(plan, "deploy", &Deploy{
+build := sw.Job(plan, "fictional-build", &Build{})
+sw.Job(plan, "fictional-deploy", &Deploy{
     Build:    sw.RefTo[BuildOut](build),
     Manifest: sw.RefToLastRun[Manifest]("manifest-pipe", "out",
                   sw.MaxAge(24*time.Hour)),
@@ -642,7 +634,7 @@ Untyped pipelines (no typed output) skip both `sw.Produces[T]` and
 ### Imperative cross-pipeline trigger
 
 ```go
-out, err := sparkwing.RunAndAwait[Out, In](ctx, "build", "artifact",
+out, err := sparkwing.RunAndAwait[Out, In](ctx, "fictional-build", "fictional-artifact",
     sparkwing.WithFreshInputs(In{Service: "api"}),
     sparkwing.WithFreshTimeout(10*time.Minute),
 )
@@ -677,7 +669,7 @@ are resolved when the graph runs.
 
 ```go
 func (b *Build) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
-    sw.Job(plan, "build", func(ctx context.Context) error {
+    sw.Job(plan, "fictional-build", func(ctx context.Context) error {
         region, err := sw.Config(ctx, "REGION")
         if err != nil { return err }
         return doBuild(region)
@@ -706,7 +698,7 @@ type DeployArgs struct {
 }
 
 func (Deploy) Plan(ctx context.Context, plan *sw.Plan, _ DeployArgs, rc sw.RunContext) error {
-    sw.Job(plan, "deploy", func(ctx context.Context) error {
+    sw.Job(plan, "fictional-deploy", func(ctx context.Context) error {
         args := sw.Inputs[DeployArgs](ctx)
         return runDeploy(ctx, args.Service, args.Env)
     })
@@ -755,7 +747,7 @@ func init() {
 For pipelines that take no flags, use `sw.NoInputs`:
 
 ```go
-sw.Register[sw.NoInputs]("lint", func() sw.Pipeline[sw.NoInputs] {
+sw.Register[sw.NoInputs]("fictional-lint", func() sw.Pipeline[sw.NoInputs] {
     return Lint{}
 })
 ```
@@ -904,9 +896,9 @@ group -- that is [Concurrency](#concurrency)'s job.
 ```go
 sw.Key("go-mod", "1.26", "abc123")
 
-node := sw.Job(plan, "build", func(ctx context.Context) error { return nil })
+node := sw.Job(plan, "fictional-build", func(ctx context.Context) error { return nil })
 node.Memoize(func(ctx context.Context) (sw.CacheKey, error) {
-    return sw.Key("build", "linux", "amd64"), nil
+    return sw.Key("fictional-build", "linux", "amd64"), nil
 }, sw.TTL(24*time.Hour))
 ```
 
@@ -936,22 +928,22 @@ databaseGroup := sw.NewConcurrencyGroup("db", sw.ConcurrencyLimit{
     OnLimit:      sw.Queue,
     QueueTimeout: 30 * time.Second,
 })
-sw.Job(plan, "shard-1", func(ctx context.Context) error { return nil }).Concurrency(databaseGroup, 4)
-sw.Job(plan, "shard-2", func(ctx context.Context) error { return nil }).Concurrency(databaseGroup, 4)
+sw.Job(plan, "fictional-shard-1", func(ctx context.Context) error { return nil }).Concurrency(databaseGroup, 4)
+sw.Job(plan, "fictional-shard-2", func(ctx context.Context) error { return nil }).Concurrency(databaseGroup, 4)
 ```
 
 `Capacity` and `cost` are integers in author-defined units (a slot, a
-gigabyte, a database container). Admission compares the summed `cost` of
+gigabyte, a database container, and similar quantities). Admission compares the summed `cost` of
 live members in the scope plus this member's cost against `Capacity`.
 For at most `N` concurrent members, set capacity to `N` and use each
 member's default cost of 1.
 
 ```go
-deployGate := sw.NewConcurrencyGroup("deploy-prod", sw.ConcurrencyLimit{
+deployGate := sw.NewConcurrencyGroup("fictional-deploy-prod", sw.ConcurrencyLimit{
     Capacity: 1,
     OnLimit:  sw.Queue,
 })
-sw.Job(plan, "deploy", func(ctx context.Context) error { return nil }).Concurrency(deployGate)
+sw.Job(plan, "fictional-deploy", func(ctx context.Context) error { return nil }).Concurrency(deployGate)
 ```
 
 ### OnLimit
@@ -970,9 +962,7 @@ What a member does when its group is at capacity:
   fits (best-effort; side effects already committed are not rolled
   back).
 
-Sharing another member's result is not an option here -- a group is
-different work taking turns, never the same work. Result reuse is
-[Cache](#cache).
+Concurrency groups schedule distinct work. Use [Cache](#cache) to reuse results.
 
 ### Scope
 
@@ -1053,14 +1043,13 @@ own:
 plan.Priority(10)
 ```
 
-That is the author's default, not the last word. An operator waiting on
-the queue overrides it per run with `sparkwing run --sw-priority VALUE`,
+An operator can override that default per run with `sparkwing run --sw-priority VALUE`,
 where VALUE is an integer or one of `front` / `back`:
 
 ```sh
-sparkwing run deploy --sw-priority 100   # explicit number
-sparkwing run deploy --sw-priority front # one past the highest queued
-sparkwing run deploy --sw-priority back  # one below the lowest queued
+sparkwing run fictional-deploy --sw-priority 100   # explicit number
+sparkwing run fictional-deploy --sw-priority front # one past the highest queued
+sparkwing run fictional-deploy --sw-priority back  # one below the lowest queued
 ```
 
 `front` and `back` are resolved once, when the run starts, against the

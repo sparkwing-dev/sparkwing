@@ -48,17 +48,17 @@ func TestParseRunFlags_NoCache(t *testing.T) {
 }
 
 func TestParseRunFlags_RunHandleFile(t *testing.T) {
-	flags, passthroughArgs := parseRunFlags([]string{"--sw-run-handle-file", "/tmp/run.json", "--target", "prod"})
-	if flags.runHandleFile != "/tmp/run.json" {
+	flags, passthroughArgs := parseRunFlags([]string{"--sw-run-handle-file", "/tmp/fictional-run.json", "--target", "fictional-production"})
+	if flags.runHandleFile != "/tmp/fictional-run.json" {
 		t.Fatalf("runHandleFile = %q", flags.runHandleFile)
 	}
-	if got := strings.Join(passthroughArgs, " "); got != "--target prod" {
+	if got := strings.Join(passthroughArgs, " "); got != "--target fictional-production" {
 		t.Fatalf("passthrough = %q", got)
 	}
 }
 
 func TestRemoveEnvDropsAmbientRunHandle(t *testing.T) {
-	env := removeEnv([]string{"PATH=/bin", "SPARKWING_RUN_HANDLE_FILE=/tmp/stale"}, "SPARKWING_RUN_HANDLE_FILE")
+	env := removeEnv([]string{"PATH=/bin", "SPARKWING_RUN_HANDLE_FILE=/tmp/fictional-stale"}, "SPARKWING_RUN_HANDLE_FILE")
 	if len(env) != 1 || env[0] != "PATH=/bin" {
 		t.Fatalf("environment = %#v", env)
 	}
@@ -147,8 +147,8 @@ func TestParseRunFlags_Profile(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"space-separated", []string{"--profile", "prod"}, "prod"},
-		{"equals-form", []string{"--profile=prod"}, "prod"},
+		{"space-separated", []string{"--profile", "fictional-production"}, "fictional-production"},
+		{"equals-form", []string{"--profile=fictional-production"}, "fictional-production"},
 		{"empty-trailing-flag-falls-through", []string{"--profile"}, ""},
 	}
 	for _, testCase := range cases {
@@ -165,17 +165,17 @@ func TestParseRunFlags_Profile(t *testing.T) {
 }
 
 func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
-	flags, passthroughArgs := parseRunFlags([]string{"--profile", "local", "--target", "prod"})
-	if flags.profile != "local" {
-		t.Errorf("profile = %q, want local", flags.profile)
+	flags, passthroughArgs := parseRunFlags([]string{"--profile", "fictional-local", "--target", "fictional-production"})
+	if flags.profile != "fictional-local" {
+		t.Errorf("profile = %q, want fictional-local", flags.profile)
 	}
-	if !slices.Contains(passthroughArgs, "--target") || !slices.Contains(passthroughArgs, "prod") {
+	if !slices.Contains(passthroughArgs, "--target") || !slices.Contains(passthroughArgs, "fictional-production") {
 		t.Errorf("--target should fall through to pipeline args; passthrough=%v", passthroughArgs)
 	}
 }
 
 func TestParseRunFlags_RetiredSwProfileFallsThrough(t *testing.T) {
-	flags, passthroughArgs := parseRunFlags([]string{"--sw-profile", "remote"})
+	flags, passthroughArgs := parseRunFlags([]string{"--sw-profile", "fictional-remote"})
 	if flags.profile != "" {
 		t.Errorf("--sw-profile should not set profile; got %q", flags.profile)
 	}
@@ -192,7 +192,7 @@ func TestRetiredFlagYieldsToTheCommandThatDeclaresIt(t *testing.T) {
 	if err := checkRetiredWhereFlags(args, map[string]bool{"name": true}); err == nil {
 		t.Error("--on passed the guard on a command that does not declare it")
 	}
-	if err := checkRetiredWhereFlags([]string{"--on=prod"}, nil); err == nil {
+	if err := checkRetiredWhereFlags([]string{"--on=fictional-production"}, nil); err == nil {
 		t.Error("--on=value form escaped the guard")
 	}
 }
@@ -203,8 +203,8 @@ func TestParseRunFlags_IsolatedHome(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"space-separated", []string{"--sw-isolated-home", "/tmp/gate"}, "/tmp/gate"},
-		{"equals-form", []string{"--sw-isolated-home=/tmp/gate"}, "/tmp/gate"},
+		{"space-separated", []string{"--sw-isolated-home", "/tmp/fictional-gate"}, "/tmp/fictional-gate"},
+		{"equals-form", []string{"--sw-isolated-home=/tmp/fictional-gate"}, "/tmp/fictional-gate"},
 		{"empty-trailing-flag-falls-through", []string{"--sw-isolated-home"}, ""},
 	}
 	for _, testCase := range cases {

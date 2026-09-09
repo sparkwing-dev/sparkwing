@@ -14,7 +14,7 @@ store.
 
 Declaring a cadence does not arm it. `sparkwing crons install` arms a
 repo's schedules on the host it is run from, and installs one OS timer -- a
-systemd user timer on Linux, a launchd agent on macOS -- that calls`sparkwing crons tick` every minute. Sparkwing evaluates every cron
+systemd user timer on Linux, a launchd agent on macOS -- that calls `sparkwing crons tick` every minute. Sparkwing evaluates every cron
 expression itself inside that tick, so the machine holds one timer however
 many schedules are armed.
 
@@ -69,8 +69,8 @@ zone, overlap policy or catch-up window is stored, a pipeline that stopped
 declaring a cadence is marked undeclared, and pause state, cursor and fire
 history survive.
 
-Arming is per host. Another machine reading the same repo stays idle until it
-is armed too, so two hosts never race for the same instant.
+Arming is per host. Another machine runs the same schedule only when the
+schedule is also armed on that machine.
 
 ### Flags
 
