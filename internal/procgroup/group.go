@@ -40,6 +40,7 @@ type Info struct {
 	Group   int
 	Session int
 	State   string
+	Exiting bool
 
 	Birth string
 }
