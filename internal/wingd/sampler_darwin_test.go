@@ -59,3 +59,10 @@ func TestSampleHost_NeverClaimsAMeasurementItDoesNotHave(t *testing.T) {
 		t.Fatal("host total memory is zero")
 	}
 }
+
+func TestDarwinFreeMemory_PressureIsNotMeasurement(t *testing.T) {
+	free, measured := darwinFreeMemory(16<<30, 62, true)
+	if measured || free != 0 {
+		t.Fatalf("pressure level reported %d available bytes, measured=%v", free, measured)
+	}
+}
