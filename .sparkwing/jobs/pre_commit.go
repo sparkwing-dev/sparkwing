@@ -304,17 +304,24 @@ func changeScope(ctx context.Context, noun string, keep func([]string) []string)
 }
 
 func resolveGateBase(ctx context.Context) (string, error) {
-	sha, err := sparkwing.Bash(ctx, "git merge-base "+gateBaselineRef+" HEAD").String()
-	sha = strings.TrimSpace(sha)
-	if err != nil || sha == "" {
-		return "", fmt.Errorf("could not run -- nothing is staged, so the step reads the change "+
-			"since %s, and this checkout cannot resolve it. Run `%s`",
-			gateBaselineRef, fetchBaselineHint())
+	baseline, err := resolveBaselineCommit(ctx)
+	if err != nil {
+		return "", err
 	}
-	if len(sha) > 12 {
-		sha = sha[:12]
+	output, err := sparkwing.Exec(ctx, "git", "merge-base", baseline, "HEAD").Capture()
+	if err != nil {
+		cause := errors.Join(err, ctx.Err())
+		var commandError *sparkwing.ExecError
+		if ctx.Err() == nil && errors.As(err, &commandError) && commandError.ExitCode == 1 {
+			return "", fmt.Errorf("%s and HEAD have no common ancestor: %w", gateBaselineRef, cause)
+		}
+		return "", fmt.Errorf("find merge base of %s and HEAD: %w", gateBaselineRef, cause)
 	}
-	return sha, nil
+	commit := strings.TrimSpace(output.Stdout)
+	if commit == "" {
+		return "", fmt.Errorf("git merge-base returned an empty commit ID")
+	}
+	return commit, nil
 }
 
 func listNames(ctx context.Context, command string) ([]string, error) {
