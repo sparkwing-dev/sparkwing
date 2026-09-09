@@ -376,3 +376,138 @@ func TestControllerCrons_ScopesAreEnforced(t *testing.T) {
 		}
 	}
 }
+
+func TestControllerCrons_PushRefusesABranchGitWouldNotAccept(t *testing.T) {
+	f := newCronsFixture(t)
+	for _, branch := range []string{
+		"has a space", "feature/../main", "-leading-dash", "trailing/", "tip.lock",
+		"ref@{0}", "double//slash", "star*",
+	} {
+		body := cronPushBody()
+		body["branch"] = branch
+		if got := f.status(http.MethodPut, "/api/v1/crons/repos", f.writer, body); got != http.StatusBadRequest {
+			t.Errorf("branch %q: status = %d, want 400", branch, got)
+		}
+	}
+	for _, branch := range []string{"", "main", "feature/crons-v2", "release-1.2"} {
+		body := cronPushBody()
+		body["branch"] = branch
+		if got := f.status(http.MethodPut, "/api/v1/crons/repos", f.writer, body); got != http.StatusOK {
+			t.Errorf("branch %q: status = %d, want 200", branch, got)
+		}
+	}
+}
+
+func TestControllerCrons_HealthIsUnhealthyBeforeTheFirstTick(t *testing.T) {
+	f := newCronsFixture(t)
+	f.push(cronPushBody())
+
+	var overview crons.OverviewView
+	f.call(http.MethodGet, "/api/v1/crons", f.reader, nil, http.StatusOK, &overview)
+	if !overview.Health.TickStale {
+		t.Error("a controller that has never ticked reports a fresh tick")
+	}
+	if crons.HealthFromView(overview.Health).Healthy() {
+		t.Error("a controller with armed schedules and no tick reports healthy")
+	}
+}
+
+func TestControllerCrons_OverrideRoundTripsAnEmptyArgumentSet(t *testing.T) {
+	f := newCronsFixture(t)
+	f.push(cronPushBody())
+
+	var envelope crons.ScheduleEnvelope
+	f.call(http.MethodPut, "/api/v1/crons/acme%2Fwidgets%2Fnightly/override", f.writer,
+		map[string]any{"args": map[string]string{}}, http.StatusOK, &envelope)
+	if len(envelope.Schedule.Effective.Args) != 0 {
+		t.Errorf("effective args = %v, want none", envelope.Schedule.Effective.Args)
+	}
+	fields := envelope.Schedule.Override.Fields
+	if len(fields) != 1 || fields[0] != "args" {
+		t.Fatalf("override fields = %v, want [args]", fields)
+	}
+	row := crons.RowFromView(envelope.Schedule)
+	if row.Override == nil || row.Override.Args == nil || len(row.Override.Args) != 0 {
+		t.Errorf("rebuilt override args = %#v, want a set but empty map", row.Override)
+	}
+	if len(row.Effective.Args) != 0 {
+		t.Errorf("rebuilt effective args = %v, want none", row.Effective.Args)
+	}
+}
+
+func TestControllerCrons_OverrideValuesSurviveTheWire(t *testing.T) {
+	f := newCronsFixture(t)
+	f.push(cronPushBody())
+
+	var envelope crons.ScheduleEnvelope
+	f.call(http.MethodPut, "/api/v1/crons/acme%2Fwidgets%2Fnightly/override", f.writer,
+		map[string]any{"cron": "*/15 * * * *", "tz": "America/Denver", "overlap": "queue", "catch_up": "6h"},
+		http.StatusOK, &envelope)
+
+	row := crons.RowFromView(envelope.Schedule)
+	if row.Override == nil {
+		t.Fatal("the wire carried no override")
+	}
+	if row.Override.Cron != "*/15 * * * *" || row.Override.TZ != "America/Denver" ||
+		row.Override.Overlap != "queue" {
+		t.Errorf("rebuilt override = %+v, want the values that were set", row.Override)
+	}
+	if row.Override.CatchUp == nil || *row.Override.CatchUp != 6*time.Hour {
+		t.Errorf("rebuilt catch-up = %v, want 6h", row.Override.CatchUp)
+	}
+	if row.Override.Args != nil {
+		t.Errorf("rebuilt args = %v, want nil for an override that names none", row.Override.Args)
+	}
+}
+
+func TestControllerCrons_DetailServesTheWholeRetainedHistory(t *testing.T) {
+	f := newCronsFixture(t)
+	pushed := f.push(cronPushBody())
+	schedules, _ := pushed["schedules"].([]any)
+	first, _ := schedules[0].(map[string]any)
+	id, _ := first["id"].(string)
+	if id == "" {
+		t.Fatalf("push returned no schedule id: %v", pushed)
+	}
+
+	ctx := context.Background()
+	base := time.Now().UTC().Add(-100 * time.Hour)
+	const seeded = 60
+	for i := 0; i < seeded; i++ {
+		at := base.Add(time.Duration(i) * time.Hour)
+		fire := &store.CronFire{
+			DueAt: at, DecidedAt: at, Outcome: store.CronOutcomeMissed, Detail: "seeded",
+		}
+		if err := f.store.ResolveCronDue(ctx, id, at, nil, fire, at); err != nil {
+			t.Fatalf("seed fire %d: %v", i, err)
+		}
+	}
+
+	var detail crons.DetailView
+	f.call(http.MethodGet, "/api/v1/crons/"+id, f.reader, nil, http.StatusOK, &detail)
+	if len(detail.Fires) != seeded {
+		t.Errorf("detail carried %d fires, want the %d the store retains so `--fires N` is not capped below N",
+			len(detail.Fires), seeded)
+	}
+}
+
+func TestControllerCrons_APushWithNoSchedulesKeyWithdrawsEverything(t *testing.T) {
+	f := newCronsFixture(t)
+	f.push(cronPushBody())
+
+	// safety: `schedules` is optional in the schema for exactly this -- the body
+	// is the whole set, so one carrying none withdraws them all.
+	out := f.push(map[string]any{"repo_url": cronTestRepoURL, "branch": "main", "sha": cronTestSHA})
+	withdrawn, _ := out["withdrawn"].([]any)
+	if len(withdrawn) != 2 {
+		t.Fatalf("withdrawn = %v, want both schedules", out["withdrawn"])
+	}
+
+	var overview crons.OverviewView
+	f.call(http.MethodGet, "/api/v1/crons", f.reader, nil, http.StatusOK, &overview)
+	for _, view := range overview.Schedules {
+		if view.Declared {
+			t.Errorf("%s is still declared after a push that carried nothing", view.Name)
+		}
+	}
+}

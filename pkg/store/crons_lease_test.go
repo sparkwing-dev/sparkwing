@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -113,14 +114,60 @@ func TestRunCronTickLeased_RefusesAMissingTickFunction(t *testing.T) {
 	}
 }
 
-func TestCronTickIntervalLeavesRoomForAMinuteTimer(t *testing.T) {
+func TestCronTickWindowLeavesRoomForAMinuteTimer(t *testing.T) {
 	// safety: a caller waking every minute stamps its tick a little after it
 	// started, so a lease window of a full minute would turn the next wake away
 	// and skip that minute entirely.
-	if store.CronTickInterval >= time.Minute {
-		t.Errorf("CronTickInterval = %s, want a window under a minute", store.CronTickInterval)
+	if store.CronTickWindow >= time.Minute {
+		t.Errorf("CronTickWindow = %s, want a window under a minute", store.CronTickWindow)
 	}
-	if store.CronTickInterval < 30*time.Second {
-		t.Errorf("CronTickInterval = %s, want a window near a minute", store.CronTickInterval)
+	if store.CronTickWindow < 30*time.Second {
+		t.Errorf("CronTickWindow = %s, want a window near a minute", store.CronTickWindow)
+	}
+}
+
+func TestRunCronTickLeased_ReleasesTheClaimWhenTheTickIsCancelled(t *testing.T) {
+	st := storetest.Open(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ran, err := st.RunCronTickLeased(ctx, "alpha", time.Hour, func(tickCtx context.Context) error {
+		cancel()
+		return tickCtx.Err()
+	})
+	if !ran {
+		t.Fatalf("the cancelled tick did not run: %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("tick error = %v, want the cancellation", err)
+	}
+	assertCronTickClaimFree(t, st)
+}
+
+func TestRunCronTickLeased_RecoversAPanicAndReleasesTheClaim(t *testing.T) {
+	st := storetest.Open(t)
+
+	ran, err := st.RunCronTickLeased(context.Background(), "alpha", time.Hour, func(context.Context) error {
+		panic("the evaluator fell over")
+	})
+	if !ran {
+		t.Error("a panicking tick reported that it never ran")
+	}
+	if err == nil || !strings.Contains(err.Error(), "panicked") {
+		t.Fatalf("tick error = %v, want the recovered panic", err)
+	}
+	assertCronTickClaimFree(t, st)
+}
+
+// safety: a tick that failed leaves no stamp, so the next caller is turned away
+// only by a claim nobody released.
+func assertCronTickClaimFree(t *testing.T, st *store.Store) {
+	t.Helper()
+	next, err := st.RunCronTickLeased(context.Background(), "beta", time.Minute,
+		func(context.Context) error { return nil })
+	if err != nil {
+		t.Fatalf("the next tick: %v", err)
+	}
+	if !next {
+		t.Error("the claim was still held, so the next minute could not tick")
 	}
 }

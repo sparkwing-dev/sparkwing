@@ -63,11 +63,19 @@ type LockView struct {
 }
 
 // OverrideView names the declared fields the evaluating side has overridden,
-// and whether the declaration has moved under them since.
+// whether the declaration has moved under them since, and the values that were
+// set. A field the override does not name is empty here, so a reader rebuilds
+// the same override the evaluator holds and can print it beside the
+// declaration.
 type OverrideView struct {
-	Fields []string `json:"fields"`
-	Stale  bool     `json:"stale"`
-	SetAt  string   `json:"set_at"`
+	Fields    []string          `json:"fields"`
+	Stale     bool              `json:"stale"`
+	SetAt     string            `json:"set_at"`
+	Cron      string            `json:"cron"`
+	TZ        string            `json:"tz"`
+	Overlap   string            `json:"overlap"`
+	CatchUpNS int64             `json:"catch_up_ns"`
+	Args      map[string]string `json:"args"`
 }
 
 // EffectiveView is the cadence a schedule actually runs.
@@ -198,6 +206,16 @@ func NewScheduleView(row Row) ScheduleView {
 	}
 	if row.Override != nil {
 		override.SetAt = RFC3339(row.Override.SetAt)
+		override.Cron = row.Override.Cron
+		override.TZ = row.Override.TZ
+		override.Overlap = row.Override.Overlap
+		override.Args = ViewArgs(row.Override.Args)
+		if row.Override.CatchUp != nil {
+			override.CatchUpNS = int64(*row.Override.CatchUp)
+		}
+	}
+	if override.Args == nil {
+		override.Args = map[string]string{}
 	}
 	return ScheduleView{
 		ID:           row.ID,
@@ -328,9 +346,31 @@ func RowFromView(v ScheduleView) Row {
 		Location:       zoneOrUTC(v.Effective.TZ),
 	}
 	if len(v.Override.Fields) > 0 {
-		row.Override = &store.CronOverride{SetAt: parseRFC3339(v.Override.SetAt)}
+		row.Override = &store.CronOverride{
+			SetAt:   parseRFC3339(v.Override.SetAt),
+			Cron:    v.Override.Cron,
+			TZ:      v.Override.TZ,
+			Overlap: v.Override.Overlap,
+			Args:    overrideArgsFromView(v.Override),
+		}
+		if v.Override.CatchUpNS != 0 {
+			d := time.Duration(v.Override.CatchUpNS)
+			row.Override.CatchUp = &d
+		}
 	}
 	return row
+}
+
+// safety: an override that replaces the declared arguments with none is a set
+// but empty map, which the wire cannot tell from an override that names no
+// arguments at all -- the field list can, so it decides.
+func overrideArgsFromView(v OverrideView) map[string]string {
+	for _, field := range v.Fields {
+		if field == "args" {
+			return ViewArgs(v.Args)
+		}
+	}
+	return nil
 }
 
 // HealthFromView rebuilds the [Health] a renderer reads from the wire shape.

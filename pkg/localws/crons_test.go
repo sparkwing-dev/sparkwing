@@ -27,7 +27,7 @@ var (
 		"schedule_name", "state", "state_detail", "tz", "updated_at", "where",
 	}
 	cronLockKeys      = []string{"binary", "digest", "ref", "state"}
-	cronOverrideKeys  = []string{"fields", "set_at", "stale"}
+	cronOverrideKeys  = []string{"args", "catch_up_ns", "cron", "fields", "overlap", "set_at", "stale", "tz"}
 	cronEffectiveKeys = []string{"args", "catch_up_ns", "cron", "overlap", "tz"}
 	cronHealthKeys    = []string{
 		"ahead", "armed", "detail", "following", "last_tick", "locked",

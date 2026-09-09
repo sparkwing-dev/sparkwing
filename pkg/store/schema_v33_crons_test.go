@@ -140,6 +140,22 @@ func TestSchemaV33UpgradesV32AndKeepsSchedulesAndFires(t *testing.T) {
 			t.Errorf("%s fires after upgrade = %+v", sched.ID, fires)
 		}
 	}
+	assertTwoNamesOnOnePipeline(t, up, "/repo/one", "nightly")
+}
+
+// safety: the widening exists so one pipeline carries several names, so an
+// upgraded store has to accept a second where v32's key refused it.
+func assertTwoNamesOnOnePipeline(t *testing.T, st *store.Store, repo, pipeline string) {
+	t.Helper()
+	ctx := context.Background()
+	for _, name := range []string{"morning", "evening"} {
+		if _, _, err := st.ArmCronSchedule(ctx, store.CronSchedule{
+			ID: "crn_upgraded_" + name, RepoPath: repo, Pipeline: pipeline, Name: name,
+			Cron: "0 * * * *", TZ: "UTC", CatchUp: time.Hour,
+		}, cronBase); err != nil {
+			t.Fatalf("arm %s/%s after the upgrade: %v", pipeline, name, err)
+		}
+	}
 }
 
 func TestSchemaV33KeysSchedulesByName(t *testing.T) {

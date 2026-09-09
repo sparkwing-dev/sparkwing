@@ -198,9 +198,12 @@ refused when it is set, and the schedule keeps running what it was.
 `crons list` marks an overridden expression with `*`, and `crons show` prints
 the declared value, the override and the effective value side by side. An
 override is **stale** once the repo changes the declaration it was set against:
-it still applies, and both `list` and `show` say so, because a cadence someone
-chose against `0 3 * * *` may mean nothing against `*/5 * * * *`. Re-running
-install re-bases it, which is the host acknowledging the new declaration.
+it still applies, because a cadence someone chose against `0 3 * * *` may mean
+nothing against `*/5 * * * *`. `crons list` adds a `!` after the `*` and prints
+a footnote naming the remedy, `crons show` prints an `override stale` line, and
+`crons status` counts them. Re-running install re-bases every stale override
+and says which ones it moved, which is the host acknowledging the new
+declaration.
 
 ## Drift
 
@@ -231,9 +234,11 @@ the cron expressions itself rather than translating them into a service
 manager's own calendar syntax.
 
 Each tick takes an exclusive lock on `crons.lock` under the sparkwing home, so
-two ticks never resolve the same instant. It re-reads what the armed
-repositories declare, then evaluates every declared unpaused schedule against
-its cursor -- the last due instant it resolved -- and resolves each one:
+two ticks never resolve the same instant. It re-reads the declaration of every
+schedule that follows its checkout; a pinned schedule keeps the declaration it
+was armed with, because reading the working tree is exactly what the pin exists
+to avoid. It then evaluates every declared unpaused schedule against its
+cursor -- the last due instant it resolved -- and resolves each one:
 
 - **fired**: the instant is inside the catch-up window and the run is
   launched.
@@ -248,7 +253,10 @@ its cursor -- the last due instant it resolved -- and resolves each one:
 
 Every outcome moves the cursor, so an instant is considered exactly once. A
 schedule that fails, is skipped, or is paused still fires on time at its next
-instant.
+instant. The one exception is a schedule that cannot be evaluated at all -- an
+override that leaves an unparseable expression, a zone this host cannot load --
+which has no due instant to resolve: its cursor stays where it is until the
+override is fixed or dropped, so nothing between now and then is skipped.
 
 A scheduled run goes through the same path as `sparkwing run --sw-detached`:
 it is persisted against this home's runs store and executed by the resident
@@ -363,9 +371,13 @@ commit, and sends the whole set. Entries declared `where: local` are reported
 as this host's, and the same command with no `--profile` arms them here.
 
 The repository needs a git origin, because the cluster clones the pipeline
-source at each fire rather than reading a checkout. A seed that fails is a
-warning: the trigger loop fetches the commit itself when it finds the cache
-short.
+source at each fire rather than reading a checkout. For the same reason the
+push refuses a HEAD no remote branch carries -- `git branch -r --contains HEAD`
+empty -- since every fire would fail at the clone: push the branch first, or
+use `--follow` to clone the branch tip instead. Uncommitted edits are a warning
+rather than a refusal, because the controller clones the pushed commit and they
+are simply not part of what fires. A seed that fails is a warning too: the
+trigger loop fetches the commit itself when it finds the cache short.
 
 ### Pinned by commit, or following the branch
 
@@ -384,8 +396,11 @@ branch.
 
 The controller evaluates the pushed schedules once a minute from a loop of its
 own. The minute is claimed in the runs store, so several controllers sharing
-one store still resolve each due instant exactly once, and a controller that
-dies mid-tick releases its claim within ninety seconds. Nothing on the
+one store keep off each other's minute, and a controller that dies mid-tick
+releases its claim within ninety seconds. That claim is advisory: what actually
+makes a due instant fire once is the launch's idempotency key,
+`<schedule id>@<due instant>`, and the schedule's cursor, which only ever moves
+forward. Two overlapping ticks reach the same run rather than starting two. Nothing on the
 controller reads a working tree, so a pushed schedule never drifts: its
 declaration is what the last push carried.
 
@@ -405,8 +420,9 @@ starting a second.
 
 ### Inspecting
 
-Every verb but `tick` takes `--profile NAME` and reads the controller instead
-of this host:
+Every verb but `tick`, `lock` and `unlock` takes `--profile NAME` and reads the
+controller instead of this host. A controller schedule is pinned by the commit
+it was pushed at, so there is no separate lock to take:
 
 ```bash
 sparkwing crons list --profile prod

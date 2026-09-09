@@ -108,6 +108,9 @@ func summarize(errs []string) string {
 }
 
 func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now time.Time, dryRun bool, report *TickReport) {
+	if !s.evaluates(sched) {
+		return
+	}
 	eval, err := prepare(sched)
 	if err != nil {
 		s.recordUnevaluable(ctx, sched, now, dryRun, report, err)

@@ -41,9 +41,6 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v32 adds two tables of its own and no column, and nothing older
 	// reads them, so an older binary keeps writing the migrated database.
 	32: nil,
-	// safety: v33 widens the schedule key with a defaulted column, so an older
-	// binary's insert still lands on the name it has always used.
-	33: {cronScheduleNamedCols, cronFireArgsCols},
 }
 
 func columnSpecMaps() []map[string]string {

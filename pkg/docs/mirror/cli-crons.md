@@ -30,7 +30,8 @@ a checkout updated afterwards does not change what runs unattended. Re-run
 install to move the pin, `crons unlock` to follow the checkout again,
 and `crons set` to override a declared cadence on this host alone.
 
---profile NAME points every verb but tick at a controller instead of this host.
+--profile NAME points every verb but tick, lock and unlock at a controller
+instead of this host.
 `crons install --profile` pushes the repo's `where: controller`
 entries to it, pinned at HEAD unless --follow; the controller evaluates them
 from a loop of its own, one evaluator per store, and each fire becomes a
@@ -131,7 +132,9 @@ is armed too, so two hosts never race for the same instant.
 controller instead, and reports the "where: local" ones as this host's. The
 push needs a git origin, because the cluster clones the source at each fire; it
 pins every fire to the checkout's HEAD unless --follow, which clones the branch
-tip. Re-running the push is the explicit update, and it moves the pin.
+tip. A HEAD no remote branch carries is refused, because every fire would fail
+at the clone; uncommitted edits are a warning, since the pushed commit is what
+runs. Re-running the push is the explicit update, and it moves the pin.
 
 ### Flags
 
@@ -225,7 +228,6 @@ pipeline runs from the checkout or from PATH are outside it.
 
 | Flag | Description |
 |---|---|
-| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -248,7 +250,7 @@ like -- a day-of-week field, a DST boundary, a zone that is not yours.
 
 ### Arguments
 
-- `NAME` (optional) -- Schedule id, repo/pipeline, or a unique pipeline name; omit for every armed schedule
+- `NAME` (optional) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name; omit for every armed schedule
 
 ### Flags
 
@@ -278,7 +280,7 @@ passed while it was paused.
 
 ### Arguments
 
-- `NAME` (required) -- Schedule id, repo/pipeline, or a unique pipeline name
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
 
 ### Flags
 
@@ -327,7 +329,7 @@ Resumes at the next due instant. The instants that passed while the schedule was
 
 ### Arguments
 
-- `NAME` (required) -- Schedule id, repo/pipeline, or a unique pipeline name
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
 
 ### Flags
 
@@ -356,7 +358,7 @@ instants, so the next one still fires on time.
 
 ### Arguments
 
-- `NAME` (required) -- Schedule id, repo/pipeline, or a unique pipeline name
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
 
 ### Flags
 
@@ -432,7 +434,7 @@ unique across this host's schedules.
 
 ### Arguments
 
-- `NAME` (required) -- Schedule id, repo/pipeline, or a unique pipeline name
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
 
 ### Flags
 
@@ -494,8 +496,10 @@ Evaluate every armed schedule once (the OS timer's entry point)
 
 What the systemd timer or launchd agent runs every minute.
 It takes an exclusive lock so two ticks never resolve the same instant,
-re-reads what the armed repos declare, evaluates every declared unpaused
-schedule against its cursor, launches what is due, and records each outcome.
+re-reads the declaration of every schedule that follows its checkout -- a
+pinned schedule keeps the declaration it was armed with -- evaluates every
+declared unpaused schedule against its cursor, launches what is due, and
+records each outcome.
 
 Quiet on success: one summary line and the id of each run it launched. It
 exits non-zero only when the tick itself could not run, so a schedule that
@@ -574,7 +578,6 @@ the repo's declaration again.
 
 | Flag | Description |
 |---|---|
-| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples

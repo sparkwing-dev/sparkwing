@@ -1031,7 +1031,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 33
+const expectedSchemaVersion = 34
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1435,8 +1435,6 @@ const cronSchedulesTableSQLite = `CREATE TABLE IF NOT EXISTS cron_schedules (
     catch_up_ns   INTEGER NOT NULL,
     -- local | controller
     where_        TEXT NOT NULL DEFAULT 'local',
-    -- branch a controller schedule was pushed from; empty for a local one.
-    git_branch    TEXT NOT NULL DEFAULT '',
     -- JSON object of CLI argument name to value, passed to the scheduled run.
     args          TEXT NOT NULL DEFAULT '{}',
     -- commit the schedule is pinned to; empty means it follows the checkout.
@@ -1481,7 +1479,6 @@ var cronSchedulesTablePostgres = strings.NewReplacer(
 var cronScheduleNamedCols = map[string]string{
 	"schedule_name":        "TEXT NOT NULL DEFAULT 'default'",
 	"where_":               "TEXT NOT NULL DEFAULT 'local'",
-	"git_branch":           "TEXT NOT NULL DEFAULT ''",
 	"args":                 "TEXT NOT NULL DEFAULT '{}'",
 	"locked_ref":           "TEXT NOT NULL DEFAULT ''",
 	"locked_binary":        "TEXT NOT NULL DEFAULT ''",
@@ -1496,6 +1493,13 @@ var cronScheduleNamedCols = map[string]string{
 }
 
 var cronFireArgsCols = map[string]string{"args": "TEXT NOT NULL DEFAULT '{}'"}
+
+// safety: the branch a controller schedule was pushed from arrived after v33
+// had already stamped stores on this branch, so it is v34's column rather than
+// a silent addition to a version those stores will never re-run.
+var cronScheduleBranchCols = map[string]string{
+	"git_branch": "TEXT NOT NULL DEFAULT ''",
+}
 
 const cronFiresTableSQLite = `CREATE TABLE IF NOT EXISTS cron_fires (
     id          TEXT PRIMARY KEY,
@@ -1793,6 +1797,8 @@ var migrationRequirements = map[int][]string{
 		agentLossRequirement,
 	},
 	31: {assistedExecutionPolicyRequirement},
+	33: {cronScheduleNameRequirement},
+	34: {cronScheduleNameRequirement},
 }
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
@@ -1898,6 +1904,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyCronsMigration(ctx, tx, cronSchedulesTableSQLite, cronFiresTableSQLite)
 	case 33:
 		return applyNamedCronsMigrationSQLite(ctx, tx)
+	case 34:
+		return applyCronBranchMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1942,7 +1950,50 @@ func applyNamedCronsMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	if err := ensureColumnsSQLite(ctx, tx, "cron_schedules", cronScheduleNamedCols); err != nil {
 		return err
 	}
-	return ensureColumnsSQLite(ctx, tx, "cron_fires", cronFireArgsCols)
+	if err := ensureColumnsSQLite(ctx, tx, "cron_fires", cronFireArgsCols); err != nil {
+		return err
+	}
+	// safety: outside the rebuild branch as well, because a store that already
+	// carries schedule_name never enters it and would otherwise keep only the
+	// v32 key, exactly as Postgres creates the index either way.
+	_, err = tx.ExecContext(ctx, cronSchedulesUniqueIndex)
+	return err
+}
+
+// safety: v33 was still unreleased when it gained a column, so every store an
+// earlier commit on that lineage stamped 33 is short of it. This repairs the
+// whole v33 shape -- its columns and its widened key -- rather than trusting
+// the stamp, and every statement it runs is a no-op on a store that has them.
+func applyCronBranchMigrationSQLite(ctx context.Context, tx *storeTx) error {
+	if err := ensureColumnsSQLite(ctx, tx, "cron_schedules", cronScheduleNamedCols); err != nil {
+		return err
+	}
+	if err := ensureColumnsSQLite(ctx, tx, "cron_schedules", cronScheduleBranchCols); err != nil {
+		return err
+	}
+	if err := ensureColumnsSQLite(ctx, tx, "cron_fires", cronFireArgsCols); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, cronSchedulesUniqueIndex)
+	return err
+}
+
+func applyCronBranchMigrationPostgres(ctx context.Context, tx *storeTx) error {
+	if err := addColumnsTx(ctx, tx, "cron_schedules", cronScheduleNamedCols); err != nil {
+		return err
+	}
+	if err := addColumnsTx(ctx, tx, "cron_schedules", cronScheduleBranchCols); err != nil {
+		return err
+	}
+	if err := addColumnsTx(ctx, tx, "cron_fires", cronFireArgsCols); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`ALTER TABLE cron_schedules DROP CONSTRAINT IF EXISTS cron_schedules_repo_path_pipeline_key`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, cronSchedulesUniqueIndex)
+	return err
 }
 
 func applyNamedCronsMigrationPostgres(ctx context.Context, tx *storeTx) error {
@@ -2161,6 +2212,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyCronsMigration(ctx, tx, cronSchedulesTablePostgres, cronFiresTablePostgres)
 	case 33:
 		return applyNamedCronsMigrationPostgres(ctx, tx)
+	case 34:
+		return applyCronBranchMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

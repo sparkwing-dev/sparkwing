@@ -49,13 +49,14 @@ type CronRepoDeleteResponse struct {
 
 // CronOverrideRequest is the body of PUT /api/v1/crons/{id}/override. A field
 // left empty keeps what the repository declared; Args replaces the declared set
-// whole.
+// whole, and a set but empty map is how a schedule is overridden to launch with
+// no arguments at all, so it is sent rather than omitted.
 type CronOverrideRequest struct {
 	Cron    string            `json:"cron,omitempty"`
 	TZ      string            `json:"tz,omitempty"`
 	Overlap string            `json:"overlap,omitempty"`
 	CatchUp string            `json:"catch_up,omitempty"`
-	Args    map[string]string `json:"args,omitempty"`
+	Args    map[string]string `json:"args"`
 }
 
 // ListCrons returns the controller's scheduler health and every schedule pushed

@@ -238,3 +238,90 @@ func newCronsControllerRepo(t *testing.T) string {
 	}
 	return root
 }
+
+func TestCronsInstallProfile_RefusesAHeadNoRemoteBranchCarries(t *testing.T) {
+	newCronsProfileFixture(t)
+	repo := newCronsControllerRepo(t)
+
+	err := runCrons([]string{"install", "--profile", "prod", "--repo", repo, "-o", "pretty"})
+	if err == nil {
+		t.Fatal("a commit no remote branch carries was pushed anyway")
+	}
+	for _, want := range []string{"no remote branch", "--follow"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q is missing %q", err, want)
+		}
+	}
+}
+
+func TestCronsInstallProfile_PushesOnceARemoteBranchCarriesHeadAndWarnsWhenDirty(t *testing.T) {
+	f := newCronsProfileFixture(t)
+	repo := newCronsControllerRepo(t)
+	gitInRepo(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+	if err := os.WriteFile(filepath.Join(repo, "scratch.txt"), []byte("uncommitted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out string
+	warning := captureStderr(t, func() {
+		out = captureStdout(t, func() {
+			if err := runCrons([]string{"install", "--profile", "prod", "--repo", repo, "-o", "pretty"}); err != nil {
+				t.Errorf("crons install --profile: %v", err)
+			}
+		})
+	})
+	if !strings.Contains(out, "pushed") {
+		t.Errorf("install reported no push:\n%s", out)
+	}
+	if !strings.Contains(warning, "uncommitted edits") {
+		t.Errorf("a dirty working tree drew no warning:\n%s", warning)
+	}
+	rows, err := (&crons.Service{Store: f.store}).List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 || rows[0].LockedRef == "" {
+		t.Fatalf("rows = %+v, want one pinned at the pushed commit", rows)
+	}
+}
+
+func TestCronsInstallProfile_PlainPrintsBareNames(t *testing.T) {
+	newCronsProfileFixture(t)
+	repo := newCronsControllerRepo(t)
+
+	out := captureStdout(t, func() {
+		if err := runCrons([]string{"install", "--profile", "prod", "--repo", repo, "--follow", "-o", "plain"}); err != nil {
+			t.Errorf("crons install --profile -o plain: %v", err)
+		}
+	})
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 || lines[0] != "acme/widgets/cluster-sweep" {
+		t.Errorf("plain output = %q, want one bare schedule name", out)
+	}
+}
+
+func TestSelectDeclaredForPushTrimsTheNamesItIsGiven(t *testing.T) {
+	declared := []crons.Declared{
+		declaredControllerEntry("nightly", "default", "0 3 * * *"),
+		declaredControllerEntry("sweep", "quick", "*/5 * * * *"),
+	}
+	got, err := selectDeclaredForPush(declared, []string{" nightly ", "", "  ", "sweep/quick\t"}, "/repo")
+	if err != nil {
+		t.Fatalf("selectDeclaredForPush: %v", err)
+	}
+	if len(got) != 2 || got[0].Pipeline != "nightly" || got[1].Name != "quick" {
+		t.Fatalf("selected %+v, want both entries", got)
+	}
+	if _, err := selectDeclaredForPush(declared, []string{" nope "}, "/repo"); err == nil {
+		t.Error("a name the repo does not declare was accepted")
+	}
+}
+
+func gitInRepo(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+	}
+}

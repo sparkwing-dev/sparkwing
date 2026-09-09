@@ -20,9 +20,11 @@ side that fires it.
       tz: America/Denver
   ```
 
-- **After:** `on.schedule` takes a bare cron string, one mapping, or a list of
-  mappings. Each entry adds `where` (required, `local` or `controller`), an
-  optional `name`, and optional `args` keyed by CLI flag name.
+- **After:** `on.schedule` takes one mapping or a list of mappings. Each entry
+  adds `where` (required, `local` or `controller`), an optional `name`, and
+  optional `args` keyed by CLI flag name. The bare cron string is gone: a
+  scalar cannot carry `where`, so it is refused at load with a message naming
+  the mapping form.
 
   ```yaml
   on:
@@ -41,7 +43,8 @@ side that fires it.
   In Go, `pipelines.Triggers.Schedule` is a `pipelines.ScheduleTriggers`, a
   slice of `pipelines.ScheduleTrigger`.
 
-- **Migration:** every schedule already declared needs `where: local` added to
+- **Migration:** a schedule still written as a bare cron string becomes a
+  mapping, and every schedule already declared needs `where: local` added to
   keep firing from the host that arms it. That edit is deliberate: `where` has
   no default, so a config that does not say where a cadence fires is rejected
   at load rather than guessed at. A pipeline that declares more than one entry
@@ -67,13 +70,13 @@ side that fires it.
   quarter hour and a deep one nightly -- and naming the entries lets each carry
   its own arguments and be paused, resumed and run on its own.
 
-## Runs-store schema 33: named, locked schedules
+## Runs-store schema 34: named, locked schedules
 
 - **Before:** Schema 32 held one schedule per repository checkout and
   pipeline, keyed `UNIQUE(repo_path, pipeline)`. A schedule ran the cadence
   the repository declared, from whatever the checkout held at the moment the
   tick fired, with no arguments and no host-side edits.
-- **After:** Schema 33 keeps several schedules for one pipeline and pins what
+- **After:** Schema 34 keeps several schedules for one pipeline and pins what
   they run. `cron_schedules` gains `schedule_name` (`default` for the lone
   schedule of a pipeline), `where_` (`local` or `controller`), `args` (a JSON
   object of CLI argument name to value), the lock -- `locked_ref`,
@@ -85,12 +88,31 @@ side that fires it.
   widen it, Postgres drops the old constraint and creates the index.
   `cron_schedules` also gains `git_branch`, the branch a schedule pushed to a
   controller was read from, empty for one a host armed from a working tree.
-  `cron_fires` gains `args`, the arguments the launch was given.
-- **Migration:** None to perform. The migration is additive: it declares no
-  schema requirement, and every column it adds carries a default, so a binary
-  built before it opens and writes the same database, seeing the rows it
-  armed under the name `default`. Existing schedules and their fire history
-  survive the widening intact.
+  `cron_fires` gains `args`, the arguments the launch was given. Schema 34 is
+  a repair pass over 33: it adds `git_branch` and re-runs every one of 33's
+  additions, so a database an intermediate build stamped 33 is brought to the
+  full shape rather than left short of a column or the widened index.
+- **Migration:** The migration declares the schema requirement
+  `cron-schedule-names-v1`, so **a binary older than this release refuses the
+  store** once it has been opened by this one. The refusal is deliberate: an
+  older binary still keys schedules by `(repo_path, pipeline)`, so it would
+  overwrite a named or a pushed row through the key it believes in, and it
+  would fire a pinned schedule by compiling the checkout the pin exists to
+  ignore.
+
+  Upgrade every pinned SDK on a machine in one sitting before opening the
+  store with this release:
+
+  ```bash
+  sparkwing repos update          # move every registered repo's SDK pin
+  sparkwing crons install         # re-pin, so the timer runs the new binary
+  ```
+
+  `sparkwing crons install` matters on any host with an OS timer: the unit
+  runs the binary recorded when it was written, and a timer still pointing at
+  an older one will refuse the store every minute.
+
+  Existing schedules and their fire history survive the widening intact.
 
 ## Armed schedules are pinned
 

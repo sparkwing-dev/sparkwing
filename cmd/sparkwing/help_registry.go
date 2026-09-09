@@ -4086,7 +4086,8 @@ a checkout updated afterwards does not change what runs unattended. Re-run
 install to move the pin, ` + "`crons unlock`" + ` to follow the checkout again,
 and ` + "`crons set`" + ` to override a declared cadence on this host alone.
 
---profile NAME points every verb but tick at a controller instead of this host.
+--profile NAME points every verb but tick, lock and unlock at a controller
+instead of this host.
 ` + "`crons install --profile`" + ` pushes the repo's ` + "`where: controller`" + `
 entries to it, pinned at HEAD unless --follow; the controller evaluates them
 from a loop of its own, one evaluator per store, and each fire becomes a
@@ -4135,7 +4136,9 @@ is armed too, so two hosts never race for the same instant.
 controller instead, and reports the "where: local" ones as this host's. The
 push needs a git origin, because the cluster clones the source at each fire; it
 pins every fire to the checkout's HEAD unless --follow, which clones the branch
-tip. Re-running the push is the explicit update, and it moves the pin.`,
+tip. A HEAD no remote branch carries is refused, because every fire would fail
+at the clone; uncommitted edits are a warning, since the pushed commit is what
+runs. Re-running the push is the explicit update, and it moves the pin.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
@@ -4216,7 +4219,6 @@ pipeline runs from the checkout or from PATH are outside it.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -4234,7 +4236,6 @@ the repo's declaration again.`,
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -4352,7 +4353,7 @@ status, and the reason for any outcome that is not a launch.
 NAME is a schedule id, a repo/pipeline name, or a bare pipeline name that is
 unique across this host's schedules.`,
 	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
@@ -4375,7 +4376,7 @@ next instants across every armed schedule, merged in time order.
 This is the cheapest way to check a cron expression means what it looks
 like -- a day-of-week field, a DST boundary, a zone that is not yours.`,
 	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name; omit for every armed schedule"},
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name; omit for every armed schedule"},
 	},
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
@@ -4396,7 +4397,7 @@ var cmdCronsPause = Command{
 resuming it fires the next due instant rather than replaying the ones that
 passed while it was paused.`,
 	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
@@ -4412,7 +4413,7 @@ var cmdCronsResume = Command{
 	Synopsis:    "Let a paused schedule fire again",
 	Description: `Resumes at the next due instant. The instants that passed while the schedule was paused are behind its cursor and do not run.`,
 	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
@@ -4433,7 +4434,7 @@ schedule's history as a manual fire.
 The cursor does not move: a manual run is not one of the cadence's due
 instants, so the next one still fires on time.`,
 	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
@@ -4449,8 +4450,10 @@ var cmdCronsTick = Command{
 	Synopsis: "Evaluate every armed schedule once (the OS timer's entry point)",
 	Description: `What the systemd timer or launchd agent runs every minute.
 It takes an exclusive lock so two ticks never resolve the same instant,
-re-reads what the armed repos declare, evaluates every declared unpaused
-schedule against its cursor, launches what is due, and records each outcome.
+re-reads the declaration of every schedule that follows its checkout -- a
+pinned schedule keeps the declaration it was armed with -- evaluates every
+declared unpaused schedule against its cursor, launches what is due, and
+records each outcome.
 
 Quiet on success: one summary line and the id of each run it launched. It
 exits non-zero only when the tick itself could not run, so a schedule that

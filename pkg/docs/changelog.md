@@ -25,8 +25,8 @@ code change to unlock.
 
 ### Added
 
-- **cli:** `sparkwing crons` arms a subset of a repo's schedules, pins what they
-  run, and lets one host edit a declared cadence. `crons install` takes `--only`
+- **cli (Breaking):** `sparkwing crons` arms a subset of a repo's schedules,
+  pins what they run, and lets one host edit a declared cadence. `crons install` takes `--only`
   to arm named pipelines or `pipeline/name` entries, reports the entries that
   fire from the controller instead of arming them, and pins by default: the
   compile that proves a pipeline builds is kept as the schedule's binary under
@@ -61,28 +61,35 @@ code change to unlock.
   dashboard proxies every route at the same scope. See
   [crons.md](docs/crons.md#controller-schedules).
 
-- **cli:** Every `sparkwing crons` verb but `tick` takes `--profile NAME` and
-  acts on that profile's controller instead of this host, rendering with the
-  same renderer as the local path. `crons install --profile` reads the repo's
+- **cli:** Every `sparkwing crons` verb but `tick`, `lock` and `unlock` takes
+  `--profile NAME` and acts on that profile's controller instead of this host,
+  rendering with the same renderer as the local path. A controller schedule is
+  pinned by the commit it was pushed at, which is why the two pin verbs have no
+  controller form. `crons install --profile` reads the repo's
   `where: controller` entries, requires a git origin, resolves HEAD and the
-  branch, seeds the controller's git cache with that commit, and pushes them;
-  `--follow` clones the branch tip at each fire instead of pinning.
+  branch, refuses a HEAD no remote branch carries (every fire would fail at the
+  clone) and warns on a dirty working tree, seeds the controller's git cache
+  with that commit, and pushes them; `--follow` clones the branch tip at each
+  fire instead of pinning.
   `crons uninstall --profile` removes them, and `crons status --profile`
   reports the controller's loop and its last tick.
 
-- **store:** The runs store advances to schema 33, which keeps several
-  schedules for one pipeline and pins what they run. `cron_schedules` gains a
-  schedule name (`default` for the lone schedule of a pipeline), where the
-  schedule fires, the arguments its launch passes, the commit, pipeline binary
-  and cache digest it is locked to, and this host's override of the declared
-  cadence alongside the declaration that override was set against, plus the
-  branch a controller schedule was pushed from. Its unique key widens from
-  `(repo_path, pipeline)` to include the name, and `cron_fires` records the
-  arguments each launch was given. The migration is additive -- it
-  declares no schema requirement and every column it adds carries a default --
-  so a binary built before it keeps opening and writing the same database. See
-  the [migration
-  note](docs/migrations/_unreleased.md#runs-store-schema-33-named-locked-schedules).
+- **store (Breaking):** The runs store advances to schema 34, which keeps
+  several schedules for one pipeline and pins what they run. `cron_schedules`
+  gains a schedule name (`default` for the lone schedule of a pipeline), where
+  the schedule fires, the arguments its launch passes, the commit, pipeline
+  binary and sha256 digest it is locked to, and this host's override of the
+  declared cadence alongside the declaration that override was set against,
+  plus the branch a controller schedule was pushed from. Its unique key widens
+  from `(repo_path, pipeline)` to include the name, and `cron_fires` records
+  the arguments each launch was given. The migration declares the schema
+  requirement `cron-schedule-names-v1`: a binary older than this release
+  refuses the store, because it would rewrite a named or pushed row through
+  the key it still believes in and fire a pinned schedule by compiling the
+  checkout. Bump every pinned SDK on the machine in one sitting with
+  `sparkwing repos update`, then re-run `sparkwing crons install` so the OS
+  timer runs the new binary. See the [migration
+  note](docs/migrations/_unreleased.md#runs-store-schema-34-named-locked-schedules).
 
 ### Changed
 

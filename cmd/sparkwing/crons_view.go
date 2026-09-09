@@ -192,7 +192,7 @@ func renderCronsList(w io.Writer, rows []crons.Row, hidden int, now time.Time, f
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "SCHEDULE\tNAME\tCRON\tTZ\tLOCK\tNEXT\tLAST\tOUTCOME\tSTATE")
-	overridden := false
+	overridden, staleOverride := false, false
 	for _, r := range rows {
 		next := "-"
 		if r.NextDueAt != nil {
@@ -206,6 +206,10 @@ func renderCronsList(w io.Writer, rows []crons.Row, hidden int, now time.Time, f
 		if len(r.OverrideFields) > 0 {
 			cron += "*"
 			overridden = true
+			if r.OverrideStale {
+				cron += "!"
+				staleOverride = true
+			}
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			r.ID, r.Display, cron, cronsZoneLabel(r.Effective.TZ), cronsLockWord(r), next, last,
@@ -216,6 +220,10 @@ func renderCronsList(w io.Writer, rows []crons.Row, hidden int, now time.Time, f
 	}
 	if overridden {
 		fmt.Fprintln(w, "\n* this host overrides the declared value; `sparkwing crons show <name>` has both")
+	}
+	if staleOverride {
+		fmt.Fprintln(w, "! the repo has changed the declaration since that override was set; "+
+			"`sparkwing crons install` re-bases it")
 	}
 	if hidden > 0 {
 		fmt.Fprintf(w, "\n%d schedule(s) the repo no longer declares are hidden; `sparkwing crons list --all` shows them\n", hidden)

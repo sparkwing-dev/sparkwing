@@ -102,3 +102,46 @@ func TestDispatchLocalTrigger_RefusesAPinThatIsNotExecutable(t *testing.T) {
 		t.Errorf("error %q does not say the pin is not executable", err)
 	}
 }
+
+func TestDispatchLocalTrigger_RefusesAPinReplacedSinceItWasArmed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture is a shell script")
+	}
+	repoDir, cache, logger := cronPinnedFixture(t)
+	pinned := filepath.Join(t.TempDir(), "pipeline")
+	if err := os.WriteFile(pinned, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	armed, err := crons.FileDigest(pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{
+		SubmitRepoDirKey:         repoDir,
+		crons.PinnedBinaryEnvKey: pinned,
+		crons.PinnedDigestEnvKey: armed,
+	}
+
+	// safety: the control -- an untouched pin must still run, or the check below
+	// proves nothing.
+	if derr := dispatchLocalTrigger(context.Background(), &store.Trigger{
+		ID: "run-intact", Pipeline: "nightly", TriggerEnv: env,
+	}, "", repoDir, cache, logger, nil); derr != nil {
+		t.Fatalf("an untouched pin was refused: %v", derr)
+	}
+
+	if werr := os.WriteFile(pinned, []byte("#!/bin/sh\necho swapped\nexit 0\n"), 0o700); werr != nil {
+		t.Fatal(werr)
+	}
+	derr := dispatchLocalTrigger(context.Background(), &store.Trigger{
+		ID: "run-swapped", Pipeline: "nightly", TriggerEnv: env,
+	}, "", repoDir, cache, logger, nil)
+	if derr == nil {
+		t.Fatal("a pinned binary replaced since arming ran anyway")
+	}
+	for _, want := range []string{pinned, "replaced", armed, "crons install"} {
+		if !strings.Contains(derr.Error(), want) {
+			t.Errorf("error %q is missing %q", derr, want)
+		}
+	}
+}

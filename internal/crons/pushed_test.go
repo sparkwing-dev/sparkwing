@@ -275,8 +275,11 @@ func TestControllerHealth_ReportsTheLoopAndTheStoredTick(t *testing.T) {
 	if health.Armed != 1 {
 		t.Errorf("armed = %d, want 1", health.Armed)
 	}
-	if health.TickStale {
-		t.Error("a controller that has never ticked is not stale")
+	if !health.TickStale {
+		t.Error("a controller that has never ticked reports a fresh tick")
+	}
+	if health.Healthy() {
+		t.Error("a controller with an armed schedule and no tick reports healthy")
 	}
 
 	at := time.Now().Add(-10 * time.Minute)

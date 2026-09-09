@@ -183,8 +183,8 @@ type Triggers struct {
 	// and PR number reach the pipeline on RunContext.Trigger.PullRequest.
 	PullRequest *PullRequestTrigger `yaml:"pull_request,omitempty"`
 	// Schedule fires the pipeline on one or more cron cadences. It accepts
-	// a bare cron string, one mapping, or a list of mappings; every entry
-	// declares where it fires.
+	// one mapping or a list of mappings; every entry declares where it
+	// fires, so a bare cron string is refused.
 	Schedule ScheduleTriggers `yaml:"schedule,omitempty"`
 	// Webhook exposes a custom HTTP path that fires the pipeline.
 	Webhook *WebhookTrigger `yaml:"webhook,omitempty"`
@@ -234,7 +234,8 @@ type PullRequestTrigger struct {
 // pipeline declares none. Sparkwing evaluates a `local` entry on every host where
 // `sparkwing crons install` armed the pipeline.
 //
-// The YAML accepts a bare cron string, one mapping, or a list of mappings:
+// The YAML accepts one mapping or a list of mappings. A bare cron string is
+// refused, because `where` is required and a scalar cannot carry it:
 //
 //	schedule:
 //	  cron: "0 3 * * *"
@@ -334,12 +335,14 @@ func (s *ScheduleTriggers) UnmarshalYAML(node *yaml.Node) error {
 		*s = nil
 		return nil
 	case node.Kind == yaml.ScalarNode:
-		var cron string
-		if err := node.Decode(&cron); err != nil {
-			return fmt.Errorf("on.schedule: %w", err)
-		}
-		*s = ScheduleTriggers{{Cron: cron}}
-		return nil
+		// safety: `where` is required and has no default, so a bare cron string
+		// cannot say which side fires it; accepting one would arm a schedule
+		// nobody chose a side for.
+		return fmt.Errorf(
+			"on.schedule: a schedule is a mapping or a list of mappings, not a bare cron string, "+
+				"because every entry must declare `where` (%s or %s). Write:\n"+
+				"  schedule:\n    cron: %q\n    where: %s",
+			ScheduleWhereLocal, ScheduleWhereController, node.Value, ScheduleWhereLocal)
 	case node.Kind == yaml.MappingNode:
 		var one ScheduleTrigger
 		if err := node.Decode(&one); err != nil {
@@ -359,7 +362,7 @@ func (s *ScheduleTriggers) UnmarshalYAML(node *yaml.Node) error {
 		*s = out
 		return nil
 	default:
-		return fmt.Errorf("on.schedule: expected a cron string, a mapping, or a list of mappings, got %s",
+		return fmt.Errorf("on.schedule: expected a mapping or a list of mappings, got %s",
 			nodeKindName(node.Kind))
 	}
 }

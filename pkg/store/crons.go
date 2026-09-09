@@ -38,6 +38,11 @@ const (
 // anywhere.
 const CronScheduleDefaultName = "default"
 
+// safety: a binary predating the widened schedule key would overwrite a named
+// or pushed row through the key it still believes in, and fire a pinned
+// schedule by compiling the checkout. Stamping this makes it refuse the store.
+const cronScheduleNameRequirement = "cron-schedule-names-v1"
+
 // safety: the store mints fire ids because neither dialect autoincrements a text primary key.
 const cronFireIDPrefix = "crf_"
 
@@ -550,6 +555,13 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 		return err
 	}
 	if fire != nil {
+		recorded, derr := cronFireAlreadyRecorded(ctx, tx, id, *fire)
+		if derr != nil {
+			return derr
+		}
+		if recorded {
+			return tx.Commit()
+		}
 		fireID := fire.ID
 		if fireID == "" {
 			fireID, err = newOpaqueIdentity(cronFireIDPrefix)
@@ -575,6 +587,24 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 		}
 	}
 	return tx.Commit()
+}
+
+// safety: two evaluators of one minute reach one run through the idempotency
+// key, so the second must not write a second fired row for it. Only a fired
+// outcome and only the same run: `crons run` repeats an instant on purpose and
+// reaches a run of its own.
+func cronFireAlreadyRecorded(ctx context.Context, tx *storeTx, scheduleID string, fire CronFire) (bool, error) {
+	if fire.Outcome != CronOutcomeFired || fire.RunID == "" {
+		return false, nil
+	}
+	var n int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM cron_fires
+          WHERE schedule_id = ? AND due_at = ? AND run_id = ? AND outcome = ?`,
+		scheduleID, fire.DueAt.UnixNano(), fire.RunID, CronOutcomeFired).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // ListCronFires returns a schedule's resolved instants newest first.

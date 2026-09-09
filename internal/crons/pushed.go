@@ -58,7 +58,7 @@ func (s *Service) ArmPushed(ctx context.Context, push ArmPush) (ArmReport, error
 		} else {
 			report.Refreshed++
 		}
-		if rebased, berr := s.rebaseOverride(ctx, stored, now); berr != nil {
+		if rebased, berr := s.rebaseOverride(ctx, stored, now, &report); berr != nil {
 			return report, berr
 		} else if rebased != nil {
 			stored = *rebased
@@ -115,7 +115,9 @@ func (s *Service) ControllerHealth(ctx context.Context) (Health, error) {
 	health.Timer.Enabled = true
 	health.Timer.Detail = ControllerTimerDetail
 	now := s.now()
-	health.TickStale = !tick.At.IsZero() && now.Sub(tick.At) > TickStaleAfter
+	// safety: a loop that has never ticked is as unhealthy as one that stopped,
+	// which is what the local Health already says of a timer that never fired.
+	health.TickStale = tick.At.IsZero() || now.Sub(tick.At) > TickStaleAfter
 	health.Detail = health.describeController(now)
 	health.Remedy = health.remedy()
 	return health, nil

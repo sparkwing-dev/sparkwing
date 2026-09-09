@@ -1007,7 +1007,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 
 	go s.runReaper(ctx, 10*time.Second)
-	go s.runCronTick(ctx, CronTickInterval)
+	go s.runCronTick(ctx, cronTickOffer)
 
 	if s.pool != nil {
 		go s.pool.run(ctx, s.logger)

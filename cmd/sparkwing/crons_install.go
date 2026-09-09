@@ -31,11 +31,12 @@ type cronsInstallReport struct {
 }
 
 type cronsRepoResult struct {
-	Repo        string       `json:"repo"`
-	Schedules   []cronsArmed `json:"schedules,omitempty"`
-	Controller  []string     `json:"controller,omitempty"`
-	Withdrawals []string     `json:"withdrawals,omitempty"`
-	Error       string       `json:"error,omitempty"`
+	Repo        string         `json:"repo"`
+	Schedules   []cronsArmed   `json:"schedules,omitempty"`
+	Controller  []string       `json:"controller,omitempty"`
+	Withdrawals []string       `json:"withdrawals,omitempty"`
+	Rebased     []crons.Rebase `json:"rebased,omitempty"`
+	Error       string         `json:"error,omitempty"`
 }
 
 type cronsArmed struct {
@@ -111,6 +112,7 @@ func runCronsInstall(args []string) error {
 			}
 			result.Controller = armed.Controller
 			result.Withdrawals = armed.Withdrawals
+			result.Rebased = armed.Rebased
 			report.Armed += armed.Armed
 			report.Refreshed += armed.Refreshed
 			report.Withdrawn += armed.Withdrawn
@@ -205,6 +207,16 @@ func ensureCronsTimer(ctx context.Context, session *cronsSession, report *cronsI
 	return nil
 }
 
+// safety: the cadence is what an override is measured against, so the two ends
+// of a re-base read as the two cron expressions and zones, not whole rows.
+func cronsDeclarationLabel(d store.CronDeclaration) string {
+	label := d.Cron
+	if d.TZ != "" {
+		label += " " + d.TZ
+	}
+	return dashIfEmpty(label)
+}
+
 func renderCronsInstall(report cronsInstallReport, format string) error {
 	switch format {
 	case "json":
@@ -225,7 +237,7 @@ func renderCronsInstall(report cronsInstallReport, format string) error {
 		switch {
 		case r.Error != "":
 			fmt.Fprintf(os.Stdout, "error: %s\n", r.Error)
-		case len(r.Schedules) == 0 && len(r.Withdrawals) == 0 && len(r.Controller) == 0:
+		case len(r.Schedules) == 0 && len(r.Withdrawals) == 0 && len(r.Controller) == 0 && len(r.Rebased) == 0:
 			if !multi {
 				fmt.Fprintf(os.Stdout, "nothing to arm: no pipeline in %s declares a schedule\n", r.Repo)
 			}
@@ -238,6 +250,10 @@ func renderCronsInstall(report cronsInstallReport, format string) error {
 			}
 			for _, name := range r.Withdrawals {
 				fmt.Fprintf(os.Stdout, "withdrawn %s: the repo no longer declares it\n", name)
+			}
+			for _, rb := range r.Rebased {
+				fmt.Fprintf(os.Stdout, "re-based the override on %s: it was set against %s, now %s\n",
+					rb.Name, cronsDeclarationLabel(rb.From), cronsDeclarationLabel(rb.To))
 			}
 		}
 	}
@@ -460,5 +476,5 @@ func compileRepoPipelines(ctx context.Context, repoRoot string) (crons.Proof, er
 	if rerr := lease.Release(); rerr != nil {
 		return crons.Proof{}, fmt.Errorf("release the pipeline cache lease: %w", rerr)
 	}
-	return crons.Proof{Binary: path, Digest: key}, nil
+	return crons.Proof{Binary: path}, nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
@@ -15,11 +16,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// CronTickInterval is how often a controller offers to evaluate the schedules
-// pushed to it. It is shorter than a minute so a wake that the store's lease
-// turns away is followed by another inside the same minute; the lease, not this
-// interval, is what keeps one evaluator per store per minute.
-const CronTickInterval = 20 * time.Second
+// safety: shorter than a minute, so a wake the store's lease turns away is
+// followed by another inside the same minute. store.CronTickWindow, not this
+// interval, is what spaces the ticks that actually run.
+const cronTickOffer = 20 * time.Second
 
 // safety: long enough that a tick which dies mid-flight does not hand the next
 // minute a claim it will never release, short enough that the minute after that
@@ -30,7 +30,10 @@ const cronTickLeaseTTL = 90 * time.Second
 // suffix, because pipelines branch on it.
 const cronTriggerSource = "schedule"
 
-const cronDetailFires = 20
+// safety: the store prunes a schedule's history to 200, so serving that many is
+// serving all of it; `crons show --fires N` truncates the page it is given, and
+// a smaller number here would silently cap N.
+const cronDetailFires = 200
 
 const cronDetailUpcoming = 5
 
@@ -125,6 +128,7 @@ func (s *Server) cronService() *crons.Service {
 		Now:      s.cronNow,
 		Host:     s.cronHolder,
 		Version:  buildinfo.Read("sparkwing-controller", "").Version,
+		Side:     store.CronWhereController,
 	}
 }
 
@@ -155,8 +159,12 @@ func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 func (s *Server) cronTickOnce(ctx context.Context) {
 	var report crons.TickReport
 	ran, err := s.store.RunCronTickLeased(ctx, s.cronHolder, cronTickLeaseTTL, func(tickCtx context.Context) error {
+		// safety: a tick that outlives the lease is a tick running beside
+		// whoever claimed the next minute, so it is cut at the lease instead.
+		deadline, cancel := context.WithTimeout(tickCtx, cronTickLeaseTTL)
+		defer cancel()
 		var terr error
-		report, terr = s.cronService().Tick(tickCtx, false)
+		report, terr = s.cronService().Tick(deadline, false)
 		return terr
 	})
 	switch {
@@ -212,13 +220,14 @@ type cronRepoDeleteResponse struct {
 }
 
 // safety: a member left empty keeps the declared value; Args replaces the
-// declared argument set whole, which is what an empty non-nil map means.
+// declared argument set whole, so a set but empty map -- an override to launch
+// with no arguments -- has to survive the round trip rather than be omitted.
 type cronOverrideRequest struct {
 	Cron    string            `json:"cron,omitempty"`
 	TZ      string            `json:"tz,omitempty"`
 	Overlap string            `json:"overlap,omitempty"`
 	CatchUp string            `json:"catch_up,omitempty"`
-	Args    map[string]string `json:"args,omitempty"`
+	Args    map[string]string `json:"args"`
 }
 
 func (s *Server) handleListCrons(w http.ResponseWriter, r *http.Request) {
@@ -284,6 +293,10 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("repo_url: %w", err))
 		return
 	}
+	if err := validateGitBranchName(body.Branch); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("branch: %w", err))
+		return
+	}
 	sha := body.SHA
 	if body.Follow {
 		sha = ""
@@ -324,6 +337,42 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// safety: the branch reaches git as the ref a fire clones, so it is held to
+// git's own check-ref-format rules here rather than at three in the morning.
+// An empty branch is allowed: a push pinned to a SHA needs none.
+func validateGitBranchName(branch string) error {
+	if branch == "" {
+		return nil
+	}
+	if len(branch) > maxGitBranchLen {
+		return fmt.Errorf("must be at most %d characters", maxGitBranchLen)
+	}
+	if strings.HasPrefix(branch, "-") {
+		return errors.New("must not begin with '-', which git reads as an option")
+	}
+	if strings.HasPrefix(branch, "/") || strings.HasSuffix(branch, "/") ||
+		strings.HasPrefix(branch, ".") || strings.HasSuffix(branch, ".") {
+		return errors.New("must not begin or end with '/' or '.'")
+	}
+	if strings.HasSuffix(branch, ".lock") || strings.Contains(branch, "//") ||
+		strings.Contains(branch, "..") || strings.Contains(branch, "@{") {
+		return errors.New(`must not contain "..", "//" or "@{", or end in ".lock"`)
+	}
+	for _, r := range branch {
+		if r <= ' ' || r == 0x7f {
+			return errors.New("must not contain a space or a control character")
+		}
+		if strings.ContainsRune("~^:?*[\\", r) {
+			return fmt.Errorf("must not contain %q", r)
+		}
+	}
+	return nil
+}
+
+// safety: git itself imposes no limit, but a ref this long is a mistake rather
+// than a branch, and the value is stored and rendered in a column.
+const maxGitBranchLen = 255
 
 // safety: the entries are validated as a set before anything is written, so a
 // push carrying one bad cadence never half-arms the repository.

@@ -408,6 +408,21 @@ func pinnedTriggerBinary(trig *store.Trigger) (string, error) {
 			"the pipeline binary this cron schedule pinned at %s is not executable; re-run "+
 				"`sparkwing crons install` to pin it again", path)
 	}
+	want := strings.TrimSpace(trig.TriggerEnv[crons.PinnedDigestEnvKey])
+	if want == "" {
+		return path, nil
+	}
+	got, err := crons.FileDigest(path)
+	if err != nil {
+		return "", fmt.Errorf("read the pinned pipeline binary at %s to check it against the pin: %w", path, err)
+	}
+	if got != want {
+		return "", fmt.Errorf(
+			"the pipeline binary this cron schedule pinned at %s has been replaced: it hashes to %s, and the "+
+				"schedule was armed against %s. The pin is what keeps an unattended run from executing something "+
+				"nobody approved, so this run is refused; re-run `sparkwing crons install` to pin the checkout as "+
+				"it stands, or `sparkwing crons unlock` to follow it", path, got, want)
+	}
 	return path, nil
 }
 

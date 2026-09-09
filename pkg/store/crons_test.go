@@ -844,3 +844,48 @@ func TestCronFireRoundTripsArgs(t *testing.T) {
 		t.Errorf("fire args = %v, want %v", fires[1].Args, args)
 	}
 }
+
+func TestResolveCronDueSkipsASecondFiredRowForTheSameInstantAndRun(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.Open(t)
+	sched := armCron(t, st, "crn_dup", "/repo/one", "nightly", cronBase)
+	due := cronBase.Add(time.Hour)
+	next := due.Add(time.Hour)
+
+	fire := func(runID string) *store.CronFire {
+		return &store.CronFire{
+			DueAt: due, DecidedAt: cronBase, Outcome: store.CronOutcomeFired, RunID: runID,
+		}
+	}
+	for i := 0; i < 2; i++ {
+		if err := st.ResolveCronDue(ctx, sched.ID, due, &next, fire("run-1"), cronBase); err != nil {
+			t.Fatalf("resolve %d: %v", i, err)
+		}
+	}
+	fires, err := st.ListCronFires(ctx, sched.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fires) != 1 {
+		t.Fatalf("fires for one instant and one run = %d, want 1: %+v", len(fires), fires)
+	}
+
+	// safety: a different run for the same instant is `crons run`, not a repeat.
+	if err := st.ResolveCronDue(ctx, sched.ID, due, &next, fire("run-2"), cronBase); err != nil {
+		t.Fatalf("resolve a second run: %v", err)
+	}
+	// safety: so is a different outcome for the same instant.
+	miss := &store.CronFire{
+		DueAt: due, DecidedAt: cronBase, Outcome: store.CronOutcomeMissed, Detail: "asleep",
+	}
+	if err := st.ResolveCronDue(ctx, sched.ID, due, &next, miss, cronBase); err != nil {
+		t.Fatalf("resolve a miss: %v", err)
+	}
+	fires, err = st.ListCronFires(ctx, sched.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fires) != 3 {
+		t.Fatalf("fires = %d, want the deduplicated one plus the second run and the miss: %+v", len(fires), fires)
+	}
+}

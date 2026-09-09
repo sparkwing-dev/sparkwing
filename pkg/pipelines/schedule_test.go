@@ -23,20 +23,6 @@ func parseSchedule(t *testing.T, body string) pipelines.ScheduleTriggers {
 	return p.On.Schedule
 }
 
-// hack: decodes without validating, so the scalar shorthand -- which carries no
-// where and so can never validate -- is still readable here.
-func decodeSchedule(t *testing.T, body string) pipelines.ScheduleTriggers {
-	t.Helper()
-	var cfg pipelines.Config
-	if err := yaml.Unmarshal([]byte(body), &cfg); err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	if len(cfg.Pipelines) != 1 {
-		t.Fatalf("got %d pipelines, want 1", len(cfg.Pipelines))
-	}
-	return cfg.Pipelines[0].On.Schedule
-}
-
 func parseScheduleError(t *testing.T, body string) string {
 	t.Helper()
 	_, err := pipelines.Parse(strings.NewReader(body))
@@ -46,22 +32,28 @@ func parseScheduleError(t *testing.T, body string) string {
 	return err.Error()
 }
 
-func TestScheduleTriggers_ScalarForm(t *testing.T) {
-	got := decodeSchedule(t, `
+// A scalar cannot carry `where`, which is required, so accepting one would arm
+// a schedule nobody chose a side for.
+func TestScheduleTriggers_ScalarFormIsRefusedAtParse(t *testing.T) {
+	body := `
 pipelines:
   - name: nightly
     entrypoint: Nightly
     on:
       schedule: "0 3 * * *"
-`)
-	if len(got) != 1 {
-		t.Fatalf("got %d entries, want 1: %+v", len(got), got)
+`
+	var cfg pipelines.Config
+	err := yaml.Unmarshal([]byte(body), &cfg)
+	if err == nil {
+		t.Fatal("the bare cron string was accepted")
 	}
-	if got[0].Cron != "0 3 * * *" {
-		t.Errorf("cron = %q, want %q", got[0].Cron, "0 3 * * *")
+	for _, want := range []string{"on.schedule", "mapping", "list of mappings", "where"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
 	}
-	if got[0].EffectiveName() != "default" {
-		t.Errorf("EffectiveName() = %q, want default", got[0].EffectiveName())
+	if msg := parseScheduleError(t, body); !strings.Contains(msg, "mapping") {
+		t.Errorf("Parse error %q does not name the mapping form", msg)
 	}
 }
 
@@ -121,7 +113,7 @@ pipelines:
 }
 
 func TestScheduleTriggers_AbsentIsNil(t *testing.T) {
-	got := decodeSchedule(t, `
+	got := parseSchedule(t, `
 pipelines:
   - name: nightly
     entrypoint: Nightly
@@ -175,7 +167,7 @@ func TestScheduleTriggers_ValidationErrors(t *testing.T) {
 			[]string{"on.schedule.cron"},
 		},
 		{
-			"missing where", `      schedule: "0 3 * * *"`,
+			"missing where", "      schedule:\n        cron: \"0 3 * * *\"",
 			[]string{"on.schedule.where is required", "where it fires", `"local"`, `"controller"`, "entry per side"},
 		},
 		{

@@ -78,7 +78,7 @@ func runCronsPauseResume(cmd Command, args []string, pause bool) error {
 		_, perr := fmt.Fprintln(os.Stdout, row.ID)
 		return perr
 	}
-	fmt.Fprintf(os.Stdout, "%s is %s\n", row.Name, row.State)
+	fmt.Fprintf(os.Stdout, "%s is %s\n", row.Display, row.State)
 	if !pause && row.NextDueAt != nil {
 		fmt.Fprintf(os.Stdout, "  next: %s\n", cronAbsTime(*row.NextDueAt, row.Location))
 	}

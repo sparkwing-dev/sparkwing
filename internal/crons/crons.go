@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -89,14 +90,19 @@ func repoLabel(repoPath string) string {
 }
 
 // PushedRepo reports whether a stored repo_path names a repository pushed to a
-// controller rather than a checkout on this machine.
+// controller rather than a checkout on this machine. Every clone URL a push is
+// allowed to carry counts, including the scp form under any user name, not
+// only git@.
 func PushedRepo(repoPath string) bool {
 	for _, scheme := range []string{"https://", "http://", "ssh://", "git://"} {
 		if strings.HasPrefix(repoPath, scheme) {
 			return true
 		}
 	}
-	return strings.HasPrefix(repoPath, "git@")
+	// safety: the scp form carries no scheme, so only the clone validator tells
+	// user@host:path from a directory on this machine.
+	_, err := sourceurl.ValidateCloneURL(repoPath)
+	return err == nil
 }
 
 // Pushed reports whether a schedule was pushed to a controller, so its
@@ -214,6 +220,27 @@ type Service struct {
 
 	// ArmedBy is recorded when a schedule is first armed, such as user@host.
 	ArmedBy string
+
+	// Side names which schedules [Service.Tick] evaluates:
+	// [store.CronWhereLocal], the default, or
+	// [store.CronWhereController]. A row declared for the other side is
+	// left alone, so two evaluators sharing one store never fire each
+	// other's schedules.
+	Side string
+}
+
+// safety: a row for the other side has no business firing here -- a controller
+// row has no checkout to compile, a local row a clone URL the controller cannot
+// resolve -- and the two can share a store.
+func (s *Service) evaluates(sched store.CronSchedule) bool {
+	return sideOrLocal(sched.Where) == sideOrLocal(s.Side)
+}
+
+func sideOrLocal(where string) string {
+	if where == "" {
+		return store.CronWhereLocal
+	}
+	return where
 }
 
 func (s *Service) now() time.Time {
@@ -715,3 +742,8 @@ const ScheduleEnvKey = "_SPARKWING_CRON_SCHEDULE"
 // checkout, so a checkout updated between arming and three in the morning
 // cannot change what the unattended run executes.
 const PinnedBinaryEnvKey = "_SPARKWING_CRON_BINARY"
+
+// PinnedDigestEnvKey carries the sha256 of that file as it stood when the
+// schedule was armed. The consumer recomputes it before executing, so a pinned
+// binary replaced in place fails the run instead of running as the pin.
+const PinnedDigestEnvKey = "_SPARKWING_CRON_BINARY_SHA256"

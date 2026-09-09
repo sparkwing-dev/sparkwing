@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
+	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -15,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
-	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -344,6 +345,11 @@ func runCronsInstallProfile(profileName, root string, only []string, follow bool
 	} else if repoURL, err = sourceurl.ValidateCloneURL(repoURL); err != nil {
 		return fmt.Errorf("crons install: %s has an origin the cluster cannot clone: %w", root, err)
 	}
+	if len(push) > 0 {
+		if err := checkPushableHead(root, follow); err != nil {
+			return err
+		}
+	}
 	report.RepoURL = repoURL
 	report.Branch = branch
 	if !follow {
@@ -354,7 +360,9 @@ func runCronsInstallProfile(profileName, root string, only []string, follow bool
 		seedCronsSource(remote.prof, root, repoURL, sha)
 	}
 
-	resp, err := remote.api.PutCronRepo(context.Background(), client.CronRepoRequest{
+	ctx, cancel := cronsRemoteContext()
+	defer cancel()
+	resp, err := remote.api.PutCronRepo(ctx, client.CronRepoRequest{
 		RepoURL:   repoURL,
 		Branch:    branch,
 		SHA:       sha,
@@ -373,6 +381,54 @@ func runCronsInstallProfile(profileName, root string, only []string, follow bool
 	return renderCronsPush(os.Stdout, report, format)
 }
 
+// safety: the controller clones what it is pushed, so a commit no remote branch
+// carries makes every fire fail at the clone. The check is skipped under
+// --follow, which pins the branch tip rather than this checkout's HEAD.
+func checkPushableHead(root string, follow bool) error {
+	if follow {
+		return nil
+	}
+	if dirty, known := gitWorkingTreeDirty(root); known && dirty {
+		fmt.Fprintf(os.Stderr,
+			"crons install: %s has uncommitted edits; the controller clones the pushed commit, "+
+				"so they are not part of what fires\n", root)
+	}
+	remotes, known := gitRemoteBranchesContainingHead(root)
+	if !known || len(remotes) > 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"crons install: %s is on a commit no remote branch carries, so every fire would fail at the clone. "+
+			"Push the branch first, or use --follow to clone the tip of %s at each fire instead",
+		root, dashIfEmpty(gitBranchName(root)))
+}
+
+func gitWorkingTreeDirty(root string) (dirty, known bool) {
+	out, err := exec.Command("git", "-C", root, "status", "--porcelain").Output()
+	if err != nil {
+		return false, false
+	}
+	return strings.TrimSpace(string(out)) != "", true
+}
+
+func gitRemoteBranchesContainingHead(root string) (branches []string, known bool) {
+	out, err := exec.Command("git", "-C", root, "branch", "-r", "--contains", "HEAD").Output()
+	if err != nil {
+		return nil, false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if name := strings.TrimSpace(line); name != "" {
+			branches = append(branches, name)
+		}
+	}
+	return branches, true
+}
+
+func gitBranchName(root string) string {
+	branch, _, _, _ := gitContextIn(root)
+	return branch
+}
+
 // safety: the same selection `crons install` applies on a host, so a name the
 // repository does not declare is refused before anything is pushed.
 func selectDeclaredForPush(declared []crons.Declared, only []string, root string) ([]crons.Declared, error) {
@@ -381,6 +437,10 @@ func selectDeclaredForPush(declared []crons.Declared, only []string, root string
 	}
 	var out []crons.Declared
 	for _, want := range only {
+		want = strings.TrimSpace(want)
+		if want == "" {
+			continue
+		}
 		var matched []crons.Declared
 		for _, d := range declared {
 			if d.Pipeline == want || d.Selector() == want {
@@ -458,7 +518,12 @@ func renderCronsPush(w io.Writer, report cronsPushReport, format string) error {
 	case "json":
 		return json.NewEncoder(w).Encode(report)
 	case "plain":
-		return ndjson.Write(w, report.Schedules)
+		for _, s := range report.Schedules {
+			if _, err := fmt.Fprintln(w, s.Name); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	if len(report.Schedules) == 0 && len(report.Withdrawals) == 0 {
 		fmt.Fprintf(w, "nothing to push: no pipeline in %s declares a `where: controller` schedule\n", report.Repo)

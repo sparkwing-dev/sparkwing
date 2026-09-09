@@ -47,7 +47,7 @@ func cronsFakeProver(t *testing.T) {
 			if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 				return crons.Proof{}, err
 			}
-			return crons.Proof{Binary: path, Digest: "digest-" + pipeline}, nil
+			return crons.Proof{Binary: path}, nil
 		}
 	}
 	t.Cleanup(func() { cronsProver = prior })

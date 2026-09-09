@@ -49,7 +49,7 @@ The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs t
 |---|---|---|---|
 | `push` | `PushTrigger` | no | Push fires on a git push the controller receives via webhook. |
 | `pull_request` | `PullRequestTrigger` | no | PullRequest fires on a GitHub pull_request event the controller receives via webhook. The run checks out the PR head; base ref and PR number reach the pipeline on RunContext.Trigger.PullRequest. |
-| `schedule` | `ScheduleTriggers` | no | Schedule fires the pipeline on one or more cron cadences. It accepts a bare cron string, one mapping, or a list of mappings; every entry declares where it fires. |
+| `schedule` | `ScheduleTriggers` | no | Schedule fires the pipeline on one or more cron cadences. It accepts one mapping or a list of mappings; every entry declares where it fires, so a bare cron string is refused. |
 | `webhook` | `WebhookTrigger` | no | Webhook exposes a custom HTTP path that fires the pipeline. |
 | `pre_commit` | `PreHookTrigger` | no | PreHook fires from the installed git pre-commit hook. |
 | `pre_push` | `PostHookTrigger` | no | PostHook fires from the installed git pre-push hook. |

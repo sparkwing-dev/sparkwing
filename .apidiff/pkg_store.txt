@@ -232,7 +232,7 @@ type CronTick struct {
 	Version string
 	Error   string
 }
-const CronTickInterval = 55 * time.Second
+const CronTickWindow = 55 * time.Second
 const CronWhereController = "controller"
 const CronWhereLocal = "local"
 type DebugPause struct {
@@ -952,7 +952,7 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RollbackExecutorProvisioning(ctx context.Context, name, tokenPrefix string, now time.Time) error
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
-func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (bool, error)
+func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
 func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error

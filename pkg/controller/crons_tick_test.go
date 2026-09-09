@@ -74,8 +74,43 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 	beta.cronHolder, beta.cronNow = "beta", ahead
 
 	ctx := context.Background()
-	alpha.cronTickOnce(ctx)
-	beta.cronTickOnce(ctx)
+	var mu sync.Mutex
+	holding := map[string]bool{}
+	peak := 0
+	// safety: cronNow is only read from inside the leased tick, so marking the
+	// holder there measures the window the lease is supposed to keep to one.
+	watch := func(holder string) func() time.Time {
+		return func() time.Time {
+			mu.Lock()
+			holding[holder] = true
+			if len(holding) > peak {
+				peak = len(holding)
+			}
+			mu.Unlock()
+			return time.Now().Add(2 * time.Minute)
+		}
+	}
+	alpha.cronNow, beta.cronNow = watch("alpha"), watch("beta")
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, c := range []*Server{alpha, beta} {
+		wg.Add(1)
+		go func(srv *Server) {
+			defer wg.Done()
+			<-start
+			srv.cronTickOnce(ctx)
+			mu.Lock()
+			delete(holding, srv.cronHolder)
+			mu.Unlock()
+		}(c)
+	}
+	close(start)
+	wg.Wait()
+
+	if peak > 1 {
+		t.Errorf("%d controllers held the tick at once, want at most 1", peak)
+	}
 
 	dispatched := alpha.dispatcher.(*countingDispatcher).count() + beta.dispatcher.(*countingDispatcher).count()
 	if dispatched != 1 {
@@ -114,8 +149,8 @@ func TestCronTick_TwoControllersSharingAStoreFireOneTrigger(t *testing.T) {
 	if tick.At.IsZero() {
 		t.Error("the tick recorded nothing")
 	}
-	if tick.Host != "alpha" {
-		t.Errorf("tick host = %q, want the holder that ran it", tick.Host)
+	if tick.Host != "alpha" && tick.Host != "beta" {
+		t.Errorf("tick host = %q, want one of the two holders", tick.Host)
 	}
 }
 

@@ -221,8 +221,10 @@ func TestSchemaV33PostgresFreshAndV32UpgradeShape(t *testing.T) {
 			statements = append(statements, `ALTER TABLE cron_schedules DROP COLUMN `+column)
 		}
 		statements = append(statements,
-			`ALTER TABLE cron_schedules
-             ADD CONSTRAINT cron_schedules_repo_path_pipeline_key UNIQUE (repo_path, pipeline)`,
+			// safety: unnamed, so Postgres mints the constraint name a v32
+			// database really carries rather than the test asserting a name it
+			// chose for the migration to find.
+			`ALTER TABLE cron_schedules ADD UNIQUE (repo_path, pipeline)`,
 			`ALTER TABLE cron_fires DROP COLUMN args`,
 			`DELETE FROM sparkwing_schema_version WHERE version >= 33`,
 		)
@@ -232,6 +234,7 @@ func TestSchemaV33PostgresFreshAndV32UpgradeShape(t *testing.T) {
 				t.Fatalf("downgrade with %q: %v", statement, err)
 			}
 		}
+		seedV32CronRowsPostgres(t, st)
 		if err := st.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -244,7 +247,33 @@ func TestSchemaV33PostgresFreshAndV32UpgradeShape(t *testing.T) {
 		if got, err := up.CurrentSchemaVersion(ctx); err != nil || got != store.ExpectedSchemaVersion() {
 			t.Fatalf("schema version = %d, err = %v, want %d", got, err, store.ExpectedSchemaVersion())
 		}
+		assertTwoNamesOnOnePipeline(t, up, "/repo/one", "nightly")
 	})
+}
+
+// safety: the rows a v32 store held, so the upgrade is measured against a table
+// with data in it rather than an empty one.
+func seedV32CronRowsPostgres(t *testing.T, st *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	armedNS := cronBase.UnixNano()
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
+		`INSERT INTO cron_schedules
+         (id, repo_path, pipeline, cron, tz, overlap, catch_up_ns, armed_at, armed_by,
+          updated_at, cursor_at, last_run_id, last_outcome)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		"crn_nightly", "/repo/one", "nightly", "0 * * * *", "UTC", store.CronOverlapSkip,
+		int64(time.Hour), armedNS, "korey", armedNS, armedNS, "run-1", store.CronOutcomeFired,
+	); err != nil {
+		t.Fatalf("insert a v32 schedule: %v", err)
+	}
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
+		`INSERT INTO cron_fires (id, schedule_id, due_at, decided_at, outcome, run_id, detail)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`),
+		"crf_nightly", "crn_nightly", armedNS, armedNS, store.CronOutcomeFired, "run-1", "",
+	); err != nil {
+		t.Fatalf("insert a v32 fire: %v", err)
+	}
 }
 
 func assertPostgresNamedCronShape(t *testing.T, st *store.Store) {

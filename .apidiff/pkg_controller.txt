@@ -50,7 +50,6 @@ type Cipher interface {
 	Open(envelope string) (string, error)
 }
 func CronIdempotencyKey(scheduleID string, due time.Time) string
-const CronTickInterval = 20 * time.Second
 const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error

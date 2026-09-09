@@ -179,6 +179,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, _ time.T
 		ScheduleID:   s.ID,
 		Args:         s.Effective().Args,
 		PinnedBinary: s.LockedBinary,
+		PinnedDigest: s.LockedDigest,
 	})
 	if err != nil {
 		return "", err

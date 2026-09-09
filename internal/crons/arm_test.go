@@ -62,7 +62,7 @@ func (c *fakeCompiler) prove(_ context.Context, repoRoot, pipeline string) (Proo
 	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
 		return Proof{}, err
 	}
-	return Proof{Binary: path, Digest: fmt.Sprintf("digest-%s-r%d", pipeline, c.revision)}, nil
+	return Proof{Binary: path}, nil
 }
 
 func (c *fakeCompiler) proved() []string {
@@ -151,8 +151,12 @@ func TestArmPinsTheCompiledBinaryAndSkipsControllerEntries(t *testing.T) {
 	if quick.LockedBinary != wantBinary {
 		t.Errorf("locked binary = %q, want %q", quick.LockedBinary, wantBinary)
 	}
-	if quick.LockedDigest != "digest-sweep-r0" {
-		t.Errorf("locked digest = %q, want the compiler's key", quick.LockedDigest)
+	wantDigest, derr := FileDigest(wantBinary)
+	if derr != nil {
+		t.Fatalf("digest the pinned binary: %v", derr)
+	}
+	if quick.LockedDigest != wantDigest {
+		t.Errorf("locked digest = %q, want the pinned file's own sha256 %q", quick.LockedDigest, wantDigest)
 	}
 	info, err := os.Stat(quick.LockedBinary)
 	if err != nil {
@@ -183,8 +187,12 @@ func TestArmPinsTheCompiledBinaryAndSkipsControllerEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
-	if repinned.LockedDigest != "digest-sweep-r1" {
-		t.Errorf("re-arming did not re-pin: %+v", repinned)
+	if repinned.LockedDigest == quick.LockedDigest {
+		t.Errorf("re-arming did not re-pin: digest is still %q", repinned.LockedDigest)
+	}
+	if again, derr := FileDigest(repinned.LockedBinary); derr != nil || again != repinned.LockedDigest {
+		t.Errorf("re-pinned digest = %q, want the new file's sha256 %q (err %v)",
+			repinned.LockedDigest, again, derr)
 	}
 	body, err := os.ReadFile(repinned.LockedBinary)
 	if err != nil || !strings.Contains(string(body), "r1") {
@@ -746,5 +754,197 @@ func TestHealthCountsLocksFollowersAndStaleOverrides(t *testing.T) {
 	}
 	if !strings.Contains(health.Remedy, "crons install") {
 		t.Errorf("remedy = %q", health.Remedy)
+	}
+}
+
+func TestArmFollowDropsAnExistingPinnedBinary(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	root := gitRepo(t, "svc", everyMinute)
+	compiler := newFakeCompiler(t)
+	if _, err := h.svc.Arm(ctx, root, ArmOptions{Prove: compiler.prove}); err != nil {
+		t.Fatalf("Arm: %v", err)
+	}
+	id := ScheduleID(root, "every-minute", "")
+	pinDir := filepath.Join(h.svc.PinRoot, id)
+	if _, err := os.Stat(pinDir); err != nil {
+		t.Fatalf("the first arm wrote no pin: %v", err)
+	}
+
+	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true, Prove: compiler.prove}); err != nil {
+		t.Fatalf("re-Arm with --follow: %v", err)
+	}
+	stored, err := h.store.GetCronSchedule(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.LockedBinary != "" {
+		t.Errorf("--follow left the row pinned to %q", stored.LockedBinary)
+	}
+	if _, err := os.Stat(pinDir); !os.IsNotExist(err) {
+		t.Errorf("--follow left the pinned binary behind: %v", err)
+	}
+}
+
+func TestArmWithoutProofDropsAnExistingPinnedBinary(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	root := gitRepo(t, "svc", everyMinute)
+	compiler := newFakeCompiler(t)
+	if _, err := h.svc.Arm(ctx, root, ArmOptions{Prove: compiler.prove}); err != nil {
+		t.Fatalf("Arm: %v", err)
+	}
+	id := ScheduleID(root, "every-minute", "")
+	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
+		t.Fatalf("re-Arm without proof: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(h.svc.PinRoot, id)); !os.IsNotExist(err) {
+		t.Errorf("--no-prove left the pinned binary behind: %v", err)
+	}
+}
+
+func TestRefreshKeepsTheLockOfARowItRepublishes(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	root := gitRepo(t, "svc", everyMinute)
+	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true}); err != nil {
+		t.Fatalf("Arm: %v", err)
+	}
+	id := ScheduleID(root, "every-minute", "")
+	// safety: only a pin the refresh does not skip can prove the lock is
+	// carried through, and Refresh skips a row with a pinned binary, so the
+	// row carries a ref alone -- the shape `crons install --no-prove` leaves.
+	lock := store.CronLock{Ref: "0123456789abcdef0123456789abcdef01234567"}
+	if err := h.store.SetCronScheduleLock(ctx, id, lock, h.clock.now()); err != nil {
+		t.Fatalf("SetCronScheduleLock: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"),
+		[]byte("pipelines:\n"+strings.Replace(everyMinute, `"* * * * *"`, `"0 4 * * *"`, 1)), 0o644); err != nil {
+		t.Fatalf("rewrite config: %v", err)
+	}
+	report, err := h.svc.Refresh(ctx)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if report.Updated != 1 {
+		t.Fatalf("refresh: %+v", report)
+	}
+	stored, err := h.store.GetCronSchedule(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Cron != "0 4 * * *" {
+		t.Errorf("the declaration did not move: %q", stored.Cron)
+	}
+	if stored.LockedRef != lock.Ref {
+		t.Errorf("refresh blanked the lock: ref = %q, want %q", stored.LockedRef, lock.Ref)
+	}
+}
+
+func TestArmReportsTheOverridesItReBased(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	root := gitRepo(t, "svc", everyMinute)
+	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true}); err != nil {
+		t.Fatalf("Arm: %v", err)
+	}
+	id := ScheduleID(root, "every-minute", "")
+	cron := "*/5 * * * *"
+	if _, err := h.svc.SetOverride(ctx, id, Override{Cron: &cron}); err != nil {
+		t.Fatalf("SetOverride: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"),
+		[]byte("pipelines:\n"+strings.Replace(everyMinute, `"* * * * *"`, `"0 4 * * *"`, 1)), 0o644); err != nil {
+		t.Fatalf("rewrite config: %v", err)
+	}
+	git(t, root, "add", ".")
+	git(t, root, "commit", "--quiet", "-m", "move the cadence")
+
+	report, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true})
+	if err != nil {
+		t.Fatalf("re-Arm: %v", err)
+	}
+	if len(report.Rebased) != 1 {
+		t.Fatalf("report.Rebased = %+v, want the one override the arm moved", report.Rebased)
+	}
+	rb := report.Rebased[0]
+	if rb.Schedule != id || rb.Name != "svc/every-minute" {
+		t.Errorf("rebase names %q/%q, want the schedule it moved", rb.Schedule, rb.Name)
+	}
+	if rb.From.Cron != "* * * * *" || rb.To.Cron != "0 4 * * *" {
+		t.Errorf("rebase = %+v, want the old and new declarations", rb)
+	}
+
+	// safety: the arm has already re-based it, so a second one has nothing to
+	// report and must not repeat the warning.
+	again, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true})
+	if err != nil {
+		t.Fatalf("third Arm: %v", err)
+	}
+	if len(again.Rebased) != 0 {
+		t.Errorf("a settled override was reported re-based again: %+v", again.Rebased)
+	}
+}
+
+func TestPushedRepoAcceptsEveryCloneURLFormAndNoLocalPath(t *testing.T) {
+	for _, url := range []string{
+		"https://github.com/acme/widgets.git",
+		"ssh://git@github.com/acme/widgets.git",
+		"git@github.com:acme/widgets.git",
+		"deploy@git.example.com:acme/widgets.git",
+		"ci-bot@git.internal.example:srv/widgets",
+	} {
+		if !PushedRepo(url) {
+			t.Errorf("PushedRepo(%q) = false, want true", url)
+		}
+	}
+	for _, path := range []string{
+		"/home/korey/code/widgets", "./widgets", "widgets",
+		"/tmp/a@b", "git@github.com", "-flag@host:path",
+	} {
+		if PushedRepo(path) {
+			t.Errorf("PushedRepo(%q) = true, want false", path)
+		}
+	}
+}
+
+func TestTickLeavesTheOtherSidesSchedulesAlone(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	root := gitRepo(t, "svc", everyMinute)
+	if _, err := h.svc.Arm(ctx, root, ArmOptions{Follow: true}); err != nil {
+		t.Fatalf("Arm: %v", err)
+	}
+	id := ScheduleID(root, "every-minute", "")
+
+	// safety: a controller row that reached this store fires from the
+	// controller, never from the host's timer.
+	if _, _, err := h.store.ArmCronSchedule(ctx, store.CronSchedule{
+		ID: "crn_pushed", RepoPath: "https://github.com/acme/widgets.git", Pipeline: "nightly",
+		Name: store.CronScheduleDefaultName, Cron: "* * * * *", TZ: "UTC",
+		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
+	}, h.clock.now()); err != nil {
+		t.Fatalf("seed a controller row: %v", err)
+	}
+
+	h.clock.at = at(t, "2026-01-01T00:02:30Z")
+	report, err := h.svc.Tick(ctx, false)
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if report.Evaluated != 1 {
+		t.Errorf("the local tick evaluated %d schedules, want only its own", report.Evaluated)
+	}
+	for _, d := range report.Decisions {
+		if d.Schedule.ID != id {
+			t.Errorf("the local tick resolved %s, which fires from the controller", d.Schedule.ID)
+		}
+	}
+	pushed, err := h.store.GetCronSchedule(ctx, "crn_pushed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pushed.CursorAt.IsZero() && pushed.LastOutcome != "" {
+		t.Errorf("the local tick moved a controller row: %+v", pushed)
 	}
 }

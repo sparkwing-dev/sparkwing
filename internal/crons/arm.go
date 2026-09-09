@@ -23,10 +23,9 @@ import (
 const PinnedBinaryName = "pipeline"
 
 // Proof is what compiling a repository's pipelines produced: the binary that
-// answers for the pipeline, and the cache digest it was built from.
+// answers for the pipeline.
 type Proof struct {
 	Binary string
-	Digest string
 }
 
 // Prover compiles a repository's pipelines and reports the binary that carries
@@ -60,6 +59,19 @@ type ArmReport struct {
 	Schedules   []store.CronSchedule `json:"schedules,omitempty"`
 	Withdrawals []string             `json:"withdrawals,omitempty"`
 	Controller  []string             `json:"controller,omitempty"`
+	// Rebased names the overrides this arm re-based, one entry per
+	// schedule, so the staleness the arm silently resolved is still
+	// reported to whoever ran it.
+	Rebased []Rebase `json:"rebased,omitempty"`
+}
+
+// Rebase is one override re-based onto a moved declaration: what the override
+// was set against, and what it is measured against now.
+type Rebase struct {
+	Schedule string                `json:"schedule"`
+	Name     string                `json:"name"`
+	From     store.CronDeclaration `json:"from"`
+	To       store.CronDeclaration `json:"to"`
 }
 
 // Arm records the schedules repoRoot declares with `where: local` against this
@@ -122,16 +134,25 @@ func (s *Service) Arm(ctx context.Context, repoRoot string, opts ArmOptions) (Ar
 		if rerr != nil {
 			return report, fmt.Errorf("%s: %w", d.DisplayName(), rerr)
 		}
+		hadPin := s.pinnedBefore(ctx, d.ID())
 		stored, created, aerr := s.Store.ArmCronSchedule(ctx, row, now)
 		if aerr != nil {
 			return report, aerr
+		}
+		// safety: --follow and an arm without proof both clear the row's lock,
+		// so the file the row no longer names would otherwise sit under the
+		// pin root for ever.
+		if lock.Binary == "" && hadPin {
+			if perr := s.removePin(d.ID()); perr != nil {
+				return report, fmt.Errorf("%s: drop the pinned binary: %w", d.DisplayName(), perr)
+			}
 		}
 		if created {
 			report.Armed++
 		} else {
 			report.Refreshed++
 		}
-		if rebased, berr := s.rebaseOverride(ctx, stored, now); berr != nil {
+		if rebased, berr := s.rebaseOverride(ctx, stored, now, &report); berr != nil {
 			return report, berr
 		} else if rebased != nil {
 			stored = *rebased
@@ -207,16 +228,22 @@ func (s *Service) proveAll(ctx context.Context, root string, locals []Declared, 
 // safety: the arm re-reads the declaration it just wrote, so an override that
 // survived the arm is measured against what the repository says now rather
 // than what it said when the override was typed.
-func (s *Service) rebaseOverride(ctx context.Context, stored store.CronSchedule, now time.Time) (*store.CronSchedule, error) {
+func (s *Service) rebaseOverride(
+	ctx context.Context, stored store.CronSchedule, now time.Time, report *ArmReport,
+) (*store.CronSchedule, error) {
 	if stored.Override == nil || !overrideStale(stored) {
 		return nil, nil
 	}
 	override := *stored.Override
+	was := override.Base
 	override.Base = stored.Declaration()
 	if err := s.Store.SetCronOverride(ctx, stored.ID, override, now); err != nil {
 		return nil, fmt.Errorf("%s: rebase the override onto the new declaration: %w", DisplayName(stored), err)
 	}
 	stored.Override = &override
+	report.Rebased = append(report.Rebased, Rebase{
+		Schedule: stored.ID, Name: DisplayName(stored), From: was, To: override.Base,
+	})
 	return &stored, nil
 }
 
@@ -263,15 +290,19 @@ func (s *Service) pin(id, head string, proof Proof) (store.CronLock, error) {
 	if err := copyExecutable(proof.Binary, dest); err != nil {
 		return store.CronLock{}, err
 	}
-	digest := proof.Digest
-	if digest == "" {
-		computed, err := fileDigest(dest)
-		if err != nil {
-			return store.CronLock{}, fmt.Errorf("digest %s: %w", dest, err)
-		}
-		digest = computed
+	// safety: the digest is the pinned file's own sha256, not the compiler's
+	// cache key, because the fire compares it against the bytes it is about to
+	// execute and a cache key answers a different question.
+	digest, err := fileDigest(dest)
+	if err != nil {
+		return store.CronLock{}, fmt.Errorf("digest %s: %w", dest, err)
 	}
 	return store.CronLock{Ref: head, Binary: dest, Digest: digest}, nil
+}
+
+func (s *Service) pinnedBefore(ctx context.Context, id string) bool {
+	sched, err := s.Store.GetCronSchedule(ctx, id)
+	return err == nil && sched.LockedBinary != ""
 }
 
 func (s *Service) removePin(id string) error {
@@ -320,8 +351,13 @@ func discardStaged(path string) {
 	}
 }
 
-// safety: the arm records a digest even when the compiler exposes no cache
-// key, so two pins of the same schedule are still comparable.
+// FileDigest is the sha256 of one file, hex encoded. Arming records it for the
+// binary it pinned, and the fire recomputes it before executing that file, so
+// a pin replaced in place is caught rather than run.
+func FileDigest(path string) (string, error) {
+	return fileDigest(path)
+}
+
 func fileDigest(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -501,9 +537,13 @@ func sameArgs(a, b map[string]string) bool {
 // avoid. What the checkout has done since is derived on read instead, and
 // reaches an operator through the lock state in `sparkwing crons list`.
 //
-// Refresh republishes rows that already exist. A pipeline that starts
+// Refresh only ever republishes rows that already exist. A pipeline that starts
 // declaring a schedule is armed by `sparkwing crons install`, because which
-// host evaluates a schedule is a decision an operator makes on that host.
+// host evaluates a schedule is a decision an operator makes on that host, and a
+// schedule `crons disarm` removed is gone from the store, so nothing here can
+// bring it back. A row the repository had stopped declaring is different: it is
+// still in the store, so a repository that declares it again republishes it and
+// it fires once more, as long as it follows the checkout.
 func (s *Service) Refresh(ctx context.Context) (RefreshReport, error) {
 	stored, err := s.Store.ListCronSchedules(ctx)
 	if err != nil {
@@ -555,6 +595,13 @@ func (s *Service) refreshOne(
 	ctx context.Context, sched store.CronSchedule, byID map[string]Declared,
 	now time.Time, report *RefreshReport,
 ) {
+	// safety: a row the caller already filtered, repeated here because a
+	// republished row for the other side would move a declaration nothing on
+	// this machine owns.
+	if Pushed(sched) || !s.evaluates(sched) {
+		report.Locked++
+		return
+	}
 	d, still := byID[sched.ID]
 	if !still {
 		if !sched.Declared {
@@ -567,7 +614,10 @@ func (s *Service) refreshOne(
 		report.Withdrawn++
 		return
 	}
-	row, rerr := scheduleRow(d, store.CronLock{}, sched.ArmedBy, now)
+	// safety: the lock moves at an explicit install, lock or unlock, never at a
+	// refresh, so it is carried through rather than rebuilt from the declaration.
+	lock := store.CronLock{Ref: sched.LockedRef, Binary: sched.LockedBinary, Digest: sched.LockedDigest}
+	row, rerr := scheduleRow(d, lock, sched.ArmedBy, now)
 	if rerr != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), rerr))
 		return
