@@ -6,17 +6,15 @@ Every `sparkwing info` command, flag, and argument, generated from the CLI's own
 
 ## `sparkwing info`
 
-Self-describe sparkwing + the current project (agent entrypoint)
+Describe Sparkwing and the selected project
 
-One command that answers "what is sparkwing, am I in a
-project, what should I run next" without prior knowledge. Prints
+Reports
 the CLI version, whether the current directory is inside a
 sparkwing project (and how many pipelines it has), whether the Go
 toolchain is on PATH, a curated list of next-step commands, and
 the docs URL. When a project declares a git hook that is not
 firing, repairing it is the first next step.
 
-This is the canonical first command an agent runs after install.
 Use -o json for structured output that an agent can parse, or
 -o plain to emit one next-step command per line for shell
 pipelines (head -n1 yields the most-likely next command).

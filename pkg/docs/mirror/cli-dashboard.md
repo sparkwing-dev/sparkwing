@@ -14,9 +14,7 @@ $SPARKWING_HOME), 'kill' stops it, 'status' reports liveness.
 
 The server is one Go process that hosts the embedded Next.js SPA,
 the JSON API, the log endpoints, and the SQLite store on the same
-port. There is no separate Node process. The dashboard is purely
-for visualization -- everything it shows is reachable from the
-CLI as well.
+port.
 
 ### Subcommands
 

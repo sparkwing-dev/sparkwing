@@ -14,8 +14,7 @@ store.
 
 Declaring a cadence does not arm it. `sparkwing crons install` arms a
 repo's schedules on the host it is run from, and installs one OS timer -- a
-systemd user timer on Linux, a launchd agent on macOS -- that calls
-`sparkwing crons tick` every minute. Sparkwing evaluates every cron
+systemd user timer on Linux, a launchd agent on macOS -- that calls `sparkwing crons tick` every minute. Sparkwing evaluates every cron
 expression itself inside that tick, so the machine holds one timer however
 many schedules are armed.
 
@@ -110,7 +109,7 @@ alone: this host does not fire it.
 
 Each pipeline is compiled first and has to appear in the binary's own
 description, because a schedule fires unattended: a pipeline that will not
-build is refused here rather than at three in the morning. That compile is also
+build is refused here before unattended execution. That compile is also
 the pin: the binary is copied under the sparkwing home and recorded with the
 checkout's HEAD, so every fire runs what was armed however the checkout moves
 afterwards. --follow arms without a pin, and each fire compiles the checkout.
@@ -125,8 +124,8 @@ checkout, republishes what the repo declares, marks a pipeline that stopped
 declaring a cadence undeclared, and re-bases this host's overrides onto the new
 declaration. Pause state, cursor, fire history and the override values survive.
 
-Arming is per host. Another machine reading the same repo stays idle until it
-is armed too, so two hosts never race for the same instant.
+Arming is per host. Another machine runs the same schedule only when the
+schedule is also armed on that machine.
 
 --profile NAME pushes the repo's "where: controller" entries to that
 controller instead, and reports the "where: local" ones as this host's. The
@@ -241,12 +240,9 @@ sparkwing crons lock nightly
 
 Show the instants a schedule fires next
 
-Walks the cron expression forward from now in the zone it is
-read in. With a name, the next instants of that schedule; without one, the
-next instants across every armed schedule, merged in time order.
-
-This is the cheapest way to check a cron expression means what it looks
-like -- a day-of-week field, a DST boundary, a zone that is not yours.
+Shows upcoming times in each schedule's configured time zone. Supply a
+schedule name to inspect one expression; omit it to merge upcoming times
+from every armed schedule.
 
 ### Arguments
 
@@ -267,7 +263,7 @@ like -- a day-of-week field, a DST boundary, a zone that is not yours.
 sparkwing crons next
 
 # Check one expression
-sparkwing crons next nightly-rebuild --count 10
+sparkwing crons next fictional-nightly --count 10
 ```
 
 ## `sparkwing crons pause`
@@ -275,7 +271,7 @@ sparkwing crons next nightly-rebuild --count 10
 Stop a schedule firing, keeping it armed
 
 A paused schedule still advances its cursor on every tick, so
-resuming it fires the next due instant rather than replaying the ones that
+resuming it fires the next due instant instead of replaying the ones that
 passed while it was paused.
 
 ### Arguments
@@ -293,7 +289,7 @@ passed while it was paused.
 
 ```sh
 # Pause a schedule
-sparkwing crons pause nightly-rebuild
+sparkwing crons pause fictional-nightly
 ```
 
 ## `sparkwing crons reset`
@@ -325,7 +321,8 @@ sparkwing crons reset nightly
 
 Let a paused schedule fire again
 
-Resumes at the next due instant. The instants that passed while the schedule was paused are behind its cursor and do not run.
+Resumes at the next due instant. The instants that passed while the schedule
+was paused are behind its cursor and do not run.
 
 ### Arguments
 
@@ -342,7 +339,7 @@ Resumes at the next due instant. The instants that passed while the schedule was
 
 ```sh
 # Resume a schedule
-sparkwing crons resume nightly-rebuild
+sparkwing crons resume fictional-nightly
 ```
 
 ## `sparkwing crons run`
@@ -371,7 +368,7 @@ instants, so the next one still fires on time.
 
 ```sh
 # Run a schedule's pipeline now
-sparkwing crons run nightly-rebuild
+sparkwing crons run fictional-nightly
 ```
 
 ## `sparkwing crons set`
@@ -448,10 +445,10 @@ unique across this host's schedules.
 
 ```sh
 # Inspect one schedule
-sparkwing crons show nightly-rebuild
+sparkwing crons show fictional-nightly
 
 # Read further back
-sparkwing crons show nightly-rebuild --fires 50
+sparkwing crons show fictional-nightly --fires 50
 ```
 
 ## `sparkwing crons status`

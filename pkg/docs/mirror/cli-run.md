@@ -11,13 +11,10 @@ Invoke a pipeline
 Compiles the nearest .sparkwing/ binary and exec's it
 with the named pipeline.
 
-The pipeline name is the only positional in the sparkwing
-surface -- a deliberate exception, kept short because run is
-typed many times a day. Every other input is a named flag.
-
-Any flag not recognized by run itself is forwarded to the
-pipeline binary, e.g. 'sparkwing run release --version
-v1.2.3' passes --version through to the pipeline's Args.
+Runner options use the --sw- prefix. Unknown --sw- options fail before
+execution setup. Other arguments pass to the pipeline. Put -- before
+pipeline arguments that resemble runner options; every argument after the
+separator passes through unchanged.
 
 For remote execution on a profile's controller, use
 'sparkwing pipeline trigger <name> --profile PROF'.
@@ -50,7 +47,7 @@ when piped; plain prints the bare id for scripting).
 --sw-idempotency-key deduplicates on key plus pipeline: a repeat
 carrying a key an earlier launch used returns the original run
 id and its current status and creates nothing, which is what
-makes a retry after a dropped connection safe. Reusing a key
+prevents duplicate launches after a dropped connection. Reusing a key
 with different arguments is refused, because a key names one
 intent and different arguments are a different request.
 --sw-request-id is tracing only and never affects deduplication.
@@ -64,7 +61,7 @@ ahead of the queue the run actually joins.
 
 A flag a detached run cannot carry (--sw-index, --sw-dry-run,
 --profile, --sw-fleet, --sw-isolated-home, and the other
-run-shaping --sw- flags) is refused with the reason rather than
+run-shaping --sw- flags) is refused with the reason instead of
 ignored; run those in the foreground.
 
 PIPELINE resolves against the checkout you are standing in (or
@@ -117,13 +114,13 @@ is running and exits after five idle minutes; see
 
 ```sh
 # Run with no flags
-sparkwing run build-test-deploy
+sparkwing run fictional-build
 
 # Pass a typed pipeline arg
-sparkwing run release --version v0.28.1
+sparkwing run fictional-release --version v0.28.1
 
 # Run from a different git ref
-sparkwing run build-test-deploy --sw-ref feature/xyz
+sparkwing run fictional-build --sw-ref feature/xyz
 
 # Queue a run that outlives the terminal
 sparkwing run nightly-report --sw-detached
@@ -131,14 +128,14 @@ sparkwing run nightly-report --sw-detached
 # Capture the id for scripting
 RUN=$(sparkwing run build --sw-detached --sw-output plain)
 
-# Make a detached retry safe to repeat
-sparkwing run deploy --sw-detached --sw-idempotency-key deploy-2026-08-11-a --env staging
+# Deduplicate a detached retry
+sparkwing run deploy --sw-detached --sw-idempotency-key fictional-deploy-attempt --env staging
 
 # Detach a pipeline from another checkout
 sparkwing run lint --sw-detached --sw-cd ~/code/other-project
 
 # Retry a failed run
-sparkwing runs retry RUN_ID --failed
+sparkwing runs retry --run run-fictional --failed
 
 # Submit to a remote controller
 sparkwing pipeline trigger deploy --profile prod
@@ -148,14 +145,9 @@ sparkwing pipeline trigger deploy --profile prod
 
 Print a pipeline's declared Secrets with provenance
 
-Pure inspection: lists every Secret the pipeline
-declares, each with its source binding and resolution status when a
-source is configured -- useful before driving destructive runs to
-confirm you'd hit the right vault. No Plan() runs, nothing
-dispatches, nothing mutates.
-
-Invocation: `sparkwing run <pipeline> config` -- the
-pipeline binary handles the subverb directly.
+Lists each declared secret, its source binding, and its resolution status.
+Invoke it with 'sparkwing run <pipeline> config'. The pipeline binary
+handles this inspection command.
 
 ### Flags
 
@@ -167,8 +159,8 @@ pipeline binary handles the subverb directly.
 
 ```sh
 # Inspect the declared secrets
-sparkwing run release config
+sparkwing run fictional-release config
 
 # Agent-readable form
-sparkwing run release config -o json
+sparkwing run fictional-release config -o json
 ```

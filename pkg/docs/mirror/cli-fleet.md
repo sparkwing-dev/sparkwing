@@ -27,7 +27,8 @@ history.
 
 Provision helpers for foreground coordinators
 
-Creates local verifier-backed credentials and trusted executor enrollments. Raw credentials print once and never enter fleet.yaml.
+Creates local verifier-backed credentials and trusted executor enrollments.
+Raw credentials print once and never enter fleet.yaml.
 
 ### Subcommands
 
@@ -46,7 +47,8 @@ no token material or token identifier.
 
 Atomically merge stdout into the helper's owner-only agent.yaml (0600 on Unix;
 a protected user ACL on Windows). Direct shell redirection can truncate an
-existing multi-coordinator file before validation and is not a safe merge.
+existing multi-coordinator file before validation and can destroy existing
+memberships.
 
 Use one credential per coordinator membership.
 

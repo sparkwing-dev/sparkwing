@@ -23,19 +23,22 @@ webhooks, schedules, or manual invocation. Use 'sparkwing run
 for agent-facing discovery.`,
 	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "crons", "queue", "cache", "daemon", "profile", "version", "update", "dashboard", "doctor", "cluster", "fleet", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
 	Examples: []Example{
-		{"Run a pipeline (positional shortcut)", "sparkwing run build-test-deploy"},
+		{"Run a pipeline (positional shortcut)", "sparkwing run fictional-build"},
 		{"First command an agent should run", "sparkwing info --for-agent"},
 		{"List every invocable (agents)", "sparkwing pipeline list -o json"},
-		{"Inspect one pipeline's full metadata", "sparkwing pipeline describe --name release -o json"},
-		{"Bootstrap + scaffold your first pipeline in a fresh repo", "sparkwing pipeline new --name release"},
+		{"Inspect one pipeline's full metadata", "sparkwing pipeline describe --name fictional-release -o json"},
+		{"Bootstrap + scaffold your first pipeline in a new repository", "sparkwing pipeline new --name release"},
 		{"Start the local dashboard", "sparkwing dashboard start"},
 	},
 }
 
 var cmdDaemon = Command{
-	Path:            "sparkwing daemon",
-	Synopsis:        "Inspect or refresh the local admission daemon",
-	Description:     `The admission daemon starts on demand when a pipeline needs it. Status never starts one. Restart replaces only an answering daemon with this installed build, using the same drain, durable lease, and reattachment path as automatic version takeover; a stopped daemon stays stopped.`,
+	Path:     "sparkwing daemon",
+	Synopsis: "Inspect or refresh the local admission daemon",
+	Description: `The admission daemon starts on demand when a pipeline needs it. Status never
+starts one. Restart replaces only an answering daemon with this installed
+build, using the same drain, durable lease, and reattachment path as automatic
+version takeover; a stopped daemon stays stopped.`,
 	SubcommandOrder: []string{"status", "restart", "recover-state"},
 	Examples: []Example{
 		{"Machine-readable status", "sparkwing daemon status -o json"},
@@ -44,9 +47,13 @@ var cmdDaemon = Command{
 }
 
 var cmdDaemonRecoverState = Command{
-	Path:        "sparkwing daemon recover-state",
-	Synopsis:    "Preserve unreadable daemon state after guarded commands stop",
-	Description: `Fail-closed recovery for a daemon that cannot parse its durable state. The unreadable bytes may describe guarded commands that are still running, so first stop or verify those commands, then pass --yes. Recovery holds the daemon election lock, moves state.json to a state.json.corrupt-<time> forensic copy, and never discards readable state.`,
+	Path:     "sparkwing daemon recover-state",
+	Synopsis: "Preserve unreadable daemon state after guarded commands stop",
+	Description: `Fail-closed recovery for a daemon that cannot parse its durable state. The
+unreadable bytes may describe guarded commands that are still running, so
+first stop or verify those commands, then pass --yes. Recovery holds the
+daemon election lock, moves state.json to a state.json.corrupt-<time> forensic
+copy, and never discards readable state.`,
 	Flags: []FlagSpec{
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing home whose unreadable daemon state should be preserved", Group: "Input"},
 		{Name: "yes", Desc: "Confirm every guarded command described by the unreadable state has stopped", Required: true, Group: "Safety"},
@@ -58,9 +65,31 @@ var cmdDaemonRecoverState = Command{
 }
 
 var cmdDaemonStatus = Command{
-	Path:        "sparkwing daemon status",
-	Synopsis:    "Report whether wingd is running and which build it serves",
-	Description: `Read-only daemon status. An absent daemon is a healthy stopped state and exits zero. An unreachable socket fails instead of pretending the admission queue is empty. The JSON running_revision identifies the exact source build when available. It also reports missing_requirements: the schema requirements this home's store records and the daemon's binary does not understand. A daemon behind the store by additive migrations alone keeps serving, so only a non-empty missing_requirements marks it unhealthy, and the report then names the remedy that works, which is not a restart when the installed sparkwing is the same build. daemon_schema_version and store_schema_version report the two schema numbers, and a daemon too old to advertise its requirements falls back to comparing them. A store that exists but cannot be read is reported as store_schema_error and also marks the daemon unhealthy, rather than passing as an absent store. daemon_store_ready and daemon_store_error report the daemon's own view of the handle it holds: a daemon whose store will not open keeps serving and evicts every run whose terminal state it cannot check, naming the reason here alongside the remedy and the store_path it tried. daemon_store_skew separates the reason that is only age -- a store this daemon's binary is too old to open, which a newer pin migrated -- from a store that is unreadable for any other reason; runs go standalone in the first case and fail in the second. A daemon too old to answer omits both fields, so a false daemon_store_ready is the daemon's own answer rather than an absent one. api_socket names the second socket the daemon binds, where it serves the controller HTTP API for runs it hosts. api_ready reports whether that socket is bound, and api_error why it is not: a takeover in flight, a socket path over the OS length limit, or a socket directory this user does not own. A daemon that serves no API omits api_ready entirely, so a false api_ready is the daemon's own answer rather than an absent one, and an unbound socket marks the daemon unhealthy because no run it hosts can reach its state. artifact_store_error reports a cache URL the daemon could not open; it serves without artifact routes rather than refusing to start.`,
+	Path:     "sparkwing daemon status",
+	Synopsis: "Report whether wingd is running and which build it serves",
+	Description: `Reports daemon reachability and source build identity. An absent daemon exits
+zero. An unreachable socket returns an error.
+
+running_revision identifies the build. missing_requirements lists store
+requirements the binary cannot interpret. Additive migrations permit older
+binaries to keep serving. Older daemons use daemon_schema_version and
+store_schema_version for comparison.
+
+store_schema_error reports a store the CLI could not read. daemon_store_ready
+and daemon_store_error describe the daemon's own store handle. The daemon
+evicts runs whose terminal state it cannot check. store_path identifies the
+store it tried to open.
+
+daemon_store_skew identifies an incompatible store schema. Pipeline runs use
+standalone storage for that mismatch and fail for other store errors. Older
+daemons omit fields they cannot report.
+
+api_socket names the controller API socket. api_ready reports whether it is
+bound, and api_error explains a binding failure. A daemon that supports the
+API but cannot bind its socket is unhealthy. Older daemons omit api_ready.
+
+artifact_store_error reports failure to open the configured cache. The daemon
+continues serving with artifact routes disabled.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
@@ -72,9 +101,12 @@ var cmdDaemonStatus = Command{
 }
 
 var cmdDaemonRestart = Command{
-	Path:        "sparkwing daemon restart",
-	Synopsis:    "Refresh an answering wingd to this installed build",
-	Description: `Refresh an answering daemon when its build differs from this installed build. With --force, drain and replace an answering daemon even when the builds match. Existing holders reconnect and reattach through durable leases. If no daemon is running, nothing is started.`,
+	Path:     "sparkwing daemon restart",
+	Synopsis: "Refresh an answering wingd to this installed build",
+	Description: `Refresh an answering daemon when its build differs from this installed build.
+With --force, drain and replace an answering daemon even when the builds
+match. Existing holders reconnect and reattach through durable leases. If no
+daemon is running, nothing is started.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
@@ -90,16 +122,14 @@ var cmdDaemonRestart = Command{
 
 var cmdInfo = Command{
 	Path:     "sparkwing info",
-	Synopsis: "Self-describe sparkwing + the current project (agent entrypoint)",
-	Description: `One command that answers "what is sparkwing, am I in a
-project, what should I run next" without prior knowledge. Prints
+	Synopsis: "Describe Sparkwing and the selected project",
+	Description: `Reports
 the CLI version, whether the current directory is inside a
 sparkwing project (and how many pipelines it has), whether the Go
 toolchain is on PATH, a curated list of next-step commands, and
 the docs URL. When a project declares a git hook that is not
 firing, repairing it is the first next step.
 
-This is the canonical first command an agent runs after install.
 Use -o json for structured output that an agent can parse, or
 -o plain to emit one next-step command per line for shell
 pipelines (head -n1 yields the most-likely next command).`,
@@ -120,24 +150,13 @@ pipelines (head -n1 yields the most-likely next command).`,
 var cmdCluster = Command{
 	Path:     "sparkwing cluster",
 	Synopsis: "Operate and inspect the sparkwing cluster",
-	Description: `Cluster-scoped operations and state. 'status' rolls up
-controller health + fleet + queue state into one report;
-individual verbs drill in (agents for fleet detail, users /
-tokens for controller-stored config, image rollout
-for deploys, webhooks for GitHub delivery debug).
+	Description: `Inspect controller health, executors, admission, users, tokens, images,
+and webhooks. Select the controller with --profile NAME.
+Configure profiles with 'sparkwing configure profiles'.
 
-Secrets used to live here; they're now top-level
-('sparkwing secrets ...') since they straddle laptop dotenv
-+ controller storage and are referenced constantly.
-
-'worker' runs a laptop-side queue drainer against a remote
-cluster. 'gc' sweeps stale warm-runner PVCs.
-
-For the laptop-local dashboard server, see
-'sparkwing dashboard start'.
-
-Profiles (via --profile) pick which cluster these commands
-address; set them up with 'sparkwing configure profiles'.`,
+'worker' executes queued triggers on this machine. 'gc' removes stale
+warm-runner storage. Manage secrets with 'sparkwing secrets' and the
+local dashboard with 'sparkwing dashboard'.`,
 	SubcommandOrder: []string{"status", "agents", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
@@ -148,16 +167,12 @@ address; set them up with 'sparkwing configure profiles'.`,
 var cmdConfigure = Command{
 	Path:     "sparkwing configure",
 	Synopsis: "Configure laptop-local settings",
-	Description: `Laptop-local setup commands. 'init' is the one-shot
-"prepare ~/.config/sparkwing/ + report what's there" command;
-'profiles' manages remote-cluster connection profiles. Future
-laptop-level surfaces (aliases, default flags, per-repo config)
-land here.
+	Description: `Configure this machine. 'init' prepares the configuration directory and
+reports its contents. 'profiles' manages controller connections.
+'xrepo' registers local repositories.
 
-Controller-side state (users, tokens) lives under
-'sparkwing cluster ...' since it writes to the remote
-controller, not the local config. Secrets are top-level
-('sparkwing secrets ...').`,
+Manage controller users and tokens with 'sparkwing cluster'.
+Manage secrets with 'sparkwing secrets'.`,
 	SubcommandOrder: []string{"init", "profiles", "xrepo"},
 	Examples: []Example{
 		{"First-time laptop setup", "sparkwing configure init"},
@@ -251,7 +266,7 @@ in one step (no separate init needed).
 Re-running on an already-set-up laptop re-applies 0700 to
 ~/.config/sparkwing/ and reports each config file's mode, naming any
 that group or other users can read. --dry-run skips both the mkdir
-and the permission fix so the command pure-probes.`,
+and the permission fix so the command reports existing state.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "dry-run", Desc: "Probe + report without creating or tightening ~/.config/sparkwing/", Group: "Behavior"},
@@ -311,7 +326,7 @@ The ceiling shape controls its reach:
 
   vMAJOR.MINOR       caps a whole minor series -- every patch of that
                      minor is allowed, the next minor is refused
-                     (e.g. v0.15 allows v0.15.9 but refuses v0.16.0).
+                     (v9.8 allows v9.8.7 and excludes v9.9.0, for example).
   vMAJOR.MINOR.PATCH exact ceiling -- nothing above that patch installs.
 
 With no flags, prints the current hold and where it is set. The hold
@@ -321,14 +336,14 @@ overrides the file for a shell or a whole fleet. Releases beyond the
 hold still show in 'sparkwing version' so the operator sees what is
 being deferred.`,
 	Flags: []FlagSpec{
-		{Name: "set", Argument: "VERSION", Desc: "Set the ceiling (e.g. v0.15 or v0.15.4)", Group: "Action"},
+		{Name: "set", Argument: "VERSION", Desc: "Set the ceiling (vMAJOR.MINOR or vMAJOR.MINOR.PATCH)", Group: "Action"},
 		{Name: "clear", Desc: "Remove the hold so upgrades are unrestricted", Group: "Action"},
 	},
 	GroupOrder: []string{"Action", "Other"},
 	Examples: []Example{
 		{"Show the current hold", "sparkwing version hold"},
-		{"Hold the minor series at v0.15", "sparkwing version hold --set v0.15"},
-		{"Pin an exact ceiling", "sparkwing version hold --set v0.15.4"},
+		{"Hold the minor series at v9.8", "sparkwing version hold --set v9.8"},
+		{"Pin an exact ceiling", "sparkwing version hold --set v9.8.7"},
 		{"Lift the hold", "sparkwing version hold --clear"},
 	},
 }
@@ -350,21 +365,21 @@ and the latest published release, exits 0 when already current,
 and exits 1 when a newer release exists (useful for CI/notifications).
 
 Downgrades are blocked by default. Pass --force to install an older
-release (e.g. bisecting a regression).
+release when investigating a regression.
 
 For SDK (go.mod) bumps, use 'sparkwing version update --sdk'.`,
 	Flags: []FlagSpec{
 		{Name: "check", Desc: "Report installed vs latest; exit 1 if a newer release exists (read-only)", Group: "Behavior"},
 		{Name: "force", Desc: "Allow downgrading to an older release", Group: "Behavior"},
 		{Name: "override-hold", Desc: "Cross an operator version hold", Group: "Behavior"},
-		{Name: "version", Argument: "TAG", Desc: "Target release tag (e.g. v0.17.0). Default: latest.", Group: "Input"},
+		{Name: "version", Argument: "TAG", Desc: "Target release tag (vX.Y.Z). Default: latest.", Group: "Input"},
 	},
 	GroupOrder: []string{"Behavior", "Input", "Other"},
 	Examples: []Example{
 		{"Check for a newer release (read-only)", "sparkwing update --check"},
 		{"Update to latest", "sparkwing update"},
-		{"Pin to a specific release", "sparkwing update --version v0.44.0"},
-		{"Downgrade to an older release", "sparkwing update --version v0.40.0 --force"},
+		{"Pin to a specific release", "sparkwing update --version v9.8.7"},
+		{"Downgrade to an older release", "sparkwing update --version v9.7.6 --force"},
 	},
 }
 
@@ -390,17 +405,17 @@ applies to whichever target is selected.`,
 	Flags: []FlagSpec{
 		{Name: "cli", Desc: "Self-update the sparkwing CLI binary", Group: "Target", ConflictsWith: []string{"sdk"}},
 		{Name: "sdk", Desc: "Bump the SDK pin in this project's .sparkwing/go.mod", Group: "Target", ConflictsWith: []string{"cli"}},
-		{Name: "version", Argument: "TAG", Desc: "Target release tag (e.g. v0.17.0). Omit for latest.", Group: "Input"},
+		{Name: "version", Argument: "TAG", Desc: "Target release tag (vX.Y.Z). Omit for latest.", Group: "Input"},
 		{Name: "force", Desc: "Allow downgrading to an older release (--cli only)", Group: "Input"},
 		{Name: "override-hold", Desc: "Cross an operator version hold (--cli only)", Group: "Input"},
 	},
 	GroupOrder: []string{"Target", "Input", "Other"},
 	Examples: []Example{
 		{"Update the CLI to latest", "sparkwing version update --cli"},
-		{"Pin the CLI to a specific release", "sparkwing version update --cli --version v0.44.0"},
-		{"Downgrade the CLI", "sparkwing version update --cli --version v0.40.0 --force"},
+		{"Pin the CLI to a specific release", "sparkwing version update --cli --version v9.8.7"},
+		{"Downgrade the CLI", "sparkwing version update --cli --version v9.7.6 --force"},
 		{"Bump the SDK in this project to latest", "sparkwing version update --sdk"},
-		{"Pin the SDK to a specific release", "sparkwing version update --sdk --version v0.44.0"},
+		{"Pin the SDK to a specific release", "sparkwing version update --sdk --version v9.8.7"},
 	},
 }
 
@@ -418,7 +433,8 @@ Rows carry path, synopsis and full-tree subcommand_count. Read a selected
 command with <path> --help. Hidden commands require --include-hidden.
 Plain prints paths only, with continuation on stderr.
 
---format markdown exports the full reference and rejects query/pagination flags. --split-dir writes generated files.`,
+--format markdown exports the full reference and rejects query/pagination
+flags. --split-dir writes generated files.`,
 	Flags: []FlagSpec{
 		{Name: "query", Short: "q", Argument: "TEXT", Desc: "Match every word against paths and synopses", Group: "Selection"},
 		{Name: "limit", Argument: "N", Desc: "Maximum records; 0 returns every remaining match", Default: "40", Group: "Selection"},
@@ -426,7 +442,7 @@ Plain prints paths only, with continuation on stderr.
 		{Name: "format", Argument: "markdown", Desc: "Export the full command reference as Markdown", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "split-dir", Argument: "DIR", Desc: "With --format markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages", Group: "Output"},
-		{Name: "path", Argument: "PREFIX", Desc: "Only emit commands at or under PREFIX, matched by whole path components, with or without the leading 'sparkwing' (runs, sparkwing runs, runs list); a prefix matching nothing is an error", Group: "Filter"},
+		{Name: "path", Argument: "PREFIX", Desc: "Only emit commands at or under PREFIX, matched by whole path components, with or without the leading 'sparkwing' (runs, sparkwing runs, runs list, and similar paths); a prefix matching nothing is an error", Group: "Filter"},
 		{Name: "include-hidden", Desc: "Also emit Hidden:true commands (default: skip)", Group: "Filter"},
 	},
 	GroupOrder: []string{"Selection", "Filter", "Output", "Other"},
@@ -440,41 +456,25 @@ Plain prints paths only, with continuation on stderr.
 
 var cmdQueue = Command{
 	Path:     "sparkwing queue",
-	Synopsis: "The truthful view of local admission: holders, connections, waiters, and why",
-	Description: `Reads the local admission daemon and prints one honest picture of
-where every run stands: each resource (host cores, memory, and every
-named concurrency semaphore) with its capacity and how much is in use;
-every run currently holding resources, with the repo it came from, how
-long it has held, and what it is charged; connected run registrations that
-hold no resources, labeled separately; and every waiter in admission
-order, with its position, priority, cost, and exactly what it is waiting on.
-A child run attached to its parent's lease renders indented under that
-parent. The header carries a one-line summary of the daemon's recent
-admission outcomes -- runs granted, median wait, evictions, queue
-timeouts, younger backfills, and protected waiters -- so chronic patterns show
-up at a glance.
+	Synopsis: "Inspect local admission holders, connections, and waiters",
+	Description: `Reports the local admission daemon's resource capacity, usage, and queue.
+Each holder shows its repository, age, and charge. Connected runs that hold
+no resources have separate rows. Waiters appear in admission order with
+their position, priority, cost, and blocking resource. Attached child runs
+appear under their parent. The header summarizes recent admission outcomes.
 
-A holder that is alive but has burned near-zero CPU while runs queue
-behind it is flagged as stalled, together with the exact command to
-clear it -- 'sparkwing runs cancel --run <id>'. The queue never kills a
-run for you and never points at a host-wide destructive verb.
+A stalled holder includes a cancellation command:
+'sparkwing runs cancel --run <id>'. Inspect the holder before cancelling it.
+The queue command only reports state.
 
-Pretty on a terminal, JSON when piped (add -o json to force it), and
-one tab-separated record per line with -o plain for shell pipelines.
+Output is pretty on a terminal and JSON when piped. Select JSON explicitly
+with -o json, or tab-separated records with -o plain.
 
-Every view says outright whether it reached the daemon, because an empty
-queue and an unanswered one look identical otherwise. With no daemon
-running there is nothing to arbitrate, so the command reports an empty
-queue and exits 0. When the daemon's socket cannot be reached at all --
-blocked by a sandbox, wedged, gone mid-read -- what is queued is unknown
-rather than empty: the command says so, names the dial failure, and exits
-4 instead of reporting a quiet machine it never looked at.
+An absent daemon reports an empty queue and exits 0. An unreachable daemon
+reports the connection failure and exits 4; its queue state is unknown.
 
-With --profile NAME the view switches to that profile's controller: the
-same renderer prints the controller's admission state -- every
-concurrency key, its holders and waiters, and each registered runner's
-free capacity -- so one vocabulary reads local and cluster admission
-alike.`,
+With --profile NAME, the view reads that profile's controller and shows each
+concurrency key, its holders and waiters, and registered runner capacity.`,
 	SubcommandOrder:    []string{"exec", "priority"},
 	SubcommandOptional: true,
 	Flags: []FlagSpec{
@@ -493,9 +493,14 @@ alike.`,
 }
 
 var cmdQueueExec = Command{
-	Path:        "sparkwing queue exec",
-	Synopsis:    "Run a command under local machine admission",
-	Description: `Submits the command to the local admission daemon before starting it. While blocked, the command is visible in sparkwing queue. Once granted, its complete process tree runs under the lease; interruption or cancellation terminates and reaps that tree before the lease is released. Exact process-session ownership is available on Linux and macOS; queue exec refuses before admission on Windows and other Unix platforms.`,
+	Path:     "sparkwing queue exec",
+	Synopsis: "Run a command under local machine admission",
+	Description: `Submits the command to the local admission daemon before starting it. While
+blocked, the command is visible in sparkwing queue. Once granted, its complete
+process tree runs under the lease; interruption or cancellation terminates and
+reaps that tree before the lease is released. Exact process-session ownership
+is available on Linux and macOS; queue exec refuses before admission on
+Windows and other Unix platforms.`,
 	PosArgs: []PosArg{
 		{Name: "command", Desc: "Command and arguments to execute after --", Required: true},
 	},
@@ -529,7 +534,7 @@ that frees the run to start admits it immediately.
 resolve against the waiters that are not part of this run: front is one
 above the highest other waiter's priority, back is one below the lowest,
 and both fall back to a step either side of zero when nothing else is
-waiting. Asking for front twice is therefore stable rather than an
+waiting. Asking for front twice is therefore stable instead of an
 escalating race with the run's own rank.
 
 One run is several admission participants -- the run itself, and each of
@@ -601,7 +606,7 @@ The embedded copy matches this binary; --web reads another version.`,
 		{Name: "cursor", Argument: "CURSOR", Desc: "Continue after next_cursor with the same filters and binary version", Group: "Selection"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
-		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version.", Group: "Source"},
+		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (vX.Y.Z or latest). Defaults to this CLI's embedded version.", Group: "Source"},
 		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
 	GroupOrder: []string{"Selection", "Source", "Output", "Other"},
@@ -621,8 +626,7 @@ from docs search (--section). Section selection requires --topic and
 cannot combine with --guide or --web. Piped output is one JSON document record;
 --output plain prints raw Markdown. The slug is
 the filename under /docs/ minus .md (run ` + "`sparkwing docs list`" + ` to
-see them all). Subdirs use slash-separated paths (e.g.
-design/remote-retry).
+see them all). Nested topics use slash-separated names.
 
 Default source is the binary's embedded corpus. Use --web to fetch
 from sparkwing.dev, optionally pinned to --version vX.Y.Z or
@@ -630,10 +634,10 @@ from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 	Flags: []FlagSpec{
 		{Name: "section", Argument: "START_LINE", Desc: "Read one embedded section returned by search", RequiresFlags: []string{"topic"}, ConflictsWith: []string{"guide", "web"}, Group: "Selection"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain (pretty on a terminal, json when piped)", Group: "Output"},
-		{Name: "topic", Argument: "NAME", Desc: "Doc slug (e.g. getting-started, pipelines, mcp)", Group: "Selection"},
+		{Name: "topic", Argument: "NAME", Desc: "Topic name from docs list", Group: "Selection"},
 		{Name: "guide", Argument: "NAME", Desc: "Read a task-sized set of topics instead of one (`sparkwing docs guides`)", Group: "Selection"},
 		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
-		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version.", Group: "Source"},
+		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (vX.Y.Z or latest). Defaults to this CLI's embedded version.", Group: "Source"},
 		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
 	GroupOrder: []string{"Selection", "Source", "Other"},
@@ -666,7 +670,7 @@ lookup short. ` + "`sparkwing docs read --guide authoring`" + ` returns the
 whole set in one call.
 
 Guides carry narrative topics only. The generated references
-(sdk-reference, cli-reference) are lookup tables rather than pages to
+(sdk-reference, cli-reference) are lookup tables instead of pages to
 read end to end; reach those with ` + "`sparkwing docs search`" + `.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
@@ -710,16 +714,9 @@ matching topic metadata instead of sections.`,
 var cmdDocsMigrations = Command{
 	Path:     "sparkwing docs migrations",
 	Synopsis: "Per-version migration guides (agent-friendly)",
-	Description: `Surface the migration guides shipped under docs/migrations/.
-Each released sparkwing version that introduces breaking changes
-gets a guide; ` + "`sparkwing docs migrations between`" + ` concatenates
-every guide in a version range into one blob you can pipe straight
-into an agent context.
-
-The same files are also reachable as regular docs (e.g.
-` + "`sparkwing docs read --topic migrations/v0.4.0`" + `); this
-subcommand is the ergonomics layer with semver-aware filtering and
-range output.`,
+	Description: `Read the migration guides embedded in this binary. Use 'list' to find a
+version, 'read' for one guide, or 'between' for every guide in a version
+range.`,
 	SubcommandOrder: []string{"list", "read", "between"},
 	Examples: []Example{
 		{"List embedded migration guides", "sparkwing docs migrations list"},
@@ -764,7 +761,7 @@ rewritten into ` + "`sparkwing docs read --topic <slug>`" + ` form
 		{Name: "[vX.Y.Z]", Desc: "Migration guide version, when --version is not supplied"},
 	},
 	Flags: []FlagSpec{
-		{Name: "version", Argument: "vX.Y.Z", Desc: "Migration guide version (e.g. v0.4.0). Positional fallback accepted.", Group: "Selection"},
+		{Name: "version", Argument: "vX.Y.Z", Desc: "Migration guide version (vX.Y.Z). Positional fallback accepted.", Group: "Selection"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
 		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
@@ -773,23 +770,18 @@ rewritten into ` + "`sparkwing docs read --topic <slug>`" + ` form
 	Examples: []Example{
 		{"Read the v0.4.0 guide", "sparkwing docs migrations read --version v0.4.0"},
 		{"Positional shortcut", "sparkwing docs migrations read v0.4.0"},
-		{"Read v0.5.0 from sparkwing.dev (not yet embedded)", "sparkwing docs migrations read --version v0.5.0 --web"},
+		{"Read v0.5.0 from sparkwing.dev (outside this binary's embedded versions)", "sparkwing docs migrations read --version v0.5.0 --web"},
 	},
 }
 
 var cmdDocsMigrationsBetween = Command{
 	Path:     "sparkwing docs migrations between",
 	Synopsis: "Concatenate every guide in a version range into one blob",
-	Description: `Returns every migration guide whose version is in (--from, --to],
-in ascending version order, separated by markdown horizontal rules.
-The output starts with a "Migration: vA -> vB" header so an agent
-knows the range up-front.
+	Description: `Returns guides with versions greater than --from and at most --to, in
+ascending version order. Markdown output separates guides with horizontal
+rules and identifies the selected range in its heading.
 
-This is the agent-killer command: one invocation produces the full
-migration context for an N-version jump in a form ready to pipe.
-
---from defaults to v0.0.0 (every guide up through --to).
---to defaults to the highest version this CLI knows about.`,
+--from defaults to v0.0.0. --to defaults to the highest embedded version.`,
 	Flags: []FlagSpec{
 		{Name: "from", Argument: "vX.Y.Z", Desc: "Exclusive lower bound (default v0.0.0)", Group: "Selection"},
 		{Name: "to", Argument: "vA.B.C", Desc: "Inclusive upper bound (default = latest embedded version)", Group: "Selection"},
@@ -802,21 +794,16 @@ migration context for an N-version jump in a form ready to pipe.
 		{"Every guide for a v0.3.0 -> v0.4.0 jump", "sparkwing docs migrations between --from v0.3.0 --to v0.4.0"},
 		{"Every guide up to a target version", "sparkwing docs migrations between --to v0.4.0"},
 		{"Every guide this CLI knows (one-shot agent context)", "sparkwing docs migrations between"},
-		{"Full range from sparkwing.dev (includes versions not yet embedded)", "sparkwing docs migrations between --web"},
+		{"Full range from sparkwing.dev (includes versions outside this binary's embedded versions)", "sparkwing docs migrations between --web"},
 	},
 }
 
 var cmdDocsVersions = Command{
 	Path:     "sparkwing docs versions",
 	Synopsis: "List doc versions known to this CLI (and sparkwing.dev with --web)",
-	Description: `Reports each doc version the source knows about. Default
-output is hermetic: only the binary's embedded version (plus every
-migration-guide version shipped in the embed) appears, with no
-network calls.
-
-With --web, fetches sparkwing.dev/versions.json and merges in every
-release available online -- useful for discovering newer versions
-this CLI can render via --web on the read / list verbs.`,
+	Description: `Lists the binary's embedded documentation version and migration-guide
+versions. With --web, also fetches published versions from sparkwing.dev.
+Use a returned version with 'sparkwing docs read --web --version'.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "web", Desc: "Merge in sparkwing.dev/versions.json (network)", Group: "Source"},
@@ -878,15 +865,10 @@ faster than the 24h TTL window, or when debugging --web behavior.`,
 var cmdCache = Command{
 	Path:     "sparkwing cache",
 	Synopsis: "Inspect or trim the compiled pipeline binary cache",
-	Description: `Every pipeline invocation compiles .sparkwing/ to a binary keyed
-on a fingerprint of its source, and those binaries are cached under
-$SPARKWING_HOME/cache/pipelines. They are large -- often 90 MB or
-more each -- so the cache is bounded rather than allowed to grow.
-
-Pruning runs automatically after a compile, keeping the most
-recently used entries within a byte ceiling and an entry count.
-These verbs are for looking at what is cached and for reclaiming
-space on demand.`,
+	Description: `Compiled pipeline binaries are keyed by their source fingerprint and stored
+under $SPARKWING_HOME/cache/pipelines. Automatic pruning after compilation
+keeps recently used entries within the configured byte and entry limits.
+Use these commands to inspect entries or reclaim space.`,
 	SubcommandOrder: []string{"info", "prune", "explain"},
 	Examples: []Example{
 		{"See what is cached", "sparkwing cache info"},
@@ -903,7 +885,7 @@ last-use times. Entries are ordered by last use, which is what
 pruning evicts on -- not by when they were built.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
-		{Name: "all", Argument: "", Desc: "List every entry rather than the ten most recent", Group: "Output"},
+		{Name: "all", Argument: "", Desc: "List every entry instead of the ten most recent", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
@@ -926,7 +908,7 @@ and busy entries, bounds the number examined, and reports observed
 capacity separately from removed entries. Callers making admission
 decisions remeasure filesystem capacity after pruning.`,
 	Flags: []FlagSpec{
-		{Name: "max-bytes", Argument: "SIZE", Desc: "Byte ceiling, e.g. 512MiB", Group: "Limits"},
+		{Name: "max-bytes", Argument: "SIZE", Desc: "Byte ceiling (512MiB and similar sizes)", Group: "Limits"},
 		{Name: "max-entries", Argument: "N", Desc: "Entry ceiling", Group: "Limits"},
 		{Name: "all", Argument: "", Desc: "Remove every entry, ignoring both ceilings", Group: "Limits"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
@@ -948,8 +930,8 @@ the platform, the module tree, each local replace target, a covering
 go.work, and the resolved module pins -- each with its own digest and
 how much it covered.
 
-File counts note how many files git ignores and excluded, which is
-the usual explanation when an edit does not trigger a rebuild.
+File counts show how many files were excluded because Git ignores them.
+Edits to excluded files leave the cache key unchanged.
 
 When other cached entries came from the same checkout, each is listed
 with the inputs that differ from the current key. That is the direct
@@ -968,14 +950,12 @@ answer to why a rebuild happened.`,
 var cmdDebug = Command{
 	Path:     "sparkwing debug",
 	Synopsis: "Interactive debugging for pipeline runs",
-	Description: `Pause nodes at selected hook points, inspect the paused pod,
-drop into a shell, or release the node. Every debug verb is
-ephemeral -- pause directives live only on the run they launch,
-never in pipeline source. Pipelines stay production-clean.`,
+	Description: `Pause nodes at selected execution points, inspect them, open a shell,
+or resume execution. Pause settings apply to the launched run.`,
 	SubcommandOrder: []string{"run", "release", "attach", "env", "rerun", "replay"},
 	Examples: []Example{
 		{"Pause before the tests node", "sparkwing debug run build --pause-before tests"},
-		{"Resume a paused node", "sparkwing debug release --run run-X --node tests"},
+		{"Resume a paused node", "sparkwing debug release --run run-fictional --node tests"},
 	},
 }
 
@@ -985,17 +965,17 @@ var cmdDebugRun = Command{
 	Description: `Runs the named pipeline exactly as 'sparkwing run <pipeline>' would, with
 additional pause hooks the orchestrator honors before and after
 each matching node. Directives travel as env vars to the
-pipeline binary; they never land in git-tracked code.
+pipeline binary; they never land in tracked code.
 
 --pause-before <node> holds the node BEFORE its Run is invoked.
 --pause-after  <node> holds the node AFTER its Run returns
   (success or failure). Both flags are repeatable.
 --pause-on-failure holds ANY node whose Run returns a non-nil
-  error. Skipped / cancelled / OnFailure-recovered nodes do NOT
-  pause -- only honest Run errors.
+  error. Skipped / cancelled / OnFailure-recovered nodes do not
+  pause -- only Run errors.
 
 Paused nodes hold for 30 minutes by default; set
-SPARKWING_PAUSE_TIMEOUT=<duration> to change. A timed-out pause
+SPARKWING_PAUSE_TIMEOUT=<duration> to change. An expired pause
 is released with reason 'timeout-released' and surfaces in the
 run record.
 
@@ -1003,7 +983,7 @@ See 'sparkwing debug release' to resume, 'sparkwing debug env'
 to inspect, and 'sparkwing debug attach' (cluster mode) to shell
 into the pod holding the paused node.`,
 	Flags: []FlagSpec{
-		{Name: "pipeline", Argument: "NAME", Desc: "Pipeline (pipeline) name to run under debug supervision", Required: true, Group: "Target"},
+		{Name: "pipeline", Argument: "NAME", Desc: "Pipeline name to run under debug supervision", Required: true, Group: "Target"},
 		{Name: "pause-before", Argument: "NODE", Desc: "Hold NODE before Run (repeatable)", Group: "Debug"},
 		{Name: "pause-after", Argument: "NODE", Desc: "Hold NODE after Run (repeatable)", Group: "Debug"},
 		{Name: "pause-on-failure", Desc: "Hold any node whose Run errors", Group: "Debug"},
@@ -1027,8 +1007,8 @@ the pause point. Local and cluster modes share this surface.`,
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
 	},
 	Examples: []Example{
-		{"Release locally", "sparkwing debug release --run run-X --node tests"},
-		{"Release in prod", "sparkwing debug release --run run-X --node tests --profile prod"},
+		{"Release locally", "sparkwing debug release --run run-fictional --node tests"},
+		{"Release in prod", "sparkwing debug release --run run-fictional --node tests --profile prod"},
 	},
 }
 
@@ -1046,35 +1026,24 @@ exits 0.`,
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
 	},
 	Examples: []Example{
-		{"Attach in prod", "sparkwing debug attach --run run-X --node tests --profile prod"},
+		{"Attach in prod", "sparkwing debug attach --run run-fictional --node tests --profile prod"},
 	},
 }
 
 var cmdDebugRerun = Command{
 	Path:     "sparkwing debug rerun",
 	Synopsis: "Reproduce a node's dispatch frame in an interactive shell",
-	Description: `Reads the dispatch snapshot for the given run/node and reproduces
-the env + workdir the orchestrator saw at dispatch time. Local mode
-exec's $SHELL with the snapshot env applied and writes upstream Ref
-outputs to ~/.sparkwing/rerun/<run>/<node>/refs so they're cat-able
-from the shell. Cluster mode pipes a debug-pod manifest to 'kubectl
-create' against a runner image (--image or $SPARKWING_RERUN_IMAGE),
-carrying the snapshot env on stdin, then attaches to the pod and
-deletes it on exit.
+	Description: `Opens an interactive shell using a node's recorded environment and working
+directory. Local execution writes upstream reference outputs beneath the
+run's rerun directory. Cluster execution creates a temporary pod using
+--image or SPARKWING_RERUN_IMAGE, attaches to it, and deletes it on exit.
 
-Snapshots drop credential-shaped names and values and rewrite the
-userinfo of any URL or DSN they keep, and the controller serves the
-captured env only to an admin token. The banner names the keys the
-snapshot dropped; export those yourself.
+Snapshots omit credential names and values and remove URL credentials.
+Controller access to the captured environment requires an admin token.
+The command lists omitted keys so you can supply required credentials.
+Secrets resolve when accessed, and the selected runner image applies.
 
-Replays do NOT freeze the rest of the cluster: secrets re-resolve
-through the standard sparkwing.Secret API on demand, and the runner
-image is whatever the cluster runs today. Replay is "what would this
-node do now, with the args+env it had then?", not a frozen
-reproduction.
-
-Default --seq selects the most-recent attempt for the node; pass
---seq 0 (or another integer) to target a specific attempt index.`,
+--seq selects an attempt index; its default selects the latest attempt.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the node", Required: true, Group: "Target"},
 		{Name: "node", Argument: "NAME", Desc: "Node ID to reproduce", Required: true, Group: "Target"},
@@ -1083,9 +1052,9 @@ Default --seq selects the most-recent attempt for the node; pass
 		{Name: "image", Argument: "REF", Desc: "Runner image for cluster-mode debug pod (cluster mode)", Group: "System"},
 	},
 	Examples: []Example{
-		{"Rerun locally", "sparkwing debug rerun --run run-X --node tests"},
-		{"Rerun a specific attempt", "sparkwing debug rerun --run run-X --node tests --seq 1"},
-		{"Rerun in prod", "sparkwing debug rerun --run run-X --node tests --profile prod --image ghcr.io/me/runner:v1"},
+		{"Rerun locally", "sparkwing debug rerun --run run-fictional --node tests"},
+		{"Rerun a specific attempt", "sparkwing debug rerun --run run-fictional --node tests --seq 1"},
+		{"Rerun in prod", "sparkwing debug rerun --run run-fictional --node tests --profile prod --image ghcr.io/me/runner:v1"},
 	},
 }
 
@@ -1099,11 +1068,11 @@ node's input struct is reconstituted from the stored dispatch
 snapshot; upstream Refs resolve against the original
 run's outputs without re-executing them.
 
-Replay is "what would this node do now, with the same args+env?":
+Replay is "what would this node do now, with the same arguments and
+environment?":
 secrets re-resolve fresh through sparkwing.Secret, BeforeRun hooks
 re-fire, and any code drift in the registered job struct (renamed
-type, removed field) aborts loud rather than silently producing
-wrong results.
+type, removed field) returns an error.
 
 With --profile PROF, the original run + target node + dep outputs +
 dispatch snapshot are first fetched from the named controller via
@@ -1116,26 +1085,24 @@ registered pipeline factories.`,
 		{Name: "profile", Argument: "PROF", Desc: "Sideload from this profile's controller before replaying locally", Group: "System"},
 	},
 	Examples: []Example{
-		{"Replay a node locally", "sparkwing debug replay --run run-X --node deploy"},
-		{"Replay a prod run on your laptop", "sparkwing debug replay --profile prod --run run-X --node deploy"},
+		{"Replay a node locally", "sparkwing debug replay --run run-fictional --node deploy"},
+		{"Replay a prod run on your laptop", "sparkwing debug replay --profile prod --run run-fictional --node deploy"},
 	},
 }
 
 var cmdDebugEnv = Command{
 	Path:     "sparkwing debug env",
-	Synopsis: "Print a paused node's env + workdir + claim holder",
-	Description: `Inspection-only command: reads the stored node record (env map,
-claim holder, current pause state) and prints them to stdout.
-Does NOT spawn a shell. If the node is not paused, prints a
-warning and exits 0 -- env info is captured at pause time, not
-continuously.`,
+	Synopsis: "Print a paused node's environment and working directory + claim holder",
+	Description: `Prints the environment, working directory, process owner, and state
+captured when a node paused. If the node is not paused, prints a warning
+and exits zero.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "ID", Desc: "Run ID holding the node", Required: true, Group: "Target"},
 		{Name: "node", Argument: "NAME", Desc: "Node ID to inspect", Required: true, Group: "Target"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (cluster mode)", Group: "System"},
 	},
 	Examples: []Example{
-		{"Inspect locally", "sparkwing debug env --run run-X --node tests"},
+		{"Inspect locally", "sparkwing debug env --run run-fictional --node tests"},
 	},
 }
 
@@ -1144,14 +1111,14 @@ var runFlagSpecs = runFlagSpecsFromDocs()
 func runFlagSpecsFromDocs() []FlagSpec {
 	docs := sparkwing.SparkwingFlagDocs()
 	out := make([]FlagSpec, 0, len(docs))
-	for _, d := range docs {
+	for _, document := range docs {
 		out = append(out, FlagSpec{
-			Name:     d.Name,
-			Short:    d.Short,
-			Argument: d.Argument,
-			Desc:     d.Desc,
-			Group:    d.Group,
-			Hot:      d.Hot,
+			Name:     document.Name,
+			Short:    document.Short,
+			Argument: document.Argument,
+			Desc:     document.Desc,
+			Group:    document.Group,
+			Hot:      document.Hot,
 		})
 	}
 	return out
@@ -1181,29 +1148,24 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 	SubcommandOrder: []string{"list", "describe", "discover", "new", "explain", "lint", "plan", "run", "trigger", "hooks", "sparks"},
 	Examples: []Example{
 		{"Machine-readable catalog", "sparkwing pipeline list -o json"},
-		{"One pipeline's details", "sparkwing pipeline describe --name release -o json"},
+		{"One pipeline's details", "sparkwing pipeline describe --name fictional-release -o json"},
 		{"Search by intent", `sparkwing pipeline discover --query "tag a release"`},
-		{"First pipeline in a fresh repo (auto-bootstraps)", "sparkwing pipeline new --name release"},
-		{"Inspect the DAG before running", "sparkwing pipeline explain --name release-all"},
+		{"First pipeline in a new repository (auto-bootstraps)", "sparkwing pipeline new --name release"},
+		{"Inspect the DAG before running", "sparkwing pipeline explain --name fictional-release"},
 		{"Run a pipeline", "sparkwing pipeline run release"},
 	},
 }
 
 var cmdPipelineRun = Command{
 	Path:     "sparkwing pipeline run",
-	Synopsis: "Invoke a pipeline (canonical form of `sparkwing run <name>`)",
-	Description: `Compiles the nearest .sparkwing/ binary and exec's it
-with the named pipeline. Identical to the top-level shortcut
-'sparkwing run <name>'.
+	Synopsis: "Invoke a pipeline",
+	Description: `Compiles and runs the named pipeline from the nearest pipeline directory.
+This command has the same behavior as 'sparkwing run <pipeline>'.
 
-The pipeline name is the only positional in the sparkwing
-surface -- a deliberate exception, kept short because run is
-typed many times a day.
-
-Any flag not recognized by run itself is forwarded to the
-pipeline binary, e.g. 'sparkwing pipeline run release
---version v1.2.3' passes --version through to the pipeline's
-Args.`,
+Runner options use the --sw- prefix. Unknown --sw- options fail before
+execution setup. Other arguments pass to the pipeline. Put -- before
+pipeline arguments that resemble runner options; every argument after the
+separator passes through unchanged.`,
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
 	},
@@ -1211,9 +1173,9 @@ Args.`,
 	GroupOrder:  []string{"Source", "Range", "Safety", "System", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
-		{"Run with no flags", "sparkwing pipeline run build-test-deploy"},
-		{"Pass a typed pipeline arg", "sparkwing pipeline run release --version v0.28.1"},
-		{"Run from a different git ref", "sparkwing pipeline run build-test-deploy --sw-ref feature/xyz"},
+		{"Run with no flags", "sparkwing pipeline run fictional-build"},
+		{"Pass a typed pipeline arg", "sparkwing pipeline run fictional-release --version v0.28.1"},
+		{"Run from a different git ref", "sparkwing pipeline run fictional-build --sw-ref feature/xyz"},
 		{"Dispatch remotely", "sparkwing pipeline trigger deploy --profile prod"},
 	},
 }
@@ -1242,7 +1204,7 @@ mode, so redirecting stdout still shows why a run failed.
 submission, not outcome.
 
 Any flag not recognized here is forwarded to the pipeline as a
-typed Arg, e.g. 'sparkwing pipeline trigger release --profile
+typed argument. For example, 'sparkwing pipeline trigger release --profile
 prod --version v1.2.3' passes --version through to the trigger
 payload -- same shape as 'sparkwing run'.
 
@@ -1265,8 +1227,8 @@ against a profile's storage, use 'sparkwing run --profile X'.`,
 	GroupOrder:  []string{"Source", "System", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
-		{"Submit and follow", "sparkwing pipeline trigger release --profile prod --version v1.2.3"},
-		{"Fire-and-forget; print run id and exit", "sparkwing pipeline trigger release --profile prod --detach"},
+		{"Submit and follow", "sparkwing pipeline trigger fictional-release --profile prod --version v1.2.3"},
+		{"Fire-and-forget; print run id and exit", "sparkwing pipeline trigger fictional-release --profile prod --detach"},
 		{"Run the current dirty tree remotely", "sparkwing pipeline trigger test --profile gaming --working-tree"},
 	},
 }
@@ -1310,7 +1272,7 @@ hidden flag shouldn't surprise you.`,
 	GroupOrder: []string{"Target", "Output", "Other"},
 	Examples: []Example{
 		{"Human-readable", "sparkwing pipeline describe --name release"},
-		{"Agent-readable", "sparkwing pipeline describe --name release -o json"},
+		{"Agent-readable", "sparkwing pipeline describe --name fictional-release -o json"},
 	},
 }
 
@@ -1339,84 +1301,32 @@ score descending; agents should prefer -o json for consumption.`,
 var cmdPipelineNew = Command{
 	Path:     "sparkwing pipeline new",
 	Synopsis: "Scaffold a new Go pipeline",
-	Description: `Creates a stub pipeline in the nearest .sparkwing/:
-jobs/<snake>.go plus a sparkwing.yaml entry. Auto-bootstraps
-.sparkwing/ on first use, so a fresh repo's first scaffold sets
-up the package skeleton too -- no separate init step, no
-sample pipeline you didn't ask for.
+	Description: `Creates a pipeline source file and registers its name. Creates the pipeline
+module when the repository has none. An existing pipeline name is refused
+before files are written.
 
---template takes a shape, not a task: it picks the DAG. --on picks
-what fires the pipeline, independently. Every combination runs green
-in any repo before you edit it, because the Run bodies are echoes.
+--template selects the dependency graph. --on selects triggers independently:
+  pull_request   opened, synchronize, and reopened events
+  push           any branch
+  schedule       daily at 09:00 UTC
+  manual         explicit invocation only
 
-  --on pull_request   opened / synchronize / reopened
-  --on push           any branch
-  --on schedule       cron, 09:00 UTC daily
-  --on manual         no trigger; runs only when invoked
+Repeat --on or separate events with commas. 'manual' must stand alone.
+Edit the generated trigger configuration to add filters.
 
-One pipeline can declare several: --on push,pull_request, or repeat
-the flag. 'manual' is the opt-out and cannot be combined with the rest.
+Templates:
+  minimal            one node with a placeholder action; no trigger
+  build-test-deploy  sequential build, test, and deploy; no trigger
+  ci-pr-check        parallel lint and test, followed by a gate; pull_request
+  release            version, changelog, and publish sequence; no trigger
+  scheduled-report   collect, parallel gatherers, then publish; schedule
 
-Omit --on and the shape's own default applies (below). A trigger is
-declarative -- the controller dispatches whichever pipeline its webhook
-names -- so it changes nothing about 'sparkwing run <name>' locally,
-and the scaffolded block carries a comment naming the filter it does
-not have. Edit the 'on:' block in .sparkwing/sparkwing.yaml to change
-any of it.
+Generated actions print placeholder output. Replace them with the work the
+pipeline should perform. Use 'sparkwing docs read --guide authoring' for
+pipeline authoring guidance and 'sparkwing examples' for complete examples.
 
-New to authoring? 'sparkwing docs read --guide authoring' returns the
-DAG model, the idioms the linter enforces, how a pipeline fires, and
-the sparkwing.yaml schema in one call -- the four pages you would
-otherwise open one at a time.
-
-Pass --sw-cd/-C to scaffold into a repo other than the current
-directory (the .sparkwing search re-anchors there).
-
-Shapes:
-  - minimal (default): single-node Plan with a stubbed Run.
-    Smallest viable shape; the editor's first move is replacing
-    the placeholder Info() line with real logic.
-  - build-test-deploy: three-node Plan (build -> test -> deploy)
-    with echo Run bodies that print a placeholder line on each step.
-    The canonical CI shape; first 'sparkwing run <name>' surfaces three
-    exec banners + three echoed lines so the structure is
-    visible end-to-end.
-  - ci-pr-check: 3 nodes. lint and test run in parallel and a final
-    gate job depends on both, so the pipeline is green only when every
-    check passes. test Prefers a CI runner label. Defaults to
-    '--on pull_request'.
-  - release: linear version-bump -> changelog -> publish flow. The
-    canonical release shape; publish Prefers a release runner label.
-  - scheduled-report: 5 nodes. One collect job seeds three parallel
-    gatherers (metrics, errors, usage) and publish-report converges
-    them. Defaults to '--on schedule'.
-
-The other three shapes default to no trigger. Any shape takes any
---on, so "PR-triggered single check" is
-'--template minimal --on pull_request' rather than a three-node gate
-with two nodes deleted.
-
-Every shape scaffolds a pipeline that compiles, renders clean under
-'pipeline explain', and passes 'pipeline lint': pure Plan(), runner-label
-preferences over host branching, echo Run bodies so the first
-'sparkwing run <name>' succeeds end-to-end.
-
-For how a real pipeline is written -- container deploys, migrations,
-canary rollouts -- read a worked one: 'sparkwing docs search -q <task>',
-then 'sparkwing examples --name <name> --body'. Those are for reading,
-not scaffolding; --template will not take one.
-
-Refuses to clobber: if the name already exists in sparkwing.yaml
-the command fails before writing anything.
-
-Supply --hidden to hide from default listings; --short to pre-fill
-the description.
-
-See also:
-  If your pipeline is a single linear shell sequence with no DAG,
-  retry, or cross-runner concerns, a plain shell-script runner
-  (e.g. just / make / a wrapper over ./bin/*.sh) is probably a
-  better fit -- it skips the compile cycle.`,
+--sw-cd/-C selects another repository. --hidden hides the entry from default
+listings. --short sets its description.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
 		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Scaffold as if started in this directory (re-anchors the .sparkwing search)", Group: "Target"},
@@ -1428,7 +1338,7 @@ See also:
 	GroupOrder: []string{"Target", "Scaffold", "Other"},
 	Examples: []Example{
 		{"Single-node pipeline (default shape)", "sparkwing pipeline new --name release"},
-		{"Build/test/deploy DAG (three-node)", "sparkwing pipeline new --name release-all --template build-test-deploy"},
+		{"Build/test/deploy DAG (three-node)", "sparkwing pipeline new --name fictional-release --template build-test-deploy"},
 		{"Pull-request gate (lint + test -> gate)", "sparkwing pipeline new --name pr-check --template ci-pr-check"},
 		{"Scheduled fan-out report", "sparkwing pipeline new --name daily-report --template scheduled-report"},
 		{"One job, fired by pull requests", "sparkwing pipeline new --name pr-test --template minimal --on pull_request"},
@@ -1439,31 +1349,18 @@ See also:
 
 var cmdExamples = Command{
 	Path:     "sparkwing examples",
-	Synopsis: "Worked pipelines to read, not starting points to scaffold",
-	Description: `The sparks-core registry: complete, working pipelines --
-container deploys for AWS and GCP, migrations, canary rollouts,
-release publishing, test sharding. The template-verify pipeline
-proves every one compiles, lints, and explains, and runs the
-runnable-tier ones, so unlike prose they cannot quietly stop
-being true.
+	Synopsis: "Read complete example pipelines",
+	Description: `Read complete pipelines from the sparks-core example registry. Examples
+cover container deployment, migrations, release publishing, test sharding,
+and similar tasks.
 
-Read them, do not scaffold from them. 'sparkwing pipeline new
---template <shape>' starts a pipeline; an example shows how a real
-one is built once you have the shape. Reach for one when you want
-to know how something is done rather than to begin.
+--category and --cloud filter the list. Cloud-independent examples match
+every cloud filter. --name reads one example's description, prerequisites,
+parameters, applicability, and README. --body includes source with default
+parameter values.
 
-Most arrivals should come through 'sparkwing docs search', which
-ranks examples alongside the docs -- searching "ecs fargate"
-answers the question without anyone browsing a list.
-
---category and --cloud narrow the list; a cloud-agnostic example
-always passes a --cloud filter. --name switches to a full detail
-view: description, when-to-use, prerequisite, parameters,
-applicability, and README. Add --body for the pipeline source
-rendered with each parameter's default.
-
--o json emits manifests for the list, or manifest + README
-(+ rendered body with --body) for one example.`,
+JSON output contains manifests for a list, or a manifest and README for one
+example. Use 'sparkwing pipeline new --template <shape>' to start a pipeline.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "EXAMPLE", Desc: "Show full detail for one example instead of the list", Group: "Target"},
 		{Name: "body", Desc: "With --name, print the pipeline source (default + <placeholder> params)", Group: "Target"},
@@ -1474,30 +1371,25 @@ rendered with each parameter's default.
 	Examples: []Example{
 		{"Browse them", "sparkwing examples"},
 		{"Read one", "sparkwing examples --name container-deploy-ecs-fargate --body"},
-		{"Usually you want this instead", "sparkwing docs search -q \"ecs fargate\""},
+		{"Search deployment guidance", "sparkwing docs search -q \"ecs fargate\""},
 	},
 }
 
 var cmdPipelineExplain = Command{
 	Path:     "sparkwing pipeline explain",
 	Synopsis: "Render the pipeline's Plan DAG without dispatching any jobs",
-	Description: `Compiles the nearest .sparkwing/ binary, calls the named
-pipeline's Plan method, and prints the resulting DAG (nodes,
-dependencies, approval gates) without running a single job.
+	Description: `Compiles the pipeline binary, calls the named pipeline's Plan method, and
+prints its nodes, dependencies, and approval gates. Jobs remain unexecuted.
 
-Any --flag value tokens that are NOT recognized by explain itself
-(i.e. anything other than --name / --all / -o/--output / --help) are
-forwarded to the pipeline so Plans that branch on --env / --version
-/ etc. can be previewed under realistic inputs. Missing required
-args are non-fatal here -- explain renders a best-effort plan so
-the shape is visible before every flag is provided.
+Arguments other than --name, --all, -o/--output, and --help pass to the
+pipeline. This previews plans controlled by --env, --version, and similar
+inputs. Missing required arguments are tolerated so the plan can be inspected
+before every input is supplied.
 
---all sweeps every pipeline in .sparkwing/sparkwing.yaml, runs
-Plan() on each with no extra args, and exits non-zero if any
-pipeline fails. Designed as a CI gate: a Plan-time validation
-mismatch (sparkwing.RefTo[T] type drift, Produces[T] / SetResult
-asymmetry, duplicate node ID, etc.) blocks merges before the
-pipeline ever runs.`,
+--all constructs every declared pipeline with no extra arguments and exits
+non-zero if any plan fails validation. Validation detects mismatched typed
+references, inconsistent declared outputs, duplicate node IDs, and similar
+errors.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Pipeline to explain (one of --name or --all required)", Group: "Target"},
 		{Name: "all", Desc: "Validate every pipeline in this repo's sparkwing.yaml; non-zero exit on any failure", Group: "Target"},
@@ -1506,9 +1398,9 @@ pipeline ever runs.`,
 	GroupOrder:  []string{"Target", "Output", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
-		{"Inspect release-all's DAG", "sparkwing pipeline explain --name release-all"},
+		{"Inspect the example release DAG", "sparkwing pipeline explain --name fictional-release"},
 		{"Preview with args (forwarded to the pipeline)", "sparkwing pipeline explain --name example-release --env prod"},
-		{"Agent-readable JSON", "sparkwing pipeline explain --name release-all -o json"},
+		{"Agent-readable JSON", "sparkwing pipeline explain --name fictional-release -o json"},
 		{"Validate every pipeline (CI gate)", "sparkwing pipeline explain --all"},
 	},
 }
@@ -1535,10 +1427,8 @@ var cmdPipelineLint = Command{
 	Synopsis: "Check pipeline source for idiomatic anti-patterns (enforced gate)",
 	Description: `Statically analyzes pipeline source for the anti-patterns
 that make a Plan() non-deterministic, impure, or misconfigured,
-and exits non-zero on any violation. Unlike 'explain' (which
-builds and runs Plan to validate the resulting DAG), 'lint' reads
-the Go source with go/ast -- it never compiles or runs anything,
-so it works against a pinned-SDK .sparkwing/ tree.
+and exits non-zero on any violation. It inspects the Go syntax tree without
+compilation or execution, including source pinned to another SDK version.
 
 Only the Plan() body is inspected; code inside job/step closures
 and SkipIf / BeforeRun bodies runs at dispatch, so I/O and
@@ -1576,29 +1466,17 @@ override with --dir.`,
 var cmdPipelinePlan = Command{
 	Path:     "sparkwing pipeline plan",
 	Synopsis: "Render the runtime-resolved DAG without dispatching any jobs",
-	Description: `Compiles the nearest .sparkwing/ binary, calls the named
-pipeline's Plan method, and prints the runtime-resolved DAG --
-the same structure 'explain' shows plus a per-step decision
-("would_run" / "would_skip <reason>") evaluated under the
-supplied args and --start-at / --stop-at bounds. NO step bodies
-execute.
+	Description: `Compiles the pipeline and evaluates its plan under the supplied arguments.
+Each step reports would_run or would_skip with its reason. Step actions are
+not executed.
 
-Skip reasons surface their cause:
-  - user_skipif    : a SkipIf predicate would match at run time
-  - range_skip     : item is outside the --start-at..--stop-at window
+Skip reasons:
+  user_skipif  the SkipIf predicate matches
+  range_skip   the step falls outside --start-at and --stop-at
 
-For SpawnNodeForEach generators (dynamic fan-out), cardinality is
-reported as "unresolved" with a pointer to the source item -- the
-honest answer when the count depends on a runtime value.
-
-State-loading caveat: if a step normally populates in-memory state
-that downstream steps consume, --start-at past it leaves state
-empty. The plan output reflects this honestly (downstream steps
-show "would_run") but operators should design step bodies to
-lazy-load when state isn't populated, so resume-from-step is safe.
-
-Like 'explain', this is the read-only pre-flight surface; pair
-with 'sparkwing run <name>' to actually dispatch.`,
+Dynamic fan-out counts remain unresolved when they require execution.
+Skipping a state-loading step with --start-at leaves that state empty;
+downstream predicates are evaluated with the resulting state.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Pipeline to plan", Group: "Target"},
 		{Name: "start-at", Argument: "STEP", Desc: "Skip every WorkStep upstream of STEP in the resulting plan", Group: "Range"},
@@ -1608,30 +1486,25 @@ with 'sparkwing run <name>' to actually dispatch.`,
 	GroupOrder:  []string{"Target", "Range", "Output", "Other"},
 	UsageSuffix: "[-- pipeline-flags...]",
 	Examples: []Example{
-		{"Resolve cluster-up's DAG with current args", "sparkwing pipeline plan --name cluster-up"},
-		{"Preview a resume-from-step", "sparkwing pipeline plan --name cluster-up --start-at install-argocd"},
-		{"Agent-readable JSON for diff against expectations", "sparkwing pipeline plan --name release-all -o json"},
+		{"Resolve the example cluster DAG with supplied arguments", "sparkwing pipeline plan --name fictional-cluster"},
+		{"Preview a resume-from-step", "sparkwing pipeline plan --name fictional-cluster --start-at fictional-install"},
+		{"Agent-readable JSON for diff against expectations", "sparkwing pipeline plan --name fictional-release -o json"},
 	},
 }
 
 var cmdRunConfig = Command{
 	Path:     "sparkwing run config",
 	Synopsis: "Print a pipeline's declared Secrets with provenance",
-	Description: `Pure inspection: lists every Secret the pipeline
-declares, each with its source binding and resolution status when a
-source is configured -- useful before driving destructive runs to
-confirm you'd hit the right vault. No Plan() runs, nothing
-dispatches, nothing mutates.
-
-Invocation: ` + "`sparkwing run <pipeline> config`" + ` -- the
-pipeline binary handles the subverb directly.`,
+	Description: `Lists each declared secret, its source binding, and its resolution status.
+Invoke it with 'sparkwing run <pipeline> config'. The pipeline binary
+handles this inspection command.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
-		{"Inspect the declared secrets", "sparkwing run release config"},
-		{"Agent-readable form", "sparkwing run release config -o json"},
+		{"Inspect the declared secrets", "sparkwing run fictional-release config"},
+		{"Agent-readable form", "sparkwing run fictional-release config -o json"},
 	},
 	HideFromComplete: true,
 }
@@ -1642,13 +1515,10 @@ var cmdRun = Command{
 	Description: `Compiles the nearest .sparkwing/ binary and exec's it
 with the named pipeline.
 
-The pipeline name is the only positional in the sparkwing
-surface -- a deliberate exception, kept short because run is
-typed many times a day. Every other input is a named flag.
-
-Any flag not recognized by run itself is forwarded to the
-pipeline binary, e.g. 'sparkwing run release --version
-v1.2.3' passes --version through to the pipeline's Args.
+Runner options use the --sw- prefix. Unknown --sw- options fail before
+execution setup. Other arguments pass to the pipeline. Put -- before
+pipeline arguments that resemble runner options; every argument after the
+separator passes through unchanged.
 
 For remote execution on a profile's controller, use
 'sparkwing pipeline trigger <name> --profile PROF'.
@@ -1681,7 +1551,7 @@ when piped; plain prints the bare id for scripting).
 --sw-idempotency-key deduplicates on key plus pipeline: a repeat
 carrying a key an earlier launch used returns the original run
 id and its current status and creates nothing, which is what
-makes a retry after a dropped connection safe. Reusing a key
+prevents duplicate launches after a dropped connection. Reusing a key
 with different arguments is refused, because a key names one
 intent and different arguments are a different request.
 --sw-request-id is tracing only and never affects deduplication.
@@ -1695,7 +1565,7 @@ ahead of the queue the run actually joins.
 
 A flag a detached run cannot carry (--sw-index, --sw-dry-run,
 --profile, --sw-fleet, --sw-isolated-home, and the other
-run-shaping --sw- flags) is refused with the reason rather than
+run-shaping --sw- flags) is refused with the reason instead of
 ignored; run those in the foreground.
 
 PIPELINE resolves against the checkout you are standing in (or
@@ -1716,21 +1586,21 @@ is running and exits after five idle minutes; see
 	SubcommandOptional: true,
 	UsageSuffix:        "[-- pipeline-flags...]",
 	Examples: []Example{
-		{"Run with no flags", "sparkwing run build-test-deploy"},
-		{"Pass a typed pipeline arg", "sparkwing run release --version v0.28.1"},
-		{"Run from a different git ref", "sparkwing run build-test-deploy --sw-ref feature/xyz"},
+		{"Run with no flags", "sparkwing run fictional-build"},
+		{"Pass a typed pipeline arg", "sparkwing run fictional-release --version v0.28.1"},
+		{"Run from a different git ref", "sparkwing run fictional-build --sw-ref feature/xyz"},
 		{"Queue a run that outlives the terminal", "sparkwing run nightly-report --sw-detached"},
 		{"Capture the id for scripting", "RUN=$(sparkwing run build --sw-detached --sw-output plain)"},
-		{"Make a detached retry safe to repeat", "sparkwing run deploy --sw-detached --sw-idempotency-key deploy-2026-08-11-a --env staging"},
+		{"Deduplicate a detached retry", "sparkwing run deploy --sw-detached --sw-idempotency-key fictional-deploy-attempt --env staging"},
 		{"Detach a pipeline from another checkout", "sparkwing run lint --sw-detached --sw-cd ~/code/other-project"},
-		{"Retry a failed run", "sparkwing runs retry RUN_ID --failed"},
+		{"Retry a failed run", "sparkwing runs retry --run run-fictional --failed"},
 		{"Submit to a remote controller", "sparkwing pipeline trigger deploy --profile prod"},
 	},
 }
 
 var cmdProfile = Command{
 	Path:     "sparkwing profile",
-	Synopsis: "Show which profile sparkwing would use right now, and why",
+	Synopsis: "Show the selected profile and how it was chosen",
 	Description: `Reports the profile a sparkwing command would resolve to and
 the chain that picked it (flag > project hint > detect > default
 > builtin laptop), using the same resolver 'sparkwing run' and
@@ -1761,9 +1631,7 @@ $SPARKWING_HOME), 'kill' stops it, 'status' reports liveness.
 
 The server is one Go process that hosts the embedded Next.js SPA,
 the JSON API, the log endpoints, and the SQLite store on the same
-port. There is no separate Node process. The dashboard is purely
-for visualization -- everything it shows is reachable from the
-CLI as well.`,
+port.`,
 	SubcommandOrder: []string{"start", "kill", "status"},
 	Examples: []Example{
 		{"Start the dashboard", "sparkwing dashboard start"},
@@ -1845,10 +1713,8 @@ var cmdWorker = Command{
 	Path:     "sparkwing cluster worker",
 	Synopsis: "Claim triggers from a profile's controller and run them in-process",
 	Description: `Polls the trigger queue at the selected profile's
-controller and executes each claimed trigger in-process. Laptop-local:
-no K8s, no warm pool, no image dispatch. For the cluster-mode worker
-with --runner k8s|warm and image / service-account flags, use
-sparkwing-runner.
+controller and executes each claimed trigger in-process on this host.
+Use sparkwing-runner for --runner k8s|warm and image or service-account flags.
 
 Run against a remote controller via --profile prod (or whichever profile),
 or against a local 'sparkwing dashboard start' via --profile local.`,
@@ -1888,61 +1754,30 @@ mtime-based git/ and tmp/ sweeps still run and free disk. Supply
 
 var cmdDoctor = Command{
 	Path:     "sparkwing doctor",
-	Synopsis: "Diagnose and safely repair local state",
-	Description: `Checks the sparkwing home for state that is safe to
-remove because the process behind it is provably gone, repairs what it
-finds, and reports everything -- so it is safe to run at any time and a
-healthy machine reports a clean bill. It never kills a process, never
-touches the admission daemon's live state, and never touches
-cluster-scoped (global) rows.
+	Synopsis: "Inspect and repair abandoned local state",
+	Description: `Inspects local state and repairs entries whose owners have stopped.
+--dry-run reports proposed repairs. The command preserves live processes,
+active daemon state, and cluster-scoped records.
 
-It repairs five things: permissive files and directories in the Sparkwing
-home; local run rows still marked running whose process
-is gone and which the daemon does not know about; leftover box-slot lock
-files from older binaries (a file whose owner is still alive is reported,
-never removed); local-scope concurrency rows whose run has ended; and
-run directories on disk whose run row no longer exists.
+Repairs cover home permissions, abandoned local run records, abandoned
+box-slot locks, ended local concurrency records, and orphaned run directories.
+Run-record repair requires a reachable daemon so held runs remain protected.
+A held box-slot lock is reported with guidance to update the pipeline SDK.
 
-That last sweep only unlinks what the local state database can account
-for. It leaves a run directory alone for ten minutes after anything last
-wrote to it, and it removes nothing at all unless this user's profiles
-describe the home being inspected, every one of them keeps run state in
-that home's own SQLite file, and that store has recorded at least one
-run. Everything else it finds is reported and left in place: a missing
-local row is not evidence that the run is gone.
+Run-directory removal requires a local store with recorded runs and profiles
+that all use that store. Directories written within the grace period remain.
+Unaccounted directories are reported for inspection.
 
-On POSIX systems, doctor removes group, other, and special permission bits
-without granting new owner access; cached executables retain any existing
-owner execute bit. The walk never follows symlinks. Windows access
-is governed by DACLs that this portable check cannot inspect or repair,
-so doctor reports the permission audit as unverified rather than healthy.
+On POSIX systems, permission repair removes group, other, and special bits
+while retaining existing owner access. The walk preserves symlinks without
+following them. Windows access permissions are reported as unverified.
 
-If an older-pinned pipeline binary is still admitting outside the daemon
-through a held box-slot lock, doctor reports it and points at the fix --
-bump that repo's sparkwing pin -- rather than deleting live state.
+The report includes daemon reachability, repeated admission rejections,
+version mismatches, quarantined ledgers, and capacity measurement problems.
+It names the reset command for excessive learned demand floors.
 
-Every report opens with the admission daemon's state -- serving (with its
-version and protocol), none running, or unreachable. That line is always
-there, because a sweep that never reached the daemon otherwise printed
-the same counts a healthy machine prints. An unreachable daemon is not a
-clean bill: the checks below it did not run, and the run-row repair is
-skipped rather than risk finalizing a run that daemon is still holding.
-
-It also reports (never repairs) standing problems that otherwise surface
-only as opaque per-run failures: repeated admission rejections, a version
-skew with the resident daemon, quarantined admission ledgers, and a
-capacity profile poisoned by contention -- one whose learned demand floor
-prices every run at the whole machine, named with the exact
-runs stats --reset command that clears it.
-
-It also lists this home's standalone runs stores -- the ones pipeline
-binaries wrote when they could not reach the daemon -- with each store's
-run count and the age of its oldest run. Those runs are invisible to
-sparkwing runs and to the dashboard, which read this home's own state.db,
-and nothing prunes them: delete a directory when you no longer want the
-runs in it.
-
-Use --dry-run to report what it would repair without changing anything.`,
+Standalone stores are listed with run counts and the oldest run's age.
+Inspect their records before deleting a store directory.`,
 	Flags: []FlagSpec{
 		{Name: "dry-run", Desc: "Report what would be repaired without changing anything", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
@@ -2067,9 +1902,10 @@ var cmdProfilesRemove = Command{
 }
 
 var cmdProfilesDuplicate = Command{
-	Path:        "sparkwing configure profiles duplicate",
-	Synopsis:    "Copy one profile's config into another",
-	Description: `Useful when you want to tweak a known-good profile (say, change the token for a staging rotation) without hand-editing yaml.`,
+	Path:     "sparkwing configure profiles duplicate",
+	Synopsis: "Copy one profile's config into another",
+	Description: `Copies the source profile into a new destination profile. The destination
+name must be unused.`,
 	Flags: []FlagSpec{
 		{Name: "src", Argument: "NAME", Desc: "Source profile name", Required: true, Group: "Input"},
 		{Name: "dst", Argument: "NAME", Desc: "Destination profile name (must not exist yet)", Required: true, Group: "Input"},
@@ -2108,8 +1944,8 @@ var cmdTokens = Command{
 	Synopsis: "Manage controller API tokens",
 	Description: `All subcommands resolve controller URL + admin bearer from the
 profile named by --profile.
-Token creation prints the raw value to stdout exactly ONCE --
-stash it immediately.`,
+Token creation prints the raw value to stdout once --
+save it before leaving this command.`,
 	SubcommandOrder: []string{"create", "list", "revoke", "lookup", "rotate"},
 }
 
@@ -2122,14 +1958,14 @@ call. The raw token is printed to stdout exactly once; after
 this command exits it cannot be recovered.`,
 	Flags: []FlagSpec{
 		{Name: "type", Argument: "KIND", Desc: "Token type: user | runner | service", Required: true, Group: "Input"},
-		{Name: "principal", Argument: "NAME", Desc: "Free-form label identifying the token holder", Required: true, Group: "Input"},
-		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes (e.g. runs.read,runs.write); auth.md lists the full set", Group: "Input"},
-		{Name: "ttl", Argument: "DURATION", Desc: "Token lifetime (e.g. 30d, 720h). 0 = never expires", Group: "Input"},
+		{Name: "principal", Argument: "NAME", Desc: "Name identifying the token holder", Required: true, Group: "Input"},
+		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes; use sparkwing docs read --topic auth for the supported set", Group: "Input"},
+		{Name: "ttl", Argument: "DURATION", Desc: "Token lifetime (30d, 720h, and similar durations). 0 = never expires", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
 		{"Mint a service token with write scopes", "sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write --profile prod"},
-		{"Mint a user token that expires in 30 days", "sparkwing cluster tokens create --type user --principal alice --scope admin --ttl 720h --profile prod"},
+		{"Mint a user token that expires in 30 days", "sparkwing cluster tokens create --type user --principal fictional-user --scope admin --ttl 720h --profile prod"},
 	},
 }
 
@@ -2156,14 +1992,15 @@ scope arrays, suitable for piping into jq.`,
 	Examples: []Example{
 		{"List all active tokens", "sparkwing cluster tokens list --profile prod"},
 		{"Audit every revoked service token", "sparkwing cluster tokens list --type service --include-revoked --profile prod"},
-		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --profile prod -o json | jq '.[] | select(.principal==\"agent:sparkwing-warm-runner\") | .scopes'"},
+		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --profile prod -o json | jq '.[] | select(.principal==\"agent:fictional-runner\") | .scopes'"},
 	},
 }
 
 var cmdTokensRevoke = Command{
-	Path:        "sparkwing cluster tokens revoke",
-	Synopsis:    "Mark a token revoked",
-	Description: `Subsequent requests using the token receive HTTP 401. Revocation is immediate and irreversible.`,
+	Path:     "sparkwing cluster tokens revoke",
+	Synopsis: "Mark a token revoked",
+	Description: `Subsequent requests using the token receive HTTP 401. Revocation is immediate
+and irreversible.`,
 	Flags: []FlagSpec{
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix (from 'tokens list')", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
@@ -2174,9 +2011,10 @@ var cmdTokensRevoke = Command{
 }
 
 var cmdTokensLookup = Command{
-	Path:        "sparkwing cluster tokens lookup",
-	Synopsis:    "Print metadata for a single token",
-	Description: `Prints the JSON metadata for a token given its non-secret prefix. Useful for confirming principal + scopes before revoking or rotating.`,
+	Path:     "sparkwing cluster tokens lookup",
+	Synopsis: "Print metadata for a single token",
+	Description: `Prints the JSON metadata for a token given its non-secret prefix. Useful for
+confirming principal + scopes before revoking or rotating.`,
 	Flags: []FlagSpec{
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
@@ -2196,7 +2034,7 @@ caps --grace at 7 days, and revoking the old prefix cuts a grace
 window short.`,
 	Flags: []FlagSpec{
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret prefix of the token to rotate", Required: true, Group: "Input"},
-		{Name: "grace", Argument: "DURATION", Desc: "Window during which the old token still authenticates (max 168h)", Default: "24h", Group: "Input"},
+		{Name: "grace", Argument: "DURATION", Desc: "Window during which the old token still authenticates (maximum 168h)", Default: "24h", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "TTL of the new token (0 = preserve the old token's remaining TTL)", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
@@ -2232,7 +2070,7 @@ admin is refused until one exists.`,
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Interactive add of the first admin", "sparkwing cluster users add --name alice --profile prod"},
+		{"Interactive add of the first admin", "sparkwing cluster users add --name fictional-user --profile prod"},
 		{"Read-only account, once an admin exists", "sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod"},
 		{"Non-interactive add for CI", `sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod`},
 	},
@@ -2264,29 +2102,25 @@ cleared; auth.md describes the windows that remain elsewhere.`,
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Delete a user", "sparkwing cluster users delete --name alice --profile prod"},
+		{"Delete a user", "sparkwing cluster users delete --name fictional-user --profile prod"},
 	},
 }
 
 var cmdJobs = Command{
 	Path:     "sparkwing runs",
 	Synopsis: "Inspect and control pipeline runs",
-	Description: `Runs are the per-invocation records of pipeline execution.
-Every 'sparkwing run <pipeline>' produces a run; cluster mode surfaces
-the same runs remotely via the controller.
-
-Local-mode subcommands (list, status, logs, errors) read from
-~/.sparkwing/runs/. Controller-mode subcommands (cancel, retry,
-prune) require a profile; 'runs logs' supports both.`,
+	Description: `Inspect recorded pipeline executions and control their lifecycle.
+Commands support local runs and runs stored through a named profile.
+Pass --profile NAME to select that profile's backend.`,
 	SubcommandOrder: []string{"consumer", "list", "status", "summary", "timeline", "wait", "find", "grep", "logs", "errors", "failures", "stats", "last", "tree", "get", "receipt", "annotations", "approvals", "triggers", "retry", "cancel", "bounce", "prune"},
 }
 
 var cmdJobsList = Command{
 	Path:     "sparkwing runs list",
 	Synopsis: "List recent pipeline runs",
-	Description: `Without --profile, reads from the local run directory. With --profile NAME,
-fetches from the named profile's controller. Filters compose with
-AND semantics across flag types (pipeline=X AND status=Y), OR
+	Description: `Reads runs from the selected backend. Pass --profile NAME to select a
+named profile. Filters compose with AND semantics across flag types
+(pipeline=X AND status=Y), OR
 semantics within a repeated flag (pipeline=X OR pipeline=Y).
 
 A local listing merges this home's own store with every standalone
@@ -2296,9 +2130,9 @@ from: 'shared', or the store's path under the home. An id in both
 stores lists once, from the shared store. The STORE column appears
 only when a standalone run is in the table; -o json always carries
 the field. A standalone store this build cannot read is named on
-stderr after the table rather than listed.
+stderr after the table instead of listed.
 
-With -q / --quiet the output is just run ids, one per line, for
+With -q / --quiet the output contains run identifiers, one per line, for
 shell piping:
 
   sparkwing runs list --pipeline X --limit 1 -q --profile prod \
@@ -2310,12 +2144,12 @@ shell piping:
 		{Name: "sha", Argument: "PREFIX", Desc: "Filter by git sha prefix (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "error", Argument: "SUBSTR", Desc: "Substring match against the persisted failure reason", Group: "Filter"},
 		{Name: "search", Argument: "QUERY", Desc: "Free-text search across pipeline/branch/sha/id/error; prefix a term with `-` to exclude", Group: "Filter"},
-		{Name: "since", Argument: "DURATION", Desc: "Only runs newer than this (e.g. 1h, 24h, 7d)", Group: "Filter"},
+		{Name: "since", Argument: "DURATION", Desc: "Only runs newer than this (1h, 24h, 7d, and similar durations)", Group: "Filter"},
 		{Name: "started-after", Argument: "DATE", Desc: "Only runs whose StartedAt >= this (today, yesterday, 24h, 7d, or a date)", Group: "Filter"},
 		{Name: "started-before", Argument: "DATE", Desc: "Only runs whose StartedAt <= this", Group: "Filter"},
 		{Name: "finished-after", Argument: "DATE", Desc: "Only runs whose FinishedAt >= this (excludes still-running)", Group: "Filter"},
 		{Name: "finished-before", Argument: "DATE", Desc: "Only runs whose FinishedAt <= this (excludes still-running)", Group: "Filter"},
-		{Name: "limit", Argument: "N", Desc: "Max runs to show", Default: "20", Group: "Output"},
+		{Name: "limit", Argument: "N", Desc: "Maximum runs to show", Default: "20", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only run ids, one per line (or JSON array of ids with -o json)", Group: "Output"},
 		{Name: "by-pipeline", Desc: "Pivot into one row per pipeline with a status sparkline of the last N runs", Group: "Output"},
@@ -2350,7 +2184,7 @@ in each standalone store, and reports which one held it. The verbs
 that write to a run -- bounce, annotations add, approvals approve
 and deny, debug rerun, debug replay -- write in whichever store held
 it. Cancel and retry cannot act on a standalone run at all, because
-no daemon arbitrates one, and say so rather than reporting it
+no daemon arbitrates one, and say so instead of reporting it
 missing.
 
 Runs that wrote their logs to a filesystem also report log_path: the
@@ -2366,9 +2200,9 @@ Exit code contract: after rendering, 'runs status' exits 0 only when
 status == success. Any non-success terminal status (failed, cancelled)
 exits 1; a run that is still running when the (non-follow) read
 returns also exits 1. Pass --exit-zero to inspect a known-failed run
-without the shell redline. For a blocking wait, use 'runs wait'.`,
+while returning zero. For a blocking wait, use 'runs wait'.`,
 	Flags: []FlagSpec{
-		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier (e.g. run-20260422-142501-abcd)", Required: true, Group: "Input"},
+		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "follow", Short: "f", Desc: "Poll until the run reaches a terminal state", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "steps", Desc: "Render every step under every node (plain output). Failed / skipped / annotated nodes always include their steps; this flag forces success nodes too.", Group: "Output"},
@@ -2377,11 +2211,11 @@ without the shell redline. For a blocking wait, use 'runs wait'.`,
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Check a local run once", "sparkwing runs status --run run-20260422-142501-abcd"},
-		{"Follow a running job to completion", "sparkwing runs status --run run-... --follow"},
-		{"Inspect a known-failed run without nonzero exit", "sparkwing runs status --run run-... --exit-zero"},
-		{"Expand every step on every node", "sparkwing runs status --run run-... --steps"},
-		{"Check a prod run", "sparkwing runs status --run run-... --profile prod"},
+		{"Check a local run once", "sparkwing runs status --run run-fictional"},
+		{"Follow a running job to completion", "sparkwing runs status --run run-fictional --follow"},
+		{"Inspect a known-failed run without nonzero exit", "sparkwing runs status --run run-fictional --exit-zero"},
+		{"Expand every step on every node", "sparkwing runs status --run run-fictional --steps"},
+		{"Check a prod run", "sparkwing runs status --run run-fictional --profile prod"},
 	},
 }
 
@@ -2413,7 +2247,7 @@ controller, and any profile that declares its own logs surface.`,
 		{Name: "head", Argument: "N", Desc: "Print only the first N lines", Group: "Filter"},
 		{Name: "lines", Argument: "A:B", Desc: "1-indexed inclusive line range", Group: "Filter"},
 		{Name: "grep", Argument: "PATTERN", Desc: "Substring match (case-sensitive)", Group: "Filter"},
-		{Name: "since", Argument: "DURATION", Desc: "Only include nodes that started within the last D (e.g. 5m, 1h)", Group: "Filter"},
+		{Name: "since", Argument: "DURATION", Desc: "Only include nodes that started within the last D (5m, 1h, and similar durations)", Group: "Filter"},
 		{Name: "tree", Desc: "Merge root + descendant runs into one stream (local only)", Group: "Filter"},
 		{Name: "events-only", Desc: "Include event records and omit node body output", ConflictsWith: []string{"no-events"}, Group: "Filter"},
 		{Name: "no-events", Desc: "Include node body output and omit event records", ConflictsWith: []string{"events-only"}, Group: "Filter"},
@@ -2423,44 +2257,46 @@ controller, and any profile that declares its own logs surface.`,
 	},
 	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Read local logs", "sparkwing runs logs --run run-20260422-142501-abcd"},
-		{"Last 20 lines of a remote run", "sparkwing runs logs --run run-... --profile prod --tail 20"},
-		{"Only the most recent attempt's output", "sparkwing runs logs --run run-... --profile prod --since 5m"},
-		{"Search logs for an error substring", "sparkwing runs logs --run run-... --grep 'permission denied'"},
-		{"Merge a parent run with every descendant", "sparkwing runs logs --run run-... --tree"},
-		{"Read only structured event records", "sparkwing runs logs --run run-... --events-only"},
-		{"JSON stream for an agent", "sparkwing runs logs --run run-... -o json"},
-		{"Plain text with node/step prefix", "sparkwing runs logs --run run-... -o plain"},
-		{"Force the colored renderer when piping", "sparkwing runs logs --run run-... -o pretty | less -R"},
+		{"Read local logs", "sparkwing runs logs --run run-fictional"},
+		{"Last 20 lines of a remote run", "sparkwing runs logs --run run-fictional --profile prod --tail 20"},
+		{"Only the most recent attempt's output", "sparkwing runs logs --run run-fictional --profile prod --since 5m"},
+		{"Search logs for an error substring", "sparkwing runs logs --run run-fictional --grep 'permission denied'"},
+		{"Merge a parent run with every descendant", "sparkwing runs logs --run run-fictional --tree"},
+		{"Read only structured event records", "sparkwing runs logs --run run-fictional --events-only"},
+		{"JSON stream for an agent", "sparkwing runs logs --run run-fictional -o json"},
+		{"Plain text with node/step prefix", "sparkwing runs logs --run run-fictional -o plain"},
+		{"Force the colored renderer when piping", "sparkwing runs logs --run run-fictional -o pretty | less -R"},
 	},
 }
 
 var cmdJobsErrors = Command{
 	Path:        "sparkwing runs errors",
 	Synopsis:    "Surface the error trail for a failed run",
-	Description: `Walks the run's node DAG and prints the error chain for any node that failed. Quicker than paging through full logs when you only care about the terminal failure. Reads from the local run store.`,
+	Description: `Reads the local run store and prints each failed node's error chain.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Inspect a local failure", "sparkwing runs errors --run run-20260422-142501-abcd"},
-		{"As JSON", "sparkwing runs errors --run run-... -o json"},
+		{"Inspect a local failure", "sparkwing runs errors --run run-fictional"},
+		{"As JSON", "sparkwing runs errors --run run-fictional -o json"},
 	},
 }
 
 var cmdJobsFailures = Command{
-	Path:        "sparkwing runs failures",
-	Synopsis:    "List recent failed runs, optionally clustered",
-	Description: `Fetches recent runs with status=failed and extracts the first failing node's step + error message for each. --group-by clusters the output by step so a systemic failure surfaces as one row with a count.`,
+	Path:     "sparkwing runs failures",
+	Synopsis: "List recent failed runs, optionally clustered",
+	Description: `Fetches recent runs with status=failed and extracts the first failing node's
+step + error message for each. --group-by clusters the output by step so a
+systemic failure surfaces as one row with a count.`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
 		{Name: "git-sha", Argument: "SHA", Desc: "Restrict to a git SHA prefix", Group: "Filter"},
 		{Name: "branch", Argument: "NAME", Desc: "Restrict to one git branch", Group: "Filter"},
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "Restrict to one repository", Group: "Filter"},
-		{Name: "since", Argument: "DURATION", Desc: "Only failures newer than this (e.g. 24h, 7d)", Group: "Filter"},
-		{Name: "limit", Argument: "N", Desc: "Max failures to analyze", Default: "20", Group: "Filter"},
+		{Name: "since", Argument: "DURATION", Desc: "Only failures newer than this (24h, 7d, and similar durations)", Group: "Filter"},
+		{Name: "limit", Argument: "N", Desc: "Maximum failures to analyze", Default: "20", Group: "Filter"},
 		{Name: "group-by", Argument: "KEY", Desc: "Cluster by: step | node", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
@@ -2474,15 +2310,27 @@ var cmdJobsFailures = Command{
 
 var cmdJobsStats = Command{
 	Path:     "sparkwing runs stats",
-	Synopsis: "Aggregate run counts, success %, avg + p95 duration",
-	Description: `Per-pipeline aggregates across the last 500 root runs (or the --since window). In-flight runs count toward RUN (running) but do not contribute to timing percentiles.
+	Synopsis: "Report run counts, success rate, and duration percentiles",
+	Description: `Reports per-pipeline counts and durations over the selected run window.
+Running runs contribute to counts and are excluded from duration percentiles.
 
---capacity switches to the measured capacity profiles admission learns from: each pipeline's p50/p99 duration, its CPU and memory distributions (p50/p95/peak across recent runs), the CPU CHARGE column holding the core figure admission actually reserves, its queue-wait p50/p99, sample count, and whether the admission charge comes from a pin, measurement, or the cold-start default. The resource percentiles show whether a pipeline is steady or spiky. Admission charges memory from the peak, because under-reserving memory recreates the oversubscription admission exists to prevent, and charges cores from each run's sustained demand instead, because the kernel time-slices a transient CPU collision and reserving a burst peak for a whole run only refuses work the box could have run. A pipeline whose pin has drifted from its measured peaks carries the exact fix. Capacity profiles are local-only and repo-scoped for runs launched inside a git repo, so same-named pipelines in different repos never share a profile. The repo scope is the repository's canonical identity: host/owner/path from its origin remote, the object store it borrows from when it has no remote, or a private hash of a local-path remote. Every tree of one repository -- the main checkout, a linked worktree, a clone in an ephemeral directory -- therefore shares one profile: a pipeline costs what it costs whichever tree runs it, and a gate cloning into a fresh directory arrives already knowing its price. A repo with no remote at all keys by its directory name. The table prints each key as its repo scope and pipeline joined with "/".
+--capacity reports measured duration, CPU, memory, admission charge,
+queue wait, sample count, and the source of each charge. Memory charges use
+peak demand; CPU charges use sustained demand. Explicit resource pins remain
+in effect when measurements are reset.
 
---reset clears a pipeline's learned capacity profile so it re-learns from a cold start, the escape hatch for a poisoned measurement -- one freak run that recorded an absurd peak, or a contention-ratcheted demand floor (sparkwing doctor flags those). Name the pipeline with --pipeline NAME as --capacity shows it (repo/pipeline inside a git repo); a bare pipeline name resets every repo-scoped key that carries it, a repo/pipeline name reaches every stored encoding of that profile, and the summary names each profile it reached in the same repo/pipeline form. Reset every pipeline with --all --yes. The demand floor goes whether or not measured samples sit behind it, since a pipeline that never finished a clean run is still priced off its floor. An explicit .Resources() pin is preserved: admission keeps charging the pin while the profile re-learns. The command prints how many rows were dropped, how many pinned rows were cleared, and how many samples and demand floors were discarded.`,
+Capacity profiles are local and scoped by repository identity and pipeline.
+Linked worktrees and clones with the same origin share measurements.
+The table shows each key as repository/pipeline.
+
+--reset clears samples and learned demand floors. --pipeline accepts the key
+shown by --capacity; a bare pipeline name matches that name across
+repositories.
+--all --yes resets every profile. The result reports removed rows, cleared
+pinned rows, samples, and demand floors.`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline (required with --reset unless --all)", Group: "Filter"},
-		{Name: "since", Argument: "DURATION", Desc: "Only runs newer than this (e.g. 7d)", Group: "Filter"},
+		{Name: "since", Argument: "DURATION", Desc: "Only runs newer than this (7d and similar durations)", Group: "Filter"},
 		{Name: "capacity", Desc: "Show measured capacity profiles instead of run aggregates", Group: "Output"},
 		{Name: "reset", Desc: "Delete a pipeline's learned capacity profile so it re-learns (keeps pins)", Group: "Recovery"},
 		{Name: "all", Desc: "With --reset, reset every pipeline's learned profile", RequiresFlags: []string{"reset", "yes"}, Group: "Recovery"},
@@ -2501,9 +2349,10 @@ var cmdJobsStats = Command{
 }
 
 var cmdJobsLast = Command{
-	Path:        "sparkwing runs last",
-	Synopsis:    "Print the most recent run",
-	Description: `Shorthand for 'runs list --limit 1' with a compact one-line output. --watch tails for new runs, reprinting whenever a newer run ID appears.`,
+	Path:     "sparkwing runs last",
+	Synopsis: "Print the most recent run",
+	Description: `Shorthand for 'runs list --limit 1' with a compact one-line output. --watch
+tails for new runs, reprinting whenever a newer run ID appears.`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
 		{Name: "watch", Short: "w", Desc: "Tail for new runs", Group: "Output"},
@@ -2518,9 +2367,11 @@ var cmdJobsLast = Command{
 }
 
 var cmdJobsTree = Command{
-	Path:        "sparkwing runs tree",
-	Synopsis:    "Show a run and every descendant run as an ASCII tree",
-	Description: `Walks parent_run_id links so cross-pipeline spawns (RunAndAwait) show up under their originating run. Local mode reads from SQLite; --profile NAME reads from the profile's controller.`,
+	Path:     "sparkwing runs tree",
+	Synopsis: "Show a run and every descendant run as an ASCII tree",
+	Description: `Walks parent_run_id links so cross-pipeline spawns (RunAndAwait) show up under
+their originating run. Local mode reads from SQLite; --profile NAME reads from
+the profile's controller.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Root run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
@@ -2528,23 +2379,26 @@ var cmdJobsTree = Command{
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Tree for a local run", "sparkwing runs tree --run run-20260422-142501-abcd"},
-		{"Tree for a prod run as JSON", "sparkwing runs tree --run run-... --profile prod -o json"},
+		{"Tree for a local run", "sparkwing runs tree --run run-fictional"},
+		{"Tree for a prod run as JSON", "sparkwing runs tree --run run-fictional --profile prod -o json"},
 	},
 }
 
 var cmdJobsGet = Command{
-	Path:        "sparkwing runs get",
-	Synopsis:    "Emit one run's raw JSON (run + nodes)",
-	Description: `Prints a combined {run, nodes} JSON blob to stdout, plus a top-level log_path when the run wrote its logs to a filesystem (the directory on the machine that executed it). Consumed by agents and scripts that need the full store shape rather than the summary 'status' command renders.`,
+	Path:     "sparkwing runs get",
+	Synopsis: "Emit one run's raw JSON (run + nodes)",
+	Description: `Prints a combined {run, nodes} JSON blob to stdout, plus a top-level log_path
+when the run wrote its logs to a filesystem (the directory on the machine that
+executed it). Consumed by agents and scripts that need the full store shape
+instead of the summary 'status' command renders.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Fetch a local run as JSON", "sparkwing runs get --run run-..."},
-		{"Fetch a prod run", "sparkwing runs get --run run-... --profile prod"},
+		{"Fetch a local run as JSON", "sparkwing runs get --run run-fictional"},
+		{"Fetch a prod run", "sparkwing runs get --run run-fictional --profile prod"},
 	},
 }
 
@@ -2570,24 +2424,23 @@ controller's receipt endpoint and uses the controller's configured rate.`,
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Local receipt as JSON", "sparkwing runs receipt --run run-..."},
-		{"Prod receipt", "sparkwing runs receipt --run run-... --profile prod"},
+		{"Local receipt as JSON", "sparkwing runs receipt --run run-fictional"},
+		{"Prod receipt", "sparkwing runs receipt --run run-fictional --profile prod"},
 	},
 }
 
 var cmdJobsWait = Command{
 	Path:     "sparkwing runs wait",
 	Synopsis: "Block until a run reaches a terminal status",
-	Description: `Polls the run until its status is success / failed /
-cancelled, then exits. Exit code contract:
+	Description: `Polls until the run succeeds, fails, or is cancelled.
 
-  0   status == success
-  1   status == failed or cancelled
-  2   timed out before the run reached a terminal status
-  3+  infrastructure error (controller unreachable, run not found, ...)
+Exit codes:
+  0   succeeded
+  1   failed or cancelled
+  2   timed out
+  3+  lookup or infrastructure failure
 
-Pair with 'runs find --wait' for the "push then find then wait" loop
-described in the CLI wishlist.`,
+Use 'runs find --wait' to find the run before waiting for its outcome.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier to wait on", Required: true, Group: "Input"},
 		{Name: "timeout", Argument: "DURATION", Desc: "Give up (exit 2) after this long", Default: "10m", Group: "Input"},
@@ -2597,9 +2450,9 @@ described in the CLI wishlist.`,
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Wait for a local run", "sparkwing runs wait --run run-20260422-142501-abcd"},
-		{"Wait with a custom timeout", "sparkwing runs wait --run run-... --timeout 30m --profile prod"},
-		{"Tight polling on a fast run", "sparkwing runs wait --run run-... --poll 500ms --profile prod"},
+		{"Wait for a local run", "sparkwing runs wait --run run-fictional"},
+		{"Wait with a custom timeout", "sparkwing runs wait --run run-fictional --timeout 30m --profile prod"},
+		{"Tight polling on a fast run", "sparkwing runs wait --run run-fictional --poll 500ms --profile prod"},
 	},
 }
 
@@ -2627,7 +2480,7 @@ infrastructure error.`,
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "Restrict to one stored repository identity", Group: "Filter"},
 		{Name: "root-only", Desc: "Exclude child runs", Group: "Filter"},
 		{Name: "since", Argument: "DURATION", Desc: "Lookback window", Default: "1h", Group: "Filter"},
-		{Name: "limit", Argument: "N", Desc: "Max results", Default: "20", Group: "Filter"},
+		{Name: "limit", Argument: "N", Desc: "Maximum results", Default: "20", Group: "Filter"},
 		{Name: "wait", Desc: "Block until at least one match appears", Group: "Output"},
 		{Name: "find-timeout", Argument: "DURATION", Desc: "Give up (nonzero exit) after this long when --wait is set", Default: "2m", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
@@ -2636,7 +2489,7 @@ infrastructure error.`,
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Find a run by SHA + pipeline on prod", "sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline build-test-deploy --profile prod"},
+		{"Find a run by SHA + pipeline on prod", "sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline fictional-build --profile prod"},
 		{"Block until the matching run appears", "sparkwing runs find --git-sha abc123 --pipeline X --wait --profile prod"},
 		{"Pipe matching ids into runs wait", "sparkwing runs find --git-sha abc --wait -q --profile prod | xargs -n1 -I{} sparkwing runs wait --run {} --profile prod"},
 	},
@@ -2652,7 +2505,7 @@ In cluster mode the grep runs server-side per (run, node), so only
 matching bytes come back over the wire.
 
 Default output is a table of RUN / NODE / LINE / TEXT. -q
-(quiet) prints just the unique matching run ids -- the usual
+(quiet) prints the unique matching run ids -- the usual
 shape for piping into ` + "`runs logs`" + ` or ` + "`runs status`" + `.
 
 Exit code 0 even when there are no matches.`,
@@ -2665,7 +2518,7 @@ Exit code 0 even when there are no matches.`,
 		{Name: "since", Argument: "DURATION", Desc: "Only runs newer than this", Group: "Filter"},
 		{Name: "started-after", Argument: "DATE", Desc: "Only runs whose StartedAt >= this", Group: "Filter"},
 		{Name: "started-before", Argument: "DATE", Desc: "Only runs whose StartedAt <= this", Group: "Filter"},
-		{Name: "limit", Argument: "N", Desc: "Max candidate runs to scan", Default: "50", Group: "Output"},
+		{Name: "limit", Argument: "N", Desc: "Maximum candidate runs to scan", Default: "50", Group: "Output"},
 		{Name: "max-matches", Argument: "M", Desc: "Per-node match cap (0 = no cap)", Default: "5", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only the unique matching run ids", Group: "Output"},
@@ -2682,11 +2535,8 @@ Exit code 0 even when there are no matches.`,
 var cmdJobsSummary = Command{
 	Path:     "sparkwing runs summary",
 	Synopsis: "Aggregated work view: groups, work items, modifiers, annotations",
-	Description: `Run-level rollup of every node in one render. Mirrors the
-dashboard's Summary tab: run header + run-wide annotations +
-node groups + work items (nodes and inner steps) + modifiers
-in effect + any approval-gate state. Useful for the
-"did this run actually do what I asked" agent question.`,
+	Description: `Prints the run header, annotations, node groups, work items, modifiers,
+and approval state together. Use --output json for structured output.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json (default: pretty on TTY, json when piped)", Group: "Output"},
@@ -2694,8 +2544,8 @@ in effect + any approval-gate state. Useful for the
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Quick run rollup", "sparkwing runs summary --run run-..."},
-		{"JSON for an agent", "sparkwing runs summary --run run-... -o json"},
+		{"Quick run rollup", "sparkwing runs summary --run run-fictional"},
+		{"JSON for an agent", "sparkwing runs summary --run run-fictional -o json"},
 	},
 }
 
@@ -2716,9 +2566,9 @@ emits start/end offsets in milliseconds per row.`,
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Default node waterfall", "sparkwing runs timeline --run run-..."},
-		{"Expand into per-step bars", "sparkwing runs timeline --run run-... --steps"},
-		{"JSON for an agent", "sparkwing runs timeline --run run-... --steps -o json"},
+		{"Default node waterfall", "sparkwing runs timeline --run run-fictional"},
+		{"Expand into per-step bars", "sparkwing runs timeline --run run-fictional --steps"},
+		{"JSON for an agent", "sparkwing runs timeline --run run-fictional --steps -o json"},
 	},
 }
 
@@ -2730,22 +2580,17 @@ branch, and SHA. Each new run is tagged with retry_of=<old-id>.
 
 For local runs, Sparkwing queues the retry in the same local store as
 'sparkwing run --sw-detached' and starts the resident consumer when no
-dashboard is running.
-The retry is bound to the source run's full origin
-identity, Git revision, and complete plan snapshot. Sparkwing compiles and runs
-an immutable detached snapshot of that recorded revision; uncommitted or later
-working-tree edits are deliberately excluded. If the source checkout is gone or
-any identity has drifted, the retry fails before compilation; it never falls
-back to the current directory or another repo.
+dashboard is running. The retry uses the source run's full origin identity,
+Git revision, and complete plan snapshot. Sparkwing compiles and runs an
+immutable detached snapshot of that revision. A missing source checkout or
+changed identity fails the retry before compilation.
 
 Pick a rerun scope explicitly:
   --failed   reuse cached/passed nodes from the source run;
              re-execute only the failed or unreached subset.
   --all      ignore prior outcomes and re-execute every node.
 
-One of --failed or --all is required -- the silent default
-caused operators to ship a partial rerun when they meant a full
-one (and vice versa).
+One of --failed or --all is required.
 
 Pass --run once per source id (repeatable). Use --run - to read ids
 from stdin, one per line. Failures on individual ids don't abort
@@ -2760,8 +2605,8 @@ only when at least one id failed.`,
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Rerun only the failed nodes", "sparkwing runs retry --failed --run run-..."},
-		{"Rerun every node from scratch", "sparkwing runs retry --all --run run-..."},
+		{"Rerun only the failed nodes", "sparkwing runs retry --failed --run run-fictional"},
+		{"Rerun every node from scratch", "sparkwing runs retry --all --run run-fictional"},
 		{"Rerun every recently failed run", "sparkwing runs list --status failed --since 1h -q | sparkwing runs retry --failed --run - --profile prod"},
 	},
 }
@@ -2769,30 +2614,16 @@ only when at least one id failed.`,
 var cmdJobsConsumer = Command{
 	Path:     "sparkwing runs consumer",
 	Synopsis: "Inspect or control the process that executes submitted runs",
-	Description: `One consumer process per sparkwing home claims queued triggers
-and executes them. 'sparkwing run --sw-detached' starts one when
-none is running and the consumer exits after a quiet window, so these
-verbs are for inspection and deliberate control rather than
-routine use.
+	Description: `One consumer per Sparkwing home claims queued triggers and executes them.
+A file lock grants exclusive ownership; a dashboard uses the same lock.
+A detached launch starts a consumer when needed.
 
-Exactly one consumer serves a home at a time, enforced by a file
-lock rather than a PID check -- a consumer killed with SIGKILL
-releases it immediately, so there is no stale state to clear. A
-running dashboard consumes the same queue; whichever holds the
-lock does the work and the other stands down, so a run is never
-dispatched twice.
+Stopping the consumer leaves queued runs available for a later consumer.
+An interrupted executing run returns to the queue. Cancel a run to prevent
+further execution.
 
-Stopping a consumer does not cancel queued runs. They stay
-queued and execute when a consumer comes back. A run that is
-executing when you stop it is interrupted and returned to the
-queue, not failed -- it never reached a verdict, so the next
-consumer re-executes it. To stop a run for good, cancel it.
-
-A consumer records the sparkwing version it was built from. A
-detached launch from a different build replaces it, so an upgrade takes
-effect instead of the first build serving the home forever;
-replacing one interrupts whatever it was executing, and that run
-returns to the queue for the new consumer to re-execute.`,
+A detached launch from a different build replaces the consumer. Replacement
+interrupts active work and returns it to the queue for the new consumer.`,
 	SubcommandOrder: []string{"start", "status", "stop"},
 }
 
@@ -2864,7 +2695,7 @@ from stdin, one per line.`,
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Cancel one run", "sparkwing runs cancel --run run-... --profile prod"},
+		{"Cancel one run", "sparkwing runs cancel --run run-fictional --profile prod"},
 		{"Cancel every running prod run", "sparkwing runs list --status running --profile prod -q | sparkwing runs cancel --run - --profile prod"},
 	},
 }
@@ -2896,8 +2727,8 @@ again is allowed -- one request is one restart.`,
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Bounce a wedged job in a local run", "sparkwing runs bounce --run run-... --node build"},
-		{"Bounce a job in a cluster run", "sparkwing runs bounce --run run-... --node build --profile prod"},
+		{"Bounce a wedged job in a local run", "sparkwing runs bounce --run run-fictional --node build"},
+		{"Bounce a job in a cluster run", "sparkwing runs bounce --run run-fictional --node build --profile prod"},
 	},
 }
 
@@ -2910,7 +2741,7 @@ controller's SQLite store doesn't grow unbounded. Supply either
 (repeatable). Use --run - to read ids from stdin. The two modes
 are mutually exclusive.
 
-Use --dry-run first to confirm the victim list.`,
+Use --dry-run first to confirm the matching runs.`,
 	Flags: []FlagSpec{
 		{Name: "older-than", Argument: "DURATION", Desc: "Prune runs older than this", RequiredWhen: "when no --run ids are supplied", ConflictsWith: []string{"run"}, Group: "Input"},
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to prune (repeatable; use --run - to read ids from stdin)", RequiredWhen: "when --older-than is not set", ConflictsWith: []string{"older-than"}, Group: "Input"},
@@ -2937,7 +2768,7 @@ landed, so it runs its pipelines, tolerates failures, and never
 aborts. pre-commit and pre-push abort the git action on the first
 failing pipeline.
 
-Managed hooks carry a "Installed by sparkwing" marker so
+Managed hooks carry an "Installed by sparkwing" marker so
 uninstall and status can tell them apart from hand-written
 hooks. Existing unmanaged hooks are left alone; install skips
 them with a warning.`,
@@ -2947,27 +2778,18 @@ them with a warning.`,
 var cmdHooksInstall = Command{
 	Path:     "sparkwing pipeline hooks install",
 	Synopsis: "Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers",
-	Description: `Discovers the enclosing .sparkwing/sparkwing.yaml, reads
-pre_commit / pre_push / post_commit triggers, and writes one hook
-file per hook name that fans out to the matching pipelines. Existing
-non-sparkwing hooks are skipped so hand-written ones survive.
+	Description: `Installs managed hooks for declared pre_commit, pre_push, and post_commit
+triggers. Existing unmanaged hooks are preserved and reported.
 
-Before a gate can fire, install runs it once. While a repo's hooks are inert
-a gate that cannot execute looks the same as one that passes, and arming it
-turns every commit into a failing one. Every proof finishes before candidate
-hook filenames or core.hooksPath are published, so prior hooks remain callable
-throughout a proof and unchanged if it fails. Complete replacements publish by
-atomic rename; a later installation error restores every prior managed hook,
-global-hook forwarder, file mode, and config value. No partial set is armed.
---no-prove arms anyway.
+Each gate runs successfully before replacement hooks are published. Existing
+hooks remain callable during verification. Publication uses atomic rename;
+an installation failure restores prior managed hooks, forwarders, modes,
+and configuration. --no-prove skips gate execution.
 
-Hooks installed without --profile prove and run their pipelines with
---sw-local-only. Pass --profile NAME when the gate should use shared storage.
-
---fleet counts as armed only the repos a gate now fires in. A repo whose gates
-could not run is named as left ungated, and one that declares no pre_commit or
-pre_push trigger is counted apart: nothing there can refuse a commit, so there
-was never a gate to arm.`,
+Without --profile, hooks use --sw-local-only. --profile NAME selects shared
+storage. --fleet processes registered repositories and distinguishes installed
+gates, gates that could not execute, and repositories declaring no blocking
+gate.`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Install into every registered repo instead of one", Group: "Input"},
@@ -2984,24 +2806,17 @@ was never a gate to arm.`,
 
 var cmdHooksSurvey = Command{
 	Path:     "sparkwing pipeline hooks survey",
-	Synopsis: "Report which registered repos git actually runs a gate for",
-	Description: `Classifies every repo in the local registry by what git does
-with the hooks its pipelines declare: armed (a gate runs), shadowed (a gate is
-installed but core.hooksPath sends git elsewhere), uninstalled (a declared
-hook was never written), or undeclared (no pipeline asks for one).
+	Synopsis: "Report effective gates for registered repositories",
+	Description: `Reports declared hooks for every registered repository as armed, shadowed,
+uninstalled, or undeclared. A shadowed hook is installed but core.hooksPath
+selects another location.
 
-The repos are the ones repos.yaml reaches: what sparkwing configure xrepo add
-registered, plus any fallback_paths it scans. A checkout it does not list is
-not surveyed, so register it before reading a clean survey as a clean
-machine.
+Coverage includes registered repositories and configured fallback paths.
+Register other checkouts before expecting them in the report. An unreadable
+registry produces an error.
 
-A registry it cannot read is an error, not an empty fleet: the survey names
-the file and exits non-zero rather than printing the output of a machine with
-nothing registered.
-
---ungated lists the repos a commit or a push goes through unchecked in. Only
-pre-commit and pre-push count, since a post-commit hook runs after the commit
-has landed and cannot refuse one.`,
+--ungated selects repositories where commits or pushes run without a gate.
+Only pre-commit and pre-push hooks can block those operations.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "ungated", Desc: "List only the repos git runs no gate for", Group: "Output"},
@@ -3016,29 +2831,17 @@ has landed and cannot refuse one.`,
 var cmdHooksFire = Command{
 	Path:     "sparkwing pipeline hooks fire",
 	Synopsis: "Make the gate refuse a commit, to see that it can",
-	Description: `Stages a file and commits it with the gate told to refuse, then
-reports whether git refused the commit and which hook file did it.
+	Description: `Attempts a commit with a managed gate instructed to refuse it and reports
+whether the gate blocked Git. A control attempt with hooks disabled must
+succeed, so an unrelated commit failure cannot count as a passing diagnostic.
 
-A hook directory cannot answer this. A repo whose core.hooksPath points at a
-sibling's hooks holds no gate of its own and refuses commits anyway; a repo
-whose hooks are shadowed holds a full set and refuses nothing. Both inspect as
-something they are not, so survey and status report what is installed and this
-reports what happens.
+The attempts use a temporary detached worktree and index. The source checkout
+and its branches remain unchanged. Only managed hooks carrying the diagnostic
+guard execute; other hooks are reported as unprovable.
 
-The attempt runs in a throwaway linked worktree with its own index and its own
-detached HEAD, so the repo's working tree, index, branches and HEAD are
-untouched whatever the gate does. Only a hook sparkwing wrote that carries the
-self-test guard is ever executed -- anything else is reported as unprovable
-rather than run, because answering a diagnostic question is not a reason to run
-an operator's hook.
-
-Every refusal is checked against a control: the same staged change is committed
-again with hooks switched off and has to land, so an unrelated failure is not
-read as a gate doing its job.
-
-Exits non-zero unless every repo refused the commit with a gate of its own. A
-repo that declares no pre-commit trigger has no gate to fire and does not
-count. Pre-push gates are not covered -- firing one needs a remote.`,
+Exits nonzero unless every applicable repository refused the test commit
+through its own gate. Repositories without a pre-commit trigger are excluded.
+This command verifies pre-commit hooks.`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Fire the gate in every registered repo instead of one", Group: "Input"},
@@ -3052,9 +2855,10 @@ count. Pre-push gates are not covered -- firing one needs a remote.`,
 }
 
 var cmdHooksUninstall = Command{
-	Path:        "sparkwing pipeline hooks uninstall",
-	Synopsis:    "Remove sparkwing-managed git hooks",
-	Description: `Deletes every file under .git/hooks/ that carries the "Installed by sparkwing" marker. Hand-written hooks are left alone.`,
+	Path:     "sparkwing pipeline hooks uninstall",
+	Synopsis: "Remove sparkwing-managed git hooks",
+	Description: `Deletes every file under .git/hooks/ that carries the "Installed by sparkwing"
+marker. Hand-written hooks are left alone.`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 	},
@@ -3064,9 +2868,11 @@ var cmdHooksUninstall = Command{
 }
 
 var cmdHooksStatus = Command{
-	Path:        "sparkwing pipeline hooks status",
-	Synopsis:    "Report declared, installed, and missing sparkwing hooks",
-	Description: `Lists every managed hook file under .git/hooks/ along with the pipelines it invokes. Declared hooks that are missing, shadowed, or borrowed are named with the command that repairs them.`,
+	Path:     "sparkwing pipeline hooks status",
+	Synopsis: "Report declared, installed, and missing sparkwing hooks",
+	Description: `Lists every managed hook file under .git/hooks/ along with the pipelines it
+invokes. Declared hooks that are missing, shadowed, or borrowed are named with
+the command that repairs them.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints hook names.", Group: "Output"},
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
@@ -3087,9 +2893,8 @@ invoked through 'sparkwing run <pipeline>' locally.
 
 With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run
-time. Pipelines pull a secret by listing it in the
-sparkwing.yaml 'secrets:' block. Raw values never transit the
-CLI except via 'secrets get'.`,
+time. Pipelines declare a typed Secrets provider to resolve their secrets.
+'secrets list' masks values; 'secrets get' prints them.`,
 	SubcommandOrder: []string{"set", "get", "list", "delete"},
 }
 
@@ -3105,7 +2910,7 @@ does not land in shell history.`,
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name (unique per controller)", Required: true, Group: "Input"},
 		{Name: "value", Type: FlagString, Argument: "VALUE", Desc: "Secret value (prefer --file for long values)", RequiredWhen: "when --file is not set", ConflictsWith: []string{"file"}, Group: "Input"},
 		{Name: "file", Type: FlagString, Argument: "PATH", Desc: "Read value from file (keeps value out of shell history)", RequiredWhen: "when --value is not set", ConflictsWith: []string{"value"}, Group: "Input"},
-		{Name: "plain", Type: FlagBool, Desc: "Store as non-masked config (e.g. REGION, LOG_LEVEL) -- value will NOT be redacted in run logs. Default is masked.", Group: "Input"},
+		{Name: "plain", Type: FlagBool, Desc: "Store a configuration value visible in run logs. Values are masked by default.", Group: "Input"},
 		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Scope the secret to one repository slug (controller only)", ConflictsWith: []string{"shared"}, Group: "Input"},
 		{Name: "shared", Type: FlagBool, Desc: "Let every run read this unscoped secret (controller only). Without --repo or --shared the secret answers admin callers only.", ConflictsWith: []string{"repo"}, Group: "Input"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
@@ -3139,9 +2944,11 @@ so it can be piped into another command. Use 'secrets list' for metadata.`,
 }
 
 var cmdSecretList = Command{
-	Path:        "sparkwing secrets list",
-	Synopsis:    "List secret names + metadata",
-	Description: `Lists secret names and metadata from local files when --profile is omitted, or from the named profile's controller. Raw values are never printed by this command.`,
+	Path:     "sparkwing secrets list",
+	Synopsis: "List secret names + metadata",
+	Description: `Lists secret names and metadata from local files when --profile is omitted, or
+from the named profile's controller. Raw values are never printed by this
+command.`,
 	Flags: []FlagSpec{
 		{Name: "grep", Type: FlagString, Argument: "PATTERN", Desc: "Filter by name substring (case-sensitive)", Group: "Filter"},
 		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
@@ -3155,9 +2962,11 @@ var cmdSecretList = Command{
 }
 
 var cmdSecretDelete = Command{
-	Path:        "sparkwing secrets delete",
-	Synopsis:    "Remove a secret",
-	Description: `Deletes the secret from local files when --profile is omitted, or from the named profile's controller. Pipelines that reference the name will fail to resolve until the secret is re-added.`,
+	Path:     "sparkwing secrets delete",
+	Synopsis: "Remove a secret",
+	Description: `Deletes the secret from local files when --profile is omitted, or from the
+named profile's controller. Pipelines that reference the name will fail to
+resolve until the secret is re-added.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name to remove", Required: true, Group: "Input"},
 		{Name: "repo", Type: FlagString, Argument: "SLUG", Desc: "Remove the row owned by one repository slug (controller only); omit for the unscoped row", Group: "Input"},
@@ -3173,23 +2982,16 @@ var cmdSecretDelete = Command{
 var cmdTriggers = Command{
 	Path:     "sparkwing runs triggers",
 	Synopsis: "Fire, list, or inspect controller triggers",
-	Description: `Triggers are the controller's queue of pending work. Every
-pipeline run starts as a trigger (from a webhook, hook, 'sparkwing
-run --profile', or 'triggers fire') that a worker atomically claims and
-turns into a run.
+	Description: `Inspect the controller's queue of pipeline triggers. 'list' shows pending,
+claimed, and completed entries. 'get' reads one trigger by identifier.
+Select the controller with --profile NAME.
 
-'fire' posts a synthetic trigger -- the sparkwing equivalent of
-'gh workflow run'. 'list' surfaces queued / in-flight / done
-entries so operators can see what's stuck without diving into
-controller logs. 'get' inspects one trigger by id.
-
-Connection info comes from the selected profile (--profile NAME);
-there are no --controller / --token flags on this command.`,
+Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.`,
 	SubcommandOrder: []string{"list", "get"},
 	Examples: []Example{
 		{"List pending triggers on prod", "sparkwing runs triggers list --profile prod --status pending"},
-		{"Inspect one trigger", "sparkwing runs triggers get --id run-... --profile prod"},
-		{"Fire a trigger (use pipeline run)", "sparkwing pipeline run --pipeline deploy --profile prod"},
+		{"Inspect one trigger", "sparkwing runs triggers get --id run-fictional --profile prod"},
+		{"Submit a trigger", "sparkwing pipeline trigger fictional-deploy --profile prod"},
 	},
 }
 
@@ -3204,14 +3006,14 @@ Useful when the queue looks stuck ("why isn't my trigger being
 claimed?"): --status pending shows unclaimed work, --status
 claimed shows what a worker has in-flight. The repo filter
 matches GITHUB_REPOSITORY on the trigger env so webhook-driven
-entries narrow cleanly; that value is not indexed, so the search
-covers the newest 5,000 triggers matching the other filters and
+entries match the selected repository; that value is not indexed, so the
+search covers the newest 5,000 triggers matching the other filters and
 an older entry is not reported.`,
 	Flags: []FlagSpec{
 		{Name: "status", Argument: "STATUS", Desc: "Filter by status: pending | claimed | done", Group: "Filter"},
 		{Name: "pipeline", Argument: "NAME", Desc: "Filter by pipeline name", Group: "Filter"},
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "Match GITHUB_REPOSITORY on the trigger env, over the newest 5,000 triggers", Group: "Filter"},
-		{Name: "limit", Argument: "N", Desc: "Max triggers to show", Default: "20", Group: "Output"},
+		{Name: "limit", Argument: "N", Desc: "Maximum triggers to show", Default: "20", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only trigger ids, newline-separated", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json emits the raw triggers array", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
@@ -3220,37 +3022,37 @@ an older entry is not reported.`,
 	Examples: []Example{
 		{"Recent triggers on prod", "sparkwing runs triggers list --profile prod"},
 		{"Just pending", "sparkwing runs triggers list --profile prod --status pending"},
-		{"Pipeline-specific, JSON", "sparkwing runs triggers list --profile prod --pipeline build-test-deploy --limit 5 -o json"},
+		{"Pipeline-specific, JSON", "sparkwing runs triggers list --profile prod --pipeline fictional-build --limit 5 -o json"},
 	},
 }
 
 var cmdTriggersGet = Command{
-	Path:        "sparkwing runs triggers get",
-	Synopsis:    "Inspect one trigger's full metadata by id",
-	Description: `Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args, git, env, status, claim lease). Defaults to a compact multi-line rendering; -o json emits the raw response.`,
+	Path:     "sparkwing runs triggers get",
+	Synopsis: "Inspect one trigger's full metadata by id",
+	Description: `Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args,
+git, env, status, claim lease). Defaults to a compact multi-line rendering; -o
+json emits the raw response.`,
 	Flags: []FlagSpec{
-		{Name: "id", Argument: "TRIGGER_ID", Desc: "Trigger / run identifier (same value 'fire' prints)", Required: true, Group: "Input"},
+		{Name: "id", Argument: "TRIGGER_ID", Desc: "Trigger / run identifier (the value 'pipeline trigger' prints)", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json emits the raw response", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Inspect one trigger", "sparkwing runs triggers get --id run-20260422-142501-abcd --profile prod"},
-		{"Raw JSON for scripting", "sparkwing runs triggers get --id run-... --profile prod -o json"},
+		{"Inspect one trigger", "sparkwing runs triggers get --id run-fictional --profile prod"},
+		{"Raw JSON for scripting", "sparkwing runs triggers get --id run-fictional --profile prod -o json"},
 	},
 }
 
 var cmdImage = Command{
 	Path:     "sparkwing cluster image",
 	Synopsis: "Rollout helpers for images referenced by a gitops repo",
-	Description: `Composite verbs that operate on the images: block of a
-kustomization.yaml plus the downstream ArgoCD / kubectl dance.
-Building and pushing images stays with the consumer pipeline --
-this subcommand only owns the "bump tag, commit, push, sync,
-wait for rollout" path.`,
+	Description: `Update an image tag in a GitOps repository, commit and push the change,
+sync ArgoCD, and wait for rollout. Publish the image before using these
+commands.`,
 	SubcommandOrder: []string{"rollout"},
 	Examples: []Example{
-		{"Bump sparkwing-runner to a new commit tag", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --wait"},
+		{"Update the example runner image", "sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait"},
 	},
 }
 
@@ -3275,11 +3077,11 @@ there is nothing to commit, and the pipeline continues to sync
 + wait without error. Use --dry-run to preview the plan without
 writing, committing, pushing, syncing, or waiting.
 
-Optional tools are skipped cleanly when absent from PATH:
+Tool requirements:
   - argocd missing  -> sync is skipped with a one-line notice
   - kubectl missing -> --wait / --tail-logs error before side effects
 
-This verb does NOT build or push the image itself. The consumer
+This verb does not build or push the image itself. The consumer
 pipeline that produced --tag is responsible for publishing the
 image to the registry before calling rollout.`,
 	Flags: []FlagSpec{
@@ -3295,9 +3097,9 @@ image to the registry before calling rollout.`,
 	},
 	GroupOrder: []string{"Input", "Toggles", "System", "Other"},
 	Examples: []Example{
-		{"Dry-run against the sparkwing-runner image", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --dry-run"},
-		{"Bump and wait for the rollout", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --wait"},
-		{"Bump, sync, wait, then tail pod logs", "sparkwing cluster image rollout --image sparkwing --tag commit-abc123 --wait --tail-logs"},
+		{"Preview the example runner image update", "sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --dry-run"},
+		{"Bump and wait for the rollout", "sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait"},
+		{"Bump, sync, wait, then tail pod logs", "sparkwing cluster image rollout --image fictional-service --tag commit-abc123 --wait --tail-logs"},
 	},
 }
 
@@ -3357,18 +3159,13 @@ on "is the cluster reachable at all?".`,
 var cmdWebhooks = Command{
 	Path:     "sparkwing cluster webhooks",
 	Synopsis: "Inspect and replay GitHub webhooks",
-	Description: `Sparkwing-aware wrapper over the GitHub hooks API. Shells out
-to 'gh api' (inherits your gh auth); install gh from
-https://cli.github.com if it isn't on PATH.
-
-Value-add over 'gh api' alone: the deliveries view joins
-GitHub's delivery log with sparkwing's trigger/run rows so
-each delivery shows the run id it produced and the run's
-terminal status -- without two separate lookups.`,
+	Description: `Inspect GitHub webhooks through the installed 'gh' command and its
+credentials. The deliveries view joins delivery records with Sparkwing
+triggers and run outcomes.`,
 	SubcommandOrder: []string{"list", "deliveries", "replay"},
 	Examples: []Example{
 		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app"},
-		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --profile prod"},
+		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod"},
 	},
 }
 
@@ -3412,16 +3209,15 @@ take a time filter). Default: 24h.`,
 	},
 	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --profile prod"},
+		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod"},
 	},
 }
 
 var cmdWebhooksReplay = Command{
 	Path:     "sparkwing cluster webhooks replay",
 	Synopsis: "Queue a redelivery of a specific delivery UUID",
-	Description: `POSTs /repos/OWNER/NAME/hooks/HOOK/deliveries/DELIVERY/attempts
-to GitHub. GitHub queues a fresh attempt; the new delivery
-appears in the hook's delivery log within seconds.`,
+	Description: `Requests another attempt for the selected GitHub webhook delivery.
+Read the hook's deliveries to inspect the resulting attempt.`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
 		{Name: "hook", Argument: "N", Desc: "GitHub hook id", Required: true, Group: "Input"},
@@ -3429,7 +3225,7 @@ appears in the hook's delivery log within seconds.`,
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Redeliver a webhook attempt", "sparkwing cluster webhooks replay --repo your-org/my-app --hook 608819334 --delivery 0ac55946-3e96-11f1-9de8-f33e32f0060f"},
+		{"Redeliver a webhook attempt", "sparkwing cluster webhooks replay --repo your-org/my-app --hook 123456789 --delivery 00000000-0000-4000-8000-000000000001"},
 	},
 }
 
@@ -3456,8 +3252,7 @@ live headroom. Changing the prefix requires a new heartbeat.
 
 Use a distinct revocable token for every coordinator membership. The
 prefix is accepted as input but is never returned by the agents API. A
-controller accepts at most 256 enrolled executors. Adding another returns
-` + "`executor enrollment limit reached: maximum 256 per controller`" + `.`,
+controller accepts at most 256 enrolled executors. Adding another returns ` + "`executor enrollment limit reached: maximum 256 per controller`" + `.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Executor name", Required: true, Group: "Identity"},
 		{Name: "token-prefix", Argument: "PREFIX", Desc: "Exact runner or service token prefix", Required: true, Group: "Identity"},
@@ -3487,12 +3282,12 @@ kind, trusted placement location, capabilities, concurrency limit, and
 measured resource headroom. A stale registration remains visible
 as offline; recent legacy claim-only runners remain visible too.
 
-Use -q to print just names, one per line, for shell piping
-(e.g. looping over agents with xargs).`,
+Use -q to print names, one per line, for shell piping
+(xargs and similar commands).`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-		{Name: "quiet", Short: "q", Desc: "Print just agent names, one per line", Group: "Output"},
+		{Name: "quiet", Short: "q", Desc: "Print agent names, one per line", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
 	Examples: []Example{
@@ -3541,9 +3336,10 @@ and no peer discovery occurs.`,
 }
 
 var cmdFleetAgents = Command{
-	Path:            "sparkwing fleet agents",
-	Synopsis:        "Provision helpers for foreground coordinators",
-	Description:     `Creates local verifier-backed credentials and trusted executor enrollments. Raw credentials print once and never enter fleet.yaml.`,
+	Path:     "sparkwing fleet agents",
+	Synopsis: "Provision helpers for foreground coordinators",
+	Description: `Creates local verifier-backed credentials and trusted executor enrollments.
+Raw credentials print once and never enter fleet.yaml.`,
 	SubcommandOrder: []string{"enroll"},
 }
 
@@ -3559,7 +3355,8 @@ no token material or token identifier.
 
 Atomically merge stdout into the helper's owner-only agent.yaml (0600 on Unix;
 a protected user ACL on Windows). Direct shell redirection can truncate an
-existing multi-coordinator file before validation and is not a safe merge.
+existing multi-coordinator file before validation and can destroy existing
+memberships.
 
 Use one credential per coordinator membership.`,
 	Flags: []FlagSpec{
@@ -3582,7 +3379,7 @@ Use one credential per coordinator membership.`,
 var cmdClusterConcurrency = Command{
 	Path:     "sparkwing cluster concurrency",
 	Synopsis: "Inspect a single concurrency namespace: holders + queue",
-	Description: `Shows who currently holds a concurrency namespace's slots
+	Description: `Shows who holds a concurrency namespace's slots
 and the queue of waiters behind it, each with its admission-rank
 position. Weighted admission can run a later fitting waiter before
 an earlier non-fitting waiter, so position is not always run order.
@@ -3615,7 +3412,7 @@ checks) on top of the unopinionated SDK. Consumers declare
 which libraries they want live-tracked in
 .sparkwing/sparks.yaml; the resolver writes an overlay modfile
 at .sparkwing/.resolved.mod that the compile step uses via
-'go build -modfile='. The consumer's git-tracked go.mod is
+'go build -modfile='. The consumer's tracked go.mod is
 never modified.
 
 See docs/sparks.md for the full spec (spark.json schema,
@@ -3623,9 +3420,9 @@ sparks.yaml shape, resolution rules, warmup).`,
 	SubcommandOrder: []string{"list", "lint", "resolve", "update", "add", "remove", "warmup", "inflate"},
 	Examples: []Example{
 		{"List declared sparks libraries", "sparkwing pipeline sparks list"},
-		{"Validate a library's spark.json", "sparkwing pipeline sparks lint ~/code/sparks-core"},
+		{"Validate a library's spark.json", "sparkwing pipeline sparks lint ~/code/fictional-sparks"},
 		{"Re-materialize the overlay modfile", "sparkwing pipeline sparks resolve"},
-		{"Add a library pinned to latest", "sparkwing pipeline sparks add github.com/sparkwing-dev/sparks-core"},
+		{"Add a library pinned to latest", "sparkwing pipeline sparks add example.com/fictional/sparks"},
 	},
 }
 
@@ -3672,19 +3469,17 @@ failure.`,
 	GroupOrder: []string{"Input", "Other"},
 	Examples: []Example{
 		{"Lint the library in the current directory", "sparkwing pipeline sparks lint"},
-		{"Lint a sibling library by path", "sparkwing pipeline sparks lint --path ~/code/sparks-core"},
-		{"Lint a multi-module monorepo", "sparkwing pipeline sparks lint ~/code/sparks-core"},
+		{"Lint a sibling library by path", "sparkwing pipeline sparks lint --path ~/code/fictional-sparks"},
+		{"Lint a multi-module monorepo", "sparkwing pipeline sparks lint ~/code/fictional-sparks"},
 	},
 }
 
 var cmdSparksResolve = Command{
 	Path:     "sparkwing pipeline sparks resolve",
 	Synopsis: "Resolve versions and materialize the overlay modfile",
-	Description: `Runs the same pipeline as 'sparkwing run <name>' takes before compile:
-load sparks.yaml, resolve each entry against the module proxy,
-and write .sparkwing/.resolved.mod + .resolved.sum. Idempotent
--- a second run with no upstream change is a fast no-op that
-prints 'up-to-date'. Never modifies the git-tracked go.mod.`,
+	Description: `Resolves declared libraries through the Go module proxy and writes the
+module overlay used for pipeline builds. Prints 'up-to-date' when the
+overlay already matches. The repository's module file stays unchanged.`,
 	Flags: []FlagSpec{
 		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "quiet", Short: "q", Desc: "Suppress the 'up-to-date' message", Group: "Output"},
@@ -3709,7 +3504,7 @@ the module proxy; for an exact pin it is a no-op.`,
 	GroupOrder: []string{"Input", "Other"},
 	Examples: []Example{
 		{"Update every declared library", "sparkwing pipeline sparks update"},
-		{"Update one by name", "sparkwing pipeline sparks update --name sparks-core"},
+		{"Update one by name", "sparkwing pipeline sparks update --name fictional-sparks"},
 	},
 }
 
@@ -3720,15 +3515,15 @@ var cmdSparksAdd = Command{
 version to 'latest' when --version is omitted. Refuses to add
 a duplicate (same source or same name).`,
 	Flags: []FlagSpec{
-		{Name: "source", Argument: "PATH", Desc: "Go module path (e.g. github.com/user/sparks-lib)", Required: true, Group: "Input"},
+		{Name: "source", Argument: "PATH", Desc: "Go module path", Required: true, Group: "Input"},
 		{Name: "version", Argument: "VER", Desc: "Declared version ('latest', exact tag, or semver range)", Group: "Input"},
 		{Name: "name", Argument: "NAME", Desc: "Short library name (default: last path segment of --source)", Group: "Input"},
 		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Other"},
 	Examples: []Example{
-		{"Add a library pinned to latest", "sparkwing pipeline sparks add --source github.com/sparkwing-dev/sparks-core"},
-		{"Add with a semver range", `sparkwing pipeline sparks add --source github.com/sparkwing-dev/sparks-core --version "^v0.10.0"`},
+		{"Add a library pinned to latest", "sparkwing pipeline sparks add --source example.com/fictional/sparks"},
+		{"Add with a semver range", `sparkwing pipeline sparks add --source example.com/fictional/sparks --version "^v0.10.0"`},
 	},
 }
 
@@ -3742,24 +3537,17 @@ var cmdSparksRemove = Command{
 	},
 	GroupOrder: []string{"Input", "Other"},
 	Examples: []Example{
-		{"Remove by short name", "sparkwing pipeline sparks remove --name sparks-core"},
-		{"Remove by source path", "sparkwing pipeline sparks remove --name github.com/sparkwing-dev/sparks-core"},
+		{"Remove by short name", "sparkwing pipeline sparks remove --name fictional-sparks"},
+		{"Remove by source path", "sparkwing pipeline sparks remove --name example.com/fictional/sparks"},
 	},
 }
 
 var cmdSparksWarmup = Command{
 	Path:     "sparkwing pipeline sparks warmup",
 	Synopsis: "Pre-compile pipeline binaries after a sparks release",
-	Description: `Post-release optimization: resolve the latest versions, compile
-the pipeline binary for the current .sparkwing/ tree, and
-upload to gitcache so the next 'sparkwing run' in-cluster or on a
-fresh laptop gets a cache hit instead of paying the full
-compile cost.
-
-Uses the exact same build path as 'sparkwing run', so the cache key
-matches. Warmup is optional -- pipelines always resolve on
-build -- it just removes the first-run compile cost after a
-new sparks version is published.`,
+	Description: `Resolves libraries, compiles the pipeline binary, and uploads it to the
+binary cache. Subsequent runs with matching build inputs can reuse it.
+Warmup uses the same compilation path and cache key as 'sparkwing run'.`,
 	Flags: []FlagSpec{
 		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "clear-cache", Desc: "Delete the local pipeline binary cache before compiling", Group: "Input"},
@@ -3773,26 +3561,16 @@ new sparks version is published.`,
 var cmdSparksInflate = Command{
 	Path:     "sparkwing pipeline sparks inflate",
 	Synopsis: "Copy a spark library's source into this repo so you can edit it",
-	Description: `Inflates a spark library: copies its source out of the Go
-module cache into .sparkwing/sparks/<name>/, then adds a
-'replace <module> => ./sparks/<name>' directive to
-.sparkwing/go.mod and runs 'go mod tidy'.
+	Description: `Copies a library from the Go module cache into the pipeline's local sources,
+adds a module replacement pointing at that copy, and runs 'go mod tidy'.
+Imports retain their module paths.
 
---module takes a sparks-core block name (e.g. 'templates',
-which resolves to github.com/sparkwing-dev/sparks-core/templates)
-or a full module path for any other spark library.
-
-The version is read from .sparkwing/go.mod's require list, or
-'latest' when the module is not yet required.
-
-Because the replace directive points at the copied tree, your
-import paths do not change and transitive dependencies keep
-resolving -- the code is simply yours now, editable in place.
-The command refuses to overwrite an existing destination. To
-undo, delete .sparkwing/sparks/<name>/ and drop the replace
-directive.`,
+--module accepts a sparks-core module name or a full module path. The version
+comes from the pipeline's required modules, or resolves to latest when absent.
+The destination must be unused. To undo the copy, remove its directory and
+module replacement.`,
 	Flags: []FlagSpec{
-		{Name: "module", Argument: "NAME", Desc: "Sparks-core block name (e.g. templates) or a full module path", Required: true, Group: "Input"},
+		{Name: "module", Argument: "NAME", Desc: "Sparks-core module name or full module path", Required: true, Group: "Input"},
 		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json", Group: "Output"},
 	},
@@ -3822,8 +3600,8 @@ or was already resolved (409).`,
 	},
 	GroupOrder: []string{"Target", "Input", "System", "Other"},
 	Examples: []Example{
-		{"Approve a local gate", "sparkwing runs approvals approve --run run-20260423-143012-abcd --node approve-prod"},
-		{"Approve a prod gate with a comment", `sparkwing runs approvals approve --run run-... --node approve-prod --profile prod --comment "release notes ok"`},
+		{"Approve a local gate", "sparkwing runs approvals approve --run run-fictional --node approve-prod"},
+		{"Approve a prod gate with a comment", `sparkwing runs approvals approve --run run-fictional --node approve-prod --profile prod --comment "release notes ok"`},
 	},
 }
 
@@ -3841,8 +3619,8 @@ their ContinueOnError / Optional settings.`,
 	},
 	GroupOrder: []string{"Target", "Input", "System", "Other"},
 	Examples: []Example{
-		{"Deny a local gate", "sparkwing runs approvals deny --run run-20260423-143012-abcd --node approve-prod"},
-		{"Deny a prod gate with a reason", `sparkwing runs approvals deny --run run-... --node approve-prod --profile prod --comment "tests still red"`},
+		{"Deny a local gate", "sparkwing runs approvals deny --run run-fictional --node approve-prod"},
+		{"Deny a prod gate with a reason", `sparkwing runs approvals deny --run run-fictional --node approve-prod --profile prod --comment "tests still red"`},
 	},
 }
 
@@ -3870,7 +3648,7 @@ run, both pending and resolved.`,
 	Examples: []Example{
 		{"Pending gates on the local store", "sparkwing runs approvals list"},
 		{"Pending gates on prod", "sparkwing runs approvals list --profile prod"},
-		{"Full history for one run", "sparkwing runs approvals list --run run-..."},
+		{"Full history for one run", "sparkwing runs approvals list --run run-fictional"},
 		{"Emit JSON for an agent", "sparkwing runs approvals list -o json"},
 	},
 }
@@ -3902,9 +3680,9 @@ implies step-scope and limits to the matching step.`,
 	},
 	GroupOrder: []string{"Input", "Filter", "Output", "System", "Other"},
 	Examples: []Example{
-		{"Every node annotation on a run", "sparkwing runs annotations list --run run-..."},
-		{"Include per-step annotations", "sparkwing runs annotations list --run run-... --steps"},
-		{"One node's annotations as JSON", "sparkwing runs annotations list --run run-... --node build -o json"},
+		{"Every node annotation on a run", "sparkwing runs annotations list --run run-fictional"},
+		{"Include per-step annotations", "sparkwing runs annotations list --run run-fictional --steps"},
+		{"One node's annotations as JSON", "sparkwing runs annotations list --run run-fictional --node build -o json"},
 	},
 }
 
@@ -3924,30 +3702,22 @@ preserved as the dashboard renders them.`,
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Note something on a node", "sparkwing runs annotations add --run run-... --node deploy -m 'agent: retried after 502'"},
-		{"Note something on a step inside a node", "sparkwing runs annotations add --run run-... --node deploy --step canary -m 'rolled out 5%'"},
+		{"Note something on a node", "sparkwing runs annotations add --run run-fictional --node deploy -m 'agent: retried after 502'"},
+		{"Note something on a step inside a node", "sparkwing runs annotations add --run run-fictional --node deploy --step canary -m 'rolled out 5%'"},
 	},
 }
 
 var cmdRepos = Command{
 	Path:     "sparkwing repos",
 	Synopsis: "The machine's fleet of sparkwing repos and their SDK pins",
-	Description: `Lists every repo on this machine that carries sparkwing
-pipelines -- derived from the repos this laptop has run pipelines
-for, unioned with the explicit repos.yaml registry. No manual
-registration: a repo shows up once it has run a pipeline or been
-added to repos.yaml.
+	Description: `Lists registered repositories and repositories with recorded pipeline runs.
+Each row shows the SDK version, last run, and intervening migration guides.
+Linked worktrees appear under their primary checkout, with differing SDK
+versions reported separately.
 
-Each row reports the repo, its .sparkwing SDK pin, the last run
-observed, and how many migration guides sit between its pin and
-the latest release. Linked git worktrees are folded into their
-primary checkout; a worktree pinned differently from its primary
-is reported as a detail line, not a separate repo.
-
-Bare 'sparkwing repos' and 'sparkwing repos list' both print this
-fleet. Use 'sparkwing repos info' for a single-repo deep dive, and
-'sparkwing repos update' to bump the whole fleet in one sitting
-with a compiled per-repo verdict.`,
+'sparkwing repos' and 'sparkwing repos list' print the same listing.
+Use 'sparkwing repos info' to inspect one repository and 'sparkwing repos
+update' to validate SDK upgrades for selected repositories.`,
 	SubcommandOrder:    []string{"list", "info", "update"},
 	SubcommandOptional: true,
 	Flags: []FlagSpec{
@@ -3963,11 +3733,9 @@ with a compiled per-repo verdict.`,
 var cmdReposList = Command{
 	Path:     "sparkwing repos list",
 	Synopsis: "List the machine's fleet of sparkwing repos",
-	Description: `Prints the fleet: every repo on this machine that carries
-sparkwing pipelines, with its SDK pin, last run, and how many
-migration guides sit between its pin and the latest release. This is
-the same output as bare 'sparkwing repos'; the explicit verb exists
-so the listing has a name alongside 'info' and 'update'.`,
+	Description: `Lists registered repositories and repositories with recorded pipeline runs.
+Each row shows the SDK version, last run, and intervening migration guides.
+This is the same output as 'sparkwing repos'.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 	},
@@ -3980,22 +3748,13 @@ so the listing has a name alongside 'info' and 'update'.`,
 
 var cmdReposInfo = Command{
 	Path:     "sparkwing repos info",
-	Synopsis: "Deep dive on one repo: pin, guides, worktrees, schema, pipelines",
-	Description: `Reports everything worth knowing about one repo without
-stitching it together from git, go.mod, and run history by hand. It
-defaults to the repo containing the current directory; --repo names
-another fleet member by name or checkout path.
+	Synopsis: "Inspect repository versions, worktrees, store compatibility, and pipelines",
+	Description: `Reports a repository's SDK version, intervening migration guides, linked
+worktrees, source revision, uncommitted changes, store compatibility, and
+pipeline outcomes. It suggests a next action when a check finds a problem.
 
-It shows the .sparkwing SDK pin (or replace directive) against the
-latest release, the migration guides in between with their titles
-and summaries, linked worktrees and any that pin a different
-version, the working tree's branch, commit, and clean/dirty state,
-whether the pin can open the machine's shared state database (a
-mismatch is caught here rather than when a run fails), and the
-repo's pipelines with their last run time and status. When
-something is off it prints one suggested next step.
-
-Read-only: it never builds, bumps, or commits anything.`,
+Defaults to the enclosing repository. --repo selects another repository by
+name or checkout path. The command reads existing state.`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "NAME_OR_PATH", Desc: "Repo by name or checkout path. Default: the repo containing the current directory.", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
@@ -4003,50 +3762,35 @@ Read-only: it never builds, bumps, or commits anything.`,
 	GroupOrder: []string{"Filter", "Output", "Other"},
 	Examples: []Example{
 		{"Deep dive on the current repo", "sparkwing repos info"},
-		{"Deep dive on a named repo", "sparkwing repos info --repo my-app"},
-		{"Agent-readable record", "sparkwing repos info --repo my-app -o json"},
+		{"Deep dive on a named repo", "sparkwing repos info --repo fictional-app"},
+		{"Agent-readable record", "sparkwing repos info --repo fictional-app -o json"},
 	},
 }
 
 var cmdReposUpdate = Command{
 	Path:     "sparkwing repos update",
-	Synopsis: "Bump the fleet's SDK pins with a compiled per-repo verdict",
-	Description: `Bumps every tracked repo's .sparkwing SDK pin to a target
-release and reports a compiled verdict per repo. For each repo with
-a clean working tree it bumps the pin, runs go mod tidy, and
-plan-constructs every registered pipeline before and after the
-bump:
+	Synopsis: "Update repository SDK versions and compare pipeline plans",
+	Description: `Previews SDK updates across tracked repositories. For each repository with
+no uncommitted changes, compares pipeline plans before and after the update
+and reports one result:
+  clean         compiled and compared plans are byte-identical
+  plan-differs  compiled, with a difference in a compared plan
+  broken        update, compilation, or verification failed
 
-  - clean: the bump compiled and every plan is byte-identical --
-    a guaranteed no-behavior-change upgrade.
-  - plan-differs: the bump compiled but a plan changed shape; the
-    structured node/dep/step diff is shown.
-  - broken: the bump failed to apply, compile, or verify; the
-    actual error is shown with the crossed migration guides.
+Plan equality covers the compared structure; execution behavior still needs
+verification. Plans that already failed before the update are reported as
+not compared. Repositories with uncommitted changes or missing directories
+are skipped and named.
 
-Dirty or missing repos are skipped and named rather than guessed
-at. Dry-run by default: nothing is written. --apply commits the
-bump per repo with a conventional message (no pushes). --verify
-additionally runs each repo's pre-commit gate after the bump.
---repo scopes to one repo by name or path.
+--apply writes and commits updates per repository. --verify also runs each
+repository's pre-commit gate. --repo selects one repository.
 
-Progress goes to stderr one line per step -- the repo being
-walked, each plan construction, the bump, the verdict -- because
-a fleet-wide run compiles every clean repo twice and holds the
-report until the last repo is done. Ctrl-C ends the walk after
-the repo in flight has restored its module files and prints the
-verdicts so far; a second Ctrl-C kills outright.
-
-A pipeline whose plan already fails before the bump -- one that
-needs inputs, most often -- is set aside as "not compared" rather
-than counted against the bump; the repo's verdict then rests on
-the remaining pipelines and on the post-bump compile.
-
-Because a shared state database refuses an older pin against a
-migrated schema, the fleet is meant to move together; the report
-leads with that when pins would diverge.`,
+Progress goes to stderr. The first interrupt allows the active repository to
+restore module files and prints completed results. A second interrupt exits
+immediately. The report also identifies divergent SDK pins that may conflict
+with the shared store schema.`,
 	Flags: []FlagSpec{
-		{Name: "version", Argument: "TAG", Desc: "Target SDK release (e.g. v0.16.0). Default: latest.", Group: "Input"},
+		{Name: "version", Argument: "TAG", Desc: "Target SDK release (vX.Y.Z). Default: latest.", Group: "Input"},
 		{Name: "apply", Desc: "Write the bumps and commit per repo (default is a dry run)", Group: "Behavior"},
 		{Name: "verify", Desc: "Run each repo's pre-commit gate after the bump", Group: "Behavior"},
 		{Name: "repo", Argument: "NAME_OR_PATH", Desc: "Scope to a single repo by name or checkout path", Group: "Filter"},
@@ -4057,7 +3801,7 @@ leads with that when pins would diverge.`,
 		{"Preview a fleet-wide bump to latest (dry run)", "sparkwing repos update"},
 		{"Preview a bump to a specific release", "sparkwing repos update --version v0.16.0"},
 		{"Apply the bump and commit per repo", "sparkwing repos update --version v0.16.0 --apply"},
-		{"Scope to one repo and run its gate", "sparkwing repos update --repo my-app --verify"},
+		{"Scope to one repo and run its gate", "sparkwing repos update --repo fictional-app --verify"},
 	},
 }
 
@@ -4070,8 +3814,7 @@ store.
 
 Declaring a cadence does not arm it. ` + "`sparkwing crons install`" + ` arms a
 repo's schedules on the host it is run from, and installs one OS timer -- a
-systemd user timer on Linux, a launchd agent on macOS -- that calls
-` + "`sparkwing crons tick`" + ` every minute. Sparkwing evaluates every cron
+systemd user timer on Linux, a launchd agent on macOS -- that calls ` + "`sparkwing crons tick`" + ` every minute. Sparkwing evaluates every cron
 expression itself inside that tick, so the machine holds one timer however
 many schedules are armed.
 
@@ -4114,7 +3857,7 @@ alone: this host does not fire it.
 
 Each pipeline is compiled first and has to appear in the binary's own
 description, because a schedule fires unattended: a pipeline that will not
-build is refused here rather than at three in the morning. That compile is also
+build is refused here before unattended execution. That compile is also
 the pin: the binary is copied under the sparkwing home and recorded with the
 checkout's HEAD, so every fire runs what was armed however the checkout moves
 afterwards. --follow arms without a pin, and each fire compiles the checkout.
@@ -4129,8 +3872,8 @@ checkout, republishes what the repo declares, marks a pipeline that stopped
 declaring a cadence undeclared, and re-bases this host's overrides onto the new
 declaration. Pause state, cursor, fire history and the override values survive.
 
-Arming is per host. Another machine reading the same repo stays idle until it
-is armed too, so two hosts never race for the same instant.
+Arming is per host. Another machine runs the same schedule only when the
+schedule is also armed on that machine.
 
 --profile NAME pushes the repo's "where: controller" entries to that
 controller instead, and reports the "where: local" ones as this host's. The
@@ -4361,20 +4104,17 @@ unique across this host's schedules.`,
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
-		{"Inspect one schedule", "sparkwing crons show nightly-rebuild"},
-		{"Read further back", "sparkwing crons show nightly-rebuild --fires 50"},
+		{"Inspect one schedule", "sparkwing crons show fictional-nightly"},
+		{"Read further back", "sparkwing crons show fictional-nightly --fires 50"},
 	},
 }
 
 var cmdCronsNext = Command{
 	Path:     "sparkwing crons next",
 	Synopsis: "Show the instants a schedule fires next",
-	Description: `Walks the cron expression forward from now in the zone it is
-read in. With a name, the next instants of that schedule; without one, the
-next instants across every armed schedule, merged in time order.
-
-This is the cheapest way to check a cron expression means what it looks
-like -- a day-of-week field, a DST boundary, a zone that is not yours.`,
+	Description: `Shows upcoming times in each schedule's configured time zone. Supply a
+schedule name to inspect one expression; omit it to merge upcoming times
+from every armed schedule.`,
 	PosArgs: []PosArg{
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name; omit for every armed schedule"},
 	},
@@ -4386,7 +4126,7 @@ like -- a day-of-week field, a DST boundary, a zone that is not yours.`,
 	},
 	Examples: []Example{
 		{"What fires next on this host", "sparkwing crons next"},
-		{"Check one expression", "sparkwing crons next nightly-rebuild --count 10"},
+		{"Check one expression", "sparkwing crons next fictional-nightly --count 10"},
 	},
 }
 
@@ -4394,7 +4134,7 @@ var cmdCronsPause = Command{
 	Path:     "sparkwing crons pause",
 	Synopsis: "Stop a schedule firing, keeping it armed",
 	Description: `A paused schedule still advances its cursor on every tick, so
-resuming it fires the next due instant rather than replaying the ones that
+resuming it fires the next due instant instead of replaying the ones that
 passed while it was paused.`,
 	PosArgs: []PosArg{
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
@@ -4404,14 +4144,15 @@ passed while it was paused.`,
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
-		{"Pause a schedule", "sparkwing crons pause nightly-rebuild"},
+		{"Pause a schedule", "sparkwing crons pause fictional-nightly"},
 	},
 }
 
 var cmdCronsResume = Command{
-	Path:        "sparkwing crons resume",
-	Synopsis:    "Let a paused schedule fire again",
-	Description: `Resumes at the next due instant. The instants that passed while the schedule was paused are behind its cursor and do not run.`,
+	Path:     "sparkwing crons resume",
+	Synopsis: "Let a paused schedule fire again",
+	Description: `Resumes at the next due instant. The instants that passed while the schedule
+was paused are behind its cursor and do not run.`,
 	PosArgs: []PosArg{
 		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
@@ -4420,7 +4161,7 @@ var cmdCronsResume = Command{
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
-		{"Resume a schedule", "sparkwing crons resume nightly-rebuild"},
+		{"Resume a schedule", "sparkwing crons resume fictional-nightly"},
 	},
 }
 
@@ -4441,7 +4182,7 @@ instants, so the next one still fires on time.`,
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
-		{"Run a schedule's pipeline now", "sparkwing crons run nightly-rebuild"},
+		{"Run a schedule's pipeline now", "sparkwing crons run fictional-nightly"},
 	},
 }
 

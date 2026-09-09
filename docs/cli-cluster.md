@@ -8,24 +8,13 @@ Every `sparkwing cluster` command, flag, and argument, generated from the CLI's 
 
 Operate and inspect the sparkwing cluster
 
-Cluster-scoped operations and state. 'status' rolls up
-controller health + fleet + queue state into one report;
-individual verbs drill in (agents for fleet detail, users /
-tokens for controller-stored config, image rollout
-for deploys, webhooks for GitHub delivery debug).
+Inspect controller health, executors, admission, users, tokens, images,
+and webhooks. Select the controller with --profile NAME.
+Configure profiles with 'sparkwing configure profiles'.
 
-Secrets used to live here; they're now top-level
-('sparkwing secrets ...') since they straddle laptop dotenv
-+ controller storage and are referenced constantly.
-
-'worker' runs a laptop-side queue drainer against a remote
-cluster. 'gc' sweeps stale warm-runner PVCs.
-
-For the laptop-local dashboard server, see
-'sparkwing dashboard start'.
-
-Profiles (via --profile) pick which cluster these commands
-address; set them up with 'sparkwing configure profiles'.
+'worker' executes queued triggers on this machine. 'gc' removes stale
+warm-runner storage. Manage secrets with 'sparkwing secrets' and the
+local dashboard with 'sparkwing dashboard'.
 
 ### Subcommands
 
@@ -81,8 +70,7 @@ live headroom. Changing the prefix requires a new heartbeat.
 
 Use a distinct revocable token for every coordinator membership. The
 prefix is accepted as input but is never returned by the agents API. A
-controller accepts at most 256 enrolled executors. Adding another returns
-`executor enrollment limit reached: maximum 256 per controller`.
+controller accepts at most 256 enrolled executors. Adding another returns `executor enrollment limit reached: maximum 256 per controller`.
 
 ### Flags
 
@@ -120,8 +108,8 @@ kind, trusted placement location, capabilities, concurrency limit, and
 measured resource headroom. A stale registration remains visible
 as offline; recent legacy claim-only runners remain visible too.
 
-Use -q to print just names, one per line, for shell piping
-(e.g. looping over agents with xargs).
+Use -q to print names, one per line, for shell piping
+(xargs and similar commands).
 
 ### Flags
 
@@ -129,7 +117,7 @@ Use -q to print just names, one per line, for shell piping
 |---|---|
 | `--profile NAME` | Profile name (required) |
 | `-o, --output FMT` | Output format (json\|table) |
-| `-q, --quiet` | Print just agent names, one per line |
+| `-q, --quiet` | Print agent names, one per line |
 
 ### Examples
 
@@ -145,7 +133,7 @@ sparkwing cluster agents list --profile prod -q
 
 Inspect a single concurrency namespace: holders + queue
 
-Shows who currently holds a concurrency namespace's slots
+Shows who holds a concurrency namespace's slots
 and the queue of waiters behind it, each with its admission-rank
 position. Weighted admission can run a later fitting waiter before
 an earlier non-fitting waiter, so position is not always run order.
@@ -211,11 +199,9 @@ sparkwing cluster gc --root /var/lib/sparkwing --profile prod
 
 Rollout helpers for images referenced by a gitops repo
 
-Composite verbs that operate on the images: block of a
-kustomization.yaml plus the downstream ArgoCD / kubectl dance.
-Building and pushing images stays with the consumer pipeline --
-this subcommand only owns the "bump tag, commit, push, sync,
-wait for rollout" path.
+Update an image tag in a GitOps repository, commit and push the change,
+sync ArgoCD, and wait for rollout. Publish the image before using these
+commands.
 
 ### Subcommands
 
@@ -224,8 +210,8 @@ wait for rollout" path.
 ### Examples
 
 ```sh
-# Bump sparkwing-runner to a new commit tag
-sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --wait
+# Update the example runner image
+sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait
 ```
 
 ## `sparkwing cluster image rollout`
@@ -250,11 +236,11 @@ there is nothing to commit, and the pipeline continues to sync
 + wait without error. Use --dry-run to preview the plan without
 writing, committing, pushing, syncing, or waiting.
 
-Optional tools are skipped cleanly when absent from PATH:
+Tool requirements:
   - argocd missing  -> sync is skipped with a one-line notice
   - kubectl missing -> --wait / --tail-logs error before side effects
 
-This verb does NOT build or push the image itself. The consumer
+This verb does not build or push the image itself. The consumer
 pipeline that produced --tag is responsible for publishing the
 image to the registry before calling rollout.
 
@@ -275,14 +261,14 @@ image to the registry before calling rollout.
 ### Examples
 
 ```sh
-# Dry-run against the sparkwing-runner image
-sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --dry-run
+# Preview the example runner image update
+sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --dry-run
 
 # Bump and wait for the rollout
-sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --wait
+sparkwing cluster image rollout --image fictional-runner --tag commit-abc123 --wait
 
 # Bump, sync, wait, then tail pod logs
-sparkwing cluster image rollout --image sparkwing --tag commit-abc123 --wait --tail-logs
+sparkwing cluster image rollout --image fictional-service --tag commit-abc123 --wait --tail-logs
 ```
 
 ## `sparkwing cluster status`
@@ -329,8 +315,8 @@ Manage controller API tokens
 
 All subcommands resolve controller URL + admin bearer from the
 profile named by --profile.
-Token creation prints the raw value to stdout exactly ONCE --
-stash it immediately.
+Token creation prints the raw value to stdout once --
+save it before leaving this command.
 
 ### Subcommands
 
@@ -354,9 +340,9 @@ this command exits it cannot be recovered.
 | Flag | Description |
 |---|---|
 | `--type KIND` | Token type: user \| runner \| service (required) |
-| `--principal NAME` | Free-form label identifying the token holder (required) |
-| `--scope CSV` | Comma-separated scopes (e.g. runs.read,runs.write); auth.md lists the full set |
-| `--ttl DURATION` | Token lifetime (e.g. 30d, 720h). 0 = never expires |
+| `--principal NAME` | Name identifying the token holder (required) |
+| `--scope CSV` | Comma-separated scopes; use sparkwing docs read --topic auth for the supported set |
+| `--ttl DURATION` | Token lifetime (30d, 720h, and similar durations). 0 = never expires |
 | `--profile NAME` | Profile name (required) |
 
 ### Examples
@@ -366,7 +352,7 @@ this command exits it cannot be recovered.
 sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write --profile prod
 
 # Mint a user token that expires in 30 days
-sparkwing cluster tokens create --type user --principal alice --scope admin --ttl 720h --profile prod
+sparkwing cluster tokens create --type user --principal fictional-user --scope admin --ttl 720h --profile prod
 ```
 
 ## `sparkwing cluster tokens list`
@@ -404,14 +390,15 @@ sparkwing cluster tokens list --profile prod
 sparkwing cluster tokens list --type service --include-revoked --profile prod
 
 # Inspect the warm-runner pool token's scopes as JSON
-sparkwing cluster tokens list --profile prod -o json | jq '.[] | select(.principal=="agent:sparkwing-warm-runner") | .scopes'
+sparkwing cluster tokens list --profile prod -o json | jq '.[] | select(.principal=="agent:fictional-runner") | .scopes'
 ```
 
 ## `sparkwing cluster tokens lookup`
 
 Print metadata for a single token
 
-Prints the JSON metadata for a token given its non-secret prefix. Useful for confirming principal + scopes before revoking or rotating.
+Prints the JSON metadata for a token given its non-secret prefix. Useful for
+confirming principal + scopes before revoking or rotating.
 
 ### Flags
 
@@ -431,7 +418,8 @@ sparkwing cluster tokens lookup --prefix a1b2c3d4 --profile prod
 
 Mark a token revoked
 
-Subsequent requests using the token receive HTTP 401. Revocation is immediate and irreversible.
+Subsequent requests using the token receive HTTP 401. Revocation is immediate
+and irreversible.
 
 ### Flags
 
@@ -462,7 +450,7 @@ window short.
 | Flag | Description |
 |---|---|
 | `--prefix PREFIX` | Non-secret prefix of the token to rotate (required) |
-| `--grace DURATION` | Window during which the old token still authenticates (max 168h) (default: 24h) |
+| `--grace DURATION` | Window during which the old token still authenticates (maximum 168h) (default: 24h) |
 | `--ttl DURATION` | TTL of the new token (0 = preserve the old token's remaining TTL) |
 | `--profile NAME` | Profile name (required) |
 
@@ -513,7 +501,7 @@ admin is refused until one exists.
 
 ```sh
 # Interactive add of the first admin
-sparkwing cluster users add --name alice --profile prod
+sparkwing cluster users add --name fictional-user --profile prod
 
 # Read-only account, once an admin exists
 sparkwing cluster users add --name viewer --scope runs.read,logs.read --profile prod
@@ -543,7 +531,7 @@ cleared; auth.md describes the windows that remain elsewhere.
 
 ```sh
 # Delete a user
-sparkwing cluster users delete --name alice --profile prod
+sparkwing cluster users delete --name fictional-user --profile prod
 ```
 
 ## `sparkwing cluster users list`
@@ -570,14 +558,9 @@ sparkwing cluster users list --profile prod
 
 Inspect and replay GitHub webhooks
 
-Sparkwing-aware wrapper over the GitHub hooks API. Shells out
-to 'gh api' (inherits your gh auth); install gh from
-https://cli.github.com if it isn't on PATH.
-
-Value-add over 'gh api' alone: the deliveries view joins
-GitHub's delivery log with sparkwing's trigger/run rows so
-each delivery shows the run id it produced and the run's
-terminal status -- without two separate lookups.
+Inspect GitHub webhooks through the installed 'gh' command and its
+credentials. The deliveries view joins delivery records with Sparkwing
+triggers and run outcomes.
 
 ### Subcommands
 
@@ -592,7 +575,7 @@ terminal status -- without two separate lookups.
 sparkwing cluster webhooks list --repo your-org/my-app
 
 # Recent deliveries for a hook
-sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --profile prod
+sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod
 ```
 
 ## `sparkwing cluster webhooks deliveries`
@@ -621,7 +604,7 @@ take a time filter). Default: 24h.
 
 ```sh
 # Recent deliveries for a hook
-sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --profile prod
+sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 123456789 --since 1h --profile prod
 ```
 
 ## `sparkwing cluster webhooks list`
@@ -655,9 +638,8 @@ sparkwing cluster webhooks list --repo your-org/my-app
 
 Queue a redelivery of a specific delivery UUID
 
-POSTs /repos/OWNER/NAME/hooks/HOOK/deliveries/DELIVERY/attempts
-to GitHub. GitHub queues a fresh attempt; the new delivery
-appears in the hook's delivery log within seconds.
+Requests another attempt for the selected GitHub webhook delivery.
+Read the hook's deliveries to inspect the resulting attempt.
 
 ### Flags
 
@@ -671,7 +653,7 @@ appears in the hook's delivery log within seconds.
 
 ```sh
 # Redeliver a webhook attempt
-sparkwing cluster webhooks replay --repo your-org/my-app --hook 608819334 --delivery 0ac55946-3e96-11f1-9de8-f33e32f0060f
+sparkwing cluster webhooks replay --repo your-org/my-app --hook 123456789 --delivery 00000000-0000-4000-8000-000000000001
 ```
 
 ## `sparkwing cluster worker`
@@ -679,10 +661,8 @@ sparkwing cluster webhooks replay --repo your-org/my-app --hook 608819334 --deli
 Claim triggers from a profile's controller and run them in-process
 
 Polls the trigger queue at the selected profile's
-controller and executes each claimed trigger in-process. Laptop-local:
-no K8s, no warm pool, no image dispatch. For the cluster-mode worker
-with --runner k8s|warm and image / service-account flags, use
-sparkwing-runner.
+controller and executes each claimed trigger in-process on this host.
+Use sparkwing-runner for --runner k8s|warm and image or service-account flags.
 
 Run against a remote controller via --profile prod (or whichever profile),
 or against a local 'sparkwing dashboard start' via --profile local.

@@ -6,32 +6,19 @@ Every `sparkwing examples` command, flag, and argument, generated from the CLI's
 
 ## `sparkwing examples`
 
-Worked pipelines to read, not starting points to scaffold
+Read complete example pipelines
 
-The sparks-core registry: complete, working pipelines --
-container deploys for AWS and GCP, migrations, canary rollouts,
-release publishing, test sharding. The template-verify pipeline
-proves every one compiles, lints, and explains, and runs the
-runnable-tier ones, so unlike prose they cannot quietly stop
-being true.
+Read complete pipelines from the sparks-core example registry. Examples
+cover container deployment, migrations, release publishing, test sharding,
+and similar tasks.
 
-Read them, do not scaffold from them. 'sparkwing pipeline new
---template <shape>' starts a pipeline; an example shows how a real
-one is built once you have the shape. Reach for one when you want
-to know how something is done rather than to begin.
+--category and --cloud filter the list. Cloud-independent examples match
+every cloud filter. --name reads one example's description, prerequisites,
+parameters, applicability, and README. --body includes source with default
+parameter values.
 
-Most arrivals should come through 'sparkwing docs search', which
-ranks examples alongside the docs -- searching "ecs fargate"
-answers the question without anyone browsing a list.
-
---category and --cloud narrow the list; a cloud-agnostic example
-always passes a --cloud filter. --name switches to a full detail
-view: description, when-to-use, prerequisite, parameters,
-applicability, and README. Add --body for the pipeline source
-rendered with each parameter's default.
-
--o json emits manifests for the list, or manifest + README
-(+ rendered body with --body) for one example.
+JSON output contains manifests for a list, or a manifest and README for one
+example. Use 'sparkwing pipeline new --template <shape>' to start a pipeline.
 
 ### Flags
 
@@ -52,6 +39,6 @@ sparkwing examples
 # Read one
 sparkwing examples --name container-deploy-ecs-fargate --body
 
-# Usually you want this instead
+# Search deployment guidance
 sparkwing docs search -q "ecs fargate"
 ```

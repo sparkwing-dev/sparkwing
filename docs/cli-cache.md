@@ -8,15 +8,10 @@ Every `sparkwing cache` command, flag, and argument, generated from the CLI's ow
 
 Inspect or trim the compiled pipeline binary cache
 
-Every pipeline invocation compiles .sparkwing/ to a binary keyed
-on a fingerprint of its source, and those binaries are cached under
-$SPARKWING_HOME/cache/pipelines. They are large -- often 90 MB or
-more each -- so the cache is bounded rather than allowed to grow.
-
-Pruning runs automatically after a compile, keeping the most
-recently used entries within a byte ceiling and an entry count.
-These verbs are for looking at what is cached and for reclaiming
-space on demand.
+Compiled pipeline binaries are keyed by their source fingerprint and stored
+under $SPARKWING_HOME/cache/pipelines. Automatic pruning after compilation
+keeps recently used entries within the configured byte and entry limits.
+Use these commands to inspect entries or reclaim space.
 
 ### Subcommands
 
@@ -44,8 +39,8 @@ the platform, the module tree, each local replace target, a covering
 go.work, and the resolved module pins -- each with its own digest and
 how much it covered.
 
-File counts note how many files git ignores and excluded, which is
-the usual explanation when an edit does not trigger a rebuild.
+File counts show how many files were excluded because Git ignores them.
+Edits to excluded files leave the cache key unchanged.
 
 When other cached entries came from the same checkout, each is listed
 with the inputs that differ from the current key. That is the direct
@@ -82,7 +77,7 @@ pruning evicts on -- not by when they were built.
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--all` | List every entry rather than the ten most recent |
+| `--all` | List every entry instead of the ten most recent |
 
 ### Examples
 
@@ -115,7 +110,7 @@ decisions remeasure filesystem capacity after pruning.
 
 | Flag | Description |
 |---|---|
-| `--max-bytes SIZE` | Byte ceiling, e.g. 512MiB |
+| `--max-bytes SIZE` | Byte ceiling (512MiB and similar sizes) |
 | `--max-entries N` | Entry ceiling |
 | `--all` | Remove every entry, ignoring both ceilings |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |

@@ -6,42 +6,26 @@ Every `sparkwing queue` command, flag, and argument, generated from the CLI's ow
 
 ## `sparkwing queue`
 
-The truthful view of local admission: holders, connections, waiters, and why
+Inspect local admission holders, connections, and waiters
 
-Reads the local admission daemon and prints one honest picture of
-where every run stands: each resource (host cores, memory, and every
-named concurrency semaphore) with its capacity and how much is in use;
-every run currently holding resources, with the repo it came from, how
-long it has held, and what it is charged; connected run registrations that
-hold no resources, labeled separately; and every waiter in admission
-order, with its position, priority, cost, and exactly what it is waiting on.
-A child run attached to its parent's lease renders indented under that
-parent. The header carries a one-line summary of the daemon's recent
-admission outcomes -- runs granted, median wait, evictions, queue
-timeouts, younger backfills, and protected waiters -- so chronic patterns show
-up at a glance.
+Reports the local admission daemon's resource capacity, usage, and queue.
+Each holder shows its repository, age, and charge. Connected runs that hold
+no resources have separate rows. Waiters appear in admission order with
+their position, priority, cost, and blocking resource. Attached child runs
+appear under their parent. The header summarizes recent admission outcomes.
 
-A holder that is alive but has burned near-zero CPU while runs queue
-behind it is flagged as stalled, together with the exact command to
-clear it -- 'sparkwing runs cancel --run <id>'. The queue never kills a
-run for you and never points at a host-wide destructive verb.
+A stalled holder includes a cancellation command:
+'sparkwing runs cancel --run <id>'. Inspect the holder before cancelling it.
+The queue command only reports state.
 
-Pretty on a terminal, JSON when piped (add -o json to force it), and
-one tab-separated record per line with -o plain for shell pipelines.
+Output is pretty on a terminal and JSON when piped. Select JSON explicitly
+with -o json, or tab-separated records with -o plain.
 
-Every view says outright whether it reached the daemon, because an empty
-queue and an unanswered one look identical otherwise. With no daemon
-running there is nothing to arbitrate, so the command reports an empty
-queue and exits 0. When the daemon's socket cannot be reached at all --
-blocked by a sandbox, wedged, gone mid-read -- what is queued is unknown
-rather than empty: the command says so, names the dial failure, and exits
-4 instead of reporting a quiet machine it never looked at.
+An absent daemon reports an empty queue and exits 0. An unreachable daemon
+reports the connection failure and exits 4; its queue state is unknown.
 
-With --profile NAME the view switches to that profile's controller: the
-same renderer prints the controller's admission state -- every
-concurrency key, its holders and waiters, and each registered runner's
-free capacity -- so one vocabulary reads local and cluster admission
-alike.
+With --profile NAME, the view reads that profile's controller and shows each
+concurrency key, its holders and waiters, and registered runner capacity.
 
 ### Subcommands
 
@@ -79,7 +63,12 @@ sparkwing queue priority --run build-123 --set front
 
 Run a command under local machine admission
 
-Submits the command to the local admission daemon before starting it. While blocked, the command is visible in sparkwing queue. Once granted, its complete process tree runs under the lease; interruption or cancellation terminates and reaps that tree before the lease is released. Exact process-session ownership is available on Linux and macOS; queue exec refuses before admission on Windows and other Unix platforms.
+Submits the command to the local admission daemon before starting it. While
+blocked, the command is visible in sparkwing queue. Once granted, its complete
+process tree runs under the lease; interruption or cancellation terminates and
+reaps that tree before the lease is released. Exact process-session ownership
+is available on Linux and macOS; queue exec refuses before admission on
+Windows and other Unix platforms.
 
 ### Arguments
 
@@ -119,7 +108,7 @@ that frees the run to start admits it immediately.
 resolve against the waiters that are not part of this run: front is one
 above the highest other waiter's priority, back is one below the lowest,
 and both fall back to a step either side of zero when nothing else is
-waiting. Asking for front twice is therefore stable rather than an
+waiting. Asking for front twice is therefore stable instead of an
 escalating race with the run's own rank.
 
 One run is several admission participants -- the run itself, and each of

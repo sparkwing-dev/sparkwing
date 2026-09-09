@@ -16,13 +16,13 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing dashboard`](cli-dashboard.md) -- Manage the local dashboard + API server
 - [`sparkwing debug`](cli-debug.md) -- Interactive debugging for pipeline runs
 - [`sparkwing docs`](cli-docs.md) -- Embedded user docs (offline)
-- [`sparkwing doctor`](cli-doctor.md) -- Diagnose and safely repair local state
-- [`sparkwing examples`](cli-examples.md) -- Worked pipelines to read, not starting points to scaffold
+- [`sparkwing doctor`](cli-doctor.md) -- Inspect and repair abandoned local state
+- [`sparkwing examples`](cli-examples.md) -- Read complete example pipelines
 - [`sparkwing fleet`](cli-fleet.md) -- Configure foreground assisted execution
-- [`sparkwing info`](cli-info.md) -- Self-describe sparkwing + the current project (agent entrypoint)
+- [`sparkwing info`](cli-info.md) -- Describe Sparkwing and the selected project
 - [`sparkwing pipeline`](cli-pipeline.md) -- This repo's pipelines
-- [`sparkwing profile`](cli-profile.md) -- Show which profile sparkwing would use right now, and why
-- [`sparkwing queue`](cli-queue.md) -- The truthful view of local admission: holders, connections, waiters, and why
+- [`sparkwing profile`](cli-profile.md) -- Show the selected profile and how it was chosen
+- [`sparkwing queue`](cli-queue.md) -- Inspect local admission holders, connections, and waiters
 - [`sparkwing repos`](cli-repos.md) -- The machine's fleet of sparkwing repos and their SDK pins
 - [`sparkwing run`](cli-run.md) -- Invoke a pipeline
 - [`sparkwing runs`](cli-runs.md) -- Inspect and control pipeline runs
@@ -44,7 +44,7 @@ for agent-facing discovery.
 
 ```sh
 # Run a pipeline (positional shortcut)
-sparkwing run build-test-deploy
+sparkwing run fictional-build
 
 # First command an agent should run
 sparkwing info --for-agent
@@ -53,9 +53,9 @@ sparkwing info --for-agent
 sparkwing pipeline list -o json
 
 # Inspect one pipeline's full metadata
-sparkwing pipeline describe --name release -o json
+sparkwing pipeline describe --name fictional-release -o json
 
-# Bootstrap + scaffold your first pipeline in a fresh repo
+# Bootstrap + scaffold your first pipeline in a new repository
 sparkwing pipeline new --name release
 
 # Start the local dashboard

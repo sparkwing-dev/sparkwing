@@ -16,9 +16,8 @@ invoked through 'sparkwing run <pipeline>' locally.
 
 With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run
-time. Pipelines pull a secret by listing it in the
-sparkwing.yaml 'secrets:' block. Raw values never transit the
-CLI except via 'secrets get'.
+time. Pipelines declare a typed Secrets provider to resolve their secrets.
+'secrets list' masks values; 'secrets get' prints them.
 
 ### Subcommands
 
@@ -31,7 +30,9 @@ CLI except via 'secrets get'.
 
 Remove a secret
 
-Deletes the secret from local files when --profile is omitted, or from the named profile's controller. Pipelines that reference the name will fail to resolve until the secret is re-added.
+Deletes the secret from local files when --profile is omitted, or from the
+named profile's controller. Pipelines that reference the name will fail to
+resolve until the secret is re-added.
 
 ### Flags
 
@@ -81,7 +82,9 @@ sparkwing secrets get --name API_TOKEN --profile prod
 
 List secret names + metadata
 
-Lists secret names and metadata from local files when --profile is omitted, or from the named profile's controller. Raw values are never printed by this command.
+Lists secret names and metadata from local files when --profile is omitted, or
+from the named profile's controller. Raw values are never printed by this
+command.
 
 ### Flags
 
@@ -120,7 +123,7 @@ does not land in shell history.
 | `--name NAME` | Secret name (unique per controller) (required) |
 | `--value VALUE` | Secret value (prefer --file for long values) |
 | `--file PATH` | Read value from file (keeps value out of shell history) |
-| `--plain` | Store as non-masked config (e.g. REGION, LOG_LEVEL) -- value will NOT be redacted in run logs. Default is masked. |
+| `--plain` | Store a configuration value visible in run logs. Values are masked by default. |
 | `--repo SLUG` | Scope the secret to one repository slug (controller only) |
 | `--shared` | Let every run read this unscoped secret (controller only). Without --repo or --shared the secret answers admin callers only. |
 | `--profile NAME` | Profile name (omit for local files) |

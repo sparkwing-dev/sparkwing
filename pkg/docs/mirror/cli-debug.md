@@ -8,17 +8,15 @@ Every `sparkwing debug` command, flag, and argument, generated from the CLI's ow
 
 Interactive debugging for pipeline runs
 
-Pause nodes at selected hook points, inspect the paused pod,
-drop into a shell, or release the node. Every debug verb is
-ephemeral -- pause directives live only on the run they launch,
-never in pipeline source. Pipelines stay production-clean.
+Pause nodes at selected execution points, inspect them, open a shell,
+or resume execution. Pause settings apply to the launched run.
 
 ### Subcommands
 
 - `run` -- Run a pipeline with ephemeral pause directives
 - `release` -- Resume a paused node
 - `attach` -- kubectl exec into a paused node's pod (cluster mode)
-- `env` -- Print a paused node's env + workdir + claim holder
+- `env` -- Print a paused node's environment and working directory + claim holder
 - `rerun` -- Reproduce a node's dispatch frame in an interactive shell
 - `replay` -- Re-execute a single node headlessly using its dispatch snapshot
 
@@ -29,7 +27,7 @@ never in pipeline source. Pipelines stay production-clean.
 sparkwing debug run build --pause-before tests
 
 # Resume a paused node
-sparkwing debug release --run run-X --node tests
+sparkwing debug release --run run-fictional --node tests
 ```
 
 ## `sparkwing debug attach`
@@ -54,18 +52,16 @@ exits 0.
 
 ```sh
 # Attach in prod
-sparkwing debug attach --run run-X --node tests --profile prod
+sparkwing debug attach --run run-fictional --node tests --profile prod
 ```
 
 ## `sparkwing debug env`
 
-Print a paused node's env + workdir + claim holder
+Print a paused node's environment and working directory + claim holder
 
-Inspection-only command: reads the stored node record (env map,
-claim holder, current pause state) and prints them to stdout.
-Does NOT spawn a shell. If the node is not paused, prints a
-warning and exits 0 -- env info is captured at pause time, not
-continuously.
+Prints the environment, working directory, process owner, and state
+captured when a node paused. If the node is not paused, prints a warning
+and exits zero.
 
 ### Flags
 
@@ -79,7 +75,7 @@ continuously.
 
 ```sh
 # Inspect locally
-sparkwing debug env --run run-X --node tests
+sparkwing debug env --run run-fictional --node tests
 ```
 
 ## `sparkwing debug release`
@@ -102,10 +98,10 @@ the pause point. Local and cluster modes share this surface.
 
 ```sh
 # Release locally
-sparkwing debug release --run run-X --node tests
+sparkwing debug release --run run-fictional --node tests
 
 # Release in prod
-sparkwing debug release --run run-X --node tests --profile prod
+sparkwing debug release --run run-fictional --node tests --profile prod
 ```
 
 ## `sparkwing debug replay`
@@ -119,11 +115,11 @@ node's input struct is reconstituted from the stored dispatch
 snapshot; upstream Refs resolve against the original
 run's outputs without re-executing them.
 
-Replay is "what would this node do now, with the same args+env?":
+Replay is "what would this node do now, with the same arguments and
+environment?":
 secrets re-resolve fresh through sparkwing.Secret, BeforeRun hooks
 re-fire, and any code drift in the registered job struct (renamed
-type, removed field) aborts loud rather than silently producing
-wrong results.
+type, removed field) returns an error.
 
 With --profile PROF, the original run + target node + dep outputs +
 dispatch snapshot are first fetched from the named controller via
@@ -143,38 +139,27 @@ registered pipeline factories.
 
 ```sh
 # Replay a node locally
-sparkwing debug replay --run run-X --node deploy
+sparkwing debug replay --run run-fictional --node deploy
 
 # Replay a prod run on your laptop
-sparkwing debug replay --profile prod --run run-X --node deploy
+sparkwing debug replay --profile prod --run run-fictional --node deploy
 ```
 
 ## `sparkwing debug rerun`
 
 Reproduce a node's dispatch frame in an interactive shell
 
-Reads the dispatch snapshot for the given run/node and reproduces
-the env + workdir the orchestrator saw at dispatch time. Local mode
-exec's $SHELL with the snapshot env applied and writes upstream Ref
-outputs to ~/.sparkwing/rerun/<run>/<node>/refs so they're cat-able
-from the shell. Cluster mode pipes a debug-pod manifest to 'kubectl
-create' against a runner image (--image or $SPARKWING_RERUN_IMAGE),
-carrying the snapshot env on stdin, then attaches to the pod and
-deletes it on exit.
+Opens an interactive shell using a node's recorded environment and working
+directory. Local execution writes upstream reference outputs beneath the
+run's rerun directory. Cluster execution creates a temporary pod using
+--image or SPARKWING_RERUN_IMAGE, attaches to it, and deletes it on exit.
 
-Snapshots drop credential-shaped names and values and rewrite the
-userinfo of any URL or DSN they keep, and the controller serves the
-captured env only to an admin token. The banner names the keys the
-snapshot dropped; export those yourself.
+Snapshots omit credential names and values and remove URL credentials.
+Controller access to the captured environment requires an admin token.
+The command lists omitted keys so you can supply required credentials.
+Secrets resolve when accessed, and the selected runner image applies.
 
-Replays do NOT freeze the rest of the cluster: secrets re-resolve
-through the standard sparkwing.Secret API on demand, and the runner
-image is whatever the cluster runs today. Replay is "what would this
-node do now, with the args+env it had then?", not a frozen
-reproduction.
-
-Default --seq selects the most-recent attempt for the node; pass
---seq 0 (or another integer) to target a specific attempt index.
+--seq selects an attempt index; its default selects the latest attempt.
 
 ### Flags
 
@@ -190,13 +175,13 @@ Default --seq selects the most-recent attempt for the node; pass
 
 ```sh
 # Rerun locally
-sparkwing debug rerun --run run-X --node tests
+sparkwing debug rerun --run run-fictional --node tests
 
 # Rerun a specific attempt
-sparkwing debug rerun --run run-X --node tests --seq 1
+sparkwing debug rerun --run run-fictional --node tests --seq 1
 
 # Rerun in prod
-sparkwing debug rerun --run run-X --node tests --profile prod --image ghcr.io/me/runner:v1
+sparkwing debug rerun --run run-fictional --node tests --profile prod --image ghcr.io/me/runner:v1
 ```
 
 ## `sparkwing debug run`
@@ -206,17 +191,17 @@ Run a pipeline with ephemeral pause directives
 Runs the named pipeline exactly as 'sparkwing run <pipeline>' would, with
 additional pause hooks the orchestrator honors before and after
 each matching node. Directives travel as env vars to the
-pipeline binary; they never land in git-tracked code.
+pipeline binary; they never land in tracked code.
 
 --pause-before <node> holds the node BEFORE its Run is invoked.
 --pause-after  <node> holds the node AFTER its Run returns
   (success or failure). Both flags are repeatable.
 --pause-on-failure holds ANY node whose Run returns a non-nil
-  error. Skipped / cancelled / OnFailure-recovered nodes do NOT
-  pause -- only honest Run errors.
+  error. Skipped / cancelled / OnFailure-recovered nodes do not
+  pause -- only Run errors.
 
 Paused nodes hold for 30 minutes by default; set
-SPARKWING_PAUSE_TIMEOUT=<duration> to change. A timed-out pause
+SPARKWING_PAUSE_TIMEOUT=<duration> to change. An expired pause
 is released with reason 'timeout-released' and surfaces in the
 run record.
 
@@ -228,7 +213,7 @@ into the pod holding the paused node.
 
 | Flag | Description |
 |---|---|
-| `--pipeline NAME` | Pipeline (pipeline) name to run under debug supervision (required) |
+| `--pipeline NAME` | Pipeline name to run under debug supervision (required) |
 | `--pause-before NODE` | Hold NODE before Run (repeatable) |
 | `--pause-after NODE` | Hold NODE after Run (repeatable) |
 | `--pause-on-failure` | Hold any node whose Run errors |

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -83,12 +84,12 @@ func exitCodeFor(err error) int {
 	if err == nil {
 		return 0
 	}
-	var ce *cliError
-	if errors.As(err, &ce) {
-		if ce.code == 0 {
+	var commandError *cliError
+	if errors.As(err, &commandError) {
+		if commandError.code == 0 {
 			return 1
 		}
-		return ce.code
+		return commandError.code
 	}
 	return 1
 }
@@ -97,7 +98,7 @@ func dispatchRun(args []string) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		if len(args) == 0 {
 			PrintHelp(cmdRun, os.Stderr)
-			return errors.New("run: pipeline name required (e.g. `sparkwing run hello`)")
+			return errors.New("run: pipeline name required; use `sparkwing run <pipeline>`")
 		}
 		PrintHelp(cmdRun, os.Stdout)
 		return nil
@@ -108,54 +109,62 @@ func dispatchRun(args []string) error {
 		PrintHelp(cmdRun, os.Stderr)
 		return fmt.Errorf("run: pipeline name must come first; got flag %q", pipelineName)
 	}
-	wf, passthrough := parseRunFlags(args[1:])
+	flags, passthrough := parseRunFlags(args[1:])
 	var err error
 
-	if err := checkRetiredWhereFlags(passthrough, nil); err != nil {
+	runnerArgs := passthrough
+	if separator := slices.Index(runnerArgs, "--"); separator >= 0 {
+		runnerArgs = runnerArgs[:separator]
+	}
+	if err := checkRetiredWhereFlags(runnerArgs, nil); err != nil {
 		return err
 	}
+	if flags.unknownRunnerFlag != "" {
+		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
+	}
+	if separator := slices.Index(passthrough, "--"); separator >= 0 {
+		passthrough = slices.Delete(passthrough, separator, separator+1)
+	}
 	priority := ""
-	if wf.prioritySet {
-		priority, err = validatePriorityFlag(wf.priority)
+	if flags.prioritySet {
+		priority, err = validatePriorityFlag(flags.priority)
 		if err != nil {
 			return err
 		}
 	}
-	// safety: ahead of the toolchain re-exec, the isolated home, the daemon
-	// pre-warm, and the fleet guard, none of which a detached launch performs --
-	// the consumer that executes the run does its own.
-	if wf.detached {
-		return runDetached(context.Background(), pipelineName, wf, passthrough)
+	// safety: the consumer owns execution setup for detached runs.
+	if flags.detached {
+		return runDetached(context.Background(), pipelineName, flags, passthrough)
 	}
-	if err := refuseDetachedOnlyFlags(wf); err != nil {
+	if err := refuseDetachedOnlyFlags(flags); err != nil {
 		return err
 	}
 	// safety: before the toolchain re-exec and the daemon pre-warm, because both
 	// resolve this machine's home from the environment this call rewrites.
-	if wf.isolatedHome != "" {
-		if err := applyIsolatedHome(wf.isolatedHome); err != nil {
+	if flags.isolatedHome != "" {
+		if err := applyIsolatedHome(flags.isolatedHome); err != nil {
 			return err
 		}
 	}
-	if wf.profile != "" {
-		if _, perr := resolveProfileFlag(wf.profile); perr != nil {
-			return perr
+	if flags.profile != "" {
+		if _, profileErr := resolveProfileFlag(flags.profile); profileErr != nil {
+			return profileErr
 		}
 	}
 
-	legacyStart := wf.changeDir
-	if legacyStart == "" {
-		if cwd, cerr := os.Getwd(); cerr == nil {
-			legacyStart = cwd
+	projectStart := flags.changeDir
+	if projectStart == "" {
+		if cwd, workingDirectoryErr := os.Getwd(); workingDirectoryErr == nil {
+			projectStart = cwd
 		}
 	}
-	if err := projectconfig.CheckLegacy(legacyStart); err != nil {
+	if err := projectconfig.CheckLegacy(projectStart); err != nil {
 		return err
 	}
 
 	var dir string
-	if wf.changeDir != "" {
-		dir, err = findSparkwingDirFrom(wf.changeDir)
+	if flags.changeDir != "" {
+		dir, err = findSparkwingDirFrom(flags.changeDir)
 	} else {
 		dir, err = findSparkwingDir()
 	}
@@ -172,18 +181,18 @@ func dispatchRun(args []string) error {
 	_ = repos.AutoRegister(filepath.Dir(dir))
 
 	if findings := lookupCachedRisks(dir, pipelineName); len(findings) > 0 {
-		if err := enforceRiskGate(pipelineName, findings, wf); err != nil {
+		if err := enforceRiskGate(pipelineName, findings, flags); err != nil {
 			return err
 		}
 	}
 
-	if wf.ref != "" {
-		_, sparkwingSub, cleanup, err := setupRefWorktree(dir, wf.ref)
+	if flags.ref != "" {
+		_, pipelineDirectory, cleanup, err := setupRefWorktree(dir, flags.ref)
 		if err != nil {
-			return fmt.Errorf("--sw-ref %s: %w", wf.ref, err)
+			return fmt.Errorf("--sw-ref %s: %w", flags.ref, err)
 		}
 		defer cleanup()
-		dir = sparkwingSub
+		dir = pipelineDirectory
 	}
 
 	env := os.Environ()
@@ -197,43 +206,43 @@ func dispatchRun(args []string) error {
 		env = append(env, "SPARKWING_LOG_FORMAT="+logFormat)
 	}
 
-	if wf.index != "" {
-		bound, bindErr := bindRunIndex(env, wf.index, os.Stdout, logFormat)
+	if flags.index != "" {
+		bound, bindErr := bindRunIndex(env, flags.index, os.Stdout, logFormat)
 		if bindErr != nil {
 			return bindErr
 		}
 		env = bound
 	}
-	if wf.runHandleFile != "" {
-		path, pathErr := filepath.Abs(wf.runHandleFile)
+	if flags.runHandleFile != "" {
+		path, pathErr := filepath.Abs(flags.runHandleFile)
 		if pathErr != nil {
-			return fmt.Errorf("--sw-run-handle-file %s: %w", wf.runHandleFile, pathErr)
+			return fmt.Errorf("--sw-run-handle-file %s: %w", flags.runHandleFile, pathErr)
 		}
 		env = setEnv(env, "SPARKWING_RUN_HANDLE_FILE", path)
 	}
-	if wf.verbose {
+	if flags.verbose {
 		env = append(env, "SPARKWING_LOG_LEVEL=debug")
 	}
-	if wf.startAt != "" {
-		env = append(env, "SPARKWING_START_AT="+wf.startAt)
+	if flags.startAt != "" {
+		env = append(env, "SPARKWING_START_AT="+flags.startAt)
 	}
-	if wf.stopAt != "" {
-		env = append(env, "SPARKWING_STOP_AT="+wf.stopAt)
+	if flags.stopAt != "" {
+		env = append(env, "SPARKWING_STOP_AT="+flags.stopAt)
 	}
-	if wf.dryRun {
+	if flags.dryRun {
 		env = append(env, "SPARKWING_DRY_RUN=1")
 	}
-	if wf.only != "" {
-		env = append(env, "SPARKWING_ONLY="+wf.only)
+	if flags.only != "" {
+		env = append(env, "SPARKWING_ONLY="+flags.only)
 	}
-	if wf.noCache {
+	if flags.noCache {
 		env = append(env, "SPARKWING_NO_CACHE=1")
 	}
-	if wf.localOnly {
+	if flags.localOnly {
 		env = append(env, "SPARKWING_LOCAL_ONLY=1")
 	}
 	var fleetSnapshot *worktreeSnapshot
-	if wf.fleet {
+	if flags.fleet {
 		configPath := os.Getenv("SPARKWING_FLEET_CONFIG")
 		if configPath == "" {
 			configPath, err = fleet.DefaultPath()
@@ -252,7 +261,7 @@ func dispatchRun(args []string) error {
 			return errors.New("--sw-fleet has no enrolled helpers; add one with `sparkwing fleet agents enroll --name ... --location ...`")
 		}
 		env = setEnv(env, "SPARKWING_FLEET_CONFIG", configPath)
-		if err := resolveSparks(context.Background(), dir, compileOptions{NoUpdate: wf.noUpdate}); err != nil {
+		if err := resolveSparks(context.Background(), dir, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
 			return err
 		}
 		fleetSnapshot, err = captureWorktreeSnapshot(context.Background(), filepath.Dir(dir))
@@ -278,41 +287,39 @@ func dispatchRun(args []string) error {
 		env = setEnv(env, "SPARKWING_FLEET_SOURCE_BYTES", strconv.FormatInt(fleetSnapshot.Size, 10))
 		env = setEnv(env, "SPARKWING_FLEET_SOURCE_BUNDLE_BYTES", strconv.FormatInt(fleetSnapshot.BundleSize, 10))
 	}
-	if len(wf.allow) > 0 {
-		env = append(env, "SPARKWING_ALLOW="+strings.Join(wf.allow, ","))
+	if len(flags.allow) > 0 {
+		env = append(env, "SPARKWING_ALLOW="+strings.Join(flags.allow, ","))
 	}
-	if wf.ref != "" {
-		env = append(env, "SPARKWING_REF="+wf.ref)
+	if flags.ref != "" {
+		env = append(env, "SPARKWING_REF="+flags.ref)
 	}
-	if wf.noUpdate {
+	if flags.noUpdate {
 		env = append(env, "SPARKWING_NO_UPDATE=1")
 	}
-	if wf.profile != "" {
-		env = setEnv(env, "SPARKWING_PROFILE", wf.profile)
+	if flags.profile != "" {
+		env = setEnv(env, "SPARKWING_PROFILE", flags.profile)
 	}
-	if wf.secrets != "" {
-		env = append(env, "SPARKWING_SECRETS_PROFILE="+wf.secrets)
+	if flags.secrets != "" {
+		env = append(env, "SPARKWING_SECRETS_PROFILE="+flags.secrets)
 	}
 
-	if wf.mode != "" {
-		env = append(env, "SPARKWING_MODE="+wf.mode)
-		if wf.workers > 0 {
-			env = append(env, fmt.Sprintf("SPARKWING_WORKERS=%d", wf.workers))
+	if flags.mode != "" {
+		env = append(env, "SPARKWING_MODE="+flags.mode)
+		if flags.workers > 0 {
+			env = append(env, fmt.Sprintf("SPARKWING_WORKERS=%d", flags.workers))
 		}
 	}
 
-	// safety: `front` and `back` travel unresolved because the queue they are
-	// measured against is the one standing when the pipeline program asks for
-	// admission, not the one standing when this process parsed a flag.
+	// safety: relative priority resolves against the queue at admission time.
 	if priority != "" {
 		env = setEnv(env, orchestrator.PriorityEnv, priority)
 	}
 
-	if runNeedsDaemon(wf, passthrough) {
+	if runNeedsDaemon(flags, passthrough) {
 		ensureRunDaemonFn()
 	}
 	var fleetParentGuard *fleet.ParentGuard
-	if wf.fleet {
+	if flags.fleet {
 		fleetParentGuard, err = fleet.StartParentGuard()
 		if err != nil {
 			return fmt.Errorf("--sw-fleet coordinator lifetime: %w", err)
@@ -323,7 +330,7 @@ func dispatchRun(args []string) error {
 	}
 	sweepStraySessionsBeforeRun()
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
-		compileOptions{NoUpdate: wf.noUpdate || wf.fleet})
+		compileOptions{NoUpdate: flags.noUpdate || flags.fleet})
 }
 
 func removeEnv(env []string, key string) []string {
@@ -445,20 +452,20 @@ func runSparkwing(args []string) error {
 	}
 }
 
-func runRunsApprovals(ctx context.Context, paths orchestrator.Paths, args []string) error {
+func runRunsApprovals(contextValue context.Context, paths orchestrator.Paths, args []string) error {
 	if handleParentHelp(cmdApprovals, args) {
 		return nil
 	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return runApprovalsList(ctx, paths, args)
+		return runApprovalsList(contextValue, paths, args)
 	}
 	switch args[0] {
 	case "list":
-		return runApprovalsList(ctx, paths, args[1:])
+		return runApprovalsList(contextValue, paths, args[1:])
 	case "approve":
-		return runApprove(ctx, paths, args[1:])
+		return runApprove(contextValue, paths, args[1:])
 	case "deny":
-		return runDeny(ctx, paths, args[1:])
+		return runDeny(contextValue, paths, args[1:])
 	default:
 		PrintHelp(cmdApprovals, os.Stderr)
 		return fmt.Errorf("runs approvals: unknown subcommand %q", args[0])
@@ -531,26 +538,26 @@ func runJobs(args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
+	contextValue := context.Background()
 
 	switch args[0] {
 	case "approvals":
-		return runRunsApprovals(ctx, paths, args[1:])
+		return runRunsApprovals(contextValue, paths, args[1:])
 	case "annotations":
-		return runRunsAnnotations(ctx, paths, args[1:])
+		return runRunsAnnotations(contextValue, paths, args[1:])
 	case "triggers":
 		return runTriggers(args[1:])
 	case "list":
 		fs := flag.NewFlagSet(cmdJobsList.Path, flag.ContinueOnError)
-		limit := fs.Int("limit", 20, "max runs to show")
-		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
+		limit := fs.Int("limit", 20, "maximum runs to show")
+		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
 		quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
-		since := lookbackDuration(fs, "since", 0, "only runs newer than this (e.g. 1h, 24h, 7d)")
+		since := lookbackDuration(fs, "since", 0, "only runs newer than this (1h, 24h, 7d, and similar durations)")
 		pipelines := multiFlagVar(fs, "pipeline", "filter by pipeline (repeatable; OR semantics; prefix `!` to exclude)")
 		statuses := multiFlagVar(fs, "status", "filter by status (repeatable; OR semantics; prefix `!` to exclude)")
 		branches := multiFlagVar(fs, "branch", "filter by git branch (repeatable; prefix `!` to exclude)")
 		shas := multiFlagVar(fs, "sha", "filter by git sha prefix (repeatable; prefix `!` to exclude)")
-		errorSubstr := fs.String("error", "", "substring match against the persisted failure reason")
+		errorSubstring := fs.String("error", "", "substring match against the persisted failure reason")
 		search := fs.String("search", "", "free-text search across pipeline/branch/sha/id/error; prefix a term with `-` to exclude")
 		startedAfter := fs.String("started-after", "", "only runs whose StartedAt >= this (today, yesterday, 24h, 7d, or a date)")
 		startedBefore := fs.String("started-before", "", "only runs whose StartedAt <= this")
@@ -569,7 +576,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
-		resolvedFmt, err := resolveOutputFormat(*outFmt, "runs list")
+		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs list")
 		if err != nil {
 			return err
 		}
@@ -586,7 +593,7 @@ func runJobs(args []string) error {
 			BranchExcludes: branchExc,
 			SHAPrefixes:    shaInc,
 			SHAExcludes:    shaExc,
-			ErrorSubstr:    *errorSubstr,
+			ErrorSubstr:    *errorSubstring,
 			StatusExcludes: statusExc,
 			PipelineExcl:   pipelineExc,
 			Search:         orchestrator.ParseSearch(*search),
@@ -611,44 +618,44 @@ func runJobs(args []string) error {
 			*ts.into = t
 		}
 
-		var sparkStyle orchestrator.SparklineStyle
+		var sparklineStyle orchestrator.SparklineStyle
 		switch *style {
 		case "ascii", "":
-			sparkStyle = orchestrator.SparkASCII
+			sparklineStyle = orchestrator.SparkASCII
 		case "block":
-			sparkStyle = orchestrator.SparkBlock
+			sparklineStyle = orchestrator.SparkBlock
 		case "dot":
-			sparkStyle = orchestrator.SparkDot
+			sparklineStyle = orchestrator.SparkDot
 		default:
 			return fmt.Errorf("runs list: --style must be ascii|block|dot, got %q", *style)
 		}
 
-		listOpts := orchestrator.ListOpts{
+		listOptions := orchestrator.ListOpts{
 			Limit:      *limit,
 			Pipelines:  pipelineSet,
 			Statuses:   statusInc,
 			Since:      *since,
-			JSON:       resolvedFmt == "json",
+			JSON:       resolvedFormat == "json",
 			Quiet:      *quiet,
 			Filter:     compiled,
 			ByPipeline: *byPipeline,
 			Pivot: orchestrator.PivotOpts{
 				SparklineLen: *sparkline,
-				Style:        sparkStyle,
+				Style:        sparklineStyle,
 			},
 		}
 
-		p, perr := resolveProfileFlag(*profileName)
-		if perr != nil {
-			return perr
+		p, profileErr := resolveProfileFlag(*profileName)
+		if profileErr != nil {
+			return profileErr
 		}
-		listOpts.Profile = p
-		return orchestrator.ListJobs(ctx, paths, listOpts, os.Stdout)
+		listOptions.Profile = p
+		return orchestrator.ListJobs(contextValue, paths, listOptions, os.Stdout)
 
 	case "status":
 		fs := flag.NewFlagSet(cmdJobsStatus.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
-		outFmt := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
+		outputFormat := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
 		steps := fs.Bool("steps", false, "render every step on every node in plain output")
 		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
@@ -664,26 +671,26 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		resolvedFmt, err := resolveOutputFormat(*outFmt, "runs status")
+		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs status")
 		if err != nil {
 			return err
 		}
-		statusOpts := orchestrator.StatusOpts{JSON: resolvedFmt == "json", Follow: *follow, Steps: *steps}
-		p, perr := resolveProfileFlag(*profileName)
-		if perr != nil {
-			return perr
+		statusOptions := orchestrator.StatusOpts{JSON: resolvedFormat == "json", Follow: *follow, Steps: *steps}
+		p, profileErr := resolveProfileFlag(*profileName)
+		if profileErr != nil {
+			return profileErr
 		}
-		statusOpts.Profile = p
-		if err := orchestrator.JobStatus(ctx, paths, *runID, statusOpts, os.Stdout); err != nil {
+		statusOptions.Profile = p
+		if err := orchestrator.JobStatus(contextValue, paths, *runID, statusOptions, os.Stdout); err != nil {
 			return err
 		}
 		if *exitZero {
 			return nil
 		}
 
-		status, serr := orchestrator.RunStatus(ctx, paths, p, *runID)
-		if serr != nil {
-			return serr
+		status, statusErr := orchestrator.RunStatus(contextValue, paths, p, *runID)
+		if statusErr != nil {
+			return statusErr
 		}
 		return statusExitCode(status)
 
@@ -691,7 +698,7 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsLogs.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		node := fs.String("node", "", "limit output to one node id")
-		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
+		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
 		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
@@ -699,10 +706,10 @@ func runJobs(args []string) error {
 		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")
 		grep := fs.String("grep", "", "substring filter (server-side in cluster mode)")
 		since := fs.Duration("since", 0,
-			"only include output from nodes whose StartedAt >= now-D (e.g. 5m, 1h)")
+			"only include output from nodes whose StartedAt >= now-D (5m, 1h, and similar durations)")
 		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
-		eventsOnly := fs.Bool("events-only", false, "filter to run-level envelope events (run_start, node_start, node_end, step_start, step_end, run_finish, plan_warn, ...) -- the bracketing NDJSON the dispatcher streams to stdout; a run read through a backend (shared database, object store, controller, or any profile that declares its own logs surface) emits that run's stored event records instead")
-		noEvents := fs.Bool("no-events", false, "filter to per-node body output only -- useful when scripts depend on the legacy shape")
+		eventsOnly := fs.Bool("events-only", false, "show run and step lifecycle events; stored runs use their recorded events")
+		noEvents := fs.Bool("no-events", false, "show node output only")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
@@ -713,18 +720,18 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		resolvedFmt, err := resolveTTYAwareOutput(*outFmt, "runs logs")
+		resolvedFormat, err := resolveTTYAwareOutput(*outputFormat, "runs logs")
 		if err != nil {
 			return err
 		}
 		if *tail > 0 && *head > 0 {
 			return errors.New("runs logs: --tail and --head cannot be combined")
 		}
-		opts := orchestrator.LogsOpts{
+		options := orchestrator.LogsOpts{
 			Node:       *node,
-			JSON:       resolvedFmt == "json",
+			JSON:       resolvedFormat == "json",
 			Follow:     *follow,
-			Format:     resolvedFmt,
+			Format:     resolvedFormat,
 			Tail:       *tail,
 			Head:       *head,
 			Lines:      *lines,
@@ -734,17 +741,17 @@ func runJobs(args []string) error {
 			EventsOnly: *eventsOnly,
 			NoEvents:   *noEvents,
 		}
-		p, perr := resolveProfileFlag(*profileName)
-		if perr != nil {
-			return perr
+		p, profileErr := resolveProfileFlag(*profileName)
+		if profileErr != nil {
+			return profileErr
 		}
-		opts.Profile = p
-		return orchestrator.JobLogs(ctx, paths, *runID, opts, os.Stdout)
+		options.Profile = p
+		return orchestrator.JobLogs(contextValue, paths, *runID, options, os.Stdout)
 
 	case "errors":
 		fs := flag.NewFlagSet(cmdJobsErrors.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
-		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
+		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
@@ -755,66 +762,66 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		resolvedFmt, err := resolveOutputFormat(*outFmt, "runs errors")
+		resolvedFormat, err := resolveOutputFormat(*outputFormat, "runs errors")
 		if err != nil {
 			return err
 		}
-		emitJSON := resolvedFmt == "json"
-		return orchestrator.JobErrors(ctx, paths, *runID, emitJSON, os.Stdout)
+		emitJSON := resolvedFormat == "json"
+		return orchestrator.JobErrors(contextValue, paths, *runID, emitJSON, os.Stdout)
 
 	case "consumer":
 		return runRunsConsumer(args[1:])
 	case "cancel":
-		return runRunsCancel(ctx, args[1:])
+		return runRunsCancel(contextValue, args[1:])
 	case "bounce":
-		return runRunsBounce(ctx, args[1:])
+		return runRunsBounce(contextValue, args[1:])
 	case "retry":
-		return runRunsRetry(ctx, args[1:])
+		return runRunsRetry(contextValue, args[1:])
 	case "prune":
-		return runRunsPrune(ctx, args[1:])
+		return runRunsPrune(contextValue, args[1:])
 
 	case "failures":
-		return runJobsFailures(ctx, paths, args[1:])
+		return runJobsFailures(contextValue, paths, args[1:])
 	case "stats":
-		return runJobsStats(ctx, paths, args[1:])
+		return runJobsStats(contextValue, paths, args[1:])
 	case "last":
-		return runJobsLast(ctx, paths, args[1:])
+		return runJobsLast(contextValue, paths, args[1:])
 	case "tree":
-		return runJobsTree(ctx, paths, args[1:])
+		return runJobsTree(contextValue, paths, args[1:])
 	case "get":
-		return runJobsGet(ctx, paths, args[1:])
+		return runJobsGet(contextValue, paths, args[1:])
 	case "receipt":
-		return runJobsReceipt(ctx, paths, args[1:])
+		return runJobsReceipt(contextValue, paths, args[1:])
 	case "wait":
-		return runJobsWait(ctx, paths, args[1:])
+		return runJobsWait(contextValue, paths, args[1:])
 	case "find":
-		return runJobsFind(ctx, paths, args[1:])
+		return runJobsFind(contextValue, paths, args[1:])
 	case "timeline":
-		return runJobsTimeline(ctx, paths, args[1:])
+		return runJobsTimeline(contextValue, paths, args[1:])
 	case "summary":
-		return runJobsSummary(ctx, paths, args[1:])
+		return runJobsSummary(contextValue, paths, args[1:])
 	case "grep":
-		return runJobsGrep(ctx, paths, args[1:])
+		return runJobsGrep(contextValue, paths, args[1:])
 	default:
 		return fmt.Errorf("runs: unknown command %q", args[0])
 	}
 }
 
-func resolveOutputFormat(outFmt, cmdPath string) (string, error) {
-	return resolveTTYAwareOutput(outFmt, cmdPath)
+func resolveOutputFormat(outputFormat, cmdPath string) (string, error) {
+	return resolveTTYAwareOutput(outputFormat, cmdPath)
 }
 
-func resolveTTYAwareOutput(outFmt, cmdPath string) (string, error) {
-	switch outFmt {
+func resolveTTYAwareOutput(outputFormat, cmdPath string) (string, error) {
+	switch outputFormat {
 	case "pretty", "json", "plain":
-		return outFmt, nil
+		return outputFormat, nil
 	case "":
 		if color.IsInteractiveStdout() {
 			return "pretty", nil
 		}
 		return "json", nil
 	default:
-		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
+		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outputFormat)
 	}
 }
 
