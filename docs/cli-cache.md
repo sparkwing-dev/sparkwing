@@ -11,7 +11,7 @@ Inspect or trim the compiled pipeline binary cache
 Every pipeline invocation compiles .sparkwing/ to a binary keyed
 on a fingerprint of its source, and those binaries are cached under
 $SPARKWING_HOME/cache/pipelines. They are large -- often 90 MB or
-more each -- so the cache is bounded rather than allowed to grow.
+more each -- so the cache is bounded instead of allowed to grow.
 
 Pruning runs automatically after a compile, keeping the most
 recently used entries within a byte ceiling and an entry count.
@@ -82,7 +82,7 @@ pruning evicts on -- not by when they were built.
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--all` | List every entry rather than the ten most recent |
+| `--all` | List every entry instead of the ten most recent |
 
 ### Examples
 
@@ -115,7 +115,7 @@ decisions remeasure filesystem capacity after pruning.
 
 | Flag | Description |
 |---|---|
-| `--max-bytes SIZE` | Byte ceiling, e.g. 512MiB |
+| `--max-bytes SIZE` | Byte ceiling (512MiB and similar sizes) |
 | `--max-entries N` | Entry ceiling |
 | `--all` | Remove every entry, ignoring both ceilings |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |

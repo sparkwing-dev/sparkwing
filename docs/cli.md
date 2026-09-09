@@ -8,18 +8,9 @@ command group (offline: `sparkwing docs read --topic cli-reference`,
 or `--topic cli-<group>` for one group). Treat that generated
 reference as authoritative -- when this page and it disagree, it wins.
 
-**Sparkwing does not require sparkwing.** The CLI is a developer
-convenience, not a dependency: a host that only ships the pinned pipeline
-binary -- no CLI installed -- still runs pipelines and stays operable.
-What the CLI adds at runtime is coordination: it hosts the per-machine
-admission daemon, so multiple runs on one box queue against each other
-instead of oversubscribing it. A pipeline binary alone runs
-uncoordinated. See [Headless hosts](#headless-hosts).
-
-The rule across the whole tree: **every input is a named flag**. The one
-intentional exception is the pipeline name on `sparkwing run <pipeline>`
-(and its `sparkwing pipeline run <pipeline>` long form), which is
-positional because operators type it all day.
+The CLI compiles pipelines, manages local state, and coordinates admission.
+A compiled pipeline binary can also execute on its own; see
+[Headless hosts](#headless-hosts).
 
 ## Output
 
@@ -40,18 +31,12 @@ sparkwing commands --format markdown --output plain
 ```
 
 `commands --format markdown --split-dir DIR` writes reference pages into
-files and reports the result in the selected output mode. The former
-`--output markdown` spelling is removed. Canonical output modes are
-`pretty`, `json` and `plain`; other spellings fail before work begins.
+files and reports the result in the selected output mode. Supported output
+modes are `pretty`, `json`, and `plain`.
 
-Cache JSON reports now expose their fields directly. Read `.entries` rather
-than `.payload.entries`; cache failures return a nonzero status with no
-stdout record. Plain cache output is the cache directory for `cache info`,
+Cache JSON reports expose their fields directly through `.entries` and similar
+fields. Cache failures return a nonzero status with no stdout record. Plain cache output is the cache directory for `cache info`,
 the key for `cache explain`, and the reclaimed entry count for `cache prune`.
-
-Some lifecycle, mutation and streaming commands still lack the shared
-output selector. Their remaining conversion is tracked separately from
-these discovery and report changes.
 
 ## sparkwing run
 
@@ -59,24 +44,26 @@ these discovery and report changes.
 sparkwing run <pipeline> [flags...]
 ```
 
-Compiles and runs a pipeline from the nearest `.sparkwing/`, locally.
-`sparkwing run` owns a set of control flags prefixed `--sw-*` (plus
-`--profile` and `--target`); everything else on the line is forwarded to
-the pipeline binary and parsed against the pipeline's typed Inputs. The
-`--sw-*` prefix keeps those control flags from colliding with
-pipeline-defined flags -- see the flag-namespace section of
-[sdk.md](sdk.md#typed-inputs) for the full list and the forwarding rules.
+Compiles and runs a pipeline from the nearest pipeline directory.
+Runner controls use `--sw-*`; an unknown option with that prefix fails before
+execution setup. Other arguments pass to the pipeline. Put `--` before
+pipeline arguments that resemble runner controls. Every argument after the
+separator passes through unchanged.
+
+The runner also consumes `--profile`, `-C`, `-v`, and the explicit
+`--dry-run=true` and `--dry-run=false` forms before the separator.
+`--target` passes to the pipeline.
 
 `--sw-allow` is enforced by the CLI before it dispatches anything. The
 labels you authorize are forwarded to the run as `SPARKWING_ALLOW`
-(comma-separated) purely so the run's own record shows what was
+(comma-separated) so the run's own record shows what was
 authorized -- setting that variable by hand authorizes nothing, because
 the gate has already run by then.
 
 `--profile NAME` selects the storage and dispatch addressing
 (state/cache/logs, and any controller auth). Execution still happens
 locally; to hand a run to a cluster, use `sparkwing pipeline trigger`
-instead of `sparkwing run`.
+for remote execution.
 
 ## Command groups
 
@@ -92,7 +79,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update |
 | `queue` | Local admission: holders, connections, waiters, capacity |
 | `daemon` | The local admission daemon: status / restart |
-| `profile` | Show which profile would resolve right now, and why (read-only; never prints tokens) |
+| `profile` | Show which profile would resolve for this invocation, and why (read-only; never prints tokens) |
 | `version` | Composite CLI + SDK + sparks version card; `version update --sdk` bumps the pinned SDK |
 | `update` | Self-update the `sparkwing` CLI binary |
 | `dashboard` | Detached local dashboard server: start / kill / status |
@@ -106,24 +93,18 @@ indexed in [cli-reference.md](cli-reference.md):
 | `commands` | The full CLI surface as JSON (agent self-discovery) |
 | `completion` | Shell completion script (`--shell bash\|zsh\|fish`) |
 
-One-shot repo-local shell chores -- formatters, port-forwards,
-Makefile-style glue -- belong in whatever task runner you already use;
-sparkwing is the Go-pipeline platform.
-
 ## Conventions
 
-- **Named flags only.** Every input is `--flag value`; the pipeline name
-  on `sparkwing run` is the sole positional.
 - **Structured output.** List / describe / get verbs accept
-  `-o pretty|json|plain` (default `pretty`). `-o` / `--output` is the one
+  `-o pretty|json|plain` (pretty on terminals, JSON when piped). `-o` / `--output` is the one
   output-format selector across the CLI.
 - **List output is one record per line.** A listing's `-o json` is
   NDJSON: one complete JSON object per line, no array and no
   pretty-printing, so `head -5` returns five whole records instead of a
   truncated document that parses as nothing. Read the stream a line at a
   time (`json.Decoder` in a loop, `jq -c .` with no `-s`, `while read
-  line`). An empty listing is an empty stream, not `[]`. Describe / get
-  / status verbs answer with one object and stay pretty-printed.
+  line`). An empty listing is an empty stream. Describe, get, and status verbs return
+  one compact JSON object.
 - **Profile addressing.** `--profile NAME` picks the storage/dispatch
   profile. Absent, commands read local state (SQLite under `~/.sparkwing/`).
   `sparkwing run` always executes locally; `sparkwing pipeline trigger` is
@@ -136,34 +117,19 @@ sparkwing is the Go-pipeline platform.
 
 ## Agent discovery
 
-Agents should read the catalog as JSON rather than scraping help text:
+Use the command index to find a command, then read its help:
 
 ```bash
-sparkwing pipeline list -o json                 # every invocable with metadata
-sparkwing pipeline describe --name X -o json    # one pipeline's full metadata
-sparkwing pipeline discover --query TEXT -o json # ranked fuzzy search
-sparkwing pipeline explain --name X -o json     # Plan DAG before running
-sparkwing commands                              # one-line index of every verb
+sparkwing commands --query status
+sparkwing runs status --help
+sparkwing pipeline list -o json
+sparkwing pipeline describe --name fictional-build -o json
+sparkwing pipeline discover --query fictional-build -o json
 ```
 
-The list verbs stream NDJSON, so an agent that cannot afford a whole
-catalog reads a prefix of it: `sparkwing commands --path runs -o json |
-head -20` is twenty complete command records. `sparkwing commands` with
-no flags is the cheapest orientation of all -- one line per verb for the
-whole surface.
-
-`sparkwing commands -o json` is an index, not a help dump: each record
-carries `path`, `synopsis`, and `subcommand_count` (0 means the verb is
-a leaf), and nothing else. Description, flags, and examples belong to
-`<path> --help`, which renders them from the same command registry and
-cannot go stale against it; duplicating them into the listing cost 190KB
-to answer a question the caller had not asked yet. Hidden commands are
-dispatchable but omitted from every listing -- their own help names the
-supported verb to use instead, so surfacing them in the index would
-steer readers at the thing the index exists to steer them away from.
-`--include-hidden` lists them, marked `"hidden": true`, and a `--path`
-that matches only hidden commands says so rather than reporting an empty
-subtree.
+Command records carry `path`, `synopsis`, and `subcommand_count`.
+Help supplies descriptions, flags, and examples. Hidden commands require
+`--include-hidden`. See [Bounded discovery](#bounded-discovery) for pagination.
 
 The describe schema matches `sparkwing.DescribePipeline` plus
 `group` / `tags` / `triggers` drawn from the `pipelines:` block in
@@ -177,12 +143,12 @@ invoke pipelines by name, and inspect local state through the binary's
 own `ops` verbs:
 
 ```bash
-./pipelines <name>                # run a pipeline
-./pipelines ops queue             # the admission queue: holders, waiters, capacity
-./pipelines ops doctor            # repair private-home permissions and provably-dead local state
-./pipelines ops stats             # the rolling admission-outcome window
-./pipelines ops stats-reset       # clear that window after an incident
-./pipelines ops version           # the binary's SDK version
+./pipelines <name>
+./pipelines ops queue
+./pipelines ops doctor
+./pipelines ops stats
+./pipelines ops stats-reset
+./pipelines ops version
 ```
 
 The `ops` verbs share the CLI's output conventions -- `-o pretty|json|plain`,
@@ -190,7 +156,7 @@ the same JSON shapes as `sparkwing queue` / `sparkwing doctor` -- so a
 script written against the CLI works unchanged against the binary. They
 are the field-recovery surface for a host with no browser and no CLI:
 `ops queue` shows why work is stuck, `ops doctor` clears it, and both are
-non-destructive to live runs.
+limited to inspection and abandoned-state repair.
 
 One thing a bare pipeline binary does not do is host the admission
 daemon. **The installed Sparkwing distribution owns daemon lifecycle.
@@ -201,17 +167,13 @@ to its own path -- else the `sparkwing` found on PATH.
 
 With neither present, a run says so once and proceeds without host
 arbitration -- fine for a host that runs one pipeline at a time.
-`.Concurrency()` groups still hold, through the shared store rather than
+`.Concurrency()` groups still hold, through the shared store instead of
 the daemon. The exception is a pipeline that reserves host capacity with
 `.Resources()`: that run fails instead, naming the fix, because CPU and
 memory have no fallback arbiter (`SPARKWING_ALLOW_UNADMITTED=1` overrides
 it if you know what else runs on the box). Put the CLI on the box when
 concurrent runs there should queue against each other -- see
 [local-execution.md](local-execution.md#who-hosts-the-daemon).
-
-This is the operational face of *sparkwing does not require sparkwing*:
-the pipeline binary is the product, and it stays functional alone -- the
-CLI adds the coordination.
 
 ## Bounded discovery
 
@@ -236,7 +198,7 @@ keeping the same filters and binary version. Command/topic cursors name the
 last lexical path/slug; search cursors name the last ranked section as
 `slug:start_line`. An unknown cursor fails instead of silently restarting.
 Metadata records retain their existing selection fields; readers must
-recognize the final page record rather than treat it as a command/topic.
+recognize the final page record instead of treat it as a command/topic.
 
 `--limit 0` explicitly returns every remaining match. Plain mode prints
 paths or selectors only; continuation information goes to stderr. Pretty

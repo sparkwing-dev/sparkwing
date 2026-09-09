@@ -8,16 +8,12 @@ Every `sparkwing configure` command, flag, and argument, generated from the CLI'
 
 Configure laptop-local settings
 
-Laptop-local setup commands. 'init' is the one-shot
-"prepare ~/.config/sparkwing/ + report what's there" command;
-'profiles' manages remote-cluster connection profiles. Future
-laptop-level surfaces (aliases, default flags, per-repo config)
-land here.
+Configure this machine. 'init' prepares the configuration directory and
+reports its contents. 'profiles' manages controller connections.
+'xrepo' registers local repositories.
 
-Controller-side state (users, tokens) lives under
-'sparkwing cluster ...' since it writes to the remote
-controller, not the local config. Secrets are top-level
-('sparkwing secrets ...').
+Manage controller users and tokens with 'sparkwing cluster'.
+Manage secrets with 'sparkwing secrets'.
 
 ### Subcommands
 
@@ -62,7 +58,7 @@ in one step (no separate init needed).
 Re-running on an already-set-up laptop re-applies 0700 to
 ~/.config/sparkwing/ and reports each config file's mode, naming any
 that group or other users can read. --dry-run skips both the mkdir
-and the permission fix so the command pure-probes.
+and the permission fix so the command reports existing state.
 
 ### Flags
 
@@ -144,7 +140,8 @@ sparkwing configure profiles add --name local --controller http://127.0.0.1:4344
 
 Copy one profile's config into another
 
-Useful when you want to tweak a known-good profile (say, change the token for a staging rotation) without hand-editing yaml.
+Copies the source profile into a new destination profile. The destination
+name must be unused.
 
 ### Flags
 

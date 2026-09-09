@@ -155,7 +155,7 @@ lookup short. `sparkwing docs read --guide authoring` returns the
 whole set in one call.
 
 Guides carry narrative topics only. The generated references
-(sdk-reference, cli-reference) are lookup tables rather than pages to
+(sdk-reference, cli-reference) are lookup tables instead of pages to
 read end to end; reach those with `sparkwing docs search`.
 
 ### Flags
@@ -196,7 +196,7 @@ The embedded copy matches this binary; --web reads another version.
 | `--cursor CURSOR` | Continue after next_cursor with the same filters and binary version |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--web` | Fetch from sparkwing.dev instead of the embedded corpus |
-| `--version vX.Y.Z` | Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version. |
+| `--version vX.Y.Z` | Doc version (vX.Y.Z or latest). Defaults to this CLI's embedded version. |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
 
 ### Examples
@@ -219,16 +219,9 @@ sparkwing docs list --web --version v0.3.0
 
 Per-version migration guides (agent-friendly)
 
-Surface the migration guides shipped under docs/migrations/.
-Each released sparkwing version that introduces breaking changes
-gets a guide; `sparkwing docs migrations between` concatenates
-every guide in a version range into one blob you can pipe straight
-into an agent context.
-
-The same files are also reachable as regular docs (e.g.
-`sparkwing docs read --topic migrations/v0.4.0`); this
-subcommand is the ergonomics layer with semver-aware filtering and
-range output.
+Read the migration guides embedded in this binary. Use 'list' to find a
+version, 'read' for one guide, or 'between' for every guide in a version
+range.
 
 ### Subcommands
 
@@ -256,16 +249,11 @@ sparkwing docs migrations between
 
 Concatenate every guide in a version range into one blob
 
-Returns every migration guide whose version is in (--from, --to],
-in ascending version order, separated by markdown horizontal rules.
-The output starts with a "Migration: vA -> vB" header so an agent
-knows the range up-front.
+Returns guides with versions greater than --from and at most --to, in
+ascending version order. Markdown output separates guides with horizontal
+rules and identifies the selected range in its heading.
 
-This is the agent-killer command: one invocation produces the full
-migration context for an N-version jump in a form ready to pipe.
-
---from defaults to v0.0.0 (every guide up through --to).
---to defaults to the highest version this CLI knows about.
+--from defaults to v0.0.0. --to defaults to the highest embedded version.
 
 ### Flags
 
@@ -289,7 +277,7 @@ sparkwing docs migrations between --to v0.4.0
 # Every guide this CLI knows (one-shot agent context)
 sparkwing docs migrations between
 
-# Full range from sparkwing.dev (includes versions not yet embedded)
+# Full range from sparkwing.dev (includes versions outside this binary's embedded versions)
 sparkwing docs migrations between --web
 ```
 
@@ -346,7 +334,7 @@ rewritten into `sparkwing docs read --topic <slug>` form
 
 | Flag | Description |
 |---|---|
-| `--version vX.Y.Z` | Migration guide version (e.g. v0.4.0). Positional fallback accepted. |
+| `--version vX.Y.Z` | Migration guide version (vX.Y.Z). Positional fallback accepted. |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--web` | Fetch from sparkwing.dev instead of the embedded corpus |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
@@ -360,7 +348,7 @@ sparkwing docs migrations read --version v0.4.0
 # Positional shortcut
 sparkwing docs migrations read v0.4.0
 
-# Read v0.5.0 from sparkwing.dev (not yet embedded)
+# Read v0.5.0 from sparkwing.dev (outside this binary's embedded versions)
 sparkwing docs migrations read --version v0.5.0 --web
 ```
 
@@ -373,8 +361,7 @@ from docs search (--section). Section selection requires --topic and
 cannot combine with --guide or --web. Piped output is one JSON document record;
 --output plain prints raw Markdown. The slug is
 the filename under /docs/ minus .md (run `sparkwing docs list` to
-see them all). Subdirs use slash-separated paths (e.g.
-design/remote-retry).
+see them all). Nested topics use slash-separated names.
 
 Default source is the binary's embedded corpus. Use --web to fetch
 from sparkwing.dev, optionally pinned to --version vX.Y.Z or
@@ -386,10 +373,10 @@ from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 |---|---|
 | `--section START_LINE` | Read one embedded section returned by search |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (pretty on a terminal, json when piped) |
-| `--topic NAME` | Doc slug (e.g. getting-started, pipelines, mcp) |
+| `--topic NAME` | Topic name from docs list |
 | `--guide NAME` | Read a task-sized set of topics instead of one (`sparkwing docs guides`) |
 | `--web` | Fetch from sparkwing.dev instead of the embedded corpus |
-| `--version vX.Y.Z` | Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version. |
+| `--version vX.Y.Z` | Doc version (vX.Y.Z or latest). Defaults to this CLI's embedded version. |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
 
 ### Examples
@@ -456,14 +443,9 @@ sparkwing docs search -q "warm pool" --topics
 
 List doc versions known to this CLI (and sparkwing.dev with --web)
 
-Reports each doc version the source knows about. Default
-output is hermetic: only the binary's embedded version (plus every
-migration-guide version shipped in the embed) appears, with no
-network calls.
-
-With --web, fetches sparkwing.dev/versions.json and merges in every
-release available online -- useful for discovering newer versions
-this CLI can render via --web on the read / list verbs.
+Lists the binary's embedded documentation version and migration-guide
+versions. With --web, also fetches published versions from sparkwing.dev.
+Use a returned version with 'sparkwing docs read --web --version'.
 
 ### Flags
 

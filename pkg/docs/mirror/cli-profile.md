@@ -6,7 +6,7 @@ Every `sparkwing profile` command, flag, and argument, generated from the CLI's 
 
 ## `sparkwing profile`
 
-Show which profile sparkwing would use right now, and why
+Show the selected profile and how it was chosen
 
 Reports the profile a sparkwing command would resolve to and
 the chain that picked it (flag > project hint > detect > default

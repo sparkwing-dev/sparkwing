@@ -108,7 +108,7 @@ Common shapes:
 sparkwing.Bash(ctx, "go test ./...").Run()
 sparkwing.Bash(ctx, `git -C "$R" diff --name-only`).Env("R", repo).MustBeEmpty("uncommitted changes")
 sha, _ := sparkwing.Exec(ctx, "git", "rev-parse", "HEAD").String()
-pkgs, _ := sparkwing.Bash(ctx, "go list ./...").Lines()
+packages, _ := sparkwing.Bash(ctx, "go list ./...").Lines()
 var pods PodList
 sparkwing.Exec(ctx, "kubectl", "get", "pods", "-o", "json").JSON(&pods)
 sparkwing.Exec(ctx, "go", "test", "./...").Dir("internal").Env("CGO_ENABLED", "0").Run()
@@ -161,7 +161,7 @@ cmd := sparkwing.Bash(ctx, "golangci-lint run --allow-serial-runners ./...")
 _, err = slot.Configure(cmd, "GOLANGCI_LINT_CACHE").Run()
 ```
 
-Use `Configure` rather than setting the directory yourself. It sets
+Use `Configure` instead of setting the directory yourself. It sets
 `PWD` as well: Go's `os.Getwd` prefers
 `$PWD` when it names the same directory as `.`, so a bare change of
 directory resolves the symlink, the linter sees the worktree's own
@@ -318,14 +318,14 @@ Approval gates register through `sw.JobApproval` and return an
 `*ApprovalGate` -- a narrower modifier surface than `*JobNode` so the
 modifiers that don't apply to gates (`Retry`, `Timeout`, `Memoize`,
 `Requires`, `Inline`) are physically absent and a misuse is a compile
-error rather than a runtime surprise:
+error:
 
 ```go
 approve := sw.JobApproval(plan, "approve-prod", sw.ApprovalConfig{
     Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
     Timeout:  2 * time.Hour,
     OnExpiry: sw.ApprovalFail,
-}).Needs(integStg)
+}).Needs(stagingChecks)
 
 sw.Job(plan, "deploy-prod", &Deploy{}).Needs(approve)
 ```
@@ -333,12 +333,11 @@ sw.Job(plan, "deploy-prod", &Deploy{}).Needs(approve)
 Available modifiers on `*ApprovalGate`: `Needs`, `NeedsOptional`,
 `OnFailure`, `BeforeRun`, `AfterRun`, `SkipIf`, `Optional`,
 `ContinueOnError`. Plus `Job()` as the escape hatch when an author
-genuinely needs the underlying `*JobNode`.
+needs the underlying `*JobNode`.
 
 `OnExpiry` defaults to fail; valid values are `sw.ApprovalFail`,
 `sw.ApprovalDeny`, `sw.ApprovalApprove`. Unknown values panic at
-plan time. (Named `OnExpiry` rather than `OnTimeout` to keep it
-distinct from `Job.Timeout()`, which bounds per-attempt execution.)
+plan time. `Job.Timeout()` bounds per-attempt execution.
 
 Plan accessors (reads; methods on `*Plan`):
 
@@ -440,7 +439,7 @@ struct), pass the closure directly to `sw.Job` and skip the
 Workable entirely:
 
 ```go
-sw.Job(plan, "lint", p.run)   // p.run is func(ctx context.Context) error
+sw.Job(plan, "lint", p.run)
 ```
 
 The SDK wraps the closure into a Workable.
@@ -479,8 +478,8 @@ step.SafeWithoutDryRun() *WorkStep                        // mark the apply Fn a
 Choose the parallel failure policy once per Work:
 
 ```go
-w.ParallelFailures(sw.FailFast)   // default: cancel ordinary siblings on the first decisive failure
-w.ParallelFailures(sw.CollectAll) // finish independent/ready siblings and report the full failure set
+w.ParallelFailures(sw.FailFast)
+w.ParallelFailures(sw.CollectAll)
 ```
 
 Fail-fast records the triggering step, cancelled sibling count, and
@@ -499,7 +498,7 @@ run-wide ctx -- detect it with `IsDryRun(ctx)`. Each step's dispatch
 then picks one of three paths:
 
 - `step.DryRun(fn)` declared -> `fn` runs in place of the apply Fn.
-  The closure must NEVER mutate state; it answers "what *would* the
+  The closure reports proposed changes without mutating state; it answers "what *would* the
   apply do" the way `terraform plan`, `kubectl apply --dry-run=server`,
   and `helm upgrade --dry-run` do for their tools.
 - `step.SafeWithoutDryRun()` declared -> the apply Fn runs unchanged,
@@ -571,9 +570,9 @@ type Build struct {
 }
 
 func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
-    tag      := sw.Step(w, "tag",      j.computeTag)        // (string, error)
-    platform := sw.Step(w, "platform", j.detectPlatform)    // (string, error)
-    hash     := sw.Step(w, "hash",     j.computeHash)       // (string, error)
+    tag      := sw.Step(w, "tag",      j.computeTag)
+    platform := sw.Step(w, "platform", j.detectPlatform)
+    hash     := sw.Step(w, "hash",     j.computeHash)
 
     return sw.Step(w, "compose", func(ctx context.Context) (BuildOut, error) {
         return BuildOut{
@@ -611,27 +610,25 @@ field. The constructor in `Plan()` carries the routing detail:
 ```go
 type Build struct {
     sw.Base
-    sw.Produces[BuildOut]      // declares the contract on the struct
+    sw.Produces[BuildOut]
 }
 
 func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
-    return sw.Step(w, "run", j.run), nil  // returned step IS the Job's typed output
+    return sw.Step(w, "run", j.run), nil
 }
 
 type Deploy struct {
     sw.Base
-    Build    sw.Ref[BuildOut]   // in-run
-    Manifest sw.Ref[Manifest]   // cross-pipeline, same field type
+    Build    sw.Ref[BuildOut]
+    Manifest sw.Ref[Manifest]
 }
 
 build := sw.Job(plan, "build", &Build{})
 sw.Job(plan, "deploy", &Deploy{
-    Build:    sw.RefTo[BuildOut](build),                                 // typed handle; the .Needs(build) below wires the edge
+    Build:    sw.RefTo[BuildOut](build),
     Manifest: sw.RefToLastRun[Manifest]("manifest-pipe", "out",
-                  sw.MaxAge(24*time.Hour)),                              // staleness guard
+                  sw.MaxAge(24*time.Hour)),
 }).Needs(build)
-
-// In step body:
 b := j.Build.Get(ctx)
 m := j.Manifest.Get(ctx)
 ```
@@ -646,7 +643,7 @@ Untyped pipelines (no typed output) skip both `sw.Produces[T]` and
 
 ```go
 out, err := sparkwing.RunAndAwait[Out, In](ctx, "build", "artifact",
-    sparkwing.WithFreshInputs(In{Service: "api"}),  // typed flag struct
+    sparkwing.WithFreshInputs(In{Service: "api"}),
     sparkwing.WithFreshTimeout(10*time.Minute),
 )
 ```
@@ -679,14 +676,6 @@ returns `no resolver installed` / panics. This is consistent with the
 are resolved when the graph runs.
 
 ```go
-// Wrong: reads config at Plan time -- no resolver installed yet.
-func (b *Build) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
-    region := sw.MustConfig(ctx, "REGION") // panics
-    sw.Job(plan, "build", func(_ context.Context) error { return doBuild(region) })
-    return nil
-}
-
-// Right: defer the lookup into the step body.
 func (b *Build) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
     sw.Job(plan, "build", func(ctx context.Context) error {
         region, err := sw.Config(ctx, "REGION")
@@ -821,7 +810,7 @@ Limits worth knowing:
   in logs but does not appear on the run row at all, redacted or
   otherwise. The row records the arguments the caller passed, and the
   yaml layers are re-read from the checkout each run, so a retry picks
-  up the project's current value rather than a copy of the old one.
+  up the project's current value instead of a copy of the old one.
 - Trigger rows are not redacted. `sparkwing runs triggers get`,
   `sparkwing runs triggers list`, and `GET /api/v1/triggers` show
   argument values, because the same endpoint hands them to the runner
@@ -876,7 +865,7 @@ type WrapperInputs struct {
 ### Flag namespace: `--sw-*` vs your flags
 
 `sparkwing run` keeps its own control flags out of your way by
-prefixing every one of them with `sw-`:
+using the `sw-` prefix for its long control options:
 
 ```
 -C, --sw-cd PATH          // re-anchor .sparkwing/ discovery
@@ -893,16 +882,13 @@ prefixing every one of them with `sw-`:
     --sw-no-update        // skip the sparks auto-resolve step
 ```
 
-Because the runner owns the `sw-` prefix, your pipeline `flag:"..."`
-tags have the entire unprefixed namespace to themselves -- there is no
-reserved-name collision check, and a field named `flag:"ref"` or
-`flag:"verbose"` resolves to *your* flag, not the runner's. Any flag
-`run` doesn't recognize is forwarded to the pipeline binary as a typed
-Arg.
+The runner reserves `--sw-*` for control options. Unknown options with that
+prefix fail before execution setup. Other arguments pass to the pipeline.
+Put `--` before pipeline arguments that resemble runner options; every argument after
+the separator passes unchanged to the pipeline binary.
 
-The only non-`sw-` flags `run` consumes itself are `--profile` and
-`--target` (storage / deployment-target selection); avoid those two
-names and the `sw-` prefix for pipeline inputs.
+Before the separator, the runner also consumes `--profile`, `-C`, `-v`, and
+`--dry-run=true` / `--dry-run=false`. The pipeline owns `--target`.
 
 For a `--dry-run`-style flag, prefer `step.DryRun(fn)` on each mutating
 step (see *Work - the inner DAG > Dry-run contract*) over a
@@ -916,7 +902,7 @@ content, compute once, reuse the result. It carries no scope and no
 group -- that is [Concurrency](#concurrency)'s job.
 
 ```go
-sw.Key("go-mod", "1.26", "abc123") // a CacheKey from any parts
+sw.Key("go-mod", "1.26", "abc123")
 
 node := sw.Job(plan, "build", func(ctx context.Context) error { return nil })
 node.Memoize(func(ctx context.Context) (sw.CacheKey, error) {
@@ -944,14 +930,14 @@ by its members: different work taking turns under a cap. Define the
 group once and pass the handle to each member.
 
 ```go
-dbGroup := sw.NewConcurrencyGroup("db", sw.ConcurrencyLimit{
+databaseGroup := sw.NewConcurrencyGroup("db", sw.ConcurrencyLimit{
     Capacity:     8,
     Scope:        sw.ScopeBox,
     OnLimit:      sw.Queue,
     QueueTimeout: 30 * time.Second,
 })
-sw.Job(plan, "shard-1", func(ctx context.Context) error { return nil }).Concurrency(dbGroup, 4)
-sw.Job(plan, "shard-2", func(ctx context.Context) error { return nil }).Concurrency(dbGroup, 4)
+sw.Job(plan, "shard-1", func(ctx context.Context) error { return nil }).Concurrency(databaseGroup, 4)
+sw.Job(plan, "shard-2", func(ctx context.Context) error { return nil }).Concurrency(databaseGroup, 4)
 ```
 
 `Capacity` and `cost` are integers in author-defined units (a slot, a
@@ -973,7 +959,7 @@ sw.Job(plan, "deploy", func(ctx context.Context) error { return nil }).Concurren
 What a member does when its group is at capacity:
 
 - `Queue` (default) -- wait for room, then run. Waiters that fit run
-  oldest-first; a waiter that cannot fit in the currently available
+  oldest-first; a waiter that cannot fit in the available
   weighted budget does not block later waiters that do fit unless younger
   backfilled holders are what keep the older waiter from fitting. This
   ordering is scoped to the `Concurrency()` group; local admission priority
@@ -1036,7 +1022,7 @@ with `OnLimit: Queue`, not `Fail`. `Fail` pushes a poll-and-retry loop
 onto every caller and aborts the loser with "slot full". With capacity 1,
 `Queue` lines arrivals up FIFO and runs them one at a time, with `QueueTimeout`
 as the bounded way out. With weighted capacities, it can grant one later
-request when the head waiter cannot currently fit. After that backfill, the
+request when the head waiter cannot fit. After that backfill, the
 older waiter's full resource set is protected until it runs, even if external
 pressure still keeps it from fitting when the younger holder exits. Queue state
 reports the backfill count and protection reason; the rolling event summary
@@ -1084,7 +1070,7 @@ admission and every node it later dispatches queue at the same place,
 and the run record carries both the number and where it came from.
 `sparkwing run --sw-detached --sw-priority` carries the request on the
 trigger and resolves it when the consumer launches the run, so `front`
-means ahead of the queue the run actually joins. The flag reaches the
+means ahead of the queue the run joins. The flag reaches the
 pipeline program as `SPARKWING_PRIORITY`.
 
 Priority is a whole-run order, separate from `Concurrency()`: a group's

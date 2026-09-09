@@ -12,16 +12,20 @@ for authoring rules.
 ## Pre-1.0 caveat
 
 sparkwing is on the `v0.x` track. Per [VERSIONING.md](VERSIONING.md),
-breaking changes are permitted in minor bumps until v1.0.0. We do **hard
-cuts**: removed symbols are gone, not aliased, and there is no deprecation
-runway. Each minor release that breaks something ships a migration guide
-so the cut is documented even though it isn't softened. Releases at
+breaking changes are permitted in minor bumps until v1.0.0. Removed symbols are deleted outright. Each minor release containing a
+breaking change includes a migration guide. Releases at
 `v1.0.0+` are blocked at the release pipeline and require a deliberate
 code change to unlock.
 
 ---
 
 ## [Unreleased]
+
+### Fixed
+
+- **cli:** Run arguments after `--` pass unchanged to the pipeline
+  Unknown `--sw-*` options before the separator fail before execution setup.
+  Put pipeline-owned options that use this prefix after `--`.
 
 ## [v0.47.1] - 2026-09-09
 ### Fixed
@@ -94,7 +98,7 @@ code change to unlock.
   two), and `catch_up` how long after a due minute a late fire may still
   happen (default `1h`, floor `2m`). The bare cron string still parses and
   means the same thing. Sparkwing validates the expression when the config
-  loads, so a malformed cron fails the command that reads it rather than the
+  loads, so a malformed cron fails the command that reads it instead of the
   run. For Go callers `pipelines.Triggers.Schedule` changed from `string` to
   `*pipelines.ScheduleTrigger`: read `t.Schedule.Cron` where you read
   `t.Schedule`, and test `t.Schedule != nil` where you tested `!= ""`. See
@@ -287,7 +291,7 @@ code change to unlock.
   re-dispatched run still reads while it executes, and on a directory timestamp no
   build below the top level moves. A process now takes a lock before it builds a
   worktree and keeps it until it is done, the sweep holds that lock across the
-  removal itself, and a dispatch that cannot take it refuses rather than running
+  removal itself, and a dispatch that cannot take it refuses instead of running
   in a tree something else may reclaim.
 - **orchestrator:** a lapsed claim is no longer closed out on an earlier attempt's
   run row. A re-dispatch inherits the previous attempt's terminal row, so a
@@ -315,7 +319,7 @@ code change to unlock.
 ### Added
 
 - **cli:** `sparkwing doctor` reports ref worktrees left behind by a submission
-  whose run the store no longer holds. It reports them rather than removing
+  whose run the store no longer holds. It reports them instead of removing
   them, because deregistering a worktree needs git and doctor deliberately does
   not reach the orchestrator; a consumer reclaims them as it starts.
 
@@ -346,10 +350,10 @@ code change to unlock.
   that commit even if the ref moves before a consumer claims it. The consumer
   executes the worktree and removes it once the run reaches a terminal state, and
   a consumer starting up reclaims a worktree an earlier consumer died holding, so
-  the tree belongs to the consumer rather than to the submitting shell.
+  the tree belongs to the consumer instead of to the submitting shell.
   Submission refused the flag before, because nothing would have removed the
   worktree after a detached run. `--idempotency-key` covers the resolved commit:
-  a repeat key naming a different tree is refused rather than answered with the
+  a repeat key naming a different tree is refused instead of answered with the
   first run.
 
 ### Fixed
@@ -426,7 +430,7 @@ code change to unlock.
   wedged store answers 503 with `Retry-After` and the controller client
   retries it instead of failing the run. A socket that will not bind and a
   cache URL that will not open both leave the daemon arbitrating admission
-  rather than stopping it; `sparkwing daemon status` and `sparkwing doctor`
+  instead of stopping it; `sparkwing daemon status` and `sparkwing doctor`
   report `api_socket`, `api_ready`, `api_error`, and `artifact_store_error`,
   and treat an unbound socket as unhealthy. `GET /api/v1/health` is answered
   by the daemon itself and reports the runs store as `absent`, `ready`, or
@@ -509,7 +513,7 @@ code change to unlock.
 
 - **controller:** A plan snapshot upload is capped at 4 MiB, the same ceiling
   the store puts on a node's dispatch envelope. `POST /api/v1/runs/{id}/plan`
-  is the one write path that stores its body verbatim rather than decoding it,
+  is the one write path that stores its body verbatim instead of decoding it,
   and it read the body whole with no limit, so a caller holding a claim on a
   run could make the controller buffer and persist a body of any size. An
   over-cap body is now refused with 400 and the stored snapshot is left alone.
@@ -655,7 +659,7 @@ code change to unlock.
   environment and from what the trigger consumer hands a child, so a stale
   shell value cannot redirect an unrelated run. The block prints only once
   admission has answered, and a run refused by admission removes a standalone
-  store it created rather than leaving one for `sparkwing doctor` to report; a
+  store it created instead of leaving one for `sparkwing doctor` to report; a
   run that fails later keeps its row and its block. Standalone runs share a
   lock on `standalone/state.lock` so concurrent runs cannot discard each
   other's store. A daemon whose runs
@@ -690,9 +694,9 @@ code change to unlock.
   answered 503 or never accepted the connection, is retried for up to 20
   seconds so a daemon restart does not fail the run, while a write whose fate
   cannot be established is not repeated; past that window the run fails naming
-  the daemon rather than hanging.
+  the daemon instead of hanging.
 
-- **store:** The runs store opens by requirements set rather than by exact
+- **store:** The runs store opens by requirements set instead of by exact
   schema version. The database records the features its schema relies on in a
   new `sparkwing_requirements` table, each stamped with the binary version that
   introduced it, and a binary opens the database when it knows every
@@ -752,7 +756,7 @@ code change to unlock.
   restart`'s budget now nest, so a finalize in flight when the daemon stops
   either lands or says which run it gave up on.
 - **controller:** The controller reaper runs the store's own concurrency
-  maintenance pass rather than its own sequence of sweeps, so keys with idle
+  maintenance pass instead of its own sequence of sweeps, so keys with idle
   capacity and waiting work are reconciled on every pass instead of only at
   startup. The daemon and the controller now reclaim by the same code.
 
@@ -760,7 +764,7 @@ code change to unlock.
   root Go suite. It proves the embedded documentation mirror and a named set of
   documentation, help, registry, and environment-variable contract checks in
   under a second, and every named check must report a pass, so renaming or
-  removing one fails the release rather than quietly shrinking the preflight.
+  removing one fails the release instead of quietly shrinking the preflight.
   The full gates keep their existing coverage.
 
 - **release:** `CHANGELOG.md` and the `pkg/docs/changelog.md` mirror carry
@@ -769,7 +773,7 @@ code change to unlock.
   keeps both sides of a hunk, which gets two cases wrong: two branches
   rewording one bullet produce both wordings, and two branches renaming
   `[Unreleased]` to different versions stack both headings on adjacent lines.
-  `bin/check-changelog.sh` now fails on that stacked pair rather than letting a
+  `bin/check-changelog.sh` now fails on that stacked pair instead of letting a
   release ship it.
 
 ### Fixed
@@ -847,7 +851,7 @@ code change to unlock.
   every poll and logs an event it could not write.
 
 - **controller:** HTTP request metrics label the `route` with the pattern the
-  request matched rather than a hand-maintained regex table, so the ten
+  request matched instead of a hand-maintained regex table, so the ten
   `/api/v1/concurrency/{key}/...` routes, `/api/v1/artifacts/{key}`, the
   `{nodeID}` in the approval routes and the `{path...}` in the Git cache proxy
   routes stop minting a permanent Prometheus series per distinct key. An
@@ -871,7 +875,7 @@ code change to unlock.
   after a daemon restart (30 seconds by default, `GraceWindow`); when it closes,
   the daemon terminates the session, releases the lease and finalizes the run.
   A client that reattaches inside the window keeps its session running, a
-  reattach once termination has begun is refused rather than handed a lease over
+  reattach once termination has begun is refused instead of handed a lease over
   a dying tree, and a tree that ends on its own is still released the moment the
   sweep sees it.
 
@@ -958,8 +962,8 @@ code change to unlock.
   no longer stops at the first 500 events. It made one unpaginated call, and
   every backend caps that at 500, so a busy run lost everything past the cap
   without a word. The reader now pages, and stops if a page fails to advance
-  rather than replaying it. The help says what that path emits, which is the
-  run's stored event records rather than the envelope stream a local run
+  instead of replaying it. The help says what that path emits, which is the
+  run's stored event records instead of the envelope stream a local run
   writes: that covers any profile whose state is a shared database, an object
   store or a controller, and any profile that declares its own logs surface.
   `JobLogsRemoteWithTokens` refused the flag outright; it now serves the same
@@ -981,7 +985,7 @@ code change to unlock.
   `state.db` instead, so a run held in a Postgres profile -- or a sqlite profile
   at a non-default path -- printed nothing, or failed with `node "x" not found
   in run ...` under `--node`. A profile that declares its own logs surface now
-  reads log bodies through that backend rather than the local run directories,
+  reads log bodies through that backend instead of the local run directories,
   and `--tree`, which needs local state and on-disk logs both, says so when it
   cannot run.
 
@@ -1002,7 +1006,7 @@ code change to unlock.
   while `annotation_count` -- a real atomic increment -- counts both, leaving
   a run whose counter exceeds the annotations it can show. The reads now take
   the row lock they always needed, and the step append's placeholder insert
-  upserts rather than skipping on conflict, so an appender that loses the
+  upserts instead of skipping on conflict, so an appender that loses the
   insert waits for the winner's row instead of reading past it and dropping
   the message.
 
@@ -1087,7 +1091,7 @@ code change to unlock.
   could exhaust the pod's PIDs whatever the limit said. A request now waits a
   bounded time for a slot -- a third of the server's read timeout, so a request
   that wins one still has budget left to read its body -- and then answers 503
-  with `Retry-After` rather than queueing. That applies to `/archive`, `/file`,
+  with `Retry-After` instead of queueing. That applies to `/archive`, `/file`,
   `/tree-hash` and `/branch-contains`, which previously reported saturation as a
   404 naming a branch, path or commit that was in fact present, as well as to
   `/git/<name>/info/refs` and `/git/<name>/git-upload-pack`. `POST
@@ -1102,7 +1106,7 @@ code change to unlock.
   permanent path, which the list and download routes then served as complete.
   An upload path whose base name starts with `.sparkwing-upload-` is refused
   with 400, since that prefix now marks an upload in flight, and an empty
-  artifact listing answers `[]` rather than `null`.
+  artifact listing answers `[]` instead of `null`.
 - **cache:** The gitcache background fetch loop now takes the same per-repo lock
   the request handlers take. It keyed the lock on the mirror's full path while
   every handler keyed it on the repository hash, so a background
@@ -1111,7 +1115,7 @@ code change to unlock.
   producing truncated archives and spurious 500s.
 - **orchestrator:** Ordinary environment variables stay in the retry snapshot.
   The credential heuristics match `KEY`, `PASS`, `SECRET`, `TOKEN` and the rest
-  against whole name segments rather than raw substrings, so `MONKEY_MODE`,
+  against whole name segments instead of raw substrings, so `MONKEY_MODE`,
   `COMPASS_DIR`, `BYPASS_CHECKS` and a URL whose path contains one of those
   words are no longer classified as credentials and dropped, and a retry runs
   with the environment its original attempt had. Names that run the words
@@ -1244,7 +1248,7 @@ code change to unlock.
   undefined nanosecond value, landing the run in 1754: it sorted below every
   real run so a default list never showed it, every `--since` window excluded
   it, and the stale-run reaper skipped it forever. A row already written that
-  way now reads back with an unset start time rather than a 1754 date.
+  way now reads back with an unset start time instead of a 1754 date.
 - **ci:** The `commentcheck` gate fails closed. When it cannot compute the diff
   it exits non-zero and names the fix (fetch the base ref, pass `-base`) instead
   of printing a skip and exiting 0, so the comment and `#nosec` annotation
@@ -1287,7 +1291,7 @@ code change to unlock.
   entire run state, and replay them all in order before the newest one landed.
 - **s3state + orchestrator:** A run whose state reached only the local outbox no
   longer reports success. `FinishRun` returns an error when the terminal state
-  is queued on this machine's disk rather than in the object store, `Close`
+  is queued on this machine's disk instead of in the object store, `Close`
   returns the errors from its final flush and gives the outbox a bounded chance
   to drain first, and the outbox refuses to queue a kind it cannot replay
   instead of deleting it unsent on the next drain. A local run now carries that
@@ -1327,7 +1331,7 @@ code change to unlock.
   the comment should go. `--help` now names the `<root>` positional -- one
   directory to walk, not a list of files -- and the caps a tagged comment obeys
   (four lines, 120 characters each). The failure text says to tag the comment
-  rather than delete it and names the tag ordinary rationale belongs under, so a
+  instead of delete it and names the tag ordinary rationale belongs under, so a
   why-comment survives the gate. A `#nosec` annotation sharing a group with
   another line now names the rule it broke and why, and `-base` charges
   untracked `.go` files to the branch, so a new test file no longer reports
@@ -1352,12 +1356,12 @@ code change to unlock.
   scope set returned a full `admin` account instead, so an operator who asked
   for `runs.read` got a superuser and never learned of it. The bootstrap path
   now honours the set it is given, and refuses one that omits `admin` with a
-  `400` rather than widening it; omitting `scopes` still grants `admin`.
+  `400` instead of widening it; omitting `scopes` still grants `admin`.
 - **store:** A SQLite state-database path containing `#` or `?` no longer opens
   a different file. The path was interpolated into a `file:` URI without
   escaping, so SQLite ended the filename at the first such character and opened
   the truncated path instead -- a database it created with the process umask
-  rather than the 0600 the intended path was hardened to, holding secret values
+  instead of the 0600 the intended path was hardened to, holding secret values
   and token hashes, and with every connection pragma (`busy_timeout`, WAL,
   `synchronous`, `foreign_keys`, `_txlock=immediate`) silently dropped along
   with the swallowed query string. Paths are now percent-escaped, so `#`, `?`
@@ -1439,7 +1443,7 @@ code change to unlock.
 - **store:** A trigger returned to the pending queue no longer keeps the
   principal that held it. A release, a generation-guarded release, and the
   expired-claim reaper all clear `claim_principal` and `claim_token_prefix`,
-  and an unattributed in-process claim overwrites them rather than reviving
+  and an unattributed in-process claim overwrites them instead of reviving
   whatever the last holder left. Without this, the next consumer's claim made
   the previous holder the recorded owner of a claim it did not take, and that
   principal could read the trigger, write nodes, and finish a run another
@@ -1448,7 +1452,7 @@ code change to unlock.
 - **controller + cache:** Code scanning's open findings are triaged. A clone URL
   is refused when any component begins with `-` -- the whole string, the
   scp-like host or path, the ssh userinfo, or the parsed host -- where git would
-  read it as an option rather than a repository, and also when it carries a
+  read it as an option instead of a repository, and also when it carries a
   control byte. `git clone` now separates its options from the URL with `--`,
   the persisted repo-name table is revalidated when the cache loads it so an
   entry written before validation is dropped with a warning, and the PVC pool
@@ -1478,7 +1482,7 @@ code change to unlock.
   [migration guide](docs/migrations/v0.41.0.md#the-dashboard-refuses-an-insecure-cookie-remote-bind).
   A session whose creation time sits in the future, from a clock stepped
   backwards or a tampered row, is deleted and refused instead of renewed. A tab
-  whose session ends stops polling and goes to the sign-in page rather than
+  whose session ends stops polling and goes to the sign-in page instead of
   showing the banner that blames the deployment's API token.
 - **cli:** `~/.config/sparkwing` is now created and kept at `0700` by every
   writer. Profiles, the repos registry, the dotenv secrets store, and
@@ -1491,7 +1495,7 @@ code change to unlock.
   `secrets.env` and `config.env` now follow `XDG_CONFIG_HOME` like every other
   config file. A `SPARKWING_PROFILES` or `SPARKWING_REPOS` path outside the
   config directory keeps the permissions its owner gave it, and sparkwing says
-  so on stderr rather than narrowing a shared directory.
+  so on stderr instead of narrowing a shared directory.
   `configure profiles add` and `configure profiles set` take `--token-stdin`,
   which prompts without echo on a terminal, restores echo if the prompt is
   interrupted, and reads a pipe otherwise; `--token` still works and its help
@@ -1501,7 +1505,7 @@ code change to unlock.
   a prefix is already taken, so the 12-character handle
   `sparkwing cluster tokens revoke --prefix` accepts names one principal.
   Revoking runs its update inside a transaction and rolls back when the prefix
-  matched more than one row, rather than revoking every match and reporting the
+  matched more than one row, instead of revoking every match and reporting the
   ambiguity afterwards, and `store.LookupTokenByPrefix` -- the read behind
   rotation -- errors on an ambiguous prefix instead of returning the first row.
   A database that already holds two tokens on one prefix refuses to migrate and
@@ -1555,7 +1559,7 @@ code change to unlock.
 - **deploy:** The `mode3-postgres` Terraform module now commits its
   `.terraform.lock.hcl` and pins providers with `~>` instead of `>=`, so
   `terraform init` installs the checksummed versions the module was tested
-  against rather than whatever the registry serves that day; the lock records
+  against instead of whatever the registry serves that day; the lock records
   `linux_amd64` and `darwin_arm64`. `allowed_cidr_blocks` now requires every
   entry to be an IPv4 CIDR no wider than `/8`, so neither `0.0.0.0/0` nor a
   pair of halves such as `0.0.0.0/1` and `128.0.0.0/1` opens the database
@@ -1592,7 +1596,7 @@ code change to unlock.
   `bash bin/check-api-spec.sh` fails the `pre-push` gate when the two drift.
   That check now also rejects a response object carrying a field OpenAPI 3.0
   does not allow, which an unquoted comma in a flow-style description produces,
-  and it recognizes a scope named anywhere in an operation's prose rather than
+  and it recognizes a scope named anywhere in an operation's prose instead of
   only the phrase "<scope> scope". The Git-cache document's NetworkPolicy
   paragraph names all four admitted peers and the selectors that override them.
 - **orchestrator:** Artifact capture now resolves each glob match before it
@@ -1652,7 +1656,7 @@ code change to unlock.
   instead of the whole shell: `SPARKWING_*`, `GITHUB_*`, `PATH`, `HOME`,
   `HOSTNAME`, and `KUBERNETES_SERVICE_HOST`, minus every credential-shaped
   name and value, widened by `SPARKWING_SUBMIT_ENV_ALLOW`. The consumer
-  deletes the snapshot when it starts the run rather than when the run ends.
+  deletes the snapshot when it starts the run instead of when the run ends.
 - **sdk:** `git.Clone` now authenticates to the git cache named by
   `SPARKWING_GITCACHE` or `SPARKWING_GITCACHE_URL`. The bearer in
   `SPARKWING_CACHE_TOKEN` travels in the environment as a cache-scoped
@@ -1692,7 +1696,7 @@ code change to unlock.
   `GITHUB_WEBHOOK_SECRET` stays the fallback for whatever the bindings do not
   name. The claimed slug is normalized once, so no case fold can point the
   secret lookup and the binding check at different repositories, and a
-  `repos` list that is present but empty refuses every repository rather than
+  `repos` list that is present but empty refuses every repository instead of
   none. Each delivery is recorded under both its `X-GitHub-Delivery` id and a
   digest of the material its signature covered (schema 25), so re-sending an
   accepted body answers `409` -- naming the run the first delivery produced --
@@ -1702,7 +1706,7 @@ code change to unlock.
   read the request body before taking a lock that is now sharded per stored
   file, so a slow POST no longer stalls every other node's writes, and a global
   in-flight byte budget (`--max-inflight-bytes`, 32MiB) refuses further appends
-  with `503` rather than letting concurrent bodies outgrow the pod's memory.
+  with `503` instead of letting concurrent bodies outgrow the pod's memory.
   New `--max-node-bytes`, `--max-run-bytes`, `--max-inflight-bytes`,
   `--min-free-bytes`, `--retention`, `--sweep-interval`, `--search-max-bytes`,
   and `--search-timeout` flags (each with a `SPARKWING_LOGS_*` environment
@@ -1725,13 +1729,13 @@ code change to unlock.
   credential-shaped name and value. A submitted pipeline that read
   `AWS_PROFILE`, `AWS_REGION`, `KUBECONFIG`, `DOCKER_HOST`, or `SSH_AUTH_SOCK`
   from the submitting shell no longer sees them, and the AWS and Docker
-  clients answer from a default rather than failing, so name what a pipeline
+  clients answer from a default instead of failing, so name what a pipeline
   needs:
   `SPARKWING_SUBMIT_ENV_ALLOW='AWS_PROFILE,AWS_REGION,KUBECONFIG,DOCKER_HOST,SSH_AUTH_SOCK'`.
   A bare `*` is refused instead of quietly allowing nothing, and the credential
   filter logs at warn the names it drops from an explicit entry. The consumer
   deletes the snapshot when it starts the run; a run that returns to the queue
-  without its snapshot fails rather than inheriting the consumer's own shell.
+  without its snapshot fails instead of inheriting the consumer's own shell.
   See the
   [migration guide](docs/migrations/v0.41.0.md#breaking-submitted-runs-carry-an-allow-listed-environment).
 - **controller:** Secret envelopes are now bound to the fields of the row
@@ -1750,7 +1754,7 @@ code change to unlock.
   `ciphertest.TestBoundCipher` checks, to take part in the binding.
 - **cache:** The artifact download endpoint now ends `tar`'s option list with
   `--` before the matched file names, so an artifact whose name begins with a
-  dash is archived rather than parsed as a `tar` option, and an artifact path
+  dash is archived instead of parsed as a `tar` option, and an artifact path
   with a segment that begins with `@` is refused, because `bsdtar` reads such a
   member name as an archive to inline and `--` does not stop it. The uploads
   endpoint validates the upload ID as a single path segment, so a
@@ -1773,7 +1777,7 @@ code change to unlock.
   `publish_images: true` used to move `vX.Y.Z` to a freshly built digest, so an
   operator who pinned the tag got layers nobody audited; moving it now takes
   the new `force_retag` input. A registry lookup that fails for any other
-  reason stops the run rather than reading as an absent tag, and each tag is
+  reason stops the run instead of reading as an absent tag, and each tag is
   re-read after the move to prove it resolves to the pushed digest. The step's
   shell lives in `bin/publish-image-tags.sh` so a stubbed-registry table test
   covers those paths. Each release also carries a signed `image-digests.json`
@@ -1901,7 +1905,7 @@ code change to unlock.
   per-response script nonce, `X-Frame-Options: DENY`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and HSTS
   when the request arrives over TLS. The page reads its configuration from
-  `/sparkwing-runtime.js` rather than an inline script, and the controller
+  `/sparkwing-runtime.js` instead of an inline script, and the controller
   bearer stays server-side in both login modes, so `--api-url` is deprecated
   and ignored and the chart no longer renders it. A token-backed dashboard that
   binds a non-loopback address without `--require-login` refuses to start. See
@@ -1909,7 +1913,7 @@ code change to unlock.
 - **web:** `Strict-Transport-Security` now needs evidence that browsers reach
   the dashboard over TLS: a TLS listener, `X-Forwarded-Proto: https` from a
   peer inside `--trusted-proxy-cidrs`, or the new `--hsts` flag for operators
-  who terminate TLS elsewhere. The same evidence, rather than the
+  who terminate TLS elsewhere. The same evidence, instead of the
   `SPARKWING_WEB_INSECURE_COOKIES` override, decides the scheme the login CSRF
   check expects, so a login behind an HTTPS proxy works with `Secure` cookies
   intact. `sparkwing dashboard` carries the headers on its API routes too,
@@ -1924,7 +1928,7 @@ code change to unlock.
   session row: everyone signs in again, and it is the first migration a
   still-running older binary cannot read past. A session lookup that fails on
   the store or the signing key now answers `500` instead of `401`, so the
-  dashboard reports a backend fault rather than signing the browser out. See
+  dashboard reports a backend fault instead of signing the browser out. See
   the [migration guide](docs/migrations/_unreleased.md#session-rows-are-hashed-and-the-csrf-column-is-dropped).
 - **cache:** The warm-pool controller now accepts only registry references in
   `warm_images` -- a DNS or bracketed IPv6 host, a lowercase path, an optional
@@ -1990,7 +1994,7 @@ code change to unlock.
   token, and refuses to render a non-`ClusterIP` cache Service with no token
   configured. An off-cluster controller or runner pool is admitted through
   `networkPolicy.extraIngress`. The dashboard's `/api/v1/gitcache/` mount
-  requires a Sparkwing machine token shape rather than any string, and a
+  requires a Sparkwing machine token shape instead of any string, and a
   request that arrives at the concurrent-stream cap waits a few seconds for a
   slot before answering `503` with `Retry-After`. See the
   [migration guide](docs/migrations/_unreleased.md#cache-reads-require-the-bearer-token).
@@ -2032,7 +2036,7 @@ code change to unlock.
   redacted argument would execute as the literal `***`. Runner tokens claiming
   their own work are unaffected. See the
   [migration guide](docs/migrations/_unreleased.md#node-claims-bind-to-the-claiming-token).
-- **docs:** the security guide names `sparkwing cluster tokens list`, the CLI reference lists `secrets --repo`, and the gitleaks history exception covers the argon2 hashing seam, which is renamed so future scans stay clean.
+- **docs:** the security guide names `sparkwing cluster tokens list`, the CLI reference lists `secrets --repo`, and the gitleaks history exception covers the argon2 hashing seam, which is renamed so subsequent scans recognize the permitted hashing helper.
 
 ### Added
 
@@ -2162,7 +2166,7 @@ code change to unlock.
   routes the dashboard itself calls and checks the signed-in session's scopes
   against each one, so a logged-in browser can no longer mint tokens, read
   secrets, or create users with the web pod's service bearer. Sessions carry
-  the scopes of their user rather than a fixed `admin`, run-store schema 19
+  the scopes of their user instead of a fixed `admin`, run-store schema 19
   adds a `users.scopes` column defaulting existing accounts to `admin`, and
   `sparkwing cluster users add --scope` creates narrower accounts.
   `store.CreateUser` and `store.CreateFirstUser` now take that scope set. See the
@@ -2171,7 +2175,7 @@ code change to unlock.
   `--runner k8s` now requires `--runner-sa` (or `SPARKWING_RUNNER_SA`) instead
   of silently landing pipeline code on the namespace default ServiceAccount.
   `--trigger-runner k8s` now requires `--trigger-runner-sa` (or
-  `SPARKWING_RUNNER_SA`) at startup rather than failing once per claimed
+  `SPARKWING_RUNNER_SA`) at startup instead of failing once per claimed
   trigger. See the
   [migration guide](docs/migrations/_unreleased.md#runner-serviceaccount-tokens-and-rbac).
 - **controller (Breaking):** `controller.PoolConfig` adds
@@ -2244,7 +2248,7 @@ code change to unlock.
   can no longer read or delete files outside it. Filesystem failures answer
   with a generic message instead of the server's absolute path, and the
   identifier length cap counts the `.log` suffix, so an over-long node id is
-  rejected with a 400 rather than failing as an unretryable 500.
+  rejected with a 400 instead of failing as an unretryable 500.
 
 ## [v0.38.2] - 2026-09-01
 
@@ -2385,7 +2389,7 @@ code change to unlock.
 
 - **admission:** A checkout is now identified by the repository it holds -- its
   origin remote, or the object store it borrows from when it has no remote --
-  rather than by the directory it sits in, so two checkouts of one repository
+  instead of by the directory it sits in, so two checkouts of one repository
   share one capacity profile. A pipeline that clones into a fresh directory per run previously
   recorded each run under a new key, so its node measurements never reached the
   sample count that retires the cold-start charge and every run was priced at
@@ -2394,7 +2398,7 @@ code change to unlock.
 
 - **admission:** macOS hosts now charge external memory pressure when the
   kernel reports no memory available. A `kern.memorystatus_level` of zero was
-  classified as an unread sensor rather than as a reading, and an unread
+  classified as an unread sensor instead of as a reading, and an unread
   dimension charges nothing, so the host with nothing left granted its full
   capacity -- the inverse of the guard at the one point it exists to act.
   Linux already treated a zero available-memory reading as measured, so the
@@ -2443,7 +2447,7 @@ code change to unlock.
   owner-only (`0600`). `sparkwing doctor` reports and repairs permissive legacy
   homes without following symlinks or removing cached binaries' execute bit.
   Windows continues to use inherited DACLs; doctor reports that ACL privacy as
-  unverified instead of presenting a false clean bill.
+  unverified instead of presenting a report that incorrectly passes the permission check.
 - **Helm:** The full self-host chart now sends its runner to the bundled
   controller without an extra values override. The logs service enables
   controller-backed auth only when a token Secret is configured, and the
@@ -2517,7 +2521,7 @@ code change to unlock.
   controller and a bucket has none to point it at. The dispatcher now mounts
   one on loopback for the run -- the same routes, request bodies, and status
   codes a pod talks to, served over the run's own state -- so there is a
-  single local execution model rather than one per backend. What a
+  single local execution model instead of one per backend. What a
   bucket-backed run does *not* gain is measured capacity profiles: those are
   folded from the local runs store, and a run whose state lives on a bucket
   still folds nothing, exactly as before. See the [migration
@@ -2529,7 +2533,7 @@ code change to unlock.
   logs service -- in both cases what `sparkwing runs logs` reads. A profile
   naming no logs surface is unchanged: those jobs still write the run's local
   log files. A declared logs surface that will not open now **fails the job**,
-  naming the profile and the surface type, rather than silently degrading to
+  naming the profile and the surface type, instead of silently degrading to
   local files and splitting one run's logs across two places. See the
   [migration guide](docs/migrations/v0.36.0.md#local-node-logs-use-the-declared-logs-surface).
 - **orchestrator:** An `OnFailure` recovery node on the local path now gets
@@ -2549,7 +2553,7 @@ code change to unlock.
   record, and the span that CPU was drawn over; the metric column marks a
   sample as a per-command report and carries the CPU it measured. A node or
   sample that carries none of it keeps the zero default, read everywhere as
-  absent rather than as a measurement of nothing. The upgrade is additive and
+  absent instead of as a measurement of nothing. The upgrade is additive and
   applies on open. As with every schema advance, a binary older than this
   release refuses to open a database that has been migrated, so upgrade every
   sparkwing sharing a runs store together -- the admission daemon included,
@@ -2576,7 +2580,7 @@ code change to unlock.
   other. Where both measurements exist the exact one is a floor under the
   sampled figures, so charges can rise for pipelines whose work lives between
   ticks. A node's recorded duration is now its process's whole life, spawn to
-  reap, rather than the shorter window the node stamps from inside itself, so
+  reap, instead of the shorter window the node stamps from inside itself, so
   ETAs count the startup the box actually paid for. Cluster pricing is
   untouched: a pod reports no exit accounting, and a controller-backed run is
   folded by the controller, which prices from pod samples exactly as before.
@@ -2603,7 +2607,7 @@ code change to unlock.
   its own path. A child is measured and priced as its own node: it gets its
   own sampler share and its own learned profile under `<parent>/<id>`, and
   because parent and child share one process the interval's reading is split
-  between them rather than counted twice.
+  between them instead of counted twice.
 - **cli:** `sparkwing runs bounce --run RUN_ID --node NODE_ID` restarts one
   running job's process without failing the run it belongs to. The job's
   process is stopped -- SIGTERM, then SIGKILL after the grace period -- and
@@ -2641,7 +2645,7 @@ code change to unlock.
   `store.Node.MaxRSSBytes`, and `store.Node.ProcessWallNanos` read it back.
   `store.MetricSample.CPUTime` and `MetricSample.OneShot` distinguish a
   per-command report from a sampler tick. Zero in any of these means nothing
-  measured it, so a reader must treat it as absent rather than as a node or
+  measured it, so a reader must treat it as absent instead of as a node or
   command that cost nothing.
 - **store:** `Store.ProfileSamples` and `store.NearestRankIndex` expose a
   pipeline profile's stored sample window and the position a percentile
@@ -2864,7 +2868,7 @@ code change to unlock.
   status was read from, so any machine that had not itself run the
   pipeline printed the right status and exited 1.
 - **cli:** A missing AWS region names `AWS_REGION` and the backend that
-  wanted it, rather than the SDK's "resolve auth scheme: resolve
+  wanted it, instead of the SDK's "resolve auth scheme: resolve
   endpoint: endpoint rule error, Invalid region".
 
 ### Docs
@@ -2924,7 +2928,7 @@ code change to unlock.
 ### Fixed
 
 - **cli:** `--help` lists the subcommands the CLI actually dispatches. A group's
-  COMMANDS listing is now derived from the command registry rather than authored
+  COMMANDS listing is now derived from the command registry instead of authored
   beside it, so it can no longer name a command that does not exist or omit one
   that does. `sparkwing --help` gains `examples`, `sparkwing run --help` gains
   `config`, `sparkwing configure xrepo` is a registered command instead of a
@@ -2950,7 +2954,7 @@ code change to unlock.
   records, and `runs list -o json` is 20 lines instead of 633. Migration
   is mechanical -- decode a line at a time, drop the `[0]` indexing --
   and no field was renamed or dropped. An empty listing is an empty
-  stream rather than `[]`. Single-object verbs (`runs status`, `runs
+  stream instead of `[]`. Single-object verbs (`runs status`, `runs
   get`, `runs receipt`, `pipeline describe`, `queue`, `doctor`,
   `version`, `info`) are unchanged, as are `pretty`, `plain`, and
   `markdown`. See
@@ -2969,7 +2973,7 @@ code change to unlock.
   the full record for one command. `-o pretty`, `-o plain`, and `-o
   markdown` (including `--split-dir`, which generates the
   `docs/cli-*.md` reference) are untouched. Hidden commands stay out of
-  the listing, now as a documented decision rather than an accident of
+  the listing, now as a documented decision instead of an accident of
   the filter; `--include-hidden` lists them marked `"hidden": true`.
   See
   [migration guide](docs/migrations/v0.32.0.md#commands--o-json-is-an-index)
@@ -3152,10 +3156,10 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
 
   Flags a detached run cannot honor -- `--sw-index`, `--sw-ref`, `--sw-dry-run`,
   the other run-shaping `--sw-` flags, and `--profile` -- are refused with the
-  reason rather than silently ignored.
+  reason instead of silently ignored.
 - **cli:** `sparkwing runs consumer {start,status,stop}` inspects and controls
   the resident process that executes submitted runs. One consumer serves a
-  sparkwing home at a time, elected by a file lock rather than a PID check, so a
+  sparkwing home at a time, elected by a file lock instead of a PID check, so a
   consumer killed with `kill -9` leaves no stale state; it exits on its own after
   five idle minutes. A running dashboard consumes the same queue and stands down
   when a resident consumer holds the lock, so a run is never dispatched twice.
@@ -3166,7 +3170,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   live or finished work -- the lease is wall-clock while the heartbeat defending
   it is monotonic, so a suspended laptop can lapse the lease of a dispatch that
   is perfectly alive. Stopping a consumer mid-dispatch returns that run to the
-  queue rather than failing it.
+  queue instead of failing it.
 
   A consumer records the sparkwing version it was built from, and a submission
   from a different build replaces it, so an upgrade takes effect instead of the
@@ -3182,8 +3186,8 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   adding two columns to `triggers` and one index. `idempotency_key` carries a
   caller's deduplication token, under a partial unique index on
   `(pipeline, idempotency_key)` that skips the empty default -- so dedup is a
-  database guarantee rather than a race-prone check-then-write, and a key is
-  scoped to the pipeline that used it rather than to the whole store.
+  database guarantee instead of a race-prone check-then-write, and a key is
+  scoped to the pipeline that used it instead of to the whole store.
   `claim_seq` counts how many times a trigger has been claimed, so a dispatch
   whose lease lapsed and was re-taken cannot write an outcome over the run the
   new claim is producing. The upgrade is additive and applies on open; every
@@ -3208,7 +3212,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   `wingd/d.log` without limit. A dump now rotates the log to `d.log.1` first
   when it is already past the 1MB cap, using the same once-rotated shape as
   the rotation at spawn. The rotation copies the log aside and empties it in
-  place rather than renaming it: the log is a descriptor its writers
+  place instead of renaming it: the log is a descriptor its writers
   inherited, not a path they reopen, and three processes hold it -- the
   supervisor, the daemon it starts, and the client that opened it -- so a
   rename would strand the ones that did not rotate on the archive and let
@@ -3220,7 +3224,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   and it used to match nothing, which is indistinguishable from "this CLI has
   no runs commands"; only `--path "sparkwing runs"` worked. Both forms now
   select the same subtree, matched by whole path components -- `--path run`
-  selects `run` and its subcommands rather than also dragging in the separate
+  selects `run` and its subcommands instead of also dragging in the separate
   `runs` group. A prefix that selects no command is an error naming
   the prefix with a non-zero exit, instead of an empty listing (or the literal
   `null` under `-o json`) at exit 0; when the prefix matched only hidden
@@ -3282,7 +3286,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   a job logged that reached it through `sparkwing.yaml`.
   Display surfaces were never affected. A yaml-supplied value is not recorded on
   the run row, and the secret-argument classification comes from the pipeline's
-  declared input names rather than from the values, so `runs list`, `runs get`,
+  declared input names instead of from the values, so `runs list`, `runs get`,
   `runs status`, the controller endpoints, and `run_start` redacted correctly
   throughout.
 
@@ -3299,7 +3303,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   your own survives) and brings the daemon to its own version first, for
   invocations that will actually admit work. A pipeline binary invoked
   directly falls back to the `sparkwing` on PATH, and starts the daemon
-  through that installed binary rather than through itself.
+  through that installed binary instead of through itself.
 
   The point is that a repo's `.sparkwing/go.mod` pin is no longer part of
   the machine-wide daemon version negotiation: one repo bumping its SDK can
@@ -3371,7 +3375,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   instead of after the full thirty-second socket wait, with an error
   naming the binary that was started and the tail of whatever it wrote. A
   named-but-unstartable host -- a typo'd `SPARKWING_WINGD_BIN`, a stale
-  path -- reports the variable and its value rather than "could not reach
+  path -- reports the variable and its value instead of "could not reach
   the admission daemon", which sent the reader to inspect a daemon when
   the fault was a path they typed. A spawn that never starts a process no
   longer leaves an empty `d.log` behind implying one ran.
@@ -3387,7 +3391,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   `sparkwing runs status` (one `log_path:` line, or a top-level `log_path`
   field under `-o json`), `sparkwing runs get`, and the run receipt. Only runs
   that write logs to a filesystem carry it; runs logging to a controller or an
-  object store omit the field rather than name a directory that holds nothing.
+  object store omit the field instead of name a directory that holds nothing.
   Because the path is the executor's, a run read back through `--profile` may
   name a directory that is absent locally: the text output marks those, while
   the JSON reports the path as recorded.
@@ -3411,7 +3415,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   `> run.log` redirect (the status follow also renders to stdout as it polls, so
   a terminal shows that block twice). A follow that ends without a readable
   terminal status, including a controller that becomes unreachable mid-run,
-  exits 3 and names the run to re-check with `sparkwing runs status` rather than
+  exits 3 and names the run to re-check with `sparkwing runs status` instead of
   reporting a possibly-succeeding run as failed. `--detach` is unchanged -- it
   reports submission, not outcome. Scripts that relied on the old always-zero
   exit need `|| true` to keep it.
@@ -3419,7 +3423,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   guarded session per tick. Each sweep now takes a single kernel process
   listing and judges every session -- membership and leader identity --
   against that one view. On macOS the listing comes from `kern.proc.all`
-  rather than a `ps` fork: a full snapshot measured 0.7ms against 34ms on
+  instead of a `ps` fork: a full snapshot measured 0.7ms against 34ms on
   a laptop with 669 processes, and the per-session identity lookups it
   replaces are gone entirely. This is the largest contributor to the
   reported case of a daemon pinned near 200% CPU while the queue appeared
@@ -3427,8 +3431,8 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
 - **wingd:** Guard sweeps back off exponentially (to 5s) while the daemon
   cannot read the process table at all, and return to full cadence on the
   first success; a single guarded run whose inspection fails no longer
-  slows the sweep for the others, and a guarded leader that simply exits
-  between two observations is read as the answer it is rather than as a
+  slows the sweep for the others, and a guarded leader that exits
+  between two observations is read as the answer it is instead of as a
   failure. A process table the daemon cannot read used to be retried ten
   times a second forever.
 - **wingd:** The `ps` listing -- used on Linux and other Unixes, and as
@@ -3439,7 +3443,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   rarely recovers. The post-`SIGKILL` wait for a process tree
   to disappear backs off from 10ms to one second and logs once when it
   slows down, so a descendant that cannot be killed costs about one
-  process-table read per second rather than a hundred.
+  process-table read per second instead of a hundred.
 - **wingd:** Runs and CLI commands that lose their connection to the
   daemon retry with capped exponential backoff and jitter instead of
   reconnecting as fast as the socket allows. Every dropped connection
@@ -3447,7 +3451,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   core on each side. Admission-critical exchanges (acquire, re-attach,
   guard watch, cancel) still retry until they succeed or the caller gives
   up; read-only ones (`sparkwing queue`, stats reset) now fail with a
-  clear error after ten attempts rather than retrying forever. The waits
+  clear error after ten attempts instead of retrying forever. The waits
   inside connect -- for a spawned daemon's socket to appear, and for a
   predecessor daemon to release the election during an upgrade -- are
   paced the same way, keeping their thirty-second budgets while dialling
@@ -3460,7 +3464,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   losing a socket race to several predecessors is still resolved.
 - **wingd:** Frames the daemon sends a client are bounded by a ten-second
   write deadline. A client that stops reading without closing its socket
-  is treated as gone rather than holding a daemon goroutine for as long
+  is treated as gone instead of holding a daemon goroutine for as long
   as it lives.
 
 ### Changed
@@ -3485,7 +3489,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   masked bounded output, without the headline and marker that decorate the
   error text) and `log_excerpt_truncated`. Both fields are absent together when
   there is nothing to excerpt -- a failure with no captured output, or a node
-  that did not fail on its own -- so absence is reportable rather than
+  that did not fail on its own -- so absence is reportable instead of
   fabricated. Where absence itself cannot be established (an event stream too
   large to scan, or a controller that will not serve it) the node carries
   `log_excerpt_unavailable` instead of a silent gap. Excerpts ride a new
@@ -3509,7 +3513,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   output was persisted in the node log one line below the redacted message --
   on every execution path, local included. String attributes are now masked,
   including strings nested in lists and maps; anything nested deeper than the
-  redaction pass inspects is replaced wholesale rather than emitted.
+  redaction pass inspects is replaced wholesale instead of emitted.
 - **orchestrator:** Redact secret values in node logs written by cluster and pod
   node execution. `run-node` built the per-run masker from the pipeline's secret
   arguments and wired it into secret resolution, but never installed it on the
@@ -3555,11 +3559,11 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
 ### Added
 
 - **cache:** `sparkwing cache info` and `sparkwing cache prune` inspect and trim
-  the compiled pipeline binary cache. The cache is now bounded rather than
+  the compiled pipeline binary cache. The cache is now bounded instead of
   unbounded: after each compile, least recently used binaries are evicted to fit
   `SPARKWING_CACHE_MAX_BYTES` (default `2GiB`) and `SPARKWING_CACHE_MAX_ENTRIES`
   (default `20`), either set to `0` to disable. Eviction ranks entries by last
-  use rather than build time. Kernel-backed execution and writer leases prevent
+  use instead of build time. Kernel-backed execution and writer leases prevent
   eviction of active entries.
 - **cache:** `sparkwing cache explain` prints a pipeline's cache key, whether it
   is cached, and every input behind it with its own digest and file counts --
@@ -3578,7 +3582,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
 - **cache:** the pipeline binary cache key no longer depends on where a checkout
   lives. Local `replace` targets are recorded by module path instead of absolute
   filesystem path, a covering `go.work` is folded in by its normalized directives
-  rather than its raw bytes, and builds pass `-trimpath`. Two checkouts of the
+  instead of its raw bytes, and builds pass `-trimpath`. Two checkouts of the
   same commit now compute the same key and compile to byte-identical binaries, so
   a worktree reuses the primary checkout's build instead of making its own.
 - **cache:** files git ignores are excluded from the pipeline binary cache key.
@@ -3733,7 +3737,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   `scheduled-report`) and rejects a registry name. Templates and examples were
   one list doing two jobs: agent trials spent a quarter of their turns
   choosing between forty entries, most of which are thin wiring over
-  sparks-core libraries rather than a place to start. A shape is what you
+  sparks-core libraries instead of a place to start. A shape is what you
   scaffold; an example is what you read, and `docs search` is how you find one.
   See [the migration guide](docs/migrations/v0.23.0.md#pipeline-templates-is-now-sparkwing-examples-and---template-takes-a-shape).
 - **cli:** `pipeline sparks vendor` is now `pipeline sparks inflate` -- it
@@ -3743,7 +3747,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   docs. The registry pipelines are working, verified code, which answers "how
   does someone do ECS Fargate" more directly than a reference section defining
   the symbols involved -- and unlike prose they are executed, so they cannot
-  quietly stop being true. They surface through search rather than a listing
+  quietly stop being true. They surface through search instead of a listing
   on purpose: choosing from a catalog is the expensive part, consulting one
   that search handed you is not.
 - **cli:** `docs search` now returns the matching **sections** -- topic, heading,
@@ -3759,7 +3763,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   topics that answer one task together, for when reading a single page leaves
   you a lookup short. The first is `authoring` -- the DAG model, the idioms the
   linter enforces, how a pipeline fires, and the config schema -- four pages in
-  one call rather than four calls. `docs read --topic` is unchanged and still
+  one call instead of four calls. `docs read --topic` is unchanged and still
   returns exactly the page asked for. Guides carry narrative topics only; the
   generated references are lookup tables, and `docs search` is the path to
   those.
@@ -3809,14 +3813,14 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   18-32: a second worktree pays 94.65s with its own cache and 2.42s through a
   slot, reporting only its own files. Nothing is hidden -- content is part of
   the cache key, so a planted violation was still caught, warm, in 1.76s. Use
-  `slot.Configure(cmd, "GOLANGCI_LINT_CACHE")` rather than setting the
+  `slot.Configure(cmd, "GOLANGCI_LINT_CACHE")` instead of setting the
   directory by hand: it sets `PWD` too, and without that Go's `os.Getwd`
   resolves the symlink and the slot quietly does nothing. A lease always
   succeeds -- with every slot busy it hands back the private `ToolCacheDir`,
   cold and no less correct, and `Canonical` says which. `SPARKWING_LINT_SLOTS`
   sets the pool size, default 4. A repo with more than one Go module takes one
   lease and uses `slot.ConfigureIn(cmd, module, "GOLANGCI_LINT_CACHE")` per
-  module; a path that climbs out of the lease is ignored rather than honored,
+  module; a path that climbs out of the lease is ignored instead of honored,
   because a command run outside the canonical path writes the worktree's own
   paths into the shared cache.
 
@@ -3830,11 +3834,11 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   and needs no shell to have exported anything. The file holds one setting
   line; blank lines and `#` comments are skipped, so the reason a budget is in
   force can live beside it. A value that will not parse fails daemon startup
-  rather than being dropped, whichever setting it came from.
+  instead of being dropped, whichever setting it came from.
 
 - **cli:** `sparkwing queue` names the setting the active budget came from
   (`budget 6.0 cores (machine 10.0) (from config ~/.config/sparkwing/budget)`),
-  and says so when no budget is set anywhere rather than staying silent -- a
+  and says so when no budget is set anywhere instead of staying silent -- a
   machine admitting against everything it has reads exactly like a deliberate
   whole-machine budget otherwise. The `external: ignored` line names its source
   too. `sparkwing doctor` reports a non-default budget with the setting behind
@@ -3868,9 +3872,9 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   `branches` / `paths` / `actions` filters are marked as recording intent,
   since nothing reads them today. Only per-pipeline facts appear: that
   delivery depends on a GitHub webhook is true of every such trigger in every
-  repo, so it belongs in the docs rather than in every explain, and
+  repo, so it belongs in the docs instead of in every explain, and
   `sparkwing cluster webhooks list` is what answers it for a real repo.
-  Nothing here changes an exit code -- it reports rather than judges, since a
+  Nothing here changes an exit code -- it reports instead of judges, since a
   manual-only pipeline is legitimate, which is also why it is not a lint
   rule.
 
@@ -3886,7 +3890,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   use more than one key; a migration trial reproducing a workflow that fires
   on both had to hand-edit the yaml the scaffolder had just written. `manual`
   stays exclusive, since combining "no trigger" with a trigger is a
-  contradiction rather than a merge, and is rejected by name.
+  contradiction instead of a merge, and is rejected by name.
 
 - **cli:** `pipeline new` gains `--on pull_request|push|schedule|manual`, so the
   DAG and the trigger are separate choices. They were welded together --
@@ -3897,7 +3901,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   A PR-triggered single check is now `--template minimal --on pull_request`.
   Omitting `--on` keeps each shape's own default, so nothing changes for
   anyone not passing it, and an unknown value names the whole vocabulary
-  rather than sending the author off to find it. `--on` was a global flag
+  instead of sending the author off to find it. `--on` was a global flag
   retired in v0.5.0; a command that declares a flag in its own registry entry
   now owns that spelling, and the retired-flag pointer still fires everywhere
   else.
@@ -3948,7 +3952,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   would bake in a branch name the repo may not use. Triggers are declarative
   -- the controller dispatches whichever pipeline its webhook names -- so this
   changes nothing about `sparkwing run <name>` locally, and the scaffolder now
-  names the trigger it declared in its created-files list rather than wiring a
+  names the trigger it declared in its created-files list instead of wiring a
   repo into a GitHub event silently. The other three shapes remain purely
   structural and still declare nothing.
 
@@ -3978,7 +3982,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   admission" reported an idle queue while it was blind. Every format now states
   reachability outright -- `daemon.reachable` and `daemon.state` in JSON, a
   `daemon` row in plain, a leading line in pretty -- and a socket that cannot be
-  reached names the dial failure and exits 4 rather than exiting 0 with an empty
+  reached names the dial failure and exits 4 instead of exiting 0 with an empty
   queue.
 
 - **cli:** `sparkwing doctor` always reports the admission daemon: serving with
@@ -3986,7 +3990,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   field at all before, so a sweep that never reached the daemon printed the same
   counts a healthy machine prints and read as a clean bill. An unreachable
   daemon is no longer clean, because the rejection, skew and lockout checks
-  under it never ran, and the orphaned-run repair is skipped there rather than
+  under it never ran, and the orphaned-run repair is skipped there instead of
   finalize a run that daemon may be holding.
 
 - **cli:** an unreachable admission daemon leads with why. The error opened with
@@ -4040,7 +4044,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   reason turns amber. `sparkwing configure profiles test` has always decoded
   the body; the two now share one implementation of the contract and can no
   longer disagree about the same service at the same moment. The panel's own
-  slow-response finding survives a degraded body rather than being folded into
+  slow-response finding survives a degraded body instead of being folded into
   it, so a service that is both slow and reporting problems lists both, and the
   probe still drains what it did not read so the panel keeps reusing one
   connection per service instead of opening a new one every refresh.
@@ -4064,7 +4068,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   built from while remaining older than later releases. Opaque worktree and
   dirty builds remain unordered against releases, preserving shared-daemon
   behavior without leaving an installed same-release source build behind its
-  resident daemon. Version-change notices now say `changed` rather than
+  resident daemon. Version-change notices now say `changed` instead of
   claiming every transition is an upgrade.
 - **cli:** `daemon status` and `daemon restart` now default to pretty output on
   a terminal and JSON when piped; an explicit `-o` continues to win.
@@ -4077,7 +4081,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   looking. The block also ends with this repo's state -- whether a
   `.sparkwing/` exists, how many pipelines it holds, whether Go is on PATH --
   and the CLI's own examples name it as the first command an agent should run,
-  rather than `info -o json`. The block used to send readers to `info -o json`
+  instead of `info -o json`. The block used to send readers to `info -o json`
   for exactly that, and every recorded trial made the second call before doing
   anything else: a whole model round to learn one line.
 - **cli:** `pipeline lint` with no target now lints every pipeline instead of
@@ -4107,7 +4111,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   cache.
 - **docs:** the SDK reference now lists constants declared with a named type,
   so every enum in the SDK is spellable from the docs alone. `go/doc` files a
-  typed constant under its type rather than the package, and the generator
+  typed constant under its type instead of the package, and the generator
   emitted only the package-level set, which silently dropped values such as
   `ApprovalApprove`, `NoCache`, `Queue`, and `StageAction` -- a reader shown
   `OnExpiry ApprovalTimeoutPolicy` had no way to learn what to assign it.
@@ -4136,7 +4140,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   so a result list of them said nothing about which verb each belonged to, and
   they were indistinguishable to the ranking too. Hits now read
   `` `sparkwing debug run` > Examples ``. A breadcrumb match scores below a
-  heading match, since it says what a section sits under rather than what it
+  heading match, since it says what a section sits under instead of what it
   is about.
 
 - **cli:** `pipeline new` says a declared trigger is not yet live. The `on:`
@@ -4154,7 +4158,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   as a word, as a word prefix (so "shell" reaches "shelling"), or merely as a
   substring, and single-character tokens are dropped since they match
   everywhere and narrow nothing. The two sections about running a shell
-  command are also titled with the words people search for rather than with
+  command are also titled with the words people search for instead of with
   the API's own vocabulary; ranking can only surface what is written.
 
 - **cli:** the `minimal` scaffold's stub named `ExecIn` and `BashIn`, neither of
@@ -4173,7 +4177,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   memory, or semaphore -- exactly the FIFO queue head starts; subsequent work
   stays queued behind that positive grant. Zero-cost run-registration
   connections do not count as grants; `sparkwing queue` labels them as
-  connected rather than counting them as resource holders.
+  connected instead of counting them as resource holders.
 
 - **queue:** waiter reasons now follow the admission ledger's CPU liveness
   floor. An otherwise-idle run that is really waiting for memory or a semaphore
@@ -4255,7 +4259,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   the free-page count standing -- 0.31 GiB of 16 on an idle box, which
   reports 98% of the machine consumed in the same format as a real reading.
   There is no fallback now: an unread dimension renders as `unmeasured`
-  rather than a figure, carries `"external_source": "unmeasured"` on the
+  instead of a figure, carries `"external_source": "unmeasured"` on the
   wire, and has nothing subtracted from available, so a run is never held
   back by pressure nobody measured.
 
@@ -4264,7 +4268,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   character made it print `[]` and exit zero, which is exactly what a machine
   with nothing registered prints, so a corrupt registry read as a swept, clean
   fleet while every gate on it went unchecked. The survey now names the file
-  and exits non-zero, and writes no rows at all rather than a document a
+  and exits non-zero, and writes no rows at all instead of a document a
   script would parse as an answer. `hooks install --fleet` and
   `hooks fire --fleet` refuse the same way instead of sweeping nothing and
   reporting success.
@@ -4439,22 +4443,22 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   elsewhere), `uninstalled` (a declared hook was never written), or
   `undeclared` (no pipeline asks for one). Both read the machine's repo
   registry -- `repos.yaml`, filled by `sparkwing configure xrepo add` and by any
-  `fallback_paths` it lists -- rather than a list scoped by hand, which is how
+  `fallback_paths` it lists -- instead of a list scoped by hand, which is how
   a repo ends up ungated for weeks with nothing reporting it. A checkout the
   registry does not list is not surveyed and not swept; register it first.
   `-o json` for the machine-readable form, `--ungated` for just the
   actionable rows. Ungated means a hook that can refuse work does not fire, so
   `--ungated`, `doctor` and the `--fleet` summary all count `pre-commit` and
   `pre-push` and nothing else: a repo whose only missing hook is `post-commit`
-  loses a notification rather than a gate, and a repo that declares no
-  blocking hook is counted apart from the ones `--fleet` armed rather than
+  loses a notification instead of a gate, and a repo that declares no
+  blocking hook is counted apart from the ones `--fleet` armed instead of
   among them.
 
 - **cli:** `sparkwing doctor` names the registered repos that accept commits
   with no gate, under `ungated_repos` in `-o json`. It reports them on a run
   that finds nothing else to repair too, since a healthy home is exactly where
   an ungated repo would otherwise go unmentioned. Which repos git gates is
-  machine configuration rather than a sparkwing home's state, so it is
+  machine configuration instead of a sparkwing home's state, so it is
   reported alongside the sweep and does not decide the home's verdict.
 
 - **cli:** `sparkwing doctor` (and `ops doctor` in a pipeline binary) now
@@ -4477,7 +4481,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   the deliberate counterpart to the `GIT_INDEX_FILE` git exports to every hook
   it launches, which sparkwing drops on startup so the gated repository cannot
   leak into a pipeline's own work; an argument is how a caller says the
-  binding is intent rather than inheritance. A bound run writes an
+  binding is intent instead of inheritance. A bound run writes an
   `index_bound` event naming the absolute index before the pipeline starts,
   and a caller that requires that receipt can tell a run that judged its
   snapshot from one that judged the repository's index; a run rendering for a
@@ -4502,7 +4506,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   golangci-lint's own lock, so one pipeline adopting it stops failing straight
   away with no fleet-wide agreement needed; the flag waits indefinitely, so
   bound it with a context deadline, and report a deadline that fires as
-  could-not-run with the time waited rather than as a finding in the tree.
+  could-not-run with the time waited instead of as a finding in the tree.
 
 - **admission:** the `hello_ack` handshake frame carries
   `native_protocol_major`, the newest wire protocol major the daemon speaks,
@@ -4515,7 +4519,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
 
 - **admission:** upgrading sparkwing no longer locks out every repo whose
   pipeline pins an older SDK. The daemon now answers the handshake on the
-  newest wire protocol major it shares with the client rather than only on
+  newest wire protocol major it shares with the client instead of only on
   its own, so a repo pinning v0.17.25 keeps getting admission grants from a
   v0.22.0 daemon instead of failing its gates with `daemon speaks a newer
   protocol; upgrade sparkwing` -- advice that could not work, because the
@@ -4551,7 +4555,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   has moved past the boundary, at which point it is no longer refused. The
   benefit is for the next protocol bump, not this one -- for repositories
   currently refused, the `doctor` entry below is the surface that reaches
-  them, because it runs from the machine's CLI rather than from the pinned
+  them, because it runs from the machine's CLI instead of from the pinned
   binary being turned away.
 - **cli:** `doctor` reports the version skew that actually blocks work.
   It compared the running CLI against the resident daemon and said nothing
@@ -4568,10 +4572,10 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   send an operator to edit a line that changes nothing. The daemon's protocol
   major is read from its handshake ack, and each pin is compared against the
   lowest release known to speak that major, so the check keeps working across
-  every cliff rather than the one current when the CLI was built: a daemon
+  every cliff instead of the one current when the CLI was built: a daemon
   left resident at an older major still locks out every pin below it, and a
   daemon speaking a major *newer* than the CLI is diagnosed too. Reading the
-  ack rather than the queue state is what makes that second case visible at
+  ack instead of the queue state is what makes that second case visible at
   all: such a daemon refuses the CLI's queue query outright, but answers the
   handshake before it refuses anything.
 - **cli:** `doctor` names a resident daemon whose wire protocol this build
@@ -4596,7 +4600,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   stops firing. Only names git itself runs as hooks are forwarded, so a
   helper script kept in that directory is not turned into one. When a
   hand-written hook blocks one of those forwarders, install refuses the
-  claim and names the hook rather than silencing the machine's copy; both
+  claim and names the hook instead of silencing the machine's copy; both
   install and `pipeline hooks status` report a machine hook nothing hands
   off to, including in a repository that already carries the claim. A
   `core.hooksPath` the repository set itself is left alone
@@ -4632,7 +4636,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   `git commit -- <path>` hand over a lock file that holds the content, and a
   step reading `git diff --cached` without it is shown an empty commit and
   passes it. Steps opt in per command
-  (`GIT_INDEX_FILE="$SPARKWING_GATE_INDEX" git diff --cached`) rather than
+  (`GIT_INDEX_FILE="$SPARKWING_GATE_INDEX" git diff --cached`) instead of
   inheriting the binding, which is what keeps a stray `git add` in a scratch
   checkout out of the commit being gated. `commentcheck -staged` reads it,
   preferring a `GIT_INDEX_FILE` a caller set deliberately and falling back to
@@ -4679,7 +4683,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   upgrade every pipeline re-measures once from its prior peak.
 - **admission:** the measured host charge is now the p95 of the last 20
   clean runs (previously p99 of 50, which at that window size is the
-  maximum). One freak run no longer pins a pipeline's price for weeks,
+  maximum). One outlier run no longer pins a pipeline's price for weeks,
   and a genuine cost change re-prices within the shorter window. Queue
   views and drift warnings say "measured p95" accordingly.
 
@@ -4713,7 +4717,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
 - **admission:** node-level concurrency admissions are encoded as
   distinct queue participants, fixing ID collisions between a run and
   its nodes; queue views show stable participant identity, and node
-  participants stay internal to the queue rather than leaking as
+  participants stay internal to the queue instead of leaking as
   phantom runs.
 - **admission:** a node killed by run teardown records `cancelled` and a
   node evicted by a `cancel_others` group records the superseding run,
@@ -4815,7 +4819,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   from the pipeline's `go.mod` and from an in-scope, covering `go.work`
   (both its `use` modules and its local `replace` directives) are hashed
   by content -- all files, so edits to embedded assets such as a
-  template registry's manifests count -- rather than by a version the
+  template registry's manifests count -- instead of by a version the
   local checkout doesn't carry. Previously a `go.work` replace was
   ignored entirely and edits under a `go.mod` replace only counted when
   they touched Go source, so a run could execute a stale binary compiled
@@ -5014,7 +5018,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
 - **admission:** A client that reconnects after receiving a local-admission
   grant now reclaims the matching live lease instead of failing with
   `duplicate`. The daemon still rejects mismatched retries and restored
-  multi-member leases fail closed rather than transferring partial ownership.
+  multi-member leases fail closed instead of transferring partial ownership.
 - **cli:** Fresh source-built scaffolds now pin the latest published SDK
   fallback, so projects created from an unreleased local binary still build
   against a resolvable module version.
@@ -5109,7 +5113,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
 - **cli:** The `sparkwing queue` resource table now reconciles on screen. The
   external column reports the same smoothed external load the availability
   math actually used, so capacity - in use - reserved - external = available
-  holds exactly rather than appearing off by the deadband. A one-line legend
+  holds exactly instead of appearing off by the deadband. A one-line legend
   spells out that arithmetic, and "Running" and "Waiting" headers label the
   two tables.
 - **admission:** Fully-cached runs no longer poison learned profiles. A run
@@ -5122,13 +5126,13 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
 ## [v0.17.0] - 2026-07-13
 ### Added
 
-- **admission:** Capacity measurement is now honest about contention and
-  pipeline change. A run the daemon flags as throttled by host contention no
+- **admission:** Capacity measurement separates contention samples from
+  uncontended samples and tracks pipeline changes. A run the daemon flags as throttled by host contention no
   longer folds into the measured profile: it measured what it got, not what it
   wanted, so its reading only raises a per-pipeline demand *floor* (a lower
   bound) and never sets the measured peak or graduates the profile. While a
   version has not yet finalized a measured price it is charged a safety
-  multiple (2x) of that floor -- and a contended run that consumed essentially
+  multiple (2x) of that floor -- and a contended run that consumed
   its whole charge escalates the floor to the charge, so successive runs
   double in on true demand from below. `sparkwing runs stats --capacity` shows
   the operative floor and labels the source `floor`.
@@ -5194,7 +5198,7 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
 - **admission:** A liveness floor guarantees sparkwing never refuses all work.
   Whenever no run holds a host resource, the queue head is admitted regardless
   of the reserve or external load, so a fully loaded box still runs exactly one
-  pipeline at a time rather than none; headroom sensing gates only the runs
+  pipeline at a time instead of none; headroom sensing gates only the runs
   beyond that first. A sole run admitted under load says so
   (`admitted as sole run; host under external load ...`). The empty-host case
   first shipped in v0.16.5; this release extends the floor to every
@@ -5277,10 +5281,10 @@ version takeover.
   load -- the escape hatch for a misreading host sensor. `sparkwing queue`
   still shows the real external reading and adds an `external: ignored
   (operator setting)` line, and contention detection keeps using the real
-  saturation, so observability stays truthful. `sparkwing runs stats
+  saturation, so the report distinguishes demand from observed usage. `sparkwing runs stats
   --reset --pipeline <name>` clears a pipeline's learned capacity profile
   (samples, peaks, waits, contention tally) so it re-learns from a cold
-  start after one freak run poisoned it, preserving any `.Resources()` pin
+  start after one outlier run poisoned it, preserving any `.Resources()` pin
   and printing what it dropped; `--reset --all --yes` resets every
   pipeline. The daemon now logs a one-line note when a requested budget
   exceeds machine capacity and is clamped.
@@ -5290,7 +5294,7 @@ version takeover.
 - **admission:** A run held in local admission now re-emits its wait
   status on a heartbeat (every 30s by default) instead of going silent
   after the first "queued for local admission" line, so a long wait reads
-  as healthy backpressure rather than a hang. The "admitted; starting run"
+  as healthy backpressure instead of a hang. The "admitted; starting run"
   line prints after any wait.
 - **runs cancel:** Cancelling a run that already finished now reports the
   truth ("already finished (success) -- nothing to cancel") as a no-op
@@ -5343,7 +5347,7 @@ in favor of `sparkwing queue` and the new `sparkwing doctor`; the runs-store
 schema advances from 6 to 10 and stamps the minimum sparkwing version it needs;
 and resource measurement now costs a run by its whole process tree. It also
 bounded the plan-level concurrency admission acquire, so a wedged store surfaces
-a concrete error rather than a run left heartbeating with every node pending.
+a concrete error instead of a run left heartbeating with every node pending.
 See [docs/migrations/v0.16.0.md](docs/migrations/v0.16.0.md) for the breaking
 changes and upgrade steps.
 
@@ -5351,7 +5355,7 @@ changes and upgrade steps.
 
 - **orchestrator:** The local admission daemon detects its own cgroup
   limits at startup and clamps capacity to the container it runs in, so a
-  6 GiB container on a 24 GiB host plans against 6 GiB rather than the host
+  6 GiB container on a 24 GiB host plans against 6 GiB instead of the host
   total -- the oversubscription that quietly returned inside CI containers.
   External-load sensing measures the container's own CPU and memory usage
   where the cgroup provides it, an explicit `SPARKWING_BUDGET` still caps
@@ -5455,7 +5459,7 @@ changes and upgrade steps.
   `--dry-run` reports without changing anything. It never kills a
   process, never touches the daemon's live state, and never touches
   cluster-scoped (global) rows, so it is safe to run at any time and a
-  healthy machine reports a clean bill.
+  machine with no findings reports that result.
 - **cli:** `sparkwing queue` now names the serving daemon's version and
   uptime in its header, and both `sparkwing queue` and `sparkwing doctor`
   warn when an older-pinned pipeline binary is admitting outside the
@@ -5553,7 +5557,7 @@ changes and upgrade steps.
   aggregates the command's entire reaped subtree -- fold into the node's
   measured profile, so a pipeline whose work is a test suite, a linter,
   or a shell step is costed by what those subprocesses actually drew
-  rather than the near-zero the orchestrator itself uses. Admission
+  instead of the near-zero the orchestrator itself uses. Admission
   therefore stops over-admitting subprocess-heavy runs onto one box.
   Measurement also covers subprocesses a pipeline spawns directly, outside
   the `sparkwing.Bash` / `sparkwing.Exec` wrapper: their CPU is read from
@@ -5595,7 +5599,7 @@ changes and upgrade steps.
   a holder or a run still queued for admission -- so "get this out of
   line" works on a waiting run too: the daemon removes it from the queue,
   re-states the positions behind it, and winds it down to a cancelled
-  status. The daemon signals the run on the same clean path an operator
+  status. The daemon signals the run on the same cancellation path an operator
   interrupt uses; cluster runs and runs the daemon does not hold still
   route through the controller.
 - **orchestrator:** A pipeline that mostly waits (a poller, approval
@@ -5606,9 +5610,9 @@ changes and upgrade steps.
   platform whose sampler cannot measure CPU still holds the conservative
   default, so a blind zero is never mistaken for a real measurement.
 - **cli:** `sparkwing queue` no longer prints "clears in ~-" when no clear
-  estimate is available; the header simply omits the clause. `sparkwing
+  estimate is available; the header omits the clause. `sparkwing
   runs stats --capacity` prints a pin-drift warning as a footnote below
-  the table rather than crammed into a column, so the table stays aligned.
+  the table instead of crammed into a column, so the table stays aligned.
 - **orchestrator:** A SIGINT-cancelled run names the signal as `SIGINT`
   (and SIGTERM as `SIGTERM`) in its terminal reason, instead of the bare
   lowercase "interrupt".
@@ -5683,7 +5687,7 @@ changes and upgrade steps.
   current SDK release in its generated `.sparkwing/go.mod` instead of a stale
   fallback, so `sparkwing pipeline new` followed by a build is reliably green.
   The pre-push version-freshness gate now also fails when that scaffold fallback
-  pin falls behind the latest released SDK, keeping it honest as the SDK advances.
+  pin falls behind the latest released SDK, keeping the reported requirement aligned with the SDK.
 
 ## [v0.15.6] - 2026-07-10
 ### Fixed
@@ -5877,7 +5881,7 @@ changes and upgrade steps.
   `SPARKWING_BOX_SLOTS` unset, `sparkwing run` now caps concurrent
   orchestrator processes on a host at `max(1, NumCPU/workers-per-run)`
   instead of running uncapped. Overlapping local runs queue ("waiting
-  for box slot...") rather than all proceeding, which stops concurrent
+  for box slot...") instead of all proceeding, which stops concurrent
   runs against a shared local SQLite backend from saturating the single
   writer and collapsing under lease-heartbeat failures. A single run
   never blocks on itself and cluster mode does not use the semaphore.
@@ -5894,7 +5898,7 @@ changes and upgrade steps.
   (S3 If-None-Match/If-Match and the GCS/Azure equivalents). When the
   configured endpoint does not enforce write preconditions, these
   operations report not-supported so callers fall back to Postgres
-  (Mode 3) or a hosted controller (Mode 4) rather than coordinate
+  (Mode 3) or a hosted controller (Mode 4) instead of coordinate
   unsafely. Heavily contended coalesce keys see higher tail latency than
   Postgres: each mutation is a read-modify-write retry against one object.
 - **install:** A Mode 3 (Postgres) Terraform module
@@ -6053,7 +6057,7 @@ below are kept for the audit trail and now carry an erratum.
 
 - **sdk:** Promoting queued waiters into freed concurrency slots now
   deletes and skips any waiter whose run has already finished, keeping
-  FIFO order honest so a finished head can no longer wedge the live
+  FIFO order intact so a finished head can no longer wedge the live
   waiters queued behind it.
 - **sdk:** Concurrency budgets stay correct under contention across both
   dialects: budget-mutating paths serialize on the key's row (closing a
@@ -6074,8 +6078,8 @@ steps.
 - **sdk:** Promoting queued waiters into freed concurrency slots now
   deletes and skips any waiter whose run has already finished, instead
   of minting a finished run into a holder that the reaper would only
-  have to clean up. Skipping rather than stopping at the dead waiter
-  keeps FIFO order honest, so a finished head can no longer wedge the
+  have to clean up. Skipping instead of stopping at the dead waiter
+  preserves FIFO order, so a finished head can no longer wedge the
   live waiters queued behind it. Waiters with no runs-table row are
   left untouched: concurrency keys are decoupled from the runs table,
   so a missing row carries no liveness meaning and is reclaimed by the
@@ -6117,7 +6121,7 @@ steps.
   Under `go test` a violation fails the operation; in production it is
   logged loudly. A seeded randomized property suite drives
   acquire/release/heartbeat/promote/cancel sequences -- sequential and
-  concurrent -- against a real store to keep those invariants honest.
+  concurrent -- against a real store to verify those invariants.
 - **sdk:** `NewConcurrencyGroup` rejects an empty group name (all
   unnamed groups would silently share one budget) and unknown `Scope`
   / `OnLimit` values at construction, so a misspelled policy fails at
@@ -6180,7 +6184,7 @@ steps.
 - **cli:** `sparkwing commands -o markdown` renders the entire CLI
   surface (every command, flag, and argument) as a reference page,
   generating `docs/cli-reference.md`. The CLI reference is now derived
-  from the command registry rather than hand-maintained, so it can't
+  from the command registry instead of hand-maintained, so it can't
   drift from the binary; a pre-push gate fails if the committed file is
   stale.
 - **docs:** `docs/config-reference.md` is generated from the
@@ -6235,7 +6239,7 @@ steps.
   (`g:` / `r:` / `b:`) so a `Global` group whose name contains `@`
   cannot collide with a `Box` or `Run` group of the bare name on that
   host. `sparkwing cluster concurrency` labels the scope from the tag
-  rather than inferring it from the presence of `@`.
+  instead of inferring it from the presence of `@`.
 - **controller:** `--no-cache` (bypass-read) now crosses the HTTP wire,
   so hosted and cluster runs that ask for fresh execution no longer
   silently replay a cached result.
@@ -6247,7 +6251,7 @@ steps.
   carries a superseded row no longer aborts the release transaction.
 - **sdk:** Re-acquiring an *expired* concurrency holder no longer
   revives it -- the acquire-path twin of the heartbeat-liveness guard.
-- **sdk:** Budget arithmetic no longer overflows: a very large declared
+- **sdk:** Budget arithmetic no longer overflows: a large declared
   cost can't wrap the used-plus-cost sum negative and over-admit.
 - **sdk:** A live holder carrying no declared capacity (a migration
   backfill or a promoted legacy waiter) no longer vanishes from the
@@ -6332,7 +6336,7 @@ steps.
   [migration](docs/migrations/v0.9.0.md#concurrency-a-named-group-not-a-cache-namespace).
 - **sdk (Breaking):** `OnLimit: Coalesce` and the `OnLimitPolicy` type
   are removed. In-flight dedupe is folded into `Cache` and keyed on
-  content rather than a group. See
+  content instead of a group. See
   [migration](docs/migrations/v0.9.0.md#onlimit-coalesce-is-gone).
 - **sdk (Breaking):** `Plan.Cache(CacheOptions{...})` is replaced by
   `Plan.Concurrency(group)` for whole-run coordination; a plan never
@@ -6404,7 +6408,7 @@ steps.
   `sparkwing.yaml` (the legacy name is a hard error). All current
   references now name it correctly.
 - **cli:** `sparkwing info` now notes when it resolved a `.sparkwing/`
-  by walking up from the current directory (rather than finding one in
+  by walking up from the current directory (instead of finding one in
   it) and points at `-C`, so running in a fresh directory no longer
   silently reports an ancestor repo's pipelines as your own.
 - **cli:** the `minimal` scaffold no longer emits literal `TODO:`
@@ -6437,7 +6441,7 @@ steps.
   action succeeds. The command exited 0, but if the check returns an
   error the node fails at the verify stage (eligible for `Retry`, routed
   to `OnFailure`), so "the command succeeded but the result is bad" is a
-  first-class node outcome rather than a hidden state. Runs once per
+  explicit node outcome instead of a hidden state. Runs once per
   attempt; a cache hit skips the action and the check together. Also on
   `JobGroup` (applied to every member).
 - **sdk:** `OnFailure` now also accepts a failure-aware recovery,
@@ -6595,7 +6599,7 @@ steps.
   orchestrator's downstream timeout. The resolver now reports its own
   errors via `t.Errorf`, the approval window was widened from 5s to
   30s, and the test joins the resolver goroutine before returning.
-  Verified clean under `go test -race -count=100`.
+  Passed `go test -race -count=100`.
 
 ## [v0.6.2] - 2026-05-30
 
@@ -7259,7 +7263,7 @@ the GitHub Release body.
   `job` and `job_stack` fields, following the removal of
   `sparkwing.WithJob` / `JobFromContext` / `JobStackFromContext`.
   Consumers of JSON log streams that explicitly read these fields will
-  see them as missing rather than empty. See
+  see them as missing instead of empty. See
   [migration guide](docs/migrations/v0.4.0.md#logrecord-fields).
 - **cli (Breaking):** `sparkwing info -o json` field names normalized
   on the `docs` sub-object. The previously-flat `web` key splits into

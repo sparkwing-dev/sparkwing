@@ -22,7 +22,7 @@ and the latest published release, exits 0 when already current,
 and exits 1 when a newer release exists (useful for CI/notifications).
 
 Downgrades are blocked by default. Pass --force to install an older
-release (e.g. bisecting a regression).
+release when investigating a regression.
 
 For SDK (go.mod) bumps, use 'sparkwing version update --sdk'.
 
@@ -33,7 +33,7 @@ For SDK (go.mod) bumps, use 'sparkwing version update --sdk'.
 | `--check` | Report installed vs latest; exit 1 if a newer release exists (read-only) |
 | `--force` | Allow downgrading to an older release |
 | `--override-hold` | Cross an operator version hold |
-| `--version TAG` | Target release tag (e.g. v0.17.0). Default: latest. |
+| `--version TAG` | Target release tag (vX.Y.Z). Default: latest. |
 
 ### Examples
 

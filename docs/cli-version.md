@@ -73,7 +73,7 @@ The ceiling shape controls its reach:
 
   vMAJOR.MINOR       caps a whole minor series -- every patch of that
                      minor is allowed, the next minor is refused
-                     (e.g. v0.15 allows v0.15.9 but refuses v0.16.0).
+                     (v9.8 allows v9.8.7 and excludes v9.9.0, for example).
   vMAJOR.MINOR.PATCH exact ceiling -- nothing above that patch installs.
 
 With no flags, prints the current hold and where it is set. The hold
@@ -87,7 +87,7 @@ being deferred.
 
 | Flag | Description |
 |---|---|
-| `--set VERSION` | Set the ceiling (e.g. v0.15 or v0.15.4) |
+| `--set VERSION` | Set the ceiling (vMAJOR.MINOR or vMAJOR.MINOR.PATCH) |
 | `--clear` | Remove the hold so upgrades are unrestricted |
 
 ### Examples
@@ -133,7 +133,7 @@ applies to whichever target is selected.
 |---|---|
 | `--cli` | Self-update the sparkwing CLI binary |
 | `--sdk` | Bump the SDK pin in this project's .sparkwing/go.mod |
-| `--version TAG` | Target release tag (e.g. v0.17.0). Omit for latest. |
+| `--version TAG` | Target release tag (vX.Y.Z). Omit for latest. |
 | `--force` | Allow downgrading to an older release (--cli only) |
 | `--override-hold` | Cross an operator version hold (--cli only) |
 

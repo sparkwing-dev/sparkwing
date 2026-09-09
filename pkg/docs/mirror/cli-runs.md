@@ -29,7 +29,7 @@ prune) require a profile; 'runs logs' supports both.
 - `logs` -- Print a run's logs
 - `errors` -- Surface the error trail for a failed run
 - `failures` -- List recent failed runs, optionally clustered
-- `stats` -- Aggregate run counts, success %, avg + p95 duration
+- `stats` -- Report run counts, success rate, and duration percentiles
 - `last` -- Print the most recent run
 - `tree` -- Show a run and every descendant run as an ASCII tree
 - `get` -- Emit one run's raw JSON (run + nodes)
@@ -80,10 +80,10 @@ preserved as the dashboard renders them.
 
 ```sh
 # Note something on a node
-sparkwing runs annotations add --run run-... --node deploy -m 'agent: retried after 502'
+sparkwing runs annotations add --run run-fictional --node deploy -m 'agent: retried after 502'
 
 # Note something on a step inside a node
-sparkwing runs annotations add --run run-... --node deploy --step canary -m 'rolled out 5%'
+sparkwing runs annotations add --run run-fictional --node deploy --step canary -m 'rolled out 5%'
 ```
 
 ## `sparkwing runs annotations list`
@@ -109,13 +109,13 @@ implies step-scope and limits to the matching step.
 
 ```sh
 # Every node annotation on a run
-sparkwing runs annotations list --run run-...
+sparkwing runs annotations list --run run-fictional
 
 # Include per-step annotations
-sparkwing runs annotations list --run run-... --steps
+sparkwing runs annotations list --run run-fictional --steps
 
 # One node's annotations as JSON
-sparkwing runs annotations list --run run-... --node build -o json
+sparkwing runs annotations list --run run-fictional --node build -o json
 ```
 
 ## `sparkwing runs approvals`
@@ -158,10 +158,10 @@ or was already resolved (409).
 
 ```sh
 # Approve a local gate
-sparkwing runs approvals approve --run run-20260423-143012-abcd --node approve-prod
+sparkwing runs approvals approve --run run-fictional --node approve-prod
 
 # Approve a prod gate with a comment
-sparkwing runs approvals approve --run run-... --node approve-prod --profile prod --comment "release notes ok"
+sparkwing runs approvals approve --run run-fictional --node approve-prod --profile prod --comment "release notes ok"
 ```
 
 ## `sparkwing runs approvals deny`
@@ -185,10 +185,10 @@ their ContinueOnError / Optional settings.
 
 ```sh
 # Deny a local gate
-sparkwing runs approvals deny --run run-20260423-143012-abcd --node approve-prod
+sparkwing runs approvals deny --run run-fictional --node approve-prod
 
 # Deny a prod gate with a reason
-sparkwing runs approvals deny --run run-... --node approve-prod --profile prod --comment "tests still red"
+sparkwing runs approvals deny --run run-fictional --node approve-prod --profile prod --comment "tests still red"
 ```
 
 ## `sparkwing runs approvals list`
@@ -217,7 +217,7 @@ sparkwing runs approvals list
 sparkwing runs approvals list --profile prod
 
 # Full history for one run
-sparkwing runs approvals list --run run-...
+sparkwing runs approvals list --run run-fictional
 
 # Emit JSON for an agent
 sparkwing runs approvals list -o json
@@ -257,10 +257,10 @@ again is allowed -- one request is one restart.
 
 ```sh
 # Bounce a wedged job in a local run
-sparkwing runs bounce --run run-... --node build
+sparkwing runs bounce --run run-fictional --node build
 
 # Bounce a job in a cluster run
-sparkwing runs bounce --run run-... --node build --profile prod
+sparkwing runs bounce --run run-fictional --node build --profile prod
 ```
 
 ## `sparkwing runs cancel`
@@ -287,7 +287,7 @@ from stdin, one per line.
 
 ```sh
 # Cancel one run
-sparkwing runs cancel --run run-... --profile prod
+sparkwing runs cancel --run run-fictional --profile prod
 
 # Cancel every running prod run
 sparkwing runs list --status running --profile prod -q | sparkwing runs cancel --run - --profile prod
@@ -297,30 +297,16 @@ sparkwing runs list --status running --profile prod -q | sparkwing runs cancel -
 
 Inspect or control the process that executes submitted runs
 
-One consumer process per sparkwing home claims queued triggers
-and executes them. 'sparkwing run --sw-detached' starts one when
-none is running and the consumer exits after a quiet window, so these
-verbs are for inspection and deliberate control rather than
-routine use.
+One consumer per Sparkwing home claims queued triggers and executes them.
+A file lock grants exclusive ownership; a dashboard uses the same lock.
+A detached launch starts a consumer when needed.
 
-Exactly one consumer serves a home at a time, enforced by a file
-lock rather than a PID check -- a consumer killed with SIGKILL
-releases it immediately, so there is no stale state to clear. A
-running dashboard consumes the same queue; whichever holds the
-lock does the work and the other stands down, so a run is never
-dispatched twice.
+Stopping the consumer leaves queued runs available for a later consumer.
+An interrupted executing run returns to the queue. Cancel a run to prevent
+further execution.
 
-Stopping a consumer does not cancel queued runs. They stay
-queued and execute when a consumer comes back. A run that is
-executing when you stop it is interrupted and returned to the
-queue, not failed -- it never reached a verdict, so the next
-consumer re-executes it. To stop a run for good, cancel it.
-
-A consumer records the sparkwing version it was built from. A
-detached launch from a different build replaces it, so an upgrade takes
-effect instead of the first build serving the home forever;
-replacing one interrupts whatever it was executing, and that run
-returns to the queue for the new consumer to re-execute.
+A detached launch from a different build replaces the consumer. Replacement
+interrupts active work and returns it to the queue for the new consumer.
 
 ### Subcommands
 
@@ -406,7 +392,7 @@ sparkwing runs consumer stop
 
 Surface the error trail for a failed run
 
-Walks the run's node DAG and prints the error chain for any node that failed. Quicker than paging through full logs when you only care about the terminal failure. Reads from the local run store.
+Reads the local run store and prints each failed node's error chain.
 
 ### Flags
 
@@ -419,17 +405,19 @@ Walks the run's node DAG and prints the error chain for any node that failed. Qu
 
 ```sh
 # Inspect a local failure
-sparkwing runs errors --run run-20260422-142501-abcd
+sparkwing runs errors --run run-fictional
 
 # As JSON
-sparkwing runs errors --run run-... -o json
+sparkwing runs errors --run run-fictional -o json
 ```
 
 ## `sparkwing runs failures`
 
 List recent failed runs, optionally clustered
 
-Fetches recent runs with status=failed and extracts the first failing node's step + error message for each. --group-by clusters the output by step so a systemic failure surfaces as one row with a count.
+Fetches recent runs with status=failed and extracts the first failing node's
+step + error message for each. --group-by clusters the output by step so a
+systemic failure surfaces as one row with a count.
 
 ### Flags
 
@@ -439,8 +427,8 @@ Fetches recent runs with status=failed and extracts the first failing node's ste
 | `--git-sha SHA` | Restrict to a git SHA prefix |
 | `--branch NAME` | Restrict to one git branch |
 | `--repo OWNER/NAME` | Restrict to one repository |
-| `--since DURATION` | Only failures newer than this (e.g. 24h, 7d) |
-| `--limit N` | Max failures to analyze (default: 20) |
+| `--since DURATION` | Only failures newer than this (24h, 7d, and similar durations) |
+| `--limit N` | Maximum failures to analyze (default: 20) |
 | `--group-by KEY` | Cluster by: step \| node |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name; omit for local-only |
@@ -484,7 +472,7 @@ infrastructure error.
 | `--repo OWNER/NAME` | Restrict to one stored repository identity |
 | `--root-only` | Exclude child runs |
 | `--since DURATION` | Lookback window (default: 1h) |
-| `--limit N` | Max results (default: 20) |
+| `--limit N` | Maximum results (default: 20) |
 | `--wait` | Block until at least one match appears |
 | `--find-timeout DURATION` | Give up (nonzero exit) after this long when --wait is set (default: 2m) |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
@@ -495,7 +483,7 @@ infrastructure error.
 
 ```sh
 # Find a run by SHA + pipeline on prod
-sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline build-test-deploy --profile prod
+sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline fictional-build --profile prod
 
 # Block until the matching run appears
 sparkwing runs find --git-sha abc123 --pipeline X --wait --profile prod
@@ -508,7 +496,10 @@ sparkwing runs find --git-sha abc --wait -q --profile prod | xargs -n1 -I{} spar
 
 Emit one run's raw JSON (run + nodes)
 
-Prints a combined {run, nodes} JSON blob to stdout, plus a top-level log_path when the run wrote its logs to a filesystem (the directory on the machine that executed it). Consumed by agents and scripts that need the full store shape rather than the summary 'status' command renders.
+Prints a combined {run, nodes} JSON blob to stdout, plus a top-level log_path
+when the run wrote its logs to a filesystem (the directory on the machine that
+executed it). Consumed by agents and scripts that need the full store shape
+instead of the summary 'status' command renders.
 
 ### Flags
 
@@ -521,10 +512,10 @@ Prints a combined {run, nodes} JSON blob to stdout, plus a top-level log_path wh
 
 ```sh
 # Fetch a local run as JSON
-sparkwing runs get --run run-...
+sparkwing runs get --run run-fictional
 
 # Fetch a prod run
-sparkwing runs get --run run-... --profile prod
+sparkwing runs get --run run-fictional --profile prod
 ```
 
 ## `sparkwing runs grep`
@@ -538,7 +529,7 @@ In cluster mode the grep runs server-side per (run, node), so only
 matching bytes come back over the wire.
 
 Default output is a table of RUN / NODE / LINE / TEXT. -q
-(quiet) prints just the unique matching run ids -- the usual
+(quiet) prints the unique matching run ids -- the usual
 shape for piping into `runs logs` or `runs status`.
 
 Exit code 0 even when there are no matches.
@@ -555,7 +546,7 @@ Exit code 0 even when there are no matches.
 | `--since DURATION` | Only runs newer than this |
 | `--started-after DATE` | Only runs whose StartedAt >= this |
 | `--started-before DATE` | Only runs whose StartedAt <= this |
-| `--limit N` | Max candidate runs to scan (default: 50) |
+| `--limit N` | Maximum candidate runs to scan (default: 50) |
 | `--max-matches M` | Per-node match cap (0 = no cap) (default: 5) |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
 | `-q, --quiet` | Print only the unique matching run ids |
@@ -578,7 +569,8 @@ sparkwing runs grep --pattern 'connection refused' --profile prod --since 24h -o
 
 Print the most recent run
 
-Shorthand for 'runs list --limit 1' with a compact one-line output. --watch tails for new runs, reprinting whenever a newer run ID appears.
+Shorthand for 'runs list --limit 1' with a compact one-line output. --watch
+tails for new runs, reprinting whenever a newer run ID appears.
 
 ### Flags
 
@@ -615,9 +607,9 @@ from: 'shared', or the store's path under the home. An id in both
 stores lists once, from the shared store. The STORE column appears
 only when a standalone run is in the table; -o json always carries
 the field. A standalone store this build cannot read is named on
-stderr after the table rather than listed.
+stderr after the table instead of listed.
 
-With -q / --quiet the output is just run ids, one per line, for
+With -q / --quiet the output contains run identifiers, one per line, for
 shell piping:
 
   sparkwing runs list --pipeline X --limit 1 -q --profile prod \
@@ -633,12 +625,12 @@ shell piping:
 | `--sha PREFIX` | Filter by git sha prefix (repeatable; prefix `!` to exclude) |
 | `--error SUBSTR` | Substring match against the persisted failure reason |
 | `--search QUERY` | Free-text search across pipeline/branch/sha/id/error; prefix a term with `-` to exclude |
-| `--since DURATION` | Only runs newer than this (e.g. 1h, 24h, 7d) |
+| `--since DURATION` | Only runs newer than this (1h, 24h, 7d, and similar durations) |
 | `--started-after DATE` | Only runs whose StartedAt >= this (today, yesterday, 24h, 7d, or a date) |
 | `--started-before DATE` | Only runs whose StartedAt <= this |
 | `--finished-after DATE` | Only runs whose FinishedAt >= this (excludes still-running) |
 | `--finished-before DATE` | Only runs whose FinishedAt <= this (excludes still-running) |
-| `--limit N` | Max runs to show (default: 20) |
+| `--limit N` | Maximum runs to show (default: 20) |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `-q, --quiet` | Print only run ids, one per line (or JSON array of ids with -o json) |
 | `--by-pipeline` | Pivot into one row per pipeline with a status sparkline of the last N runs |
@@ -713,7 +705,7 @@ controller, and any profile that declares its own logs surface.
 | `--head N` | Print only the first N lines |
 | `--lines A:B` | 1-indexed inclusive line range |
 | `--grep PATTERN` | Substring match (case-sensitive) |
-| `--since DURATION` | Only include nodes that started within the last D (e.g. 5m, 1h) |
+| `--since DURATION` | Only include nodes that started within the last D (5m, 1h, and similar durations) |
 | `--tree` | Merge root + descendant runs into one stream (local only) |
 | `--events-only` | Include event records and omit node body output |
 | `--no-events` | Include node body output and omit event records |
@@ -725,31 +717,31 @@ controller, and any profile that declares its own logs surface.
 
 ```sh
 # Read local logs
-sparkwing runs logs --run run-20260422-142501-abcd
+sparkwing runs logs --run run-fictional
 
 # Last 20 lines of a remote run
-sparkwing runs logs --run run-... --profile prod --tail 20
+sparkwing runs logs --run run-fictional --profile prod --tail 20
 
 # Only the most recent attempt's output
-sparkwing runs logs --run run-... --profile prod --since 5m
+sparkwing runs logs --run run-fictional --profile prod --since 5m
 
 # Search logs for an error substring
-sparkwing runs logs --run run-... --grep 'permission denied'
+sparkwing runs logs --run run-fictional --grep 'permission denied'
 
 # Merge a parent run with every descendant
-sparkwing runs logs --run run-... --tree
+sparkwing runs logs --run run-fictional --tree
 
 # Read only structured event records
-sparkwing runs logs --run run-... --events-only
+sparkwing runs logs --run run-fictional --events-only
 
 # JSON stream for an agent
-sparkwing runs logs --run run-... -o json
+sparkwing runs logs --run run-fictional -o json
 
 # Plain text with node/step prefix
-sparkwing runs logs --run run-... -o plain
+sparkwing runs logs --run run-fictional -o plain
 
 # Force the colored renderer when piping
-sparkwing runs logs --run run-... -o pretty | less -R
+sparkwing runs logs --run run-fictional -o pretty | less -R
 ```
 
 ## `sparkwing runs prune`
@@ -762,7 +754,7 @@ controller's SQLite store doesn't grow unbounded. Supply either
 (repeatable). Use --run - to read ids from stdin. The two modes
 are mutually exclusive.
 
-Use --dry-run first to confirm the victim list.
+Use --dry-run first to confirm the matching runs.
 
 ### Flags
 
@@ -815,10 +807,10 @@ controller's receipt endpoint and uses the controller's configured rate.
 
 ```sh
 # Local receipt as JSON
-sparkwing runs receipt --run run-...
+sparkwing runs receipt --run run-fictional
 
 # Prod receipt
-sparkwing runs receipt --run run-... --profile prod
+sparkwing runs receipt --run run-fictional --profile prod
 ```
 
 ## `sparkwing runs retry`
@@ -832,9 +824,11 @@ For local runs, Sparkwing queues the retry in the same local store as
 'sparkwing run --sw-detached' and starts the resident consumer when no
 dashboard is running.
 The retry is bound to the source run's full origin
-identity, Git revision, and complete plan snapshot. Sparkwing compiles and runs
+identity, Git revision, and complete plan snapshot. Sparkwing compiles and
+runs
 an immutable detached snapshot of that recorded revision; uncommitted or later
-working-tree edits are deliberately excluded. If the source checkout is gone or
+working-tree edits are deliberately excluded. If the source checkout is gone
+or
 any identity has drifted, the retry fails before compilation; it never falls
 back to the current directory or another repo.
 
@@ -843,9 +837,7 @@ Pick a rerun scope explicitly:
              re-execute only the failed or unreached subset.
   --all      ignore prior outcomes and re-execute every node.
 
-One of --failed or --all is required -- the silent default
-caused operators to ship a partial rerun when they meant a full
-one (and vice versa).
+One of --failed or --all is required.
 
 Pass --run once per source id (repeatable). Use --run - to read ids
 from stdin, one per line. Failures on individual ids don't abort
@@ -866,10 +858,10 @@ only when at least one id failed.
 
 ```sh
 # Rerun only the failed nodes
-sparkwing runs retry --failed --run run-...
+sparkwing runs retry --failed --run run-fictional
 
 # Rerun every node from scratch
-sparkwing runs retry --all --run run-...
+sparkwing runs retry --all --run run-fictional
 
 # Rerun every recently failed run
 sparkwing runs list --status failed --since 1h -q | sparkwing runs retry --failed --run - --profile prod
@@ -877,20 +869,32 @@ sparkwing runs list --status failed --since 1h -q | sparkwing runs retry --faile
 
 ## `sparkwing runs stats`
 
-Aggregate run counts, success %, avg + p95 duration
+Report run counts, success rate, and duration percentiles
 
-Per-pipeline aggregates across the last 500 root runs (or the --since window). In-flight runs count toward RUN (running) but do not contribute to timing percentiles.
+Reports per-pipeline counts and durations over the selected run window.
+Running runs contribute to counts and are excluded from duration percentiles.
 
---capacity switches to the measured capacity profiles admission learns from: each pipeline's p50/p99 duration, its CPU and memory distributions (p50/p95/peak across recent runs), the CPU CHARGE column holding the core figure admission actually reserves, its queue-wait p50/p99, sample count, and whether the admission charge comes from a pin, measurement, or the cold-start default. The resource percentiles show whether a pipeline is steady or spiky. Admission charges memory from the peak, because under-reserving memory recreates the oversubscription admission exists to prevent, and charges cores from each run's sustained demand instead, because the kernel time-slices a transient CPU collision and reserving a burst peak for a whole run only refuses work the box could have run. A pipeline whose pin has drifted from its measured peaks carries the exact fix. Capacity profiles are local-only and repo-scoped for runs launched inside a git repo, so same-named pipelines in different repos never share a profile. The repo scope is the repository's canonical identity: host/owner/path from its origin remote, the object store it borrows from when it has no remote, or a private hash of a local-path remote. Every tree of one repository -- the main checkout, a linked worktree, a clone in an ephemeral directory -- therefore shares one profile: a pipeline costs what it costs whichever tree runs it, and a gate cloning into a fresh directory arrives already knowing its price. A repo with no remote at all keys by its directory name. The table prints each key as its repo scope and pipeline joined with "/".
+--capacity reports measured duration, CPU, memory, admission charge,
+queue wait, sample count, and the source of each charge. Memory charges use
+peak demand; CPU charges use sustained demand. Explicit resource pins remain
+in effect when measurements are reset.
 
---reset clears a pipeline's learned capacity profile so it re-learns from a cold start, the escape hatch for a poisoned measurement -- one freak run that recorded an absurd peak, or a contention-ratcheted demand floor (sparkwing doctor flags those). Name the pipeline with --pipeline NAME as --capacity shows it (repo/pipeline inside a git repo); a bare pipeline name resets every repo-scoped key that carries it, a repo/pipeline name reaches every stored encoding of that profile, and the summary names each profile it reached in the same repo/pipeline form. Reset every pipeline with --all --yes. The demand floor goes whether or not measured samples sit behind it, since a pipeline that never finished a clean run is still priced off its floor. An explicit .Resources() pin is preserved: admission keeps charging the pin while the profile re-learns. The command prints how many rows were dropped, how many pinned rows were cleared, and how many samples and demand floors were discarded.
+Capacity profiles are local and scoped by repository identity and pipeline.
+Linked worktrees and clones with the same origin share measurements.
+The table shows each key as repository/pipeline.
+
+--reset clears samples and learned demand floors. --pipeline accepts the key
+shown by --capacity; a bare pipeline name matches that name across
+repositories.
+--all --yes resets every profile. The result reports removed rows, cleared
+pinned rows, samples, and demand floors.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--pipeline NAME` | Restrict to one pipeline (required with --reset unless --all) |
-| `--since DURATION` | Only runs newer than this (e.g. 7d) |
+| `--since DURATION` | Only runs newer than this (7d and similar durations) |
 | `--capacity` | Show measured capacity profiles instead of run aggregates |
 | `--reset` | Delete a pipeline's learned capacity profile so it re-learns (keeps pins) |
 | `--all` | With --reset, reset every pipeline's learned profile |
@@ -930,7 +934,7 @@ in each standalone store, and reports which one held it. The verbs
 that write to a run -- bounce, annotations add, approvals approve
 and deny, debug rerun, debug replay -- write in whichever store held
 it. Cancel and retry cannot act on a standalone run at all, because
-no daemon arbitrates one, and say so rather than reporting it
+no daemon arbitrates one, and say so instead of reporting it
 missing.
 
 Runs that wrote their logs to a filesystem also report log_path: the
@@ -946,13 +950,13 @@ Exit code contract: after rendering, 'runs status' exits 0 only when
 status == success. Any non-success terminal status (failed, cancelled)
 exits 1; a run that is still running when the (non-follow) read
 returns also exits 1. Pass --exit-zero to inspect a known-failed run
-without the shell redline. For a blocking wait, use 'runs wait'.
+while returning zero. For a blocking wait, use 'runs wait'.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--run RUN_ID` | Run identifier (e.g. run-20260422-142501-abcd) (required) |
+| `--run RUN_ID` | Run identifier (required) |
 | `-f, --follow` | Poll until the run reaches a terminal state |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--steps` | Render every step under every node (plain output). Failed / skipped / annotated nodes always include their steps; this flag forces success nodes too. |
@@ -963,30 +967,27 @@ without the shell redline. For a blocking wait, use 'runs wait'.
 
 ```sh
 # Check a local run once
-sparkwing runs status --run run-20260422-142501-abcd
+sparkwing runs status --run run-fictional
 
 # Follow a running job to completion
-sparkwing runs status --run run-... --follow
+sparkwing runs status --run run-fictional --follow
 
 # Inspect a known-failed run without nonzero exit
-sparkwing runs status --run run-... --exit-zero
+sparkwing runs status --run run-fictional --exit-zero
 
 # Expand every step on every node
-sparkwing runs status --run run-... --steps
+sparkwing runs status --run run-fictional --steps
 
 # Check a prod run
-sparkwing runs status --run run-... --profile prod
+sparkwing runs status --run run-fictional --profile prod
 ```
 
 ## `sparkwing runs summary`
 
 Aggregated work view: groups, work items, modifiers, annotations
 
-Run-level rollup of every node in one render. Mirrors the
-dashboard's Summary tab: run header + run-wide annotations +
-node groups + work items (nodes and inner steps) + modifiers
-in effect + any approval-gate state. Useful for the
-"did this run actually do what I asked" agent question.
+Prints the run header, annotations, node groups, work items, modifiers,
+and approval state together. Use --output json for structured output.
 
 ### Flags
 
@@ -1000,10 +1001,10 @@ in effect + any approval-gate state. Useful for the
 
 ```sh
 # Quick run rollup
-sparkwing runs summary --run run-...
+sparkwing runs summary --run run-fictional
 
 # JSON for an agent
-sparkwing runs summary --run run-... -o json
+sparkwing runs summary --run run-fictional -o json
 ```
 
 ## `sparkwing runs timeline`
@@ -1030,20 +1031,22 @@ emits start/end offsets in milliseconds per row.
 
 ```sh
 # Default node waterfall
-sparkwing runs timeline --run run-...
+sparkwing runs timeline --run run-fictional
 
 # Expand into per-step bars
-sparkwing runs timeline --run run-... --steps
+sparkwing runs timeline --run run-fictional --steps
 
 # JSON for an agent
-sparkwing runs timeline --run run-... --steps -o json
+sparkwing runs timeline --run run-fictional --steps -o json
 ```
 
 ## `sparkwing runs tree`
 
 Show a run and every descendant run as an ASCII tree
 
-Walks parent_run_id links so cross-pipeline spawns (RunAndAwait) show up under their originating run. Local mode reads from SQLite; --profile NAME reads from the profile's controller.
+Walks parent_run_id links so cross-pipeline spawns (RunAndAwait) show up under
+their originating run. Local mode reads from SQLite; --profile NAME reads from
+the profile's controller.
 
 ### Flags
 
@@ -1057,28 +1060,21 @@ Walks parent_run_id links so cross-pipeline spawns (RunAndAwait) show up under t
 
 ```sh
 # Tree for a local run
-sparkwing runs tree --run run-20260422-142501-abcd
+sparkwing runs tree --run run-fictional
 
 # Tree for a prod run as JSON
-sparkwing runs tree --run run-... --profile prod -o json
+sparkwing runs tree --run run-fictional --profile prod -o json
 ```
 
 ## `sparkwing runs triggers`
 
 Fire, list, or inspect controller triggers
 
-Triggers are the controller's queue of pending work. Every
-pipeline run starts as a trigger (from a webhook, hook, 'sparkwing
-run --profile', or 'triggers fire') that a worker atomically claims and
-turns into a run.
+Inspect the controller's queue of pipeline triggers. 'list' shows pending,
+claimed, and completed entries. 'get' reads one trigger by identifier.
+Select the controller with --profile NAME.
 
-'fire' posts a synthetic trigger -- the sparkwing equivalent of
-'gh workflow run'. 'list' surfaces queued / in-flight / done
-entries so operators can see what's stuck without diving into
-controller logs. 'get' inspects one trigger by id.
-
-Connection info comes from the selected profile (--profile NAME);
-there are no --controller / --token flags on this command.
+Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.
 
 ### Subcommands
 
@@ -1092,17 +1088,19 @@ there are no --controller / --token flags on this command.
 sparkwing runs triggers list --profile prod --status pending
 
 # Inspect one trigger
-sparkwing runs triggers get --id run-... --profile prod
+sparkwing runs triggers get --id run-fictional --profile prod
 
-# Fire a trigger (use pipeline run)
-sparkwing pipeline run --pipeline deploy --profile prod
+# Submit a trigger
+sparkwing pipeline trigger fictional-deploy --profile prod
 ```
 
 ## `sparkwing runs triggers get`
 
 Inspect one trigger's full metadata by id
 
-Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args, git, env, status, claim lease). Defaults to a compact multi-line rendering; -o json emits the raw response.
+Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args,
+git, env, status, claim lease). Defaults to a compact multi-line rendering; -o
+json emits the raw response.
 
 ### Flags
 
@@ -1116,10 +1114,10 @@ Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args, git, 
 
 ```sh
 # Inspect one trigger
-sparkwing runs triggers get --id run-20260422-142501-abcd --profile prod
+sparkwing runs triggers get --id run-fictional --profile prod
 
 # Raw JSON for scripting
-sparkwing runs triggers get --id run-... --profile prod -o json
+sparkwing runs triggers get --id run-fictional --profile prod -o json
 ```
 
 ## `sparkwing runs triggers list`
@@ -1134,7 +1132,8 @@ Useful when the queue looks stuck ("why isn't my trigger being
 claimed?"): --status pending shows unclaimed work, --status
 claimed shows what a worker has in-flight. The repo filter
 matches GITHUB_REPOSITORY on the trigger env so webhook-driven
-entries narrow cleanly; that value is not indexed, so the search
+entries match the selected repository; that value is not indexed, so the
+search
 covers the newest 5,000 triggers matching the other filters and
 an older entry is not reported.
 
@@ -1145,7 +1144,7 @@ an older entry is not reported.
 | `--status STATUS` | Filter by status: pending \| claimed \| done |
 | `--pipeline NAME` | Filter by pipeline name |
 | `--repo OWNER/NAME` | Match GITHUB_REPOSITORY on the trigger env, over the newest 5,000 triggers |
-| `--limit N` | Max triggers to show (default: 20) |
+| `--limit N` | Maximum triggers to show (default: 20) |
 | `-q, --quiet` | Print only trigger ids, newline-separated |
 | `-o, --output FORMAT` | Output format: json emits the raw triggers array |
 | `--profile NAME` | Profile name (required) |
@@ -1160,23 +1159,22 @@ sparkwing runs triggers list --profile prod
 sparkwing runs triggers list --profile prod --status pending
 
 # Pipeline-specific, JSON
-sparkwing runs triggers list --profile prod --pipeline build-test-deploy --limit 5 -o json
+sparkwing runs triggers list --profile prod --pipeline fictional-build --limit 5 -o json
 ```
 
 ## `sparkwing runs wait`
 
 Block until a run reaches a terminal status
 
-Polls the run until its status is success / failed /
-cancelled, then exits. Exit code contract:
+Polls until the run succeeds, fails, or is cancelled.
 
-  0   status == success
-  1   status == failed or cancelled
-  2   timed out before the run reached a terminal status
-  3+  infrastructure error (controller unreachable, run not found, ...)
+Exit codes:
+  0   succeeded
+  1   failed or cancelled
+  2   timed out
+  3+  lookup or infrastructure failure
 
-Pair with 'runs find --wait' for the "push then find then wait" loop
-described in the CLI wishlist.
+Use 'runs find --wait' to find the run before waiting for its outcome.
 
 ### Flags
 
@@ -1192,11 +1190,11 @@ described in the CLI wishlist.
 
 ```sh
 # Wait for a local run
-sparkwing runs wait --run run-20260422-142501-abcd
+sparkwing runs wait --run run-fictional
 
 # Wait with a custom timeout
-sparkwing runs wait --run run-... --timeout 30m --profile prod
+sparkwing runs wait --run run-fictional --timeout 30m --profile prod
 
 # Tight polling on a fast run
-sparkwing runs wait --run run-... --poll 500ms --profile prod
+sparkwing runs wait --run run-fictional --poll 500ms --profile prod
 ```

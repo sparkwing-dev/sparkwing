@@ -18,7 +18,8 @@ Rows carry path, synopsis and full-tree subcommand_count. Read a selected
 command with <path> --help. Hidden commands require --include-hidden.
 Plain prints paths only, with continuation on stderr.
 
---format markdown exports the full reference and rejects query/pagination flags. --split-dir writes generated files.
+--format markdown exports the full reference and rejects query/pagination
+flags. --split-dir writes generated files.
 
 ### Flags
 
