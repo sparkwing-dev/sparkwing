@@ -643,7 +643,7 @@ func TestConcurrency_QueueSerializesConcurrentHolders(t *testing.T) {
 	}()
 	select {
 	case <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("first cache body did not start")
 	}
 	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:cache-queue-key", 1, 1)
@@ -689,7 +689,7 @@ func TestConcurrency_QueueSerializesAcrossRuns(t *testing.T) {
 	})
 	select {
 	case <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("first cross-run cache body did not start")
 	}
 	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:cache-queue-key", 1, 3)
@@ -1120,7 +1120,7 @@ func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	})
 	select {
 	case <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("first plan-level cache body did not start")
 	}
 	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:plan-level-key", 1, 1)
@@ -1170,7 +1170,7 @@ func TestConcurrency_PlanLevelQueueEmitsAdmissionEvents(t *testing.T) {
 	}()
 	select {
 	case <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("plan queue event leader body did not start")
 	}
 	waitForConcurrencyHolder(t, p.StateDB(), "plan-queue-leader/-")
@@ -1415,7 +1415,7 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	var attemptCtx context.Context
 	select {
 	case attemptCtx = <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("parent action did not publish its admission context")
 	}
 	observeAdmissionWaitBeyondDispatchTimeout(t, attemptCtx, parentDone, dispatchTimeout)
@@ -1545,7 +1545,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	var attemptCtx context.Context
 	select {
 	case attemptCtx = <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("parent action did not publish its progress timeout context")
 	}
 	if !orchestrator.ProgressTimeoutPausedForTest(attemptCtx) {
@@ -1672,7 +1672,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 	var attemptCtx context.Context
 	select {
 	case attemptCtx = <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("parent action did not publish its timeout context")
 	}
 	if !orchestrator.ProgressTimeoutPausedForTest(attemptCtx) {
@@ -1774,7 +1774,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	var attemptCtx context.Context
 	select {
 	case attemptCtx = <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("parent action did not publish its timeout context")
 	}
 	const controlledRemainder = 5 * time.Second
@@ -1924,7 +1924,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	var attemptCtx context.Context
 	select {
 	case attemptCtx = <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("parent action did not publish its timeout context")
 	}
 	const controlledRemainder = time.Second
@@ -2093,7 +2093,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 	var attemptCtx context.Context
 	select {
 	case attemptCtx = <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("parent action did not publish its timeout context")
 	}
 	const controlledRemainder = 600 * time.Millisecond
@@ -2228,7 +2228,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 	var attemptCtx context.Context
 	select {
 	case attemptCtx = <-gate.started:
-	case <-time.After(time.Second):
+	case <-time.After(timingBudget(time.Second)):
 		t.Fatal("parent action did not publish its timeout context")
 	}
 	const controlledRemainder = 480 * time.Millisecond
