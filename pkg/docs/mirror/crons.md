@@ -1,12 +1,14 @@
-# Local crons
+# Crons
 
 Sparkwing runs a pipeline on a cadence from the machine you arm, with no
-controller, no cluster, and no resident process of its own. A repository
-declares the cadence; one host evaluates it.
+cluster and no resident process of its own. A repository declares the
+cadence; one host evaluates it. A repository can also declare a cadence for
+a controller to evaluate, which the same commands push and inspect with
+`--profile`; see [Controller schedules](#controller-schedules).
 
 ## A schedule
 
-A schedule is one pipeline's `on.schedule` cadence, armed on one host. Two
+A schedule is one of a pipeline's `on.schedule` entries, armed on one host. Two
 things make one:
 
 1. The repository declares the cadence in `.sparkwing/sparkwing.yaml`.
@@ -16,23 +18,21 @@ Declaring is not arming. Another machine with the same checkout stays idle
 until it is armed too, so two hosts never race for the same instant.
 
 Each schedule carries an id -- `crn_` and twelve hex characters, derived from
-the checkout path and the pipeline name -- and a display name of
-`<repo directory>/<pipeline>`. Commands accept any of the three: the id, the
-display name, or a bare pipeline name that is unique across the host.
+the checkout path, the pipeline name, and the entry's name -- and a display
+name of `<repo directory>/<pipeline>` for the entry named `default`, or
+`<repo directory>/<pipeline>/<name>` for any other. Commands accept the id, the
+display name, a `pipeline/name` pair, or a bare pipeline name that is unique
+across the host.
+
+An armed schedule carries three things beyond the cadence: what it runs (the
+pinned pipeline binary, or the checkout when it follows one), this host's own
+override of the declaration, and the arguments its launch passes.
 
 ## Declaring the cadence
 
-The short form is a five-field cron expression, read in UTC:
-
-```yaml
-pipelines:
-  - name: nightly-rebuild
-    entrypoint: NightlyRebuild
-    on:
-      schedule: "0 3 * * *"
-```
-
-The long form sets the zone and the policies:
+One entry is a cron expression and the side that fires it. `where` is
+required and has no default, so nothing fires somewhere the repository did not
+say it should; `local` is the side a host arms:
 
 ```yaml
 pipelines:
@@ -41,6 +41,19 @@ pipelines:
     on:
       schedule:
         cron: "0 3 * * *"
+        where: local
+```
+
+The same entry sets the zone and the policies:
+
+```yaml
+pipelines:
+  - name: nightly-rebuild
+    entrypoint: NightlyRebuild
+    on:
+      schedule:
+        cron: "0 3 * * *"
+        where: local
         tz: America/Denver
         overlap: queue
         catch_up: 6h
@@ -50,6 +63,37 @@ Every field, its accepted values, and its default are in
 [scheduling.md](scheduling.md#schedule-triggers-cron). `tz: local` resolves to
 the zone of whichever host evaluates the schedule, so a repository moved
 between machines follows the machine.
+
+### Several cadences on one pipeline
+
+`on.schedule` takes a list, so one pipeline can carry more than one cadence.
+Each entry then needs a `name`, unique within the pipeline, which becomes the
+last segment of the schedule's display name and the way `pause`, `resume` and
+`run` address it. `args` gives an entry its own argument values, keyed by CLI
+flag name exactly as `args:` on the pipeline is, so two cadences of the same
+pipeline run different work:
+
+```yaml
+pipelines:
+  - name: sweep
+    entrypoint: Sweep
+    on:
+      schedule:
+        - name: quick
+          cron: "*/15 * * * *"
+          where: local
+          args:
+            depth: shallow
+        - name: full
+          cron: "0 4 * * *"
+          where: local
+          args:
+            depth: deep
+```
+
+A schedule's args sit above the pipeline's own `args:` and below a host's
+override, and the run executes with the merged set, so a `guards:` token like
+`arg:depth=deep` reads them and each fire records what it ran with.
 
 ### Daylight saving
 
@@ -68,28 +112,60 @@ days a year that have no single answer:
 ```sh
 sparkwing crons install                     # the enclosing repo
 sparkwing crons install --repo /path/to/repo
+sparkwing crons install --only nightly,sweep/quick
 sparkwing crons install --fleet             # every registered repo
 ```
 
-Install compiles each declared pipeline and requires the binary to name it
-before arming the cadence, because a schedule fires unattended: a pipeline
-that will not build is refused here rather than at three in the morning.
-`--no-prove` arms without that check.
+Install arms the `where: local` entries of the repo. An entry declaring
+`where: controller` is listed as the controller's and never stored here, so one
+repo can carry both sides and each host takes only what it is asked to run.
 
-Re-running install republishes what the repository declares. A changed
-expression, zone, overlap policy, or catch-up window is stored; a pipeline
-that stopped declaring a cadence is marked undeclared and stops firing while
-keeping its history. Pause state and the cursor survive, so re-arming does not
-replay anything.
+`--only` arms a subset, naming pipelines or `pipeline/name` entries. A name the
+repo does not declare fails the command before anything is written, so a typo
+never half-arms a checkout.
+
+### The pin
+
+Install compiles each declared pipeline and requires the binary to name it
+before arming the cadence, because a schedule fires unattended: a pipeline that
+will not build is refused here rather than at three in the morning.
+
+That compile is also the pin. The binary is copied to
+`<sparkwing home>/crons/<schedule id>/pipeline` and recorded on the schedule
+with the checkout's `HEAD` and the cache digest it was built from. Every fire
+runs that file, so pulling, branching or editing the checkout afterwards does
+not change what runs at 03:00. Re-running install is the explicit update: it
+compiles again, replaces the pinned binary, and moves the recorded commit.
+
+The pin covers the pipeline the repo declares and everything compiled into it.
+Scripts and binaries the pipeline executes from the checkout or from `PATH` are
+outside it: a step that runs `./scripts/deploy.sh` reads whatever that file
+holds at the moment it fires, and one that runs `terraform` gets whichever
+version is installed. Pin those the way you would for any other unattended job.
+
+`--follow` arms without a pin, which is what v0.47.0 did: each fire compiles the
+checkout as it stands that minute. `sparkwing crons unlock <name>` moves an
+armed schedule to that behaviour, and `sparkwing crons lock <name>` pins it
+again at the current checkout. `--no-prove` skips the compile, and so pins
+nothing.
+
+### What re-arming keeps
+
+Re-running install republishes what the repo declares. A changed expression,
+zone, overlap policy, catch-up window or argument set is stored; a pipeline that
+stopped declaring a cadence is marked undeclared and stops firing while keeping
+its history. Pause state, the cursor, the fire history and this host's
+overrides survive, and an override is re-based onto the new declaration.
 
 Only a config sparkwing could read withdraws a schedule. A checkout that has
 moved, been deleted, or sits on a volume that is not mounted is reported in the
 tick's errors and `sparkwing crons status`, and its rows are left armed --
-being unable to read a repository is not a decision to stop scheduling it. Run
-`sparkwing crons uninstall --repo <path>` to remove those rows for good.
+being unable to read a repository is not a decision to stop scheduling it.
 
-`sparkwing crons uninstall` disarms a checkout and drops its history. When
-nothing is left armed anywhere, the OS timer goes with it.
+`sparkwing crons disarm <name>` removes one schedule, its history and its
+pinned binary, leaving every sibling armed. `sparkwing crons uninstall` does
+the same for a whole checkout, and when nothing is left armed anywhere, the OS
+timer goes with it.
 
 A build installed beside the released binary (`SPARKWING_INSTALL_NAME=sparkwing-crons
 bash bin/install.sh`) can arm and tick on its own, but a scheduled run still
@@ -97,6 +173,57 @@ starts its admission daemon from the `sparkwing` on PATH, and a daemon from a
 different build refuses the run. Set `SPARKWING_WINGD_BIN` to that build's path
 when you run `install`; the unit carries it, so the runs it launches are hosted
 by the same build.
+
+## Overriding a schedule on one host
+
+A repo declares one cadence for everyone who arms it. `crons set` lays this
+host's own values over that declaration, for the expression, the zone, the
+overlap policy, the catch-up window and the launch's arguments:
+
+```sh
+sparkwing crons set nightly --cron "0 5 * * *"
+sparkwing crons set nightly --tz local
+sparkwing crons set sweep/quick --arg depth=deep --arg dry-run=true
+sparkwing crons reset nightly          # run what the repo declares again
+```
+
+Each `set` keeps what an earlier one said and replaces only the fields it
+names. `--arg` is the exception: it replaces the declared argument set whole, so
+name every argument the schedule should launch with.
+
+An override that would not evaluate -- an unparseable expression, a zone this
+host cannot load, an overlap policy that is neither `skip` nor `queue` -- is
+refused when it is set, and the schedule keeps running what it was.
+
+`crons list` marks an overridden expression with `*`, and `crons show` prints
+the declared value, the override and the effective value side by side. An
+override is **stale** once the repo changes the declaration it was set against:
+it still applies, because a cadence someone chose against `0 3 * * *` may mean
+nothing against `*/5 * * * *`. `crons list` adds a `!` after the `*` and prints
+a footnote naming the remedy, `crons show` prints an `override stale` line, and
+`crons status` counts them. Re-running install re-bases every stale override
+and says which ones it moved, which is the host acknowledging the new
+declaration.
+
+## Drift
+
+A locked schedule does not read the working tree: its declaration is what was
+armed with it. What the checkout has done since is derived when you ask, and
+reaches you as the `LOCK` column of `crons list`:
+
+| Cell | What it means |
+| --- | --- |
+| `abc1234` | Pinned at that commit, and the checkout is on it and clean. |
+| `abc1234 ahead` | The checkout has newer commits the pin does not carry. |
+| `abc1234 dirty` | The checkout has uncommitted edits the pin does not carry. |
+| `follows` | No pin: every fire compiles the checkout. |
+| `missing` | The pinned binary is gone, so the schedule fires nothing. |
+
+Drift is never an error on its own -- a pin is doing its job by ignoring the
+checkout -- and `sparkwing crons install` resolves every case by pinning the
+checkout as it stands. A `missing` pin is different: its fires are recorded as
+failed with a reason naming `sparkwing crons install`, because there is nothing
+to run and the checkout is exactly what the pin exists to ignore.
 
 ## The tick model
 
@@ -107,9 +234,11 @@ the cron expressions itself rather than translating them into a service
 manager's own calendar syntax.
 
 Each tick takes an exclusive lock on `crons.lock` under the sparkwing home, so
-two ticks never resolve the same instant. It re-reads what the armed
-repositories declare, then evaluates every declared unpaused schedule against
-its cursor -- the last due instant it resolved -- and resolves each one:
+two ticks never resolve the same instant. It re-reads the declaration of every
+schedule that follows its checkout; a pinned schedule keeps the declaration it
+was armed with, because reading the working tree is exactly what the pin exists
+to avoid. It then evaluates every declared unpaused schedule against its
+cursor -- the last due instant it resolved -- and resolves each one:
 
 - **fired**: the instant is inside the catch-up window and the run is
   launched.
@@ -124,13 +253,24 @@ its cursor -- the last due instant it resolved -- and resolves each one:
 
 Every outcome moves the cursor, so an instant is considered exactly once. A
 schedule that fails, is skipped, or is paused still fires on time at its next
-instant.
+instant. The one exception is a schedule that cannot be evaluated at all -- an
+override that leaves an unparseable expression, a zone this host cannot load --
+which has no due instant to resolve: its cursor stays where it is until the
+override is fixed or dropped, so nothing between now and then is skipped.
 
 A scheduled run goes through the same path as `sparkwing run --sw-detached`:
 it is persisted against this home's runs store and executed by the resident
 consumer. It carries the trigger source `schedule`, which a pipeline can
 branch on through `RunContext.Trigger.Source`, and the schedule's id, so the
 run traces back to the cadence that asked for it.
+
+The launch passes the schedule's effective arguments after the pipeline name,
+exactly as `sparkwing run <pipeline> --key value` would, so they merge over the
+repo's `defaults.args` and the pipeline's own `args:` the same way and a
+`guards: {require: [arg:depth=deep]}` token reads them. Each fire records the
+arguments it launched with, and `crons show` prints them. A locked schedule
+hands the consumer its pinned binary, which the consumer executes instead of
+compiling the checkout, with the checkout as the working directory.
 
 Run the tick by hand on a platform sparkwing has no timer for, from that
 machine's own scheduler, once a minute:
@@ -145,19 +285,25 @@ launched -- and exits non-zero only when the tick itself could not run.
 ## Inspecting
 
 ```sh
-sparkwing crons list          # what is armed, when it next fires, how it last went
-sparkwing crons show nightly-rebuild   # every field, plus recent fires and their runs
+sparkwing crons list          # what is armed, what it runs, when it next fires
+sparkwing crons show nightly-rebuild   # declaration, override, effective, lock, fires
 sparkwing crons next          # the next instants across every armed schedule
 sparkwing crons next nightly-rebuild --count 10
 sparkwing crons status        # the timer, the last tick, the counts
 ```
 
+Every verb takes a schedule id, a `<repo>/<pipeline>[/<name>]` display name, a
+`pipeline/name` pair, or a bare pipeline name unique across this host. An
+ambiguous name lists the candidates instead of guessing.
+
 `crons next` is the cheapest way to check that an expression means what it
 looks like -- a day-of-week field, a daylight-saving boundary, a zone that is
 not yours. It walks the same evaluator the tick uses.
 
-`crons show` names each resolved instant, what the tick decided, the run it
-launched, and that run's current status.
+`crons show` prints the declared cadence, this host's override and the
+effective values side by side, then the lock and what the checkout has done
+since, then each resolved instant: what the tick decided, the arguments it
+launched with, the run, and that run's current status.
 
 Piping any of them yields NDJSON, one record per line.
 
@@ -203,6 +349,94 @@ to do depends on what it reports:
   `crons.log`.
 - **foreign**: a file sparkwing did not write sits at the unit path. Sparkwing
   never overwrites or removes one; move it aside and install again.
+
+It also counts what is pinned, what follows the checkout, how many pins the
+checkout has moved past, and how many overrides were set against a declaration
+that has since changed. None of those makes the host unhealthy, and every one
+of them is answered by re-running `sparkwing crons install`, which is the
+sentence status prints when any is non-zero.
+
+## Controller schedules
+
+An entry declared `where: controller` fires from a controller, not from any
+host. A host arms nothing for it; it pushes it:
+
+```bash
+sparkwing crons install --profile prod --repo ~/code/my-app
+```
+
+The push reads the repository's controller entries, resolves the checkout's
+git origin, branch and HEAD, seeds the controller's git cache with that
+commit, and sends the whole set. Entries declared `where: local` are reported
+as this host's, and the same command with no `--profile` arms them here.
+
+The repository needs a git origin, because the cluster clones the pipeline
+source at each fire rather than reading a checkout. For the same reason the
+push refuses a HEAD no remote branch carries -- `git branch -r --contains HEAD`
+empty -- since every fire would fail at the clone: push the branch first, or
+use `--follow` to clone the branch tip instead. Uncommitted edits are a warning
+rather than a refusal, because the controller clones the pushed commit and they
+are simply not part of what fires. A seed that fails is a warning too: the
+trigger loop fetches the commit itself when it finds the cache short.
+
+### Pinned by commit, or following the branch
+
+By default every fire clones the commit the push resolved, so a branch that
+moves afterwards does not change what runs unattended. `--follow` clones the
+tip of the branch at each fire instead. Re-running the push is the explicit
+update, and it moves the pin. `crons lock` and `crons unlock` are host verbs
+and have no controller form: the pin moves with the push.
+
+A pushed row records the clone URL as its repository, so its display name is
+`<owner>/<name>/<pipeline>[/<entry>]` rather than a directory name. The state
+detail reads `pinned <sha>`, or `branch tip` for a schedule that follows the
+branch.
+
+### One evaluator per store
+
+The controller evaluates the pushed schedules once a minute from a loop of its
+own. The minute is claimed in the runs store, so several controllers sharing
+one store keep off each other's minute, and a controller that dies mid-tick
+releases its claim within ninety seconds. That claim is advisory: what actually
+makes a due instant fire once is the launch's idempotency key,
+`<schedule id>@<due instant>`, and the schedule's cursor, which only ever moves
+forward. Two overlapping ticks reach the same run rather than starting two. Nothing on the
+controller reads a working tree, so a pushed schedule never drifts: its
+declaration is what the last push carried.
+
+### What a fire becomes
+
+A due instant writes the same three things an operator's
+`sparkwing pipeline trigger` writes: the trigger row, the pending run row, and
+the dispatch. The trigger carries the trigger source `schedule`, the
+schedule's effective arguments, the repository URL, the branch and the pinned
+commit, and the schedule's id under `_SPARKWING_CRON_SCHEDULE`. The cluster's
+trigger loop claims it, clones the repository at that commit, and runs the
+pipeline.
+
+Each launch carries an idempotency key of `<schedule id>@<due instant>`, so a
+second evaluation of one minute reaches the run the first started rather than
+starting a second.
+
+### Inspecting
+
+Every verb but `tick`, `lock` and `unlock` takes `--profile NAME` and reads the
+controller instead of this host. A controller schedule is pinned by the commit
+it was pushed at, so there is no separate lock to take:
+
+```bash
+sparkwing crons list --profile prod
+sparkwing crons show --profile prod my-org/my-app/nightly
+sparkwing crons status --profile prod
+sparkwing crons pause --profile prod my-org/my-app/nightly
+sparkwing crons run --profile prod my-org/my-app/nightly
+sparkwing crons uninstall --profile prod --repo ~/code/my-app
+```
+
+`crons status --profile` reports the controller's loop in place of an OS
+timer, along with when it last ticked and what that tick reported. The
+dashboard reads the same routes through its controller proxy, so a browser
+session with `runs.read` sees the controller's schedules beside its runs.
 
 ## Related
 
