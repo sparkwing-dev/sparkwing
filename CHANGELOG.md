@@ -22,6 +22,8 @@ unlock.
 
 ### Added
 
+- **development:** Repository-owned candidate install hook for Xwing rebuilds
+  the selected web and CLI sources into private staging
 - **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
   group has no members until its source job completes, so every `JobGroup`
   setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
