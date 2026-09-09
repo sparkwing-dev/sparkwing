@@ -40,6 +40,17 @@ unlock.
 - **sdk:** Fileset hashes distinguish file boundaries and permissions, and
   report unreadable inputs. Existing hash-derived image tags change once.
 
+### Removed
+
+- **sdk (Breaking):** `AcquireLintSlot`, the `LintSlot` type and
+  `SPARKWING_LINT_SLOTS`. A slot lent every worktree one alias path so they
+  could share a linter cache; git resolves the alias to the real worktree and
+  reports that as the repository root, so findings recorded under the alias sat
+  outside the diff and `new-from-merge-base` dropped every one -- a tree with
+  eight findings linted clean in three seconds. Hand each worktree
+  `ToolCacheDir("golangci-lint")`. See
+  [lint slots removed](docs/migrations/_unreleased.md#lint-slots-removed).
+
 ## [v0.48.1] - 2026-09-09
 ### Changed
 
