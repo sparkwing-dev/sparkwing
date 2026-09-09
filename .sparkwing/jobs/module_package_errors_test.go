@@ -32,12 +32,8 @@ func TestModulePackageDiscoveryExcludesBrokenNodeModules(t *testing.T) {
 	root := gateFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "web", "node_modules", "dependency", "broken.go"), "package\n")
 	packages, err := modulePackageArgs(context.Background(), ".", true)
-	if err != nil || len(packages) != 1 || packages[0] != `"fixture/internal"` {
+	if err != nil || len(packages) != 1 || packages[0] != `"./internal"` {
 		t.Errorf("packages = %v, %v; want only product package", packages, err)
-	}
-	empty, err := moduleHasNoPackages(context.Background(), ".")
-	if err != nil || empty {
-		t.Errorf("classification = %t, %v; want populated product module", empty, err)
 	}
 }
 
@@ -62,5 +58,14 @@ func TestModulePackageDiscoveryKeepsExcludedDependenciesOutOfLint(t *testing.T) 
 	writeGoFile(t, filepath.Join(root, "web", "node_modules", "dependency", "broken.go"), "package\n")
 	if err := runGolangciLint(context.Background()); err != nil {
 		t.Fatalf("excluded dependency changed lint verdict: %v", err)
+	}
+}
+
+func TestModulePackageDiscoveryIncludesTestOnlyLint(t *testing.T) {
+	root := lintFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, "checks", "checks_test.go"), ineffassignViolation("checks"))
+	err := runGolangciLint(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "ineffectual assignment") {
+		t.Fatalf("test-only lint error = %v, want fixture finding", err)
 	}
 }

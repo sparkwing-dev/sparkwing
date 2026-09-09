@@ -24,9 +24,9 @@ func TestModuleClassification(t *testing.T) {
 		{".", false, false}, {"empty", true, false}, {"broken", false, true}, {"missing", false, true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			empty, err := moduleHasNoPackages(context.Background(), testCase.name)
-			if (err != nil) != testCase.failed || empty != testCase.empty {
-				t.Fatalf("classification = %t, %v; want empty %t, failure %t", empty, err, testCase.empty, testCase.failed)
+			packages, err := modulePackageArgs(context.Background(), testCase.name, true)
+			if (err != nil) != testCase.failed || (err == nil && (len(packages) == 0) != testCase.empty) {
+				t.Fatalf("packages = %v, %v; want empty %t, failure %t", packages, err, testCase.empty, testCase.failed)
 			}
 			if testCase.name == "broken" {
 				var exitError *exec.ExitError
@@ -42,7 +42,7 @@ func TestModuleClassificationPreservesCancellation(t *testing.T) {
 	gateFixtureRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := moduleHasNoPackages(ctx, ".")
+	_, err := modulePackageArgs(ctx, ".", true)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("classification error = %v, want cancellation", err)
 	}
@@ -51,7 +51,7 @@ func TestModuleClassificationPreservesCancellation(t *testing.T) {
 func TestModuleClassificationFailureStopsCommand(t *testing.T) {
 	root := gateFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "go.mod"), "invalid module declaration\n")
-	err := forEachGoModule(context.Background(), "probe", "touch tool-ran", nil, true)
+	err := forEachGoModule(context.Background(), "probe", "touch tool-ran; true ./...", nil, true)
 	if err == nil {
 		t.Error("gate accepted a module classification failure")
 	}
@@ -76,7 +76,7 @@ func TestModuleClassificationStopsLint(t *testing.T) {
 func TestModuleClassificationUsesCommandEnvironment(t *testing.T) {
 	gateFixtureRepo(t)
 	ctx := sparkwing.WithCommandEnv(context.Background(), map[string]string{"GOFLAGS": "-fixture-invalid-flag"})
-	_, err := moduleHasNoPackages(ctx, ".")
+	_, err := modulePackageArgs(ctx, ".", true)
 	if err == nil || !strings.Contains(err.Error(), "fixture-invalid-flag") {
 		t.Fatalf("classification error = %v, want command environment flag failure", err)
 	}

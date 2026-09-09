@@ -3,8 +3,10 @@ package jobs
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -460,35 +462,49 @@ func forEachGoModuleEnv(ctx context.Context, label, command string, unset []stri
 }
 
 func modulePackageArgs(ctx context.Context, directory string, includeTestOnly bool) ([]string, error) {
-	// SAFETY: -e keeps broken product packages in the list for vet/build/test to reject.
-	format := "{{.ImportPath}}"
-	if !includeTestOnly {
-		format = "{{if or .GoFiles .CgoFiles .InvalidGoFiles .Error .DepsErrors}}{{.ImportPath}}{{end}}"
-	}
-	output, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %q ./...", directory, format)).String()
-	if err != nil {
-		return nil, fmt.Errorf("list module packages: %w", err)
-	}
-	var packages []string
-	for _, path := range strings.Fields(output) {
-		if strings.Contains("/"+path+"/", "/node_modules/") {
-			continue
-		}
-		packages = append(packages, fmt.Sprintf("%q", path))
-	}
-	return packages, nil
-}
-
-func moduleHasNoPackages(ctx context.Context, directory string) (bool, error) {
 	root, err := sourcePolicyRoot()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	output, err := sparkwing.Exec(ctx, "go", "list", "./...").Dir(filepath.Join(root, directory)).Capture()
+	output, err := sparkwing.Exec(ctx, "go", "list", "-e", "-json", "./...").Dir(filepath.Join(root, directory)).Capture()
 	if err != nil {
-		return false, fmt.Errorf("list packages in %s: %w", directory, errors.Join(err, ctx.Err()))
+		return nil, fmt.Errorf("list packages in %s: %w", directory, errors.Join(err, ctx.Err()))
 	}
-	return strings.TrimSpace(output.Stdout) == "", nil
+	decoder := json.NewDecoder(strings.NewReader(output.Stdout))
+	var packages []string
+	for {
+		var entry struct {
+			ImportPath                        string
+			Dir                               string
+			GoFiles, CgoFiles, InvalidGoFiles []string
+			Error                             *struct{ Err string }
+			DepsErrors                        []struct{ Err string }
+		}
+		if err := decoder.Decode(&entry); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("decode packages in %s: %w", directory, err)
+		}
+		if strings.Contains("/"+entry.ImportPath+"/", "/node_modules/") {
+			continue
+		}
+		if entry.Error != nil {
+			return nil, fmt.Errorf("list packages in %s: %s", directory, entry.Error.Err)
+		}
+		if len(entry.DepsErrors) > 0 {
+			return nil, fmt.Errorf("list packages in %s: %s", directory, entry.DepsErrors[0].Err)
+		}
+		if !includeTestOnly && len(entry.GoFiles) == 0 && len(entry.CgoFiles) == 0 && len(entry.InvalidGoFiles) == 0 {
+			continue
+		}
+		relative, err := filepath.Rel(filepath.Join(root, directory), entry.Dir)
+		if err != nil {
+			return nil, fmt.Errorf("locate package %s: %w", entry.ImportPath, err)
+		}
+		packages = append(packages, fmt.Sprintf("%q", "./"+filepath.ToSlash(relative)))
+	}
+	return packages, nil
 }
 
 var trackerIDPattern = regexp.MustCompile(`\b(IMP|SDK|LOCAL|RUN|ORG|REG|TOD)-[0-9]+\b`)
