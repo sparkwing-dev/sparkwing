@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **cache:** A profile's `cache.binaries` sub-spec now routes `bin/<hash>`
+  reads; it was parsed, validated, and documented but never consumed
 - **cache:** Pipeline binary keys include Go packages named `web`
 - **cache:** Oversized dependency responses and workspace uploads fail before
   storing truncated content

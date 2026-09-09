@@ -52,6 +52,22 @@ type Spec struct {
 	Binaries *Spec `yaml:"binaries,omitempty"`
 }
 
+// BinaryCache returns the spec that serves compiled pipeline binaries
+// (bin/<hash>). That is the cache surface itself unless the surface
+// declares a binaries sub-spec, which isolates binaries to their own
+// destination -- a shared s3 bucket while the rest of the cache stays
+// on local disk, say. Only the cache surface carries the sub-spec;
+// calling this on another surface returns that surface.
+func (s *Spec) BinaryCache() *Spec {
+	if s == nil {
+		return nil
+	}
+	if s.Binaries != nil {
+		return s.Binaries
+	}
+	return s
+}
+
 // Backend type discriminators.
 const (
 	TypeFilesystem = "filesystem"

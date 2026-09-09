@@ -39,6 +39,14 @@ func resolveEffectiveCacheSpec(_ string) (*backends.Spec, storeurl.ProfileLookup
 	return nil, nil
 }
 
+// resolveBinaryCacheSpec resolves the backend that serves pipeline
+// binaries under bin/<hash>: the active profile's cache surface, or its
+// binaries sub-spec when it declares one.
+func resolveBinaryCacheSpec(sparkwingDir string) (*backends.Spec, storeurl.ProfileLookup) {
+	cache, lookup := resolveEffectiveCacheSpec(sparkwingDir)
+	return cache.BinaryCache(), lookup
+}
+
 func controllerLookup(p *profile.Profile) storeurl.ProfileLookup {
 	if p == nil || p.ControllerURL() == "" {
 		return nil

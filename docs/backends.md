@@ -147,6 +147,9 @@ profiles:
         prefix: "${PIPELINE_NAME}/"
 ```
 
+A pipeline compile reads `bin/<hash>` from the sub-spec when one is
+declared and from the cache surface otherwise.
+
 ## Migrating from `backends.yaml`
 
 For the before/after of moving `backends.yaml` `defaults:` and

@@ -38,7 +38,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 	ctx := context.Background()
 	source := "cached"
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if cache, lookup := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
+		if cache, lookup := resolveBinaryCacheSpec(sparkwingDir); cache != nil {
 			if store, openErr := storeurl.OpenArtifactStoreFromSpec(ctx, *cache, lookup); openErr == nil {
 				if fetchErr := bincache.FetchFromArtifactStore(ctx, store, key, tempPath); fetchErr == nil {
 					source = "artifact-store"
