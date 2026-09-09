@@ -53,7 +53,7 @@ assert_plan() {
         ;;
     esac
   done
-  echo "plan engine=$engine: expected resources found"
+  echo "plan engine=$engine: resource checks completed"
 }
 
 common=(

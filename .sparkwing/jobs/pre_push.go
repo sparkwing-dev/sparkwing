@@ -57,8 +57,8 @@ func (PrePush) ShortHelp() string {
 }
 
 func (PrePush) Help() string {
-	return "Run lint, race, Postgres, admission-fault, vulnerability, dependency-version, " +
-		"public-interface, Terraform, and workflow checks. " +
+	return "Run lint, race tests, Postgres tests, admission fault tests, vulnerability scans, " +
+		"dependency checks, public interface checks, Terraform checks, and workflow checks. " +
 		"Committed Go modules must use released dependencies; the pipeline module may replace " +
 		"the Sparkwing module with its parent checkout. Keep Go workspace files untracked. " +
 		"The gate updates a stale Sparkwing dependency pin, regenerates interface snapshots, " +
