@@ -11,12 +11,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-func runProbeProcess(ctx context.Context, cmd *exec.Cmd, cleanupTimeout time.Duration) error {
-	group, err := procgroup.StartSession(cmd)
+func runProbeProcess(ctx context.Context, command *exec.Cmd, cleanupTimeout time.Duration) error {
+	group, err := procgroup.StartSession(command)
 	if err != nil {
 		return err
 	}
-	err = group.Finish(ctx, cleanupTimeout/2)
+	return finishProbeProcess(ctx, command, group, cleanupTimeout)
+}
+
+func finishProbeProcess(ctx context.Context, command *exec.Cmd, group *procgroup.Group, cleanupTimeout time.Duration) error {
+	err := group.Finish(ctx, cleanupTimeout/2)
 	if err == nil || group.Reaped() {
 		return err
 	}
