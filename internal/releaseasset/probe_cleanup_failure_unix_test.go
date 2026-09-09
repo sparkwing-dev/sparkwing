@@ -15,8 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"go.uber.org/goleak"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 func TestProbeCleanupFailureStillWaitsForCommand(t *testing.T) {
@@ -103,5 +104,18 @@ func TestExecutableIdentityPreservesCleanupFailure(t *testing.T) {
 	var syntaxError *json.SyntaxError
 	if !errors.As(err, &syntaxError) || !errors.Is(err, syscall.ENOTEMPTY) {
 		t.Fatalf("identity error = %v, want JSON and directory cleanup causes", err)
+	}
+}
+
+func TestProbeNonzeroExitPreservesWaitResult(t *testing.T) {
+	command := exec.CommandContext(t.Context(), "/bin/sh", "-c", "exit 7")
+	command.WaitDelay = 100 * time.Millisecond
+	err := runProbeProcess(t.Context(), command, command.WaitDelay)
+	var exitError *exec.ExitError
+	if !errors.As(err, &exitError) || exitError.ExitCode() != 7 || err.Error() != exitError.Error() {
+		t.Fatalf("probe error = %v, want native exit status 7", err)
+	}
+	if command.ProcessState == nil {
+		t.Fatal("probe returned without waiting for the failed command")
 	}
 }

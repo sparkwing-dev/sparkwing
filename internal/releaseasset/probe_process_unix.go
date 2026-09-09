@@ -5,6 +5,7 @@ package releaseasset
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"time"
 
@@ -24,10 +25,19 @@ func finishProbeProcess(ctx context.Context, command *exec.Cmd, group *procgroup
 	if err == nil || group.Reaped() {
 		return err
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	defer cancel()
-	if cleanupErr := group.Terminate(cleanupCtx, cleanupTimeout/2); cleanupErr != nil {
-		return errors.Join(err, cleanupErr)
+	err = errors.Join(err, group.Terminate(cleanupCtx, cleanupTimeout/2))
+	if group.Reaped() {
+		return err
 	}
-	return err
+	leaderExited := group.LeaderExited()
+	killErr := command.Process.Kill()
+	if errors.Is(killErr, os.ErrProcessDone) {
+		killErr = nil
+	}
+	// SAFETY: Group signaling has ended. Reaping waits for OS-confirmed leader exit;
+	// WaitDelay bounds inherited pipes, while kernel process exit has no deadline.
+	<-leaderExited
+	return errors.Join(err, killErr, command.Wait())
 }
