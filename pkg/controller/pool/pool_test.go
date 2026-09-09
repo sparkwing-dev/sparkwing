@@ -3,6 +3,7 @@ package pool
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"os"
 	"slices"
@@ -10,9 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 func TestCheckoutKeepsAHostileJobIDOnOneLogLine(t *testing.T) {
@@ -180,5 +184,68 @@ func TestReconcileReservesBothIndexesOfADisagreeingPVC(t *testing.T) {
 	want := []string{"sparkwing-cache-pool-0", "sparkwing-cache-pool-1", "sparkwing-cache-pool-3"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("pool after 3 reconciles = %v, want %v", names, want)
+	}
+}
+
+type poolCounter struct {
+	metric.Int64Counter
+	value int64
+}
+
+func (c *poolCounter) Add(_ context.Context, value int64, _ ...metric.AddOption) {
+	c.value += value
+}
+
+func TestPoolMetricsCountOnlySuccessfulOperations(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		checkout    bool
+		available   bool
+		updateError bool
+		wantError   bool
+		wantCount   int64
+	}{
+		{name: "checkout", checkout: true, available: true, wantCount: 1},
+		{name: "empty pool", checkout: true},
+		{name: "failed checkout update", checkout: true, available: true, updateError: true, wantError: true},
+		{name: "return", available: true, wantCount: 1},
+		{name: "missing return", wantError: true},
+		{name: "failed return update", available: true, updateError: true, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkouts, returns := &poolCounter{}, &poolCounter{}
+			oldCheckouts, oldReturns := PoolCheckouts, PoolReturns
+			PoolCheckouts, PoolReturns = checkouts, returns
+			t.Cleanup(func() { PoolCheckouts, PoolReturns = oldCheckouts, oldReturns })
+			var objects []runtime.Object
+			if tc.available {
+				objects = append(objects, poolPVC("member", "0"))
+			}
+			client := fake.NewSimpleClientset(objects...)
+			if tc.updateError {
+				client.PrependReactor("update", "persistentvolumeclaims", func(ktesting.Action) (bool, runtime.Object, error) {
+					return true, nil, errors.New("update failed")
+				})
+			}
+			p := NewPool(client, "builds", 1, "")
+			var err error
+			if tc.checkout {
+				_, err = p.Checkout(context.Background(), "job")
+			} else {
+				err = p.Return(context.Background(), "member")
+			}
+			if (err != nil) != tc.wantError {
+				t.Fatalf("operation error = %v, wantError = %v", err, tc.wantError)
+			}
+			wantCheckouts, wantReturns := int64(0), int64(0)
+			if tc.checkout {
+				wantCheckouts = tc.wantCount
+			} else {
+				wantReturns = tc.wantCount
+			}
+			if checkouts.value != wantCheckouts || returns.value != wantReturns {
+				t.Errorf("counters = (%d, %d), want (%d, %d)", checkouts.value, returns.value, wantCheckouts, wantReturns)
+			}
+		})
 	}
 }

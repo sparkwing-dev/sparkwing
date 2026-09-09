@@ -315,6 +315,14 @@ effect. Replacing a consumer interrupts whatever it was executing, on
 the same terms as stopping one: that run returns to the queue and the
 new consumer re-executes it from the start.
 
+### Reading recent local logs
+
+Use `sparkwing runs logs --run RUN_ID --tail 40` for a short excerpt.
+Unfiltered local node and envelope tails read only the suffix needed for those
+lines. Adding grep, line ranges, or event-only selection still scans the input
+before selecting the tail, so matches earlier in the log remain discoverable.
+Tree merging and follow behavior are unchanged.
+
 ### Bouncing a wedged job
 
 Every job in a local run is its own process, which means one job can be

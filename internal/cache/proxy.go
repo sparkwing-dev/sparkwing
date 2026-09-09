@@ -114,7 +114,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := proxyCacheKey(registryName, remotePath)
+	key := proxyCacheKey(registryName, remotePath, r.Header.Get("Accept"))
 	lock := proxyKeyLock(key)
 
 	lock.RLock()
@@ -180,8 +180,8 @@ func handleProxyStats(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-func proxyCacheKey(registry, path string) string {
-	h := sha256.Sum256([]byte(strconv.Itoa(len(registry)) + ":" + registry + "/" + path))
+func proxyCacheKey(registry, path, accept string) string {
+	h := sha256.Sum256([]byte(strconv.Itoa(len(registry)) + ":" + registry + strconv.Itoa(len(path)) + ":" + path + ":" + accept))
 	return fmt.Sprintf("%x", h)[:16]
 }
 
