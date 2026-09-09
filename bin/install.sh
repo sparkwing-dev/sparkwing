@@ -7,6 +7,14 @@ if [ -z "${SPARKWING_INSTALL_BIN:-}" ] && [ -z "${HOME:-}" ]; then
   exit 1
 fi
 DEST="${SPARKWING_INSTALL_BIN:-$HOME/.local/bin}"
+# A named build (SPARKWING_INSTALL_NAME=sparkwing-crons) sits beside the real
+# binary and shares its home, so a branch can be exercised against real runs
+# without replacing the sparkwing every other repo and the timer resolve.
+NAME="${SPARKWING_INSTALL_NAME:-sparkwing}"
+case "$NAME" in
+  sparkwing|sparkwing-*) ;;
+  *) echo "install.sh: SPARKWING_INSTALL_NAME must be sparkwing or sparkwing-<slug>, got $NAME" >&2; exit 1 ;;
+esac
 mkdir -p "$DEST"
 
 export GOPRIVATE='github.com/sparkwing-dev/*'
@@ -24,8 +32,13 @@ if ! git -C "$ROOT" diff --quiet HEAD 2>/dev/null; then
   VERSION="$VERSION+dirty"
 fi
 
-echo "build sparkwing $VERSION"
-go -C "$ROOT" build -ldflags "-X main.Version=$VERSION" -o "$DEST/sparkwing" ./cmd/sparkwing
+echo "build $NAME $VERSION"
+go -C "$ROOT" build -ldflags "-X main.Version=$VERSION" -o "$DEST/$NAME" ./cmd/sparkwing
+if [ "$NAME" != sparkwing ]; then
+  echo
+  echo "Installed to $DEST/$NAME (the sparkwing beside it is untouched)"
+  exit 0
+fi
 
 declare -a STALE=(
   sparkwing-cache
