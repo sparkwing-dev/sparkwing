@@ -222,10 +222,9 @@ func defaultCronsTimerHost(paths orchestrator.Paths) (crontimer.Host, error) {
 	if err != nil {
 		return crontimer.Host{}, err
 	}
-	env := map[string]string{}
-	if v := os.Getenv("SPARKWING_HOME"); v != "" {
-		env["SPARKWING_HOME"] = v
-	}
+	// safety: the unit names the home explicitly, so the tick evaluates the
+	// store that armed it wherever the service manager's environment points.
+	env := map[string]string{"SPARKWING_HOME": paths.Root}
 	// safety: the daemon host is resolved from PATH at run time, so a
 	// side-by-side build (SPARKWING_INSTALL_NAME in bin/install.sh) names its
 	// own daemon here or its scheduled runs meet the released daemon and are
