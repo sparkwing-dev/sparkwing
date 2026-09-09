@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -150,8 +151,11 @@ func indexOf(haystack, needle string) int {
 	return -1
 }
 
+var builtinSlogHandler slog.Handler
+
 func TestMain(m *testing.M) {
 	os.Unsetenv("OTEL_TRACES_SAMPLER_ARG")
+	builtinSlogHandler = slog.Default().Handler()
 	testleak.Main(m)
 }
 
@@ -232,5 +236,45 @@ func TestInitRegistersOTLPBeforeShutdown(t *testing.T) {
 	defer mu.Unlock()
 	if !bytes.Contains(exported, []byte("last-before-shutdown")) {
 		t.Error("shutdown lost the final OTLP log")
+	}
+}
+
+func TestInitReturnsWithBuiltinDefaultLogger(t *testing.T) {
+	for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"} {
+		t.Setenv(key, "")
+	}
+	old := slog.Default()
+	meter, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
+	t.Cleanup(func() {
+		slog.SetDefault(old)
+		otel.SetMeterProvider(meter)
+		otel.SetTextMapPropagator(propagator)
+	})
+	slog.SetDefault(slog.New(builtinSlogHandler))
+	logOut := log.Writer()
+	log.SetOutput(io.Discard)
+
+	done := make(chan *Telemetry, 1)
+	go func() { done <- Init(t.Context(), Config{ServiceName: "test"}) }()
+	var telemetry *Telemetry
+	select {
+	case telemetry = <-done:
+	case <-time.After(5 * time.Second):
+		// A wedged Init holds the log mutex, so restoring the writer would hang too.
+		t.Fatal("Init did not return with the built-in slog handler installed")
+	}
+	t.Cleanup(func() {
+		if err := telemetry.Shutdown(context.Background()); err != nil {
+			t.Error(err)
+		}
+		log.SetOutput(logOut)
+	})
+
+	printed := make(chan struct{})
+	go func() { log.Printf("after-init"); slog.Info("after-init"); close(printed) }()
+	select {
+	case <-printed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("logging after Init did not return")
 	}
 }
