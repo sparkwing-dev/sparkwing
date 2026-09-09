@@ -1562,8 +1562,13 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := io.ReadAll(io.LimitReader(r.Body, 500<<20))
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBufferedBodyBytes))
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "upload too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "read failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
