@@ -3,7 +3,9 @@ package services
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +30,26 @@ func containerRunning(ctx context.Context, name string) (bool, error) {
 		return false, err
 	}
 	return strings.TrimSpace(string(out)) == name, nil
+}
+
+func testServiceName(t *testing.T) string {
+	t.Helper()
+	suffix, err := randomSuffix()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "services-test-" + sanitize(t.Name()) + "-" + suffix
+}
+
+func captureRunningService(t *testing.T, parent context.Context, name string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+	defer cancel()
+	running, err := containerRunning(ctx, name)
+	if err != nil || !running {
+		t.Fatalf("owned container %s is not running: %v", name, err)
+	}
+	return name
 }
 
 func forceRemove(name string) {
@@ -131,25 +153,14 @@ func TestWithServices_StartAndCleanup(t *testing.T) {
 	requireDocker(t)
 
 	svc := Service{
+		Name:     testServiceName(t),
 		Image:    "nginx:alpine",
 		ReadyCmd: "wget -q -O /dev/null http://localhost/ || true",
 	}
 
 	var capturedName string
 	err := WithServices(context.Background(), []Service{svc}, func(ctx context.Context) error {
-		out, err := exec.Command("docker", "ps", "--format", "{{.Names}}").Output()
-		if err != nil {
-			return err
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			if strings.HasPrefix(line, "nginx-") {
-				capturedName = line
-				break
-			}
-		}
-		if capturedName == "" {
-			t.Fatalf("no nginx- container found while fn running; docker ps:\n%s", out)
-		}
+		capturedName = captureRunningService(t, ctx, svc.Name)
 		return nil
 	})
 	if err != nil {
@@ -216,6 +227,7 @@ func TestWithServices_PanicStillCleansUp(t *testing.T) {
 	requireDocker(t)
 
 	svc := Service{
+		Name:     testServiceName(t),
 		Image:    "nginx:alpine",
 		ReadyCmd: "wget -q -O /dev/null http://localhost/",
 	}
@@ -229,16 +241,7 @@ func TestWithServices_PanicStillCleansUp(t *testing.T) {
 			}
 		}()
 		_ = WithServices(context.Background(), []Service{svc}, func(ctx context.Context) error {
-			out, err := exec.Command("docker", "ps", "--format", "{{.Names}}").Output()
-			if err != nil {
-				t.Fatalf("docker ps: %v", err)
-			}
-			for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-				if strings.HasPrefix(line, "nginx-") {
-					capturedName = line
-					break
-				}
-			}
+			capturedName = captureRunningService(t, ctx, svc.Name)
 			panic("boom")
 		})
 	}()
@@ -253,6 +256,7 @@ func TestWithServices_CtxCancelCleansUp(t *testing.T) {
 	requireDocker(t)
 
 	svc := Service{
+		Name:     testServiceName(t),
 		Image:    "nginx:alpine",
 		ReadyCmd: "wget -q -O /dev/null http://localhost/",
 	}
@@ -261,16 +265,7 @@ func TestWithServices_CtxCancelCleansUp(t *testing.T) {
 	var capturedName string
 
 	err := WithServices(ctx, []Service{svc}, func(fnCtx context.Context) error {
-		out, err := exec.Command("docker", "ps", "--format", "{{.Names}}").Output()
-		if err != nil {
-			return err
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			if strings.HasPrefix(line, "nginx-") {
-				capturedName = line
-				break
-			}
-		}
+		capturedName = captureRunningService(t, fnCtx, svc.Name)
 		cancel()
 		return fnCtx.Err()
 	})
@@ -325,5 +320,62 @@ func TestWithServices_ConcurrentNoCollision(t *testing.T) {
 		if err != nil {
 			t.Fatalf("concurrent WithServices: %v", err)
 		}
+	}
+}
+
+func TestCleanupFixturesDoNotRemoveUnrelatedContainers(t *testing.T) {
+	stubDir := t.TempDir()
+	state := t.TempDir()
+	t.Setenv("SERVICE_TEST_STATE", state)
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	stub := `#!/bin/sh
+set -eu
+case "$1" in
+version) exit 0 ;;
+run)
+  shift
+  while [ "$1" != "--name" ]; do shift; done
+  printf '%s' "$2" > "$SERVICE_TEST_STATE/owned"
+  ;;
+exec) exit 0 ;;
+ps)
+  filter=""
+  shift
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--filter" ]; then filter="$2"; shift; fi
+    shift
+  done
+  if [ -z "$filter" ] || [ "$filter" = 'name=^nginx-unrelated$' ]; then
+    printf '%s\n' nginx-unrelated
+  fi
+  if [ -f "$SERVICE_TEST_STATE/owned" ]; then
+    owned=$(cat "$SERVICE_TEST_STATE/owned")
+    if [ -z "$filter" ] || [ "$filter" = "name=^$owned\$" ]; then
+      printf '%s\n' "$owned"
+    fi
+  fi
+  ;;
+rm)
+  if [ "$3" = nginx-unrelated ]; then
+    touch "$SERVICE_TEST_STATE/unrelated-removed"
+  elif [ -f "$SERVICE_TEST_STATE/owned" ] && [ "$3" = "$(cat "$SERVICE_TEST_STATE/owned")" ]; then
+    rm "$SERVICE_TEST_STATE/owned"
+  fi
+  ;;
+*) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(stubDir, "docker"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, run := range map[string]func(*testing.T){
+		"return": TestWithServices_StartAndCleanup,
+		"panic":  TestWithServices_PanicStillCleansUp,
+		"cancel": TestWithServices_CtxCancelCleansUp,
+	} {
+		t.Run(name, run)
+	}
+	if _, err := os.Stat(filepath.Join(state, "unrelated-removed")); !os.IsNotExist(err) {
+		t.Fatalf("fixture removed an unrelated container: %v", err)
 	}
 }

@@ -392,10 +392,16 @@ func forEachGoModuleEnv(ctx context.Context, label, command string, unset []stri
 	}
 	var failures []string
 	for _, directory := range directories {
-		if empty, err := moduleHasNoPackages(ctx, directory); err == nil && empty {
+		packages, err := modulePackageArgs(ctx, directory)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", directory, err))
 			continue
 		}
-		script := withoutInherited(fmt.Sprintf("cd %q && %s", directory, command), unset)
+		if len(packages) == 0 {
+			continue
+		}
+		moduleCommand := strings.TrimSuffix(command, "./...") + strings.Join(packages, " ")
+		script := withoutInherited(fmt.Sprintf("cd %q && %s", directory, moduleCommand), unset)
 		run := sparkwing.Bash(ctx, script)
 		for name, value := range env {
 			run.Env(name, value)
@@ -409,6 +415,22 @@ func forEachGoModuleEnv(ctx context.Context, label, command string, unset []stri
 	}
 	return fmt.Errorf("%s failed in %d module(s):\n  - %s",
 		label, len(failures), strings.Join(failures, "\n  - "))
+}
+
+func modulePackageArgs(ctx context.Context, directory string) ([]string, error) {
+	// SAFETY: -e keeps broken product packages in the list for vet/build/test to reject.
+	output, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list -e -f '{{.ImportPath}}' ./...`, directory)).String()
+	if err != nil {
+		return nil, fmt.Errorf("list module packages: %w", err)
+	}
+	var packages []string
+	for _, path := range strings.Fields(output) {
+		if strings.Contains("/"+path+"/", "/node_modules/") {
+			continue
+		}
+		packages = append(packages, fmt.Sprintf("%q", path))
+	}
+	return packages, nil
 }
 
 func moduleHasNoPackages(ctx context.Context, directory string) (bool, error) {

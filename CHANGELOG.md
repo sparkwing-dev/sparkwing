@@ -22,6 +22,16 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+### Fixed
+
+- **pool:** Count successful PVC checkouts and returns in the existing metrics
+
+- **cli:** Documentation searches reuse the embedded catalog instead of rebuilding it for every document
+- **cache:** Keep registry responses with different Accept headers in separate cache entries
+- **docs:** Keep hash-leading list continuations in their list items
+
+## [v0.47.0] - 2026-09-09
 ### Added
 
 - **dashboard:** The DAG tab is shown for every run. A run that ended before
