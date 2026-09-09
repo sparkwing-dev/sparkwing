@@ -424,8 +424,8 @@ func (wingdCachedUnpinnedPipe) Plan(
 	runID := rc.RunID
 	sparkwing.Job(plan, "cached", func(ctx context.Context) error {
 		return wingdE2EGate.Load().run(ctx, runID)
-	}).Memoize(func(context.Context) sparkwing.CacheKey {
-		return sparkwing.Key("wingd-e2e-cached", "stable")
+	}).Memoize(func(context.Context) (sparkwing.CacheKey, error) {
+		return sparkwing.Key("wingd-e2e-cached", "stable"), nil
 	})
 	return nil
 }
@@ -568,7 +568,7 @@ func awaitOutContains(t *testing.T, out *syncBuffer, sub string) {
 	t.Fatalf("out never contained %q; out = %q", sub, out.String())
 }
 
-func awaitWaiterOrHolder(t *testing.T, home, runID string) wingwire.QueueState {
+func awaitWaiterRejectingHolder(t *testing.T, home, runID string) wingwire.QueueState {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
 	poll := time.NewTicker(10 * time.Millisecond)
@@ -974,7 +974,7 @@ func TestWingd_LocalRunAdmitsReadyNodeAtNodeCost(t *testing.T) {
 
 	awaitNodeOutcome(t, st, "profiled-stage-run", "quick", string(sparkwing.Success))
 	heavyHostID := nodeHostRunID("profiled-stage-run", "heavy")
-	qs := awaitWaiterOrHolder(t, home, heavyHostID)
+	qs := awaitWaiterRejectingHolder(t, home, heavyHostID)
 	if w, ok := findQueuedWaiter(qs, heavyHostID); !ok || w.Position != 1 {
 		t.Fatalf("heavy stage waiter position = %d (present=%v), want queued behind external holder", w.Position, ok)
 	}
@@ -1030,7 +1030,7 @@ func TestWingd_SemaphoresOnlyRunStillAdmitsNodeHostCost(t *testing.T) {
 	}()
 
 	semNodeHostID := nodeHostRunID("sem-node-run", "hold")
-	qs := awaitWaiterOrHolder(t, home, semNodeHostID)
+	qs := awaitWaiterRejectingHolder(t, home, semNodeHostID)
 	if w, ok := findQueuedWaiter(qs, semNodeHostID); !ok || w.Position != 1 {
 		t.Fatalf("node host waiter position = %d (present=%v), want queued behind external holder", w.Position, ok)
 	}
@@ -1086,7 +1086,7 @@ func TestWingd_RecoveryNodeAdmitsHostCost(t *testing.T) {
 	}()
 
 	recoverHostID := nodeHostRunID("recovery-node-run", "recover")
-	qs := awaitWaiterOrHolder(t, home, recoverHostID)
+	qs := awaitWaiterRejectingHolder(t, home, recoverHostID)
 	if w, ok := findQueuedWaiter(qs, recoverHostID); !ok || w.Position != 1 {
 		t.Fatalf("recovery host waiter position = %d (present=%v), want queued behind external holder", w.Position, ok)
 	}
@@ -1221,7 +1221,7 @@ func TestWingd_CachedNodeMissAdmitsHostCost(t *testing.T) {
 	}()
 
 	cachedHostID := nodeHostRunID("cached-node-run", "cached")
-	qs := awaitWaiterOrHolder(t, home, cachedHostID)
+	qs := awaitWaiterRejectingHolder(t, home, cachedHostID)
 	if w, ok := findQueuedWaiter(qs, cachedHostID); !ok || w.Position != 1 {
 		t.Fatalf("cached node waiter position = %d (present=%v), want queued behind external holder", w.Position, ok)
 	}
@@ -1855,7 +1855,7 @@ func TestWingd_DaemonFirstCancelReleasesHolderAndPromotesWaiter(t *testing.T) {
 		t.Fatalf("daemon-first cancel: %v", err)
 	}
 	if !found {
-		t.Fatal("daemon did not know the local run; recovery would dead-end at a dashboard")
+		t.Fatal("daemon did not know the local run")
 	}
 
 	select {
@@ -2059,7 +2059,7 @@ func TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard(t *testing.T
 		t.Fatalf("daemon-first cancel: %v", err)
 	}
 	if !found {
-		t.Fatal("daemon did not know the queued run; cancel would dead-end at a dashboard")
+		t.Fatal("daemon did not know the queued run")
 	}
 
 	select {

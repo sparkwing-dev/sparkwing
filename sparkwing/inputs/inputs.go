@@ -1,20 +1,10 @@
-// Package inputs provides sparkwing.CacheKeyFn helpers for declaring "what
-// changed" inputs to a node's cache. Compose them via Compose(...) and
-// pass the result to sparkwing.Memoize to skip a node when its inputs
-// match a prior successful run.
-//
-//	import "github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
-//
-//	sd.Memoize(inputs.Compose(
-//	    inputs.RepoFiles(inputs.Ignore("*.md", "docs/**")),
-//	    inputs.Env("NEXT_PUBLIC_BACKEND_URL"),
-//	    inputs.Const("v1"),
-//	))
+// Package inputs builds cache keys from files, environment variables, and constants.
 package inputs
 
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -27,228 +17,230 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// RepoFilesOption mutates RepoFiles' behavior. Today only Ignore is
-// supported; the type exists so future knobs extend without breaking
-// call sites.
 type RepoFilesOption func(*repoFilesConfig)
 
 type repoFilesConfig struct {
 	ignore []string
 }
 
-// Ignore excludes paths matching any of the patterns from the
-// RepoFiles hash. Pattern semantics mirror a useful subset of
-// .gitignore:
-//
-//   - No slash: basename match anywhere (e.g. "*.md" excludes every
-//     markdown file in the tree).
-//   - Trailing slash: directory prefix (e.g. "docs/" excludes
-//     anything under docs/).
-//   - Otherwise: full-path glob with ** for multi-segment wildcard
-//     (e.g. "**/*.md" or "docs/**/api.md").
-//
-// Patterns should describe shape ("any markdown file"), not
-// enumerate today's file names.
+// Ignore excludes matching tracked paths from RepoFiles.
+// Patterns without a slash match basenames anywhere in the tree.
+// A trailing slash matches a directory prefix.
+// Other patterns match full paths; ** spans multiple path segments.
 func Ignore(patterns ...string) RepoFilesOption {
-	return func(c *repoFilesConfig) {
-		c.ignore = append(c.ignore, patterns...)
+	return func(config *repoFilesConfig) {
+		config.ignore = append(config.ignore, patterns...)
 	}
 }
 
-// RepoFiles returns a sparkwing.CacheKeyFn that hashes the contents
-// of every tracked file in the repo. Untracked and gitignored files
-// never contribute. Pass Ignore(...) to skip tracked-but-irrelevant
-// paths (docs, READMEs).
-func RepoFiles(opts ...RepoFilesOption) sparkwing.CacheKeyFn {
-	cfg := repoFilesConfig{}
-	for _, o := range opts {
-		o(&cfg)
+// RepoFiles hashes every tracked file. Ignore excludes matching tracked paths.
+func RepoFiles(options ...RepoFilesOption) sparkwing.CacheKeyFn {
+	config := repoFilesConfig{}
+	for _, option := range options {
+		option(&config)
 	}
-	matcher := buildIgnoreMatcher(cfg.ignore)
+	matcher, patternError := buildIgnoreMatcher(config.ignore)
 
-	return func(ctx context.Context) sparkwing.CacheKey {
+	return func(ctx context.Context) (sparkwing.CacheKey, error) {
+		if patternError != nil {
+			return "", patternError
+		}
 		hash, err := hashTrackedFiles(ctx, matcher)
 		if err != nil {
-			logHashError(ctx, "RepoFiles", err)
-			return ""
+			return "", fmt.Errorf("RepoFiles: %w", err)
 		}
-		return sparkwing.CacheKey("ck:" + hash)
+		return sparkwing.CacheKey("ck:" + hash), nil
 	}
 }
 
-// Files returns a sparkwing.CacheKeyFn that hashes the contents of
-// tracked files matching the given globs. Patterns share semantics
-// with Ignore. Use Files when only a narrow slice of the repo affects
-// the step: `Files("src/**", "package.json", "package-lock.json")`.
+// Files hashes tracked files matching the supplied patterns.
+// Patterns follow the same rules as Ignore.
 func Files(globs ...string) sparkwing.CacheKeyFn {
-	matcher := buildIncludeMatcher(globs)
-	return func(ctx context.Context) sparkwing.CacheKey {
+	matcher, patternError := buildIncludeMatcher(globs)
+	return func(ctx context.Context) (sparkwing.CacheKey, error) {
+		if patternError != nil {
+			return "", patternError
+		}
 		hash, err := hashTrackedFiles(ctx, matcher)
 		if err != nil {
-			logHashError(ctx, "Files", err)
-			return ""
+			return "", fmt.Errorf("Files: %w", err)
 		}
-		return sparkwing.CacheKey("ck:" + hash)
+		return sparkwing.CacheKey("ck:" + hash), nil
 	}
 }
 
-// Tree returns a sparkwing.CacheKeyFn that hashes the contents of
-// every regular file under root, walking the directory tree without
-// consulting git. Use it for inputs outside the calling repo (a
-// sibling checkout) or a gitignored build-artifact directory.
-//
-// root is resolved relative to the calling repo's root so a relative
-// path produces the same hash regardless of WorkDir. Symlinks are
-// skipped. A missing or non-directory root returns the empty key.
+// Tree hashes every regular file under root and skips symlinks.
+// Relative roots resolve against the repository root.
+// A missing or non-directory root returns an error.
 func Tree(root string) sparkwing.CacheKeyFn {
-	return func(ctx context.Context) sparkwing.CacheKey {
-		abs, err := resolveTreeRoot(ctx, root)
+	return func(ctx context.Context) (sparkwing.CacheKey, error) {
+		absolute, err := resolveTreeRoot(ctx, root)
 		if err != nil {
-			logHashError(ctx, "Tree", err)
-			return ""
+			return "", fmt.Errorf("Tree: %w", err)
 		}
-		hash, err := hashTree(abs)
+		hash, err := hashTree(ctx, absolute)
 		if err != nil {
-			logHashError(ctx, "Tree", err)
-			return ""
+			return "", fmt.Errorf("Tree: %w", err)
 		}
-		return sparkwing.CacheKey("ck:" + hash)
+		return sparkwing.CacheKey("ck:" + hash), nil
 	}
 }
 
-// Env returns a sparkwing.CacheKeyFn that hashes the values of the
-// named environment variables. Names are sorted before hashing.
-// Missing variables contribute a sentinel ("\x00unset") so a
-// removed-but-required var busts the cache rather than silently
-// matching.
+// Env hashes the named environment variables in sorted name order.
+// Unset variables hash differently from empty variables.
 func Env(names ...string) sparkwing.CacheKeyFn {
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
-	return func(_ context.Context) sparkwing.CacheKey {
-		var b strings.Builder
-		for _, n := range sorted {
-			b.WriteString(n)
-			b.WriteByte('=')
-			if v, ok := os.LookupEnv(n); ok {
-				b.WriteString(v)
+	return func(_ context.Context) (sparkwing.CacheKey, error) {
+		var builder strings.Builder
+		for _, name := range sorted {
+			builder.WriteString(name)
+			builder.WriteByte('=')
+			if value, ok := os.LookupEnv(name); ok {
+				builder.WriteString(value)
 			} else {
-				b.WriteString("\x00unset")
+				builder.WriteString("\x00unset")
 			}
-			b.WriteByte('\x1e')
+			builder.WriteByte('\x1e')
 		}
-		sum := sha256.Sum256([]byte(b.String()))
-		return sparkwing.CacheKey(fmt.Sprintf("ck:%x", sum[:6]))
+		sum := sha256.Sum256([]byte(builder.String()))
+		return sparkwing.CacheKey(fmt.Sprintf("ck:%x", sum[:6])), nil
 	}
 }
 
-// Const returns a sparkwing.CacheKeyFn that always returns the same
-// value. Use it as a cache-busting knob: bump the string ("v1" ->
-// "v2") to force every node using this input to re-run.
+// Const returns the supplied key.
 func Const(s string) sparkwing.CacheKeyFn {
-	return func(_ context.Context) sparkwing.CacheKey { return sparkwing.CacheKey(s) }
+	return func(_ context.Context) (sparkwing.CacheKey, error) { return sparkwing.CacheKey(s), nil }
 }
 
-// Compose folds multiple sparkwing.CacheKeyFn values into one via
-// sparkwing.Key. If any sub-fn returns the empty key, Compose returns
-// the empty key (signaling "no cache").
-func Compose(fns ...sparkwing.CacheKeyFn) sparkwing.CacheKeyFn {
-	return func(ctx context.Context) sparkwing.CacheKey {
-		parts := make([]any, 0, len(fns))
-		for _, fn := range fns {
-			k := fn(ctx)
-			if k == "" {
-				return ""
+// Compose combines keys with sparkwing.Key.
+// An input error or empty key returns an error.
+// NoCache stops evaluation and bypasses memoization.
+func Compose(resolvers ...sparkwing.CacheKeyFn) sparkwing.CacheKeyFn {
+	return func(ctx context.Context) (sparkwing.CacheKey, error) {
+		parts := make([]any, 0, len(resolvers))
+		for index, resolve := range resolvers {
+			key, err := resolve(ctx)
+			if err != nil {
+				return "", fmt.Errorf("Compose input %d: %w", index, err)
 			}
-			parts = append(parts, string(k))
+			if key == sparkwing.NoCache {
+				return sparkwing.NoCache, nil
+			}
+			if key == "" {
+				return "", fmt.Errorf("Compose input %d: empty key", index)
+			}
+			parts = append(parts, string(key))
 		}
-		return sparkwing.Key(parts...)
+		return sparkwing.Key(parts...), nil
 	}
 }
 
-type pathMatcher func(path string) bool
+type pathMatcher func(path string) (bool, error)
 
-func buildIgnoreMatcher(patterns []string) pathMatcher {
+func buildIgnoreMatcher(patterns []string) (pathMatcher, error) {
 	if len(patterns) == 0 {
-		return nil
+		return nil, nil
 	}
-	matchers := compilePatterns(patterns)
-	return func(path string) bool {
-		for _, m := range matchers {
-			if m(path) {
-				return false
+	matchers, err := compilePatterns(patterns)
+	if err != nil {
+		return nil, err
+	}
+	return func(path string) (bool, error) {
+		for _, matcher := range matchers {
+			matched, err := matcher(path)
+			if err != nil {
+				return false, err
+			}
+			if matched {
+				return false, nil
 			}
 		}
-		return true
-	}
+		return true, nil
+	}, nil
 }
 
-func buildIncludeMatcher(patterns []string) pathMatcher {
-	matchers := compilePatterns(patterns)
-	return func(path string) bool {
-		for _, m := range matchers {
-			if m(path) {
-				return true
+func buildIncludeMatcher(patterns []string) (pathMatcher, error) {
+	matchers, err := compilePatterns(patterns)
+	if err != nil {
+		return nil, err
+	}
+	return func(path string) (bool, error) {
+		for _, matcher := range matchers {
+			matched, err := matcher(path)
+			if err != nil {
+				return false, err
+			}
+			if matched {
+				return true, nil
 			}
 		}
-		return false
-	}
+		return false, nil
+	}, nil
 }
 
-func compilePatterns(patterns []string) []func(string) bool {
-	out := make([]func(string) bool, 0, len(patterns))
-	for _, p := range patterns {
-		out = append(out, compilePattern(p))
+func compilePatterns(patterns []string) ([]pathMatcher, error) {
+	matchers := make([]pathMatcher, 0, len(patterns))
+	for _, pattern := range patterns {
+		matcher, err := compilePattern(pattern)
+		if err != nil {
+			return nil, err
+		}
+		matchers = append(matchers, matcher)
 	}
-	return out
+	return matchers, nil
 }
 
-func compilePattern(pattern string) func(string) bool {
+func compilePattern(pattern string) (pathMatcher, error) {
 	switch {
 	case strings.HasSuffix(pattern, "/"):
-		prefix := pattern
-		return func(path string) bool { return strings.HasPrefix(path, prefix) }
-
+		return func(path string) (bool, error) { return strings.HasPrefix(path, pattern), nil }, nil
 	case !strings.ContainsRune(pattern, '/'):
-		return func(path string) bool {
-			ok, _ := filepath.Match(pattern, filepath.Base(path))
-			return ok
+		if _, err := filepath.Match(pattern, ""); err != nil {
+			return nil, fmt.Errorf("cache input pattern %q: %w", pattern, err)
 		}
-
+		return func(path string) (bool, error) {
+			matched, err := filepath.Match(pattern, filepath.Base(path))
+			if err != nil {
+				return false, fmt.Errorf("cache input pattern %q: %w", pattern, err)
+			}
+			return matched, nil
+		}, nil
 	default:
-		re := globToRegex(pattern)
-		return func(path string) bool { return re.MatchString(path) }
+		expression := globToRegex(pattern)
+		return func(path string) (bool, error) { return expression.MatchString(path), nil }, nil
 	}
 }
 
-func globToRegex(pat string) *regexp.Regexp {
-	var b strings.Builder
-	b.WriteString(`\A`)
-	i := 0
-	for i < len(pat) {
+func globToRegex(pattern string) *regexp.Regexp {
+	var builder strings.Builder
+	builder.WriteString(`\A`)
+	index := 0
+	for index < len(pattern) {
 		switch {
-		case strings.HasPrefix(pat[i:], "**/"):
-			b.WriteString(`(?:.*/)?`)
-			i += 3
-		case strings.HasPrefix(pat[i:], "**"):
-			b.WriteString(`.*`)
-			i += 2
-		case pat[i] == '*':
-			b.WriteString(`[^/]*`)
-			i++
-		case pat[i] == '?':
-			b.WriteString(`[^/]`)
-			i++
-		case strings.ContainsRune(`.+()|[]{}^$\`, rune(pat[i])):
-			b.WriteByte('\\')
-			b.WriteByte(pat[i])
-			i++
+		case strings.HasPrefix(pattern[index:], "**/"):
+			builder.WriteString(`(?:.*/)?`)
+			index += 3
+		case strings.HasPrefix(pattern[index:], "**"):
+			builder.WriteString(`.*`)
+			index += 2
+		case pattern[index] == '*':
+			builder.WriteString(`[^/]*`)
+			index++
+		case pattern[index] == '?':
+			builder.WriteString(`[^/]`)
+			index++
+		case strings.ContainsRune(`.+()|[]{}^$\`, rune(pattern[index])):
+			builder.WriteByte('\\')
+			builder.WriteByte(pattern[index])
+			index++
 		default:
-			b.WriteByte(pat[i])
-			i++
+			builder.WriteByte(pattern[index])
+			index++
 		}
 	}
-	b.WriteString(`\z`)
-	return regexp.MustCompile(b.String())
+	builder.WriteString(`\z`)
+	return regexp.MustCompile(builder.String())
 }
 
 func resolveTreeRoot(ctx context.Context, root string) (string, error) {
@@ -262,7 +254,7 @@ func resolveTreeRoot(ctx context.Context, root string) (string, error) {
 	return filepath.Clean(filepath.Join(base, root)), nil
 }
 
-func hashTree(root string) (string, error) {
+func hashTree(ctx context.Context, root string) (string, error) {
 	info, err := os.Stat(root)
 	if err != nil {
 		return "", err
@@ -271,21 +263,24 @@ func hashTree(root string) (string, error) {
 		return "", fmt.Errorf("Tree: %s is not a directory", root)
 	}
 	var paths []string
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if d.IsDir() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() {
 			return nil
 		}
-		if !d.Type().IsRegular() {
+		if !entry.Type().IsRegular() {
 			return nil
 		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return relErr
+		relative, relativeError := filepath.Rel(root, path)
+		if relativeError != nil {
+			return relativeError
 		}
-		paths = append(paths, rel)
+		paths = append(paths, relative)
 		return nil
 	})
 	if err != nil {
@@ -293,18 +288,21 @@ func hashTree(root string) (string, error) {
 	}
 	sort.Strings(paths)
 
-	h := sha256.New()
-	for _, rel := range paths {
-		data, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil {
-			continue
+	digest := sha256.New()
+	for _, relative := range paths {
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
-		h.Write([]byte(rel))
-		h.Write([]byte{0})
-		h.Write(data)
-		h.Write([]byte{0})
+		contents, err := os.ReadFile(filepath.Join(root, relative))
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", relative, err)
+		}
+		digest.Write([]byte(relative))
+		digest.Write([]byte{0})
+		digest.Write(contents)
+		digest.Write([]byte{0})
 	}
-	sum := h.Sum(nil)
+	sum := digest.Sum(nil)
 	return fmt.Sprintf("%x", sum)[:12], nil
 }
 
@@ -319,73 +317,78 @@ func hashTrackedFiles(ctx context.Context, keep pathMatcher) (string, error) {
 	}
 	if keep != nil {
 		filtered := files[:0]
-		for _, f := range files {
-			if keep(f) {
-				filtered = append(filtered, f)
+		for _, file := range files {
+			matched, err := keep(file)
+			if err != nil {
+				return "", err
+			}
+			if matched {
+				filtered = append(filtered, file)
 			}
 		}
 		files = filtered
 	}
 	sort.Strings(files)
 
-	h := sha256.New()
-	for _, f := range files {
-		data, err := os.ReadFile(filepath.Join(root, f))
-		if err != nil {
-			// hack: missing on disk (submodule pointer or staged delete) is a normal transient state; skip.
-			continue
+	digest := sha256.New()
+	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
-		h.Write([]byte(f))
-		h.Write([]byte{0})
-		h.Write(data)
-		h.Write([]byte{0})
+		contents, err := os.ReadFile(filepath.Join(root, file))
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", file, err)
+		}
+		digest.Write([]byte(file))
+		digest.Write([]byte{0})
+		digest.Write(contents)
+		digest.Write([]byte{0})
 	}
-	sum := h.Sum(nil)
+	sum := digest.Sum(nil)
 	return fmt.Sprintf("%x", sum)[:12], nil
 }
 
 func repoRoot(ctx context.Context) (string, error) {
-	out, err := runShell(ctx, "git", "rev-parse", "--show-toplevel")
+	output, err := runCommand(ctx, "git", "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimRight(out, "\n"), nil
+	return strings.TrimRight(output, "\n"), nil
 }
 
 func lsFiles(ctx context.Context, dir string) ([]string, error) {
-	out, err := runShellAt(ctx, dir, "git", "ls-files", "-z")
+	output, err := runCommandAt(ctx, dir, "git", "ls-files", "-z")
 	if err != nil {
 		return nil, err
 	}
-	raw := strings.TrimRight(out, "\x00")
+	raw := strings.TrimRight(output, "\x00")
 	if raw == "" {
 		return nil, nil
 	}
 	return strings.Split(raw, "\x00"), nil
 }
 
-func runShell(ctx context.Context, name string, args ...string) (string, error) {
-	wd := sparkwing.WorkDir()
-	if wd == "" {
-		return "", fmt.Errorf("inputs.runShell(%s): %w", name, sparkwing.ErrNoProject)
+func runCommand(ctx context.Context, name string, args ...string) (string, error) {
+	directory := sparkwing.WorkDir()
+	if directory == "" {
+		return "", fmt.Errorf("inputs.runCommand(%s): %w", name, sparkwing.ErrNoProject)
 	}
-	return runShellAt(ctx, wd, name, args...)
+	return runCommandAt(ctx, directory, name, args...)
 }
 
-func runShellAt(ctx context.Context, dir, name string, args ...string) (string, error) {
+func runCommandAt(ctx context.Context, dir, name string, args ...string) (string, error) {
 	if dir == "" {
-		return "", fmt.Errorf("inputs.runShellAt(%s): %w", name, sparkwing.ErrNoProject)
+		return "", fmt.Errorf("inputs.runCommandAt(%s): %w", name, sparkwing.ErrNoProject)
 	}
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	command := exec.CommandContext(ctx, name, args...)
+	command.Dir = dir
+	output, err := command.Output()
 	if err != nil {
-		return "", err
+		var processError *exec.ExitError
+		if errors.As(err, &processError) && len(processError.Stderr) != 0 {
+			return "", fmt.Errorf("%s %v in %s: %w: %s", name, args, dir, err, strings.TrimSpace(string(processError.Stderr)))
+		}
+		return "", fmt.Errorf("%s %v in %s: %w", name, args, dir, err)
 	}
-	return string(out), nil
-}
-
-func logHashError(ctx context.Context, fn string, err error) {
-	sparkwing.LoggerFromContext(ctx).Log("error",
-		fmt.Sprintf("sparkwing.%s: hash failed (proceeding uncached): %v", fn, err))
+	return string(output), nil
 }

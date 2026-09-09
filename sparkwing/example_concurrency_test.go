@@ -36,8 +36,8 @@ func (DBShards) Plan(ctx context.Context, plan *sparkwing.Plan, in exampleInputs
 
 	shard := sparkwing.Job(plan, "shard-1", run)
 	shard.Concurrency(dbGroup, 4)
-	shard.Memoize(func(ctx context.Context) sparkwing.CacheKey {
-		return sparkwing.Key("coverage", "shard-1")
+	shard.Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
+		return sparkwing.Key("coverage", "shard-1"), nil
 	}, sparkwing.TTL(7*24*time.Hour))
 	return nil
 }

@@ -254,7 +254,7 @@ func waitForSemConcurrencyPopulation(t *testing.T, ctx context.Context, dbPath, 
 }
 
 func contentKey(v string) sparkwing.CacheKeyFn {
-	return func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("sem", v) }
+	return func(ctx context.Context) (sparkwing.CacheKey, error) { return sparkwing.Key("sem", v), nil }
 }
 
 type memoDiffGroupsPipe struct{ sparkwing.Base }
@@ -750,7 +750,7 @@ func TestMemo_LeaderSkippedWhileFollowerCoalesced(t *testing.T) {
 	}
 }
 
-func TestGroupedNode_CancelWhileQueued_LeaksWaiterIntoPhantomHolder(t *testing.T) {
+func TestGroupedNode_CancelWhileQueuedDoesNotLeaveHolder(t *testing.T) {
 	resetSem()
 	p := newPaths(t)
 	started := time.Now()

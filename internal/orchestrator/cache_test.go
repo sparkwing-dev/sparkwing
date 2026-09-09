@@ -102,12 +102,12 @@ func (afterFiresOnFailure) Plan(ctx context.Context, plan *sparkwing.Plan, _ spa
 type hookOrderingPipe struct{ sparkwing.Base }
 
 var hookOrderingLog struct {
-	mu      atomic.Int32
+	count   atomic.Int32
 	entries [3]string
 }
 
 func recordHook(i int, label string) {
-	pos := int(hookOrderingLog.mu.Add(1)) - 1
+	pos := int(hookOrderingLog.count.Add(1)) - 1
 	if pos < len(hookOrderingLog.entries) {
 		hookOrderingLog.entries[pos] = label
 	}
@@ -208,24 +208,24 @@ func TestCacheKey_SecondRunReplaysOutput(t *testing.T) {
 	_ = time.Millisecond
 }
 
-func TestCacheKey_EmptyKeyDisablesCaching(t *testing.T) {
+func TestCacheKey_ExplicitBypassRunsEveryTime(t *testing.T) {
 	cachedInvocations.Store(0)
 	p := newPaths(t)
 
-	sparkwing.Register[sparkwing.NoInputs]("cache-empty-key", func() sparkwing.Pipeline[sparkwing.NoInputs] {
-		return wrapWithSpecificKey(&cachedPipe{}, func(ctx context.Context) sparkwing.CacheKey {
-			return ""
+	sparkwing.Register[sparkwing.NoInputs]("cache-explicit-bypass", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return wrapWithSpecificKey(&cachedPipe{}, func(ctx context.Context) (sparkwing.CacheKey, error) {
+			return sparkwing.NoCache, nil
 		})
 	})
 
 	for i := range 2 {
-		_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-empty-key"})
+		_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-explicit-bypass"})
 		if err != nil {
 			t.Fatalf("run %d: %v", i, err)
 		}
 	}
 	if got := cachedInvocations.Load(); got != 2 {
-		t.Fatalf("empty key should disable caching; got %d invocations, want 2", got)
+		t.Fatalf("explicit bypass invocation count; got %d invocations, want 2", got)
 	}
 }
 
@@ -284,7 +284,7 @@ func TestHooks_AfterRunFiresOnFailure(t *testing.T) {
 }
 
 func TestHooks_Ordering(t *testing.T) {
-	hookOrderingLog.mu.Store(0)
+	hookOrderingLog.count.Store(0)
 	hookOrderingLog.entries = [3]string{}
 	p := newPaths(t)
 	_, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "hooks-ordering"})
@@ -299,8 +299,8 @@ func TestHooks_Ordering(t *testing.T) {
 }
 
 func wrapWithCacheKey(p *cachedPipe) sparkwing.Pipeline[sparkwing.NoInputs] {
-	return wrapWithSpecificKey(p, func(ctx context.Context) sparkwing.CacheKey {
-		return sparkwing.Key("cache-test", "static")
+	return wrapWithSpecificKey(p, func(ctx context.Context) (sparkwing.CacheKey, error) {
+		return sparkwing.Key("cache-test", "static"), nil
 	})
 }
 

@@ -1,18 +1,14 @@
 # Authoring idiomatic pipelines
 
-A pipeline's `Plan` method builds the DAG and returns. The orchestrator
-reads it on every `sparkwing pipeline explain`, every plan preview, and
-every dispatch, and each read must produce the same shape. So `Plan` stays
-pure and deterministic: shelling out, reading files, and branching on the
-host all belong in a job or step body, which runs once, on the runner, at
-dispatch.
+A pipeline's `Plan` method and each job's `Work` method build the DAG.
+Plan inspection and execution must produce the same structure. Put I/O
+and host-dependent decisions in registered job or step callbacks, which
+execute after dispatch and may repeat on retry.
 
-`sparkwing pipeline lint` is the machine-checkable definition of
-"idiomatic". It parses each `Plan` body and the `guards:` blocks in
+`sparkwing pipeline lint` checks each `Plan` body and the `guards:` blocks in
 `.sparkwing/sparkwing.yaml`, reports each violation by rule name, and exits
 non-zero so it can gate a push or a CI job. `sparkwing pipeline lint
---rules` prints the live rule set, each with the charter of what it forbids
-and why. Every rule has a section below with a do/don't pair.
+--rules` prints the live rule set.
 
 ## Sequencing jobs with `Needs`
 
@@ -59,29 +55,28 @@ plain func to `Job`: it declares a `Work(w *sparkwing.Work) (*sparkwing.WorkStep
 method, registers its steps onto `w` via `Step`, and returns.
 
 ```go
-type deployJob struct{ sparkwing.Base }
+type ExampleDeploy struct{ sparkwing.Base }
 
-func (j *deployJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
     sparkwing.Step(w, "apply", j.apply)
     return nil, nil
 }
 
-func (j *deployJob) apply(ctx context.Context) error { return nil }
+func (j *ExampleDeploy) apply(ctx context.Context) error { return nil }
 ```
 
 The two return values are the job's typed output step and a Plan-time
 materialization error. An untyped job -- one that does not embed
 `Produces[T]` -- has no output to designate, so it returns `nil, nil` once
-its steps are registered; this is not an error case, it is the normal
-return for the common case. A typed job returns the step whose value
+its steps are registered. A typed job returns the step whose value
 becomes the `Produces[T]` output that `RefTo` exposes downstream:
 
 ```go
-func (j *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+func (j *ExampleBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
     compile := sparkwing.Step(w, "compile", j.compile)
     publish := sparkwing.Step(w, "publish", j.publish)
     publish.Needs(compile)
-    return publish, nil // this step's return value becomes the Job's Produces[T] output
+    return publish, nil
 }
 ```
 
@@ -93,11 +88,9 @@ helpers refuse outright: `sparkwing.Bash` / `Exec` / `Shell` and
 anything in `sparkwing/docker`, `sparkwing/git`, or `sparkwing/services`
 panic through the runtime plan-guard, naming the call. Plain `os`,
 `os/exec`, and `net/http` calls have no such guard -- they run silently
-on every read, and this lint rule is what catches them. Move the call
-into a job or step body, which runs at dispatch on the runner. That
-includes reading configuration: calling `os.Getenv`
-inside a job or step body is sanctioned, since the body runs once, at
-dispatch, on the runner -- `Plan` is the only place it is forbidden.
+on every read, and this lint rule catches them. Move I/O, including
+configuration reads, into a registered job or step callback. `Work` also
+constructs the graph before dispatch and must remain pure.
 
 Don't shell out while the DAG is built:
 
@@ -113,7 +106,7 @@ func (p *Release) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwing.N
 func (p *Release) publish(ctx context.Context) error { return nil }
 ```
 
-Do the I/O inside the job, where it runs once at dispatch:
+Do the I/O inside the registered job callback:
 
 ```go
 type Release struct{ sparkwing.Base }
@@ -124,18 +117,17 @@ func (p *Release) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwing.N
 }
 
 func (p *Release) publish(ctx context.Context) error {
-    sha, err := sparkwing.Bash(ctx, "git rev-parse HEAD").Lines() // runs at dispatch, on the runner
+    sha, err := sparkwing.Bash(ctx, "git rev-parse HEAD").Lines()
     if err != nil {
         return err
     }
-    return sparkwing.Bash(ctx, "publish "+sha[0]).MustBeEmpty("publish failed")
+    return sparkwing.Exec(ctx, "publish", sha[0]).MustBeEmpty("publish failed")
 }
 ```
 
 ## Choosing `Bash` versus `Exec` to run a shell command
 
-Both run inside a job or step body; neither is a lint rule, so nothing
-flags a wrong choice. Pick by where the values in the command come from.
+Choose by where the values in the command come from.
 
 Use `Exec` whenever an argument is dynamic -- a branch name, an image tag,
 anything built from a variable. `Exec` runs the argv directly with no
@@ -179,8 +171,9 @@ func (p *Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwing.No
 }
 ```
 
-Do declare the job unconditionally and let it decide at dispatch. The
-`SkipIf` closure runs on the runner, so an environment read there is fine:
+Declare the job unconditionally. Its `SkipIf` callback runs on the
+coordinator after dependencies complete; an environment read there sees
+the coordinator's environment:
 
 ```go
 func (p *Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -195,18 +188,14 @@ below).
 
 ## Runner labels (`runner-label`)
 
-A blank runner label matches no runner, so the job strands forever. An
-`Inline()` job runs on the dispatcher's own host rather than on a
-runner, so a `Requires` or `Prefers` label on it can never be honored
--- declaring both signals confused placement.
+The linter rejects blank runner labels. An `Inline()` job executes on
+the dispatcher's host, where `Requires` and `Prefers` do not select a runner.
 
-Don't strand a job on a blank or unhonored label:
+Avoid blank labels and labels on inline jobs:
 
 ```go
-// blank label matches no runner
 sparkwing.Job(plan, "build", func(ctx context.Context) error { return nil }).Requires("")
 
-// inline never reaches a runner, so the label is never honored
 sparkwing.Job(plan, "setup", func(ctx context.Context) error { return nil }).Inline().Requires("linux")
 ```
 
@@ -242,21 +231,17 @@ sparkwing.Job(plan, "deploy", &Deploy{Build: out}).Needs(build)
 
 ## Shared cache across a group (`group-cache-shared`)
 
-`JobGroup.Memoize` takes one key function and applies it to every member of
-the group, so the members share a single cache entry: the first to finish
-stores a result and the rest replay it. On a build matrix -- the shape
-`JobFanOut` exists for -- that means one cell's pass is served for all of
-them.
-
-It presents as a fast, green run, so nothing downstream catches it.
+`JobGroup.Memoize` applies one key function to every member. A constant
+key makes every member share one result. Give members doing different
+work distinct keys.
 
 Don't cache the group:
 
 ```go
 sparkwing.JobFanOut(plan, "matrix", goVersions, func(v string) (string, any) {
     return v, &Test{GoVersion: v}
-}).Memoize(func(ctx context.Context) sparkwing.CacheKey {
-    return sparkwing.Key("tests") // one key for every Go version
+}).Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
+    return sparkwing.Key("tests"), nil // one key for every Go version
 })
 ```
 
@@ -266,18 +251,18 @@ Do key each member:
 matrix := sparkwing.JobFanOut(plan, "matrix", goVersions, func(v string) (string, any) {
     return v, &Test{GoVersion: v}
 })
-for _, m := range matrix.Members() {
-    version := m.ID()
-    m.Memoize(func(ctx context.Context) sparkwing.CacheKey {
-        return sparkwing.Key("tests", version)
+for _, member := range matrix.Members() {
+    version := member.ID()
+    member.Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
+        return sparkwing.Key("tests", version), nil
     })
 }
 ```
 
-This is not the same thing as GitHub's `actions/cache`. A sparkwing
-content cache *memoizes the node*: on a hit, the job does not run. GitHub
-restores directories so the job runs faster. Porting `actions/cache` to
-`.Memoize()` will stop your tests executing.
+A key callback returns `(CacheKey, error)`. Return errors when inputs
+cannot be read; return `sparkwing.NoCache, nil` to bypass memoization.
+Errors, panics, empty keys, and resolution deadlines fail before dispatch.
+Use `.CacheDir()` to restore dependency directories before executing a job.
 
 ## Declarative trigger filters and run guards
 
@@ -301,9 +286,9 @@ args, and git branch -- `profile:local` / `profile:controller` /
 `profile:name=NAME`, `arg:FLAG=VALUE`, and `git:branch=NAME` /
 `git:branch=default`. `require` blocks the run when not every token
 matches; `reject` blocks it when any token matches. A token in both
-lists, a `require` that names two mutually exclusive profiles, or a
-duplicate token describes a pipeline that can never dispatch. The config
-parser accepts the syntax; the linter catches the contradiction. The
+lists or a `require` naming two mutually exclusive profiles prevents
+dispatch. A duplicate token is redundant. The linter reports both kinds
+of defect. The
 `default` token matches only when the dispatch supplies default-branch
 metadata; use a literal branch for controller webhook and local trigger
 claims.

@@ -1,10 +1,9 @@
 # Pipelines
 
-Pipelines are the core of sparkwing. They define what happens when you run
-`sparkwing run <name>` (or `sparkwing pipeline run <name>`). This page is the user-facing
-tour; for the full Go SDK reference see [sdk.md](sdk.md), and for the rules
-that keep a `Plan` pure and deterministic -- enforced by `sparkwing pipeline
-lint` -- see [authoring-pipelines.md](authoring-pipelines.md).
+Pipelines define what happens when you run
+`sparkwing run <name>` (or `sparkwing pipeline run <name>`). See the
+[SDK guide](sdk.md) for API usage and [Authoring pipelines](authoring-pipelines.md)
+for the rules enforced by `sparkwing pipeline lint`.
 
 > **Host requirements.** Pipelines that call `sparkwing.Bash` shell
 > out to `bash` on the runner host. macOS and Linux have this by
@@ -128,12 +127,9 @@ is a layer choice. Internalize this before reading the recipes below.
   Promote a step to a Job via `JobSpawn` if it needs one.
 
 Each pipeline implements `Plan(ctx, plan *sw.Plan, in T, rc sw.RunContext) error`
-which registers nodes on the passed-in `*Plan` (the outer DAG). Each Job carries a `Job` whose `Work()`
-method returns the inner DAG. Both DAGs are materialized at Plan-time
-
-- the orchestrator walks the entire reachable tree (including spawn
-targets) before any dispatch begins, so `pipeline explain` and the
-dashboard render the full structure before the run starts.
+which registers nodes on the outer DAG. A job's `Workable.Work` method
+registers its inner steps. The orchestrator materializes the reachable
+graph, including spawn targets, before dispatch so inspection can show it.
 
 ### Cost grid
 
@@ -295,8 +291,7 @@ func (j *Deploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 }
 ```
 
-`StepGet` mirrors Plan's `Ref[T].Get(ctx)`. It exists as a free
-function because Go forbids generic methods.
+`StepGet` reads a step's typed output within its job.
 
 ### Inner step skip
 
@@ -358,10 +353,8 @@ sw.JobFanOutDynamic(plan, "shard-work", shards, func(shard string) (string, any)
 })
 ```
 
-`JobFanOutDynamic` runs at Plan-time-after-source: the source Job runs
-and exits, *then* the orchestrator builds children from the resolved
-output. The source runner is not held during the fan-out - no
-stranded compute.
+`JobFanOutDynamic` creates children from its source job's output after
+the source completes and releases its runner.
 
 ### Group modifiers
 
@@ -370,7 +363,7 @@ delegates to each member and returns the same `*JobGroup` for chaining.
 The generated [sdk-reference.md](sdk-reference.md) lists the current
 set. Two carve-outs: `OnFailure` is intentionally per-Job, since
 group-level recovery has unclear semantics; and `Memoize` on a group is
-what the `group-cache-shared` lint rule rejects -- one key function
+what the `group-cache-shared` lint rule rejects -- a constant key
 across N members makes them share a single cache entry and replay each
 other's results. Key each member instead, by ranging over
 `group.Members()`; see [authoring-pipelines.md](authoring-pipelines.md).
@@ -456,20 +449,12 @@ sw.Job(plan, "setup", &Setup{}).Inline()
 sw.Job(plan, "summarize", &Summarize{}).Needs(deploys).Inline()
 ```
 
-Reach for it on genuinely lightweight glue (setup checks, fan-in
-summaries) that would otherwise burn seconds of runner boot for a few
-hundred ms of work.
+A local inline job runs in its own process. With cluster dispatch, it
+executes inside the dispatcher and shares its worker pool. Long inline
+jobs occupy capacity the dispatcher needs for other nodes.
 
-`Inline()` says where the job runs, not what it shares. In a local run
-it is still its own process, like every other job -- what it skips is
-the cluster, not the process boundary. Dispatched to a cluster runner
-it runs inside the dispatcher itself, and there it is **not** a general
-"faster" knob: it shares the dispatcher's goroutine pool, so a long
-inline job delays every other node's scheduling. Keep such jobs under a
-second or two.
-
-`.Inline()` on an approval gate panics. `.Requires` labels are ignored
-for inline nodes.
+Approval gates expose no `Inline` modifier. Runner-selection labels are
+ignored for inline nodes.
 
 ### Dynamic nodes
 
@@ -481,9 +466,8 @@ child nodes rather than expecting the full shape at plan time.
 
 ### `GroupJobs(plan, "name", ...)`
 
-Pure UI annotation. The dashboard folds nodes that share a group under
-one collapsible header; the scheduler, cache, retry, and dependency
-semantics are unchanged.
+Groups existing nodes under one dashboard header and returns a handle
+that `Needs` can use to depend on every member.
 
 ```go
 sw.GroupJobs(plan, "safety",
@@ -512,9 +496,6 @@ exposes a collapsible **Work** section showing inner steps and spawn
 declarations as placeholders (filled in once spawned children
 appear).
 
-The cost-grid table above is the load-bearing artifact for an agent
-reader - load it before designing a multi-Job pipeline.
-
 ## Cache
 
 `.Memoize(key, TTL(...))` turns a Job into a content-addressed cache
@@ -526,17 +507,18 @@ time dedupes automatically.
 
 ```go
 sw.Job(plan, "build", &Build{}).Memoize(
-    func(ctx context.Context) sparkwing.CacheKey {
-        return sparkwing.Key("build", "v1")
+    func(ctx context.Context) (sparkwing.CacheKey, error) {
+        return sparkwing.Key("build", "v1"), nil
     },
     sparkwing.TTL(24*time.Hour),
 )
 ```
 
 `sparkwing.Key(parts...)` hashes arbitrary parts into a stable string --
-use it rather than hand-concatenating. Return `sparkwing.NoCache` from
-the key fn to opt out for a particular invocation, useful when inputs
-are non-deterministic. See [caching.md](caching.md) for the full model.
+use it rather than hand-concatenating. Return `sparkwing.NoCache, nil`
+to bypass memoization for one invocation. Return errors when inputs cannot
+be resolved. Errors, panics, empty keys, and resolution deadlines fail
+before dispatch. See [Caching](caching.md).
 
 Caching is content only. To bound how many nodes run at once -- a mutex,
 a semaphore, a deploy gate -- use `.Concurrency(group)`; see
@@ -567,7 +549,7 @@ sw.Job(plan, "deploy-prod", &Deploy{Env: "prod"}).Needs(approve)
 ```
 
 `sw.JobApproval` returns `*ApprovalGate`, a narrower handle than
-`*Job` -- only the modifiers that make sense for a human gate are
+`*JobNode` -- only the modifiers that make sense for a human gate are
 methods on it (`Needs`, `NeedsOptional`, `OnFailure`, `BeforeRun`,
 `AfterRun`, `SkipIf`, `Optional`, `ContinueOnError`). Modifiers
 that don't apply to gates -- `Retry`, `Timeout`, `Memoize`, `Requires`,
@@ -583,8 +565,6 @@ rather than a runtime panic / silent no-op.
   resolution itself. Zero (the default) means never time out.
 - `OnExpiry` - one of `sw.ApprovalFail` (default), `sw.ApprovalDeny`,
   or `sw.ApprovalApprove`. Unrecognized values panic at plan time.
-  Named `OnExpiry` (not `OnTimeout`) so it doesn't read like
-  `Job.Timeout()`, which is unrelated.
 
 Resolution paths:
 
@@ -596,13 +576,6 @@ Resolution paths:
   `{"resolution":"approved","comment":"..."}`. The approver is recorded
   from the authenticated principal.
 
-**Limitation - `sparkwing` runs cannot survive a terminal close mid-approval.**
-In local (`sparkwing run <pipeline>`) mode the orchestrator lives in the same
-process as the CLI invocation. Close the terminal while a gate is
-waiting and the waiter goroutine dies with it: the approvals row
-stays on disk and can still be resolved from the dashboard, but
-nothing transitions the Job out of `approval_pending` and the run
-stays `running` forever. Workaround: re-run, or keep `sparkwing
-dashboard start` up so the dispatcher lives in the long-lived local
-web server. Cluster mode has the same property via the controller
-pod.
+For a local run that must survive closing the submitting terminal, use
+`sparkwing run <pipeline> --sw-detached`. The resident consumer owns the
+run while it waits for approval.

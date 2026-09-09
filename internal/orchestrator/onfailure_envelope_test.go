@@ -26,7 +26,7 @@ func (onFailureMemoizePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sp
 		return nil
 	})
 	deploy.OnFailureNode().Memoize(
-		func(ctx context.Context) sparkwing.CacheKey { return "rollback-pinned" },
+		func(ctx context.Context) (sparkwing.CacheKey, error) { return "rollback-pinned", nil },
 		sparkwing.TTL(time.Hour))
 	return nil
 }

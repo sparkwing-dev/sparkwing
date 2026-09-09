@@ -26,23 +26,23 @@ func (artifactAggregatePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spa
 			return os.WriteFile(p, []byte(content), 0o644)
 		}).
 			Outputs(rel).
-			Memoize(func(_ context.Context) sparkwing.CacheKey { return sparkwing.Key(id, "v1") })
+			Memoize(func(_ context.Context) (sparkwing.CacheKey, error) { return sparkwing.Key(id, "v1"), nil })
 	}
-	s1 := producer("shard-1", "shards/1.txt", "one")
-	s2 := producer("shard-2", "shards/2.txt", "two")
+	firstShard := producer("shard-1", "shards/1.txt", "one")
+	secondShard := producer("shard-2", "shards/2.txt", "two")
 
 	sparkwing.Job(plan, "aggregate", func(_ context.Context) error {
 		ws := sparkwing.WorkDir()
-		a, err := os.ReadFile(filepath.Join(ws, "shards", "1.txt"))
+		firstContents, err := os.ReadFile(filepath.Join(ws, "shards", "1.txt"))
 		if err != nil {
 			return fmt.Errorf("shard 1 missing: %w", err)
 		}
-		b, err := os.ReadFile(filepath.Join(ws, "shards", "2.txt"))
+		secondContents, err := os.ReadFile(filepath.Join(ws, "shards", "2.txt"))
 		if err != nil {
 			return fmt.Errorf("shard 2 missing: %w", err)
 		}
-		return os.WriteFile(filepath.Join(ws, "combined.txt"), []byte(string(a)+"\n"+string(b)), 0o644)
-	}).Consumes(s1).Consumes(s2)
+		return os.WriteFile(filepath.Join(ws, "combined.txt"), []byte(string(firstContents)+"\n"+string(secondContents)), 0o644)
+	}).Consumes(firstShard).Consumes(secondShard)
 	return nil
 }
 
@@ -138,9 +138,9 @@ func TestArtifacts_StagedInDistributedMode(t *testing.T) {
 
 func mustRead(t *testing.T, path string) string {
 	t.Helper()
-	b, err := os.ReadFile(path)
+	secondContents, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	return string(b)
+	return string(secondContents)
 }

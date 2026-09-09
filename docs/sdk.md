@@ -1,43 +1,21 @@
 # SDK Reference
 
-A curated tour of the `sparkwing` package helpers you call from
-`.sparkwing/jobs/*.go`, plus the SDK-authoring concepts worth loading
-at the start of a task. The **complete** API -- every exported symbol
-with its signature -- is generated from source in
-[sdk-reference.md](sdk-reference.md), with one `sdk-<name>.md` page per
-subpackage (offline: `sparkwing docs read --topic sdk-reference`, or
-`--topic sdk-<name>` for one subpackage), and browsable with
-cross-links on pkg.go.dev:
-<https://pkg.go.dev/github.com/sparkwing-dev/sparkwing/sparkwing>.
+This guide covers pipeline authoring with the `sparkwing` package.
+The generated [API reference](sdk-reference.md) lists exported signatures;
+`sdk-<name>.md` pages cover subpackages. Read them offline with
+`sparkwing docs read --topic sdk-reference` or `--topic sdk-<name>`.
+See [Pipelines](pipelines.md) for the Plan/Work model and project YAML.
 
-When a signature shown here disagrees with the generated reference, the
-generated reference wins. For the Plan/Work model and the
-`sparkwing.yaml` shape, see [pipelines](pipelines.md).
-
-The convention is to import the SDK under the alias `sw`:
+Examples import `sparkwing` by its package name or the alias `sw`:
 
 ```go
 import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
 ```
 
-Every example below uses that alias. The package itself is named
-`sparkwing` -- the alias just keeps the call sites short.
-
 ## Read/write split
 
-Operations that mutate a DAG (Plan or Work) are **free functions on
-`sparkwing`**; operations that read a DAG are **methods on the
-container** (`*Plan` / `*Work`). Go forbids generic methods, so the
-typed adders (`RefTo[T]`, `JobFanOut[T]`, `StepGet[T]`) must be free
-functions; for symmetry every adder lives there. Reads stay on the
-container because they don't have the same constraint and the
-`plan.X()` / `w.X()` shape reads naturally for accessors.
-
-The same grammar applies at both layers: `sw.<Verb>(<container>,
-...args).<modifier>(...)`. Tab-completing `sw.` shows every adder;
-tab-completing `Job` shows every way to put a Job into the run
-(`Job`, `JobFanOut`, `JobFanOutDynamic`, `JobApproval`, `JobSpawn`,
-`JobSpawnEach`) regardless of layer.
+DAG adders are package functions; container methods read the graph.
+Both layers use `sw.<Verb>(<container>, ...args).<modifier>(...)`.
 
 | Layer | Mutate (free funcs) | Read (methods) |
 |---|---|---|
@@ -55,13 +33,8 @@ tab-completing `Job` shows every way to put a Job into the run
 
 ## The two-layer model
 
-Plan/Job (the outer DAG, units of dispatch) versus Work/WorkStep (the
-inner DAG, units of work inside one Job's runner) -- the Plan-only
-modifier set, the Plan-time materialization, and the per-adder cost
-grid -- is the canonical conceptual tour in
-[pipelines](pipelines.md); the rest of this page assumes it. The
-read/write split above is the SDK-specific corollary: mutating adders
-are free functions, reads are container methods.
+A Plan holds jobs, which are dispatch units. Each job's Work graph holds
+steps that execute in the job's process. See [Pipelines](pipelines.md).
 
 ## Plan() must be pure
 
@@ -73,68 +46,20 @@ constructs the `*Plan` and hands it in -- authors don't call
 or any other helper that touches state inside `Plan()` panics at
 runtime with a message naming the helper and pointing back here.
 
-Why: `pipeline explain`, the dashboard's pipeline view, the MCP
-tool-definition path, and the describe-cache all call `Plan()`
-multiple times for read-only purposes. If `Plan()` shells out, those
-flows break outside a working repo / docker daemon, and the
-invariant that "the reachable graph derives from source without
-running anything" no longer holds.
+`Plan` and `Work` construct the graph during inspection as well as
+execution. Put side effects in registered job or step callbacks, and
+return typed outputs for downstream `Ref[T]` consumers.
 
-Move the work into a Job's `Work()` body and surface the result as a
-typed output the rest of the plan consumes via `Ref[T]`:
-
-```go
-// Wrong: shells out from Plan()
-func (b *Build) Plan(ctx context.Context, plan *sw.Plan, args BuildArgs, run sw.RunContext) error {
-    tags, err := docker.ComputeTags(ctx)              // panics: Plan-time guard
-    platforms, err := docker.FilterBuildxPlatforms(ctx, ...) // panics
-    sw.Job(plan, "build", &BuildImageJob{Tags: tags.All(), Platforms: platforms})
-    return nil
-}
-
-// Right: discover Job with typed output, downstream Ref[BuildContext]
-type BuildContext struct {
-    TagList   []string
-    Platforms []string
-    // ...
-}
-
-type DiscoverBuildContextJob struct {
-    sw.Base
-    sw.Produces[BuildContext]
-}
-
-func (j *DiscoverBuildContextJob) Work(w *sw.Work) (*sw.WorkStep, error) {
-    return sw.Step(w, "run", j.run), nil
-}
-
-func (j *DiscoverBuildContextJob) run(ctx context.Context) (BuildContext, error) {
-    tags, _ := docker.ComputeTags(ctx)              // ok: inside a Job
-    platforms, _ := docker.FilterBuildxPlatforms(ctx, ...)
-    return BuildContext{TagList: tags.All(), Platforms: platforms}, nil
-}
-
-func (b *Build) Plan(ctx context.Context, plan *sw.Plan, args BuildArgs, run sw.RunContext) error {
-    discover := sw.Job(plan, "discover", &DiscoverBuildContextJob{}).Inline()
-    discoverRef := sw.RefTo[BuildContext](discover)
-    sw.Job(plan, "build", &BuildImageJob{Discover: discoverRef}).Needs(discover)
-    return nil
-}
-```
-
-`.Inline()` keeps a tiny discover Job from paying dispatch overhead
-while still living in the DAG (so explain renders it, retry/cache
-apply, the dashboard shows it). Inline is the explicit "run on the
-dispatcher's host rather than on a runner" annotation. It says where
-the job runs, not what it shares: locally it is still its own process,
-and it is not a way to opt back into Plan-time side effects.
+`.Inline()` selects the dispatcher's host. A local inline job still runs
+in its own process, and its `Work` method still constructs the graph
+before dispatch.
 
 Consumer-side helper packages (sparks-core libraries, custom
 pipeline libs) can opt their own ctx-taking entry points into the
 guard by calling `planguard.Guard(ctx, "yourpkg.Helper")` at the top
 (import `github.com/sparkwing-dev/sparkwing/sparkwing/planguard`).
 
-## Exec and Bash - running a shell command
+## Exec and Bash - running a shell command in a step
 
 Two entry points pick the kind of execution. Each returns a `*Cmd`
 builder you chain modifiers onto, then terminate with one verb that
@@ -148,18 +73,14 @@ WorkDir() string                    // pipeline working directory (repo root)
 
 `Bash` shells out to the host's `bash`. macOS and Linux have it by
 default. **On Windows, install [Git for Windows](https://git-scm.com/download/win)
-and run `sparkwing` from the Git Bash terminal it ships** -- the same dep
-pipelines.md flags. `Exec` doesn't need a shell, so it works regardless;
-prefer it when the command is a clean arg vector (no pipes, redirects,
-or `&&`).
+and run `sparkwing` from its Git Bash terminal**. `Exec` runs an argument
+vector directly; use it for commands that need no shell features.
 
 `Bash` takes the shell program verbatim - there's no printf-style
 formatting. Splice dynamic *values* into a shell command by
 passing them through `.Env("KEY", value)` and referencing `"$KEY"`
 inside the line; the shell expands the variable safely. Splice dynamic
-*argv* through `Exec(ctx, name, args...)` instead. This makes shell
-injection unspellable: there is no signature that takes a shell string
-and a dynamic value together.
+*argv* through `Exec(ctx, name, args...)`.
 
 Modifiers (chain freely; each returns the same `*Cmd`):
 
@@ -223,26 +144,11 @@ The path is derived from `WorkDir()`, so it is stable run to run in one
 worktree - the cache still earns its keep - and disjoint between
 worktrees.
 
-A new worktree therefore starts cold, and the obvious remedy is to seed
-it by copying a cache another worktree already filled. That does not
-work. A stored issue carries the absolute path of the tree that produced
-it, so a copy replays those paths exactly as a shared directory does,
-and the seeded run reports a tree it never linted.
-
-Restricting the seed to a run that reported nothing does not rescue it
-either. Exclusion rules and diff baselines are applied when results are
-reported, while the cache stores what the analyzers returned - so a run
-can print `0 issues` and still leave path-bearing issues in its cache.
-Seeding is only sound between trees at the same absolute path.
-
 #### Lint slots: giving worktrees the same absolute path
 
-`AcquireLintSlot` supplies that same absolute path, so a cache can be
-reused between worktrees without any of the above. A slot is a fixed
-path - a symlink repointed at whichever worktree holds the lease - plus
-the cache that goes with it. Every run through a slot sees one path, so
-a replayed issue's stored filename lands under the current holder, and
-the lease is exclusive so the holder is never in doubt.
+`AcquireLintSlot` leases a fixed path and its associated cache. The path
+is a symlink to the worktree holding the exclusive lease, so cached
+filenames resolve under that worktree.
 
 ```go
 slot, err := sparkwing.AcquireLintSlot("golangci-lint")
@@ -256,7 +162,7 @@ _, err = slot.Configure(cmd, "GOLANGCI_LINT_CACHE").Run()
 ```
 
 Use `Configure` rather than setting the directory yourself. It sets
-`PWD` as well, and that is not decoration: Go's `os.Getwd` prefers
+`PWD` as well: Go's `os.Getwd` prefers
 `$PWD` when it names the same directory as `.`, so a bare change of
 directory resolves the symlink, the linter sees the worktree's own
 path, and the slot silently stops working.
@@ -278,25 +184,11 @@ A `rel` that climbs out of the lease is ignored in favour of the slot
 root, because a command run outside the canonical path writes the
 worktree's own absolute paths into the shared cache.
 
-Measured on sparkwing, 205k Go lines, at load 18-32:
-
-| run | wall | paths reported |
-| --- | --- | --- |
-| cold, private cache | 95.86s | its own |
-| warm, same worktree | 2.22s | its own |
-| second worktree, shared cache directory | 9.08s | 49 of 49 name the first worktree |
-| second worktree, through a slot | 2.42s | its own |
-
-The slot cannot hide a finding. Content is part of golangci-lint's
-cache key, so a file that differs from the one that filled the cache is
-a miss and gets analyzed: a violation planted in the second worktree
-was reported on a warm slot in 1.76s.
-
-A lease always succeeds. With every slot busy, or on a platform that
-will not give an unprivileged process a symlink, it hands back the
-worktree's own path and its private `ToolCacheDir` - cold, and no less
-correct. `Canonical` says which. `SPARKWING_LINT_SLOTS` sets the pool
-size; the default is 4.
+When every slot is busy, or the platform cannot create a symlink,
+`AcquireLintSlot` returns the worktree's own path and its private
+`ToolCacheDir`. Check the returned error; `Canonical` reports whether
+the result uses a slot. `SPARKWING_LINT_SLOTS` sets the pool size
+(default 4).
 
 Slots are for worktrees that move. A fixed-workdir runner already has a
 stable path, so it wants `ToolCacheDir` with `RestoreLintCache`
@@ -526,9 +418,7 @@ type Workable interface {
 Every Job carries a Workable (a struct that exposes its inner DAG
 via `Work`). The orchestrator constructs the `*Work` and passes it
 in -- authors don't call `NewWork()`. The returned `*WorkStep` (or
-`nil` for an untyped Job) is the Job's typed output: the
-result-step contract is enforced on Work's return value, not on a
-separate `SetResult` call.
+`nil` for an untyped job) selects the job's typed output.
 
 For Jobs with no typed output, return `nil`:
 
@@ -542,12 +432,8 @@ func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
 }
 ```
 
-For typed-output Jobs the contract is **strict**: the job struct
-must embed `sw.Produces[T]` AND its `Work` must return a step whose
-output type is `T`. Either alone is a Plan-time panic. The marker
-lives on the struct, where the typed contract belongs; `sw.RefTo[T]
-(node)` validates against the marker and never falls back to
-inferring the type from the returned step.
+A typed-output job embeds `sw.Produces[T]` and returns a step producing
+`T` from `Work`. A mismatch panics during materialization.
 
 For trivial single-closure Jobs (one function, no inner DAG, no
 struct), pass the closure directly to `sw.Job` and skip the
@@ -557,8 +443,7 @@ Workable entirely:
 sw.Job(plan, "lint", p.run)   // p.run is func(ctx context.Context) error
 ```
 
-The SDK wraps the closure into an internal Workable; no `JobFn`
-wrapper is needed.
+The SDK wraps the closure into a Workable.
 
 ## Work - the inner DAG
 
@@ -618,12 +503,9 @@ then picks one of three paths:
   apply do" the way `terraform plan`, `kubectl apply --dry-run=server`,
   and `helm upgrade --dry-run` do for their tools.
 - `step.SafeWithoutDryRun()` declared -> the apply Fn runs unchanged,
-  on the author's signed contract that it has no side effects.
-  Use for read-only steps (cluster discovery, fetch-only, validation)
-  where authoring a separate dry-run shim would be redundant.
+  for steps whose execution has no side effects.
 - Neither declared -> the step soft-skips with `step_skipped` /
-  `skip_reason: no_dry_run_defined`. Existing pipelines keep working
-  under `--sw-dry-run` while the contract gap is visible in run logs.
+  `skip_reason: no_dry_run_defined`.
   Risk labels (`step.Risk("destructive", "prod", ...)`) are a separate
   gate: they refuse a normal run unless every label is authorized with
   `--sw-allow`, and `--sw-dry-run` bypasses that gate, so a
@@ -643,15 +525,13 @@ and preview always agree. `sparkwing pipeline plan` has no dry-run
 flag of its own; the preview reads the dry-run mode from the
 environment `sparkwing run --sw-dry-run` sets.
 
-Do NOT add a `flag:"dry-run"` field to your pipeline's typed
-Inputs as a roll-your-own preview mode. Declare `step.DryRun(fn)`
-on the steps that mutate, and the runner-level `--sw-dry-run`
-dispatches your DryRun bodies for free (see *Flag namespace* below).
+Declare `step.DryRun(fn)` on mutating steps; `--sw-dry-run` selects
+those callbacks (see *Flag namespace* below).
 
 `*StepGroup` (returned by `sw.GroupSteps`) is both a `Needs` target
 (a downstream `step.Needs(group)` depends on every member) and a
 dashboard cluster (members fold under the name in the Work view).
-Initial modifiers mirror what `*WorkStep` has today:
+Its modifiers are:
 
 ```
 group.Needs(deps...) *StepGroup                           // applies to every member
@@ -756,11 +636,8 @@ b := j.Build.Get(ctx)
 m := j.Manifest.Get(ctx)
 ```
 
-`sw.RefTo[T]` is strict: the node's job MUST embed `sw.Produces[T]`.
-Without the marker -- even if the Work returns a step of the right
-type -- `sw.RefTo[T]` panics. This forces the contract to be visible
-at the type level so readers and agents see it on the struct
-definition alone.
+`sw.RefTo[T]` requires a job struct to embed `sw.Produces[T]`. It panics
+if that marker is missing or declares another output type.
 
 Untyped pipelines (no typed output) skip both `sw.Produces[T]` and
 `sw.RefTo[T]`; pass plain bytes via env vars or sibling steps.
@@ -1030,7 +907,7 @@ names and the `sw-` prefix for pipeline inputs.
 For a `--dry-run`-style flag, prefer `step.DryRun(fn)` on each mutating
 step (see *Work - the inner DAG > Dry-run contract*) over a
 `flag:"dry-run"` input; the runner-level `--sw-dry-run` then dispatches
-your DryRun bodies for free.
+your DryRun callbacks.
 
 ## Cache
 
@@ -1042,19 +919,20 @@ group -- that is [Concurrency](#concurrency)'s job.
 sw.Key("go-mod", "1.26", "abc123") // a CacheKey from any parts
 
 node := sw.Job(plan, "build", func(ctx context.Context) error { return nil })
-node.Memoize(func(ctx context.Context) sw.CacheKey {
-    return sw.Key("build", "linux", "amd64")
+node.Memoize(func(ctx context.Context) (sw.CacheKey, error) {
+    return sw.Key("build", "linux", "amd64"), nil
 }, sw.TTL(24*time.Hour))
 ```
 
-- `key` is a `CacheKeyFn` -- `func(ctx) CacheKey`. It runs at dispatch
-  time, after upstream deps resolve, so it can read `Ref[T]` output.
+- `CacheKeyFn` has signature `func(context.Context) (CacheKey, error)`.
+  It resolves after upstream dependencies complete and before dispatch,
+  so it can read `Ref[T]` output. Errors, panics, empty keys, and expired
+  resolution deadlines fail the node before its work starts.
 - `TTL(d)` bounds retention; omit for `DefaultCacheTTL` (7d), capped at
   `MaxCacheTTL` (35d).
-- Return `sw.NoCache` from the key fn to run uncached for that
-  invocation.
+- Return `sw.NoCache, nil` to run uncached for one invocation.
 - Identical content that is in flight dedupes automatically: one
-  computes, the rest wait and replay. No policy needed.
+  computes, the rest wait and replay a successful result.
 
 See [caching.md](caching.md) for the full model. The `JobGroup` mirror
 is `group.Memoize(key, opts...)`.
@@ -1079,8 +957,8 @@ sw.Job(plan, "shard-2", func(ctx context.Context) error { return nil }).Concurre
 `Capacity` and `cost` are integers in author-defined units (a slot, a
 gigabyte, a database container). Admission compares the summed `cost` of
 live members in the scope plus this member's cost against `Capacity`.
-Count-limiting ("at most N at once") is the degenerate case: capacity
-`N`, every member the default `cost` of 1.
+For at most `N` concurrent members, set capacity to `N` and use each
+member's default cost of 1.
 
 ```go
 deployGate := sw.NewConcurrencyGroup("deploy-prod", sw.ConcurrencyLimit{

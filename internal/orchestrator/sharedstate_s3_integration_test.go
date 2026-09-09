@@ -40,7 +40,9 @@ type s3CachedPipe struct{ sparkwing.Base }
 
 func (s3CachedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	node := sparkwing.Job(plan, "build", &s3CachedJob{})
-	node.Memoize(func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("s3-integ", "static-v1") })
+	node.Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
+		return sparkwing.Key("s3-integ", "static-v1"), nil
+	})
 	return nil
 }
 
@@ -91,8 +93,7 @@ func TestS3Sharing_TwoRunsBothSucceed(t *testing.T) {
 		}
 	}
 	if got := s3CachedInvocations.Load(); got != 1 {
-		t.Errorf("invocations across two Mode 2 runs = %d, want 1 "+
-			"(second run reuses the cross-runner cache memo via CAS)", got)
+		t.Errorf("invocations across two S3-backed runs = %d, want 1", got)
 	}
 }
 
