@@ -162,8 +162,8 @@ func (asset Verified) stageProbe(name string) (string, func() error, error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("inspect private %s probe directory: %w", name, errors.Join(err, removeProbePath(directory)))
 	}
-	// SAFETY: Child removal requires the secured parent identity. Nonrecursive
-	// removal keeps directory replacements and their contents outside cleanup.
+	// SAFETY: Child removal requires the secured parent identity.
+	// Nonrecursive removal preserves unexpected directory contents.
 	cleanup := func() error {
 		current, currentErr := os.Lstat(directory)
 		if errors.Is(currentErr, os.ErrNotExist) {
