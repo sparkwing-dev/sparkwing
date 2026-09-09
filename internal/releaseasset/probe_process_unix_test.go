@@ -8,12 +8,14 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -60,57 +62,106 @@ printf '{"binary":"sparkwing-runner","version":"v1.2.3","goos":"%s","goarch":"%s
 	assertProcessGone(t, pid)
 }
 
-func TestIdentityProbeTimeoutTerminatesItsProcessGroup(t *testing.T) {
-	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
+func TestIdentityProbeCancellationTerminatesItsProcessGroup(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "probe")
-	body := []byte(fmt.Sprintf(`#!/bin/sh
+	body := []byte(`#!/bin/sh
 /bin/sleep 30 &
-printf '%%s' "$!" > %q
+printf '%s\n' "$!"
 wait
-`, pidFile))
+`)
 	if err := os.WriteFile(path, body, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	cmd := exec.CommandContext(ctx, path)
-	cmd.Env = []string{}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	cmd.WaitDelay = 100 * time.Millisecond
-	started := time.Now()
-	runErr := runProbeProcess(ctx, cmd, cmd.WaitDelay)
-	if runErr == nil {
-		t.Fatal("timed-out probe process succeeded")
+	command := exec.CommandContext(ctx, path)
+	command.Env = []string{}
+	ready := make(chan string, 1)
+	var stderr bytes.Buffer
+	command.Stdout = &probePIDOutput{ready: ready}
+	command.Stderr = &stderr
+	command.WaitDelay = 100 * time.Millisecond
+	finished := make(chan struct{})
+	var runErr error
+	go func() {
+		runErr = runProbeProcess(ctx, command, command.WaitDelay)
+		close(finished)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-finished
+	})
+	var announcedPID string
+	select {
+	case announcedPID = <-ready:
+	case <-finished:
+		t.Fatalf("probe exited before readiness: %v; stderr: %q", runErr, stderr.String())
+	case <-t.Context().Done():
+		t.Fatal("test ended before probe readiness")
 	}
-	if ctx.Err() != context.DeadlineExceeded {
-		t.Fatalf("probe context error = %v", ctx.Err())
-	}
-	if elapsed := time.Since(started); elapsed >= 3*time.Second {
-		t.Fatalf("timed-out probe cleanup took %s", elapsed)
-	}
-	body, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Fatalf("read descendant pid: %v (run error: %v; stdout: %q; stderr: %q)", err, runErr, stdout.String(), stderr.String())
-	}
-	pid, err := strconv.Atoi(string(body))
+	pid, err := strconv.Atoi(announcedPID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("inspect live probe descendant: %v", err)
+	}
+	cancel()
+	select {
+	case <-finished:
+	case <-time.After(3 * time.Second):
+		t.Fatal("probe cleanup did not finish after cancellation")
+	}
+	if !errors.Is(runErr, context.Canceled) {
+		t.Fatalf("probe error = %v, want cancellation", runErr)
 	}
 	assertProcessGone(t, pid)
 }
 
+type probePIDOutput struct {
+	buffer bytes.Buffer
+	ready  chan<- string
+}
+
+func (output *probePIDOutput) Write(body []byte) (int, error) {
+	n, err := output.buffer.Write(body)
+	if output.ready != nil {
+		if line, _, complete := strings.Cut(output.buffer.String(), "\n"); complete {
+			output.ready <- line
+			output.ready = nil
+		}
+	}
+	return n, err
+}
+
+func TestIdentityProbeExpiredDeadlinePreventsProcessStart(t *testing.T) {
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	command := exec.CommandContext(ctx, "/bin/sleep", "30")
+	err := runProbeProcess(ctx, command, 100*time.Millisecond)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("probe error = %v, want expired deadline", err)
+	}
+	if command.Process != nil {
+		t.Fatal("probe started with an expired deadline")
+	}
+}
+
 func assertProcessGone(t *testing.T, pid int) {
 	t.Helper()
-	defer func() { _ = syscall.Kill(pid, syscall.SIGKILL) }()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		err := syscall.Kill(pid, 0)
-		if err != nil {
+		if errors.Is(err, syscall.ESRCH) {
 			return
 		}
+		if err != nil {
+			t.Fatalf("inspect probe descendant %d: %v", pid, err)
+		}
 		if time.Now().After(deadline) {
+			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+				t.Errorf("kill remaining probe descendant %d: %v", pid, err)
+			}
 			t.Fatalf("probe descendant %d remained after process-group cleanup", pid)
 		}
 		time.Sleep(10 * time.Millisecond)
