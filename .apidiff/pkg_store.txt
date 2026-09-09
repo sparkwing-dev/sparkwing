@@ -314,6 +314,8 @@ type ExecutionAttemptFinish struct {
 	AttemptOrdinal  int
 	Outcome         string
 	FailureReason   string
+
+	ExecutorKind string
 }
 func ExecutionAttemptOrdinalFromContext(ctx context.Context) (int, bool)
 type ExecutionStart struct {
@@ -322,6 +324,10 @@ type ExecutionStart struct {
 	ReservationID   string
 	ClaimGeneration int64
 	AttemptOrdinal  int
+
+	ExecutorKind string
+
+	ExecutorID string
 }
 type Executor struct {
 	Name             string
@@ -381,6 +387,7 @@ type ExecutorIdentity struct {
 	ID            string
 	ReservationID string
 }
+const ExecutorKindLocal = "local"
 type ExecutorMembershipSnapshot struct {
 	MembershipID            string
 	WorkerID                string

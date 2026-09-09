@@ -123,6 +123,7 @@ func startLocalFleetAuthority(st *store.Store, runID string, cfg fleet.Config, o
 	ctrl := controller.New(st, logger).
 		WithCacheCredentials(a.source.url, sourceToken).
 		WithAuthenticator(controller.NewAuthenticator(st, loopbackAuthCacheTTL)).
+		WithLocalExecution().
 		WithAssistedRunScope(runID)
 	a.server = ctrl
 	a.http = &http.Server{Handler: allowFleetTokenPrefixes(allowedPrefixes, ctrl.AssistedRunHandler()), ReadHeaderTimeout: 5 * time.Second}

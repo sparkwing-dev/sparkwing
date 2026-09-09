@@ -53,6 +53,17 @@ var enumGroups = map[string]struct {
 			"CronOutcomeMissed", "CronOutcomeFailed",
 		},
 	},
+	"store.executorLocation": {
+		file: "pkg/store/executors.go",
+		values: []string{
+			"executorLocationLocal", "executorLocationCloud",
+			"executorLocationUnknown", "executorLocationCoordinator",
+		},
+	},
+	"store.ExecutorKind": {
+		file:   "pkg/store/executors.go",
+		values: []string{"ExecutorKindLocal"},
+	},
 	"store.OnLimit": {
 		file: "pkg/store/concurrency.go",
 		values: []string{

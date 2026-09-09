@@ -466,6 +466,9 @@ func RunNodeOnce(
 		if err != nil {
 			return runner.Result{}, err
 		}
+		if !cfg.claimed && !cfg.brokeredChild {
+			ctx = withLocalExecution(ctx)
+		}
 	}
 
 	r := NewNodeExecutor(backends)

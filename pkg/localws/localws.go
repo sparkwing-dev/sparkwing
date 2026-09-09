@@ -135,6 +135,7 @@ func Run(ctx context.Context, opts Options) error {
 	if !useS3OnlyReader {
 		ctrl = controller.New(st, nil).
 			WithArtifactStore(opts.ArtifactStore).
+			WithLocalExecution().
 			WithReconcileHook(func(rctx context.Context) error {
 				_, err := orchestrator.ReconcileOrphanedLocalRuns(rctx, st, 0)
 				return err
