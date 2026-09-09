@@ -2,48 +2,76 @@
 
 package wingd
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+)
 
-func TestDarwinFreeMemory_UnreadableLevelReportsNoMeasurement(t *testing.T) {
-	const total = 17179869184
-
-	cases := []struct {
-		name     string
-		level    uint32
-		read     bool
-		wantFree uint64
-		wantOK   bool
-	}{
-		{"sysctl failed", 0, false, 0, false},
-		{"level out of range", 101, true, 0, false},
-		{"idle machine", 37, true, 6356551598, true},
-		{"under pressure", 20, true, 3435973836, true},
-		{"nothing free but still serving", 1, true, 171798691, true},
-		{"everything free", 100, true, total, true},
+func TestDarwinFreeMemory_PressureIsNotMeasurement(t *testing.T) {
+	free, measured := darwinFreeMemory(16<<30, "62")
+	if measured || free != 0 {
+		t.Fatalf("pressure level reported %d available bytes, measured=%v", free, measured)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			free, ok := darwinFreeMemory(total, tc.level, tc.read)
-			if ok != tc.wantOK {
-				t.Fatalf("measured = %v, want %v", ok, tc.wantOK)
+}
+
+func TestDarwinFreeMemory_VMCounters(t *testing.T) {
+	for _, pageSize := range []uint64{4096, 16384} {
+		t.Run(fmt.Sprint(pageSize), func(t *testing.T) {
+			output := fmt.Sprintf("Mach Virtual Memory Statistics: (page size of %d bytes)\n"+
+				"Pages free: 4096.\nPages inactive: 245760.\n"+
+				"Pages purgeable: 32768.\nPages speculative: 8192.\n"+
+				"Pages occupied by compressor: 524288.\n", pageSize)
+			free, measured := darwinFreeMemory(16<<30, output)
+			want := uint64(4096+245760) * pageSize
+			if !measured || free != want {
+				t.Fatalf("free=%d, measured=%v; want %d measured bytes", free, measured, want)
 			}
-			if free != tc.wantFree {
-				t.Fatalf("free = %d, want %d", free, tc.wantFree)
+			stat := HostStat{TotalMemoryBytes: 16 << 30, FreeMemoryBytes: free, MemoryMeasured: measured}
+			reserve, external := memReserveAndExternal(stat, 0, DefaultHeadroomFraction)
+			available := headroomFromReserveExternal(stat.TotalMemoryBytes, reserve, external)
+			if available > free || (free > reserve && available != free-reserve) {
+				t.Fatalf("admission granted %d bytes with %d free and %d reserved", available, free, reserve)
 			}
 		})
 	}
 }
 
-func TestDarwinFreeMemory_ExhaustedMachineIsAReading(t *testing.T) {
-	const total = 17179869184
-
-	free, ok := darwinFreeMemory(total, 0, true)
-	if !ok {
-		t.Fatal("a level of zero from a sysctl that answered reported unmeasured; " +
-			"an exhausted machine is a reading, and an unread dimension charges no external memory")
+func TestDarwinFreeMemory_InvalidCounters(t *testing.T) {
+	const valid = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 10.\nPages inactive: 20.\n"
+	for name, output := range map[string]string{
+		"empty":             "",
+		"missing header":    "Pages free: 10.\nPages inactive: 20.\n",
+		"missing free":      strings.ReplaceAll(valid, "Pages free: 10.\n", ""),
+		"missing inactive":  strings.ReplaceAll(valid, "Pages inactive: 20.\n", ""),
+		"truncated count":   strings.ReplaceAll(valid, "20.", "2"),
+		"duplicate":         valid + "Pages free: 10.\n",
+		"negative":          strings.ReplaceAll(valid, "10.", "-10."),
+		"malformed":         strings.ReplaceAll(valid, "10.", "unknown"),
+		"overflow":          strings.ReplaceAll(valid, "10.", "18446744073709551615."),
+		"exceeds RAM":       strings.ReplaceAll(valid, "10.", "1048576."),
+		"zero page size":    strings.ReplaceAll(valid, "16384", "0"),
+		"invalid page size": strings.ReplaceAll(valid, "16384", "12345"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			free, measured := darwinFreeMemory(16<<30, output)
+			if measured || free != 0 {
+				t.Fatalf("invalid counters reported %d available bytes, measured=%v", free, measured)
+			}
+		})
 	}
-	if free != 0 {
-		t.Fatalf("free = %d, want 0", free)
+	if free, measured := darwinFreeMemory(0, valid); measured || free != 0 {
+		t.Fatalf("unknown total reported %d available bytes, measured=%v", free, measured)
+	}
+}
+
+func TestDarwinFreeMemory_ExhaustedMachineIsAReading(t *testing.T) {
+	output := "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 0.\nPages inactive: 0.\n"
+	free, measured := darwinFreeMemory(16<<30, output)
+	if !measured || free != 0 {
+		t.Fatalf("exhausted host reported %d available bytes, measured=%v", free, measured)
 	}
 }
 
@@ -52,17 +80,38 @@ func TestSampleHost_NeverClaimsAMeasurementItDoesNotHave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sample host: %v", err)
 	}
-	if !stat.MemoryMeasured && stat.FreeMemoryBytes != 0 {
-		t.Fatalf("unmeasured memory carries %d bytes; an unread dimension must carry no figure", stat.FreeMemoryBytes)
+	if !stat.MemoryMeasured || stat.FreeMemoryBytes > stat.TotalMemoryBytes || stat.TotalMemoryBytes == 0 {
+		t.Fatalf("invalid live memory sample: %+v", stat)
 	}
-	if stat.TotalMemoryBytes == 0 {
-		t.Fatal("host total memory is zero")
+	t.Logf("available=%d total=%d", stat.FreeMemoryBytes, stat.TotalMemoryBytes)
+}
+
+func TestSampleDarwinHost_RejectsFailedMemoryRead(t *testing.T) {
+	readErr := errors.New("memory sensor unavailable")
+	stat, err := sampleDarwinHost(func(ctx context.Context) ([]byte, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("memory command has no deadline")
+		}
+		return []byte("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 10.\nPages inactive: 20.\n"), readErr
+	})
+	if !errors.Is(err, readErr) || stat.MemoryMeasured || stat.FreeMemoryBytes != 0 {
+		t.Fatalf("failed read returned stat=%+v, err=%v", stat, err)
 	}
 }
 
-func TestDarwinFreeMemory_PressureIsNotMeasurement(t *testing.T) {
-	free, measured := darwinFreeMemory(16<<30, 62, true)
-	if measured || free != 0 {
-		t.Fatalf("pressure level reported %d available bytes, measured=%v", free, measured)
+func TestSampleDarwinHost_RejectsMalformedMemoryRead(t *testing.T) {
+	stat, err := sampleDarwinHost(func(context.Context) ([]byte, error) {
+		return []byte("62"), nil
+	})
+	if err == nil || stat.MemoryMeasured || stat.FreeMemoryBytes != 0 {
+		t.Fatalf("malformed read returned stat=%+v, err=%v", stat, err)
+	}
+}
+
+func BenchmarkDarwinHostSample(b *testing.B) {
+	for b.Loop() {
+		if _, err := sampleHost(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
