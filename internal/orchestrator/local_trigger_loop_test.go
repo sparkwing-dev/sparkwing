@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -84,75 +85,65 @@ func TestLocalImplicitAwaitRetainsParentProvenanceWithoutForcingRegistryLookup(t
 	}
 }
 
-type blockedRunCreationState struct {
+type observedTriggerClaimState struct {
 	StateBackend
-	unblock <-chan struct{}
+	parents chan string
+	claims  chan string
 }
 
-func (s blockedRunCreationState) CreateRun(ctx context.Context, run store.Run) error {
-	<-s.unblock
-	return s.StateBackend.CreateRun(ctx, run)
+func (s *observedTriggerClaimState) ListPendingTriggersForParent(ctx context.Context, parent string) ([]string, error) {
+	select {
+	case s.parents <- parent:
+		return []string{"child"}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *observedTriggerClaimState) ClaimSpecificTrigger(ctx context.Context, id string, _ time.Duration) (*store.Trigger, error) {
+	select {
+	case s.claims <- id:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func TestRunLocalTriggerLoopClaimsPendingTriggerImmediately(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	if err := st.CreateRun(ctx, store.Run{
-		ID: "parent", Pipeline: "parent", Status: "running",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	childID, err := (localState{st: st}).EnqueueTrigger(
-		ctx, "child", nil, "parent", "gate", "", "await-pipeline", "", "", "",
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		state := &observedTriggerClaimState{parents: make(chan string, 2), claims: make(chan string, 2)}
+		finished := make(chan struct{})
+		go func() {
+			defer close(finished)
+			runLocalTriggerLoop(ctx, state, "parent", "", "", quietLogger(), time.Second, childStoreEnv{})
+		}()
+		defer func() {
+			cancel()
+			<-finished
+		}()
 
-	unblock := make(chan struct{})
-	state := blockedRunCreationState{StateBackend: localState{st: st}, unblock: unblock}
-	finished := make(chan struct{})
-	go func() {
-		defer close(finished)
-		runLocalTriggerLoop(ctx, state, "parent", "", t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)), time.Second, childStoreEnv{})
-	}()
-	t.Cleanup(func() {
-		close(unblock)
-		cancel()
-		timer := time.NewTimer(time.Second)
-		defer timer.Stop()
-		select {
-		case <-finished:
-		case <-timer.C:
-			t.Error("local trigger loop did not stop")
+		synctest.Wait()
+		if len(state.parents) != 1 || len(state.claims) != 1 {
+			t.Fatalf("before first tick: listed %d parents, claimed %d triggers", len(state.parents), len(state.claims))
+		}
+		if parent, child := <-state.parents, <-state.claims; parent != "parent" || child != "child" {
+			t.Fatalf("initial claim: parent=%q child=%q", parent, child)
+		}
+		time.Sleep(499 * time.Millisecond)
+		synctest.Wait()
+		if len(state.claims) != 0 {
+			t.Fatalf("before first tick: %d additional claims", len(state.claims))
+		}
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		if len(state.claims) != 1 {
+			t.Fatalf("after first tick: %d claims, want one", len(state.claims))
+		}
+		if child := <-state.claims; child != "child" {
+			t.Fatalf("after first tick: claimed %q, want child", child)
 		}
 	})
-
-	deadline := time.NewTimer(400 * time.Millisecond)
-	defer deadline.Stop()
-	poll := time.NewTicker(5 * time.Millisecond)
-	defer poll.Stop()
-	for {
-		run, err := st.GetRun(ctx, childID)
-		if err == nil {
-			if run.Status != "failed" {
-				t.Fatalf("child status = %q, want failed dispatch", run.Status)
-			}
-			return
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			t.Fatalf("get child run: %v", err)
-		}
-		select {
-		case <-poll.C:
-		case <-deadline.C:
-			t.Fatal("pending child was not claimed within 400ms")
-		}
-	}
 }
 
 func TestExplicitAwaitNeverTrustsReservedLookingTriggerEnvironment(t *testing.T) {
