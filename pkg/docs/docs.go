@@ -7,8 +7,10 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 )
 
 //go:embed all:mirror
@@ -37,8 +39,27 @@ type Entry struct {
 	Bytes   int    `json:"bytes"`
 }
 
+type embeddedCatalog struct {
+	entries    []Entry
+	knownSlugs map[string]struct{}
+}
+
+// perf: embedded metadata is immutable; rebuilding it for every rewritten document scans the corpus quadratically.
+var catalog = sync.OnceValue(func() embeddedCatalog {
+	entries := listEntries()
+	knownSlugs := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		knownSlugs[entry.Slug] = struct{}{}
+	}
+	return embeddedCatalog{entries: entries, knownSlugs: knownSlugs}
+})
+
 // List returns every embedded doc in alphabetical slug order.
 func List() []Entry {
+	return slices.Clone(catalog().entries)
+}
+
+func listEntries() []Entry {
 	var entries []Entry
 	_ = fs.WalkDir(allDocs, "mirror", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -108,10 +129,7 @@ func ReadRaw(slug string) (string, error) {
 var crossDocLinkPattern = regexp.MustCompile(`\[([^\]]+)\]\(([^)#]+)\.md(?:#[^)]*)?\)`)
 
 func rewriteCLILinks(body string) string {
-	knownSlugs := make(map[string]struct{})
-	for _, e := range List() {
-		knownSlugs[e.Slug] = struct{}{}
-	}
+	knownSlugs := catalog().knownSlugs
 	return crossDocLinkPattern.ReplaceAllStringFunc(body, func(match string) string {
 		m := crossDocLinkPattern.FindStringSubmatch(match)
 		if len(m) != 3 {

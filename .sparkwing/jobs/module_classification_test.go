@@ -51,7 +51,7 @@ func TestModuleClassificationPreservesCancellation(t *testing.T) {
 func TestModuleClassificationFailureStopsCommand(t *testing.T) {
 	root := gateFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "go.mod"), "invalid module declaration\n")
-	err := forEachGoModule(context.Background(), "probe", "touch tool-ran", nil)
+	err := forEachGoModule(context.Background(), "probe", "touch tool-ran", nil, true)
 	if err == nil {
 		t.Error("gate accepted a module classification failure")
 	}

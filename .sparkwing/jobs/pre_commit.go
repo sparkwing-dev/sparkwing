@@ -394,18 +394,18 @@ func withoutInherited(command string, names []string) string {
 }
 
 func runVet(ctx context.Context) error {
-	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), nil)
+	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), nil, true)
 }
 
 func runBuild(ctx context.Context) error {
-	return forEachGoModule(ctx, "go build", boundedGoCommand(runtime.NumCPU(), "build", "./..."), nil)
+	return forEachGoModule(ctx, "go build", boundedGoCommand(runtime.NumCPU(), "build", "./..."), nil, false)
 }
 
 func runTest(ctx context.Context) error {
 	return withGoTestScratch(func(testRoot string) error {
 		return forEachGoModuleEnv(
 			ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), productTestUnset,
-			map[string]string{"TMPDIR": testRoot},
+			map[string]string{"TMPDIR": testRoot}, true,
 		)
 	})
 }
@@ -423,25 +423,27 @@ func withGoTestScratch(run func(string) error) error {
 	return errors.Join(testErr, cleanupErr)
 }
 
-func forEachGoModule(ctx context.Context, label, command string, unset []string) error {
-	return forEachGoModuleEnv(ctx, label, command, unset, nil)
+func forEachGoModule(ctx context.Context, label, command string, unset []string, includeTestOnly bool) error {
+	return forEachGoModuleEnv(ctx, label, command, unset, nil, includeTestOnly)
 }
 
-func forEachGoModuleEnv(ctx context.Context, label, command string, unset []string, env map[string]string) error {
+func forEachGoModuleEnv(ctx context.Context, label, command string, unset []string, env map[string]string, includeTestOnly bool) error {
 	directories, err := committedModuleDirs(ctx)
 	if err != nil {
 		return err
 	}
 	var failures []string
 	for _, directory := range directories {
-		empty, err := moduleHasNoPackages(ctx, directory)
+		packages, err := modulePackageArgs(ctx, directory, includeTestOnly)
 		if err != nil {
 			return fmt.Errorf("%s: %w", label, err)
 		}
-		if empty {
+
+		if len(packages) == 0 {
 			continue
 		}
-		script := withoutInherited(fmt.Sprintf("cd %q && %s", directory, command), unset)
+		moduleCommand := strings.TrimSuffix(command, "./...") + strings.Join(packages, " ")
+		script := withoutInherited(fmt.Sprintf("cd %q && %s", directory, moduleCommand), unset)
 		run := sparkwing.Bash(ctx, script)
 		for name, value := range env {
 			run.Env(name, value)
@@ -455,6 +457,26 @@ func forEachGoModuleEnv(ctx context.Context, label, command string, unset []stri
 	}
 	return fmt.Errorf("%s failed in %d module(s):\n  - %s",
 		label, len(failures), strings.Join(failures, "\n  - "))
+}
+
+func modulePackageArgs(ctx context.Context, directory string, includeTestOnly bool) ([]string, error) {
+	// SAFETY: -e keeps broken product packages in the list for vet/build/test to reject.
+	format := "{{.ImportPath}}"
+	if !includeTestOnly {
+		format = "{{if or .GoFiles .CgoFiles .InvalidGoFiles .Error .DepsErrors}}{{.ImportPath}}{{end}}"
+	}
+	output, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %q ./...", directory, format)).String()
+	if err != nil {
+		return nil, fmt.Errorf("list module packages: %w", err)
+	}
+	var packages []string
+	for _, path := range strings.Fields(output) {
+		if strings.Contains("/"+path+"/", "/node_modules/") {
+			continue
+		}
+		packages = append(packages, fmt.Sprintf("%q", path))
+	}
+	return packages, nil
 }
 
 func moduleHasNoPackages(ctx context.Context, directory string) (bool, error) {

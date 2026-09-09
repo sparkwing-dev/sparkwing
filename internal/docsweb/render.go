@@ -94,7 +94,11 @@ func (r *renderer) heading(trimmed string) {
 		level++
 	}
 	if level >= len(trimmed) || trimmed[level] != ' ' {
-		r.para = append(r.para, trimmed)
+		if r.inUL || r.inOL {
+			r.item = append(r.item, trimmed)
+		} else {
+			r.para = append(r.para, trimmed)
+		}
 		return
 	}
 	r.flushParagraph()
