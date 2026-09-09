@@ -64,6 +64,7 @@ func TestIdentityProbeTimeoutTerminatesItsProcessGroup(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
 	path := filepath.Join(t.TempDir(), "probe")
 	body := []byte(fmt.Sprintf(`#!/bin/sh
+/bin/sleep 2
 /bin/sleep 30 &
 printf '%%s' "$!" > %q
 wait
