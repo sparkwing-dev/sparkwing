@@ -145,6 +145,18 @@ const CostSourceFloor CostSource = "floor"
 const CostSourceMeasured CostSource = "measured"
 const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
+type CronDeclaration struct {
+	Cron         string
+	TZ           string
+	Overlap      string
+	CatchUp      time.Duration
+	Where        string
+	GitBranch    string
+	Args         map[string]string
+	LockedRef    string
+	LockedBinary string
+	LockedDigest string
+}
 type CronFire struct {
 	ID         string
 	ScheduleID string
@@ -153,6 +165,12 @@ type CronFire struct {
 	Outcome    string
 	RunID      string
 	Detail     string
+	Args       map[string]string
+}
+type CronLock struct {
+	Ref    string
+	Binary string
+	Digest string
 }
 const CronOutcomeFailed = "failed"
 const CronOutcomeFired = "fired"
@@ -160,15 +178,38 @@ const CronOutcomeMissed = "missed"
 const CronOutcomeSkippedOverlap = "skipped_overlap"
 const CronOverlapQueue = "queue"
 const CronOverlapSkip = "skip"
+type CronOverride struct {
+	Cron    string
+	TZ      string
+	Overlap string
+	CatchUp *time.Duration
+	Args    map[string]string
+	Base    CronDeclaration
+	SetAt   time.Time
+}
 type CronSchedule struct {
 	ID       string
 	RepoPath string
 	Pipeline string
-	Cron     string
-	TZ       string
-	Overlap  string
 
-	CatchUp   time.Duration
+	Name    string
+	Cron    string
+	TZ      string
+	Overlap string
+
+	CatchUp time.Duration
+
+	Where string
+
+	GitBranch string
+
+	Args map[string]string
+
+	LockedRef    string
+	LockedBinary string
+	LockedDigest string
+
+	Override  *CronOverride
 	Paused    bool
 	Declared  bool
 	ArmedAt   time.Time
@@ -182,12 +223,18 @@ type CronSchedule struct {
 
 	NextDueAt *time.Time
 }
+func (s CronSchedule) Declaration() CronDeclaration
+func (s CronSchedule) Effective() CronDeclaration
+const CronScheduleDefaultName = "default"
 type CronTick struct {
 	At      time.Time
 	Host    string
 	Version string
 	Error   string
 }
+const CronTickInterval = 55 * time.Second
+const CronWhereController = "controller"
+const CronWhereLocal = "local"
 type DebugPause struct {
 	RunID       string
 	NodeID      string
@@ -755,6 +802,7 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity,
 func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, claimant ClaimIdentity, executorName, runID, nodeID, holderID string, lease time.Duration, reservationID string, slot int, resourceDigest string) (*Node, error)
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error)
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error)
+func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (s *Store) Close() error
 func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
@@ -777,6 +825,7 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
+func (s *Store) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name, repo string) error
@@ -903,8 +952,11 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RollbackExecutorProvisioning(ctx context.Context, name, tokenPrefix string, now time.Time) error
 func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Time) (raw string, newTok, oldTok *Token, err error)
+func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (bool, error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
+func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (s *Store) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
+func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
 func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
 func (s *Store) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error

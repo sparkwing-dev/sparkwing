@@ -49,6 +49,8 @@ type Cipher interface {
 
 	Open(envelope string) (string, error)
 }
+func CronIdempotencyKey(scheduleID string, due time.Time) string
+const CronTickInterval = 20 * time.Second
 const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
@@ -181,5 +183,7 @@ const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 
 # methods on un-declared receiver types (likely a bug)
+func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)
+func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flushingStatusRecorder) Flush()
 func (r *statusRecorder) WriteHeader(code int)
