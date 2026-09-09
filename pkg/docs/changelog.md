@@ -80,6 +80,10 @@ code change to unlock.
   the [migration
   guide](docs/migrations/v0.47.0.md#onschedule-takes-a-mapping).
 
+- **templates:** The embedded sparks-core registry is v0.32.0, whose
+  `contentkey` helpers return `(CacheKey, error)`, so the `cached-test-suite`,
+  `go-affected-tests` and `skip-if-paths-unchanged` scaffolds compile against
+  the `CacheKeyFn` this release requires.
 - **sdk (Breaking):** `CacheKeyFn` now returns `(CacheKey, error)`.
   Key errors, panics, empty keys, and expired resolution deadlines fail
   before dispatch. Return `NoCache, nil` to bypass memoization explicitly.
