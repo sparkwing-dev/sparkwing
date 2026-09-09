@@ -88,3 +88,17 @@ func (f *fakeAdvRunner) RunNode(_ context.Context, _ runner.Request) runner.Resu
 	return runner.Result{}
 }
 func (f *fakeAdvRunner) AdvertisedLabels() []string { return f.labels }
+
+func TestNodeExecutorExplicitLabelsOverrideLocalDefaults(t *testing.T) {
+	r := NewNodeExecutor(Backends{})
+	labels := []string{"custom", "os=explicit"}
+	r.SetLabels(labels)
+	labels[0] = "mutated"
+	if got := r.AdvertisedLabels(); !slices.Equal(got, []string{"custom", "os=explicit"}) {
+		t.Fatalf("explicit labels changed: %v", got)
+	}
+	r.SetLabels(nil)
+	if got := r.AdvertisedLabels(); len(got) != 0 {
+		t.Fatalf("cleared labels = %v", got)
+	}
+}
