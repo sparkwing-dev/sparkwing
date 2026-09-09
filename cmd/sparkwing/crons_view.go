@@ -195,8 +195,6 @@ func renderCronsList(w io.Writer, rows []crons.Row, hidden int, now time.Time, f
 	return nil
 }
 
-// cronsShowReport is one schedule and its recent history, with each fired
-// instant carrying the run's current status.
 type cronsShowReport struct {
 	crons.Row
 	Fires []cronsFireView `json:"fires,omitempty"`
@@ -309,7 +307,6 @@ func renderCronsShow(w io.Writer, report cronsShowReport, format string) error {
 	return ft.Flush()
 }
 
-// cronsUpcoming is one instant a schedule matches.
 type cronsUpcoming struct {
 	Schedule string    `json:"schedule"`
 	Name     string    `json:"name"`

@@ -88,9 +88,7 @@ func (s *Service) Arm(ctx context.Context, repoRoot string, prove func(repoRoot,
 	return report, nil
 }
 
-// scheduleRow turns a declaration into the row the store stores, with the next
-// due instant already computed so a freshly armed schedule reports one before
-// the first tick.
+// safety: the next due instant is computed here so a freshly armed schedule reports one before the first tick.
 func scheduleRow(d Declared, armedBy string, now time.Time) (store.CronSchedule, error) {
 	parsed, err := cronspec.Parse(d.Trigger.Cron)
 	if err != nil {

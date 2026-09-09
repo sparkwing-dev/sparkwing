@@ -66,7 +66,6 @@ func TestMuxSpecificity_CronRoutes(t *testing.T) {
 		{http.MethodPost, "/api/v1/crons/crn_0123456789ab/pause", "pause"},
 		{http.MethodPost, "/api/v1/crons/crn_0123456789ab/resume", "resume"},
 		{http.MethodPost, "/api/v1/crons/crn_0123456789ab/run", "run"},
-		// A display name reaches the same handlers, escaped by the caller.
 		{http.MethodGet, "/api/v1/crons/dotfiles%2Fnightly", "detail"},
 		{http.MethodPost, "/api/v1/crons/dotfiles%2Fnightly/pause", "pause"},
 		{http.MethodGet, "/api/v1/crons/crn_0123456789ab/pause", "controller-catchall"},

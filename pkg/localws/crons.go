@@ -20,23 +20,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// cronDetailFires and cronDetailUpcoming bound what the detail pane reads: a
-// page of history a reader can scan, and enough future instants to see the
-// cadence.
 const (
 	cronDetailFires    = 20
 	cronDetailUpcoming = 5
 )
 
-// cronRequestTimeout bounds a read against the store and the service manager.
 const cronRequestTimeout = 10 * time.Second
 
-// cronRunTimeout bounds the out-of-process launch, which compiles nothing but
-// does persist a trigger and may start a consumer.
+// safety: the launch persists a trigger and may start a consumer, so it needs longer than a read.
 const cronRunTimeout = 60 * time.Second
 
-// cronTimerStateDTO mirrors [crontimer.State] on the wire, so the dashboard's
-// contract does not move when that struct does.
+// safety: mirrors [crontimer.State] so the dashboard's wire contract does not move when that struct does.
 type cronTimerStateDTO struct {
 	Installed bool   `json:"installed"`
 	Foreign   bool   `json:"foreign"`
@@ -48,7 +42,7 @@ type cronTimerStateDTO struct {
 }
 
 type cronTickDTO struct {
-	// At is empty until this home has recorded a tick.
+	// safety: empty until this home has recorded a tick.
 	At      string `json:"at"`
 	Host    string `json:"host"`
 	Version string `json:"version"`
@@ -67,14 +61,13 @@ type cronHealthDTO struct {
 }
 
 type cronScheduleDTO struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	RepoPath string `json:"repo_path"`
-	Pipeline string `json:"pipeline"`
-	Cron     string `json:"cron"`
-	TZ       string `json:"tz"`
-	Overlap  string `json:"overlap"`
-	// CatchUpNS is nanoseconds, the unit the store keeps and JSON can carry.
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	RepoPath    string  `json:"repo_path"`
+	Pipeline    string  `json:"pipeline"`
+	Cron        string  `json:"cron"`
+	TZ          string  `json:"tz"`
+	Overlap     string  `json:"overlap"`
 	CatchUpNS   int64   `json:"catch_up_ns"`
 	Paused      bool    `json:"paused"`
 	Declared    bool    `json:"declared"`
@@ -95,8 +88,7 @@ type cronFireDTO struct {
 	Outcome    string `json:"outcome"`
 	RunID      string `json:"run_id"`
 	Detail     string `json:"detail"`
-	// RunStatus is the launched run's status now, empty when the fire
-	// launched nothing or its run has since been pruned.
+	// safety: empty when the fire launched nothing or its run has since been pruned.
 	RunStatus string `json:"run_status"`
 }
 
@@ -120,17 +112,14 @@ type cronRunEnvelope struct {
 	Schedule cronScheduleDTO `json:"schedule"`
 }
 
-// cronsAPI serves the dashboard's Crons tab from this home's runs store.
 type cronsAPI struct {
 	store    *store.Store
 	paths    orchestrator.Paths
 	readOnly bool
 }
 
-// registerCronRoutes names every cron route on mux. Each one has to be named
-// here: the controller catch-all at /api/v1/ claims anything that is not, and
-// the local mux does not wrap these handlers, so read-only is enforced inside
-// them.
+// safety: the controller catch-all at /api/v1/ claims any route not named here, and the local mux
+// does not wrap these handlers, so read-only is enforced inside them.
 func registerCronRoutes(mux *http.ServeMux, api *cronsAPI) {
 	mux.Handle("GET /api/v1/crons", http.HandlerFunc(api.overview))
 	mux.Handle("GET /api/v1/crons/{id}", http.HandlerFunc(api.detail))
@@ -261,9 +250,8 @@ func (a *cronsAPI) runNow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, cronRunEnvelope{RunID: runID, Schedule: cronSchedule(row)})
 }
 
-// service builds the read-only view of this home's schedules. The dashboard
-// never ticks and never launches in process, so the service carries neither a
-// lock path nor a launcher: pausing, reading and resolving need only the store.
+// safety: the dashboard never ticks and never launches in process, so this service carries
+// neither a lock path nor a launcher.
 func (a *cronsAPI) service(w http.ResponseWriter) (*crons.Service, bool) {
 	if a.store == nil {
 		http.Error(w, "this dashboard has no local runs store, so it cannot read schedules",
@@ -281,10 +269,6 @@ func (a *cronsAPI) writableService(w http.ResponseWriter) (*crons.Service, bool)
 	return a.service(w)
 }
 
-// resolveCron reads the id out of the URL through [crons.Service.Resolve], so
-// a link built from a display name or a bare pipeline name works as well as an
-// id. Anything it cannot name is a 404: the path named a schedule this home
-// does not have.
 func resolveCron(ctx context.Context, w http.ResponseWriter, svc *crons.Service, id string) (store.CronSchedule, bool) {
 	sched, err := svc.Resolve(ctx, id)
 	if err != nil {
@@ -303,14 +287,11 @@ func reloadCron(ctx context.Context, w http.ResponseWriter, svc *crons.Service, 
 	return row, true
 }
 
-// cronRunNow launches a schedule out of process. Tests replace it.
+// safety: tests replace this instead of launching out of process.
 var cronRunNow = execCronRunNow
 
-// execCronRunNow runs `sparkwing crons run` in this binary against this home
-// and reads the run id back. The launch is out of process because the detached
-// submission path -- the trigger row, the environment snapshot, the resident
-// consumer -- lives in package main, which no library can import; running the
-// same binary reuses it instead of growing a second copy that can drift.
+// safety: the detached submission path lives in package main, which no library can import, so the
+// same binary is re-executed rather than grown a second copy that can drift.
 func execCronRunNow(ctx context.Context, home, scheduleID string) (string, error) {
 	self, err := installsite.Self()
 	if err != nil {
@@ -343,10 +324,8 @@ func execCronRunNow(ctx context.Context, home, scheduleID string) (string, error
 	return "", fmt.Errorf("crons run %s named no run: %s", scheduleID, strings.TrimSpace(stdout.String()))
 }
 
-// dashboardTimerHost describes this machine to internal/crontimer well enough
-// to read the timer's state. A machine whose home directory cannot be resolved
-// is described as no platform at all, which [crontimer.Status] reports as
-// unsupported rather than failing the whole health read.
+// safety: a machine whose home cannot be resolved is described as no platform, which
+// [crontimer.Status] reports as unsupported rather than failing the whole health read.
 func dashboardTimerHost() crontimer.Host {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -431,8 +410,7 @@ func cronFire(ctx context.Context, st *store.Store, fire store.CronFire) cronFir
 	}
 }
 
-// cronRunStatus reads what became of a launched run. A run the store no longer
-// holds reads as no status rather than an error: the fire is still history.
+// safety: a run the store no longer holds reads as no status, not an error; the fire is still history.
 func cronRunStatus(ctx context.Context, st *store.Store, runID string) string {
 	if runID == "" || st == nil {
 		return ""

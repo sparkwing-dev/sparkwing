@@ -89,8 +89,6 @@ func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
 	return report, nil
 }
 
-// summarize folds a tick's errors into the one line the store keeps, so
-// `crons status` can say something happened without holding every sentence.
 func summarize(errs []string) string {
 	switch len(errs) {
 	case 0:
@@ -151,8 +149,7 @@ func (s *Service) advanceIdleCursor(ctx context.Context, sched store.CronSchedul
 	}
 }
 
-// recordMissed collapses a backlog into one row. A host that slept through a
-// week of a minutely schedule has one fire to read, not ten thousand.
+// safety: a backlog collapses to one row; a week of a slept-through minutely schedule is not ten thousand fires.
 func (s *Service) recordMissed(ctx context.Context, sched store.CronSchedule, eval evaluable,
 	decision cronspec.Decision, now time.Time, dryRun bool, report *TickReport) {
 	last := decision.Due
@@ -180,9 +177,6 @@ func (s *Service) recordMissed(ctx context.Context, sched store.CronSchedule, ev
 	}
 }
 
-// lastInstantBefore walks forward from the cursor to the newest instant that
-// still precedes due. It is the cursor a missed backlog leaves behind when the
-// newest instant is about to fire.
 func lastInstantBefore(eval evaluable, cursor, due time.Time) time.Time {
 	var last time.Time
 	at := cursor

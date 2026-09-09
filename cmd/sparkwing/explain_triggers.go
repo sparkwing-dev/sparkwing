@@ -55,8 +55,6 @@ func describeTriggers(on pipelines.Triggers) []triggerLine {
 	return out
 }
 
-// scheduleDetail renders the cadence and the zone it is read in, plus whichever
-// of overlap and catch-up the pipeline set away from its default.
 func scheduleDetail(t *pipelines.ScheduleTrigger) string {
 	tz := t.TZ
 	if tz == "" {

@@ -24,16 +24,12 @@ const (
 	CronOutcomeFailed         = "failed"
 )
 
-// cronFireIDPrefix marks a minted fire id; the store mints one because
-// neither dialect autoincrements the table's text primary key.
+// safety: the store mints fire ids because neither dialect autoincrements a text primary key.
 const cronFireIDPrefix = "crf_"
 
-// maxCronFiresPerSchedule bounds the retained history so a minutely
-// schedule cannot grow the table without limit.
+// safety: bounds retained history so a minutely schedule cannot grow the table without limit.
 const maxCronFiresPerSchedule = 200
 
-// defaultCronFireLimit is what ListCronFires reads when the caller
-// names no limit.
 const defaultCronFireLimit = 50
 
 // CronSchedule is one armed pipeline schedule. The declaration fields

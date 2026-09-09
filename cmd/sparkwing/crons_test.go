@@ -16,8 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// recordingLauncher stands in for the detached submission path, so a tick can
-// be exercised without a consumer, a daemon, or a compiled pipeline.
 type recordingLauncher struct {
 	launched []string
 	active   map[string]bool
@@ -33,8 +31,6 @@ func (l *recordingLauncher) Active(_ context.Context, runID string, _ time.Durat
 	return l.active[runID], nil
 }
 
-// cronsTestHome points every crons verb at a temporary home, a fake service
-// manager, and a launcher that records instead of running.
 func cronsTestHome(t *testing.T) (home string, launcher *recordingLauncher) {
 	t.Helper()
 	home = t.TempDir()
@@ -504,8 +500,7 @@ func TestCronsTickRejectsAMalformedNow(t *testing.T) {
 	}
 }
 
-// decodeNDJSONLines insists on one complete record per line, which is what
-// makes a piped listing safe to cut with head and jq.
+// safety: one record per line is what makes a piped listing safe to cut with head and jq.
 func decodeNDJSONLines[T any](t *testing.T, body string) []T {
 	t.Helper()
 	var out []T

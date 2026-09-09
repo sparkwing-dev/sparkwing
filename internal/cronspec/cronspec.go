@@ -23,7 +23,7 @@ type Schedule struct {
 
 	src string
 
-	// Standard cron unions the two day fields only when both were narrowed.
+	// safety: standard cron unions the two day fields only when both were narrowed.
 	domRestricted bool
 	dowRestricted bool
 }

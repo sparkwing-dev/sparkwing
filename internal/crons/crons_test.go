@@ -15,8 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// fakeLauncher records what a tick asked for and answers the overlap question
-// from a set of run ids the test declares still going.
 type fakeLauncher struct {
 	mu         sync.Mutex
 	launched   []string
@@ -125,8 +123,6 @@ func newHarness(t *testing.T, now time.Time) *harness {
 	}
 }
 
-// writeRepo lays down a checkout whose sparkwing.yaml declares the given
-// pipelines block body.
 func writeRepo(t *testing.T, name, pipelinesBody string) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), name)
@@ -161,7 +157,6 @@ func TestScheduleIDIsStableAndScopedToTheCheckout(t *testing.T) {
 	if first == ScheduleID("/repos/alpha", "weekly") {
 		t.Fatal("two pipelines in one checkout share a schedule id")
 	}
-	// The NUL separator keeps the two fields from running together.
 	if ScheduleID("/repos/a", "bc") == ScheduleID("/repos/ab", "c") {
 		t.Fatal("the separator does not separate the fields")
 	}
@@ -270,7 +265,6 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
 		t.Fatalf("ResolveCronDue: %v", err)
 	}
 
-	// Re-arming republishes the declaration; the pause and cursor are host state.
 	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"), []byte(`pipelines:
   - name: every-minute
     entrypoint: EveryMinute
@@ -668,7 +662,6 @@ func TestTickRecordsACatchUpBacklogAsOneMissAndAdvancesTheCursor(t *testing.T) {
         cron: "* * * * *"
         catch_up: 2m
 `))
-	// The host slept for an hour: only the newest instant is inside the window.
 	h.clock.set(at(t, "2026-01-01T01:00:20Z"))
 	report, err := h.svc.Tick(ctx, false)
 	if err != nil {
@@ -816,7 +809,6 @@ func TestTickRecordsALauncherFailureAndKeepsGoing(t *testing.T) {
 	}
 	healthy := ScheduleID(healthyRoot, "every-minute")
 
-	// The first schedule the tick reaches fails; the second must still fire.
 	first, second := broken.ID, healthy
 	if broken.RepoPath > healthyRoot {
 		first, second = healthy, broken.ID
@@ -1004,7 +996,7 @@ func TestUpcomingReadsTheScheduleInItsOwnZone(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("Upcoming returned %d instants", len(got))
 	}
-	// 03:00 in America/Denver is 10:00 UTC in January.
+	// safety: 03:00 in America/Denver is 10:00 UTC in January.
 	if !got[0].Equal(at(t, "2026-01-01T10:00:00Z")) {
 		t.Errorf("first instant = %v", got[0].UTC())
 	}
@@ -1117,8 +1109,6 @@ func TestHealthIsUnhealthyWhenTheLastTickReportedAnError(t *testing.T) {
 	}
 }
 
-// fakeTimerHost describes a machine whose service manager always answers, with
-// the timer's files under a temporary config home.
 func fakeTimerHost(t *testing.T, home string, installed bool) crontimer.Host {
 	t.Helper()
 	root := t.TempDir()

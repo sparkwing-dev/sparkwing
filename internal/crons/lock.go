@@ -8,9 +8,7 @@ import (
 	"path/filepath"
 )
 
-// lockTick takes the exclusive tick lock and returns the release. Two ticks
-// resolving the same minute would each read the cursor before either moved it,
-// so the second is refused rather than serialized.
+// safety: two ticks would each read the cursor before either moved it, so the second is refused, not queued.
 func lockTick(path string) (func(), error) {
 	if path == "" {
 		return nil, errors.New("crons: Service.LockPath is required to tick")

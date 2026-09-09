@@ -21,13 +21,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// scheduleTriggerSource is the trigger source a scheduled run carries. It is
-// the bare word sparkwing.TriggerInfo documents, with no host suffix, because
-// pipelines branch on it.
+// safety: the bare word, no host suffix, because pipelines branch on it.
 const scheduleTriggerSource = "schedule"
 
-// cronsLogFile receives the timer's own output; the tick names it when
-// something went wrong that the store cannot hold.
 const cronsLogFile = "crons.log"
 
 const cronsLockFile = "crons.lock"
@@ -67,16 +63,12 @@ func runCrons(args []string) error {
 	}
 }
 
-// cronsSession holds the store handle a crons verb works through. Close it
-// with the returned release.
 type cronsSession struct {
 	svc   *crons.Service
 	store *store.Store
 	paths orchestrator.Paths
 }
 
-// openCrons opens this home's runs store and builds the service over it. nowRFC
-// is the hidden --sw-now value, empty for the real clock.
 func openCrons(nowRFC string) (*cronsSession, func(), error) {
 	paths, err := orchestrator.DefaultPaths()
 	if err != nil {
@@ -149,14 +141,11 @@ func (s *cronsSession) now() time.Time {
 	return time.Now()
 }
 
-// cronsLauncher builds the launcher a schedule fires through. Tests replace it
-// with one that records launches instead of starting runs.
+// safety: tests replace this to record launches instead of starting runs.
 var cronsLauncher = func(st *store.Store, paths orchestrator.Paths) crons.Launcher {
 	return cronLauncher{store: st, paths: paths}
 }
 
-// cronLauncher turns a due schedule into a detached run against this home's
-// store, executed by the same resident consumer `run --sw-detached` uses.
 type cronLauncher struct {
 	store *store.Store
 	paths orchestrator.Paths
@@ -217,8 +206,7 @@ func runQueuedAt(run *store.Run) time.Time {
 // spawning one.
 var cronsEnsureConsumer = func(home string) error { return ensureTriggerConsumer(home, 0, 0) }
 
-// cronsTimerHost describes this machine to internal/crontimer. Tests replace it
-// with a host whose service manager and unit directory are fakes.
+// safety: tests replace this with a fake service manager and unit directory.
 var cronsTimerHost = defaultCronsTimerHost
 
 func defaultCronsTimerHost(paths orchestrator.Paths) (crontimer.Host, error) {
@@ -258,8 +246,7 @@ func defaultCronsTimerHost(paths orchestrator.Paths) (crontimer.Host, error) {
 	}, nil
 }
 
-// cronsTimerBinary is the sparkwing the unit runs. A systemd or launchd job
-// inherits no PATH of its own, so the absolute path is baked in.
+// safety: a systemd or launchd job inherits no PATH, so the absolute path is baked in.
 func cronsTimerBinary() (string, error) {
 	if self, err := installsite.Self(); err == nil && self != "" {
 		return self, nil
@@ -274,8 +261,6 @@ func cronsTimerBinary() (string, error) {
 	return filepath.Abs(exe)
 }
 
-// unsupportedTimerHint names what to run where sparkwing has no OS timer of its
-// own, so an armed host is still reachable from the machine's own scheduler.
 const unsupportedTimerHint = "run `sparkwing crons tick` from any scheduler on this machine, once a minute"
 
 func cronsOutputFlag(fs *flag.FlagSet) *string {
@@ -290,8 +275,7 @@ func cronsNowFlag(fs *flag.FlagSet) *string {
 	return now
 }
 
-// cronRelTime reads a time against the tick's clock rather than the wall clock,
-// so --sw-now makes the whole rendering deterministic.
+// safety: reads against the tick's clock, so --sw-now renders deterministically.
 func cronRelTime(now, t time.Time) string {
 	if t.IsZero() {
 		return "-"

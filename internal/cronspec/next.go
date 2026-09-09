@@ -2,8 +2,7 @@ package cronspec
 
 import "time"
 
-// yearHorizon bounds every search, so an expression that can never match (Feb
-// 30) terminates instead of walking the calendar forever.
+// safety: bounds every search, so an expression that can never match (Feb 30) terminates.
 const yearHorizon = 5
 
 // Next returns the first instant strictly after `after` that matches s,
@@ -68,8 +67,6 @@ func (s *Schedule) Upcoming(after time.Time, loc *time.Location, n int) []time.T
 	return out
 }
 
-// previous returns the latest matching instant at or before at, mirroring Next
-// downwards, or the zero time when none falls within five years before at.
 func (s *Schedule) previous(at time.Time, loc *time.Location) time.Time {
 	if s == nil {
 		return time.Time{}
@@ -107,8 +104,7 @@ func (s *Schedule) dayMatches(year int, month time.Month, day int) bool {
 	return domOK && dowOK
 }
 
-// walk is a wall-clock cursor stepped one field at a time, so a sparse
-// expression skips whole months instead of visiting every minute.
+// perf: stepping one field at a time lets a sparse expression skip whole months.
 type walk struct {
 	year   int
 	month  time.Month
@@ -117,10 +113,9 @@ type walk struct {
 	minute int
 }
 
-// resolve reports the instant for the cursor, and whether that wall-clock
-// minute exists: time.Date normalizes a spring-forward gap forward, which shows
-// up as fields that no longer match. A minute repeated by a fall-back may come
-// back as either occurrence, so resolve steps to the first one.
+// safety: time.Date normalizes a spring-forward gap forward, which shows up as fields that no
+// longer match; a minute repeated by a fall-back may come back as either occurrence, so this
+// steps to the first one.
 func (w *walk) resolve(loc *time.Location) (time.Time, bool) {
 	t := time.Date(w.year, w.month, w.day, w.hour, w.minute, 0, 0, loc)
 	if !w.holds(t) {

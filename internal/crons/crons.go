@@ -33,9 +33,7 @@ import (
 // ScheduleIDPrefix marks a schedule id.
 const ScheduleIDPrefix = "crn_"
 
-// scheduleIDHexLen is how much of the digest a schedule id carries. Twelve hex
-// characters keep the id readable in a table while leaving collisions far
-// beyond the number of checkouts one host arms.
+// safety: twelve hex characters stay readable in a table and leave collisions far beyond one host's checkouts.
 const scheduleIDHexLen = 12
 
 // ScheduleID is the stable identity of one pipeline's schedule in one
@@ -177,15 +175,11 @@ func stateOf(s store.CronSchedule) string {
 	}
 }
 
-// trigger rebuilds the declaration a stored row came from, so the zone,
-// overlap and catch-up defaults are resolved by the same code the config
-// validator uses.
+// safety: rebuilt so the zone, overlap and catch-up defaults resolve through the config validator's own code.
 func trigger(s store.CronSchedule) *pipelines.ScheduleTrigger {
 	return &pipelines.ScheduleTrigger{Cron: s.Cron, TZ: s.TZ, Overlap: s.Overlap}
 }
 
-// evaluable is a stored schedule with its expression parsed and its zone
-// resolved, which is everything the evaluator needs.
 type evaluable struct {
 	schedule *cronspec.Schedule
 	loc      *time.Location

@@ -16,8 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 )
 
-// cronsInstallReport is what one `crons install` did, across one repo or the
-// whole fleet.
 type cronsInstallReport struct {
 	Repos       []cronsRepoResult `json:"repos"`
 	Armed       int               `json:"armed"`
@@ -116,10 +114,7 @@ func runCronsInstall(args []string) error {
 	return nil
 }
 
-// ensureCronsTimer writes the OS timer when this host has something armed and
-// no current timer of its own. A host with nothing armed keeps no timer.
-// Whatever it decides is recorded on the report, so the caller can render what
-// was armed even when the timer step is the thing that failed.
+// safety: timer trouble lands on the report, not the error, so the caller still renders what was armed.
 func ensureCronsTimer(ctx context.Context, session *cronsSession, report *cronsInstallReport, skip bool) error {
 	if skip {
 		report.TimerSkip = "--no-timer: " + unsupportedTimerHint
@@ -326,8 +321,6 @@ func renderCronsUninstall(report cronsUninstallReport, format string) error {
 	return nil
 }
 
-// cronsTargetRoots names the checkouts a verb acts on: the enclosing one, the
-// one --repo names, or every registered repo.
 func cronsTargetRoots(repo string, fleet bool) ([]string, error) {
 	if fleet {
 		roots, err := fleetRepoRoots(runGit)
@@ -346,9 +339,7 @@ func cronsTargetRoots(repo string, fleet bool) ([]string, error) {
 	return []string{root}, nil
 }
 
-// cronsProver proves a pipeline exists and compiles before its cadence is
-// armed. A schedule fires unattended, so a pipeline that will not build is
-// refused here rather than at three in the morning.
+// safety: a schedule fires unattended, so a pipeline that will not build is refused at arm time.
 func cronsProver(noProve bool) func(repoRoot, pipeline string) error {
 	if noProve {
 		return nil

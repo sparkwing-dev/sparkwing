@@ -81,7 +81,6 @@ func runCronsPauseResume(cmd Command, args []string, pause bool) error {
 	return nil
 }
 
-// cronsRunReport is what `crons run` launched.
 type cronsRunReport struct {
 	Schedule string `json:"schedule"`
 	Name     string `json:"name"`

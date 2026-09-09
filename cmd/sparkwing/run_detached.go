@@ -184,13 +184,10 @@ type submission struct {
 	IdempotencyKey string
 	RequestID      string
 
-	// Source replaces the trigger source written on the row. Empty keeps the
-	// value a `run --sw-detached` writes, so only a caller with its own name
-	// for the launch -- a cron tick writes "schedule" -- sets it.
+	// safety: empty keeps the source `run --sw-detached` writes; only a caller
+	// with its own name for the launch sets this.
 	Source string
 
-	// ScheduleID stamps the cron schedule that asked for this run onto the
-	// trigger, so the run traces back to its cadence.
 	ScheduleID string
 }
 
@@ -322,9 +319,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	}, nil
 }
 
-// submissionSource keeps the host suffix a submitted run carries while letting
-// a named source -- what `sparkwing.TriggerInfo` documents, and what a pipeline
-// branches on -- through verbatim.
+// safety: a named source passes through verbatim; pipelines branch on that exact word.
 func submissionSource(sub submission) string {
 	if sub.Source != "" {
 		return sub.Source

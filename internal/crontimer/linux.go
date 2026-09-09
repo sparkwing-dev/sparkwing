@@ -197,7 +197,7 @@ func serviceUnit(h Host) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n", Marker)
 	b.WriteString("[Unit]\nDescription=sparkwing crons tick\n\n")
-	// A oneshot's cgroup is killed when its main process exits, which would take
+	// safety: a oneshot's cgroup is killed when its main process exits, which would take
 	// the run consumer and the admission daemon the tick just started with it.
 	b.WriteString("[Service]\nType=oneshot\nKillMode=process\n")
 	// safety: a tick that hangs on a lock or a store would otherwise hold the
@@ -285,10 +285,8 @@ func firstSystemdWord(s string) string {
 	return strings.ReplaceAll(b.String(), "%%", "%")
 }
 
-// loadedElsewhere returns the unit file the user session actually runs the
-// timer from when that is not the one at timerPath. systemctl addresses units
-// by name, so a ConfigHome that is not the session's would otherwise be asked
-// about, enabled, and disabled against a stranger's file.
+// safety: systemctl addresses units by name, so a ConfigHome that is not the session's would
+// otherwise be asked about, enabled, and disabled against a stranger's file.
 func loadedElsewhere(h Host, timerPath string) string {
 	out, err := h.run("systemctl", "--user", "show", "-p", "FragmentPath", "--value", TimerName)
 	if err != nil {

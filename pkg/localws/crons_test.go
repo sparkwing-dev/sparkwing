@@ -18,8 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// The dashboard's TypeScript contract, field for field. A shape that drifts
-// from web/src/lib/api.ts is a page that renders undefined.
+// safety: a shape that drifts from web/src/lib/api.ts renders undefined in the dashboard.
 var (
 	cronScheduleKeys = []string{
 		"armed_at", "catch_up_ns", "cron", "declared", "id", "last_fired_at",
@@ -43,12 +42,10 @@ type cronFixture struct {
 	mux    *http.ServeMux
 	store  *store.Store
 	paths  orchestrator.Paths
-	nights string // the schedule id of nightly
+	nights string
 	weekly string
 }
 
-// newCronFixture arms a throwaway checkout's two schedules against a home of
-// this test's own and serves them through the real route table.
 func newCronFixture(t *testing.T, readOnly bool) *cronFixture {
 	t.Helper()
 	home := t.TempDir()
@@ -104,7 +101,6 @@ func newCronFixture(t *testing.T, readOnly bool) *cronFixture {
 	return fx
 }
 
-// fire records one resolved instant against a schedule, the way a tick does.
 func (fx *cronFixture) fire(t *testing.T, scheduleID, outcome, runID, detail string, at time.Time) {
 	t.Helper()
 	err := fx.store.ResolveCronDue(context.Background(), scheduleID, at, nil, &store.CronFire{
