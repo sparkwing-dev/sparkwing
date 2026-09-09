@@ -1307,6 +1307,16 @@ machine:
   when the daemon answered, so their emptiness means nothing on its own.
   An unreachable daemon is never a clean bill, and the run-row repair is
   skipped there rather than risk finalizing a run that daemon is holding.
+  A daemon that accepts connections and answers nothing is reported as
+  wedged, with the socket it holds. Such a daemon arbitrates nothing and no
+  successor can bind that socket. `sparkwing daemon restart` cannot replace
+  it, because the drain needs a handshake it will not answer, so the report
+  names the commands that do: `lsof` on the socket finds the process,
+  `SIGUSR1` makes it dump its goroutines to `wingd/d.log`, and then it is
+  stopped. `--timeout` bounds the daemon and local-state checks and each
+  takes a slice of it, so an unanswering daemon leaves the rest of the
+  report its budget. It defaults to 10 seconds; a sweep that runs out
+  prints what it reached alongside the error.
   Standing problems it cannot safely repair -- repeated admission
   rejections, a daemon version skew, a contention-poisoned capacity
   profile, a daemon serving another sparkwing home at a version no

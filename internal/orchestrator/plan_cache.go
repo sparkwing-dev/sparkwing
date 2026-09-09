@@ -49,7 +49,7 @@ func appendPlanEvent(ctx context.Context, backends Backends, runID, kind string,
 	if backends.State == nil {
 		return
 	}
-	_ = backends.State.AppendEvent(ctx, runID, "", kind, payload)
+	noteEvent(ctx, backends.State, runID, "", kind, payload)
 }
 
 func acquirePlanAdmission(ctx context.Context, backends Backends, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {

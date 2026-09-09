@@ -20,8 +20,33 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
+  group has no members until its source job completes, so every `JobGroup`
+  setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
+  compiles, reads as configuration, and is dropped. Configure the generated
+  jobs from the value the fan-out callback returns.
+- **cli:** `runner-label` flags a blank label on `WhenRunner`, and every rule
+  now follows a builder chain split across statements, so a group bound to a
+  variable and configured on a later line is checked like a single expression.
+- **cli:** `sparkwing doctor --timeout` bounds the daemon and local-state
+  checks, defaulting to the 10 seconds doctor always used. Each check takes a
+  slice of it, so one unanswering daemon leaves the rest of the report its
+  budget, and a sweep that runs out prints what it reached alongside the error
+
 ### Fixed
 
+- **admission:** A guarded command whose daemon restarted mid-run is
+  acknowledged when it completes. The guard sweep chose which client to
+  acknowledge before it probed the process table, so a client that reattached
+  inside that window was never acknowledged: `sparkwing queue exec` waited ten
+  seconds and reported "release admission: guard completion acknowledgement
+  timed out" for a command that had succeeded. The same staleness could
+  finalize a reattached run as abandoned.
+- **cli:** `sparkwing doctor` names a wedged admission daemon -- one that
+  accepts connections and answers nothing -- and the commands that recover it,
+  instead of reporting a raw socket read timeout the operator has to interpret
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
   staged files out of their commits
 - **logs:** Concurrent filesystem appends keep each record and its newline together
@@ -30,7 +55,6 @@ unlock.
 - **telemetry:** Immediate shutdown flushes OTLP logs after initialization
 - **logs:** Secret masking inspects JSON-visible fields and retains redacted
   error messages in JSON output
-
 - **cache:** Pipeline binary keys include Go packages named `web`
 - **cache:** Oversized dependency responses and workspace uploads fail before
   storing truncated content
