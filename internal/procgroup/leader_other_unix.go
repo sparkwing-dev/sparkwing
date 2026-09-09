@@ -2,11 +2,14 @@
 
 package procgroup
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 func waitLeaderExit(pid int) error {
 	for {
-		processes, err := processTable(false)
+		processes, err := processTable(context.Background(), false)
 		if err != nil {
 			return err
 		}
