@@ -30,7 +30,7 @@ func TestLintCommandNeverDropsTheToolLockWithoutABudget(t *testing.T) {
 
 	withBudget := lintCommandFor(true)
 	if !strings.Contains(withBudget, "--allow-parallel-runners") {
-		t.Fatalf("lint kept the serializing lock while holding a budget, so the budget buys nothing: %s", withBudget)
+		t.Fatalf("lint kept the serializing lock while holding a budget: %s", withBudget)
 	}
 	if strings.Contains(withBudget, "--allow-serial-runners") {
 		t.Fatalf("lint passed both runner flags: %s", withBudget)
@@ -71,26 +71,25 @@ func TestFixedCheckoutDoesNotNeedLintAlias(t *testing.T) {
 func TestLintSlotCostIsAdmissibleOnThisBox(t *testing.T) {
 	cost, capacity := lintSlotCost(), lintBudget.Limit().Capacity
 	if cost < 1 {
-		t.Fatalf("lint draws no budget, so any number of lints would be admitted: cost %d", cost)
+		t.Fatalf("lint cost = %d, want positive cost", cost)
 	}
 	if cost > capacity {
-		t.Fatalf("lint cost %d exceeds budget capacity %d, so it could never be admitted", cost, capacity)
+		t.Fatalf("lint cost %d exceeds budget capacity %d", cost, capacity)
 	}
 }
 
 func TestLintBudgetIsBoxScoped(t *testing.T) {
 	if got := lintBudget.Limit().Scope; got != sparkwing.ScopeBox {
-		t.Fatalf("lint budget scope is %q, so it does not bound the machine the tool lock bounded", got)
+		t.Fatalf("lint budget scope = %q, want box scope", got)
 	}
 	if got := lintBudget.Limit().OnLimit; got != sparkwing.Queue {
-		t.Fatalf("lint budget on-limit is %q, so a contended gate fails instead of waiting", got)
+		t.Fatalf("lint budget on-limit = %q, want queue", got)
 	}
 }
 
 func TestLintCostIsPricedForTheColdRunNotTheWarmOne(t *testing.T) {
 	if lintCoreCost < measuredColdCoreDemand {
-		t.Fatalf("lint is priced at %.2f cores against a cold run measured at %.2f, so a full "+
-			"budget of concurrent lints demands more cores than the box has",
+		t.Fatalf("lint cost %.2f cores is below measured demand %.2f",
 			lintCoreCost, measuredColdCoreDemand)
 	}
 }
@@ -98,8 +97,8 @@ func TestLintCostIsPricedForTheColdRunNotTheWarmOne(t *testing.T) {
 func TestDescribeLintFailureOnAnExpiredWaitReportsTheWaitNotACause(t *testing.T) {
 	got := describeLintFailure(expiredContext(t), 7*time.Second, errors.New("command failed (exit 1)"))
 
-	if !strings.Contains(got, "could not run") {
-		t.Fatalf("expired wait did not report could-not-run: %s", got)
+	if !strings.Contains(got, "no result before the deadline") {
+		t.Fatalf("expired wait did not report the deadline: %s", got)
 	}
 	if !strings.Contains(got, "7s") {
 		t.Fatalf("expired wait did not report how long it actually waited: %s", got)
@@ -107,7 +106,7 @@ func TestDescribeLintFailureOnAnExpiredWaitReportsTheWaitNotACause(t *testing.T)
 	if strings.Contains(got, lintLockWait.String()) {
 		t.Fatalf("expired wait quoted the bound rather than the wait it measured: %s", got)
 	}
-	if strings.Contains(got, "That is contention") {
+	if strings.Contains(got, "lock") {
 		t.Fatalf("expired wait asserted a cause it never observed: %s", got)
 	}
 	if strings.Contains(got, "exit 1") {
@@ -124,11 +123,8 @@ func TestDescribeLintFailureNamesContentionFromTheLinterOwnMessage(t *testing.T)
 
 	got := describeLintFailure(context.Background(), time.Second, err)
 
-	if !strings.Contains(got, "could not run") {
-		t.Fatalf("contention signature did not report could-not-run: %s", got)
-	}
-	if !strings.Contains(got, "contention") {
-		t.Fatalf("contention signature did not name contention as the cause: %s", got)
+	if !strings.Contains(got, "another process holds the machine-wide lock") {
+		t.Fatalf("contention diagnostic lost the observed lock: %s", got)
 	}
 }
 
@@ -141,7 +137,7 @@ func TestDescribeLintFailureReportsRealFindingsUnchanged(t *testing.T) {
 
 	got := describeLintFailure(context.Background(), time.Second, err)
 
-	if strings.Contains(got, "could not run") {
+	if strings.Contains(got, "machine-wide lock") {
 		t.Fatalf("a genuine finding was excused as contention: %s", got)
 	}
 	if !strings.Contains(got, "golangci-lint:") {
@@ -149,27 +145,27 @@ func TestDescribeLintFailureReportsRealFindingsUnchanged(t *testing.T) {
 	}
 }
 
-func TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint(t *testing.T) {
-	var gets atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/cache/lint-cache-") {
-			gets.Add(1)
+func TestRunGolangciLint_AttemptsRestoreFromBlobStore(t *testing.T) {
+	var getRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet && strings.HasPrefix(request.URL.Path, "/cache/lint-cache-") {
+			getRequests.Add(1)
 		}
-		http.NotFound(w, r)
+		http.NotFound(response, request)
 	}))
-	t.Cleanup(srv.Close)
-	binDir := t.TempDir()
-	linter := filepath.Join(binDir, "golangci-lint")
+	t.Cleanup(server.Close)
+	binaryDirectory := t.TempDir()
+	linter := filepath.Join(binaryDirectory, "golangci-lint")
 	if err := os.WriteFile(linter, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("PATH", binaryDirectory+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
+	t.Setenv("SPARKWING_GITCACHE_URL", server.URL)
 	_ = runGolangciLint(context.Background())
 
-	if gets.Load() == 0 {
-		t.Fatal("blob store GET not sent before golangci-lint ran")
+	if getRequests.Load() == 0 {
+		t.Fatal("blob store GET was not attempted")
 	}
 }
 
