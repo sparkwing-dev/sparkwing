@@ -24,6 +24,15 @@ unlock.
 
 - **cache:** A profile's `cache.binaries` sub-spec now routes `bin/<hash>`
   reads; it was parsed, validated, and documented but never consumed
+- **cli:** Image rollouts reject blank image or tag values and leave unrelated
+  staged files out of their commits
+- **logs:** Concurrent filesystem appends keep each record and its newline together
+- **logs:** S3 log deletion reports per-object failures
+- **sdk:** Backend overlays preserve the inherited controller name
+- **telemetry:** Immediate shutdown flushes OTLP logs after initialization
+- **logs:** Secret masking inspects JSON-visible fields and retains redacted
+  error messages in JSON output
+
 - **cache:** Pipeline binary keys include Go packages named `web`
 - **cache:** Oversized dependency responses and workspace uploads fail before
   storing truncated content

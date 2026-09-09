@@ -98,3 +98,21 @@ func TestSurfacesValidate_RejectsBucketlessS3(t *testing.T) {
 		t.Errorf("error %q should name the logs surface and the missing bucket", err.Error())
 	}
 }
+
+func TestLayerSurfaces_PreservesController(t *testing.T) {
+	base := backends.Surfaces{Logs: &backends.Spec{Type: backends.TypeController, Controller: "prod", Prefix: "base/"}}
+	for _, controller := range []string{"", "staging"} {
+		over := backends.Surfaces{Logs: &backends.Spec{Type: backends.TypeController, Controller: controller, Prefix: "override/"}}
+		got := backends.LayerSurfaces(base, over)
+		want := controller
+		if want == "" {
+			want = "prod"
+		}
+		if got.Logs.Controller != want || got.Logs.Prefix != "override/" {
+			t.Fatalf("layered logs = %+v", got.Logs)
+		}
+		if err := got.Logs.ValidateFields("logs"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

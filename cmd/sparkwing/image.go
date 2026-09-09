@@ -47,6 +47,13 @@ func runImageRollout(args []string) error {
 		return err
 	}
 
+	if strings.TrimSpace(*image) == "" {
+		return errors.New("image rollout: --image must not be blank")
+	}
+	if strings.TrimSpace(*tag) == "" {
+		return errors.New("image rollout: --tag must not be blank")
+	}
+
 	repoRoot, err := resolveGitopsRepo(*gitopsRepo)
 	if err != nil {
 		return fmt.Errorf("image rollout: %w", err)
@@ -292,10 +299,10 @@ func gitCommitAndPush(repoRoot, kustPath, message string) (sha string, committed
 	if rerr != nil {
 		return "", false, fmt.Errorf("relpath: %w", rerr)
 	}
-	if _, aerr := runGit(repoRoot, "add", relPath); aerr != nil {
+	if _, aerr := runGit(repoRoot, "add", "--", relPath); aerr != nil {
 		return "", false, fmt.Errorf("%w", aerr)
 	}
-	cmd := exec.Command("git", "-C", repoRoot, "diff", "--cached", "--quiet")
+	cmd := exec.Command("git", "-C", repoRoot, "diff", "--cached", "--quiet", "--", relPath)
 	if cerr := cmd.Run(); cerr == nil {
 		out, herr := runGit(repoRoot, "rev-parse", "HEAD")
 		if herr != nil {
@@ -303,7 +310,7 @@ func gitCommitAndPush(repoRoot, kustPath, message string) (sha string, committed
 		}
 		return strings.TrimSpace(out), false, nil
 	}
-	if _, cerr := runGit(repoRoot, "commit", "-m", message); cerr != nil {
+	if _, cerr := runGit(repoRoot, "commit", "-m", message, "--", relPath); cerr != nil {
 		return "", false, fmt.Errorf("%w", cerr)
 	}
 	shaOut, rerr := runGit(repoRoot, "rev-parse", "HEAD")

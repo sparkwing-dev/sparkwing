@@ -136,14 +136,12 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 	}
 
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" || os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") != "" {
-		go func() {
-			logCtx, logCancel := context.WithTimeout(ctx, 5*time.Second)
-			defer logCancel()
-			logExporter, err := otlploghttp.New(logCtx)
-			if err != nil {
-				log.Printf("warning: otel OTLP log exporter failed: %v", err)
-				return
-			}
+		logCtx, logCancel := context.WithTimeout(ctx, 5*time.Second)
+		logExporter, err := otlploghttp.New(logCtx)
+		logCancel()
+		if err != nil {
+			log.Printf("warning: otel OTLP log exporter failed: %v", err)
+		} else {
 			lp := sdklog.NewLoggerProvider(
 				sdklog.WithResource(res),
 				sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
@@ -158,7 +156,7 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 			}}
 			slog.SetDefault(slog.New(combined))
 			log.Printf("otel: logs enabled (OTLP + slog bridge)")
-		}()
+		}
 	} else {
 		slog.SetDefault(slog.New(&traceContextHandler{
 			inner: slog.Default().Handler(),
