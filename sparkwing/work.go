@@ -48,7 +48,7 @@ type ParallelFailurePolicy string
 
 const (
 	// FailFast cancels ordinary in-flight siblings after the first decisive
-	// failure. It is the default and preserves the historical Work behavior.
+	// failure. It is the default policy.
 	FailFast ParallelFailurePolicy = "fail-fast"
 	// CollectAll lets every independent or already-ready item finish so one run
 	// can report the full failure set. It does not satisfy a failed prerequisite;
@@ -73,7 +73,7 @@ func (w *Work) ParallelFailures(policy ParallelFailurePolicy) *Work {
 }
 
 // ParallelFailurePolicy returns the configured policy. The zero value is
-// [FailFast] for backward compatibility.
+// [FailFast].
 func (w *Work) ParallelFailurePolicy() ParallelFailurePolicy {
 	if w == nil || w.failures == "" {
 		return FailFast
@@ -300,10 +300,7 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 // compute.
 //
 // The returned *SpawnSpec accepts .Needs to declare which Steps must
-// complete before the spawn fires, and .Get(ctx) for typed output.
-//
-// "Spawn" is a lifecycle suffix here -- the verb adds a Plan Job
-// from inside Work, hence the Job- prefix.
+// complete before the spawn fires.
 //
 // Accepts the same argument shapes as sparkwing.Job's third arg
 // (Workable struct or func(ctx) error closure).
@@ -409,21 +406,14 @@ func validateSpawnEach(items, fn any) {
 	}
 }
 
-// CoerceSpawnEachJob normalizes the second-return of a JobSpawnEach
-// per-item callback into a Workable. Mirrors coerceJobArg for the
-// fan-out case so closure-form jobs work uniformly without an
-// explicit wrapper. Exported so the orchestrator's template
-// materializer can apply the same shape rules at dispatch time.
+// CoerceSpawnEachJob converts a JobSpawnEach callback result into a Workable.
+// It accepts Workable values and func(context.Context) error closures.
 func CoerceSpawnEachJob(v any) (Workable, error) {
 	switch j := v.(type) {
 	case Workable:
 		return j, nil
 	case func(ctx context.Context) error:
 		return &jobFn{fn: j}, nil
-	}
-	rv := reflect.ValueOf(v)
-	if rv.IsValid() && rv.Type().Implements(reflect.TypeOf((*Workable)(nil)).Elem()) {
-		return rv.Interface().(Workable), nil
 	}
 	return nil, fmt.Errorf("sparkwing: JobSpawnEach: per-item job has unsupported type %T", v)
 }
@@ -436,14 +426,8 @@ func coerceSpawnEachJob(v any) Workable {
 	return job
 }
 
-// WorkStep is one unit of work inside a [Work]. Steps are not Jobs;
-// they run inside the Job's runner process and share its filesystem,
-// environment, and ctx. Returned by [Step]; modifier methods
-// ([WorkStep.Needs], [WorkStep.SkipIf], [WorkStep.Risk],
-// [WorkStep.DryRun], [WorkStep.SafeWithoutDryRun]) chain off it.
-// Plan-layer modifiers (Retry, Timeout, OnFailure, Cache, Requires,
-// BeforeRun / AfterRun) are deliberately absent here -- promote to a
-// Job via [JobSpawn] if you need them.
+// WorkStep is one unit of work inside a [Work]. Steps share the Job runner's
+// process, filesystem, environment, and context. Register them with [Step].
 type WorkStep struct {
 	id              string
 	fn              func(ctx context.Context) (any, error)
@@ -472,15 +456,9 @@ func (s *WorkStep) ID() string { return s.id }
 // that return only error.
 func (s *WorkStep) OutputType() reflect.Type { return s.outType }
 
-// WorkDep is the closed type set accepted by Work-layer [WorkStep.Needs]
-// and the Needs methods on [StepGroup], [SpawnSpec], and [SpawnGenSpec].
-// The unexported marker method `workDepID()` prevents callers from
-// passing arbitrary values; the Plan-layer [Dep] types are NOT WorkDep
-// and vice versa, so the two layers cannot cross by accident.
-//
-// Implementations: [*WorkStep], [*StepGroup], [*SpawnSpec],
-// [*SpawnGenSpec]. By-name references via a typed-string sentinel are
-// intentionally not supported -- store and pass the upstream's handle.
+// WorkDep is the closed type set accepted by Work dependency methods.
+// Pass an upstream [*WorkStep], [*StepGroup], [*SpawnSpec], or [*SpawnGenSpec]
+// handle. The unexported marker restricts implementations to these SDK types.
 type WorkDep interface {
 	workDepID() string
 }
@@ -654,8 +632,7 @@ func (s *WorkStep) awaitDone(ctx context.Context) error {
 // StepGroup is a handle to a named group of Steps. Returned by
 // sparkwing.GroupSteps. Downstream .Needs(group) expands eagerly to
 // the group's members. Modifiers (Needs, SkipIf) delegate to every
-// member, mirroring the *WorkStep modifier surface so future
-// step-level modifiers can be added uniformly to both.
+// member.
 type StepGroup struct {
 	name    string
 	members []*WorkStep
@@ -685,8 +662,6 @@ func (g *StepGroup) Members() []*WorkStep {
 //	    sw.Step(w, "vet",     j.vet).Needs(fetch),
 //	)
 //	return sw.Step(w, "deploy", j.deploy).Needs(checks), nil
-//
-// The mirror of sparkwing.GroupJobs at the Work layer.
 func GroupSteps(w *Work, name string, steps ...*WorkStep) *StepGroup {
 	if w == nil {
 		panic("sparkwing: GroupSteps: w must be non-nil")
@@ -779,26 +754,6 @@ func (s *SpawnSpec) markDone(out any) {
 	s.mu.Unlock()
 }
 
-//lint:ignore U1000 reader half of unwired SpawnSpec.Get scaffolding; keep paired with markDone
-func (s *SpawnSpec) awaitDone(ctx context.Context) error {
-	s.mu.Lock()
-	if s.resolved {
-		s.mu.Unlock()
-		return nil
-	}
-	if s.done == nil {
-		s.done = make(chan struct{})
-	}
-	ch := s.done
-	s.mu.Unlock()
-	select {
-	case <-ch:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
 // Needs declares which Steps / Spawns inside the same Work must
 // complete before the spawn fires. Mirrors [WorkStep.Needs] at the
 // spawn layer.
@@ -829,8 +784,7 @@ type SpawnGenSpec struct {
 
 func (g *SpawnGenSpec) syntheticID() string { return g.id }
 
-// ID exposes the synthetic id (e.g. "__spawn_each_0") to renderers
-// and the orchestrator's snapshot walker.
+// ID returns the generated identifier used by renderers and snapshots.
 func (g *SpawnGenSpec) ID() string { return g.id }
 
 // Items returns the input slice value.

@@ -41,10 +41,10 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])` -- RegisterEntrypoint installs a Go work unit (the entrypoint) under the given type-name, matching the `entrypoint:` field in sparkwing.yaml.
 - `func Registered() []string` -- Registered returns the names of all registered pipelines, sorted.
 - `func ResolveAs[T any](s *Schema, in ResolveInputs) (T, error)` -- ResolveAs is the typed convenience wrapper: same semantics as Schema.Resolve but returns T directly so callers don't have to type-assert the reflect.Value.
-- `func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error)` -- RestoreLintCache downloads the blob-store seed for the current WorkDir and expands it into the golangci-lint tool-cache directory.
+- `func RestoreLintCache(ctx context.Context, cacheURL string) (restored bool, received int64, resultErr error)` -- RestoreLintCache downloads the blob-store seed for the current WorkDir and expands it into the golangci-lint tool-cache directory.
 - `func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error)` -- RunAndAwait triggers a fresh run of pipeline and waits for it to reach terminal state, returning the typed output of nodeID from that run.
 - `func RunWork(ctx context.Context, w *Work) (any, error)` -- RunWork executes w's step + spawn DAG.
-- `func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error)` -- SaveLintCache compresses the golangci-lint tool-cache directory for the current WorkDir and PUTs it to gcURL/cache/<key>.
+- `func SaveLintCache(ctx context.Context, cacheURL, token string) (sent int64, resultErr error)` -- SaveLintCache compresses the golangci-lint tool-cache directory for the current WorkDir and PUTs it to cacheURL/cache/<key>.
 - `func Secret(ctx context.Context, name string) (string, error)` -- Secret resolves a masked value through the resolver installed on ctx.
 - `func SetGit(g *Git)` -- SetGit attaches a fully-populated Git to the runtime.
 - `func SetWorkDir(dir string)` -- SetWorkDir overrides the WorkDir field on the runtime singleton and updates the Git workDir so live methods follow.
@@ -138,7 +138,7 @@ const (
 
 ### type AwaitOption
 
-AwaitOption tunes RunAndAwait's trigger + wait behavior.
+AwaitOption configures the triggered run and the wait.
 
 ```
 type AwaitOption func(*awaitConfig)
@@ -147,7 +147,7 @@ type AwaitOption func(*awaitConfig)
 - `func WithFreshArgs(args map[string]string) AwaitOption` -- WithFreshArgs passes args through to the spawned trigger.
 - `func WithFreshBranch(branch string) AwaitOption` -- WithFreshBranch overrides the branch the spawned trigger runs against.
 - `func WithFreshInputs[T any](in T) AwaitOption` -- WithFreshInputs flattens a typed Inputs struct into the underlying args map.
-- `func WithFreshRepo(repo string) AwaitOption` -- WithFreshRepo declares which repo the spawned pipeline lives in (e.g.
+- `func WithFreshRepo(repo string) AwaitOption` -- WithFreshRepo selects the repository containing the spawned pipeline.
 - `func WithFreshTimeout(d time.Duration) AwaitOption` -- WithFreshTimeout bounds the total wait, including admission queue time.
 
 ### type AwaitRequest
@@ -1006,7 +1006,7 @@ type ParallelFailurePolicy string
 ```
 const (
     // FailFast cancels ordinary in-flight siblings after the first decisive
-    // failure. It is the default and preserves the historical Work behavior.
+    // failure. It is the default policy.
     FailFast ParallelFailurePolicy = "fail-fast"
     // CollectAll lets every independent or already-ready item finish so one run
     // can report the full failure set. It does not satisfy a failed prerequisite;
@@ -1730,7 +1730,7 @@ type SpawnGenSpec struct {
 - `func JobSpawnEach(w *Work, items, fn any) *SpawnGenSpec` -- JobSpawnEach is the cardinality-many variant of JobSpawn.
 - `func (g *SpawnGenSpec) DepIDs() []string` -- DepIDs returns the WorkStep IDs the generator waits on.
 - `func (g *SpawnGenSpec) Fn() any` -- Fn returns the per-item closure.
-- `func (g *SpawnGenSpec) ID() string` -- ID exposes the synthetic id (e.g.
+- `func (g *SpawnGenSpec) ID() string` -- ID returns the generated identifier used by renderers and snapshots.
 - `func (g *SpawnGenSpec) Items() any` -- Items returns the input slice value.
 - `func (g *SpawnGenSpec) Needs(deps ...WorkDep) *SpawnGenSpec` -- Needs declares which Steps / Spawns must complete before the generator runs.
 
@@ -1923,7 +1923,7 @@ type Work struct {
 
 ### type WorkDep
 
-WorkDep is the closed type set accepted by Work-layer WorkStep.Needs and the Needs methods on StepGroup, SpawnSpec, and SpawnGenSpec.
+WorkDep is the closed type set accepted by Work dependency methods.
 
 ```
 type WorkDep interface {
@@ -1973,7 +1973,7 @@ type Workable interface {
 }
 ```
 
-- `func CoerceSpawnEachJob(v any) (Workable, error)` -- CoerceSpawnEachJob normalizes the second-return of a JobSpawnEach per-item callback into a Workable.
+- `func CoerceSpawnEachJob(v any) (Workable, error)` -- CoerceSpawnEachJob converts a JobSpawnEach callback result into a Workable.
 
 ## Constants
 

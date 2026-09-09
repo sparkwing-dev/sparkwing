@@ -2,40 +2,42 @@ package sparkwing
 
 import (
 	"archive/tar"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
-// safety: bounds one extraction, so a gzip bomb cannot fill the disk.
+// SAFETY: Bounds decompressed archive output.
 var maxExtractBytes = int64(20 << 30)
 
 type tarExtractPolicy struct {
-	allowSymlinks bool
-	minDirPerm    fs.FileMode
-	minFilePerm   fs.FileMode
-	rename        func(name string) (string, bool)
+	allowSymlinks           bool
+	minDirectoryPermissions fs.FileMode
+	minFilePerm             fs.FileMode
+	rename                  func(name string) (string, bool)
 }
 
-func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error {
-	root, err := os.OpenRoot(dir)
+func extractTarInRoot(archiveReader *tar.Reader, directory string, policy tarExtractPolicy) (resultErr error) {
+	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { resultErr = errors.Join(resultErr, root.Close()) }()
 
-	type dirMode struct {
+	type directoryMode struct {
 		path string
 		mode fs.FileMode
 	}
-	var deferredDirModes []dirMode
+	var deferredDirectoryModes []directoryMode
 	var written int64
 
 	for {
-		hdr, err := tr.Next()
+		header, err := archiveReader.Next()
 		if err == io.EOF {
 			break
 		}
@@ -43,55 +45,55 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 			return fmt.Errorf("tar: %w", err)
 		}
 
-		name := hdr.Name
+		name := header.Name
 		if policy.rename != nil {
 			kept := false
 			if name, kept = policy.rename(name); !kept {
 				continue
 			}
 		}
-		rel, err := secureArchiveRel(name)
+		relative, err := secureArchiveRel(name)
 		if err != nil {
 			return err
 		}
-		if rel == "." {
+		if relative == "." {
 			continue
 		}
 
-		switch hdr.Typeflag {
+		switch header.Typeflag {
 		case tar.TypeDir:
-			// safety: a read-only directory mode would block extracting
+			// SAFETY: A read-only directory mode would block extracting
 			// its children; create writable, restore the mode afterwards.
-			if err := root.MkdirAll(rel, provisionalDirPerm); err != nil {
+			if err := root.MkdirAll(relative, provisionalDirPerm); err != nil {
 				return err
 			}
-			// safety: chmod ignores the umask, so clamp the archive's mode
+			// SAFETY: Chmod ignores the umask, so clamp the archive's mode
 			// instead of letting it leave a world-writable directory.
-			mode := hdr.FileInfo().Mode().Perm()&maxDirPerm | policy.minDirPerm
-			deferredDirModes = append(deferredDirModes, dirMode{rel, mode})
+			mode := header.FileInfo().Mode().Perm()&maxDirPerm | policy.minDirectoryPermissions
+			deferredDirectoryModes = append(deferredDirectoryModes, directoryMode{relative, mode})
 
 		case tar.TypeReg:
-			if err := mkdirParent(root, rel); err != nil {
+			if err := mkdirParent(root, relative); err != nil {
 				return err
 			}
-			// safety: overwriting a read-only file from a previous
+			// SAFETY: Overwriting a read-only file from a previous
 			// partial restore needs the remove first.
-			_ = root.Remove(rel)
-			f, err := root.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, hdr.FileInfo().Mode().Perm()|policy.minFilePerm)
+			if err := root.Remove(relative); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			file, err := root.OpenFile(relative, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode().Perm()|policy.minFilePerm)
 			if err != nil {
 				return err
 			}
-			n, err := io.Copy(f, io.LimitReader(tr, maxExtractBytes-written+1))
-			written += n
+			bytesRead, err := io.Copy(file, io.LimitReader(archiveReader, maxExtractBytes-written+1))
+			written += bytesRead
 			if err != nil {
-				f.Close()
-				return err
+				return errors.Join(err, file.Close())
 			}
 			if written > maxExtractBytes {
-				f.Close()
-				return fmt.Errorf("archive exceeds the %s extraction limit; refusing to fill the disk", humanBytes(maxExtractBytes))
+				return errors.Join(fmt.Errorf("archive exceeds the %s extraction limit; refusing to fill the disk", humanBytes(maxExtractBytes)), file.Close())
 			}
-			if err := f.Close(); err != nil {
+			if err := file.Close(); err != nil {
 				return err
 			}
 
@@ -99,14 +101,16 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 			if !policy.allowSymlinks {
 				continue
 			}
-			if err := mkdirParent(root, rel); err != nil {
+			if err := mkdirParent(root, relative); err != nil {
 				return err
 			}
-			if err := symlinkStaysInside(root, rel, hdr.Linkname); err != nil {
+			if err := symlinkStaysInside(root, relative, header.Linkname); err != nil {
 				return err
 			}
-			_ = root.Remove(rel)
-			if err := root.Symlink(hdr.Linkname, rel); err != nil {
+			if err := root.Remove(relative); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			if err := root.Symlink(header.Linkname, relative); err != nil {
 				return err
 			}
 
@@ -114,11 +118,16 @@ func extractTarInRoot(tr *tar.Reader, dir string, policy tarExtractPolicy) error
 		}
 	}
 
-	// safety: deepest-first restores nested read-only directories
+	sort.SliceStable(deferredDirectoryModes, func(left, right int) bool {
+		return strings.Count(deferredDirectoryModes[left].path, string(filepath.Separator)) < strings.Count(deferredDirectoryModes[right].path, string(filepath.Separator))
+	})
+	// SAFETY: Deepest-first restores nested read-only directories
 	// without locking out their own just-extracted contents.
-	for i := len(deferredDirModes) - 1; i >= 0; i-- {
-		dm := deferredDirModes[i]
-		_ = root.Chmod(dm.path, dm.mode)
+	for index := len(deferredDirectoryModes) - 1; index >= 0; index-- {
+		directoryMode := deferredDirectoryModes[index]
+		if err := root.Chmod(directoryMode.path, directoryMode.mode); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -128,8 +137,8 @@ const (
 	maxDirPerm         = fs.FileMode(0o755)
 )
 
-func mkdirParent(root *os.Root, rel string) error {
-	parent := filepath.Dir(rel)
+func mkdirParent(root *os.Root, relative string) error {
+	parent := filepath.Dir(relative)
 	if parent == "." {
 		return nil
 	}
@@ -144,52 +153,50 @@ func secureArchiveRel(name string) (string, error) {
 	return clean, nil
 }
 
-// safety: os.Root constrains where a link is created, never where it points,
+// SAFETY: os.Root constrains where a link is created, never where it points,
 // so measure the target from the entry's real parent, not its lexical one.
-func symlinkStaysInside(root *os.Root, rel, linkname string) error {
+func symlinkStaysInside(root *os.Root, relative, linkname string) error {
 	link := filepath.FromSlash(linkname)
 	if link == "" || filepath.IsAbs(link) {
-		return fmt.Errorf("archive symlink %q -> %q is not a relative link", rel, linkname)
+		return fmt.Errorf("archive symlink %q -> %q is not a relative link", relative, linkname)
 	}
-	if err := refuseSymlinkedAncestors(root, rel); err != nil {
+	if err := refuseSymlinkedAncestors(root, relative); err != nil {
 		return err
 	}
-	target := filepath.Clean(filepath.Join(filepath.Dir(rel), link))
+	target := filepath.Clean(filepath.Join(filepath.Dir(relative), link))
 	if target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("archive symlink %q -> %q escapes the target directory", rel, linkname)
+		return fmt.Errorf("archive symlink %q -> %q escapes the target directory", relative, linkname)
 	}
 	return nil
 }
 
-// safety: a symlinked ancestor makes the entry's real depth shallower than its
+// SAFETY: A symlinked ancestor makes the entry's real depth shallower than its
 // name, which is how a link that reads as contained lands outside the root.
-func refuseSymlinkedAncestors(root *os.Root, rel string) error {
-	parent := filepath.Dir(rel)
+func refuseSymlinkedAncestors(root *os.Root, relative string) error {
+	parent := filepath.Dir(relative)
 	if parent == "." {
 		return nil
 	}
 	parts := strings.Split(parent, string(filepath.Separator))
-	for i := range parts {
-		ancestor := filepath.Join(parts[:i+1]...)
-		fi, err := root.Lstat(ancestor)
+	for index := range parts {
+		ancestor := filepath.Join(parts[:index+1]...)
+		info, err := root.Lstat(ancestor)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil
 			}
 			return err
 		}
-		if fi.Mode()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("archive entry %q sits under the symlinked directory %q", rel, filepath.ToSlash(ancestor))
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("archive entry %q sits under the symlinked directory %q", relative, filepath.ToSlash(ancestor))
 		}
 	}
 	return nil
 }
 
-// safety: extract beside the target and swap it in with a rename, so a
-// concurrent reader sees the previous cache or the new one, never a partial
-// one, and a rejected entry leaves the previous cache in place.
-func extractIntoDirStaged(dir, stagePattern string, extract func(stage string) error) error {
-	parent := filepath.Dir(dir)
+// SAFETY: Staging preserves the previous cache when archive extraction fails.
+func extractIntoDirStaged(directory, stagePattern string, extract func(stage string) error) error {
+	parent := filepath.Dir(directory)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
 	}
@@ -198,28 +205,25 @@ func extractIntoDirStaged(dir, stagePattern string, extract func(stage string) e
 		return err
 	}
 	if err := extract(stage); err != nil {
-		_ = os.RemoveAll(stage)
-		return err
+		return errors.Join(err, os.RemoveAll(stage))
 	}
 
 	retired := stage + ".retired"
 	swapped := false
-	switch err := os.Rename(dir, retired); {
+	switch err := os.Rename(directory, retired); {
 	case err == nil:
 		swapped = true
 	case !os.IsNotExist(err):
-		_ = os.RemoveAll(stage)
-		return err
+		return errors.Join(err, os.RemoveAll(stage))
 	}
-	if err := os.Rename(stage, dir); err != nil {
+	if err := os.Rename(stage, directory); err != nil {
 		if swapped {
-			_ = os.Rename(retired, dir)
+			err = errors.Join(err, os.Rename(retired, directory))
 		}
-		_ = os.RemoveAll(stage)
-		return err
+		return errors.Join(err, os.RemoveAll(stage))
 	}
 	if swapped {
-		_ = os.RemoveAll(retired)
+		return os.RemoveAll(retired)
 	}
 	return nil
 }

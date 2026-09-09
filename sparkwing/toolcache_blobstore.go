@@ -19,16 +19,11 @@ import (
 
 const lintCacheManifestName = "workdir"
 
-// ErrLintCacheWorkdirMismatch is returned when the archive's recorded
-// workdir does not match the running WorkDir. The cache is structurally
-// valid, but restoring it would replay another tree's file paths.
+// ErrLintCacheWorkdirMismatch prevents restoring paths recorded for another workdir.
 var ErrLintCacheWorkdirMismatch = errors.New("lint cache archive was produced at a different workdir")
 
 // LintCacheBlobKey returns the /cache/<key> identifier for the
-// golangci-lint tool cache for the current WorkDir. Two runners at the
-// same absolute path produce the same key; runners at different absolute
-// paths produce different keys, so the blob store cannot serve a cache
-// across a path boundary.
+// golangci-lint tool cache for the current WorkDir.
 func LintCacheBlobKey() string {
 	return lintCacheKey(WorkDir())
 }
@@ -39,205 +34,192 @@ func lintCacheKey(workdir string) string {
 }
 
 // SaveLintCache compresses the golangci-lint tool-cache directory for
-// the current WorkDir and PUTs it to gcURL/cache/<key>. Returns the
-// number of bytes sent to the server on success. An empty gcURL or an
-// empty (or missing) tool-cache directory is a no-op that returns (0, nil).
-//
-// The archive embeds the current WorkDir as its first entry so
-// RestoreLintCache can detect a workdir mismatch before expanding any files.
-func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error) {
-	if gcURL == "" {
+// the current WorkDir and PUTs it to cacheURL/cache/<key>.
+// An empty URL or missing or empty cache returns zero bytes without a request.
+func SaveLintCache(ctx context.Context, cacheURL, token string) (sent int64, resultErr error) {
+	if cacheURL == "" {
 		return 0, nil
 	}
-	cacheDir := ToolCacheDir("golangci-lint")
-	if empty, _ := isDirEmpty(cacheDir); empty {
+	cacheDirectory := ToolCacheDir("golangci-lint")
+	empty, err := isDirEmpty(cacheDirectory)
+	if errors.Is(err, os.ErrNotExist) {
+		_, statErr := os.Lstat(cacheDirectory)
+		if errors.Is(statErr, os.ErrNotExist) {
+			return 0, nil
+		}
+		err = errors.Join(err, statErr)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("save lint cache: inspect directory: %w", err)
+	}
+	if empty {
 		return 0, nil
 	}
 
-	tmp, err := os.CreateTemp("", "sparkwing-lintcache-*.tar.gz")
+	archiveFile, err := os.CreateTemp("", "sparkwing-lintcache-*.tar.gz")
 	if err != nil {
 		return 0, fmt.Errorf("save lint cache: create temp: %w", err)
 	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
-	if err := writeLintCacheArchive(tmp, cacheDir, WorkDir()); err != nil {
-		tmp.Close()
+	defer func() { resultErr = errors.Join(resultErr, archiveFile.Close(), os.Remove(archiveFile.Name())) }()
+	if err := writeLintCacheArchive(archiveFile, cacheDirectory, WorkDir()); err != nil {
 		return 0, fmt.Errorf("save lint cache: archive: %w", err)
 	}
-	size, err := tmp.Seek(0, io.SeekCurrent)
+	size, err := archiveFile.Seek(0, io.SeekCurrent)
 	if err != nil {
-		tmp.Close()
 		return 0, fmt.Errorf("save lint cache: seek: %w", err)
 	}
-	if err := tmp.Close(); err != nil {
-		return 0, fmt.Errorf("save lint cache: close temp: %w", err)
-	}
 
-	f, err := os.Open(tmpPath)
-	if err != nil {
-		return 0, fmt.Errorf("save lint cache: reopen temp: %w", err)
-	}
-	defer f.Close()
-
-	url := strings.TrimRight(gcURL, "/") + "/cache/" + LintCacheBlobKey()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, f)
+	url := strings.TrimRight(cacheURL, "/") + "/cache/" + LintCacheBlobKey()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPut, url, io.NewSectionReader(archiveFile, 0, size))
 	if err != nil {
 		return 0, err
 	}
-	req.ContentLength = size
+	request.ContentLength = size
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	req.Header.Set("Content-Type", "application/gzip")
+	request.Header.Set("Content-Type", "application/gzip")
 
-	cli := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := cli.Do(req)
+	client := &http.Client{Timeout: 10 * time.Minute}
+	response, err := client.Do(request)
 	if err != nil {
 		return 0, fmt.Errorf("save lint cache: PUT: %w", err)
 	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	defer func() { resultErr = errors.Join(resultErr, response.Body.Close()) }()
+	_, readErr := io.Copy(io.Discard, response.Body)
 
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("save lint cache: server returned %s", resp.Status)
+	if response.StatusCode != http.StatusCreated && response.StatusCode != http.StatusOK {
+		return 0, errors.Join(fmt.Errorf("save lint cache: server returned %s", response.Status), readErr)
+	}
+	if readErr != nil {
+		return 0, fmt.Errorf("save lint cache: read response: %w", readErr)
 	}
 	return size, nil
 }
 
 // RestoreLintCache downloads the blob-store seed for the current WorkDir
-// and expands it into the golangci-lint tool-cache directory. Returns
-// (true, bytes, nil) on a hit, (false, 0, nil) when no seed exists yet
-// (404), and an error for I/O failures.
-//
-// If the archive records a different WorkDir than the running one,
-// RestoreLintCache returns ErrLintCacheWorkdirMismatch rather than
-// silently expanding paths from another tree.
-//
-// The blob store authenticates reads as well as writes, so the request
-// carries $SPARKWING_CACHE_TOKEN as its bearer when that variable is set.
-func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error) {
-	if gcURL == "" {
+// and expands it into the golangci-lint tool-cache directory.
+// An empty URL or HTTP 404 returns (false, 0, nil). I/O failures and archives
+// with another workdir return errors. SPARKWING_CACHE_TOKEN authenticates reads.
+func RestoreLintCache(ctx context.Context, cacheURL string) (restored bool, received int64, resultErr error) {
+	if cacheURL == "" {
 		return false, 0, nil
 	}
 
-	url := strings.TrimRight(gcURL, "/") + "/cache/" + LintCacheBlobKey()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	url := strings.TrimRight(cacheURL, "/") + "/cache/" + LintCacheBlobKey()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false, 0, err
 	}
 	if token := os.Getenv("SPARKWING_CACHE_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	cli := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := cli.Do(req)
+	client := &http.Client{Timeout: 10 * time.Minute}
+	response, err := client.Do(request)
 	if err != nil {
 		return false, 0, fmt.Errorf("restore lint cache: GET: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { resultErr = errors.Join(resultErr, response.Body.Close()) }()
 
-	if resp.StatusCode == http.StatusNotFound {
+	if response.StatusCode == http.StatusNotFound {
 		return false, 0, nil
 	}
-	if resp.StatusCode != http.StatusOK {
-		return false, 0, fmt.Errorf("restore lint cache: server returned %s", resp.Status)
+	if response.StatusCode != http.StatusOK {
+		return false, 0, fmt.Errorf("restore lint cache: server returned %s", response.Status)
 	}
 
-	counted := &countReader{r: resp.Body}
-	cacheDir := ToolCacheDir("golangci-lint")
-	if err := extractLintCacheArchiveStaged(counted, cacheDir, WorkDir()); err != nil {
-		return false, counted.n, err
+	counted := &countReader{reader: response.Body}
+	cacheDirectory := ToolCacheDir("golangci-lint")
+	if err := extractLintCacheArchiveStaged(counted, cacheDirectory, WorkDir()); err != nil {
+		return false, counted.bytesRead, err
 	}
-	return true, counted.n, nil
+	return true, counted.bytesRead, nil
 }
 
-func writeLintCacheArchive(w io.Writer, cacheDir, workdir string) error {
-	gz := gzip.NewWriter(w)
-	tw := tar.NewWriter(gz)
+func writeLintCacheArchive(writer io.Writer, cacheDirectory, workdir string) (resultErr error) {
+	compressed := gzip.NewWriter(writer)
+	archiveWriter := tar.NewWriter(compressed)
+	defer func() { resultErr = errors.Join(resultErr, archiveWriter.Close(), compressed.Close()) }()
 
 	manifest := []byte(workdir)
-	if err := tw.WriteHeader(&tar.Header{
+	if err := archiveWriter.WriteHeader(&tar.Header{
 		Name: lintCacheManifestName,
 		Mode: 0o600,
 		Size: int64(len(manifest)),
 	}); err != nil {
 		return err
 	}
-	if _, err := tw.Write(manifest); err != nil {
+	if _, err := archiveWriter.Write(manifest); err != nil {
 		return err
 	}
 
-	if err := filepath.WalkDir(cacheDir, func(path string, d fs.DirEntry, walkErr error) error {
+	if err := filepath.WalkDir(cacheDirectory, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		rel, err := filepath.Rel(cacheDir, path)
+		relative, err := filepath.Rel(cacheDirectory, path)
 		if err != nil {
 			return err
 		}
-		info, err := d.Info()
+		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
-		hdr, err := tar.FileInfoHeader(info, "")
+		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
 		}
-		hdr.Name = "cache/" + filepath.ToSlash(rel)
-		if d.IsDir() {
-			hdr.Name += "/"
+		header.Name = "cache/" + filepath.ToSlash(relative)
+		if entry.IsDir() {
+			header.Name += "/"
 		} else if !info.Mode().IsRegular() {
 			return nil
 		}
-		if err := tw.WriteHeader(hdr); err != nil {
+		if err := archiveWriter.WriteHeader(header); err != nil {
 			return err
 		}
-		if d.IsDir() {
+		if entry.IsDir() {
 			return nil
 		}
 		// #nosec G122 -- a TOCTOU swap here needs write access to this user's own tool cache, so the race is accepted
-		f, err := os.Open(path)
+		file, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-		defer f.Close()
-		_, err = io.Copy(tw, f)
-		return err
+		_, copyErr := io.Copy(archiveWriter, file)
+		return errors.Join(copyErr, file.Close())
 	}); err != nil {
 		return err
 	}
 
-	if err := tw.Close(); err != nil {
-		return err
-	}
-	return gz.Close()
+	return nil
 }
 
-func extractLintCacheArchiveStaged(r io.Reader, destDir, runningWorkdir string) error {
-	return extractIntoDirStaged(destDir, ".lintcache-restore-*", func(stage string) error {
-		return extractLintCacheArchive(r, stage, runningWorkdir)
+func extractLintCacheArchiveStaged(reader io.Reader, destination, runningWorkdir string) error {
+	return extractIntoDirStaged(destination, ".lintcache-restore-*", func(stage string) error {
+		return extractLintCacheArchive(reader, stage, runningWorkdir)
 	})
 }
 
-func extractLintCacheArchive(r io.Reader, destDir, runningWorkdir string) error {
-	gz, err := gzip.NewReader(r)
+func extractLintCacheArchive(reader io.Reader, destination, runningWorkdir string) (resultErr error) {
+	compressed, err := gzip.NewReader(reader)
 	if err != nil {
 		return fmt.Errorf("extract lint cache: %w", err)
 	}
-	defer gz.Close()
+	defer func() { resultErr = errors.Join(resultErr, compressed.Close()) }()
 
-	tr := tar.NewReader(gz)
+	archiveReader := tar.NewReader(compressed)
 
-	// safety: first entry must be the manifest; check before touching destDir
-	hdr, err := tr.Next()
+	// SAFETY: Validate the archive workdir before creating destination files.
+	header, err := archiveReader.Next()
 	if err != nil {
 		return fmt.Errorf("extract lint cache: read manifest: %w", err)
 	}
-	if hdr.Name != lintCacheManifestName {
-		return fmt.Errorf("extract lint cache: unexpected first entry %q", hdr.Name)
+	if header.Name != lintCacheManifestName {
+		return fmt.Errorf("extract lint cache: unexpected first entry %q", header.Name)
 	}
-	manifestBytes, err := io.ReadAll(io.LimitReader(tr, 4096))
+	manifestBytes, err := io.ReadAll(io.LimitReader(archiveReader, 4096))
 	if err != nil {
 		return fmt.Errorf("extract lint cache: read manifest body: %w", err)
 	}
@@ -246,14 +228,14 @@ func extractLintCacheArchive(r io.Reader, destDir, runningWorkdir string) error 
 		return fmt.Errorf("%w: archive=%q running=%q", ErrLintCacheWorkdirMismatch, archiveWorkdir, runningWorkdir)
 	}
 
-	if err := os.MkdirAll(destDir, 0o700); err != nil {
+	if err := os.MkdirAll(destination, 0o700); err != nil {
 		return err
 	}
 
-	if err := extractTarInRoot(tr, destDir, tarExtractPolicy{
-		minDirPerm:  0o700,
-		minFilePerm: 0o600,
-		rename:      lintCacheEntryName,
+	if err := extractTarInRoot(archiveReader, destination, tarExtractPolicy{
+		minDirectoryPermissions: 0o700,
+		minFilePerm:             0o600,
+		rename:                  lintCacheEntryName,
 	}); err != nil {
 		return fmt.Errorf("extract lint cache: %w", err)
 	}
@@ -261,20 +243,20 @@ func extractLintCacheArchive(r io.Reader, destDir, runningWorkdir string) error 
 }
 
 func lintCacheEntryName(name string) (string, bool) {
-	rel, ok := strings.CutPrefix(name, "cache/")
-	if !ok || rel == "" {
+	relative, ok := strings.CutPrefix(name, "cache/")
+	if !ok || relative == "" {
 		return "", false
 	}
-	return rel, true
+	return relative, true
 }
 
-func isDirEmpty(dir string) (bool, error) {
-	f, err := os.Open(dir)
+func isDirEmpty(directory string) (empty bool, resultErr error) {
+	file, err := os.Open(directory)
 	if err != nil {
 		return true, err
 	}
-	defer f.Close()
-	_, err = f.Readdirnames(1)
+	defer func() { resultErr = errors.Join(resultErr, file.Close()) }()
+	_, err = file.Readdirnames(1)
 	if err == io.EOF {
 		return true, nil
 	}
@@ -282,12 +264,12 @@ func isDirEmpty(dir string) (bool, error) {
 }
 
 type countReader struct {
-	r io.Reader
-	n int64
+	reader    io.Reader
+	bytesRead int64
 }
 
-func (c *countReader) Read(p []byte) (int, error) {
-	n, err := c.r.Read(p)
-	c.n += int64(n)
-	return n, err
+func (counter *countReader) Read(buffer []byte) (int, error) {
+	bytesRead, err := counter.reader.Read(buffer)
+	counter.bytesRead += int64(bytesRead)
+	return bytesRead, err
 }
