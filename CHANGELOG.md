@@ -33,6 +33,14 @@ code change to unlock.
 - **Runs logs:** Short, unfiltered local tails read from the end of the log
   instead of loading its full history. Output and filter ordering are unchanged.
 
+### Security
+
+- **deps:** `google.golang.org/grpc` moves to v1.83.2 for CVE-2026-84445, a
+  denial of service in its xDS server. The HIGH finding failed the image scan
+  that gates every published release, which is why v0.46.0 and v0.47.0 carry
+  tags but no binaries; this release publishes them.
+
+
 ## [v0.47.0] - 2026-09-09
 ### Added
 
