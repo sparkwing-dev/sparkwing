@@ -11,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-var productDirs = []string{"cmd", "internal", "pkg", "sparkwing"}
+var productDirectories = []string{"cmd", "internal", "pkg", "sparkwing"}
 
 const lintFixtureConfig = `version: "2"
 linters:
@@ -31,9 +31,9 @@ func lintFixtureRepo(t *testing.T) string {
 	gitInit(t, root)
 	writeGoFile(t, filepath.Join(root, "go.mod"), "module fixture\n\ngo 1.25\n")
 	writeGoFile(t, filepath.Join(root, ".golangci.yml"), lintFixtureConfig)
-	for _, dir := range productDirs {
-		writeGoFile(t, filepath.Join(root, dir, "clean.go"),
-			fmt.Sprintf("package %s\n\nfunc Clean() int { return 1 }\n", dir))
+	for _, directory := range productDirectories {
+		writeGoFile(t, filepath.Join(root, directory, "clean.go"),
+			fmt.Sprintf("package %s\n\nfunc Clean() int { return 1 }\n", directory))
 	}
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "go.mod"), "module fixture-pipelines\n\ngo 1.25\n")
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs.go"),
@@ -41,15 +41,15 @@ func lintFixtureRepo(t *testing.T) string {
 	gitCommitAll(t, root, "clean base")
 	runTestGit(t, root, "update-ref", "refs/remotes/"+gateBaselineRef, "HEAD")
 
-	prev := sparkwing.WorkDir()
+	previous := sparkwing.WorkDir()
 	sparkwing.SetWorkDir(root)
-	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
 	return root
 }
 
 func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
-	for _, dir := range productDirs {
-		t.Run(dir, func(t *testing.T) {
+	for _, directory := range productDirectories {
+		t.Run(directory, func(t *testing.T) {
 			root := lintFixtureRepo(t)
 			ctx := context.Background()
 
@@ -57,16 +57,16 @@ func TestLintRefusesAFindingInEachProductDirectory(t *testing.T) {
 				t.Fatalf("clean fixture must pass lint: %v", err)
 			}
 
-			bad := filepath.Join(root, dir, "negative_control.go")
-			writeGoFile(t, bad, ineffassignViolation(dir))
+			bad := filepath.Join(root, directory, "negative_control.go")
+			writeGoFile(t, bad, ineffassignViolation(directory))
 			gitAddAll(t, root)
 
 			err := runGolangciLint(ctx)
 			if err == nil {
-				t.Fatalf("lint passed a finding in %s/", dir)
+				t.Fatalf("lint passed a finding in %s/", directory)
 			}
 			if !strings.Contains(err.Error(), "ineffectual assignment") {
-				t.Errorf("lint failed in %s/ for some reason other than the planted finding: %v", dir, err)
+				t.Errorf("lint error in %s lacks the expected ineffectual assignment: %v", directory, err)
 			}
 		})
 	}
@@ -119,7 +119,7 @@ func TestLintRefusesToRunWhenTheBaselineRefIsMissing(t *testing.T) {
 		t.Errorf("a missing baseline did not name the fix: %s", got)
 	}
 	if strings.Contains(got, "ineffectual assignment") {
-		t.Errorf("the step linted anyway and charged the author for the result: %s", got)
+		t.Errorf("baseline error includes an unrelated lint finding: %s", got)
 	}
 }
 
@@ -146,11 +146,11 @@ func TestLintBaselineDescriptionCarriesTheResolvedCommit(t *testing.T) {
 	}
 }
 
-func gitOutput(t *testing.T, dir string, args ...string) string {
+func gitOutput(t *testing.T, directory string, arguments ...string) string {
 	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	output, err := exec.Command("git", append([]string{"-C", directory}, arguments...)...).Output()
 	if err != nil {
-		t.Fatalf("git %v: %v", args, err)
+		t.Fatalf("git %v: %v", arguments, err)
 	}
-	return string(out)
+	return string(output)
 }
