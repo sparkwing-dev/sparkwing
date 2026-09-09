@@ -30,9 +30,16 @@ unlock.
 - **cli:** `runner-label` flags a blank label on `WhenRunner`, and every rule
   now follows a builder chain split across statements, so a group bound to a
   variable and configured on a later line is checked like a single expression.
+- **cli:** `sparkwing doctor --timeout` bounds the daemon and local-state
+  checks, defaulting to the 10 seconds doctor always used. Each check takes a
+  slice of it, so one unanswering daemon leaves the rest of the report its
+  budget, and a sweep that runs out prints what it reached alongside the error
 
 ### Fixed
 
+- **cli:** `sparkwing doctor` names a wedged admission daemon -- one that
+  accepts connections and answers nothing -- and the commands that recover it,
+  instead of reporting a raw socket read timeout the operator has to interpret
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
   staged files out of their commits
 - **logs:** Concurrent filesystem appends keep each record and its newline together
