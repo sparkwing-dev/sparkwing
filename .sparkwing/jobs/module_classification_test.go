@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestModuleClassification(t *testing.T) {
@@ -46,7 +48,7 @@ func TestModuleClassificationPreservesCancellation(t *testing.T) {
 	}
 }
 
-func TestModuleClassificationStopsGoTool(t *testing.T) {
+func TestModuleClassificationFailureStopsCommand(t *testing.T) {
 	root := gateFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "go.mod"), "invalid module declaration\n")
 	err := forEachGoModule(context.Background(), "probe", "touch tool-ran", nil)
@@ -68,5 +70,14 @@ func TestModuleClassificationStopsLint(t *testing.T) {
 	var exitError *exec.ExitError
 	if !errors.As(err, &exitError) {
 		t.Errorf("lint lost classification process exit cause: %v", err)
+	}
+}
+
+func TestModuleClassificationUsesCommandEnvironment(t *testing.T) {
+	gateFixtureRepo(t)
+	ctx := sparkwing.WithCommandEnv(context.Background(), map[string]string{"GOFLAGS": "-fixture-invalid-flag"})
+	_, err := moduleHasNoPackages(ctx, ".")
+	if err == nil || !strings.Contains(err.Error(), "fixture-invalid-flag") {
+		t.Fatalf("classification error = %v, want command environment flag failure", err)
 	}
 }
