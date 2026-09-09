@@ -24,6 +24,9 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **dashboard:** The DAG tab is shown for every run. A run that ended before
+  its pipeline planned any nodes gets an empty canvas that says so and carries
+  the run's error, instead of no tab at all.
 - **dashboard:** A Crons tab lists this host's armed pipeline schedules with a
   health banner for the OS timer and the last tick, and a detail pane carrying
   a schedule's recent fires -- each with the status of the run it launched --
@@ -85,6 +88,14 @@ code change to unlock.
   Input helpers propagate filesystem and Git failures; `inputs.Compose`
   propagates errors and explicit bypasses. See the
   [migration guide](docs/migrations/_unreleased.md#cache-key-callbacks-return-errors).
+
+### Fixed
+
+- **consumer:** A detached run whose pipeline process exits before planning
+  now records the last lines the process wrote to stderr in the run's error,
+  so "child exec: exit status 1" names its reason (an admission daemon of
+  another build, a missing toolchain) where a person reads it.
+
 
 ## [v0.46.0] - 2026-09-09
 ### Changed
