@@ -189,6 +189,7 @@ func (h *startupLogHandler) Handle(ctx context.Context, rec slog.Record) error {
 	}
 	return h.Handler.Handle(ctx, rec)
 }
+
 func TestInitRegistersOTLPBeforeShutdown(t *testing.T) {
 	for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"} {
 		t.Setenv(key, "")

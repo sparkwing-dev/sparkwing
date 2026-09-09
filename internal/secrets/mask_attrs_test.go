@@ -254,6 +254,7 @@ func TestMaskAttrsMasksJSONRendering(t *testing.T) {
 		})
 	}
 }
+
 func TestMaskedErrorKeepsMessageInJSON(t *testing.T) {
 	output := newTestMasker("s3cr3t").MaskAttrs(map[string]any{"err": errors.New("failed s3cr3t")})
 	body, err := json.Marshal(output)
@@ -284,6 +285,7 @@ func TestMaskAttrsMasksJSONErrorPayload(t *testing.T) {
 		t.Fatal("lost error chain")
 	}
 }
+
 func TestMaskAttrsJSONPreservesNumbers(t *testing.T) {
 	raw := json.RawMessage(`{"token":"s3cr3t","id":9007199254740993}`)
 	output := newTestMasker("s3cr3t").MaskAttrs(map[string]any{"raw": raw})
