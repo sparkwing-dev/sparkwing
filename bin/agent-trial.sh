@@ -229,57 +229,37 @@ if [[ ! -d "$TRIAL/.sparkwing" ]]; then
   echo "  NO .sparkwing/ IN THE TRIAL REPO -- the agent built elsewhere."
   echo "  Treat the timing above as void; see the escape note in WASTE SIGNALS."
 fi
-sparkwing pipeline list -o json 2>/dev/null | jq -r '.[] | "  \(.name)\t\(.short)"' 2>/dev/null || echo "  (no pipelines registered)"
+ORACLE="$REPO_ROOT/bin/agent-trial-oracle.sh"
+registered=$(bash "$ORACLE" list "$TRIAL")
+if [[ -n "$registered" ]]; then
+  sed 's/^/  /' <<<"$registered"
+else
+  echo "  (no pipelines registered)"
+fi
 echo
 echo "  lint:    $(sparkwing pipeline lint --all >/dev/null 2>&1 && echo PASS || echo FAIL)"
 
 explain_ok=0
 explain_bad=""
-for p in $(sparkwing pipeline list -o json 2>/dev/null | jq -r '.[].name' 2>/dev/null); do
+for p in $(cut -f1 <<<"$registered"); do
   if sparkwing pipeline explain --name "$p" --sw-dry-run -o json >/dev/null 2>&1; then
     explain_ok=$((explain_ok + 1))
   else
     explain_bad="$explain_bad $p"
   fi
 done
-if [[ -n "$explain_bad" ]]; then
+if [[ -z "$registered" ]]; then
+  # A check that looked at nothing must not read as a pass.
+  echo "  explain: NONE (no pipelines to explain)"
+elif [[ -n "$explain_bad" ]]; then
   echo "  explain: FAIL ($explain_ok ok; failed:$explain_bad)"
 else
   echo "  explain: PASS ($explain_ok pipelines)"
 fi
 
-EXPECT="${prompt_file%.txt}.expect"
-if [[ -r "$EXPECT" ]]; then
-  yaml_all=$(cat "$TRIAL"/.sparkwing/sparkwing.yaml 2>/dev/null)
-  jobs_all=$(cat "$TRIAL"/.sparkwing/jobs/*.go 2>/dev/null)
-  pipeline_count=$(sparkwing pipeline list -o json 2>/dev/null | jq -r 'length' 2>/dev/null || echo 0)
-  task_fail=""
-  task_ok=0
-  while read -r kind arg; do
-    [[ -z "$kind" || "$kind" == \#* ]] && continue
-    ok=1
-    case "$kind" in
-      trigger)   grep -qE "^[[:space:]]*$arg:" <<<"$yaml_all" || ok=0 ;;
-      yaml)      grep -qE "$arg" <<<"$yaml_all" || ok=0 ;;
-      job)       grep -qE "$arg" <<<"$jobs_all" || ok=0 ;;
-      pipelines) [[ "${pipeline_count:-0}" -ge "$arg" ]] || ok=0 ;;
-      *)         echo "  (unknown expectation kind $kind)" ; continue ;;
-    esac
-    if [[ "$ok" -eq 1 ]]; then
-      task_ok=$((task_ok + 1))
-    else
-      task_fail="$task_fail
-    missing: $kind $arg"
-    fi
-  done < "$EXPECT"
-  if [[ -n "$task_fail" ]]; then
-    echo "  task:    FAIL -- compiles and lints, but does not do what was asked$task_fail"
-  else
-    echo "  task:    PASS ($task_ok expectation(s))"
-  fi
-else
-  echo "  task:    (no $(basename "$EXPECT"); lint+explain do not check whether the prompt was satisfied)"
-fi
+# lint and explain judge form; only the expectations judge whether the
+# prompt was answered.
+bash "$ORACLE" task "$TRIAL" "${prompt_file%.txt}.expect"
 echo
 agent_ms=$(tail -1 "$TRACE" 2>/dev/null | jq -r '.duration_ms // empty' 2>/dev/null)
 if [[ -n "$GREEN" ]]; then

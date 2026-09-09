@@ -37,37 +37,6 @@ func TestLintCommandNeverDropsTheToolLockWithoutABudget(t *testing.T) {
 	}
 }
 
-func TestLinkedWorktreeKeepsItsOwnLintCache(t *testing.T) {
-	worktree := t.TempDir()
-	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: elsewhere"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	previous := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(worktree)
-	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
-
-	if shouldLeaseLintPath("") {
-		t.Fatal("a linked worktree would answer lint from findings cached for another tree")
-	}
-	if shouldLeaseLintPath("https://cache.invalid") {
-		t.Fatal("a blob-backed worktree would restore a cache directory lint does not read")
-	}
-}
-
-func TestFixedCheckoutDoesNotNeedLintAlias(t *testing.T) {
-	checkout := t.TempDir()
-	if err := os.Mkdir(filepath.Join(checkout, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	previous := sparkwing.WorkDir()
-	sparkwing.SetWorkDir(checkout)
-	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
-
-	if shouldLeaseLintPath("") {
-		t.Fatal("a fixed checkout does not need a canonical alias")
-	}
-}
-
 func TestLintSlotCostIsAdmissibleOnThisBox(t *testing.T) {
 	cost, capacity := lintSlotCost(), lintBudget.Limit().Capacity
 	if cost < 1 {

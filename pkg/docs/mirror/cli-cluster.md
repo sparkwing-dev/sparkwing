@@ -390,7 +390,7 @@ sparkwing cluster tokens list --profile prod
 sparkwing cluster tokens list --type service --include-revoked --profile prod
 
 # Inspect the warm-runner pool token's scopes as JSON
-sparkwing cluster tokens list --profile prod -o json | jq '.[] | select(.principal=="agent:fictional-runner") | .scopes'
+sparkwing cluster tokens list --profile prod -o json | jq 'select(.principal=="agent:fictional-runner") | .scopes'
 ```
 
 ## `sparkwing cluster tokens lookup`
