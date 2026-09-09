@@ -215,7 +215,7 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "shellcheck: clean")
 	}
 
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-terraform.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-terraform-test.sh && bash bin/check-terraform.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("terraform: %v", err))
 	} else {
 		sparkwing.Info(ctx, "terraform: module valid + plans clean (both engines)")
