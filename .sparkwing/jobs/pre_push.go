@@ -17,30 +17,30 @@ const (
 	actionlintCommand   = "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"
 )
 
-func runMarkdownlint(ctx context.Context) error {
-	_, err := sparkwing.Bash(ctx, markdownlintCommand).Run()
+func runMarkdownlint(jobContext context.Context) error {
+	_, err := sparkwing.Bash(jobContext, markdownlintCommand).Run()
 	return err
 }
 
-func runActionlint(ctx context.Context) error {
-	_, err := sparkwing.Bash(ctx, actionlintCommand).Run()
+func runActionlint(jobContext context.Context) error {
+	_, err := sparkwing.Bash(jobContext, actionlintCommand).Run()
 	return err
 }
 
-func runReleaseBinaryVulnerabilityScan(ctx context.Context) error {
-	dir, err := os.MkdirTemp("", "sparkwing-release-vulnerability-*")
+func runReleaseBinaryVulnerabilityScan(jobContext context.Context) error {
+	scanDirectory, err := os.MkdirTemp("", "sparkwing-release-vulnerability-*")
 	if err != nil {
 		return fmt.Errorf("create release vulnerability scan directory: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer os.RemoveAll(scanDirectory)
 
 	for _, binary := range publicBinaries {
-		artifact := filepath.Join(dir, binary)
-		if _, err := sparkwing.Exec(ctx, "go", "build", "-trimpath", "-o", artifact, "./cmd/"+binary).
+		artifact := filepath.Join(scanDirectory, binary)
+		if _, err := sparkwing.Exec(jobContext, "go", "build", "-trimpath", "-o", artifact, "./cmd/"+binary).
 			Env("GOWORK", "off").Run(); err != nil {
 			return fmt.Errorf("build release vulnerability artifact %s: %w", binary, err)
 		}
-		if _, err := sparkwing.Exec(ctx, "bash", "bin/check-release-binary-vulnerabilities.sh", artifact).Run(); err != nil {
+		if _, err := sparkwing.Exec(jobContext, "bash", "bin/check-release-binary-vulnerabilities.sh", artifact).Run(); err != nil {
 			return fmt.Errorf("scan release vulnerability artifact %s: %w", binary, err)
 		}
 	}
@@ -53,195 +53,177 @@ type PrePush struct {
 }
 
 func (PrePush) ShortHelp() string {
-	return "Release-boundary verification: lint, test -race, chaos, vuln, freshness, api-snapshot, no replace + no go.work"
+	return "Check release tests, dependencies, public interfaces, and infrastructure"
 }
 
 func (PrePush) Help() string {
-	return "Explicit release-boundary verification. Runs the full golangci-lint set, " +
-		"`go test -race ./...` in the .sparkwing pipeline module, " +
-		"the pkg/store suite against an embedded Postgres (the store-postgres " +
-		"pipeline, which needs no Docker), " +
-		"binary-mode govulncheck against every shipped Go executable, the " +
-		"sparkwing-ecosystem version-freshness check (deps must be at " +
-		"the latest released tag, or replaced with a not-behind local " +
-		"path), the chaos gate (the adversarial admission suite in " +
-		"internal/chaos, which fault-injects a real daemon and asserts " +
-		"the concurrency invariants), the public API-surface drift gate " +
-		"(the `pkg/` snapshot " +
-		"under .apidiff/ must match HEAD), refuses to push if any " +
-		"committed go.mod contains a `replace` line other than " +
-		"`.sparkwing/go.mod`'s dogfood self-replace to `..`, and refuses to push " +
-		"if `go.work` / `go.work.sum` have been committed (workspaces are " +
-		"local-iteration scaffolding and can't be resolved by the Go " +
-		"module proxy), validates + offline-plans the Mode 3 Postgres " +
-		"Terraform module for both engine knobs (bin/check-terraform.sh), " +
-		"and validates every GitHub Actions workflow with pinned actionlint. " +
-		"Not read-only: when the .sparkwing sparkwing pin is behind the " +
-		"latest released tag, pre-push bumps the pin and pkg/scaffold's " +
-		"fallback version, tidies .sparkwing/go.mod, regenerates the public " +
-		"API snapshots, and commits the result " +
-		"so the bump rides along with the push."
+	return "Run lint, race, Postgres, admission-fault, vulnerability, dependency-version, " +
+		"public-interface, Terraform, and workflow checks. " +
+		"Committed Go modules must use released dependencies; the pipeline module may replace " +
+		"the Sparkwing module with its parent checkout. Keep Go workspace files untracked. " +
+		"The gate updates a stale Sparkwing dependency pin, regenerates interface snapshots, " +
+		"and commits those changes before the push."
 }
 
 func (PrePush) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Manually invoke the pre-push gate", Command: "sparkwing run pre-push"},
+		{Comment: "Run release checks", Command: "sparkwing run pre-push"},
 	}
 }
 
-func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, p.run)
+func (prePush *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
+	sparkwing.Job(plan, runContext.Pipeline, prePush.run)
 	return nil
 }
 
-func (p *PrePush) run(ctx context.Context) error {
+func (prePush *PrePush) run(jobContext context.Context) error {
 	var failures []string
 
-	if err := checkNoReplaceDirectivesInCommittedGoMods(ctx); err != nil {
+	if err := checkNoReplaceDirectivesInCommittedGoMods(jobContext); err != nil {
 		failures = append(failures, err.Error())
 	} else {
-		sparkwing.Info(ctx, "no-replace check: clean")
+		sparkwing.Info(jobContext, "no-replace check: passed")
 	}
 
-	if err := checkNoCommittedGoWorkFiles(ctx); err != nil {
+	if err := checkNoCommittedGoWorkFiles(jobContext); err != nil {
 		failures = append(failures, err.Error())
 	} else {
-		sparkwing.Info(ctx, "no-go.work check: clean")
+		sparkwing.Info(jobContext, "no-go.work check: passed")
 	}
 
-	if _, err := sparkwing.Bash(ctx,
+	if _, err := sparkwing.Bash(jobContext,
 		`go -C .sparkwing mod tidy 2>/dev/null || true; git diff --quiet -- .sparkwing/go.mod .sparkwing/go.sum`,
 	).Run(); err != nil {
 		failures = append(failures, "go mod tidy drift: run `go -C .sparkwing mod tidy` and commit the result")
 	} else {
-		sparkwing.Info(ctx, "go mod tidy: no drift")
+		sparkwing.Info(jobContext, "go mod tidy: no drift")
 	}
 
-	if bumpedTo, err := autoBumpSparkwingPinIfStale(ctx, sparkwing.WorkDir()); err != nil {
+	if bumpedTo, err := autoBumpSparkwingPinIfStale(jobContext, sparkwing.WorkDir()); err != nil {
 		failures = append(failures, fmt.Sprintf("auto-bump sparkwing pin: %v", err))
 	} else if bumpedTo != "" {
-		sparkwing.Info(ctx, "sparkwing pin: auto-bumped to %s (commit added to push)", bumpedTo)
+		sparkwing.Info(jobContext, "sparkwing pin: auto-bumped to %s (commit added to push)", bumpedTo)
 	}
 
 	versionOptions := VersionFreshnessOptions{
-		AllowReleaseLineSelfReplace: p.AllowReleaseLineSelfReplace,
+		AllowReleaseLineSelfReplace: prePush.AllowReleaseLineSelfReplace,
 	}
-	if err := CheckVersionsFreshnessWithOptions(ctx, sparkwing.WorkDir(), versionOptions); err != nil {
+	if err := CheckVersionsFreshnessWithOptions(jobContext, sparkwing.WorkDir(), versionOptions); err != nil {
 		failures = append(failures, err.Error())
 	} else {
-		sparkwing.Info(ctx, "version freshness: current")
+		sparkwing.Info(jobContext, "version freshness: passed")
 	}
 
-	if err := CheckPreV1Policy(ctx, sparkwing.WorkDir()); err != nil {
+	if err := CheckPreV1Policy(jobContext, sparkwing.WorkDir()); err != nil {
 		failures = append(failures, err.Error())
 	} else {
-		sparkwing.Info(ctx, "pre-v1 policy: clean")
+		sparkwing.Info(jobContext, "pre-v1 policy: passed")
 	}
 
-	if err := sparkwing.Bash(ctx, `gofmt -l $(go list -f '{{.Dir}}' ./...)`).
+	if err := sparkwing.Bash(jobContext, `gofmt -l $(go list -f '{{.Dir}}' ./...)`).
 		MustBeEmpty("gofmt reported unformatted files"); err != nil {
 		failures = append(failures, fmt.Sprintf("gofmt: %v", err))
 	} else {
-		sparkwing.Info(ctx, "gofmt: clean")
+		sparkwing.Info(jobContext, "gofmt: passed")
 	}
 
-	if err := runGolangciLint(ctx); err != nil {
+	if err := runGolangciLint(jobContext); err != nil {
 		failures = append(failures, err.Error())
 	} else {
-		sparkwing.Info(ctx, "golangci-lint: clean")
+		sparkwing.Info(jobContext, "golangci-lint: passed")
 	}
 
-	if _, err := sparkwing.Bash(ctx, "go -C .sparkwing test -race ./...").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "go -C .sparkwing test -race ./...").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("go test -race: %v", err))
 	} else {
-		sparkwing.Info(ctx, "go test -race: passed")
+		sparkwing.Info(jobContext, "go test -race: passed")
 	}
 
-	storeCtx, cancelStore := context.WithTimeout(ctx, storePostgresPrePushTimeout)
-	err := (&StorePostgres{}).run(storeCtx)
+	storeContext, cancelStore := context.WithTimeout(jobContext, storePostgresPrePushTimeout)
+	err := (&StorePostgres{}).run(storeContext)
 	cancelStore()
 	if err != nil {
 		failures = append(failures, fmt.Sprintf("store postgres suite: %v", err))
 	} else {
-		sparkwing.Info(ctx, "store postgres suite: passed against postgres")
+		sparkwing.Info(jobContext, "store postgres suite: passed against postgres")
 	}
 
-	if _, err := sparkwing.Bash(ctx, "go test -count=1 -run TestChaos_CI ./internal/chaos").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "go test -count=1 -run TestChaos_CI ./internal/chaos").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("chaos gate: %v", err))
 	} else {
-		sparkwing.Info(ctx, "chaos gate: admission invariants held under fault injection")
+		sparkwing.Info(jobContext, "chaos gate: admission invariants held under fault injection")
 	}
 
-	if err := runReleaseBinaryVulnerabilityScan(ctx); err != nil {
+	if err := runReleaseBinaryVulnerabilityScan(jobContext); err != nil {
 		failures = append(failures, fmt.Sprintf("release binary vulnerability scan: %v", err))
 	} else {
-		sparkwing.Info(ctx, "release binary vulnerability scan: clean")
+		sparkwing.Info(jobContext, "release binary vulnerability scan: passed")
 	}
 
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell-test.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "bash bin/check-shell-test.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("shellcheck script portability: %v", err))
 	} else {
-		sparkwing.Info(ctx, "shellcheck script portability: clean")
+		sparkwing.Info(jobContext, "shellcheck script portability: passed")
 	}
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-hosted-gate-clean-test.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "bash bin/check-hosted-gate-clean-test.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("hosted gate mutation guard: %v", err))
 	} else {
-		sparkwing.Info(ctx, "hosted gate mutation guard: clean")
+		sparkwing.Info(jobContext, "hosted gate mutation guard: passed")
 	}
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-release-binary-vulnerabilities-test.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "bash bin/check-release-binary-vulnerabilities-test.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("release binary vulnerability scanner: %v", err))
 	} else {
-		sparkwing.Info(ctx, "release binary vulnerability scanner: clean")
+		sparkwing.Info(jobContext, "release binary vulnerability scanner: passed")
 	}
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-changelog-test.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "bash bin/check-changelog-test.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("changelog script portability: %v", err))
 	} else {
-		sparkwing.Info(ctx, "changelog script portability: clean")
+		sparkwing.Info(jobContext, "changelog script portability: passed")
 	}
-	if _, err := sparkwing.Bash(ctx, "bash bin/install-test.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "bash bin/install-test.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("installer report: %v", err))
 	} else {
-		sparkwing.Info(ctx, "installer report: clean")
+		sparkwing.Info(jobContext, "installer report: passed")
 	}
-	if _, err := sparkwing.Bash(ctx, "bash bin/service-install-test.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "bash bin/service-install-test.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("service installer config guard: %v", err))
 	} else {
-		sparkwing.Info(ctx, "service installer config guard: clean")
+		sparkwing.Info(jobContext, "service installer config guard: passed")
 	}
 
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "bash bin/check-shell.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("shellcheck: %v", err))
 	} else {
-		sparkwing.Info(ctx, "shellcheck: clean")
+		sparkwing.Info(jobContext, "shellcheck: passed")
 	}
 
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-terraform-test.sh && bash bin/check-terraform.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "bash bin/check-terraform-test.sh && bash bin/check-terraform.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("terraform: %v", err))
 	} else {
-		sparkwing.Info(ctx, "terraform: module valid + plans clean (both engines)")
+		sparkwing.Info(jobContext, "terraform: validation and both engine plans passed")
 	}
 
-	if err := runMarkdownlint(ctx); err != nil {
+	if err := runMarkdownlint(jobContext); err != nil {
 		failures = append(failures, fmt.Sprintf("markdownlint: %v", err))
 	} else {
-		sparkwing.Info(ctx, "markdownlint: clean")
+		sparkwing.Info(jobContext, "markdownlint: passed")
 	}
 
-	if err := runActionlint(ctx); err != nil {
+	if err := runActionlint(jobContext); err != nil {
 		failures = append(failures, fmt.Sprintf("actionlint: %v", err))
 	} else {
-		sparkwing.Info(ctx, "actionlint: clean")
+		sparkwing.Info(jobContext, "actionlint: passed")
 	}
 
-	if _, err := sparkwing.Bash(ctx,
+	if _, err := sparkwing.Bash(jobContext,
 		`cd "$ROOT" && go run ./internal/doccheck "$ROOT/docs" "$ROOT"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("doc-examples: %v", err))
 	} else {
-		sparkwing.Info(ctx, "doc-examples: no SDK-API drift")
+		sparkwing.Info(jobContext, "doc-examples: no SDK-API drift")
 	}
 
-	if _, err := sparkwing.Bash(ctx,
+	if _, err := sparkwing.Bash(jobContext,
 		`cd "$ROOT" &&
 		TMP="$(mktemp -d)" &&
 		trap 'rm -rf "$TMP"' EXIT &&
@@ -260,18 +242,18 @@ func (p *PrePush) run(ctx context.Context) error {
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		failures = append(failures, "cli-reference: stale -- run `bash bin/gen-cli-docs.sh`")
 	} else {
-		sparkwing.Info(ctx, "cli-reference: current")
+		sparkwing.Info(jobContext, "cli-reference: matches source")
 	}
 
-	if _, err := sparkwing.Bash(ctx,
+	if _, err := sparkwing.Bash(jobContext,
 		`cd "$ROOT" && go run ./internal/configref "$ROOT" | diff -u docs/config-reference.md -`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		failures = append(failures, "config-reference: stale -- run `bash bin/gen-config-docs.sh`")
 	} else {
-		sparkwing.Info(ctx, "config-reference: current")
+		sparkwing.Info(jobContext, "config-reference: matches source")
 	}
 
-	if _, err := sparkwing.Bash(ctx,
+	if _, err := sparkwing.Bash(jobContext,
 		`cd "$ROOT" &&
 		TMP="$(mktemp -d)" &&
 		trap 'rm -rf "$TMP"' EXIT &&
@@ -290,27 +272,27 @@ func (p *PrePush) run(ctx context.Context) error {
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		failures = append(failures, "sdk-reference: stale -- run `bash bin/gen-sdk-docs.sh`")
 	} else {
-		sparkwing.Info(ctx, "sdk-reference: current")
+		sparkwing.Info(jobContext, "sdk-reference: matches source")
 	}
 
-	if _, err := sparkwing.Bash(ctx,
+	if _, err := sparkwing.Bash(jobContext,
 		`cd "$ROOT" && go run ./internal/apiref "$ROOT" | diff -u docs/api-reference.md -`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		failures = append(failures, "api-reference: stale -- run `bash bin/gen-api-docs.sh`")
 	} else {
-		sparkwing.Info(ctx, "api-reference: current")
+		sparkwing.Info(jobContext, "api-reference: matches source")
 	}
 
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-spec.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "bash bin/check-api-spec.sh").Run(); err != nil {
 		failures = append(failures, "openapi: stale -- run `bash bin/gen-api-docs.sh`")
 	} else {
-		sparkwing.Info(ctx, "openapi: current")
+		sparkwing.Info(jobContext, "openapi: matches source")
 	}
 
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Run(); err != nil {
+	if _, err := sparkwing.Bash(jobContext, "bash bin/check-api-snapshot.sh").Run(); err != nil {
 		failures = append(failures, "api-snapshot: drift -- run `bash bin/regen-api-snapshot.sh` and commit .apidiff/")
 	} else {
-		sparkwing.Info(ctx, "api-snapshot: no drift")
+		sparkwing.Info(jobContext, "api-snapshot: no drift")
 	}
 
 	if len(failures) > 0 {
@@ -319,61 +301,61 @@ func (p *PrePush) run(ctx context.Context) error {
 	return nil
 }
 
-func committedGoMods(ctx context.Context) ([]string, error) {
+func committedGoMods(jobContext context.Context) ([]string, error) {
 	// safety: git -C anchors paths to repo root regardless of process cwd.
-	out, err := sparkwing.Bash(ctx,
+	output, err := sparkwing.Bash(jobContext,
 		`git -C "$SPARKWING_WORKDIR" ls-files '*go.mod'`,
 	).Env("SPARKWING_WORKDIR", sparkwing.Path()).String()
 	if err != nil {
 		return nil, fmt.Errorf("list go.mod files: %w", err)
 	}
-	var mods []string
-	for _, rel := range strings.Split(strings.TrimSpace(out), "\n") {
-		if rel != "" && !isTestdataPath(rel) {
-			mods = append(mods, rel)
+	var moduleFiles []string
+	for _, relativePath := range strings.Split(strings.TrimSpace(output), "\n") {
+		if relativePath != "" && !isTestdataPath(relativePath) {
+			moduleFiles = append(moduleFiles, relativePath)
 		}
 	}
-	return mods, nil
+	return moduleFiles, nil
 }
 
-func isTestdataPath(rel string) bool {
-	return strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/")
+func isTestdataPath(relativePath string) bool {
+	return strings.HasPrefix(relativePath, "testdata/") || strings.Contains(relativePath, "/testdata/")
 }
 
-func committedModuleDirs(ctx context.Context) ([]string, error) {
-	mods, err := committedGoMods(ctx)
+func committedModuleDirs(jobContext context.Context) ([]string, error) {
+	moduleFiles, err := committedGoMods(jobContext)
 	if err != nil {
 		return nil, err
 	}
-	dirs := make([]string, 0, len(mods))
-	for _, m := range mods {
-		dirs = append(dirs, filepath.Dir(m))
+	moduleDirectories := make([]string, 0, len(moduleFiles))
+	for _, moduleFile := range moduleFiles {
+		moduleDirectories = append(moduleDirectories, filepath.Dir(moduleFile))
 	}
-	return dirs, nil
+	return moduleDirectories, nil
 }
 
-func checkNoReplaceDirectivesInCommittedGoMods(ctx context.Context) error {
-	mods, err := committedGoMods(ctx)
+func checkNoReplaceDirectivesInCommittedGoMods(jobContext context.Context) error {
+	moduleFiles, err := committedGoMods(jobContext)
 	if err != nil {
 		return err
 	}
 	var offenders []string
-	for _, rel := range mods {
-		abs := sparkwing.Path(rel)
-		data, rerr := os.ReadFile(abs)
-		if rerr != nil {
-			return fmt.Errorf("read %s: %w", rel, rerr)
+	for _, relativePath := range moduleFiles {
+		absolutePath := sparkwing.Path(relativePath)
+		contents, readError := os.ReadFile(absolutePath)
+		if readError != nil {
+			return fmt.Errorf("read %s: %w", relativePath, readError)
 		}
-		mf, perr := modfile.Parse(rel, data, nil)
-		if perr != nil {
-			return fmt.Errorf("parse %s: %w", rel, perr)
+		parsedModule, parseError := modfile.Parse(relativePath, contents, nil)
+		if parseError != nil {
+			return fmt.Errorf("parse %s: %w", relativePath, parseError)
 		}
-		for _, r := range mf.Replace {
-			if isSparkwingDogfoodReplace(rel, r) {
+		for _, replacement := range parsedModule.Replace {
+			if isSparkwingDogfoodReplace(relativePath, replacement) {
 				continue
 			}
 			offenders = append(offenders,
-				fmt.Sprintf("%s: %s => %s", rel, r.Old.Path, r.New.Path))
+				fmt.Sprintf("%s: %s => %s", relativePath, replacement.Old.Path, replacement.New.Path))
 		}
 	}
 	if len(offenders) == 0 {
@@ -385,28 +367,28 @@ func checkNoReplaceDirectivesInCommittedGoMods(ctx context.Context) error {
 	)
 }
 
-func isSparkwingDogfoodReplace(path string, r *modfile.Replace) bool {
+func isSparkwingDogfoodReplace(path string, replacement *modfile.Replace) bool {
 	return path == ".sparkwing/go.mod" &&
-		r.Old.Path == "github.com/sparkwing-dev/sparkwing" &&
-		r.Old.Version == "" &&
-		r.New.Path == ".." &&
-		r.New.Version == ""
+		replacement.Old.Path == "github.com/sparkwing-dev/sparkwing" &&
+		replacement.Old.Version == "" &&
+		replacement.New.Path == ".." &&
+		replacement.New.Version == ""
 }
 
-func checkNoCommittedGoWorkFiles(ctx context.Context) error {
-	out, err := sparkwing.Bash(ctx,
+func checkNoCommittedGoWorkFiles(jobContext context.Context) error {
+	output, err := sparkwing.Bash(jobContext,
 		`git ls-files | grep -E '(^|/)go\.work(\.sum)?$' || true`,
 	).String()
 	if err != nil {
 		return fmt.Errorf("scan go.work files: %w", err)
 	}
-	out = strings.TrimSpace(out)
-	if out == "" {
+	output = strings.TrimSpace(output)
+	if output == "" {
 		return nil
 	}
-	files := strings.Split(out, "\n")
+	files := strings.Split(output, "\n")
 	return fmt.Errorf(
-		"refusing to push: %d committed go.work file(s) (remove + add to .gitignore):\n    %s",
+		"refusing to push: %d committed go.work file(s) (remove and add to .gitignore):\n    %s",
 		len(files), strings.Join(files, "\n    "),
 	)
 }
