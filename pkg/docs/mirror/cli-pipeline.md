@@ -566,7 +566,7 @@ separator passes through unchanged.
 | `--sw-consumer-idle DUR` | Detached only, and only if this starts a consumer: how long it stays alive with no work (default 5m) |
 | `--sw-consumer-claim-lease DUR` | Detached only, and only if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m) |
 | `--sw-output FORMAT` | Detached only: run-handle format, pretty\|json\|plain (default: pretty on a TTY, json when piped) |
-| `-v, --sw-verbose` | Enable debug logging |
+| `-v, --sw-verbose` | Enable debug logging and the complete live JSON event stream |
 | `--sw-start-at STEP` | Start the run at STEP |
 | `--sw-stop-at STEP` | Stop the run after STEP |
 | `--sw-only GLOB` | Run only jobs whose ID matches GLOB (plus their Needs ancestors) |

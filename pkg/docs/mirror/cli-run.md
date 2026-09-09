@@ -19,13 +19,17 @@ separator passes through unchanged.
 For remote execution on a profile's controller, use
 'sparkwing pipeline trigger <name> --profile PROF'.
 
-Output: a human-readable per-node summary when stdout is a
-terminal, line-delimited JSON otherwise (so piped/agent/CI
-consumers get a stable JSONL stream). Force a format with
-SPARKWING_LOG_FORMAT=pretty|json|quiet. quiet collapses the
-run to a progress line plus a one-line pass/fail status with
-the run id, surfacing the failing step only on failure; it is
-the default for managed git hooks.
+Output: pretty on a terminal, compact NDJSON otherwise. JSON runs
+emit a start, at most 20 node completions and five diagnostics, and
+a terminal record with status, outcome counts and log commands.
+Child output remains in the stored logs. Display strings are capped
+at 256 bytes; truncation and omitted event/failure counts are explicit.
+Use --sw-verbose for the complete live event stream, or
+'sparkwing runs logs --run RUN_ID --follow' to read stored output.
+
+SPARKWING_LOG_FORMAT=pretty|json|quiet overrides terminal detection.
+quiet is the human summary used by managed git hooks. Explicit json
+uses the same compact records on a terminal; --sw-verbose expands it.
 
 --sw-detached queues the run instead of executing it here. It
 returns as soon as the run is durable, and a resident consumer
@@ -94,7 +98,7 @@ is running and exits after five idle minutes; see
 | `--sw-consumer-idle DUR` | Detached only, and only if this starts a consumer: how long it stays alive with no work (default 5m) |
 | `--sw-consumer-claim-lease DUR` | Detached only, and only if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m) |
 | `--sw-output FORMAT` | Detached only: run-handle format, pretty\|json\|plain (default: pretty on a TTY, json when piped) |
-| `-v, --sw-verbose` | Enable debug logging |
+| `-v, --sw-verbose` | Enable debug logging and the complete live JSON event stream |
 | `--sw-start-at STEP` | Start the run at STEP |
 | `--sw-stop-at STEP` | Stop the run after STEP |
 | `--sw-only GLOB` | Run only jobs whose ID matches GLOB (plus their Needs ancestors) |

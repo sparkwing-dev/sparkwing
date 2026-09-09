@@ -27,6 +27,7 @@ func TestProcessPerNode_BounceRestartsANodeWithoutFailingTheRun(t *testing.T) {
 		"SPARKWING_HOME="+home,
 		"SPARKWING_WINGD_BIN="+cli,
 		"SPARKWING_LOG_FORMAT=json",
+		"SPARKWING_LOG_LEVEL=debug",
 		"PROC_PROBE_DIR="+probe,
 	)
 
