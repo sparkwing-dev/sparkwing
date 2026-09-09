@@ -119,3 +119,18 @@ func TestResolveProfileChain_NoFlagNoProjectDefault(t *testing.T) {
 		t.Errorf("got profile %#v, want none", p)
 	}
 }
+
+func TestResolveProfile_UsesProjectResolutionChain(t *testing.T) {
+	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
+	projectAt(t, bucketProject)
+	for _, name := range []string{"bucket", ""} {
+		p, err := resolveProfile(name)
+		if err != nil {
+			t.Fatalf("resolve %q: %v", name, err)
+		}
+		state, _, _ := p.SurfaceStrings()
+		if !strings.Contains(state, "example-bucket") {
+			t.Errorf("resolve %q state = %q", name, state)
+		}
+	}
+}
