@@ -232,8 +232,8 @@ var detachedRecoveryCalled atomic.Bool
 
 type detachedRollbackJob struct{ sparkwing.Base }
 
-func (j *detachedRollbackJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run)
+func (job *detachedRollbackJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(work, "run", job.run)
 	return nil, nil
 }
 
@@ -316,11 +316,24 @@ func TestRetry_ExhaustedStillFails(t *testing.T) {
 func TestRetry_LogCapturesAttempts(t *testing.T) {
 	atomic.StoreInt32(&retryExhaustedState.attempts, 0)
 	paths := newPaths(t)
-	result, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "mod-retry-exhausted"})
+	result, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "mod-retry-exhausted"})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
+	}
 
-	state, _ := store.Open(paths.StateDB())
-	defer func() { _ = state.Close() }()
-	nodes, _ := state.ListNodes(context.Background(), result.RunID)
+	state, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
+	nodes, err := state.ListNodes(context.Background(), result.RunID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
 	if len(nodes) == 0 || nodes[0].NodeID != "always-fails" {
 		t.Fatalf("expected always-fails node, got %+v", nodes)
 	}
@@ -414,7 +427,11 @@ func TestNoProgressTimeout_CancelsSilentJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = state.Close() }()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
 	nodes, err := state.ListNodes(context.Background(), result.RunID)
 	if err != nil {
 		t.Fatalf("list nodes: %v", err)
@@ -510,7 +527,11 @@ func TestTimeout_RemainsAbsoluteWhileProgressContinues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = state.Close() }()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
 	nodes, err := state.ListNodes(context.Background(), result.RunID)
 	if err != nil {
 		t.Fatalf("list nodes: %v", err)
@@ -610,7 +631,11 @@ func assertForcedTimeout(t *testing.T, pipeline string, started <-chan context.C
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = state.Close() }()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
 	nodes, err := state.ListNodes(context.Background(), run.result.RunID)
 	if err != nil {
 		t.Fatalf("list nodes: %v", err)
@@ -623,7 +648,10 @@ func assertForcedTimeout(t *testing.T, pipeline string, started <-chan context.C
 func TestOnFailure_RunsWhenParentFails(t *testing.T) {
 	rollbackCalled.Store(false)
 	paths := newPaths(t)
-	result, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "mod-onfailure"})
+	result, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "mod-onfailure"})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
+	}
 
 	if result.Status != "failed" {
 		t.Fatalf("run status = %q, want failed", result.Status)
@@ -632,9 +660,19 @@ func TestOnFailure_RunsWhenParentFails(t *testing.T) {
 		t.Fatal("rollback was not called")
 	}
 
-	state, _ := store.Open(paths.StateDB())
-	defer func() { _ = state.Close() }()
-	nodes, _ := state.ListNodes(context.Background(), result.RunID)
+	state, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
+	nodes, err := state.ListNodes(context.Background(), result.RunID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
 	nodesByID := map[string]*store.Node{}
 	for _, node := range nodes {
 		nodesByID[node.NodeID] = node
@@ -650,7 +688,10 @@ func TestOnFailure_RunsWhenParentFails(t *testing.T) {
 func TestOnFailure_SkippedWhenParentSucceeds(t *testing.T) {
 	skipRollbackCalled.Store(false)
 	paths := newPaths(t)
-	result, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "mod-onfailure-skip"})
+	result, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "mod-onfailure-skip"})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
+	}
 
 	if result.Status != "success" {
 		t.Fatalf("run status = %q, want success", result.Status)
@@ -659,9 +700,19 @@ func TestOnFailure_SkippedWhenParentSucceeds(t *testing.T) {
 		t.Fatal("rollback ran after its parent succeeded")
 	}
 
-	state, _ := store.Open(paths.StateDB())
-	defer func() { _ = state.Close() }()
-	nodes, _ := state.ListNodes(context.Background(), result.RunID)
+	state, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
+	nodes, err := state.ListNodes(context.Background(), result.RunID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
 	nodesByID := map[string]*store.Node{}
 	for _, node := range nodes {
 		nodesByID[node.NodeID] = node
@@ -677,7 +728,10 @@ func TestOnFailure_SkippedWhenParentSucceeds(t *testing.T) {
 func TestOnFailure_DetachedRecoveryRuns(t *testing.T) {
 	detachedRecoveryCalled.Store(false)
 	paths := newPaths(t)
-	result, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "mod-onfailure-detached"})
+	result, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "mod-onfailure-detached"})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
+	}
 
 	if result.Status != "failed" {
 		t.Fatalf("run status = %q, want failed", result.Status)
@@ -686,9 +740,19 @@ func TestOnFailure_DetachedRecoveryRuns(t *testing.T) {
 		t.Fatal("detached recovery was not called")
 	}
 
-	state, _ := store.Open(paths.StateDB())
-	defer func() { _ = state.Close() }()
-	nodes, _ := state.ListNodes(context.Background(), result.RunID)
+	state, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
+	nodes, err := state.ListNodes(context.Background(), result.RunID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
 	nodesByID := map[string]*store.Node{}
 	for _, node := range nodes {
 		nodesByID[node.NodeID] = node
