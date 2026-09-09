@@ -23,6 +23,10 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cache:** Keep registry responses with different Accept headers in separate cache entries
+
 ## [v0.47.0] - 2026-09-09
 ### Added
 
