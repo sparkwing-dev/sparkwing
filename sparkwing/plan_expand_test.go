@@ -2,7 +2,7 @@ package sparkwing
 
 import (
 	"context"
-	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -25,7 +25,7 @@ func TestInsertExpandedRejectsWholeBatch(t *testing.T) {
 			if err := plan.insertExpanded(source, []*JobNode{fresh, invalid}); err == nil {
 				t.Fatal("accepted invalid batch")
 			}
-			if !reflect.DeepEqual(plan.Nodes(), before) || plan.Job("fresh") != nil {
+			if !slices.Equal(plan.Nodes(), before) || plan.Job("fresh") != nil {
 				t.Error("rejected batch left phantom node in plan")
 			}
 			if len(fresh.DepIDs()) != 0 {
@@ -37,7 +37,7 @@ func TestInsertExpandedRejectsWholeBatch(t *testing.T) {
 			if err := plan.insertExpanded(source, []*JobNode{fresh}); err != nil {
 				t.Fatalf("failed batch poisoned retry: %v", err)
 			}
-			if plan.Job("fresh") != fresh || !reflect.DeepEqual(fresh.DepIDs(), []string{"source"}) {
+			if plan.Job("fresh") != fresh || !slices.Equal(fresh.DepIDs(), []string{"source"}) {
 				t.Fatal("successful retry did not insert dependent child")
 			}
 		})

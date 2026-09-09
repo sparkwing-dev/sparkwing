@@ -39,6 +39,14 @@ unlock.
 
 ### Fixed
 
+- **cli:** Cross-repository configuration commands report invalid flags
+- **cli:** User creation accepts complete piped passphrases, including spaces
+- **cli:** `info` reports unavailable pipeline catalogs instead of silently
+  displaying zero pipelines
+- **sdk:** Invalid dynamic expansion batches leave the plan unchanged
+- **secrets:** Empty filesystem values report missing secrets, matching the
+  environment backend
+
 - **admission:** A guarded command whose daemon restarted mid-run is
   acknowledged when it completes. The guard sweep chose which client to
   acknowledge before it probed the process table, so a client that reattached
