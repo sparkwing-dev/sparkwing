@@ -31,13 +31,16 @@ func finishProbeProcess(ctx context.Context, command *exec.Cmd, group *procgroup
 	if group.Reaped() {
 		return err
 	}
-	leaderExited := group.LeaderExited()
+	return errors.Join(err, disposeProbeProcess(command, group.WaitLeaderExit))
+}
+
+func disposeProbeProcess(command *exec.Cmd, waitForLeader func() error) error {
 	killErr := command.Process.Kill()
 	if errors.Is(killErr, os.ErrProcessDone) {
 		killErr = nil
 	}
 	// SAFETY: Group signaling has ended. Reaping waits for OS-confirmed leader exit;
 	// WaitDelay bounds inherited pipes, while kernel process exit has no deadline.
-	<-leaderExited
-	return errors.Join(err, killErr, command.Wait())
+	_ = waitForLeader()
+	return errors.Join(killErr, command.Wait())
 }

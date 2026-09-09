@@ -324,6 +324,12 @@ func (g *Group) ID() int { return g.id }
 
 func (g *Group) LeaderExited() <-chan struct{} { return g.leaderDone }
 
+// WaitLeaderExit waits for the leader observer to finish and returns its result.
+func (g *Group) WaitLeaderExit() error {
+	<-g.leaderDone
+	return g.leaderExitError()
+}
+
 func (g *Group) Reaped() bool {
 	return g.reapedFlag.Load()
 }
