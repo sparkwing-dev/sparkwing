@@ -22,6 +22,13 @@ unlock.
 
 ### Fixed
 
+- **admission:** A guarded command whose daemon restarted mid-run is
+  acknowledged when it completes. The guard sweep chose which client to
+  acknowledge before it probed the process table, so a client that reattached
+  inside that window was never acknowledged: `sparkwing queue exec` waited ten
+  seconds and reported "release admission: guard completion acknowledgement
+  timed out" for a command that had succeeded. The same staleness could
+  finalize a reattached run as abandoned.
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
   staged files out of their commits
 - **logs:** Concurrent filesystem appends keep each record and its newline together
