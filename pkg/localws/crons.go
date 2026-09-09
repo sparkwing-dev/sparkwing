@@ -282,4 +282,3 @@ func cronRunStatus(ctx context.Context, st *store.Store, runID string) string {
 	}
 	return run.Status
 }
-
