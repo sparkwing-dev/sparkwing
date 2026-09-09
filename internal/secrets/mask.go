@@ -214,7 +214,7 @@ func (m *Masker) maskValue(v any, depth int) (any, bool) {
 		}
 		return maskedError{msg: masked, err: t}, true
 	default:
-		// Text and JSON sinks can render different fields of the same value.
+		// safety: text and JSON sinks can render different fields of the same value.
 		rendered := fmt.Sprint(v)
 		masked := m.Mask(rendered)
 		if masked == rendered {
@@ -225,6 +225,11 @@ func (m *Masker) maskValue(v any, depth int) (any, bool) {
 }
 
 func (m *Masker) maskJSON(v any, depth int) (any, bool) {
+	switch v.(type) {
+	case nil, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr, float32, float64:
+		return v, false
+	}
+
 	encoded, err := json.Marshal(v)
 	if err != nil {
 		return v, false
