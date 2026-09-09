@@ -84,6 +84,16 @@ func TestLocalImplicitAwaitRetainsParentProvenanceWithoutForcingRegistryLookup(t
 	}
 }
 
+type blockedRunCreationState struct {
+	StateBackend
+	unblock <-chan struct{}
+}
+
+func (s blockedRunCreationState) CreateRun(ctx context.Context, run store.Run) error {
+	<-s.unblock
+	return s.StateBackend.CreateRun(ctx, run)
+}
+
 func TestRunLocalTriggerLoopClaimsPendingTriggerImmediately(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -103,12 +113,15 @@ func TestRunLocalTriggerLoopClaimsPendingTriggerImmediately(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	unblock := make(chan struct{})
+	state := blockedRunCreationState{StateBackend: localState{st: st}, unblock: unblock}
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		runLocalTriggerLoop(ctx, localState{st: st}, "parent", "", t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)), time.Second, childStoreEnv{})
+		runLocalTriggerLoop(ctx, state, "parent", "", t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)), time.Second, childStoreEnv{})
 	}()
 	t.Cleanup(func() {
+		close(unblock)
 		cancel()
 		timer := time.NewTimer(time.Second)
 		defer timer.Stop()
