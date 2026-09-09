@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -317,5 +318,58 @@ func TestDispatchRun_SeparatorPassesRetiredFlagsToPipeline(t *testing.T) {
 	err := dispatchRun([]string{"fictional", "--sw-cd", missing, "--", "--sw-profile", "fictional"})
 	if err == nil || !strings.Contains(err.Error(), missing) {
 		t.Fatalf("dispatch error = %v, want pipeline directory lookup", err)
+	}
+}
+
+func TestDispatchRun_ConsumesSeparatorBeforeExecutingPipeline(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("SPARKWING_NO_BINCACHE", "1")
+	t.Setenv("SPARKWING_NO_AUTO_REGISTER", "1")
+	t.Setenv("GOWORK", "off")
+	repository := t.TempDir()
+	pipelineDirectory := filepath.Join(repository, ".sparkwing")
+	if err := os.Mkdir(pipelineDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	argumentsFile := filepath.Join(t.TempDir(), "arguments.json")
+	t.Setenv("FICTIONAL_ARGUMENTS_FILE", argumentsFile)
+	files := map[string]string{
+		"go.mod": "module example.com/fictional\n\ngo 1.26\n",
+		"main.go": `package main
+import (
+ "encoding/json"
+ "os"
+)
+func main() {
+ data, err := json.Marshal(os.Args[1:])
+ if err != nil { panic(err) }
+ if err := os.WriteFile(os.Getenv("FICTIONAL_ARGUMENTS_FILE"), data, 0600); err != nil { panic(err) }
+}
+`,
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(pipelineDirectory, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	previousDaemon := ensureRunDaemonFn
+	ensureRunDaemonFn = func() {}
+	t.Cleanup(func() { ensureRunDaemonFn = previousDaemon })
+	want := []string{"fictional", "--sw-profile", "fictional", "--sw-mystery=value", "--", "literal"}
+	arguments := append([]string{"fictional", "--sw-no-update", "--sw-cd", repository, "--"}, want[1:]...)
+	if err := dispatchRun(arguments); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(argumentsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("executed arguments = %q, want %q", got, want)
 	}
 }
