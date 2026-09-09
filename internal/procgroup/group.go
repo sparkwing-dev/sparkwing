@@ -19,6 +19,8 @@ var sessionProcessTable = processTable
 
 var sessionIdentityLookup = sessionIdentity
 
+const processTableTimeout = 2 * time.Second
+
 const DefaultTerminationGrace = time.Second
 
 const guardedSessionTerminateGrace = DefaultTerminationGrace
@@ -61,7 +63,7 @@ type Group struct {
 	waitErr    error
 	session    bool
 	inspectMu  sync.Mutex
-	inspect    func(int, bool, bool) (bool, error)
+	inspect    func(context.Context, int, bool, bool) (bool, error)
 }
 
 func Supported() error { return platformSupport() }
@@ -185,7 +187,7 @@ type SessionTable struct {
 }
 
 func CaptureSessionTable() (*SessionTable, error) {
-	processes, err := sessionProcessTable(true)
+	processes, err := sessionProcessTable(context.Background(), true)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +205,7 @@ func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) 
 	if err := validateSessionIdentity(identity); err != nil {
 		return false, err
 	}
-	processes, err := sessionProcessTable(true)
+	processes, err := sessionProcessTable(context.Background(), true)
 	if err != nil {
 		return false, err
 	}
@@ -328,7 +330,7 @@ func (group *Group) Reaped() bool {
 	return group.reapedFlag.Load()
 }
 
-func (group *Group) SetDescendantProbe(probe func(group int, exited, session bool) (bool, error)) {
+func (group *Group) SetDescendantProbe(probe func(context.Context, int, bool, bool) (bool, error)) {
 	group.inspectMu.Lock()
 	defer group.inspectMu.Unlock()
 	if probe == nil {
@@ -338,7 +340,7 @@ func (group *Group) SetDescendantProbe(probe func(group int, exited, session boo
 	group.inspect = probe
 }
 
-func (group *Group) descendantProbe() func(int, bool, bool) (bool, error) {
+func (group *Group) descendantProbe() func(context.Context, int, bool, bool) (bool, error) {
 	group.inspectMu.Lock()
 	defer group.inspectMu.Unlock()
 	return group.inspect
@@ -350,7 +352,14 @@ func (group *Group) Kill() error {
 	if group.reaped {
 		return nil
 	}
-	return signalKill(group.id, group.leaderHasExited(), group.session)
+	return group.signal(context.Background(), group.leaderHasExited(), signalKill)
+}
+
+func (group *Group) signal(ctx context.Context, exited bool, send func(context.Context, int, bool, bool) error) error {
+	// SAFETY: Caller cancellation must permit termination.
+	inspectionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), processTableTimeout)
+	defer cancel()
+	return send(inspectionCtx, group.id, exited, group.session)
 }
 
 func (group *Group) Finish(ctx context.Context, grace time.Duration) error {
@@ -367,7 +376,7 @@ func (group *Group) Terminate(ctx context.Context, grace time.Duration) error {
 		group.finishMu.Unlock()
 		return err
 	}
-	err := signalTerminate(group.id, group.leaderHasExited(), group.session)
+	err := group.signal(ctx, group.leaderHasExited(), signalTerminate)
 	group.finishMu.Unlock()
 	if err != nil {
 		return fmt.Errorf("%w: terminate group %d: %w", ErrCleanup, group.id, err)
@@ -379,11 +388,11 @@ func (group *Group) Terminate(ctx context.Context, grace time.Duration) error {
 	if err != nil {
 		group.finishMu.Lock()
 		if group.reaped {
-			result := group.waitErr
+			waitErr := group.waitErr
 			group.finishMu.Unlock()
-			return result
+			return waitErr
 		}
-		err = signalKill(group.id, group.leaderHasExited(), group.session)
+		err = group.signal(ctx, group.leaderHasExited(), signalKill)
 		group.finishMu.Unlock()
 		if err != nil {
 			return fmt.Errorf("%w: kill group %d: %w", ErrCleanup, group.id, err)
@@ -463,7 +472,7 @@ func (group *Group) leaderExitError() error {
 func (group *Group) leaderHasExited() bool {
 	select {
 	case <-group.leaderDone:
-		return true
+		return group.leaderExitError() == nil
 	default:
 		return false
 	}
@@ -477,11 +486,11 @@ func boundedContext(parent context.Context, duration time.Duration) (context.Con
 }
 
 func (group *Group) emptyDescendants(ctx context.Context, grace time.Duration) error {
-	empty, err := group.descendantProbe()(group.id, true, group.session)
+	empty, err := group.descendantProbe()(ctx, group.id, true, group.session)
 	if err != nil || empty {
 		return err
 	}
-	if err := signalTerminate(group.id, true, group.session); err != nil {
+	if err := group.signal(ctx, true, signalTerminate); err != nil {
 		return err
 	}
 	graceCtx, cancel := boundedContext(ctx, grace)
@@ -490,7 +499,7 @@ func (group *Group) emptyDescendants(ctx context.Context, grace time.Duration) e
 	if err == nil {
 		return nil
 	}
-	if err := signalKill(group.id, true, group.session); err != nil {
+	if err := group.signal(ctx, true, signalKill); err != nil {
 		return err
 	}
 	return group.waitDescendantsEmpty(ctx)
@@ -502,7 +511,7 @@ func (group *Group) waitDescendantsEmpty(ctx context.Context) error {
 	defer timer.Stop()
 	reported := false
 	for {
-		empty, err := group.descendantProbe()(group.id, true, group.session)
+		empty, err := group.descendantProbe()(ctx, group.id, true, group.session)
 		if err != nil {
 			return err
 		}
@@ -524,8 +533,8 @@ func (group *Group) waitDescendantsEmpty(ctx context.Context) error {
 	}
 }
 
-func List() ([]Info, error) { return processTable(false) }
+func List() ([]Info, error) { return processTable(context.Background(), false) }
 
-func ListSessions() ([]Info, error) { return processTable(true) }
+func ListSessions() ([]Info, error) { return processTable(context.Background(), true) }
 
 func IgnoreTermination() { ignoreTermination() }

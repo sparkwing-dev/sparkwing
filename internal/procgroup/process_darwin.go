@@ -3,10 +3,11 @@
 package procgroup
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"log/slog"
 	"strconv"
-	"sync"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -16,27 +17,19 @@ var darwinProcessListing = func() ([]byte, error) {
 	return unix.SysctlRaw("kern.proc.all")
 }
 
-var (
-	nativeFallbackOnce sync.Once
-	nativeFallbackLog  = func(err error) {
-		slog.Warn("kernel process listing unavailable; falling back to a ps fork per listing", "err", err)
+func processTable(ctx context.Context, withSessions bool) ([]Info, error) {
+	ctx, cancel := context.WithTimeout(ctx, processTableTimeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-)
-
-func reportNativeFallback(err error) {
-	nativeFallbackOnce.Do(func() { nativeFallbackLog(err) })
-}
-
-func nativeProcessTable(withSessions bool) ([]Info, bool) {
-	raw, err := darwinProcessListing()
+	raw, err := readDarwinProcessListing(ctx)
 	if err != nil {
-		reportNativeFallback(err)
-		return nil, false
+		return nil, err
 	}
 	size := int(unsafe.Sizeof(unix.KinfoProc{}))
-	if len(raw) < size {
-		reportNativeFallback(fmt.Errorf("kernel process listing returned %d bytes, short of one %d-byte record", len(raw), size))
-		return nil, false
+	if len(raw) == 0 || len(raw)%size != 0 {
+		return nil, fmt.Errorf("kernel process listing has %d bytes for %d-byte records", len(raw), size)
 	}
 	processes := make([]Info, 0, len(raw)/size)
 	for start := 0; start+size <= len(raw); start += size {
@@ -46,21 +39,28 @@ func nativeProcessTable(withSessions bool) ([]Info, bool) {
 		if pid <= 0 {
 			continue
 		}
-		sid := 0
+		sessionID := 0
 		if withSessions {
-			// safety: exit between sysctl and this call yields session zero, which
-			// callers treat as outside the guarded session.
-			sid, _ = processSessionID(pid)
+			sessionID, err = processSessionID(pid)
+			if errors.Is(err, syscall.ESRCH) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("inspect process %d session: %w", pid, err)
+			}
 		}
 		processes = append(processes, Info{
 			PID:     pid,
 			Group:   int(process.Eproc.Pgid),
-			Session: sid,
+			Session: sessionID,
 			State:   darwinProcessState(process.Proc.P_stat),
 			Birth:   darwinBirthToken(process),
 		})
 	}
-	return processes, true
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return processes, nil
 }
 
 func darwinProcessState(stat int8) string {
@@ -83,4 +83,18 @@ func darwinProcessState(stat int8) string {
 func darwinBirthToken(process unix.KinfoProc) string {
 	return strconv.FormatInt(process.Proc.P_starttime.Sec, 10) + ":" +
 		strconv.FormatInt(int64(process.Proc.P_starttime.Usec), 10)
+}
+
+func readDarwinProcessListing(ctx context.Context) ([]byte, error) {
+	for {
+		raw, err := darwinProcessListing()
+		if contextErr := ctx.Err(); contextErr != nil {
+			return nil, errors.Join(err, contextErr)
+		}
+		// SAFETY: Process creation can outgrow the size sampled by SysctlRaw.
+		if errors.Is(err, syscall.ENOMEM) {
+			continue
+		}
+		return raw, err
+	}
 }

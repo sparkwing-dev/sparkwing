@@ -7,6 +7,8 @@ import (
 	"errors"
 	"syscall"
 	"testing"
+	"testing/synctest"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -27,7 +29,7 @@ func TestProcessListingGrowthResamplesWithinCallerBudget(t *testing.T) {
 			calls := 0
 			darwinProcessListing = func() ([]byte, error) {
 				calls++
-				if test.finalErr == context.Canceled {
+				if errors.Is(test.finalErr, context.Canceled) {
 					cancel()
 					return nil, syscall.ENOMEM
 				}
@@ -46,17 +48,43 @@ func TestProcessListingGrowthResamplesWithinCallerBudget(t *testing.T) {
 				}
 				return records, nil
 			}
-			_ = ctx
-			_, err := processTable(true)
+			_, err := processTable(ctx, true)
 			if test.finalErr == nil && err != nil {
 				t.Fatalf("resized listing: %v", err)
 			}
 			if test.finalErr != nil && !errors.Is(err, test.finalErr) {
 				t.Fatalf("listing error = %v, want %v", err, test.finalErr)
 			}
-			if test.finalErr == context.Canceled && !errors.Is(err, syscall.ENOMEM) {
+			if errors.Is(test.finalErr, context.Canceled) && !errors.Is(err, syscall.ENOMEM) {
 				t.Fatalf("exhausted listing error = %v, want allocation cause", err)
 			}
 		})
 	}
+}
+
+func TestProcessListingGrowthStopsAtDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		original := darwinProcessListing
+		t.Cleanup(func() { darwinProcessListing = original })
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		calls := 0
+		darwinProcessListing = func() ([]byte, error) {
+			calls++
+			time.Sleep(10 * time.Millisecond)
+			synctest.Wait()
+			return nil, syscall.ENOMEM
+		}
+		started := time.Now()
+		_, err := processTable(ctx, false)
+		if !errors.Is(err, syscall.ENOMEM) || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("exhausted listing error = %v, want allocation and deadline causes", err)
+		}
+		if elapsed := time.Since(started); elapsed != 100*time.Millisecond {
+			t.Fatalf("listing elapsed = %s, want caller deadline", elapsed)
+		}
+		if calls < 2 {
+			t.Fatalf("listing calls = %d, want repeated sizing", calls)
+		}
+	})
 }

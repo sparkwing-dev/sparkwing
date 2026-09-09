@@ -3,6 +3,7 @@
 package procgroup
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strconv"
@@ -11,20 +12,23 @@ import (
 )
 
 func TestSendSignalPreservesPermissionFailure(t *testing.T) {
-	original := processGroupSignal
-	t.Cleanup(func() { processGroupSignal = original })
+	original, originalTable := processGroupSignal, sessionProcessTable
+	t.Cleanup(func() { processGroupSignal, sessionProcessTable = original, originalTable })
+	sessionProcessTable = func(context.Context, bool) ([]Info, error) {
+		return []Info{{PID: 12345, Group: 12345, State: "S"}}, nil
+	}
 	processGroupSignal = func(int, syscall.Signal) error { return syscall.EPERM }
-	if err := sendSignal(12345, true, syscall.SIGKILL); !errors.Is(err, syscall.EPERM) {
+	if err := sendSignal(t.Context(), 12345, true, syscall.SIGKILL); !errors.Is(err, syscall.EPERM) {
 		t.Fatalf("signal error = %v, want permission failure", err)
 	}
 	processGroupSignal = func(int, syscall.Signal) error { return syscall.ESRCH }
-	if err := sendSignal(12345, true, syscall.SIGKILL); err != nil {
+	if err := sendSignal(t.Context(), 12345, true, syscall.SIGKILL); err != nil {
 		t.Fatalf("signal absent group: %v", err)
 	}
 }
 
 func TestProcessTableRejectsMalformedRows(t *testing.T) {
-	for _, row := range []string{"", "12 12", "invalid 12 S", "12 invalid S", "12 12 S extra"} {
+	for _, row := range []string{"", "12 12", "invalid 12 S", "12 invalid S", "12 12 S extra", "-1 12 S", "12 -1 S", "12 12 invalid"} {
 		t.Run(row, func(t *testing.T) {
 			_, err := parsePSProcessTable([]byte(row), false)
 			if err == nil {
@@ -59,7 +63,7 @@ func TestSignalSessionAttemptsEveryGroupInOrder(t *testing.T) {
 	t.Cleanup(func() {
 		sessionProcessTable, processGroupSignal = originalTable, originalSignal
 	})
-	sessionProcessTable = func(bool) ([]Info, error) {
+	sessionProcessTable = func(context.Context, bool) ([]Info, error) {
 		return []Info{{Session: 12345, Group: 30303}, {Session: 12345, Group: 10101}, {Session: 12345, Group: 20202}}, nil
 	}
 	var signaled []int
@@ -74,7 +78,7 @@ func TestSignalSessionAttemptsEveryGroupInOrder(t *testing.T) {
 			return nil
 		}
 	}
-	err := signalSession(12345, syscall.SIGKILL)
+	err := signalSession(t.Context(), 12345, syscall.SIGKILL)
 	if !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EIO) {
 		t.Errorf("signal error = %v, want both native failures", err)
 	}

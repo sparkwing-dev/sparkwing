@@ -3,6 +3,7 @@
 package procgroup
 
 import (
+	"context"
 	"fmt"
 	"syscall"
 	"unsafe"
@@ -24,11 +25,11 @@ func sessionIdentity(pid int) (int, string, error) {
 		if int(process.Proc.P_pid) != pid {
 			continue
 		}
-		sid, err := unix.Getsid(pid)
+		sessionID, err := unix.Getsid(pid)
 		if err != nil {
 			return 0, "", err
 		}
-		return sid, darwinBirthToken(process), nil
+		return sessionID, darwinBirthToken(process), nil
 	}
 	return 0, "", fmt.Errorf("%w: process %d", ErrProcessAbsent, pid)
 }
@@ -38,9 +39,9 @@ func signalGuardSession(sessionID int, kill bool) error {
 	if kill {
 		signal = syscall.SIGKILL
 	}
-	return signalSession(sessionID, signal)
+	return signalSession(context.Background(), sessionID, signal)
 }
 
 func signalDiagnosticSession(sessionID int) error {
-	return signalSession(sessionID, syscall.SIGQUIT)
+	return signalSession(context.Background(), sessionID, syscall.SIGQUIT)
 }

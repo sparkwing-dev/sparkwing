@@ -3,6 +3,7 @@
 package procgroup
 
 import (
+	"context"
 	"errors"
 	"syscall"
 	"testing"
@@ -24,13 +25,13 @@ func TestSignalPermissionFailureRequiresTerminatedGroupProof(t *testing.T) {
 			t.Cleanup(func() { sessionProcessTable, processGroupSignal = originalTable, originalSignal })
 			signaled := false
 			processGroupSignal = func(int, syscall.Signal) error { signaled = true; return syscall.EPERM }
-			sessionProcessTable = func(bool) ([]Info, error) {
+			sessionProcessTable = func(context.Context, bool) ([]Info, error) {
 				if !signaled {
 					return []Info{{PID: 12345, Group: 12345, State: "S"}}, nil
 				}
 				return test.processes, test.inspectionErr
 			}
-			err := sendSignal(12345, true, syscall.SIGTERM)
+			err := sendSignal(t.Context(), 12345, true, syscall.SIGTERM)
 			if errors.Is(err, syscall.EPERM) != test.wantPermission {
 				t.Fatalf("signal error = %v, permission failure wanted %v", err, test.wantPermission)
 			}

@@ -46,7 +46,7 @@ func TestProbeCleanupFailureStillWaitsForCommand(t *testing.T) {
 	inspectionError := errors.New("fixture descendant inspection failed")
 	terminationError := errors.New("fixture termination inspection failed")
 	inspections := 0
-	group.SetDescendantProbe(func(int, bool, bool) (bool, error) {
+	group.SetDescendantProbe(func(context.Context, int, bool, bool) (bool, error) {
 		inspections++
 		if inspections == 1 {
 			return false, inspectionError
