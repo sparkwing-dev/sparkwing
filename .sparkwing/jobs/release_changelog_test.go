@@ -56,14 +56,14 @@ func TestUnreleasedEntries(t *testing.T) {
 			want: 1,
 		},
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := unreleasedEntries(c.body)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got, err := unreleasedEntries(testCase.body)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got != c.want {
-				t.Fatalf("got %d entries, want %d", got, c.want)
+			if got != testCase.want {
+				t.Fatalf("got %d entries, want %d", got, testCase.want)
 			}
 		})
 	}
@@ -101,14 +101,14 @@ func TestVersionEntries(t *testing.T) {
 			want:    1,
 		},
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := versionEntries(c.body, c.version)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got, err := versionEntries(testCase.body, testCase.version)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got != c.want {
-				t.Fatalf("got %d entries, want %d", got, c.want)
+			if got != testCase.want {
+				t.Fatalf("got %d entries, want %d", got, testCase.want)
 			}
 		})
 	}
@@ -116,22 +116,22 @@ func TestVersionEntries(t *testing.T) {
 
 func TestRewriteUnreleasedToVersion(t *testing.T) {
 	body := "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- thing one\n\n## [v0.9.0]\n\n- prior\n"
-	out, err := rewriteUnreleasedToVersion(body, "v1.0.0", "2026-05-20")
+	output, err := rewriteUnreleasedToVersion(body, "v1.0.0", "2026-05-20")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "## [Unreleased]") {
-		t.Errorf("expected fresh [Unreleased] heading, got:\n%s", out)
+	if !strings.Contains(output, "## [Unreleased]") {
+		t.Errorf("expected fresh [Unreleased] heading, got:\n%s", output)
 	}
-	if !strings.Contains(out, "## [v1.0.0] - 2026-05-20") {
-		t.Errorf("expected [v1.0.0] - 2026-05-20 heading, got:\n%s", out)
+	if !strings.Contains(output, "## [v1.0.0] - 2026-05-20") {
+		t.Errorf("expected [v1.0.0] - 2026-05-20 heading, got:\n%s", output)
 	}
-	idxVer := strings.Index(out, "## [v1.0.0]")
-	idxThing := strings.Index(out, "- thing one")
-	idxOld := strings.Index(out, "## [v0.9.0]")
-	if !(idxVer < idxThing && idxThing < idxOld) {
+	versionPosition := strings.Index(output, "## [v1.0.0]")
+	entryPosition := strings.Index(output, "- thing one")
+	previousVersionPosition := strings.Index(output, "## [v0.9.0]")
+	if !(versionPosition < entryPosition && entryPosition < previousVersionPosition) {
 		t.Fatalf("expected `- thing one` between [v1.0.0] and [v0.9.0]; positions ver=%d thing=%d old=%d\n%s",
-			idxVer, idxThing, idxOld, out)
+			versionPosition, entryPosition, previousVersionPosition, output)
 	}
 }
 
@@ -154,20 +154,20 @@ func TestValidateReleaseVersion_Pre1Lock(t *testing.T) {
 		{version: "v1.2.3", wantErr: "pre-1.0 lock"},
 		{version: "v2.0.0", wantErr: "pre-1.0 lock"},
 	}
-	for _, c := range cases {
-		t.Run(c.version, func(t *testing.T) {
-			err := validateReleaseVersion(c.version)
-			if c.wantErr == "" {
+	for _, testCase := range cases {
+		t.Run(testCase.version, func(t *testing.T) {
+			err := validateReleaseVersion(testCase.version)
+			if testCase.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
 				return
 			}
 			if err == nil {
-				t.Fatalf("expected error containing %q, got nil", c.wantErr)
+				t.Fatalf("expected error containing %q, got nil", testCase.wantErr)
 			}
-			if !strings.Contains(err.Error(), c.wantErr) {
-				t.Fatalf("error %q does not contain %q", err.Error(), c.wantErr)
+			if !strings.Contains(err.Error(), testCase.wantErr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), testCase.wantErr)
 			}
 		})
 	}
@@ -180,7 +180,7 @@ func TestHighestReleaseTag(t *testing.T) {
 		want string
 	}{
 		{
-			name: "skips retracted v1.x tombstone and picks highest v0.x",
+			name: "excludes v1.x and picks highest v0.x",
 			tags: []string{"v0.9.1", "v0.10.0", "v0.11.0", "v1.6.1"},
 			want: "v0.11.0",
 		},
@@ -210,10 +210,10 @@ func TestHighestReleaseTag(t *testing.T) {
 			want: "",
 		},
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := highestReleaseTag(c.tags); got != c.want {
-				t.Fatalf("highestReleaseTag(%v) = %q, want %q", c.tags, got, c.want)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := highestReleaseTag(testCase.tags); got != testCase.want {
+				t.Fatalf("highestReleaseTag(%v) = %q, want %q", testCase.tags, got, testCase.want)
 			}
 		})
 	}
@@ -254,30 +254,30 @@ func TestEnsureBranchContainsRemote(t *testing.T) {
 	runTestGit(t, clone, "push", "origin", "HEAD:release-test")
 
 	if err := ensureBranchContainsRemote(ctx, work, "release-test"); err == nil {
-		t.Fatalf("stale release branch passed freshness fence")
+		t.Fatalf("stale release branch passed the ancestry check")
 	}
 }
 
 func TestWriteSelfModuleSums(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo")
-	writeSelfModuleSumsFixture(t, repo)
+	repository := filepath.Join(t.TempDir(), "repo")
+	writeSelfModuleSumsFixture(t, repository)
 
 	const version = "v0.1.0"
-	zipHash, goModHash, err := selfModuleSums(context.Background(), repo, version)
+	zipHash, goModHash, err := selfModuleSums(context.Background(), repository, version)
 	if err != nil {
 		t.Fatalf("selfModuleSums: %v", err)
 	}
-	assertWriteSelfModuleSums(t, repo, version, zipHash, goModHash)
+	assertWriteSelfModuleSums(t, repository, version, zipHash, goModHash)
 }
 
 func TestWriteSelfModuleSumsInGitWorktree(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	writeSelfModuleSumsFixture(t, repo)
-	runTestGit(t, repo, "branch", "release-line")
+	temporaryDirectory := t.TempDir()
+	repository := filepath.Join(temporaryDirectory, "repo")
+	writeSelfModuleSumsFixture(t, repository)
+	runTestGit(t, repository, "branch", "release-line")
 
-	worktree := filepath.Join(tmp, "release-worktree")
-	runTestGit(t, repo, "worktree", "add", worktree, "release-line")
+	worktree := filepath.Join(temporaryDirectory, "release-worktree")
+	runTestGit(t, repository, "worktree", "add", worktree, "release-line")
 
 	const version = "v0.1.0"
 	zipHash, goModHash, err := selfModuleSums(context.Background(), worktree, version)
@@ -288,21 +288,21 @@ func TestWriteSelfModuleSumsInGitWorktree(t *testing.T) {
 }
 
 func TestSelfModuleSumsIgnoreNestedPipelineModule(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo")
-	writeSelfModuleSumsFixture(t, repo)
+	repository := filepath.Join(t.TempDir(), "repo")
+	writeSelfModuleSumsFixture(t, repository)
 
 	const version = "v0.1.0"
-	before, _, err := selfModuleSums(context.Background(), repo, version)
+	before, _, err := selfModuleSums(context.Background(), repository, version)
 	if err != nil {
 		t.Fatalf("selfModuleSums before nested change: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "go.sum"), []byte("nested module changed\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repository, ".sparkwing", "go.sum"), []byte("nested module changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runTestGit(t, repo, "add", ".sparkwing/go.sum")
-	runTestGit(t, repo, "commit", "-m", "change nested module")
+	runTestGit(t, repository, "add", ".sparkwing/go.sum")
+	runTestGit(t, repository, "commit", "-m", "change nested module")
 
-	after, _, err := selfModuleSums(context.Background(), repo, version)
+	after, _, err := selfModuleSums(context.Background(), repository, version)
 	if err != nil {
 		t.Fatalf("selfModuleSums after nested change: %v", err)
 	}
@@ -312,19 +312,19 @@ func TestSelfModuleSumsIgnoreNestedPipelineModule(t *testing.T) {
 }
 
 func TestSelfModuleSumsIgnoreUntrackedFiles(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "repo")
-	writeSelfModuleSumsFixture(t, repo)
+	repository := filepath.Join(t.TempDir(), "repo")
+	writeSelfModuleSumsFixture(t, repository)
 
 	const version = "v0.1.0"
-	before, _, err := selfModuleSums(context.Background(), repo, version)
+	before, _, err := selfModuleSums(context.Background(), repository, version)
 	if err != nil {
 		t.Fatalf("selfModuleSums before untracked file: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "local-output.bin"), []byte(strings.Repeat("x", 1024)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repository, "local-output.bin"), []byte(strings.Repeat("x", 1024)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	after, _, err := selfModuleSums(context.Background(), repo, version)
+	after, _, err := selfModuleSums(context.Background(), repository, version)
 	if err != nil {
 		t.Fatalf("selfModuleSums after untracked file: %v", err)
 	}
@@ -333,9 +333,9 @@ func TestSelfModuleSumsIgnoreUntrackedFiles(t *testing.T) {
 	}
 }
 
-func writeSelfModuleSumsFixture(t *testing.T, repo string) {
+func writeSelfModuleSumsFixture(t *testing.T, repository string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repository, ".sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	files := map[string]string{
@@ -347,7 +347,7 @@ func writeSelfModuleSumsFixture(t *testing.T, repo string) {
 		"docs/placeholder.md": "# Placeholder\n",
 	}
 	for name, body := range files {
-		path := filepath.Join(repo, name)
+		path := filepath.Join(repository, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -355,19 +355,19 @@ func writeSelfModuleSumsFixture(t *testing.T, repo string) {
 			t.Fatal(err)
 		}
 	}
-	runTestGit(t, repo, "init")
-	runTestGit(t, repo, "config", "user.name", "Test User")
-	runTestGit(t, repo, "config", "user.email", "test@example.com")
-	runTestGit(t, repo, "add", ".")
-	runTestGit(t, repo, "commit", "-m", "initial")
+	runTestGit(t, repository, "init")
+	runTestGit(t, repository, "config", "user.name", "Test User")
+	runTestGit(t, repository, "config", "user.email", "test@example.com")
+	runTestGit(t, repository, "add", ".")
+	runTestGit(t, repository, "commit", "-m", "initial")
 }
 
-func assertWriteSelfModuleSums(t *testing.T, repo, version, zipHash, goModHash string) {
+func assertWriteSelfModuleSums(t *testing.T, repository, version, zipHash, goModHash string) {
 	t.Helper()
-	if err := writeSelfModuleSums(context.Background(), repo, version); err != nil {
+	if err := writeSelfModuleSums(context.Background(), repository, version); err != nil {
 		t.Fatalf("writeSelfModuleSums: %v", err)
 	}
-	first, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
+	first, err := os.ReadFile(filepath.Join(repository, ".sparkwing", "go.sum"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,10 +383,10 @@ func assertWriteSelfModuleSums(t *testing.T, repo, version, zipHash, goModHash s
 		t.Fatalf(".sparkwing/go.sum kept stale self-module sum:\n%s", first)
 	}
 
-	if err := writeSelfModuleSums(context.Background(), repo, version); err != nil {
+	if err := writeSelfModuleSums(context.Background(), repository, version); err != nil {
 		t.Fatalf("repeat writeSelfModuleSums: %v", err)
 	}
-	second, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.sum"))
+	second, err := os.ReadFile(filepath.Join(repository, ".sparkwing", "go.sum"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,17 +395,16 @@ func assertWriteSelfModuleSums(t *testing.T, repo, version, zipHash, goModHash s
 	}
 }
 
-func runTestGit(t *testing.T, dir string, args ...string) {
+func runTestGit(t *testing.T, directory string, arguments ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	command := exec.Command("git", arguments...)
+	command.Dir = directory
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(arguments, " "), err, output)
 	}
 }
 
 func TestPlanChangelogRewrite(t *testing.T) {
-	const date = "2026-05-20"
 	cases := []struct {
 		name     string
 		body     string
@@ -431,7 +430,7 @@ func TestPlanChangelogRewrite(t *testing.T) {
 			name:    "refuse when both Unreleased and version populated",
 			body:    "## [Unreleased]\n- new\n## [v1.0.0]\n- already\n",
 			version: "v1.0.0",
-			wantErr: "BOTH [Unreleased]",
+			wantErr: "both [Unreleased]",
 		},
 		{
 			name:    "refuse when nothing to ship",
@@ -440,28 +439,27 @@ func TestPlanChangelogRewrite(t *testing.T) {
 			wantErr: "[Unreleased] is empty",
 		},
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, err := planChangelogRewrite(c.body, c.version)
-			if c.wantErr != "" {
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got, err := planChangelogRewrite(testCase.body, testCase.version)
+			if testCase.wantErr != "" {
 				if err == nil {
-					t.Fatalf("expected error containing %q, got nil", c.wantErr)
+					t.Fatalf("expected error containing %q, got nil", testCase.wantErr)
 				}
-				if !strings.Contains(err.Error(), c.wantErr) {
-					t.Fatalf("error %q does not contain %q", err.Error(), c.wantErr)
+				if !strings.Contains(err.Error(), testCase.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), testCase.wantErr)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got.kind != c.wantKind {
-				t.Fatalf("kind = %v, want %v", got.kind, c.wantKind)
+			if got.kind != testCase.wantKind {
+				t.Fatalf("kind = %v, want %v", got.kind, testCase.wantKind)
 			}
-			if c.wantBody != "" && !strings.Contains(got.newBody, c.wantBody) {
-				t.Fatalf("newBody missing %q:\n%s", c.wantBody, got.newBody)
+			if testCase.wantBody != "" && !strings.Contains(got.newBody, testCase.wantBody) {
+				t.Fatalf("newBody missing %q:\n%s", testCase.wantBody, got.newBody)
 			}
-			_ = date
 		})
 	}
 }

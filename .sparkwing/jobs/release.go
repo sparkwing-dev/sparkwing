@@ -25,8 +25,7 @@ import (
 
 const templateVerifyReleaseTimeout = time.Hour
 
-// safety: the release proof is exhaustive. A recorded template proof shortens
-// local iteration, never the boundary a tag is cut at.
+// SAFETY: Release verification reruns every template without reusing recorded results.
 var releaseTemplateVerifyArgs = TemplateVerifyArgs{Exhaustive: true}
 
 type ReleaseArgs struct {
@@ -36,15 +35,15 @@ type ReleaseArgs struct {
 
 type Release struct {
 	sparkwing.Base
-	args ReleaseArgs
+	arguments ReleaseArgs
 }
 
 func (Release) ShortHelp() string {
-	return "Tag and push a public sparkwing version (kicks GH-Actions release)"
+	return "Tag and push a public sparkwing version (starts release builds)"
 }
 
 func (Release) Help() string {
-	return "Runs a contract preflight (the embedded documentation mirror, and a named set of documentation, help, registry, and environment-variable contract checks, each of which must report a pass) before the pre-commit, pre-push and template-verify gates (the last exhaustive: the release proof never reuses a recorded one), validates the release shape (clean tree, free tag, non-empty CHANGELOG.md [Unreleased] section), commits the CHANGELOG [Unreleased] rename, then pushes the branch and a vX.Y.Z tag to origin. Afterwards it pins .sparkwing/go.mod and pkg/scaffold to the released version, regenerates the public API snapshots, and restores the dogfood self-replace, in two further commits, and pushes the branch again. The .github/workflows/release.yaml workflow takes over from the tag push to build cross-platform binaries (uploaded to GH Releases) and multi-arch container images (published to GHCR). This pipeline never builds or publishes artifacts itself."
+	return "Checks documentation, help, registry, and environment-variable contracts before pre-commit, pre-push, and exhaustive template verification. Requires a clean working tree, an available version tag, release notes, and release ancestry. Commits the changelog version, then pushes the branch and tag. Updates SDK pins and API snapshots, restores the local SDK replacement, and pushes those commits. The tag starts GitHub Actions builds for release binaries and container images."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -55,8 +54,8 @@ func (Release) Examples() []sparkwing.Example {
 	}
 }
 
-func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
-	r.args = in
+func (release *Release) Plan(_ context.Context, plan *sparkwing.Plan, arguments ReleaseArgs, _ sparkwing.RunContext) error {
+	release.arguments = arguments
 
 	repoDir, err := repoRoot()
 	if err != nil {
@@ -64,8 +63,8 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	}
 
 	discover := sparkwing.Job(plan, "discover-version", &resolveVersionJob{
-		Explicit: r.args.Version,
-		Bump:     r.args.Bump,
+		Explicit: release.arguments.Version,
+		Bump:     release.arguments.Bump,
 		RepoDir:  repoDir,
 	}).Inline()
 	versionRef := sparkwing.RefTo[string](discover)
@@ -144,14 +143,14 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 }
 
 func repoRoot() (string, error) {
-	d := sparkwing.WorkDir()
-	if d == "" {
+	directory := sparkwing.WorkDir()
+	if directory == "" {
 		return "", errors.New("sparkwing.WorkDir() returned empty")
 	}
-	if _, err := os.Stat(filepath.Join(d, ".git")); err != nil {
-		return "", fmt.Errorf("not a git repo at %s: %w", d, err)
+	if _, err := os.Stat(filepath.Join(directory, ".git")); err != nil {
+		return "", fmt.Errorf("not a git repo at %s: %w", directory, err)
 	}
-	return d, nil
+	return directory, nil
 }
 
 type resolveVersionJob struct {
@@ -163,19 +162,19 @@ type resolveVersionJob struct {
 	RepoDir  string
 }
 
-func (j *resolveVersionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "run", j.run).SafeWithoutDryRun(), nil
+func (job *resolveVersionJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(work, "run", job.run).SafeWithoutDryRun(), nil
 }
 
-func (j *resolveVersionJob) run(ctx context.Context) (string, error) {
-	if s := strings.TrimSpace(j.Explicit); s != "" {
-		if err := validateReleaseVersion(s); err != nil {
+func (job *resolveVersionJob) run(ctx context.Context) (string, error) {
+	if explicitVersion := strings.TrimSpace(job.Explicit); explicitVersion != "" {
+		if err := validateReleaseVersion(explicitVersion); err != nil {
 			return "", err
 		}
-		sparkwing.Info(ctx, "using explicit version: %s", s)
-		return s, nil
+		sparkwing.Info(ctx, "using explicit version: %s", explicitVersion)
+		return explicitVersion, nil
 	}
-	bump := strings.TrimSpace(j.Bump)
+	bump := strings.TrimSpace(job.Bump)
 	if bump == "" {
 		bump = "minor"
 	}
@@ -184,7 +183,7 @@ func (j *resolveVersionJob) run(ctx context.Context) (string, error) {
 	default:
 		return "", fmt.Errorf("release: --bump must be patch|minor|major (got %q)", bump)
 	}
-	latest, err := latestSemverTagIn(ctx, j.RepoDir)
+	latest, err := latestSemverTagIn(ctx, job.RepoDir)
 	if err != nil {
 		return "", fmt.Errorf("release: resolve latest tag: %w", err)
 	}
@@ -209,24 +208,24 @@ type validateVersionJob struct {
 	RepoDir string
 }
 
-func (j *validateVersionJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+func (job *validateVersionJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(work, "run", job.run).SafeWithoutDryRun()
 	return nil, nil
 }
 
-func (j *validateVersionJob) run(ctx context.Context) error {
-	version := j.Version.Get(ctx)
+func (job *validateVersionJob) run(ctx context.Context) error {
+	version := job.Version.Get(ctx)
 	if err := validateReleaseVersion(version); err != nil {
 		return err
 	}
-	exists, err := tagExistsOnRemote(ctx, j.RepoDir, version)
+	exists, err := tagExistsOnRemote(ctx, job.RepoDir, version)
 	if err != nil {
 		return fmt.Errorf("release: check remote tags: %w", err)
 	}
 	if exists {
 		return fmt.Errorf("release: tag %s already exists on origin (never force-push a module tag; increment to a new version)", version)
 	}
-	if err := j.checkHostingReleaseConstant(ctx, version); err != nil {
+	if err := job.checkHostingReleaseConstant(ctx, version); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "version %s is free on origin", version)
@@ -237,33 +236,28 @@ const firstHostingReleaseSource = "internal/wingd/client/client.go"
 
 var firstHostingReleasePattern = regexp.MustCompile(`(?m)^const FirstHostingRelease = "([^"]+)"`)
 
-func (j *validateVersionJob) checkHostingReleaseConstant(ctx context.Context, version string) error {
-	path := filepath.Join(j.RepoDir, firstHostingReleaseSource)
-	src, err := os.ReadFile(path)
+func (job *validateVersionJob) checkHostingReleaseConstant(ctx context.Context, version string) error {
+	path := filepath.Join(job.RepoDir, firstHostingReleaseSource)
+	source, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("release: read %s: %w", firstHostingReleaseSource, err)
 	}
-	m := firstHostingReleasePattern.FindSubmatch(src)
-	if m == nil {
-		return fmt.Errorf("release: no FirstHostingRelease declaration found in %s; "+
-			"the daemon-hosting release gate cannot verify what a too-old host is told to install "+
-			"(update firstHostingReleasePattern if the constant moved)", firstHostingReleaseSource)
+	match := firstHostingReleasePattern.FindSubmatch(source)
+	if match == nil {
+		return fmt.Errorf("release: no FirstHostingRelease declaration found in %s; verify the declaration and its parser", firstHostingReleaseSource)
 	}
-	declared := string(m[1])
+	declared := string(match[1])
 	if version == declared {
 		return nil
 	}
-	claimed, err := tagExistsOnRemote(ctx, j.RepoDir, declared)
+	claimed, err := tagExistsOnRemote(ctx, job.RepoDir, declared)
 	if err != nil {
 		return fmt.Errorf("release: check daemon-hosting release tag: %w", err)
 	}
 	if claimed {
 		return nil
 	}
-	return fmt.Errorf("release: cutting %s while FirstHostingRelease still names the unreleased %s. "+
-		"That constant is what a pipeline binary tells an operator to install when their sparkwing is too old to host "+
-		"the admission daemon, so shipping it unchanged would name a release that never carried the feature. "+
-		"Set it to %s in %s (and update the migration note in CHANGELOG.md), or cut %s instead",
+	return fmt.Errorf("release: version %s differs from unpublished FirstHostingRelease %s; set the constant to %s in %s and update its changelog note, or release %s",
 		version, declared, version, firstHostingReleaseSource, declared)
 }
 
@@ -272,18 +266,18 @@ type checkCleanTreeJob struct {
 	RepoDir string
 }
 
-func (j *checkCleanTreeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+func (job *checkCleanTreeJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(work, "run", job.run).SafeWithoutDryRun()
 	return nil, nil
 }
 
-func (j *checkCleanTreeJob) run(ctx context.Context) error {
-	out, err := runGitIn(ctx, j.RepoDir, "status", "--porcelain")
+func (job *checkCleanTreeJob) run(ctx context.Context) error {
+	output, err := runGitIn(ctx, job.RepoDir, "status", "--porcelain")
 	if err != nil {
 		return fmt.Errorf("release: git status: %w", err)
 	}
-	if strings.TrimSpace(out) != "" {
-		return fmt.Errorf("release: working tree is dirty:\n%s\ncommit or stash before releasing", strings.TrimSpace(out))
+	if strings.TrimSpace(output) != "" {
+		return fmt.Errorf("release: working tree is dirty:\n%s\ncommit or stash before releasing", strings.TrimSpace(output))
 	}
 	sparkwing.Info(ctx, "working tree is clean")
 	return nil
@@ -311,14 +305,14 @@ func writeChangelogPair(repoDir, body string) error {
 	return nil
 }
 
-func (j *prepareChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun)
+func (job *prepareChangelogJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(work, "run", job.run).DryRun(job.dryRun)
 	return nil, nil
 }
 
-func (j *prepareChangelogJob) run(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	path := filepath.Join(j.RepoDir, "CHANGELOG.md")
+func (job *prepareChangelogJob) run(ctx context.Context) error {
+	version := job.Version.Get(ctx)
+	path := filepath.Join(job.RepoDir, "CHANGELOG.md")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
@@ -334,22 +328,22 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	case rewriteApply:
 		sparkwing.Info(ctx, "renaming CHANGELOG.md [Unreleased] -> [%s] (%d entries)", version, action.unreleasedEntries)
 	}
-	if err := writeChangelogPair(j.RepoDir, action.newBody); err != nil {
+	if err := writeChangelogPair(job.RepoDir, action.newBody); err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "add", "CHANGELOG.md", embeddedChangelogRel); err != nil {
+	if _, err := runGitIn(ctx, job.RepoDir, "add", "CHANGELOG.md", embeddedChangelogRel); err != nil {
 		return fmt.Errorf("release: git add changelog: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m", "release: "+version+" changelog"); err != nil {
+	if _, err := runGitIn(ctx, job.RepoDir, "commit", "-m", "release: "+version+" changelog"); err != nil {
 		return fmt.Errorf("release: git commit CHANGELOG.md: %w", err)
 	}
 	sparkwing.Info(ctx, "committed CHANGELOG.md rewrite for %s", version)
 	return nil
 }
 
-func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	path := filepath.Join(j.RepoDir, "CHANGELOG.md")
+func (job *prepareChangelogJob) dryRun(ctx context.Context) error {
+	version := job.Version.Get(ctx)
+	path := filepath.Join(job.RepoDir, "CHANGELOG.md")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
@@ -367,12 +361,7 @@ func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
 	return nil
 }
 
-const selfReplaceComment = `// The pipelines tree is consumed as the same module path the SDK
-// itself ships, so the require above is a placeholder; this replace
-// pins it to the parent checkout (the sparkwing repo root). The
-// pattern follows the standard "consumer .sparkwing/ uses a local
-// replace during development" convention; here the parent IS the
-// SDK rather than a sibling.
+const selfReplaceComment = `// SAFETY: Pipeline jobs use the parent checkout to exercise SDK source changes.
 `
 
 const selfReplaceLine = "replace github.com/sparkwing-dev/sparkwing => .."
@@ -385,13 +374,13 @@ type prepareSelfReplaceJob struct {
 	Version sparkwing.Ref[string]
 }
 
-func (j *prepareSelfReplaceJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun)
+func (job *prepareSelfReplaceJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(work, "run", job.run).DryRun(job.dryRun)
 	return nil, nil
 }
 
-func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
-	return bumpSelfReplace(ctx, j.RepoDir, j.Version.Get(ctx))
+func (job *prepareSelfReplaceJob) run(ctx context.Context) error {
+	return bumpSelfReplace(ctx, job.RepoDir, job.Version.Get(ctx))
 }
 
 func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
@@ -419,7 +408,7 @@ func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 		return fmt.Errorf("release: inspect release-version artifacts: %w", err)
 	}
 	if !changed && aligned {
-		sparkwing.Info(ctx, "release-version artifacts already in shipped shape; skipping")
+		sparkwing.Info(ctx, "release-version artifacts already match the release version; skipping")
 		return nil
 	}
 	if changed {
@@ -456,9 +445,9 @@ func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 	return nil
 }
 
-func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+func (job *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
+	version := job.Version.Get(ctx)
+	path := filepath.Join(job.RepoDir, ".sparkwing", "go.mod")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
@@ -467,12 +456,12 @@ func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
-	aligned, err := releaseVersionArtifactsAligned(j.RepoDir, version)
+	aligned, err := releaseVersionArtifactsAligned(job.RepoDir, version)
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
 	if !moduleChanged && aligned {
-		sparkwing.Info(ctx, "dry-run: release-version artifacts already in shipped shape; no rewrite")
+		sparkwing.Info(ctx, "dry-run: release-version artifacts already match the release version; no rewrite")
 	} else {
 		sparkwing.Info(ctx, "%s", releaseVersionArtifactsDryRunMessage(version))
 	}
@@ -520,25 +509,25 @@ func writeSelfModuleSums(ctx context.Context, repoDir, version string) error {
 }
 
 func selfModuleSums(ctx context.Context, repoDir, version string) (string, string, error) {
-	tmp, err := os.CreateTemp("", "sparkwing-release-module-*.zip")
+	temporaryFile, err := os.CreateTemp("", "sparkwing-release-module-*.zip")
 	if err != nil {
 		return "", "", err
 	}
-	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-	defer func() { _ = tmp.Close() }()
+	temporaryPath := temporaryFile.Name()
+	defer func() { _ = os.Remove(temporaryPath) }()
+	defer func() { _ = temporaryFile.Close() }()
 
 	moduleZip, err := createSelfModuleZip(ctx, repoDir, version)
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := tmp.Write(moduleZip); err != nil {
+	if _, err := temporaryFile.Write(moduleZip); err != nil {
 		return "", "", err
 	}
-	if err := tmp.Close(); err != nil {
+	if err := temporaryFile.Close(); err != nil {
 		return "", "", err
 	}
-	zipHash, err := dirhash.HashZip(tmpPath, dirhash.Hash1)
+	zipHash, err := dirhash.HashZip(temporaryPath, dirhash.Hash1)
 	if err != nil {
 		return "", "", err
 	}
@@ -564,19 +553,19 @@ func createSelfModuleZip(ctx context.Context, repoDir, version string) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	var out bytes.Buffer
-	if err := modzip.Create(&out, module.Version{Path: sparkwingModulePath, Version: version}, files); err != nil {
+	var output bytes.Buffer
+	if err := modzip.Create(&output, module.Version{Path: sparkwingModulePath, Version: version}, files); err != nil {
 		return nil, err
 	}
-	return out.Bytes(), nil
+	return output.Bytes(), nil
 }
 
 func selfModuleZipFiles(ctx context.Context, repoDir string) ([]modzip.File, error) {
-	out, err := runGitRawIn(ctx, repoDir, "ls-files", "-z")
+	output, err := runGitRawIn(ctx, repoDir, "ls-files", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("release: list tracked files: %w", err)
 	}
-	paths := gitTrackedPaths(string(out))
+	paths := gitTrackedPaths(string(output))
 	nestedModules := map[string]struct{}{}
 	for _, path := range paths {
 		if path == "" || path == "go.mod" || filepath.Base(path) != "go.mod" {
@@ -602,11 +591,11 @@ func selfModuleZipFiles(ctx context.Context, repoDir string) ([]modzip.File, err
 	return files, nil
 }
 
-func gitTrackedPaths(out string) []string {
-	if out == "" {
+func gitTrackedPaths(output string) []string {
+	if output == "" {
 		return nil
 	}
-	parts := strings.Split(out, "\x00")
+	parts := strings.Split(output, "\x00")
 	paths := parts[:0]
 	for _, path := range parts {
 		if path != "" {
@@ -617,8 +606,8 @@ func gitTrackedPaths(out string) []string {
 }
 
 func nestedModulePath(path string, nestedModules map[string]struct{}) bool {
-	for dir := range nestedModules {
-		if strings.HasPrefix(path, dir) {
+	for directory := range nestedModules {
+		if strings.HasPrefix(path, directory) {
 			return true
 		}
 	}
@@ -648,13 +637,13 @@ type restoreSelfReplaceJob struct {
 	RepoDir string
 }
 
-func (j *restoreSelfReplaceJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun).Risk("destructive")
+func (job *restoreSelfReplaceJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(work, "run", job.run).DryRun(job.dryRun).Risk("destructive")
 	return nil, nil
 }
 
-func (j *restoreSelfReplaceJob) run(ctx context.Context) error {
-	return restoreSelfReplaceIn(ctx, j.RepoDir)
+func (job *restoreSelfReplaceJob) run(ctx context.Context) error {
+	return restoreSelfReplaceIn(ctx, job.RepoDir)
 }
 
 func restoreSelfReplaceIn(ctx context.Context, repoDir string) error {
@@ -701,8 +690,8 @@ func restoreSelfReplaceIn(ctx context.Context, repoDir string) error {
 	return nil
 }
 
-func (j *restoreSelfReplaceJob) dryRun(ctx context.Context) error {
-	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+func (job *restoreSelfReplaceJob) dryRun(ctx context.Context) error {
+	path := filepath.Join(job.RepoDir, ".sparkwing", "go.mod")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
@@ -724,11 +713,11 @@ func stripSelfReplace(body, version string) (string, bool, error) {
 	newBody := requireRe.ReplaceAllString(body, "${1}"+sparkwingModulePath+" "+version)
 
 	replaceRe := regexp.MustCompile(`(?m)^replace\s+` + regexp.QuoteMeta(sparkwingModulePath) + `\s*=>\s*\.\.\s*$`)
-	loc := replaceRe.FindStringIndex(newBody)
-	if loc == nil {
+	location := replaceRe.FindStringIndex(newBody)
+	if location == nil {
 		return newBody, newBody != body, nil
 	}
-	start := loc[0]
+	start := location[0]
 	for start > 0 {
 		prevEnd := start - 1
 		if prevEnd >= 0 && newBody[prevEnd] != '\n' {
@@ -747,7 +736,7 @@ func stripSelfReplace(body, version string) (string, bool, error) {
 	if start >= 2 && newBody[start-1] == '\n' && newBody[start-2] == '\n' {
 		start--
 	}
-	end := loc[1]
+	end := location[1]
 	if end < len(newBody) && newBody[end] == '\n' {
 		end++
 	}
@@ -792,7 +781,7 @@ func planChangelogRewrite(body, version string) (changelogRewrite, error) {
 		return changelogRewrite{kind: rewriteNoop, versionEntries: versionCount}, nil
 	case versionCount > 0 && unreleased > 0:
 		return changelogRewrite{}, fmt.Errorf(
-			"CHANGELOG.md has BOTH [Unreleased] (%d entries) and [%s] (%d entries) populated -- "+
+			"CHANGELOG.md has both [Unreleased] (%d entries) and [%s] (%d entries) populated -- "+
 				"consolidate the entries under one section before re-running",
 			unreleased, version, versionCount,
 		)
@@ -816,12 +805,12 @@ func planChangelogRewrite(body, version string) (changelogRewrite, error) {
 
 func rewriteUnreleasedToVersion(body, version, date string) (string, error) {
 	re := regexp.MustCompile(`(?m)^## \[?Unreleased\]?\s*$`)
-	loc := re.FindStringIndex(body)
-	if loc == nil {
+	location := re.FindStringIndex(body)
+	if location == nil {
 		return "", fmt.Errorf("CHANGELOG.md has no [Unreleased] heading to rewrite")
 	}
 	newHeader := "## [Unreleased]\n\n## [" + version + "] - " + date
-	return body[:loc[0]] + newHeader + body[loc[1]:], nil
+	return body[:location[0]] + newHeader + body[location[1]:], nil
 }
 
 func versionEntries(body, version string) (int, error) {
@@ -830,7 +819,7 @@ func versionEntries(body, version string) (int, error) {
 		return 0, fmt.Errorf("empty version")
 	}
 	lines := strings.Split(body, "\n")
-	in := false
+	inSection := false
 	count := 0
 	for _, raw := range lines {
 		line := strings.TrimRight(raw, "\r")
@@ -845,15 +834,15 @@ func versionEntries(body, version string) (int, error) {
 				rest = rest[:dash]
 			}
 			if strings.EqualFold(strings.TrimSpace(rest), target) {
-				in = true
+				inSection = true
 				continue
 			}
-			if in {
+			if inSection {
 				break
 			}
 			continue
 		}
-		if !in {
+		if !inSection {
 			continue
 		}
 		trimmed := strings.TrimSpace(line)
@@ -866,23 +855,23 @@ func versionEntries(body, version string) (int, error) {
 
 func unreleasedEntries(body string) (int, error) {
 	lines := strings.Split(body, "\n")
-	in := false
+	inSection := false
 	count := 0
 	for _, raw := range lines {
 		line := strings.TrimRight(raw, "\r")
 		if strings.HasPrefix(line, "## ") {
-			h := strings.TrimSpace(strings.TrimPrefix(line, "## "))
-			h = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(h, "["), "]"))
-			if strings.EqualFold(h, "Unreleased") {
-				in = true
+			heading := strings.TrimSpace(strings.TrimPrefix(line, "## "))
+			heading = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(heading, "["), "]"))
+			if strings.EqualFold(heading, "Unreleased") {
+				inSection = true
 				continue
 			}
-			if in {
+			if inSection {
 				break
 			}
 			continue
 		}
-		if !in {
+		if !inSection {
 			continue
 		}
 		trimmed := strings.TrimSpace(line)
@@ -899,48 +888,48 @@ type pushTagJob struct {
 	RepoDir string
 }
 
-func (j *pushTagJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).
-		DryRun(j.dryRun).
+func (job *pushTagJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(work, "run", job.run).
+		DryRun(job.dryRun).
 		Risk("destructive", "prod")
 	return nil, nil
 }
 
-func (j *pushTagJob) run(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	exists, err := tagExistsOnRemote(ctx, j.RepoDir, version)
+func (job *pushTagJob) run(ctx context.Context) error {
+	version := job.Version.Get(ctx)
+	exists, err := tagExistsOnRemote(ctx, job.RepoDir, version)
 	if err != nil {
 		return fmt.Errorf("release: re-check remote tags: %w", err)
 	}
 	if exists {
 		return fmt.Errorf("release: tag %s appeared on origin between validate and push (race); abort", version)
 	}
-	branch, err := currentBranch(ctx, j.RepoDir)
+	branch, err := currentBranch(ctx, job.RepoDir)
 	if err != nil {
 		return fmt.Errorf("release: detect current branch: %w", err)
 	}
 	if branch != "main" {
 		sparkwing.Info(ctx, "release: tagging from branch %q", branch)
 	}
-	if err := ensureBranchContainsRemote(ctx, j.RepoDir, branch); err != nil {
+	if err := ensureBranchContainsRemote(ctx, job.RepoDir, branch); err != nil {
 		return err
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "push", "origin", "refs/heads/"+branch); err != nil {
+	if _, err := runGitIn(ctx, job.RepoDir, "push", "origin", "refs/heads/"+branch); err != nil {
 		return fmt.Errorf("release: push branch: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "tag", "-a", version, "-m", "Release "+version); err != nil {
+	if _, err := runGitIn(ctx, job.RepoDir, "tag", "-a", version, "-m", "Release "+version); err != nil {
 		return fmt.Errorf("release: create tag: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "push", "origin", "refs/tags/"+version); err != nil {
+	if _, err := runGitIn(ctx, job.RepoDir, "push", "origin", "refs/tags/"+version); err != nil {
 		return fmt.Errorf("release: push tag: %w", err)
 	}
-	sparkwing.Info(ctx, "pushed %s + branch %s to origin (GH-Actions release.yaml will take over)", version, branch)
+	sparkwing.Info(ctx, "pushed %s + branch %s to origin (GitHub Actions release.yaml will take over)", version, branch)
 	return nil
 }
 
-func (j *pushTagJob) dryRun(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	branch, err := currentBranch(ctx, j.RepoDir)
+func (job *pushTagJob) dryRun(ctx context.Context) error {
+	version := job.Version.Get(ctx)
+	branch, err := currentBranch(ctx, job.RepoDir)
 	if err != nil {
 		sparkwing.Info(ctx, "dry-run: would tag %s and push branch+tag to origin (current-branch lookup failed: %v)", version, err)
 		return nil
@@ -950,11 +939,11 @@ func (j *pushTagJob) dryRun(ctx context.Context) error {
 }
 
 func currentBranch(ctx context.Context, repoDir string) (string, error) {
-	out, err := runGitIn(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	output, err := runGitIn(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	return strings.TrimSpace(output), nil
 }
 
 func ensureBranchContainsRemote(ctx context.Context, repoDir, branch string) error {
@@ -979,13 +968,13 @@ type checkReleaseLineageJob struct {
 	RepoDir string
 }
 
-func (j *checkReleaseLineageJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+func (job *checkReleaseLineageJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(work, "run", job.run).SafeWithoutDryRun()
 	return nil, nil
 }
 
-func (j *checkReleaseLineageJob) run(ctx context.Context) error {
-	return ensureLineageContainsLatestRelease(ctx, j.RepoDir)
+func (job *checkReleaseLineageJob) run(ctx context.Context) error {
+	return ensureLineageContainsLatestRelease(ctx, job.RepoDir)
 }
 
 func ensureLineageContainsLatestRelease(ctx context.Context, repoDir string) error {
@@ -1009,108 +998,105 @@ func ensureLineageContainsLatestRelease(ctx context.Context, repoDir string) err
 		sparkwing.Info(ctx, "history contains the latest release %s", latest)
 		return nil
 	}
-	var ee *sparkwing.ExecError
-	if errors.As(err, &ee) && ee.ExitCode == 1 {
-		return fmt.Errorf("release: the latest release %s is not in this line's history. "+
-			"An earlier release was cut from a branch that never landed here, so releasing now would ship without that work and silently drop it. "+
-			"Bring the %s line back first -- `git fetch --tags origin && git log %s --not HEAD` lists the missing commits; merge or cherry-pick them -- then re-run",
-			latest, latest, latest)
+	var executionError *sparkwing.ExecError
+	if errors.As(err, &executionError) && executionError.ExitCode == 1 {
+		return fmt.Errorf("release: latest release %s is absent from HEAD history; inspect `git fetch --tags origin && git log %s --not HEAD`, then merge the missing release history before releasing",
+			latest, latest)
 	}
 	return fmt.Errorf("release: lineage check for %s: %w", latest, err)
 }
 
-func validateReleaseVersion(v string) error {
-	v = strings.TrimSpace(v)
-	if v == "" {
+func validateReleaseVersion(version string) error {
+	version = strings.TrimSpace(version)
+	if version == "" {
 		return errors.New("release: --version is required (e.g. --version v0.6.1)")
 	}
-	if !strings.HasPrefix(v, "v") {
-		return fmt.Errorf("release: version %q must begin with 'v' (e.g. v0.6.1)", v)
+	if !strings.HasPrefix(version, "v") {
+		return fmt.Errorf("release: version %q must begin with 'v' (e.g. v0.6.1)", version)
 	}
-	if !semver.IsValid(v) {
-		return fmt.Errorf("release: version %q is not valid semver (expected vX.Y.Z)", v)
+	if !semver.IsValid(version) {
+		return fmt.Errorf("release: version %q is not valid semver (expected vX.Y.Z)", version)
 	}
-	if semver.Prerelease(v) != "" || semver.Build(v) != "" {
-		return fmt.Errorf("release: version %q includes pre-release / build metadata; release pipeline only cuts stable tags", v)
+	if semver.Prerelease(version) != "" || semver.Build(version) != "" {
+		return fmt.Errorf("release: version %q includes pre-release / build metadata; release pipeline only cuts stable tags", version)
 	}
-	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
+	parts := strings.Split(strings.TrimPrefix(version, "v"), ".")
 	if len(parts) != 3 {
-		return fmt.Errorf("release: version %q must be vX.Y.Z", v)
+		return fmt.Errorf("release: version %q must be vX.Y.Z", version)
 	}
-	// safety: module is locked to v0.x; remove this check to allow v1+ tags.
-	if semver.Major(v) != "v0" {
+	if semver.Major(version) != "v0" {
 		return fmt.Errorf("release: version %q is v1.0.0+ but sparkwing is locked to v0.x. "+
 			"Bumping to v1+ commits the public API surface (see VERSIONING.md); "+
-			"if that's intentional, remove the pre-1.0 lock in .sparkwing/jobs/release.go and resubmit", v)
+			"if that's intentional, remove the pre-1.0 lock in .sparkwing/jobs/release.go and resubmit", version)
 	}
 	return nil
 }
 
 func tagExistsOnRemote(ctx context.Context, repoDir, tag string) (bool, error) {
-	out, err := runGitIn(ctx, repoDir, "ls-remote", "--tags", "origin", "refs/tags/"+tag)
+	output, err := runGitIn(ctx, repoDir, "ls-remote", "--tags", "origin", "refs/tags/"+tag)
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(out) != "", nil
+	return strings.TrimSpace(output) != "", nil
 }
 
-func runGitIn(ctx context.Context, dir string, args ...string) (string, error) {
-	res, err := sparkwing.Exec(ctx, "git", args...).Dir(dir).Run()
+func runGitIn(ctx context.Context, directory string, arguments ...string) (string, error) {
+	result, err := sparkwing.Exec(ctx, "git", arguments...).Dir(directory).Run()
 	if err != nil {
-		msg := strings.TrimSpace(res.Stderr)
-		if msg == "" {
-			return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		message := strings.TrimSpace(result.Stderr)
+		if message == "" {
+			return "", fmt.Errorf("git %s: %w", strings.Join(arguments, " "), err)
 		}
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(arguments, " "), err, message)
 	}
-	return res.Stdout, nil
+	return result.Stdout, nil
 }
 
-func runGitRawIn(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
+func runGitRawIn(ctx context.Context, directory string, arguments ...string) ([]byte, error) {
+	command := exec.CommandContext(ctx, "git", arguments...)
+	command.Dir = directory
+	output, err := command.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			msg := strings.TrimSpace(string(exitErr.Stderr))
-			if msg != "" {
-				return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
+			message := strings.TrimSpace(string(exitErr.Stderr))
+			if message != "" {
+				return nil, fmt.Errorf("git %s: %w: %s", strings.Join(arguments, " "), err, message)
 			}
 		}
-		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		return nil, fmt.Errorf("git %s: %w", strings.Join(arguments, " "), err)
 	}
-	return out, nil
+	return output, nil
 }
 
 const releaseTagCeiling = "v1.0.0"
 
 func highestReleaseTag(tags []string) string {
 	var best string
-	for _, t := range tags {
-		if !semver.IsValid(t) {
+	for _, tag := range tags {
+		if !semver.IsValid(tag) {
 			continue
 		}
-		if semver.Prerelease(t) != "" || semver.Build(t) != "" {
+		if semver.Prerelease(tag) != "" || semver.Build(tag) != "" {
 			continue
 		}
-		if semver.Compare(t, releaseTagCeiling) >= 0 {
+		if semver.Compare(tag, releaseTagCeiling) >= 0 {
 			continue
 		}
-		if best == "" || semver.Compare(t, best) > 0 {
-			best = t
+		if best == "" || semver.Compare(tag, best) > 0 {
+			best = tag
 		}
 	}
 	return best
 }
 
 func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
-	out, err := runGitIn(ctx, repoDir, "ls-remote", "--tags", "origin")
+	output, err := runGitIn(ctx, repoDir, "ls-remote", "--tags", "origin")
 	if err != nil {
 		return "", err
 	}
 	var tags []string
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -1125,13 +1111,13 @@ func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
 	return highestReleaseTag(tags), nil
 }
 
-func bumpVersion(v, kind string) (string, error) {
-	if !semver.IsValid(v) {
-		return "", fmt.Errorf("not semver: %s", v)
+func bumpVersion(version, kind string) (string, error) {
+	if !semver.IsValid(version) {
+		return "", fmt.Errorf("not semver: %s", version)
 	}
-	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
+	parts := strings.Split(strings.TrimPrefix(version, "v"), ".")
 	if len(parts) != 3 {
-		return "", fmt.Errorf("not vX.Y.Z: %s", v)
+		return "", fmt.Errorf("not vX.Y.Z: %s", version)
 	}
 	var major, minor, patch int
 	if _, err := fmt.Sscanf(parts[0], "%d", &major); err != nil {
@@ -1170,37 +1156,35 @@ var (
 	migrationRequirementNameRe   = regexp.MustCompile(`"([^"]+)"`)
 )
 
-// safety: distinct from a registry the parser cannot read, which fails the gate;
-// a tag cut before requirements shipped carries none at all.
+// SAFETY: An absent requirement registry differs from a malformed registry, which fails the gate.
 var errNoRequirementRegistry = errors.New("no `var migrationRequirements = map[int][]string{...}`")
 
-// safety: parses the source rather than importing the package, so the gate can read
-// the registry at a released tag as well as the one being cut.
-func parseMigrationRequirements(goSource string) (map[int][]string, error) {
-	loc := migrationRequirementsDeclRe.FindStringIndex(goSource)
-	if loc == nil {
+// WHY: Source parsing also reads the registry at released tags.
+func parseMigrationRequirements(source string) (map[int][]string, error) {
+	location := migrationRequirementsDeclRe.FindStringIndex(source)
+	if location == nil {
 		return nil, fmt.Errorf("%w in %s", errNoRequirementRegistry, storeSchemaSourcePath)
 	}
-	block := migrationRequirementsBlockRe.FindStringSubmatch(goSource[loc[0]:])
+	block := migrationRequirementsBlockRe.FindStringSubmatch(source[location[0]:])
 	if block == nil {
 		return nil, fmt.Errorf("unterminated migrationRequirements registry in %s", storeSchemaSourcePath)
 	}
-	out := map[int][]string{}
+	output := map[int][]string{}
 	for _, entry := range migrationRequirementsEntryRe.FindAllStringSubmatch(block[1], -1) {
 		version, err := strconv.Atoi(entry[1])
 		if err != nil {
 			return nil, fmt.Errorf("parse %s requirement version %q: %w", storeSchemaSourcePath, entry[1], err)
 		}
 		for _, name := range migrationRequirementNameRe.FindAllStringSubmatch(entry[2], -1) {
-			out[version] = append(out[version], name[1])
+			output[version] = append(output[version], name[1])
 		}
 	}
-	return out, nil
+	return output, nil
 }
 
-func requirementsAddedBetween(registry map[int][]string, prevSchema, curSchema int) []string {
+func requirementsAddedBetween(registry map[int][]string, previousSchema, currentSchema int) []string {
 	var added []string
-	for v := prevSchema + 1; v <= curSchema; v++ {
+	for v := previousSchema + 1; v <= currentSchema; v++ {
 		added = append(added, registry[v]...)
 	}
 	sort.Strings(added)
@@ -1227,15 +1211,15 @@ func requirementsAddedSince(prev, cur map[int][]string) []string {
 }
 
 func parseStoreSchemaVersion(goSource string) (int, error) {
-	m := storeSchemaConstRe.FindStringSubmatch(goSource)
-	if m == nil {
+	match := storeSchemaConstRe.FindStringSubmatch(goSource)
+	if match == nil {
 		return 0, fmt.Errorf("no `const expectedSchemaVersion = N` in %s", storeSchemaSourcePath)
 	}
-	n, err := strconv.Atoi(m[1])
+	version, err := strconv.Atoi(match[1])
 	if err != nil {
-		return 0, fmt.Errorf("parse %s schema version %q: %w", storeSchemaSourcePath, m[1], err)
+		return 0, fmt.Errorf("parse %s schema version %q: %w", storeSchemaSourcePath, match[1], err)
 	}
-	return n, nil
+	return version, nil
 }
 
 type checkSchemaBreakJob struct {
@@ -1244,54 +1228,54 @@ type checkSchemaBreakJob struct {
 	Version sparkwing.Ref[string]
 }
 
-func (j *checkSchemaBreakJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+func (job *checkSchemaBreakJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(work, "run", job.run).SafeWithoutDryRun()
 	return nil, nil
 }
 
-func (j *checkSchemaBreakJob) run(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	prevTag, err := latestSemverTagIn(ctx, j.RepoDir)
+func (job *checkSchemaBreakJob) run(ctx context.Context) error {
+	version := job.Version.Get(ctx)
+	previousTag, err := latestSemverTagIn(ctx, job.RepoDir)
 	if err != nil {
 		return fmt.Errorf("release: resolve previous tag for schema gate: %w", err)
 	}
-	if prevTag == "" {
+	if previousTag == "" {
 		sparkwing.Info(ctx, "no previous release tag; skipping schema-break changelog gate")
 		return nil
 	}
-	curSrc, err := os.ReadFile(filepath.Join(j.RepoDir, filepath.FromSlash(storeSchemaSourcePath)))
+	currentSource, err := os.ReadFile(filepath.Join(job.RepoDir, filepath.FromSlash(storeSchemaSourcePath)))
 	if err != nil {
 		return fmt.Errorf("release: read %s: %w", storeSchemaSourcePath, err)
 	}
-	curSchema, err := parseStoreSchemaVersion(string(curSrc))
+	currentSchema, err := parseStoreSchemaVersion(string(currentSource))
 	if err != nil {
 		return fmt.Errorf("release: current schema: %w", err)
 	}
-	prevSrc, err := runGitIn(ctx, j.RepoDir, "show", prevTag+":"+storeSchemaSourcePath)
+	previousSource, err := runGitIn(ctx, job.RepoDir, "show", previousTag+":"+storeSchemaSourcePath)
 	if err != nil {
-		return fmt.Errorf("release: read %s at %s: %w", storeSchemaSourcePath, prevTag, err)
+		return fmt.Errorf("release: read %s at %s: %w", storeSchemaSourcePath, previousTag, err)
 	}
-	prevSchema, err := parseStoreSchemaVersion(prevSrc)
+	previousSchema, err := parseStoreSchemaVersion(previousSource)
 	if err != nil {
-		return fmt.Errorf("release: schema at %s: %w", prevTag, err)
+		return fmt.Errorf("release: schema at %s: %w", previousTag, err)
 	}
-	curRegistry, err := parseMigrationRequirements(string(curSrc))
+	currentRegistry, err := parseMigrationRequirements(string(currentSource))
 	if err != nil {
 		return fmt.Errorf("release: current schema requirements: %w", err)
 	}
-	added, err := requirementsAdded(prevSrc, curRegistry, prevSchema, curSchema)
+	added, err := requirementsAdded(previousSource, currentRegistry, previousSchema, currentSchema)
 	if err != nil {
-		return fmt.Errorf("release: schema requirements at %s: %w", prevTag, err)
+		return fmt.Errorf("release: schema requirements at %s: %w", previousTag, err)
 	}
-	if prevSchema == curSchema && len(added) == 0 {
-		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d) and no requirement added; gate passes", prevTag, curSchema)
+	if previousSchema == currentSchema && len(added) == 0 {
+		sparkwing.Info(ctx, "runs-store schema unchanged since %s (schema %d) and no requirement added; gate passes", previousTag, currentSchema)
 		return nil
 	}
-	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
+	body, err := os.ReadFile(filepath.Join(job.RepoDir, "CHANGELOG.md"))
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
-	issues := LintSchemaBreak(string(body), version, prevSchema, curSchema, added)
+	issues := LintSchemaBreak(string(body), version, previousSchema, currentSchema, added)
 	if len(issues) > 0 {
 		var b strings.Builder
 		for _, i := range issues {
@@ -1302,25 +1286,23 @@ func (j *checkSchemaBreakJob) run(ctx context.Context) error {
 	}
 	if len(added) > 0 {
 		sparkwing.Info(ctx, "runs-store schema %d -> %d adds requirement(s) %s and is marked (Breaking) in the changelog; gate passes",
-			prevSchema, curSchema, strings.Join(added, ", "))
+			previousSchema, currentSchema, strings.Join(added, ", "))
 		return nil
 	}
-	sparkwing.Info(ctx, "runs-store schema %d -> %d adds no requirement and carries a store changelog entry; gate passes", prevSchema, curSchema)
+	sparkwing.Info(ctx, "runs-store schema %d -> %d adds no requirement and carries a store changelog entry; gate passes", previousSchema, currentSchema)
 	return nil
 }
 
-// safety: a tag cut before the registry existed has no prior classification to diff,
-// so only the versions this release adds count; diffing against it would demand a
-// (Breaking) entry for the initial population.
-func requirementsAdded(prevSrc string, curRegistry map[int][]string, prevSchema, curSchema int) ([]string, error) {
-	prevRegistry, err := parseMigrationRequirements(prevSrc)
+// SAFETY: Without a prior registry, only newly added schema versions require classification.
+func requirementsAdded(previousSource string, currentRegistry map[int][]string, previousSchema, currentSchema int) ([]string, error) {
+	previousRegistry, err := parseMigrationRequirements(previousSource)
 	if errors.Is(err, errNoRequirementRegistry) {
-		return requirementsAddedBetween(curRegistry, prevSchema, curSchema), nil
+		return requirementsAddedBetween(currentRegistry, previousSchema, currentSchema), nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return requirementsAddedSince(prevRegistry, curRegistry), nil
+	return requirementsAddedSince(previousRegistry, currentRegistry), nil
 }
 
 type checkWireBreakJob struct {
@@ -1329,34 +1311,34 @@ type checkWireBreakJob struct {
 	Version sparkwing.Ref[string]
 }
 
-func (j *checkWireBreakJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+func (job *checkWireBreakJob) Work(work *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(work, "run", job.run).SafeWithoutDryRun()
 	return nil, nil
 }
 
-func (j *checkWireBreakJob) run(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	prevTag, err := latestSemverTagIn(ctx, j.RepoDir)
+func (job *checkWireBreakJob) run(ctx context.Context) error {
+	version := job.Version.Get(ctx)
+	previousTag, err := latestSemverTagIn(ctx, job.RepoDir)
 	if err != nil {
 		return fmt.Errorf("release: resolve previous tag for wire gate: %w", err)
 	}
-	if prevTag == "" {
+	if previousTag == "" {
 		sparkwing.Info(ctx, "no previous release tag; skipping wire-surface changelog gate")
 		return nil
 	}
-	cuts, err := wireCutsSince(ctx, j.RepoDir, prevTag)
+	cuts, err := wireCutsSince(ctx, job.RepoDir, previousTag)
 	if err != nil {
-		return fmt.Errorf("release: diff the wire surface against %s: %w", prevTag, err)
+		return fmt.Errorf("release: diff the wire surface against %s: %w", previousTag, err)
 	}
 	if len(cuts) == 0 {
-		sparkwing.Info(ctx, "wire surface added to or unchanged since %s; gate passes", prevTag)
+		sparkwing.Info(ctx, "wire surface added to or unchanged since %s; gate passes", previousTag)
 		return nil
 	}
-	body, err := os.ReadFile(filepath.Join(j.RepoDir, "CHANGELOG.md"))
+	body, err := os.ReadFile(filepath.Join(job.RepoDir, "CHANGELOG.md"))
 	if err != nil {
 		return fmt.Errorf("release: read CHANGELOG.md: %w", err)
 	}
-	issues := LintWireBreak(string(body), version, cuts, migrationsFS(j.RepoDir))
+	issues := LintWireBreak(string(body), version, cuts, migrationsFS(job.RepoDir))
 	if len(issues) > 0 {
 		var b strings.Builder
 		for _, i := range issues {
@@ -1366,19 +1348,19 @@ func (j *checkWireBreakJob) run(ctx context.Context) error {
 		return fmt.Errorf("release: undeclared wire-surface cut blocks %s:\n%s", version, b.String())
 	}
 	sparkwing.Info(ctx, "wire surface cuts %s since %s and the changelog declares it; gate passes",
-		strings.Join(describeCuts(cuts), ", "), prevTag)
+		strings.Join(describeCuts(cuts), ", "), previousTag)
 	return nil
 }
 
-func wireCutsSince(ctx context.Context, repoDir, prevTag string) ([]wireCut, error) {
+func wireCutsSince(ctx context.Context, repoDir, previousTag string) ([]wireCut, error) {
 	states := make([]wireSurfaceState, 0, len(wireSurfaces))
 	for _, surface := range wireSurfaces {
-		prev, present, err := fileAtTag(ctx, repoDir, prevTag, surface.path)
+		prev, present, err := fileAtTag(ctx, repoDir, previousTag, surface.path)
 		if err != nil {
 			return nil, err
 		}
 		if !present {
-			sparkwing.Info(ctx, "%s does not exist at %s; nothing to diff", surface.path, prevTag)
+			sparkwing.Info(ctx, "%s does not exist at %s; nothing to diff", surface.path, previousTag)
 			states = append(states, wireSurfaceState{surface: surface})
 			continue
 		}
