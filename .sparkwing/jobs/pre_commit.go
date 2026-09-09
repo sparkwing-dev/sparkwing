@@ -435,7 +435,7 @@ func checkEmDashes(ctx context.Context) error {
 		if err != nil || len(data) == 0 {
 			continue
 		}
-		// WHY: Binary files are excluded from text checks.
+		// SAFETY: Binary files are excluded from text checks.
 		head := data
 		if len(head) > 8192 {
 			head = head[:8192]
@@ -472,7 +472,7 @@ func checkTrackerIDs(ctx context.Context) error {
 		if err != nil || len(data) == 0 {
 			continue
 		}
-		// WHY: Binary files are excluded from text checks.
+		// SAFETY: Binary files are excluded from text checks.
 		head := data
 		if len(head) > 8192 {
 			head = head[:8192]

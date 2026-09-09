@@ -1159,7 +1159,7 @@ var (
 // SAFETY: An absent requirement registry differs from a malformed registry, which fails the gate.
 var errNoRequirementRegistry = errors.New("no `var migrationRequirements = map[int][]string{...}`")
 
-// WHY: Source parsing also reads the registry at released tags.
+// SAFETY: Source parsing also reads the registry at released tags.
 func parseMigrationRequirements(source string) (map[int][]string, error) {
 	location := migrationRequirementsDeclRe.FindStringIndex(source)
 	if location == nil {
