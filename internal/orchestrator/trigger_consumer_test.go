@@ -269,7 +269,7 @@ func TestRunLocalTriggerConsumer_StandsDownWhenAResidentConsumerHoldsTheLock(t *
 	residentPID, _ := ConsumerPID(home)
 
 	logger, stoodDown := newConsumerLogSignal(dashboardStandDownMessage)
-	if err := RunLocalTriggerConsumer(ctx, home, st, logger); err != nil {
+	if err := RunLocalTriggerConsumer(ctx, home, st, logger, ""); err != nil {
 		t.Fatalf("dashboard consumer startup: %v", err)
 	}
 	waitForConsumerLog(t, stoodDown)
@@ -619,7 +619,7 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 
 	logger, stoodDown := newConsumerLogSignal(dashboardStandDownMessage)
 	var err error
-	dashboardFinished, err = runLocalTriggerConsumerWithRetryInterval(ctx, home, st, logger, 10*time.Millisecond)
+	dashboardFinished, err = runLocalTriggerConsumerWithRetryInterval(ctx, home, st, logger, "", 10*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}

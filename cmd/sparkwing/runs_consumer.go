@@ -175,6 +175,12 @@ func rotateOutdatedConsumer(home string) bool {
 	if info.Version == mine {
 		return false
 	}
+	if info.Host != "" {
+		fmt.Fprintf(os.Stderr,
+			"sparkwing run --sw-detached: the %s (pid %d, %s) hosts this home's consumer; the run executes under that build\n",
+			info.Host, info.PID, consumerVersionLabel(info.Version))
+		return false
+	}
 	fmt.Fprintf(os.Stderr,
 		"sparkwing run --sw-detached: replacing the resident consumer (pid %d, %s) with this build (%s)\n",
 		info.PID, consumerVersionLabel(info.Version), mine)

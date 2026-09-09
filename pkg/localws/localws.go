@@ -139,7 +139,7 @@ func Run(ctx context.Context, opts Options) error {
 				_, err := orchestrator.ReconcileOrphanedLocalRuns(rctx, st, 0)
 				return err
 			})
-		if err := orchestrator.RunLocalTriggerConsumer(ctx, paths.Root, st, nil); err != nil {
+		if err := orchestrator.RunLocalTriggerConsumer(ctx, paths.Root, st, nil, opts.Version); err != nil {
 			return err
 		}
 	}
@@ -260,6 +260,7 @@ func buildHandler(
 	}
 	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
 	root.Handle("GET /api/v1/queue", queueHandler(parts.paths.Root, opts.Version))
+	registerCronRoutes(root, &cronsAPI{store: parts.store, paths: parts.paths, readOnly: opts.ReadOnly})
 	// safety: the controller claims all of /api/v1/, so dashboard-owned routes
 	// must be named here to remain reachable.
 	root.Handle("GET /api/v1/capacity/profiles", webHandler)
