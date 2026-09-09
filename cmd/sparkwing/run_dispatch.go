@@ -621,7 +621,12 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		discoverCtx, dCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		services, derr := discovery.ServicesFor(discoverCtx, prof.ControllerURL(), prof.ControllerToken())
 		dCancel()
-		seedTriggerSource(prof, services.CachePod, derr, repoURL, sha)
+		repoDir, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			fmt.Fprintf(os.Stderr, "sparkwing run: gitcache seed skipped (cwd: %v)\n", cwdErr)
+		} else {
+			seedTriggerSource(prof, services.CachePod, derr, repoDir, repoURL, sha)
+		}
 	}
 
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
@@ -654,15 +659,10 @@ func seedWorkingTreeSnapshot(prof *profile.Profile, cacheURL, repoURL string, sn
 	return controllerErr
 }
 
-func seedTriggerSource(prof *profile.Profile, cacheURL string, discoveryErr error, repoURL, sha string) {
-	repoDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "sparkwing run: gitcache seed skipped (cwd: %v)\n", err)
-		return
-	}
+func seedTriggerSource(prof *profile.Profile, cacheURL string, discoveryErr error, repoDir, repoURL, sha string) {
 	if cacheURL != "" {
 		refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err = bincache.RefreshRepo(refreshCtx, cacheURL, bincache.CacheToken(), repoURL)
+		err := bincache.RefreshRepo(refreshCtx, cacheURL, bincache.CacheToken(), repoURL)
 		cancel()
 		if err == nil {
 			return
@@ -680,7 +680,7 @@ func seedTriggerSource(prof *profile.Profile, cacheURL string, discoveryErr erro
 	}
 
 	refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	err = bincache.RefreshRepoViaController(refreshCtx, prof.ControllerURL(), prof.ControllerToken(), repoURL)
+	err := bincache.RefreshRepoViaController(refreshCtx, prof.ControllerURL(), prof.ControllerToken(), repoURL)
 	cancel()
 	if err == nil {
 		return

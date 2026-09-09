@@ -53,7 +53,9 @@ var allCommands = []*Command{
 	&cmdApprove, &cmdDeny, &cmdApprovals, &cmdApprovalsList,
 	&cmdAnnotations, &cmdAnnotationsList, &cmdAnnotationsAdd,
 	&cmdRepos, &cmdReposList, &cmdReposInfo, &cmdReposUpdate,
-	&cmdCrons, &cmdCronsInstall, &cmdCronsUninstall, &cmdCronsStatus, &cmdCronsList,
+	&cmdCrons, &cmdCronsInstall, &cmdCronsUninstall, &cmdCronsDisarm,
+	&cmdCronsLock, &cmdCronsUnlock, &cmdCronsSet, &cmdCronsReset,
+	&cmdCronsStatus, &cmdCronsList,
 	&cmdCronsShow, &cmdCronsNext, &cmdCronsPause, &cmdCronsResume, &cmdCronsRun, &cmdCronsTick,
 }
 

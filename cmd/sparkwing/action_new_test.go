@@ -64,8 +64,11 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 			}
 		}},
 		{"scheduled-report", triggerBlocks["schedule"], func(t *testing.T, tr pipelines.Triggers) {
-			if tr.Schedule == nil {
-				t.Error("scheduled-report declares no schedule; its help says it prints one")
+			if len(tr.Schedule) == 0 {
+				t.Fatal("scheduled-report declares no schedule; its help says it prints one")
+			}
+			if tr.Schedule[0].Where != pipelines.ScheduleWhereLocal {
+				t.Errorf("scaffolded schedule declares where %q; the scaffold must arm on the host it is created on", tr.Schedule[0].Where)
 			}
 		}},
 	}
@@ -86,7 +89,7 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 			if len(cfg.Pipelines) != 1 {
 				t.Fatalf("got %d pipelines, want 1", len(cfg.Pipelines))
 			}
-			if (cfg.Pipelines[0].On == pipelines.Triggers{}) {
+			if len(describeTriggers(cfg.Pipelines[0].On)) == 0 {
 				t.Fatal("entry has no triggers at all")
 			}
 			tc.check(t, cfg.Pipelines[0].On)
@@ -107,7 +110,7 @@ func TestShapesWithoutAnEventStayManual(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if (cfg.Pipelines[0].On != pipelines.Triggers{}) {
+	if len(describeTriggers(cfg.Pipelines[0].On)) > 0 {
 		t.Errorf("structural shape declared triggers %+v", cfg.Pipelines[0].On)
 	}
 }
@@ -171,12 +174,12 @@ func TestEveryTriggerBlockParses(t *testing.T) {
 			}
 			on := cfg.Pipelines[0].On
 			if event == "manual" {
-				if (on != pipelines.Triggers{}) {
+				if len(describeTriggers(on)) > 0 {
 					t.Errorf("--on manual declared %+v; it is the opt-out", on)
 				}
 				return
 			}
-			if (on == pipelines.Triggers{}) {
+			if len(describeTriggers(on)) == 0 {
 				t.Errorf("--on %s decoded to no trigger at all", event)
 			}
 		})
@@ -333,7 +336,7 @@ func TestMultiTriggerYAMLParses(t *testing.T) {
 		t.Fatalf("multi-trigger entry does not parse: %v\n%s", err, block)
 	}
 	on := cfg.Pipelines[0].On
-	if on.Push == nil || on.PullRequest == nil || on.Schedule == nil {
+	if on.Push == nil || on.PullRequest == nil || len(on.Schedule) == 0 {
 		t.Errorf("decoded %+v; want all three declared", on)
 	}
 }

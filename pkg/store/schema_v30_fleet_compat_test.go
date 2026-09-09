@@ -21,9 +21,14 @@ var fleetRequirementNames = []string{
 	"assisted-execution-policy-v1",
 }
 
+// safety: every requirement a migration above v29 stamps, so a fixture wound
+// back below one of them does not keep listing what it can no longer support.
+var postV29RequirementNames = append(append([]string{}, fleetRequirementNames...),
+	"cron-schedule-names-v1")
+
 func deleteFleetRequirements(t *testing.T, db *sql.DB) {
 	t.Helper()
-	for _, name := range fleetRequirementNames {
+	for _, name := range postV29RequirementNames {
 		if _, err := db.Exec(`DELETE FROM sparkwing_requirements WHERE name = '` + name + `'`); err != nil {
 			t.Fatalf("delete Fleet requirement %s: %v", name, err)
 		}

@@ -59,15 +59,28 @@ function isoFromNow(ms: number): string {
 const armedCron = {
   id: "crn_0123456789ab",
   name: "dotfiles/nightly-vault-sweep",
+  schedule_name: "default",
   repo_path: "/home/me/code/dotfiles",
   pipeline: "nightly-vault-sweep",
+  where: "local",
   cron: "0 3 * * *",
   tz: "America/Denver",
   overlap: "skip",
   catch_up_ns: 3_600_000_000_000,
+  args: {},
+  lock: { ref: "", binary: "", digest: "", state: "follows" },
+  override: { fields: [], stale: false, set_at: "" },
+  effective: {
+    cron: "0 3 * * *",
+    tz: "America/Denver",
+    overlap: "skip",
+    catch_up_ns: 3_600_000_000_000,
+    args: {},
+  },
   paused: false,
   declared: true,
   state: "armed",
+  state_detail: "",
   armed_at: isoFromNow(-4 * 3_600_000),
   updated_at: isoFromNow(-60_000),
   last_fired_at: isoFromNow(-9 * 3_600_000),
@@ -79,10 +92,12 @@ const armedCron = {
 const pausedCron = {
   ...armedCron,
   id: "crn_ffeeddccbbaa",
-  name: "sparkwing/weekly-bench",
+  name: "sparkwing/weekly-bench/host",
+  schedule_name: "host",
   repo_path: "/home/me/code/sparkwing",
   pipeline: "weekly-bench",
   cron: "0 4 * * 0",
+  effective: { ...armedCron.effective, cron: "0 4 * * 0" },
   paused: true,
   state: "paused",
   last_outcome: "skipped_overlap",
@@ -98,6 +113,41 @@ const undeclaredCron = {
   declared: false,
   state: "undeclared",
   next_due_at: null,
+};
+
+// A schedule running a pinned binary the checkout has since moved past.
+const aheadCron = {
+  ...armedCron,
+  id: "crn_beefcafe0011",
+  name: "dotfiles/nightly-rebuild",
+  pipeline: "nightly-rebuild",
+  lock: {
+    ref: "abc1234def567890",
+    binary: "/home/me/.sparkwing/crons/crn_beefcafe0011/pipeline",
+    digest: "sha256:2f6c",
+    state: "ahead",
+  },
+  state_detail: "locked, checkout ahead",
+};
+
+// A schedule this host runs on its own expression, set against a declaration
+// the repo has changed since.
+const overriddenCron = {
+  ...armedCron,
+  id: "crn_0f0f0f0f0f0f",
+  name: "dotfiles/vault-sweep",
+  pipeline: "vault-sweep",
+  args: { depth: "deep" },
+  override: {
+    fields: ["cron"],
+    stale: true,
+    set_at: isoFromNow(-72 * 3_600_000),
+  },
+  effective: {
+    ...armedCron.effective,
+    cron: "0 5 * * *",
+    args: { depth: "deep" },
+  },
 };
 
 const healthyCronTimer = {
@@ -123,7 +173,13 @@ const healthyCronHealth = {
   armed: 1,
   paused: 1,
   undeclared: 1,
+  locked: 0,
+  following: 3,
+  ahead: 0,
+  missing_binary: 0,
+  stale_override: 0,
   detail: "1 schedule armed on this host",
+  remedy: "",
 };
 
 const cronsOverview = {
@@ -148,7 +204,13 @@ const noCronsOverview = {
     armed: 0,
     paused: 0,
     undeclared: 0,
+    locked: 0,
+    following: 0,
+    ahead: 0,
+    missing_binary: 0,
+    stale_override: 0,
     detail: "no schedules armed on this host",
+    remedy: "",
   },
   schedules: [],
 };
@@ -164,6 +226,7 @@ const cronDetail = {
       outcome: "fired",
       run_id: "run_abc",
       detail: "",
+      args: { depth: "deep" },
       run_status: "passed",
     },
     {
@@ -174,6 +237,7 @@ const cronDetail = {
       outcome: "skipped_overlap",
       run_id: "",
       detail: "previous run still holding admission",
+      args: {},
       run_status: "",
     },
   ],
@@ -1266,6 +1330,97 @@ test("warns when the cron tick has gone stale", async ({ page }) => {
   const banner = page.getByRole("region", { name: "Cron health" });
   await expect(banner.getByText(/Cron ticks have stopped/)).toBeVisible();
   await expect(banner.getByText(/sparkwing crons install/)).toBeVisible();
+});
+
+test("names what a locked schedule runs and warns when the checkout has moved past it", async ({
+  page,
+}) => {
+  await installMockAPI(page, {
+    crons: {
+      health: {
+        ...healthyCronHealth,
+        armed: 1,
+        paused: 0,
+        undeclared: 0,
+        schedules: 1,
+        locked: 1,
+        following: 0,
+        ahead: 1,
+        remedy:
+          "1 schedule(s) are pinned behind the checkout; re-run `sparkwing crons install` to pin the checkout as it stands",
+      },
+      schedules: [aheadCron],
+    },
+  });
+  await page.goto("/crons");
+
+  const row = page.locator(`[data-schedule-id="${aheadCron.id}"]`);
+  await expect(row.getByText("ahead", { exact: true })).toBeVisible();
+  await expect(row.getByText("abc1234", { exact: true })).toBeVisible();
+
+  const banner = page.getByRole("region", { name: "Cron health" });
+  await expect(banner.getByText(/moved past a pin/)).toBeVisible();
+  await expect(banner.getByText(/pin the checkout as it stands/)).toBeVisible();
+});
+
+test("marks an overridden schedule and shows the declaration beside it", async ({
+  page,
+}) => {
+  await installMockAPI(page, {
+    crons: {
+      health: {
+        ...healthyCronHealth,
+        armed: 1,
+        paused: 0,
+        undeclared: 0,
+        schedules: 1,
+        stale_override: 1,
+      },
+      schedules: [overriddenCron],
+    },
+    cronDetail: {
+      schedule: overriddenCron,
+      fires: [
+        {
+          id: "crf_11",
+          schedule_id: overriddenCron.id,
+          due_at: isoFromNow(-19 * 3_600_000),
+          decided_at: isoFromNow(-19 * 3_600_000 + 700),
+          outcome: "fired",
+          run_id: "run_ovr",
+          detail: "",
+          args: { depth: "deep", "dry-run": "true" },
+          run_status: "passed",
+        },
+      ],
+      upcoming: [isoFromNow(6 * 3_600_000)],
+    },
+  });
+  await page.goto(`/crons?schedule=${overriddenCron.id}`);
+
+  const row = page.locator(`[data-schedule-id="${overriddenCron.id}"]`);
+  await expect(row.getByText("override", { exact: true })).toBeVisible();
+  await expect(row.getByText("0 5 * * *", { exact: true })).toBeVisible();
+
+  const pane = page.getByRole("region", { name: "Schedule detail" });
+  const cron = pane.locator('[data-cadence-field="cron"]');
+  await expect(cron.getByText("0 3 * * *", { exact: true })).toBeVisible();
+  await expect(cron.getByText("0 5 * * *", { exact: true })).toBeVisible();
+  await expect(
+    pane.locator('[data-cadence-field="tz"]').getByText("America/Denver", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(pane.getByText(/still applies/)).toBeVisible();
+  await expect(
+    pane.getByText("--depth=deep --dry-run=true", { exact: true }),
+  ).toBeVisible();
+
+  const banner = page.getByRole("region", { name: "Cron health" });
+  await expect(banner.getByText(/dotfiles\/vault-sweep/)).toBeVisible();
+  await expect(
+    banner.getByText(/declaration that has changed/),
+  ).toBeVisible();
 });
 
 test("pauses a schedule and flips the row it acted on", async ({ page }) => {

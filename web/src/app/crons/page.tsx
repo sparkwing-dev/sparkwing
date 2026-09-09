@@ -16,13 +16,17 @@ import {
 } from "@/lib/api";
 import {
   type CronTone,
-  fmtCatchUp,
-  fmtOverlap,
+  declaredVsEffective,
+  fmtArgs,
   healthBanner,
+  lockBadge,
+  lockNote,
   outcomeLabel,
   outcomeTone,
+  overrideMarker,
   partitionUndeclared,
   scheduleCounts,
+  shortRef,
   stateTone,
 } from "@/lib/crons";
 import { fmtAgo, fmtDateTime, fmtFullDate, fmtUntil } from "@/lib/timeFormat";
@@ -203,7 +207,7 @@ function Header({ overview }: { overview: CronsOverview | null }) {
 // takes no `now` of its own.
 function HealthBannerCard({ overview }: { overview: CronsOverview | null }) {
   const health = overview?.health;
-  const banner = healthBanner(health);
+  const banner = healthBanner(health, overview?.schedules ?? []);
   const tick = health?.last_tick;
   const timer = health?.timer;
   const tone =
@@ -281,6 +285,7 @@ function ScheduleTable({
             <Th>Last</Th>
             <Th>Outcome</Th>
             <Th>State</Th>
+            <Th>Lock</Th>
             <Th right>Actions</Th>
           </tr>
         </thead>
@@ -288,7 +293,7 @@ function ScheduleTable({
           {rows.length === 0 ? (
             <tr>
               <td
-                colSpan={8}
+                colSpan={9}
                 className="px-3 py-3 text-[var(--muted)] text-center bg-[var(--surface)]"
               >
                 Every schedule on this host is hidden.
@@ -337,18 +342,28 @@ function ScheduleRow({
       }`}
     >
       <Td>
-        <div className="font-mono text-xs text-[var(--foreground)]">
-          {s.name}
+        <div className="flex items-center gap-1.5">
+          <span className="font-mono text-xs text-[var(--foreground)]">
+            {s.name}
+          </span>
+          {s.schedule_name && s.schedule_name !== "default" && (
+            <span className="font-mono text-[10px] px-1 py-0.5 rounded bg-[var(--surface-raised)] text-[var(--muted)]">
+              {s.schedule_name}
+            </span>
+          )}
         </div>
         <div className="font-mono text-[10px] text-[var(--muted)] truncate max-w-[16rem]">
           {s.repo_path}
         </div>
       </Td>
       <Td hideSm mono muted>
-        {s.cron}
+        <div className="flex items-center gap-1.5">
+          <span>{s.effective?.cron || s.cron}</span>
+          <OverridePill s={s} />
+        </div>
       </Td>
       <Td hideSm mono muted>
-        {s.tz}
+        {s.effective?.tz || s.tz}
       </Td>
       <Td mono>
         {s.next_due_at ? (
@@ -384,6 +399,9 @@ function ScheduleRow({
       </Td>
       <Td>
         <Pill tone={stateTone(s.state)} label={s.state} />
+      </Td>
+      <Td>
+        <LockCell s={s} />
       </Td>
       <Td right>
         <div className="inline-flex items-center gap-1.5">
@@ -429,6 +447,31 @@ function RowButton({
     >
       {label}
     </button>
+  );
+}
+
+function OverridePill({ s }: { s: CronSchedule }) {
+  const marker = overrideMarker(s);
+  if (!marker) return null;
+  return <Pill tone={marker.tone} label={marker.label} title={marker.title} />;
+}
+
+// The badge says what the next fire runs; the short ref rides beside it for the
+// drifted states, whose label spends its room on the drift instead.
+function LockCell({ s }: { s: CronSchedule }) {
+  const badge = lockBadge(s.lock);
+  const ref = shortRef(s.lock?.ref);
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      <Pill
+        tone={badge.tone}
+        label={badge.label}
+        title={s.state_detail || lockNote(s.lock)}
+      />
+      {ref && s.lock?.state !== "pinned" && (
+        <span className="font-mono text-[10px] text-[var(--muted)]">{ref}</span>
+      )}
+    </div>
   );
 }
 
@@ -479,10 +522,8 @@ function DetailPane({
         <Field label="id" value={s.id} />
         <Field label="repo" value={s.repo_path} />
         <Field label="pipeline" value={s.pipeline} />
-        <Field label="cron" value={s.cron} />
-        <Field label="tz" value={s.tz} />
-        <Field label="overlap" value={fmtOverlap(s.overlap)} />
-        <Field label="catch-up" value={fmtCatchUp(s.catch_up_ns)} />
+        <Field label="schedule" value={s.schedule_name} />
+        <Field label="where" value={s.where} />
         <Field label="state" value={s.state} />
         <Field label="paused" value={s.paused ? "yes" : "no"} />
         <Field label="declared" value={s.declared ? "yes" : "no"} />
@@ -506,6 +547,10 @@ function DetailPane({
           {s.last_run_id ? <RunLink id={s.last_run_id} /> : "-"}
         </dd>
       </dl>
+
+      <CadenceTable s={s} />
+
+      <LockBlock s={s} />
 
       <div>
         <SectionHeading>Upcoming</SectionHeading>
@@ -535,6 +580,93 @@ function DetailPane({
   );
 }
 
+/**
+ * CadenceTable puts what the repo declares beside what this host runs. A row
+ * this host has not overridden runs the declared value, so its effective cell
+ * is a dash rather than the same string twice.
+ */
+function CadenceTable({ s }: { s: CronSchedule }) {
+  const rows = declaredVsEffective(s);
+  const fields = s.override?.fields ?? [];
+  return (
+    <div>
+      <SectionHeading>Cadence</SectionHeading>
+      <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+        <table className="w-full text-xs" aria-label="Declared and effective">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wider text-[var(--muted)] bg-[var(--surface-raised)]">
+              <Th>Field</Th>
+              <Th>Declared</Th>
+              <Th>Effective</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr
+                key={r.field}
+                data-cadence-field={r.field}
+                className={`border-t border-[var(--border)] ${
+                  r.overridden ? "bg-amber-500/10" : ""
+                }`}
+              >
+                <Td muted>{r.label}</Td>
+                <Td mono>{r.declared}</Td>
+                <Td mono>
+                  {r.overridden ? (
+                    <span className="text-amber-400">{r.effective}</span>
+                  ) : (
+                    <span className="text-[var(--muted)]" title="same as declared">
+                      -
+                    </span>
+                  )}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {fields.length > 0 && (
+        <div className="text-[11px] text-[var(--muted)] mt-1">
+          {`This host overrides ${fields.join(", ")}`}
+          {s.override?.set_at ? `, set ${fmtDateTime(s.override.set_at)}.` : "."}
+        </div>
+      )}
+      {s.override?.stale && (
+        <div className="text-[11px] text-amber-400 mt-1">
+          The repo has changed the declaration this override was set against; it
+          still applies. Re-run <code>sparkwing crons install</code> to re-base
+          it.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LockBlock({ s }: { s: CronSchedule }) {
+  const badge = lockBadge(s.lock);
+  return (
+    <div>
+      <SectionHeading>Lock</SectionHeading>
+      <div className="flex items-center gap-2 mb-2">
+        <Pill tone={badge.tone} label={badge.label} />
+        {s.state_detail && (
+          <span className="text-[11px] text-[var(--muted)]">
+            {s.state_detail}
+          </span>
+        )}
+      </div>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+        <Field label="ref" value={s.lock?.ref ?? ""} />
+        <Field label="binary" value={s.lock?.binary ?? ""} />
+        <Field label="lock state" value={s.lock?.state ?? ""} />
+      </dl>
+      <div className="text-[11px] text-[var(--muted)] mt-1">
+        {lockNote(s.lock)}
+      </div>
+    </div>
+  );
+}
+
 function FiresTable({ fires }: { fires: CronFire[] }) {
   if (fires.length === 0) {
     return (
@@ -551,6 +683,7 @@ function FiresTable({ fires }: { fires: CronFire[] }) {
             <Th>Due</Th>
             <Th>Decided</Th>
             <Th>Outcome</Th>
+            <Th>Args</Th>
             <Th>Run</Th>
             <Th>Run status</Th>
             <Th>Detail</Th>
@@ -567,6 +700,9 @@ function FiresTable({ fires }: { fires: CronFire[] }) {
               </Td>
               <Td>
                 <Pill tone={outcomeTone(f.outcome)} label={outcomeLabel(f.outcome)} />
+              </Td>
+              <Td mono muted>
+                {fmtArgs(f.args)}
               </Td>
               <Td>{f.run_id ? <RunLink id={f.run_id} /> : "-"}</Td>
               <Td>
@@ -602,7 +738,15 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Pill({ tone, label }: { tone: CronTone; label: string }) {
+function Pill({
+  tone,
+  label,
+  title,
+}: {
+  tone: CronTone;
+  label: string;
+  title?: string;
+}) {
   const cls =
     tone === "ok"
       ? "bg-green-500/15 text-green-400"
@@ -613,6 +757,7 @@ function Pill({ tone, label }: { tone: CronTone; label: string }) {
           : "bg-gray-500/15 text-gray-400";
   return (
     <span
+      title={title}
       className={`inline-block px-2 py-0.5 rounded text-xs font-mono ${cls}`}
     >
       {label}

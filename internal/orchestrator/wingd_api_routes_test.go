@@ -18,6 +18,14 @@ import (
 // weight; it exists to make the classification exhaustive, so a new
 // controller route fails the gate below instead of defaulting silently.
 var apiWriteRoutes = []string{
+	"PUT /api/v1/crons/repos",
+	"DELETE /api/v1/crons/repos",
+	"POST /api/v1/crons/{id}/pause",
+	"POST /api/v1/crons/{id}/resume",
+	"POST /api/v1/crons/{id}/run",
+	"POST /api/v1/crons/{id}/disarm",
+	"PUT /api/v1/crons/{id}/override",
+	"DELETE /api/v1/crons/{id}/override",
 	"POST /api/v1/maintenance/reconcile-orphans",
 	"POST /api/v1/pipelines/{name}/profile/contention",
 	"POST /api/v1/pipelines/{name}/profile/observations",

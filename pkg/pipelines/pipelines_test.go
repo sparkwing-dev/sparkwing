@@ -47,7 +47,9 @@ pipelines:
     on:
       push:
         branches: [main]
-      schedule: "0 */6 * * *"
+      schedule:
+        cron: "0 */6 * * *"
+        where: local
       webhook:
         path: /hooks/btd
 `
@@ -62,7 +64,7 @@ pipelines:
 	if p.On.Push == nil || len(p.On.Push.Branches) != 1 || p.On.Push.Branches[0] != "main" {
 		t.Fatalf("push branches mis-parsed: %+v", p.On.Push)
 	}
-	if p.On.Schedule == nil || p.On.Schedule.Cron != "0 */6 * * *" {
+	if len(p.On.Schedule) != 1 || p.On.Schedule[0].Cron != "0 */6 * * *" {
 		t.Fatalf("schedule mis-parsed: %+v", p.On.Schedule)
 	}
 	if p.On.Webhook == nil || p.On.Webhook.Path != "/hooks/btd" {
