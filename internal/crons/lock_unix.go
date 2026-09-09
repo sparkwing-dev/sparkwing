@@ -12,7 +12,7 @@ func flockExclusiveNonblock(f *os.File) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if err == syscall.EWOULDBLOCK { //nolint:errorlint // raw errno from Flock
+	if err == syscall.EWOULDBLOCK {
 		return false, nil
 	}
 	return false, err

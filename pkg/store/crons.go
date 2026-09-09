@@ -101,7 +101,7 @@ const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, d
 // declared, it does not restart its history. ArmedAt defaults to now
 // on a create when the caller leaves it zero, and an empty Overlap
 // means CronOverlapSkip.
-func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error) {
+func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error) {
 	if sched.ID == "" || sched.RepoPath == "" || sched.Pipeline == "" {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: id, repo_path and pipeline required")
 	}
@@ -115,13 +115,13 @@ func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now tim
 	if err != nil {
 		return CronSchedule{}, false, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 
 	var id string
 	err = tx.QueryRowContext(ctx,
 		`SELECT id FROM cron_schedules WHERE repo_path = ? AND pipeline = ?`+tx.forUpdate(),
 		sched.RepoPath, sched.Pipeline).Scan(&id)
-	created := errors.Is(err, sql.ErrNoRows)
+	created = errors.Is(err, sql.ErrNoRows)
 	if err != nil && !created {
 		return CronSchedule{}, false, err
 	}
@@ -152,7 +152,7 @@ UPDATE cron_schedules
 	); err != nil {
 		return CronSchedule{}, false, err
 	}
-	stored, err := getCronScheduleTx(ctx, tx, id)
+	stored, err = getCronScheduleTx(ctx, tx, id)
 	if err != nil {
 		return CronSchedule{}, false, err
 	}
@@ -164,15 +164,14 @@ UPDATE cron_schedules
 
 // ListCronSchedules returns every schedule armed on this host, ordered
 // by repository path then pipeline.
-func (s *Store) ListCronSchedules(ctx context.Context) ([]CronSchedule, error) {
+func (s *Store) ListCronSchedules(ctx context.Context) (out []CronSchedule, err error) {
 	rows, err := s.query(ctx, `SELECT `+cronScheduleColumns+`
   FROM cron_schedules
  ORDER BY repo_path, pipeline`)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []CronSchedule
+	defer closeRowsInto(rows, &err)
 	for rows.Next() {
 		sched, err := scanCronSchedule(rows.Scan)
 		if err != nil {
@@ -222,12 +221,12 @@ func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *tim
 // DeleteCronSchedulesForRepo disarms every schedule of one repository
 // checkout and returns how many rows went, so a caller can report an
 // uninstall that found nothing.
-func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error) {
+func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM cron_fires
           WHERE schedule_id IN (SELECT id FROM cron_schedules WHERE repo_path = ?)`, repoPath); err != nil {
@@ -256,7 +255,7 @@ func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string)
 // A fired outcome also stamps last_fired_at, last_run_id and
 // last_outcome; every other outcome stamps last_outcome alone, leaving
 // the last successful launch on the row. fire.ID is minted when empty.
-func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) error {
+func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error) {
 	if fire != nil && fire.Outcome == "" {
 		return fmt.Errorf("ResolveCronDue: fire outcome required")
 	}
@@ -267,7 +266,7 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 
 	var exists string
 	switch err := tx.QueryRowContext(ctx,
@@ -334,7 +333,7 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 
 // ListCronFires returns a schedule's resolved instants newest first.
 // A limit of zero or less reads the newest 50.
-func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) ([]CronFire, error) {
+func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) (out []CronFire, err error) {
 	if limit <= 0 {
 		limit = defaultCronFireLimit
 	}
@@ -346,8 +345,7 @@ func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []CronFire
+	defer closeRowsInto(rows, &err)
 	for rows.Next() {
 		var fire CronFire
 		var dueNS, decidedNS int64
@@ -374,7 +372,7 @@ func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 	for _, kv := range [][2]string{
 		{metaKeyCronLastTickAt, strconv.FormatInt(atNS, 10)},
 		{metaKeyCronLastTickHost, tick.Host},
@@ -393,15 +391,14 @@ func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error {
 
 // GetCronTick returns the last recorded tick, zero-valued when this
 // host has never ticked.
-func (s *Store) GetCronTick(ctx context.Context) (CronTick, error) {
+func (s *Store) GetCronTick(ctx context.Context) (tick CronTick, err error) {
 	rows, err := s.query(ctx, `SELECT key, value FROM sparkwing_meta WHERE key IN (?, ?, ?, ?)`,
 		metaKeyCronLastTickAt, metaKeyCronLastTickHost,
 		metaKeyCronLastTickVersion, metaKeyCronLastTickError)
 	if err != nil {
 		return CronTick{}, err
 	}
-	defer func() { _ = rows.Close() }()
-	var tick CronTick
+	defer closeRowsInto(rows, &err)
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
@@ -496,4 +493,21 @@ func nanosToTime(ns sql.NullInt64) *time.Time {
 	}
 	at := time.Unix(0, ns.Int64)
 	return &at
+}
+
+// rollbackUnlessDone rolls a transaction back on the way out; a transaction
+// already committed reports ErrTxDone, which is the expected case and dropped,
+// while any other rollback failure becomes the function's error.
+func rollbackUnlessDone(tx *storeTx, err *error) {
+	if rerr := tx.Rollback(); rerr != nil && !errors.Is(rerr, sql.ErrTxDone) && *err == nil {
+		*err = rerr
+	}
+}
+
+// closeRowsInto closes a result set on the way out and surfaces a close
+// failure as the function's error when nothing else already failed.
+func closeRowsInto(rows *sql.Rows, err *error) {
+	if cerr := rows.Close(); cerr != nil && *err == nil {
+		*err = cerr
+	}
 }

@@ -90,7 +90,10 @@ func openCrons(nowRFC string) (*cronsSession, func(), error) {
 			slog.Default().Warn("close runs store", "path", paths.StateDB(), "error", cerr)
 		}
 	}
-	host, _ := os.Hostname()
+	host, err := os.Hostname()
+	if err != nil {
+		host = ""
+	}
 	session := &cronsSession{
 		svc: &crons.Service{
 			Store:    st,
