@@ -129,7 +129,7 @@ func Main() {
 
 	pipelineYAML := loadPipelineYAML(pipeline)
 
-	delegate := selectLocalRenderer()
+	delegate := selectRunRenderer()
 	opts := Options{
 		Pipeline:                  pipeline,
 		RunHandlePath:             os.Getenv("SPARKWING_RUN_HANDLE_FILE"),
@@ -233,13 +233,21 @@ func Main() {
 		defer stopParentGuard()
 	}
 	res, err := RunLocal(runCtx, paths, opts)
+	if renderer, ok := delegate.(*compactRunRenderer); ok {
+		renderer.finishResult(res, err)
+		if renderer.Err() != nil {
+			fmt.Fprintln(os.Stderr, "run output:", renderer.Err())
+			cleanupFleet()
+			os.Exit(1)
+		}
+	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "run:", err)
+		fmt.Fprintln(os.Stderr, "run:", runDisplayError(delegate, err))
 		cleanupFleet()
 		os.Exit(1)
 	}
 	if res != nil && res.Error != nil {
-		fmt.Fprintln(os.Stderr, "run:", res.Error)
+		fmt.Fprintln(os.Stderr, "run:", runDisplayError(delegate, res.Error))
 	}
 	if res != nil && res.Status != "success" {
 		cleanupFleet()

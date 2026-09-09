@@ -20,6 +20,13 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **cli (Breaking):** Piped foreground runs now emit a compact NDJSON summary
+  instead of every log event. Node progress and failure details are bounded;
+  stored logs stay complete. Add `--sw-verbose` for the full live event stream.
+  See [compact run output migration](docs/migrations/compact-run-output.md).
+
 ### Fixed
 
 - **local execution:** macOS admission reads available memory from VM page
