@@ -297,8 +297,9 @@ var triggerBlocks = map[string]string{
       # GitHub webhook at this pipeline.
       push: {}
 `,
-	"schedule": `      # Cron cadence (UTC), declarative: drive it with an external
-      # timer that runs this pipeline. 09:00 daily.
+	"schedule": `      # Cron cadence, read in UTC. 09:00 daily. Arm it on this
+      # host with ` + "`sparkwing crons install`" + `; expand it to a mapping
+      # (cron, tz, overlap, catch_up) to change the zone or the policy.
       schedule: "0 9 * * *"
 `,
 	"manual": "",
@@ -412,7 +413,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 			color.Green("+"), color.Bold(strings.Join(events, " + ")+" trigger"))
 
 		if slices.Contains(events, "schedule") {
-			fmt.Printf("    %s\n", color.Dim("schedule: declarative cadence; drive it with an external timer"))
+			fmt.Printf("    %s\n", color.Dim("schedule: arm it on this host with `sparkwing crons install`"))
 		}
 		if slices.Contains(events, "push") || slices.Contains(events, "pull_request") {
 			fmt.Printf("    %s\n", color.Dim("not yet live: point the repo's GitHub webhook at this pipeline to deliver the event"))
@@ -776,6 +777,9 @@ import (
 //
 //   on:
 //     schedule: "0 8 * * *"   # daily at 08:00 UTC
+//
+// Then arm it on the host that should run it with
+// "sparkwing crons install".
 //
 // See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
 type {{STRUCT}} struct{ sw.Base }

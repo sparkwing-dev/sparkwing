@@ -62,8 +62,8 @@ pipelines:
 	if p.On.Push == nil || len(p.On.Push.Branches) != 1 || p.On.Push.Branches[0] != "main" {
 		t.Fatalf("push branches mis-parsed: %+v", p.On.Push)
 	}
-	if p.On.Schedule != "0 */6 * * *" {
-		t.Fatalf("schedule mis-parsed: %q", p.On.Schedule)
+	if p.On.Schedule == nil || p.On.Schedule.Cron != "0 */6 * * *" {
+		t.Fatalf("schedule mis-parsed: %+v", p.On.Schedule)
 	}
 	if p.On.Webhook == nil || p.On.Webhook.Path != "/hooks/btd" {
 		t.Fatalf("webhook mis-parsed: %+v", p.On.Webhook)

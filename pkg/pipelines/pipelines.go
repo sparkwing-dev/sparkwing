@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
 )
 
 // Config is one pipeline registry document.
@@ -176,11 +180,9 @@ type Triggers struct {
 	// receives via webhook. The run checks out the PR head; base ref
 	// and PR number reach the pipeline on RunContext.Trigger.PullRequest.
 	PullRequest *PullRequestTrigger `yaml:"pull_request,omitempty"`
-	// Schedule is a cron expression (UTC) recorded on the pipeline.
-	// It is declarative: sparkwing stores and displays it but never
-	// evaluates it, so a scheduled pipeline fires only when an external
-	// timer invokes it.
-	Schedule string `yaml:"schedule,omitempty"`
+	// Schedule fires the pipeline on a cron cadence. It accepts a bare
+	// cron string or a mapping of cron, tz, overlap and catch_up.
+	Schedule *ScheduleTrigger `yaml:"schedule,omitempty"`
 	// Webhook exposes a custom HTTP path that fires the pipeline.
 	Webhook *WebhookTrigger `yaml:"webhook,omitempty"`
 	// PreHook fires from the installed git pre-commit hook.
@@ -223,6 +225,161 @@ type PullRequestTrigger struct {
 	// Branches records the intended pull-request base branch globs. It does
 	// not gate webhook dispatch.
 	Branches []string `yaml:"branches,omitempty"`
+}
+
+// ScheduleTrigger fires a pipeline on a cron cadence. Sparkwing evaluates it on every host where
+// `sparkwing crons install` armed the pipeline.
+//
+// The YAML accepts either shape:
+//
+//	schedule: "0 3 * * *"
+//
+//	schedule:
+//	  cron: "0 3 * * *"
+//	  tz: America/Denver
+//	  overlap: queue
+//	  catch_up: 6h
+type ScheduleTrigger struct {
+	// Cron is a five-field cron expression (minute hour day-of-month month day-of-week) with the usual
+	// lists, ranges, steps, month and day names, and the @hourly/@daily/@weekly/@monthly/@yearly aliases.
+	Cron string `yaml:"cron"`
+	// TZ is the IANA zone the expression is read in, such as America/Denver. Default UTC. The word
+	// "local" means the zone of the host that runs the schedule.
+	TZ string `yaml:"tz,omitempty"`
+	// Overlap decides what happens when the cadence comes due while the previous scheduled run is still
+	// running: "skip" (default) records the fire as skipped, "queue" launches it anyway and lets admission order it.
+	Overlap string `yaml:"overlap,omitempty"`
+	// CatchUp is how long after its due minute a fire may still happen when the host was asleep or the
+	// timer was late, as a Go duration such as 1h or 30m. Default 1h; values under 2m are rejected. A due
+	// minute older than the window is recorded as missed.
+	CatchUp string `yaml:"catch_up,omitempty"`
+}
+
+// Schedule field defaults and the vocabulary the validator accepts.
+const (
+	// DefaultScheduleTZ is the zone an empty tz reads the expression in.
+	DefaultScheduleTZ = "UTC"
+	// ScheduleTZLocal is the tz value meaning the zone of the host that runs the schedule.
+	ScheduleTZLocal = "local"
+	// ScheduleOverlapSkip records a fire as skipped while the previous scheduled run is still running.
+	ScheduleOverlapSkip = "skip"
+	// ScheduleOverlapQueue launches a due fire even while the previous scheduled run is still running.
+	ScheduleOverlapQueue = "queue"
+	// DefaultScheduleOverlap is the policy an empty overlap means.
+	DefaultScheduleOverlap = ScheduleOverlapSkip
+)
+
+// DefaultScheduleCatchUp is the window an empty catch_up means.
+const DefaultScheduleCatchUp = time.Hour
+
+func scheduleKnownYAMLFields() map[string]struct{} {
+	return map[string]struct{}{"cron": {}, "tz": {}, "overlap": {}, "catch_up": {}}
+}
+
+// UnmarshalYAML decodes either the scalar form, which sets Cron alone, or a
+// mapping, which sets each field and rejects any key outside the schema.
+func (s *ScheduleTrigger) UnmarshalYAML(node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		return s.UnmarshalYAML(node.Alias)
+	}
+	if node.Kind == yaml.ScalarNode {
+		var cron string
+		if err := node.Decode(&cron); err != nil {
+			return fmt.Errorf("on.schedule: %w", err)
+		}
+		*s = ScheduleTrigger{Cron: cron}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("on.schedule: expected a cron string or a mapping, got %s", nodeKindName(node.Kind))
+	}
+	known := scheduleKnownYAMLFields()
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		if key.Kind != yaml.ScalarNode {
+			continue
+		}
+		if _, ok := known[key.Value]; !ok {
+			return fmt.Errorf("on.schedule: unknown field %q", key.Value)
+		}
+	}
+	type scheduleAlias ScheduleTrigger
+	var raw scheduleAlias
+	if err := node.Decode(&raw); err != nil {
+		return fmt.Errorf("on.schedule: %w", err)
+	}
+	*s = ScheduleTrigger(raw)
+	return nil
+}
+
+// Location resolves TZ to the zone the cron expression is read in.
+func (s *ScheduleTrigger) Location() (*time.Location, error) {
+	switch s.TZ {
+	case "", DefaultScheduleTZ:
+		return time.UTC, nil
+	case ScheduleTZLocal:
+		return time.Local, nil
+	}
+	loc, err := time.LoadLocation(s.TZ)
+	if err != nil {
+		return nil, fmt.Errorf("unknown time zone %q", s.TZ)
+	}
+	return loc, nil
+}
+
+// OverlapPolicy returns the declared overlap policy, or the default when unset.
+func (s *ScheduleTrigger) OverlapPolicy() string {
+	if s.Overlap == "" {
+		return DefaultScheduleOverlap
+	}
+	return s.Overlap
+}
+
+// CatchUpDuration returns the declared catch-up window, or the default when unset.
+func (s *ScheduleTrigger) CatchUpDuration() (time.Duration, error) {
+	if s.CatchUp == "" {
+		return DefaultScheduleCatchUp, nil
+	}
+	d, err := time.ParseDuration(s.CatchUp)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration %q", s.CatchUp)
+	}
+	return d, nil
+}
+
+// Validate reports any problem in the trigger, naming the pipeline and the
+// field at fault. A nil trigger is valid: the pipeline declares no cadence.
+func (s *ScheduleTrigger) Validate(pipeline string) error {
+	if s == nil {
+		return nil
+	}
+	if strings.TrimSpace(s.Cron) == "" {
+		return fmt.Errorf("pipeline %q: on.schedule.cron is required", pipeline)
+	}
+	if _, err := cronspec.Parse(s.Cron); err != nil {
+		return fmt.Errorf("pipeline %q: on.schedule.cron: %w", pipeline, err)
+	}
+	if _, err := s.Location(); err != nil {
+		return fmt.Errorf("pipeline %q: on.schedule.tz: %w", pipeline, err)
+	}
+	switch s.OverlapPolicy() {
+	case ScheduleOverlapSkip, ScheduleOverlapQueue:
+	default:
+		return fmt.Errorf("pipeline %q: on.schedule.overlap: must be %q or %q, got %q",
+			pipeline, ScheduleOverlapSkip, ScheduleOverlapQueue, s.Overlap)
+	}
+	catchUp, err := s.CatchUpDuration()
+	if err != nil {
+		return fmt.Errorf("pipeline %q: on.schedule.catch_up: %w", pipeline, err)
+	}
+	if catchUp < cronspec.MinCatchUp {
+		return fmt.Errorf("pipeline %q: on.schedule.catch_up: must be at least %s, got %s",
+			pipeline, cronspec.MinCatchUp, catchUp)
+	}
+	return nil
 }
 
 // WebhookTrigger exposes an HTTP path that fires the pipeline. The
@@ -289,6 +446,9 @@ func (c *Config) Validate() error {
 		seen[p.Name] = struct{}{}
 
 		if err := p.Guards.Validate(p.Name); err != nil {
+			return err
+		}
+		if err := p.On.Schedule.Validate(p.Name); err != nil {
 			return err
 		}
 	}

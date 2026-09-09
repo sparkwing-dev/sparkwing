@@ -20,6 +20,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+
+	// safety: a systemd or launchd job has no zoneinfo of its own on a slim
+	// host, and a schedule that declares tz: would fail to resolve its zone.
+	_ "time/tzdata"
 )
 
 const fleetUntrackedSourceWarning = "fleet source: every non-ignored untracked file is included; review Git ignores before sharing with enrolled helpers"
@@ -373,6 +377,9 @@ func runSparkwing(args []string) error {
 
 	case "repos":
 		return runRepos(args[1:])
+
+	case "crons":
+		return runCrons(args[1:])
 
 	case "cluster":
 		return runCluster(args[1:])

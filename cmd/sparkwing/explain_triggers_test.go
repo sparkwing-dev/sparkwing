@@ -47,7 +47,7 @@ func TestEveryTriggerKindRenders(t *testing.T) {
 	all := pipelines.Triggers{
 		Push:           &pipelines.PushTrigger{},
 		PullRequest:    &pipelines.PullRequestTrigger{},
-		Schedule:       "0 9 * * *",
+		Schedule:       &pipelines.ScheduleTrigger{Cron: "0 9 * * *"},
 		Webhook:        &pipelines.WebhookTrigger{Path: "/review"},
 		PreHook:        &pipelines.PreHookTrigger{},
 		PostHook:       &pipelines.PostHookTrigger{},
@@ -59,5 +59,24 @@ func TestEveryTriggerKindRenders(t *testing.T) {
 	}
 	if len(describeTriggers(pipelines.Triggers{})) != 0 {
 		t.Error("an empty Triggers rendered a line")
+	}
+}
+
+func TestScheduleDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		trigger pipelines.ScheduleTrigger
+		want    string
+	}{
+		{"defaults", pipelines.ScheduleTrigger{Cron: "0 9 * * *"}, "0 9 * * * (UTC)"},
+		{"zone", pipelines.ScheduleTrigger{Cron: "0 9 * * *", TZ: "America/Denver"}, "0 9 * * * (America/Denver)"},
+		{"default overlap stays quiet", pipelines.ScheduleTrigger{Cron: "0 9 * * *", Overlap: "skip"}, "0 9 * * * (UTC)"},
+		{"policies", pipelines.ScheduleTrigger{Cron: "0 9 * * *", Overlap: "queue", CatchUp: "6h"}, "0 9 * * * (UTC), overlap queue, catch-up 6h0m0s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := scheduleDetail(&tc.trigger); got != tc.want {
+				t.Errorf("scheduleDetail = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

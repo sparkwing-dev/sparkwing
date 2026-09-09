@@ -88,6 +88,11 @@ func init() {
 for the full reference; [`docs/sdk.md`](./docs/sdk.md) is the SDK
 flat reference.
 
+A pipeline that declares an `on.schedule` cadence runs on a cadence from any
+machine you arm with `sparkwing crons install`: one OS timer per host calls
+`sparkwing crons tick` every minute and sparkwing evaluates the cron
+expressions itself. See [`docs/crons.md`](./docs/crons.md).
+
 ## HTTP API
 
 The controller's HTTP API (served by `sparkwing-controller` in

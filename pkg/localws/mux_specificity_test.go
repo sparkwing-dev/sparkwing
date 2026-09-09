@@ -45,6 +45,44 @@ func TestMuxSpecificity_ApiV1Routing(t *testing.T) {
 	}
 }
 
+func TestMuxSpecificity_CronRoutes(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/v1/crons", marker("overview"))
+	mux.Handle("GET /api/v1/crons/{id}", marker("detail"))
+	mux.Handle("POST /api/v1/crons/{id}/pause", marker("pause"))
+	mux.Handle("POST /api/v1/crons/{id}/resume", marker("resume"))
+	mux.Handle("POST /api/v1/crons/{id}/run", marker("run"))
+	mux.Handle("/api/v1/", marker("controller-catchall"))
+
+	cases := []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{http.MethodGet, "/api/v1/crons", "overview"},
+		{http.MethodGet, "/api/v1/crons/crn_0123456789ab", "detail"},
+		{http.MethodPost, "/api/v1/crons/crn_0123456789ab/pause", "pause"},
+		{http.MethodPost, "/api/v1/crons/crn_0123456789ab/resume", "resume"},
+		{http.MethodPost, "/api/v1/crons/crn_0123456789ab/run", "run"},
+		{http.MethodGet, "/api/v1/crons/dotfiles%2Fnightly", "detail"},
+		{http.MethodPost, "/api/v1/crons/dotfiles%2Fnightly/pause", "pause"},
+		{http.MethodGet, "/api/v1/crons/crn_0123456789ab/pause", "controller-catchall"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if got := rec.Header().Get("X-Marker"); got != tc.want {
+				t.Fatalf("%s %s: got %q, want %q", tc.method, tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMuxSpecificity_S3OnlyMode(t *testing.T) {
 	t.Parallel()
 
