@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -13,8 +14,8 @@ func TestBuildSkipsTestOnlyPackageAndTestRunsIt(t *testing.T) {
 	if err := runBuild(context.Background()); err != nil {
 		t.Fatalf("build rejected a test-only package: %v", err)
 	}
-	if err := runTest(context.Background()); err == nil {
-		t.Fatal("test skipped a failing test-only package")
+	if err := runTest(context.Background()); err == nil || !strings.Contains(err.Error(), "fixture failure") {
+		t.Fatalf("test verdict = %v, want fixture test failure", err)
 	}
 }
 

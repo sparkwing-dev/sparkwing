@@ -185,11 +185,11 @@ func checkHomeResolution(ctx context.Context) error {
 		if strings.HasPrefix(file, ".sparkwing/") || strings.Contains(file, "node_modules/") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(root, file))
+		source, err := os.ReadFile(filepath.Join(root, file))
 		if err != nil {
 			continue
 		}
-		code := strippedGoComments(string(data))
+		code := strippedGoComments(string(source))
 		for i, rule := range homeRules {
 			if _, ok := rule.allowed[file]; ok {
 				continue
@@ -352,18 +352,18 @@ func withoutInherited(command string, names []string) string {
 }
 
 func runVet(ctx context.Context) error {
-	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), nil)
+	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), nil, true)
 }
 
 func runBuild(ctx context.Context) error {
-	return forEachGoModule(ctx, "go build", boundedGoCommand(runtime.NumCPU(), "build", "./..."), nil)
+	return forEachGoModule(ctx, "go build", boundedGoCommand(runtime.NumCPU(), "build", "./..."), nil, false)
 }
 
 func runTest(ctx context.Context) error {
 	return withGoTestScratch(func(testRoot string) error {
 		return forEachGoModuleEnv(
 			ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), productTestUnset,
-			map[string]string{"TMPDIR": testRoot},
+			map[string]string{"TMPDIR": testRoot}, true,
 		)
 	})
 }
@@ -381,18 +381,18 @@ func withGoTestScratch(run func(string) error) error {
 	return errors.Join(testErr, cleanupErr)
 }
 
-func forEachGoModule(ctx context.Context, label, command string, unset []string) error {
-	return forEachGoModuleEnv(ctx, label, command, unset, nil)
+func forEachGoModule(ctx context.Context, label, command string, unset []string, includeTestOnly bool) error {
+	return forEachGoModuleEnv(ctx, label, command, unset, nil, includeTestOnly)
 }
 
-func forEachGoModuleEnv(ctx context.Context, label, command string, unset []string, env map[string]string) error {
+func forEachGoModuleEnv(ctx context.Context, label, command string, unset []string, env map[string]string, includeTestOnly bool) error {
 	directories, err := committedModuleDirs(ctx)
 	if err != nil {
 		return err
 	}
 	var failures []string
 	for _, directory := range directories {
-		packages, err := modulePackageArgs(ctx, directory)
+		packages, err := modulePackageArgs(ctx, directory, includeTestOnly)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", directory, err))
 			continue
@@ -417,9 +417,13 @@ func forEachGoModuleEnv(ctx context.Context, label, command string, unset []stri
 		label, len(failures), strings.Join(failures, "\n  - "))
 }
 
-func modulePackageArgs(ctx context.Context, directory string) ([]string, error) {
+func modulePackageArgs(ctx context.Context, directory string, includeTestOnly bool) ([]string, error) {
 	// SAFETY: -e keeps broken product packages in the list for vet/build/test to reject.
-	output, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list -e -f '{{.ImportPath}}' ./...`, directory)).String()
+	format := "{{.ImportPath}}"
+	if !includeTestOnly {
+		format = "{{if or .GoFiles .CgoFiles .InvalidGoFiles .Error .DepsErrors}}{{.ImportPath}}{{end}}"
+	}
+	output, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %q ./...", directory, format)).String()
 	if err != nil {
 		return nil, fmt.Errorf("list module packages: %w", err)
 	}
@@ -453,19 +457,19 @@ func checkEmDashes(ctx context.Context) error {
 	root := regexCheckRoot()
 	var bad []string
 	for _, file := range files {
-		data, err := os.ReadFile(filepath.Join(root, file))
-		if err != nil || len(data) == 0 {
+		source, err := os.ReadFile(filepath.Join(root, file))
+		if err != nil || len(source) == 0 {
 			continue
 		}
 		// SAFETY: Binary files are excluded from text checks.
-		head := data
-		if len(head) > 8192 {
-			head = head[:8192]
+		prefix := source
+		if len(prefix) > 8192 {
+			prefix = prefix[:8192]
 		}
-		if bytes.IndexByte(head, 0) >= 0 {
+		if bytes.IndexByte(prefix, 0) >= 0 {
 			continue
 		}
-		if bytes.Contains(data, []byte("\u2014")) {
+		if bytes.Contains(source, []byte("\u2014")) {
 			bad = append(bad, file)
 		}
 	}
@@ -490,19 +494,19 @@ func checkTrackerIDs(ctx context.Context) error {
 		if file == "CHANGELOG.md" {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(root, file))
-		if err != nil || len(data) == 0 {
+		source, err := os.ReadFile(filepath.Join(root, file))
+		if err != nil || len(source) == 0 {
 			continue
 		}
 		// SAFETY: Binary files are excluded from text checks.
-		head := data
-		if len(head) > 8192 {
-			head = head[:8192]
+		prefix := source
+		if len(prefix) > 8192 {
+			prefix = prefix[:8192]
 		}
-		if bytes.IndexByte(head, 0) >= 0 {
+		if bytes.IndexByte(prefix, 0) >= 0 {
 			continue
 		}
-		if trackerIDPattern.Match(data) {
+		if trackerIDPattern.Match(source) {
 			bad = append(bad, file)
 		}
 	}
