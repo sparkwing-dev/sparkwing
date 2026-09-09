@@ -26,6 +26,7 @@ unlock.
   options before the separator fail before execution setup. Put pipeline-owned options
   that use this prefix after `--`.
 
+## [v0.48.0] - 2026-09-09
 ### Added
 
 - **cli (Breaking):** `sparkwing crons` arms a subset of a repo's schedules,
