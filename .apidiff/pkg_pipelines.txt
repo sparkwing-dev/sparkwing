@@ -11,6 +11,7 @@ func (c *Config) Names() []string
 func (c *Config) PipelinesByEntrypoint() map[string][]*Pipeline
 func (c *Config) Validate() error
 const DefaultScheduleCatchUp = time.Hour
+const DefaultScheduleName = "default"
 const DefaultScheduleOverlap = ScheduleOverlapSkip
 const DefaultScheduleTZ = "UTC"
 type GuardContext struct {
@@ -46,6 +47,7 @@ const KindProfileController
 const KindProfileLocal
 const KindProfileName
 const KindUnknown GuardKind = iota
+const MaxScheduleNameLen = 40
 func Parse(r io.Reader) (*Config, error)
 func ParseGuardToken(raw string) (GuardToken, error)
 type Pipeline struct {
@@ -85,19 +87,31 @@ const ScheduleOverlapQueue = "queue"
 const ScheduleOverlapSkip = "skip"
 const ScheduleTZLocal = "local"
 type ScheduleTrigger struct {
+	Name string
+
 	Cron string
+
+	Where string
 
 	TZ string
 
 	Overlap string
 
 	CatchUp string
+
+	Args map[string]string
 }
 func (s *ScheduleTrigger) CatchUpDuration() (time.Duration, error)
+func (s *ScheduleTrigger) EffectiveName() string
 func (s *ScheduleTrigger) Location() (*time.Location, error)
 func (s *ScheduleTrigger) OverlapPolicy() string
 func (s *ScheduleTrigger) UnmarshalYAML(node *yaml.Node) error
 func (s *ScheduleTrigger) Validate(pipeline string) error
+type ScheduleTriggers []ScheduleTrigger
+func (s *ScheduleTriggers) UnmarshalYAML(node *yaml.Node) error
+func (s ScheduleTriggers) Validate(pipeline string) error
+const ScheduleWhereController = "controller"
+const ScheduleWhereLocal = "local"
 type SecretEntry struct {
 	Name     string
 	Required bool
@@ -110,7 +124,7 @@ type Triggers struct {
 
 	PullRequest *PullRequestTrigger
 
-	Schedule *ScheduleTrigger
+	Schedule ScheduleTriggers
 
 	Webhook *WebhookTrigger
 

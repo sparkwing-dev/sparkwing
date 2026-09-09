@@ -797,68 +797,19 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	triggerEnv := sanitizeTriggerEnv(body.Trigger.Env)
-
-	now := time.Now()
-	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
-		ID:            runID,
+	if err := s.admitTrigger(r.Context(), triggerIntake{
+		RunID:         runID,
 		Pipeline:      body.Pipeline,
 		Args:          body.Args,
-		TriggerSource: body.Trigger.Source,
-		TriggerUser:   body.Trigger.User,
-		TriggerEnv:    triggerEnv,
-		GitBranch:     body.Git.Branch,
-		GitSHA:        body.Git.SHA,
-		Repo:          body.Git.Repo,
-		RepoURL:       body.Git.RepoURL,
-		GithubOwner:   body.Git.GithubOwner,
-		GithubRepo:    body.Git.GithubRepo,
-		CreatedAt:     now,
+		Source:        body.Trigger.Source,
+		User:          body.Trigger.User,
+		Env:           sanitizeTriggerEnv(body.Trigger.Env),
+		Git:           body.Git,
 		ParentRunID:   body.ParentRunID,
 		ParentNodeID:  body.ParentNodeID,
 		RetryOf:       body.RetryOf,
 		RepoInherited: repoInherited,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
-		return
-	}
-
-	if err := s.store.CreateRun(r.Context(), store.Run{
-		ID:            runID,
-		Pipeline:      body.Pipeline,
-		Status:        "pending",
-		TriggerSource: body.Trigger.Source,
-		GitBranch:     body.Git.Branch,
-		GitSHA:        body.Git.SHA,
-		Args:          body.Args,
-		ParentRunID:   body.ParentRunID,
-		Repo:          body.Git.Repo,
-		RepoURL:       body.Git.RepoURL,
-		GithubOwner:   body.Git.GithubOwner,
-		GithubRepo:    body.Git.GithubRepo,
-		RetryOf:       body.RetryOf,
-		CreatedAt:     now,
-		StartedAt:     now,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist run: %w", err))
-		return
-	}
-
-	if err := s.dispatcher.Dispatch(r.Context(), RunRequest{
-		RunID:    runID,
-		Pipeline: body.Pipeline,
-		Args:     body.Args,
-		Trigger: sparkwing.TriggerInfo{
-			Source: body.Trigger.Source,
-			User:   body.Trigger.User,
-		},
-		Git: &sparkwing.Git{
-			Branch:  body.Git.Branch,
-			SHA:     body.Git.SHA,
-			Repo:    body.Git.Repo,
-			RepoURL: body.Git.RepoURL,
-		},
-		ParentRunID: body.ParentRunID,
+		At:            time.Now(),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -867,6 +818,94 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, triggerResp{
 		RunID:  runID,
 		Status: "dispatched",
+	})
+}
+
+// safety: Env arrives sanitized; a caller inside the process supplies only keys
+// a run may read, because nothing filters it again here.
+type triggerIntake struct {
+	RunID         string
+	Pipeline      string
+	Args          map[string]string
+	Source        string
+	User          string
+	Env           map[string]string
+	Git           triggerReqGit
+	ParentRunID   string
+	ParentNodeID  string
+	RetryOf       string
+	RepoInherited bool
+	// safety: a second intake under one key fails with
+	// store.ErrDuplicateIdempotencyKey rather than starting a second run.
+	IdempotencyKey string
+	At             time.Time
+}
+
+// safety: every path that starts a run on this controller writes its three rows
+// here -- the trigger, the pending run, the dispatch -- so an HTTP submission
+// and a schedule the controller fired land identically.
+func (s *Server) admitTrigger(ctx context.Context, in triggerIntake) error {
+	if err := s.store.CreateTrigger(ctx, store.Trigger{
+		ID:             in.RunID,
+		Pipeline:       in.Pipeline,
+		Args:           in.Args,
+		TriggerSource:  in.Source,
+		TriggerUser:    in.User,
+		TriggerEnv:     in.Env,
+		GitBranch:      in.Git.Branch,
+		GitSHA:         in.Git.SHA,
+		Repo:           in.Git.Repo,
+		RepoURL:        in.Git.RepoURL,
+		GithubOwner:    in.Git.GithubOwner,
+		GithubRepo:     in.Git.GithubRepo,
+		CreatedAt:      in.At,
+		ParentRunID:    in.ParentRunID,
+		ParentNodeID:   in.ParentNodeID,
+		RetryOf:        in.RetryOf,
+		RepoInherited:  in.RepoInherited,
+		IdempotencyKey: in.IdempotencyKey,
+	}); err != nil {
+		if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
+			return err
+		}
+		return fmt.Errorf("persist trigger: %w", err)
+	}
+
+	if err := s.store.CreateRun(ctx, store.Run{
+		ID:            in.RunID,
+		Pipeline:      in.Pipeline,
+		Status:        "pending",
+		TriggerSource: in.Source,
+		GitBranch:     in.Git.Branch,
+		GitSHA:        in.Git.SHA,
+		Args:          in.Args,
+		ParentRunID:   in.ParentRunID,
+		Repo:          in.Git.Repo,
+		RepoURL:       in.Git.RepoURL,
+		GithubOwner:   in.Git.GithubOwner,
+		GithubRepo:    in.Git.GithubRepo,
+		RetryOf:       in.RetryOf,
+		CreatedAt:     in.At,
+		StartedAt:     in.At,
+	}); err != nil {
+		return fmt.Errorf("persist run: %w", err)
+	}
+
+	return s.dispatcher.Dispatch(ctx, RunRequest{
+		RunID:    in.RunID,
+		Pipeline: in.Pipeline,
+		Args:     in.Args,
+		Trigger: sparkwing.TriggerInfo{
+			Source: in.Source,
+			User:   in.User,
+		},
+		Git: &sparkwing.Git{
+			Branch:  in.Git.Branch,
+			SHA:     in.Git.SHA,
+			Repo:    in.Git.Repo,
+			RepoURL: in.Git.RepoURL,
+		},
+		ParentRunID: in.ParentRunID,
 	})
 }
 

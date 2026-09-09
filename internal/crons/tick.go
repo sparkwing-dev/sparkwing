@@ -37,13 +37,17 @@ type Decision struct {
 	Outcome  string             `json:"outcome"`
 	RunID    string             `json:"run_id,omitempty"`
 	Detail   string             `json:"detail,omitempty"`
+	// Args are the arguments the launch was given, after this host's
+	// override.
+	Args map[string]string `json:"args,omitempty"`
 }
 
 // Tick is the per-minute entry point the OS timer calls.
 //
-// It takes an exclusive lock on [Service.LockPath], republishes what the armed
-// repositories declare, evaluates every declared unpaused schedule against its
-// cursor, and resolves each due instant: a launch, a skip when the schedule's
+// It takes an exclusive lock on [Service.LockPath] -- unless that is empty,
+// which says the caller holds exclusion of its own -- republishes what the
+// armed repositories declare, evaluates every declared unpaused schedule
+// against its cursor, and resolves each due instant: a launch, a skip when the schedule's
 // previous run is still active and its policy is skip, or a miss when the
 // instant fell outside the catch-up window. Every outcome moves the cursor, so
 // no instant is ever considered twice. Paused and undeclared rows fire
@@ -54,11 +58,15 @@ type Decision struct {
 // the tick. dryRun evaluates and reports without launching anything or writing
 // anything.
 func (s *Service) Tick(ctx context.Context, dryRun bool) (TickReport, error) {
-	unlock, err := lockTick(s.LockPath)
-	if err != nil {
-		return TickReport{}, err
+	// safety: an empty LockPath is a caller that already holds exclusion of its
+	// own, such as the controller's store lease, not a caller that forgot one.
+	if s.LockPath != "" {
+		unlock, err := lockTick(s.LockPath)
+		if err != nil {
+			return TickReport{}, err
+		}
+		defer unlock()
 	}
-	defer unlock()
 
 	now := s.now()
 	report := TickReport{At: now}
@@ -100,9 +108,12 @@ func summarize(errs []string) string {
 }
 
 func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now time.Time, dryRun bool, report *TickReport) {
+	if !s.evaluates(sched) {
+		return
+	}
 	eval, err := prepare(sched)
 	if err != nil {
-		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
+		s.recordUnevaluable(ctx, sched, now, dryRun, report, err)
 		return
 	}
 	if !sched.Declared || sched.Paused {
@@ -130,6 +141,34 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 		}
 	}
 	s.resolveDue(ctx, sched, eval, decision.Due, now, dryRun, report)
+}
+
+// safety: a host's override can break a cadence the config validated, and such
+// a schedule has no due instant to resolve, so the failure is recorded once per
+// episode rather than on every minute tick.
+func (s *Service) recordUnevaluable(
+	ctx context.Context, sched store.CronSchedule, now time.Time, dryRun bool,
+	report *TickReport, cause error,
+) {
+	detail := cause.Error()
+	if sched.Override != nil {
+		detail += "; `sparkwing crons reset " + DisplayName(sched) + "` drops this host's override"
+	}
+	report.Errors = append(report.Errors, fmt.Sprintf("%s: %s", DisplayName(sched), detail))
+	if !sched.Declared || sched.Paused {
+		return
+	}
+	report.Failed++
+	report.Decisions = append(report.Decisions, Decision{
+		Schedule: sched, Due: now, Outcome: store.CronOutcomeFailed, Detail: detail,
+	})
+	if dryRun || sched.LastOutcome == store.CronOutcomeFailed {
+		return
+	}
+	fire := &store.CronFire{DueAt: now, DecidedAt: now, Outcome: store.CronOutcomeFailed, Detail: detail}
+	if err := s.Store.ResolveCronDue(ctx, sched.ID, sched.CursorAt, sched.NextDueAt, fire, now); err != nil {
+		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
+	}
 }
 
 // safety: a cursor left where the pause found it reads as a backlog when the
@@ -197,7 +236,11 @@ func (s *Service) resolveDue(ctx context.Context, sched store.CronSchedule, eval
 ) {
 	outcome, runID, detail := store.CronOutcomeFired, "", ""
 
-	if sched.Overlap == store.CronOverlapSkip && sched.LastRunID != "" {
+	if err := s.pinnedBinaryReady(sched); err != nil {
+		outcome, detail = store.CronOutcomeFailed, err.Error()
+	}
+
+	if outcome == store.CronOutcomeFired && sched.Effective().Overlap == store.CronOverlapSkip && sched.LastRunID != "" {
 		active, err := s.Launcher.Active(ctx, sched.LastRunID, eval.catchUp)
 		switch {
 		case err != nil:
@@ -227,12 +270,14 @@ func (s *Service) resolveDue(ctx context.Context, sched store.CronSchedule, eval
 		report.Failed++
 	}
 	report.Decisions = append(report.Decisions, Decision{
-		Schedule: sched, Due: due, Outcome: outcome, RunID: runID, Detail: detail,
+		Schedule: sched, Due: due, Outcome: outcome, RunID: runID, Detail: detail, Args: eval.args,
 	})
 	if dryRun {
 		return
 	}
-	fire := &store.CronFire{DueAt: due, DecidedAt: now, Outcome: outcome, RunID: runID, Detail: detail}
+	fire := &store.CronFire{
+		DueAt: due, DecidedAt: now, Outcome: outcome, RunID: runID, Detail: detail, Args: eval.args,
+	}
 	if err := s.Store.ResolveCronDue(ctx, sched.ID, due, eval.nextAfter(due), fire, now); err != nil {
 		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
 	}

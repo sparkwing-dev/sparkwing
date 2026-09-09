@@ -5,10 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-func parseSchedule(t *testing.T, body string) *pipelines.ScheduleTrigger {
+func parseSchedule(t *testing.T, body string) pipelines.ScheduleTriggers {
 	t.Helper()
 	cfg, err := pipelines.Parse(strings.NewReader(body))
 	if err != nil {
@@ -21,26 +23,41 @@ func parseSchedule(t *testing.T, body string) *pipelines.ScheduleTrigger {
 	return p.On.Schedule
 }
 
-func TestScheduleTrigger_ScalarForm(t *testing.T) {
-	got := parseSchedule(t, `
+func parseScheduleError(t *testing.T, body string) string {
+	t.Helper()
+	_, err := pipelines.Parse(strings.NewReader(body))
+	if err == nil {
+		t.Fatal("Parse accepted the config")
+	}
+	return err.Error()
+}
+
+// A scalar cannot carry `where`, which is required, so accepting one would arm
+// a schedule nobody chose a side for.
+func TestScheduleTriggers_ScalarFormIsRefusedAtParse(t *testing.T) {
+	body := `
 pipelines:
   - name: nightly
     entrypoint: Nightly
     on:
       schedule: "0 3 * * *"
-`)
-	if got == nil {
-		t.Fatal("schedule not decoded")
+`
+	var cfg pipelines.Config
+	err := yaml.Unmarshal([]byte(body), &cfg)
+	if err == nil {
+		t.Fatal("the bare cron string was accepted")
 	}
-	if got.Cron != "0 3 * * *" {
-		t.Errorf("cron = %q, want %q", got.Cron, "0 3 * * *")
+	for _, want := range []string{"on.schedule", "mapping", "list of mappings", "where"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
 	}
-	if got.TZ != "" || got.Overlap != "" || got.CatchUp != "" {
-		t.Errorf("scalar form set a policy field: %+v", got)
+	if msg := parseScheduleError(t, body); !strings.Contains(msg, "mapping") {
+		t.Errorf("Parse error %q does not name the mapping form", msg)
 	}
 }
 
-func TestScheduleTrigger_MappingForm(t *testing.T) {
+func TestScheduleTriggers_MappingForm(t *testing.T) {
 	got := parseSchedule(t, `
 pipelines:
   - name: nightly
@@ -48,79 +65,194 @@ pipelines:
     on:
       schedule:
         cron: "@daily"
+        where: local
         tz: America/Denver
         overlap: queue
         catch_up: 6h
+        args:
+          region: us-east
 `)
-	if got == nil {
-		t.Fatal("schedule not decoded")
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1: %+v", len(got), got)
 	}
-	want := pipelines.ScheduleTrigger{Cron: "@daily", TZ: "America/Denver", Overlap: "queue", CatchUp: "6h"}
-	if *got != want {
-		t.Errorf("schedule = %+v, want %+v", *got, want)
+	entry := got[0]
+	if entry.Cron != "@daily" || entry.Where != "local" || entry.TZ != "America/Denver" ||
+		entry.Overlap != "queue" || entry.CatchUp != "6h" {
+		t.Errorf("entry = %+v", entry)
+	}
+	if entry.Args["region"] != "us-east" {
+		t.Errorf("args = %v, want region=us-east", entry.Args)
 	}
 }
 
-func TestScheduleTrigger_UnknownKeyRejected(t *testing.T) {
-	_, err := pipelines.Parse(strings.NewReader(`
+func TestScheduleTriggers_ListForm(t *testing.T) {
+	got := parseSchedule(t, `
+pipelines:
+  - name: nightly
+    entrypoint: Nightly
+    on:
+      schedule:
+        - name: host
+          cron: "0 3 * * *"
+          where: local
+        - name: cluster
+          cron: "0 4 * * *"
+          where: controller
+          args:
+            region: us-east
+`)
+	if len(got) != 2 {
+		t.Fatalf("got %d entries, want 2: %+v", len(got), got)
+	}
+	if got[0].EffectiveName() != "host" || got[0].Where != "local" {
+		t.Errorf("first entry = %+v", got[0])
+	}
+	if got[1].EffectiveName() != "cluster" || got[1].Where != "controller" || got[1].Args["region"] != "us-east" {
+		t.Errorf("second entry = %+v", got[1])
+	}
+}
+
+func TestScheduleTriggers_AbsentIsNil(t *testing.T) {
+	got := parseSchedule(t, `
+pipelines:
+  - name: nightly
+    entrypoint: Nightly
+`)
+	if got != nil {
+		t.Errorf("a pipeline with no on: block decoded %+v", got)
+	}
+}
+
+func TestScheduleTriggers_UnknownKeyRejected(t *testing.T) {
+	msg := parseScheduleError(t, `
 pipelines:
   - name: nightly
     entrypoint: Nightly
     on:
       schedule:
         cron: "0 3 * * *"
+        where: local
         timezone: UTC
-`))
-	if err == nil {
-		t.Fatal("Parse accepted an unknown schedule key")
-	}
-	if !strings.Contains(err.Error(), `"timezone"`) {
-		t.Errorf("error does not name the key: %v", err)
+`)
+	if !strings.Contains(msg, `"timezone"`) {
+		t.Errorf("error does not name the key: %s", msg)
 	}
 }
 
-func TestScheduleTrigger_SequenceRejected(t *testing.T) {
-	_, err := pipelines.Parse(strings.NewReader(`
+func TestScheduleTriggers_ScalarListRejected(t *testing.T) {
+	msg := parseScheduleError(t, `
 pipelines:
   - name: nightly
     entrypoint: Nightly
     on:
       schedule: ["0 3 * * *"]
-`))
-	if err == nil {
-		t.Fatal("Parse accepted a sequence")
-	}
-	if !strings.Contains(err.Error(), "sequence") {
-		t.Errorf("error does not name the node kind: %v", err)
+`)
+	if !strings.Contains(msg, "mapping") {
+		t.Errorf("error does not say a list entry must be a mapping: %s", msg)
 	}
 }
 
-func TestScheduleTrigger_ValidationErrors(t *testing.T) {
+func TestScheduleTriggers_ValidationErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		block string
-		want  string
+		want  []string
 	}{
-		{"empty cron", `      schedule: ""`, "on.schedule.cron is required"},
-		{"malformed cron", `      schedule: "0 3 * *"`, "on.schedule.cron"},
-		{"unknown zone", "      schedule:\n        cron: \"0 3 * * *\"\n        tz: Mars/Olympus", "on.schedule.tz"},
-		{"bad overlap", "      schedule:\n        cron: \"0 3 * * *\"\n        overlap: wait", "on.schedule.overlap"},
-		{"unparsable catch_up", "      schedule:\n        cron: \"0 3 * * *\"\n        catch_up: soon", "on.schedule.catch_up"},
-		{"catch_up under the floor", "      schedule:\n        cron: \"0 3 * * *\"\n        catch_up: 30s", "on.schedule.catch_up"},
+		{
+			"empty cron", "      schedule:\n        cron: \"\"\n        where: local",
+			[]string{"on.schedule.cron is required"},
+		},
+		{
+			"malformed cron", "      schedule:\n        cron: \"0 3 * *\"\n        where: local",
+			[]string{"on.schedule.cron"},
+		},
+		{
+			"missing where", "      schedule:\n        cron: \"0 3 * * *\"",
+			[]string{"on.schedule.where is required", "where it fires", `"local"`, `"controller"`, "entry per side"},
+		},
+		{
+			"bad where", "      schedule:\n        cron: \"0 3 * * *\"\n        where: laptop",
+			[]string{"on.schedule.where", `"laptop"`},
+		},
+		{
+			"unknown zone", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        tz: Mars/Olympus",
+			[]string{"on.schedule.tz"},
+		},
+		{
+			"bad overlap", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        overlap: wait",
+			[]string{"on.schedule.overlap"},
+		},
+		{
+			"unparsable catch_up", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        catch_up: soon",
+			[]string{"on.schedule.catch_up"},
+		},
+		{
+			"catch_up under the floor", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        catch_up: 30s",
+			[]string{"on.schedule.catch_up"},
+		},
+		{
+			"bad name charset", "      schedule:\n        name: Nightly_Run\n        cron: \"0 3 * * *\"\n        where: local",
+			[]string{"on.schedule.name must match"},
+		},
+		{
+			"overlong name", "      schedule:\n        name: " + strings.Repeat("a", 41) + "\n        cron: \"0 3 * * *\"\n        where: local",
+			[]string{"on.schedule.name must be at most 40"},
+		},
+		{
+			"bad arg key", "      schedule:\n        cron: \"0 3 * * *\"\n        where: local\n        args:\n          Dry_Run: \"1\"",
+			[]string{"on.schedule.args", `"Dry_Run"`},
+		},
+		{
+			"unnamed entries in a list",
+			"      schedule:\n        - cron: \"0 3 * * *\"\n          where: local\n        - cron: \"0 4 * * *\"\n          where: controller",
+			[]string{"on.schedule[0].name is required"},
+		},
+		{
+			"duplicate names",
+			"      schedule:\n        - name: host\n          cron: \"0 3 * * *\"\n          where: local\n        - name: host\n          cron: \"0 4 * * *\"\n          where: controller",
+			[]string{`schedule "host"`, "duplicate schedule name"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := pipelines.Parse(strings.NewReader(
-				"pipelines:\n  - name: nightly\n    entrypoint: Nightly\n    on:\n" + tc.block + "\n"))
-			if err == nil {
-				t.Fatalf("Parse accepted %s", tc.name)
+			msg := parseScheduleError(t,
+				"pipelines:\n  - name: nightly\n    entrypoint: Nightly\n    on:\n"+tc.block+"\n")
+			for _, want := range tc.want {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error %q does not contain %q", msg, want)
+				}
 			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("error %q does not contain %q", err, tc.want)
-			}
-			if !strings.Contains(err.Error(), `"nightly"`) {
-				t.Errorf("error does not name the pipeline: %v", err)
+			if !strings.Contains(msg, `"nightly"`) {
+				t.Errorf("error does not name the pipeline: %s", msg)
 			}
 		})
+	}
+}
+
+func TestScheduleTriggers_NamedDefaultAccepted(t *testing.T) {
+	got := parseSchedule(t, `
+pipelines:
+  - name: nightly
+    entrypoint: Nightly
+    on:
+      schedule:
+        - name: default
+          cron: "0 3 * * *"
+          where: local
+        - name: cluster
+          cron: "0 4 * * *"
+          where: controller
+`)
+	if len(got) != 2 || got[0].EffectiveName() != "default" {
+		t.Errorf("explicit default name rejected or mis-parsed: %+v", got)
+	}
+}
+
+func TestScheduleTrigger_EffectiveName(t *testing.T) {
+	if got := (&pipelines.ScheduleTrigger{}).EffectiveName(); got != pipelines.DefaultScheduleName {
+		t.Errorf("EffectiveName() = %q, want %q", got, pipelines.DefaultScheduleName)
+	}
+	if got := (&pipelines.ScheduleTrigger{Name: "cluster"}).EffectiveName(); got != "cluster" {
+		t.Errorf("EffectiveName() = %q, want cluster", got)
 	}
 }
 
@@ -186,8 +318,8 @@ func TestScheduleTrigger_CatchUpDuration(t *testing.T) {
 	}
 }
 
-func TestScheduleTrigger_NilValidates(t *testing.T) {
-	var s *pipelines.ScheduleTrigger
+func TestScheduleTriggers_EmptyValidates(t *testing.T) {
+	var s pipelines.ScheduleTriggers
 	if err := s.Validate("nightly"); err != nil {
 		t.Errorf("a pipeline with no schedule failed validation: %v", err)
 	}

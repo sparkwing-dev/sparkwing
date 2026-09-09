@@ -42,6 +42,10 @@ var enumGroups = map[string]struct {
 		file:   "pkg/store/crons.go",
 		values: []string{"CronOverlapSkip", "CronOverlapQueue"},
 	},
+	"store.CronWhere": {
+		file:   "pkg/store/crons.go",
+		values: []string{"CronWhereLocal", "CronWhereController"},
+	},
 	"store.CronOutcome": {
 		file: "pkg/store/crons.go",
 		values: []string{
