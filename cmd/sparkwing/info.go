@@ -84,11 +84,12 @@ type InfoDocs struct {
 }
 
 type InfoProject struct {
-	Found         bool             `json:"found"`
-	SparkwingDir  string           `json:"sparkwing_dir,omitempty"`
-	FoundAbove    bool             `json:"found_above_cwd,omitempty"`
-	Pipelines     InfoPipelinesSum `json:"pipelines,omitempty"`
-	HowToScaffold string           `json:"how_to_scaffold,omitempty"`
+	Found          bool             `json:"found"`
+	SparkwingDir   string           `json:"sparkwing_dir,omitempty"`
+	FoundAbove     bool             `json:"found_above_cwd,omitempty"`
+	Pipelines      InfoPipelinesSum `json:"pipelines,omitempty"`
+	PipelinesError string           `json:"pipelines_error,omitempty"`
+	HowToScaffold  string           `json:"how_to_scaffold,omitempty"`
 }
 
 type InfoPipelinesSum struct {
@@ -301,6 +302,8 @@ func printAgentBlock(w io.Writer) {
 	switch {
 	case !info.Project.Found:
 		fmt.Fprintln(w, "- No `.sparkwing/` yet. `sparkwing pipeline new` bootstraps one; there is no separate init step.")
+	case info.Project.PipelinesError != "":
+		fmt.Fprintf(w, "- `%s` -- pipelines unavailable: %s\n", info.Project.SparkwingDir, info.Project.PipelinesError)
 	default:
 		p := info.Project.Pipelines
 		fmt.Fprintf(w, "- `%s` -- %d pipeline(s): %d triggered, %d manual. `sparkwing pipeline list -o json` names them.\n",
@@ -472,6 +475,8 @@ func gatherInfo() Info {
 			info.Project.FoundAbove = filepath.Dir(sparkwingDir) != cwd
 			if pipelineList, perr := gatherPipelinesCatalog(false); perr == nil {
 				info.Project.Pipelines = summarizePipelines(pipelineList)
+			} else {
+				info.Project.PipelinesError = perr.Error()
 			}
 		}
 	}
@@ -831,7 +836,11 @@ func printInfoTable(info Info) {
 		if p.Total == 1 {
 			noun = "pipeline"
 		}
-		row("project", ".sparkwing/ at "+info.Project.SparkwingDir, fmt.Sprintf("(%d %s: %d triggered, %d manual)", p.Total, noun, p.Triggered, p.Manual))
+		if info.Project.PipelinesError != "" {
+			row("project", ".sparkwing/ at "+info.Project.SparkwingDir, "(pipelines unavailable: "+info.Project.PipelinesError+")")
+		} else {
+			row("project", ".sparkwing/ at "+info.Project.SparkwingDir, fmt.Sprintf("(%d %s: %d triggered, %d manual)", p.Total, noun, p.Triggered, p.Manual))
+		}
 		if info.Project.FoundAbove {
 			row("", color.Cyan("note: found by walking up from the current directory, not in it -- pass -C <dir> (or cd) to target a different repo"), "")
 		}

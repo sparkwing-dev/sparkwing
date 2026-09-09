@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -77,5 +78,38 @@ func TestInfoLeadsWithMissingDeclaredHooks(t *testing.T) {
 	if len(steps) == 0 || !strings.Contains(steps[0].Command, "sparkwing pipeline hooks install") ||
 		!strings.Contains(steps[0].Purpose, "pre-commit") {
 		t.Fatalf("info next steps = %+v, want missing hook repair first", steps)
+	}
+}
+
+func TestInfoReportsInvalidPipelineConfig(t *testing.T) {
+	projectAt(t, "pipelines: [invalid YAML\n")
+	for _, args := range [][]string{{"-o", "json"}, {"-o", "pretty"}, {"--for-agent", "-o", "plain"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			out := captureStdout(t, func() {
+				if err := runInfo(args); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if args[1] == "json" {
+				var report struct {
+					Project struct {
+						PipelinesError string `json:"pipelines_error"`
+					} `json:"project"`
+				}
+				if err := json.Unmarshal([]byte(out), &report); err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(report.Project.PipelinesError, "parse") {
+					t.Fatalf("catalog error absent: %s", out)
+				}
+			} else {
+				if !strings.Contains(out, "pipelines unavailable") || !strings.Contains(out, "parse") {
+					t.Fatalf("catalog error absent: %s", out)
+				}
+				if strings.Contains(out, "0 pipeline") {
+					t.Fatal("failed catalog reported an empty pipeline count")
+				}
+			}
+		})
 	}
 }
