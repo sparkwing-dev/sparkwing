@@ -73,6 +73,13 @@ replay anything.
 `sparkwing crons uninstall` disarms a checkout and drops its history. When
 nothing is left armed anywhere, the OS timer goes with it.
 
+A build installed beside the released binary (`SPARKWING_INSTALL_NAME=sparkwing-crons
+bash bin/install.sh`) can arm and tick on its own, but a scheduled run still
+starts its admission daemon from the `sparkwing` on PATH, and a daemon from a
+different build refuses the run. Set `SPARKWING_WINGD_BIN` to that build's path
+when you run `install`; the unit carries it, so the runs it launches are hosted
+by the same build.
+
 ## The tick model
 
 Install writes one OS timer for the whole host -- a systemd user timer on

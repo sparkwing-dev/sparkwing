@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -215,8 +216,13 @@ func defaultCronsTimerHost(paths orchestrator.Paths) (crontimer.Host, error) {
 		return crontimer.Host{}, err
 	}
 	env := map[string]string{}
-	if v := os.Getenv("SPARKWING_HOME"); v != "" {
-		env["SPARKWING_HOME"] = v
+	// The daemon host is resolved from PATH at run time, so a side-by-side build
+	// (see SPARKWING_INSTALL_NAME in bin/install.sh) names its own daemon here
+	// or its scheduled runs meet the released daemon and refuse the build.
+	for _, key := range []string{"SPARKWING_HOME", wingdclient.HostBinEnv} {
+		if v := os.Getenv(key); v != "" {
+			env[key] = v
+		}
 	}
 	return crontimer.Host{
 		GOOS:       runtime.GOOS,
