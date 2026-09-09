@@ -10,6 +10,42 @@ execute after dispatch and may repeat on retry.
 non-zero so it can gate a push or a CI job. `sparkwing pipeline lint
 --rules` prints the live rule set.
 
+## Adding a pipeline
+
+Start with the scaffold so the Go registration and YAML catalog entry are
+created together:
+
+```sh
+sparkwing pipeline new --name deploy --template minimal
+```
+
+`sparkwing.Register` connects a name to its Go implementation in the
+pipeline binary. `.sparkwing/sparkwing.yaml` defines the repository catalog
+and its triggers, defaults, and guards. `sparkwing pipeline list` reads that
+catalog without compiling Go, so a Go registration alone will not appear.
+
+When adding a pipeline by hand, pair its registration in `.sparkwing/jobs/`:
+
+```go
+func init() {
+    sparkwing.Register("deploy", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+        return &Deploy{}
+    })
+}
+```
+
+with an entry under `pipelines:` in `.sparkwing/sparkwing.yaml`:
+
+```yaml
+pipelines:
+  - name: deploy
+    entrypoint: Deploy
+```
+
+The `name` matches the registration, and `entrypoint` names the Go type.
+Run `sparkwing pipeline list` to confirm the catalog entry, then
+`sparkwing pipeline lint` to check the pipeline source and guards.
+
 ## Sequencing jobs with `Needs`
 
 A multi-job pipeline dispatches in the order its edges require, not the
