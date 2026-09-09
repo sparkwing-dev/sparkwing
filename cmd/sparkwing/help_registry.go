@@ -2785,10 +2785,11 @@ var cmdHooksInstall = Command{
 	Description: `Installs managed hooks for declared pre_commit, pre_push, and post_commit
 triggers. Existing unmanaged hooks are preserved and reported.
 
-Each gate runs successfully before replacement hooks are published. Existing
-hooks remain callable during verification. Publication uses atomic rename;
+Each gate runs successfully through the invoking executable before replacement
+hooks are published. Existing hooks remain callable during verification. Publication uses atomic rename;
 an installation failure restores prior managed hooks, forwarders, modes,
-and configuration. --no-prove skips gate execution.
+and configuration. A rejected installation exits nonzero and reports its
+reason on stderr. --no-prove skips gate execution.
 
 Without --profile, hooks use --sw-local-only. --profile NAME selects shared
 storage. --fleet processes registered repositories and distinguishes installed

@@ -20,6 +20,26 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cache:** Pipeline binary keys include Go packages named `web`
+- **cache:** Oversized dependency responses and workspace uploads fail before
+  storing truncated content
+- **logs:** Whole-run filesystem logs include child nodes, and S3 log reads
+  keep parent and child output separate
+- **cli:** Adding a pipeline preserves configuration sections after `pipelines`
+- **cli:** Commands resolve project profiles through the same chain as runs
+- **cli:** Rejected hook installations exit nonzero with diagnostics on stderr;
+  gate proofs use the invoking executable
+- **logs:** Terminal summaries strip unsafe control sequences
+- **logs:** Live logs and run events survive long-running jobs and quiet intervals
+  while individual writes retain a timeout
+- **web:** Read-only local consoles reject log append and deletion requests
+- **telemetry:** Initialization preserves the configured logger and log level
+  when OTLP logging is disabled
+- **sdk:** Fileset hashes distinguish file boundaries and permissions, and
+  report unreadable inputs. Existing hash-derived image tags change once.
+
 ## [v0.48.1] - 2026-09-09
 ### Changed
 

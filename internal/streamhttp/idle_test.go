@@ -16,7 +16,7 @@ func TestWriterAllowsHTTP2IdleIntervals(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		// HTTP/2 aborts the stream when an armed deadline expires, even without a write.
+		// safety: HTTP/2 aborts an idle stream when its write deadline expires.
 		time.Sleep(60 * time.Millisecond)
 		for _, line := range []string{": open\n\n", "data: late\n\n"} {
 			if _, err := io.WriteString(out, line); err != nil {
