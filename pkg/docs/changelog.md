@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.46.0] - 2026-09-09
 ### Changed
 
 - **cli (Breaking):** Dashboard and consumer lifecycle commands emit compact
