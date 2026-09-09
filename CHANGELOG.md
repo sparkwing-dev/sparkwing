@@ -20,7 +20,18 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **cli:** `sparkwing doctor --timeout` bounds the daemon and local-state
+  checks, defaulting to the 10 seconds doctor always used. Each check takes a
+  slice of it, so one unanswering daemon leaves the rest of the report its
+  budget, and a sweep that runs out prints what it reached alongside the error
+
 ### Fixed
+
+- **cli:** `sparkwing doctor` names a wedged admission daemon -- one that
+  accepts connections and answers nothing -- and the commands that recover it,
+  instead of reporting a raw socket read timeout the operator has to interpret
 
 - **cache:** Pipeline binary keys include Go packages named `web`
 - **cache:** Oversized dependency responses and workspace uploads fail before

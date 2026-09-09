@@ -1781,17 +1781,26 @@ version mismatches, quarantined ledgers, and capacity measurement problems.
 It names the reset command for excessive learned demand floors.
 
 Standalone stores are listed with run counts and the oldest run's age.
-Inspect their records before deleting a store directory.`,
+Inspect their records before deleting a store directory.
+
+--timeout bounds the daemon and local-state checks, each taking a slice of it,
+so a daemon that accepts connections and answers nothing is reported as wedged
+rather than spending the whole budget. Recovering a wedged daemon means
+stopping the process holding its socket; a restart needs a handshake it will
+not answer. When the budget runs out mid-sweep, doctor prints what it reached
+alongside the error.`,
 	Flags: []FlagSpec{
 		{Name: "dry-run", Desc: "Report what would be repaired without changing anything", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
+		{Name: "timeout", Argument: "DURATION", Desc: "Budget for the daemon and local-state checks; each takes a slice of it", Default: "10s", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
 		{"Diagnose and repair now", "sparkwing doctor"},
 		{"Report without changing anything", "sparkwing doctor --dry-run"},
 		{"Agent-readable report", "sparkwing doctor -o json"},
+		{"Answer quickly on a machine that is already stuck", "sparkwing doctor --timeout 3s"},
 	},
 }
 
