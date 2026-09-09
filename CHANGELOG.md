@@ -27,6 +27,7 @@ code change to unlock.
 
 - **cli:** Documentation searches reuse the embedded catalog instead of rebuilding it for every document
 - **cache:** Keep registry responses with different Accept headers in separate cache entries
+- **docs:** Keep hash-leading list continuations in their list items
 
 ## [v0.47.0] - 2026-09-09
 ### Added
