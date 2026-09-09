@@ -175,9 +175,16 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		return fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
 	}
 
-	binPath, err := cache.compile(sparkwingDir)
+	binPath, err := pinnedTriggerBinary(trig)
 	if err != nil {
-		return fmt.Errorf("compile %s: %w", sparkwingDir, err)
+		return err
+	}
+	pinned := binPath != ""
+	if !pinned {
+		//nolint:contextcheck // the compile cache owns its own context, as it did before the pin.
+		if binPath, err = cache.compile(sparkwingDir); err != nil {
+			return fmt.Errorf("compile %s: %w", sparkwingDir, err)
+		}
 	}
 
 	logger.Info(
@@ -186,6 +193,7 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		"pipeline", trig.Pipeline,
 		"repo", trig.Repo,
 		"repo_dir", repoDir,
+		"pinned", pinned,
 	)
 
 	args := []string{"handle-trigger", "--local"}
@@ -378,6 +386,41 @@ const SubmitPriorityKey = "_SPARKWING_SUBMIT_PRIORITY"
 // is the authoritative join; this key answers the question from the run's own
 // row, which is where an operator reading `runs get` starts.
 const CronScheduleKey = "_SPARKWING_CRON_SCHEDULE"
+
+// CronBinaryKey carries the pipeline binary a locked cron schedule pinned at
+// arming time. The consumer execs that file instead of compiling the checkout,
+// so a checkout updated between arming and three in the morning cannot change
+// what the unattended run executes.
+const CronBinaryKey = "_SPARKWING_CRON_BINARY"
+
+// safety: the pin is what keeps an updated checkout out of an unattended run,
+// so a pin that cannot be executed fails the run rather than falling back to
+// compiling the checkout.
+func pinnedTriggerBinary(trig *store.Trigger) (string, error) {
+	if trig == nil {
+		return "", nil
+	}
+	path := strings.TrimSpace(trig.TriggerEnv[CronBinaryKey])
+	if path == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("the cron schedule pinned %q, which is not an absolute path", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf(
+			"the pipeline binary this cron schedule pinned is gone from %s, and the pin is what keeps an "+
+				"updated checkout from changing what runs: %w. Re-run `sparkwing crons install` to pin the "+
+				"checkout as it stands, or `sparkwing crons unlock` to follow it", path, err)
+	}
+	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf(
+			"the pipeline binary this cron schedule pinned at %s is not executable; re-run "+
+				"`sparkwing crons install` to pin it again", path)
+	}
+	return path, nil
+}
 
 func submittedTriggerPriority(trig *store.Trigger) string {
 	if trig == nil {

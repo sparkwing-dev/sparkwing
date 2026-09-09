@@ -21,18 +21,23 @@ import (
 // safety: a shape that drifts from web/src/lib/api.ts renders undefined in the dashboard.
 var (
 	cronScheduleKeys = []string{
-		"armed_at", "catch_up_ns", "cron", "declared", "id", "last_fired_at",
-		"last_outcome", "last_run_id", "name", "next_due_at", "overlap",
-		"paused", "pipeline", "repo_path", "state", "tz", "updated_at",
+		"args", "armed_at", "catch_up_ns", "cron", "declared", "effective", "id",
+		"last_fired_at", "last_outcome", "last_run_id", "lock", "name",
+		"next_due_at", "overlap", "override", "paused", "pipeline", "repo_path",
+		"schedule_name", "state", "state_detail", "tz", "updated_at", "where",
 	}
-	cronHealthKeys = []string{
-		"armed", "detail", "last_tick", "paused", "schedules", "tick_stale",
-		"timer", "undeclared",
+	cronLockKeys      = []string{"binary", "digest", "ref", "state"}
+	cronOverrideKeys  = []string{"fields", "set_at", "stale"}
+	cronEffectiveKeys = []string{"args", "catch_up_ns", "cron", "overlap", "tz"}
+	cronHealthKeys    = []string{
+		"ahead", "armed", "detail", "following", "last_tick", "locked",
+		"missing_binary", "paused", "remedy", "schedules", "stale_override",
+		"tick_stale", "timer", "undeclared",
 	}
 	cronTimerKeys = []string{"binary", "detail", "enabled", "foreign", "installed", "path", "stale"}
 	cronTickKeys  = []string{"at", "error", "host", "version"}
 	cronFireKeys  = []string{
-		"decided_at", "detail", "due_at", "id", "outcome", "run_id",
+		"args", "decided_at", "detail", "due_at", "id", "outcome", "run_id",
 		"run_status", "schedule_id",
 	}
 )
@@ -42,6 +47,7 @@ type cronFixture struct {
 	mux    *http.ServeMux
 	store  *store.Store
 	paths  orchestrator.Paths
+	repo   string
 	nights string
 	weekly string
 }
@@ -74,18 +80,27 @@ func newCronFixture(t *testing.T, readOnly bool) *cronFixture {
     on:
       schedule:
         cron: "0 3 * * *"
+        where: local
         tz: America/Denver
         catch_up: 1h
+        args:
+          depth: deep
   - name: weekly
     entrypoint: Weekly
     on:
-      schedule: "0 4 * * 0"
+      schedule:
+        - name: host
+          cron: "0 4 * * 0"
+          where: local
+        - name: cluster
+          cron: "0 5 * * 0"
+          where: controller
 `
 	if err := os.WriteFile(filepath.Join(cfgDir, "sparkwing.yaml"), []byte(config), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	svc := &crons.Service{Store: st, ArmedBy: "tester@test-host"}
-	if _, err := svc.Arm(context.Background(), repo, nil); err != nil {
+	if _, err := svc.Arm(context.Background(), repo, crons.ArmOptions{}); err != nil {
 		t.Fatalf("arm %s: %v", repo, err)
 	}
 
@@ -94,8 +109,9 @@ func newCronFixture(t *testing.T, readOnly bool) *cronFixture {
 		mux:    http.NewServeMux(),
 		store:  st,
 		paths:  paths,
-		nights: crons.ScheduleID(repo, "nightly"),
-		weekly: crons.ScheduleID(repo, "weekly"),
+		repo:   repo,
+		nights: crons.ScheduleID(repo, "nightly", ""),
+		weekly: crons.ScheduleID(repo, "weekly", "host"),
 	}
 	registerCronRoutes(fx.mux, fx.api)
 	return fx
@@ -109,6 +125,7 @@ func (fx *cronFixture) fire(t *testing.T, scheduleID, outcome, runID, detail str
 		Outcome:   outcome,
 		RunID:     runID,
 		Detail:    detail,
+		Args:      map[string]string{"depth": "deep"},
 	}, at)
 	if err != nil {
 		t.Fatalf("resolve due instant: %v", err)
@@ -197,6 +214,25 @@ func TestCronsOverview_MatchesTheDashboardContract(t *testing.T) {
 	if nightly["name"] != "dotfiles/nightly" || nightly["state"] != "armed" || nightly["cron"] != "0 3 * * *" {
 		t.Errorf("nightly = %+v", nightly)
 	}
+	if nightly["schedule_name"] != "default" || nightly["where"] != "local" {
+		t.Errorf("nightly identity = %+v", nightly)
+	}
+	wantKeys(t, "schedule.lock", objectAt(t, nightly, "lock"), cronLockKeys)
+	wantKeys(t, "schedule.override", objectAt(t, nightly, "override"), cronOverrideKeys)
+	effective := objectAt(t, nightly, "effective")
+	wantKeys(t, "schedule.effective", effective, cronEffectiveKeys)
+	if effective["cron"] != "0 3 * * *" || effective["catch_up_ns"] != float64(time.Hour) {
+		t.Errorf("effective = %+v", effective)
+	}
+	if objectAt(t, nightly, "args")["depth"] != "deep" || objectAt(t, effective, "args")["depth"] != "deep" {
+		t.Errorf("declared args = %+v", nightly["args"])
+	}
+	if objectAt(t, nightly, "lock")["state"] != crons.LockFollows {
+		t.Errorf("a schedule armed with no pin: %+v", nightly["lock"])
+	}
+	if byID[crons.ScheduleID(fx.repo, "weekly", "cluster")] != nil {
+		t.Error("a controller entry reached this host's overview")
+	}
 	if nightly["tz"] != "America/Denver" || nightly["catch_up_ns"] != float64(time.Hour) {
 		t.Errorf("nightly declaration = %+v", nightly)
 	}
@@ -239,6 +275,9 @@ func TestCronDetail_CarriesFiresRunStatusAndUpcoming(t *testing.T) {
 	}
 	first := fires[0].(map[string]any)
 	wantKeys(t, "fire", first, cronFireKeys)
+	if objectAt(t, first, "args")["depth"] != "deep" {
+		t.Errorf("a fire does not carry the arguments it launched with: %+v", first["args"])
+	}
 	if first["run_id"] != "run_gone" {
 		t.Errorf("fires are not newest first: %+v", first)
 	}

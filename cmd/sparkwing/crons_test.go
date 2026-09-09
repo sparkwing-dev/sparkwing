@@ -70,7 +70,9 @@ const cronsMinutelyRepo = `pipelines:
   - name: every-minute
     entrypoint: EveryMinute
     on:
-      schedule: "* * * * *"
+      schedule:
+        cron: "* * * * *"
+        where: local
 `
 
 func TestCronsInstallArmsTheRepoAndInstallsTheTimer(t *testing.T) {
@@ -201,7 +203,9 @@ func TestCronsRunLaunchesRegardlessOfCadence(t *testing.T) {
   - name: yearly
     entrypoint: Yearly
     on:
-      schedule: "@yearly"
+      schedule:
+        cron: "@yearly"
+        where: local
 `)
 	captureStdout(t, func() {
 		if err := runCronsInstall([]string{"--repo", repo, "--no-prove", "--no-timer", "-o", "pretty"}); err != nil {
@@ -242,7 +246,9 @@ func TestCronsListAndNextEmitNDJSON(t *testing.T) {
   - name: nightly
     entrypoint: Nightly
     on:
-      schedule: "0 3 * * *"
+      schedule:
+        cron: "0 3 * * *"
+        where: local
 `} {
 		repo := cronsTestRepo(t, body)
 		captureStdout(t, func() {
@@ -262,7 +268,7 @@ func TestCronsListAndNextEmitNDJSON(t *testing.T) {
 		t.Fatalf("list emitted %d row(s):\n%s", len(rows), list)
 	}
 	for _, r := range rows {
-		if r.Name == "" || r.State != crons.StateArmed {
+		if r.Display == "" || r.State != crons.StateArmed {
 			t.Errorf("row: %+v", r)
 		}
 	}

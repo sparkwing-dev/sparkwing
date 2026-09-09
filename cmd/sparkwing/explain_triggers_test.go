@@ -68,18 +68,36 @@ func TestScheduleDetail(t *testing.T) {
 		trigger pipelines.ScheduleTrigger
 		want    string
 	}{
-		{"defaults", pipelines.ScheduleTrigger{Cron: "0 9 * * *", Where: "local"},
-			"default: 0 9 * * * (UTC) where local"},
-		{"named entry", pipelines.ScheduleTrigger{Name: "cluster", Cron: "0 9 * * *", Where: "controller"},
-			"cluster: 0 9 * * * (UTC) where controller"},
-		{"zone", pipelines.ScheduleTrigger{Cron: "0 9 * * *", TZ: "America/Denver", Where: "local"},
-			"default: 0 9 * * * (America/Denver) where local"},
-		{"default overlap stays quiet", pipelines.ScheduleTrigger{Cron: "0 9 * * *", Overlap: "skip", Where: "local"},
-			"default: 0 9 * * * (UTC) where local"},
-		{"policies", pipelines.ScheduleTrigger{Cron: "0 9 * * *", Overlap: "queue", CatchUp: "6h", Where: "local"},
-			"default: 0 9 * * * (UTC) where local, overlap queue, catch-up 6h0m0s"},
-		{"args", pipelines.ScheduleTrigger{Cron: "0 9 * * *", Where: "local", Args: map[string]string{"region": "us-east", "dry-run": "true"}},
-			"default: 0 9 * * * (UTC) where local, arg dry-run=true, arg region=us-east"},
+		{
+			"defaults",
+			pipelines.ScheduleTrigger{Cron: "0 9 * * *", Where: "local"},
+			"default: 0 9 * * * (UTC) where local",
+		},
+		{
+			"named entry",
+			pipelines.ScheduleTrigger{Name: "cluster", Cron: "0 9 * * *", Where: "controller"},
+			"cluster: 0 9 * * * (UTC) where controller",
+		},
+		{
+			"zone",
+			pipelines.ScheduleTrigger{Cron: "0 9 * * *", TZ: "America/Denver", Where: "local"},
+			"default: 0 9 * * * (America/Denver) where local",
+		},
+		{
+			"default overlap stays quiet",
+			pipelines.ScheduleTrigger{Cron: "0 9 * * *", Overlap: "skip", Where: "local"},
+			"default: 0 9 * * * (UTC) where local",
+		},
+		{
+			"policies",
+			pipelines.ScheduleTrigger{Cron: "0 9 * * *", Overlap: "queue", CatchUp: "6h", Where: "local"},
+			"default: 0 9 * * * (UTC) where local, overlap queue, catch-up 6h0m0s",
+		},
+		{
+			"args",
+			pipelines.ScheduleTrigger{Cron: "0 9 * * *", Where: "local", Args: map[string]string{"region": "us-east", "dry-run": "true"}},
+			"default: 0 9 * * * (UTC) where local, arg dry-run=true, arg region=us-east",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := scheduleDetail(&tc.trigger); got != tc.want {

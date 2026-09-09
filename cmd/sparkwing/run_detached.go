@@ -189,6 +189,10 @@ type submission struct {
 	Source string
 
 	ScheduleID string
+
+	// safety: a locked cron schedule pins its own binary, and the consumer
+	// execs this file instead of compiling the checkout.
+	PinnedBinary string
 }
 
 func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.Paths, sub submission) (submitResult, error) {
@@ -251,6 +255,9 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	}
 	if sub.ScheduleID != "" {
 		triggerEnv[orchestrator.CronScheduleKey] = sub.ScheduleID
+	}
+	if sub.PinnedBinary != "" {
+		triggerEnv[orchestrator.CronBinaryKey] = sub.PinnedBinary
 	}
 	var userName string
 	if u, uerr := user.Current(); uerr == nil {

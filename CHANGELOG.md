@@ -25,6 +25,26 @@ code change to unlock.
 
 ### Added
 
+- **cli:** `sparkwing crons` arms a subset of a repo's schedules, pins what they
+  run, and lets one host edit a declared cadence. `crons install` takes `--only`
+  to arm named pipelines or `pipeline/name` entries, reports the entries that
+  fire from the controller instead of arming them, and pins by default: the
+  compile that proves a pipeline builds is kept as the schedule's binary under
+  `<home>/crons/`, recorded with the checkout's commit, so a checkout updated
+  afterwards cannot change what fires at three in the morning. `--follow` arms
+  without a pin, and the new `crons lock` and `crons unlock` move one schedule
+  between the two. `crons disarm` removes a single schedule, `crons set`
+  overrides its cron, zone, overlap policy, catch-up window or arguments on this
+  host alone, and `crons reset` drops that override. `crons list` gains a LOCK
+  column and marks an overridden expression, `crons show` prints declared,
+  override and effective values side by side, and `crons status` counts what is
+  pinned, what follows the checkout, what the checkout has moved past, and which
+  overrides were set against a declaration that has since changed. A scheduled
+  launch passes the schedule's arguments the way `sparkwing run <pipeline> --key
+  value` does, and each fire records what it ran with. See
+  [crons.md](docs/crons.md) and the [migration
+  note](docs/migrations/_unreleased.md#armed-schedules-are-pinned).
+
 - **store:** The runs store advances to schema 33, which keeps several
   schedules for one pipeline and pins what they run. `cron_schedules` gains a
   schedule name (`default` for the lone schedule of a pipeline), where the

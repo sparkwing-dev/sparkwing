@@ -89,3 +89,27 @@ side that fires it.
   built before it opens and writes the same database, seeing the rows it
   armed under the name `default`. Existing schedules and their fire history
   survive the widening intact.
+
+## Armed schedules are pinned
+
+`sparkwing crons install` now keeps the pipeline binary it compiled and runs
+that file at every fire, instead of compiling the checkout each minute.
+
+- **Before:** a schedule read the checkout at the moment it fired, so pulling a
+  branch changed what ran that night.
+- **After:** install records the compiled binary under `<sparkwing home>/crons/`
+  along with the checkout's `HEAD`, and the fire executes it. Re-running install
+  is the explicit update: it compiles again, replaces the binary and moves the
+  recorded commit. `crons install --follow` and `crons unlock <name>` keep the
+  old behaviour for a schedule; `crons lock <name>` pins one again.
+- **Migration:** nothing breaks and nothing is pinned by the upgrade. A schedule
+  armed by an earlier release keeps following the checkout until `sparkwing
+  crons install` is run again on that host, which is the act that pins it.
+  `sparkwing crons status` says how many schedules follow the checkout and how
+  many are pinned, so a host can be checked without re-arming it.
+- **Why:** a cron fires unattended. Someone updating a checkout during the day
+  should not change what runs at three in the morning without saying so.
+
+  The pin covers the pipeline and everything compiled into it. Scripts and
+  binaries the pipeline executes from the checkout or from `PATH` are outside
+  it, and stay whatever the machine holds when the run reaches them.
