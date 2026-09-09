@@ -138,7 +138,7 @@ func signalSession(leader int, sig syscall.Signal) error {
 	if leader <= 1 || leader == syscall.Getpgrp() {
 		return fmt.Errorf("refusing unsafe process session %d", leader)
 	}
-	processes, err := processTable(true)
+	processes, err := sessionProcessTable(true)
 	if err != nil {
 		return err
 	}
