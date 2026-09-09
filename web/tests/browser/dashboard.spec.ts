@@ -567,6 +567,32 @@ test("opens a completed run and renders stored node logs", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("shows an empty DAG canvas with the error for a run that never planned", async ({
+  page,
+}) => {
+  const refused = {
+    id: "run-20260909-003",
+    pipeline: "heartbeat",
+    status: "failed",
+    started_at: "2026-09-09T03:00:00Z",
+    finished_at: "2026-09-09T03:00:01Z",
+    error:
+      "local dispatch: child exec: exit status 1: wingd/client: daemon build differs from this client",
+  };
+  await installMockAPI(page, {
+    runs: [refused],
+    details: { [refused.id]: { run: refused, nodes: [] } },
+  });
+  await page.goto(`/runs?run=${refused.id}`);
+
+  await page.getByRole("button", { name: /^DAG/ }).click();
+  const empty = page.getByTestId("dag-empty");
+  await expect(empty).toBeVisible();
+  await expect(empty).toContainText("No DAG for this run");
+  await expect(empty).toContainText("ended before its pipeline planned any nodes");
+  await expect(empty).toContainText("daemon build differs from this client");
+});
+
 test("keeps the selected run when an older detail request finishes late", async ({
   page,
 }) => {

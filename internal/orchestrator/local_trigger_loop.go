@@ -232,7 +232,8 @@ func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []st
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Dir = repoDir
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	tail := &stderrTail{limit: childStderrTailBytes}
+	cmd.Stderr = io.MultiWriter(os.Stderr, tail)
 	cmd.Env = env
 	if cmd.Env == nil {
 		cmd.Env = os.Environ()
@@ -248,9 +249,46 @@ func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []st
 				)
 			}
 		}
+		if reason := tail.lastLines(childStderrTailLines); reason != "" {
+			return fmt.Errorf("child exec: %w: %s", err, reason)
+		}
 		return fmt.Errorf("child exec: %w", err)
 	}
 	return nil
+}
+
+const (
+	childStderrTailBytes = 8 << 10
+	childStderrTailLines = 6
+)
+
+// safety: the run row is what a person reads, so a non-zero exit carries the
+// reason the child printed rather than only its status.
+type stderrTail struct {
+	limit int
+	buf   []byte
+}
+
+func (t *stderrTail) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > t.limit {
+		t.buf = t.buf[len(t.buf)-t.limit:]
+	}
+	return len(p), nil
+}
+
+func (t *stderrTail) lastLines(n int) string {
+	lines := strings.Split(strings.TrimSpace(string(t.buf)), "\n")
+	kept := lines[:0]
+	for _, l := range lines {
+		if l = strings.TrimSpace(l); l != "" {
+			kept = append(kept, l)
+		}
+	}
+	if len(kept) > n {
+		kept = kept[len(kept)-n:]
+	}
+	return strings.Join(kept, " | ")
 }
 
 func prepareTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir string) (string, func(), error) {

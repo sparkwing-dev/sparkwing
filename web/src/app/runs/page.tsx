@@ -2181,7 +2181,7 @@ function buildVisibleTabs(
         key: "dag" as const,
         label: "DAG",
         count: formatCount("dag", nodes.length ? `${nodes.length}` : undefined),
-        visible: nodes.length > 0,
+        visible: true,
       },
       {
         key: "logs" as const,
@@ -2838,7 +2838,27 @@ function RunDetailPane({
             />
           </div>
         )}
-        {effectiveTab === "dag" && (
+        {effectiveTab === "dag" && nodes.length === 0 && (
+          <div className="p-4">
+            <div
+              className="rounded-lg border border-dashed border-[var(--border)] p-6 text-sm"
+              data-testid="dag-empty"
+            >
+              <div className="font-medium">No DAG for this run</div>
+              <div className="mt-1 text-[var(--muted)]">
+                {run.finished_at
+                  ? "The run ended before its pipeline planned any nodes."
+                  : "The pipeline has not planned any nodes yet."}
+              </div>
+              {run.error ? (
+                <pre className="mt-3 whitespace-pre-wrap break-words font-mono text-xs text-red-300">
+                  {run.error}
+                </pre>
+              ) : null}
+            </div>
+          </div>
+        )}
+        {effectiveTab === "dag" && nodes.length > 0 && (
           <div className="p-4">
             <DAG
               nodes={nodes}
