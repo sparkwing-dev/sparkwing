@@ -151,9 +151,9 @@ func TestHooksInstall_KeepsTheGlobalHookFiringWhenItCannotForwardIt(t *testing.T
 	writeExec(t, filepath.Join(hooksDir, "prepare-commit-msg"),
 		"#!/bin/sh\n: > "+f.sentinelOf("repo-prepare")+"\nexit 0\n")
 
-	out := captureStdout(t, func() {
-		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
-			t.Fatalf("install: %v", err)
+	out := captureStderr(t, func() {
+		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err == nil {
+			t.Fatal("rejected installation returned success")
 		}
 	})
 
@@ -174,7 +174,7 @@ func TestHooksCommands_InstallStatusAndUninstallDriveTheWholeChain(t *testing.T)
 	hooksDir := filepath.Join(f.repo, ".git", "hooks")
 
 	out := captureStdout(t, func() {
-		if err := runHooksInstall([]string{"--repo", f.repo}); err != nil {
+		if err := runHooksInstall([]string{"--repo", f.repo, "--no-prove"}); err != nil {
 			t.Fatalf("hooks install: %v", err)
 		}
 	})
@@ -332,8 +332,8 @@ func TestHooksStatus_LocalShadowRemedyReachesFiringHooks(t *testing.T) {
 	}
 	f.git(t, "config", "core.hooksPath", shadowDir)
 	captureStdout(t, func() {
-		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
-			t.Fatalf("shadowed install: %v", err)
+		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err == nil {
+			t.Fatal("rejected installation returned success")
 		}
 	})
 

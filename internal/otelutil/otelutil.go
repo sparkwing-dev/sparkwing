@@ -161,7 +161,7 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 		}()
 	} else {
 		slog.SetDefault(slog.New(&traceContextHandler{
-			inner: slog.NewTextHandler(os.Stderr, nil),
+			inner: slog.Default().Handler(),
 		}))
 	}
 

@@ -130,6 +130,39 @@ func TestLogStore(t *testing.T, factory func() storage.LogStore) {
 		}
 	})
 
+	t.Run("HierarchicalNodes", func(t *testing.T) {
+		s := factory()
+		ctx := context.Background()
+		nodes := []string{"parent", "parent/child", "parent/child/grandchild"}
+		for _, node := range nodes {
+			mustAppend(t, s, ctx, "run-1", node, node+" line\n")
+		}
+		for _, node := range nodes {
+			body, err := s.Read(ctx, "run-1", node, storage.ReadOpts{})
+			if maybeSkipUnsupported(t, err, "Read") {
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) != node+" line\n" {
+				t.Errorf("Read(%q) = %q", node, body)
+			}
+		}
+		body, err := s.ReadRun(ctx, "run-1")
+		if maybeSkipUnsupported(t, err, "ReadRun") {
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, node := range nodes {
+			if !strings.Contains(string(body), node+" line\n") {
+				t.Errorf("ReadRun missing %q: %q", node, body)
+			}
+		}
+	})
+
 	t.Run("Stream", func(t *testing.T) {
 		s := factory()
 		ctx, cancel := context.WithCancel(context.Background())

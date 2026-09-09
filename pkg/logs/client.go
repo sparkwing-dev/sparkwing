@@ -21,21 +21,20 @@ var ErrClaimConflict = errors.New("logs append claim is no longer current")
 // Client is the HTTP client for the logs service. Workers use it to
 // post lines; dashboards and CLIs use it to fetch.
 type Client struct {
-	baseURL string
-	http    *http.Client
+	baseURL     string
+	http        *http.Client
+	defaultHTTP bool
 }
 
 // NewClient returns a Client targeting the given logs-service URL.
 // Nil httpClient uses a default with sensible defaults; callers who
 // need connection-pooling tuning pass their own.
 func NewClient(baseURL string, httpClient *http.Client) *Client {
-	if httpClient == nil {
-		httpClient = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: otelutil.WrapTransport(nil),
-		}
+	defaultHTTP := httpClient == nil
+	if defaultHTTP {
+		httpClient = defaultClient()
 	}
-	return &Client{baseURL: baseURL, http: httpClient}
+	return &Client{baseURL: baseURL, http: httpClient, defaultHTTP: defaultHTTP}
 }
 
 // NewClientWithToken is NewClient plus a shared-secret bearer token.
@@ -44,11 +43,9 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 // trust their transport; when we build the default, the transport
 // is otelhttp-wrapped so outgoing requests propagate trace context.
 func NewClientWithToken(baseURL string, httpClient *http.Client, token string) *Client {
-	if httpClient == nil {
-		httpClient = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: otelutil.WrapTransport(nil),
-		}
+	defaultHTTP := httpClient == nil
+	if defaultHTTP {
+		httpClient = defaultClient()
 	}
 	if token != "" {
 		base := httpClient.Transport
@@ -62,7 +59,17 @@ func NewClientWithToken(baseURL string, httpClient *http.Client, token string) *
 			Transport:     &bearerTransport{base: base, token: token},
 		}
 	}
-	return &Client{baseURL: baseURL, http: httpClient}
+	return &Client{baseURL: baseURL, http: httpClient, defaultHTTP: defaultHTTP}
+}
+
+func defaultClient() *http.Client {
+	transport := http.DefaultTransport
+	if base, ok := transport.(*http.Transport); ok {
+		clone := base.Clone()
+		clone.ResponseHeaderTimeout = 30 * time.Second
+		transport = clone
+	}
+	return &http.Client{Timeout: 30 * time.Second, Transport: otelutil.WrapTransport(transport)}
 }
 
 type bearerTransport struct {
@@ -240,7 +247,9 @@ func (f ReadFilter) query() string {
 // Stream opens an SSE connection to the logs service and returns
 // the raw response body. Callers read until EOF or context
 // cancellation; close the returned body to terminate the stream
-// early. Used by the web dashboard's live-tail proxy: bytes pass
+// early. The default client limits response headers to 30 seconds but leaves
+// stream lifetime to ctx. A supplied HTTP client retains its timeout.
+// Used by the web dashboard's live-tail proxy: bytes pass
 // through verbatim so the browser's EventSource handles framing.
 func (c *Client) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser, error) {
 	u := fmt.Sprintf("%s/api/v1/logs/%s/%s/stream", c.baseURL,
@@ -250,7 +259,13 @@ func (c *Client) Stream(ctx context.Context, runID, nodeID string) (io.ReadClose
 		return nil, err
 	}
 	req.Header.Set("Accept", "text/event-stream")
-	resp, err := c.http.Do(req)
+	client := c.http
+	if c.defaultHTTP {
+		streamClient := *client
+		streamClient.Timeout = 0
+		client = &streamClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

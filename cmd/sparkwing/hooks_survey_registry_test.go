@@ -22,7 +22,7 @@ func armedFleet(t *testing.T) {
 	f.asProcessEnv(t)
 	f.registerRepos(t, f.repo)
 	captureStdout(t, func() {
-		if err := runHooksInstall([]string{"--repo", f.repo}); err != nil {
+		if err := runHooksInstall([]string{"--repo", f.repo, "--no-prove"}); err != nil {
 			t.Fatalf("hooks install: %v", err)
 		}
 	})

@@ -216,6 +216,8 @@ func proxyServeFromCache(w http.ResponseWriter, r *http.Request, registry, key s
 	return proxyWriteCachedBody(w, r, registry, meta, bodyPath, "HIT")
 }
 
+var maxBufferedBodyBytes int64 = 500 << 20
+
 func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, remotePath, key string) {
 	upstreamURL := reg.Upstream + "/" + remotePath
 
@@ -254,7 +256,7 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 500<<20))
+	body, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, maxBufferedBodyBytes))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("reading upstream: %v", err), http.StatusBadGateway)
 		return

@@ -1,12 +1,16 @@
 package otelutil
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
@@ -146,4 +150,26 @@ func indexOf(haystack, needle string) int {
 func TestMain(m *testing.M) {
 	os.Unsetenv("OTEL_TRACES_SAMPLER_ARG")
 	testleak.Main(m)
+}
+
+func TestInitPreservesConfiguredLogging(t *testing.T) {
+	for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"} {
+		t.Setenv(key, "")
+	}
+	old := slog.Default()
+	meter, propagator := otel.GetMeterProvider(), otel.GetTextMapPropagator()
+	t.Cleanup(func() { slog.SetDefault(old); otel.SetMeterProvider(meter); otel.SetTextMapPropagator(propagator) })
+	var output bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	telemetry := Init(t.Context(), Config{ServiceName: "test"})
+	t.Cleanup(func() {
+		if err := telemetry.Shutdown(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	output.Reset()
+	slog.Debug("after-init")
+	if !strings.Contains(output.String(), `"level":"DEBUG","msg":"after-init"`) {
+		t.Fatalf("configured JSON/debug handler lost: %q", output.String())
+	}
 }

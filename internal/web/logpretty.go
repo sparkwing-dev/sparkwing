@@ -90,7 +90,7 @@ func renderJSONL(src []byte, w io.Writer, f logFormat) {
 	pr.Flush()
 }
 
-func streamPrettySSE(body io.Reader, w io.Writer, flusher http.Flusher, f logFormat) {
+func streamPrettySSE(body io.Reader, w io.Writer, flush func() error, f logFormat) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -100,12 +100,16 @@ func streamPrettySSE(body io.Reader, w io.Writer, flusher http.Flusher, f logFor
 			if _, err := w.Write([]byte("\n")); err != nil {
 				return
 			}
-			flusher.Flush()
+			if err := flush(); err != nil {
+				return
+			}
 		case raw[0] == ':':
 			if _, err := fmt.Fprintf(w, "%s\n", raw); err != nil {
 				return
 			}
-			flusher.Flush()
+			if err := flush(); err != nil {
+				return
+			}
 		case bytes.HasPrefix(raw, []byte("data: ")):
 			payload := raw[len("data: "):]
 			for _, line := range renderSSELogLine(payload, f) {

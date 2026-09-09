@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,29 +123,37 @@ func (s *LogStore) ReadRun(_ context.Context, runID string) ([]byte, error) {
 		return nil, fmt.Errorf("fs.LogStore.ReadRun: %w", err)
 	}
 	dir := s.RunDir(runID)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
 	var buf bytes.Buffer
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".ndjson") {
-			continue
-		}
-		nodeID := strings.TrimSuffix(e.Name(), ".ndjson")
-		fmt.Fprintf(&buf, "=== %s ===\n", nodeID)
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			return nil, err
+			if path == dir && errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
 		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".ndjson") {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		nodeID := strings.TrimSuffix(filepath.ToSlash(rel), ".ndjson")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(&buf, "=== %s ===\n", nodeID)
 		buf.Write(data)
 		if len(data) > 0 && data[len(data)-1] != '\n' {
 			buf.WriteByte('\n')
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
+
 	return buf.Bytes(), nil
 }
 

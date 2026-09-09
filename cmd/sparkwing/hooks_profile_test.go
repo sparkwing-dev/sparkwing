@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -115,29 +114,31 @@ func TestRunPipelineForProof_SelectsLocalOrPinnedStorage(t *testing.T) {
 		{name: "explicit profile", profile: "bucket", want: "run gate --profile bucket"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			binDir := t.TempDir()
-			record := filepath.Join(t.TempDir(), "args")
-			writeExec(t, filepath.Join(binDir, "sparkwing"), "#!/bin/sh\nprintf '%s\\n%s\\n%s\\n' \"$*\" \"${SPARKWING_PROFILE-unset}\" \"${SPARKWING_SECRETS_PROFILE-unset}\" > "+shellSingleQuote(record)+"\n")
-			t.Setenv("PATH", binDir)
+			t.Setenv("PATH", t.TempDir())
 			t.Setenv("SPARKWING_PROFILE", "ambient-profile")
 			t.Setenv("SPARKWING_SECRETS_PROFILE", "ambient-secrets")
-
-			if err := runPipelineForProof(tc.profile)(t.TempDir(), "gate"); err != nil {
-				t.Fatalf("prove: %v", err)
-			}
-			got, err := os.ReadFile(record)
+			repo := t.TempDir()
+			cmd, err := pipelineProofCommand(repo, "gate", tc.profile)
 			if err != nil {
-				t.Fatalf("read args: %v", err)
+				t.Fatal(err)
 			}
-			lines := strings.Split(strings.TrimSpace(string(got)), "\n")
-			if len(lines) != 3 {
-				t.Fatalf("proof record = %q, want args and two environment values", got)
+			self, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
 			}
-			if lines[0] != tc.want {
-				t.Errorf("proof args = %q, want %q", lines[0], tc.want)
+			if cmd.Path != self || cmd.Err != nil {
+				t.Errorf("proof executable = %q (%v), want %q", cmd.Path, cmd.Err, self)
 			}
-			if lines[1] != "unset" || lines[2] != "unset" {
-				t.Errorf("proof inherited profiles: profile=%q secrets=%q", lines[1], lines[2])
+			if got := strings.Join(cmd.Args[1:], " "); got != tc.want {
+				t.Errorf("proof args = %q, want %q", got, tc.want)
+			}
+			if cmd.Dir != repo {
+				t.Errorf("proof directory = %q, want %q", cmd.Dir, repo)
+			}
+			for _, value := range cmd.Env {
+				if strings.HasPrefix(value, "SPARKWING_PROFILE=") || strings.HasPrefix(value, "SPARKWING_SECRETS_PROFILE=") {
+					t.Errorf("proof inherited %q", value)
+				}
 			}
 		})
 	}
