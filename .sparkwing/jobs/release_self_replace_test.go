@@ -18,34 +18,30 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
 )
 
-// The pipelines tree is consumed as the same module path the SDK
-// itself ships, so the require above is a placeholder; this replace
-// pins it to the parent checkout (the sparkwing repo root). The
-// pattern follows the standard "consumer .sparkwing/ uses a local
-// replace during development" convention; here the parent IS the
-// SDK rather than a sibling.
+// SAFETY: Fixture pipelines resolve the local SDK checkout.
+// The required version is used after removing this replacement.
 replace github.com/sparkwing-dev/sparkwing => ..
 `
 
 func TestStripSelfReplace_BumpsRequireAndDropsReplace(t *testing.T) {
-	out, changed, err := stripSelfReplace(fixtureBeforeCut, "v0.4.0")
+	output, changed, err := stripSelfReplace(fixtureBeforeCut, "v0.4.0")
 	if err != nil {
 		t.Fatalf("stripSelfReplace: %v", err)
 	}
 	if !changed {
 		t.Fatal("expected changed=true")
 	}
-	if !strings.Contains(out, "github.com/sparkwing-dev/sparkwing v0.4.0") {
-		t.Errorf("expected require bumped to v0.4.0; got:\n%s", out)
+	if !strings.Contains(output, "github.com/sparkwing-dev/sparkwing v0.4.0") {
+		t.Errorf("expected require bumped to v0.4.0; got:\n%s", output)
 	}
-	if strings.Contains(out, "v0.1.0") {
-		t.Errorf("old require version v0.1.0 still present:\n%s", out)
+	if strings.Contains(output, "v0.1.0") {
+		t.Errorf("old require version v0.1.0 still present:\n%s", output)
 	}
-	if strings.Contains(out, "replace github.com/sparkwing-dev/sparkwing") {
-		t.Errorf("replace line not stripped:\n%s", out)
+	if strings.Contains(output, "replace github.com/sparkwing-dev/sparkwing") {
+		t.Errorf("replace line not stripped:\n%s", output)
 	}
-	if strings.Contains(out, "// The pipelines tree is consumed") {
-		t.Errorf("self-replace comment block not stripped:\n%s", out)
+	if strings.Contains(output, "// SAFETY: Fixture pipelines resolve") {
+		t.Errorf("self-replace comment block not stripped:\n%s", output)
 	}
 }
 
@@ -56,15 +52,15 @@ go 1.26.0
 
 require github.com/sparkwing-dev/sparkwing v0.4.0
 `
-	out, changed, err := stripSelfReplace(body, "v0.4.0")
+	output, changed, err := stripSelfReplace(body, "v0.4.0")
 	if err != nil {
 		t.Fatalf("stripSelfReplace: %v", err)
 	}
 	if changed {
-		t.Errorf("expected changed=false when already in shipped shape; out:\n%s", out)
+		t.Errorf("expected changed=false when already pinned without a replacement; out:\n%s", output)
 	}
-	if out != body {
-		t.Errorf("body modified unexpectedly:\nbytes(got)=%d bytes(want)=%d\n--- got %q ---\n--- want %q ---", len(out), len(body), out, body)
+	if output != body {
+		t.Errorf("body modified unexpectedly:\nbytes(got)=%d bytes(want)=%d\n--- got %q ---\n--- want %q ---", len(output), len(body), output, body)
 	}
 }
 
@@ -75,15 +71,15 @@ go 1.26.0
 
 require github.com/sparkwing-dev/sparkwing v0.1.0
 `
-	out, changed, err := stripSelfReplace(body, "v0.4.0")
+	output, changed, err := stripSelfReplace(body, "v0.4.0")
 	if err != nil {
 		t.Fatalf("stripSelfReplace: %v", err)
 	}
 	if !changed {
 		t.Fatal("expected changed=true when require pin needs bumping")
 	}
-	if !strings.Contains(out, "v0.4.0") {
-		t.Errorf("require not bumped:\n%s", out)
+	if !strings.Contains(output, "v0.4.0") {
+		t.Errorf("require not bumped:\n%s", output)
 	}
 }
 
@@ -107,21 +103,21 @@ go 1.26.0
 
 require github.com/sparkwing-dev/sparkwing v0.4.0
 `
-	out, changed := restoreSelfReplace(body)
+	output, changed := restoreSelfReplace(body)
 	if !changed {
 		t.Fatal("expected changed=true")
 	}
-	if !strings.Contains(out, "replace github.com/sparkwing-dev/sparkwing => ..") {
-		t.Errorf("replace line not appended:\n%s", out)
+	if !strings.Contains(output, "replace github.com/sparkwing-dev/sparkwing => ..") {
+		t.Errorf("replace line not appended:\n%s", output)
 	}
-	if !strings.Contains(out, "// The pipelines tree is consumed") {
-		t.Errorf("comment block not appended:\n%s", out)
+	if !strings.Contains(output, "// SAFETY: Pipeline jobs use the parent checkout to exercise SDK source changes.") {
+		t.Errorf("comment block not appended:\n%s", output)
 	}
-	out2, changed2 := restoreSelfReplace(out)
-	if changed2 {
+	repeatedOutput, changedAgain := restoreSelfReplace(output)
+	if changedAgain {
 		t.Error("restoreSelfReplace not idempotent")
 	}
-	if out2 != out {
+	if repeatedOutput != output {
 		t.Error("idempotent call modified body")
 	}
 }

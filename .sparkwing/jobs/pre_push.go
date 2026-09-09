@@ -2,10 +2,12 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/mod/modfile"
 
@@ -28,24 +30,35 @@ func runActionlint(ctx context.Context) error {
 }
 
 func runReleaseBinaryVulnerabilityScan(ctx context.Context) error {
-	dir, err := os.MkdirTemp("", "sparkwing-release-vulnerability-*")
+	return withReleaseScanDirectory(func(directory string) error {
+		for _, binary := range publicBinaries {
+			artifact := filepath.Join(directory, binary)
+			if _, err := sparkwing.Exec(ctx, "go", "build", "-trimpath", "-o", artifact, "./cmd/"+binary).
+				Env("GOWORK", "off").Run(); err != nil {
+				return fmt.Errorf("build release vulnerability artifact %s: %w", binary, err)
+			}
+			if _, err := sparkwing.Exec(ctx, "bash", "bin/check-release-binary-vulnerabilities.sh", artifact).Run(); err != nil {
+				return fmt.Errorf("scan release vulnerability artifact %s: %w", binary, err)
+			}
+		}
+		return nil
+	})
+}
+
+func withReleaseScanDirectory(run func(string) error) (resultErr error) {
+	directory, err := os.MkdirTemp("", "sparkwing-release-vulnerability-*")
 	if err != nil {
 		return fmt.Errorf("create release vulnerability scan directory: %w", err)
 	}
-	defer os.RemoveAll(dir)
-
-	for _, binary := range publicBinaries {
-		artifact := filepath.Join(dir, binary)
-		if _, err := sparkwing.Exec(ctx, "go", "build", "-trimpath", "-o", artifact, "./cmd/"+binary).
-			Env("GOWORK", "off").Run(); err != nil {
-			return fmt.Errorf("build release vulnerability artifact %s: %w", binary, err)
+	defer func() {
+		if err := os.RemoveAll(directory); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove release vulnerability scan directory: %w", err))
 		}
-		if _, err := sparkwing.Exec(ctx, "bash", "bin/check-release-binary-vulnerabilities.sh", artifact).Run(); err != nil {
-			return fmt.Errorf("scan release vulnerability artifact %s: %w", binary, err)
-		}
-	}
-	return nil
+	}()
+	return run(directory)
 }
+
+const prePushTimeout = 30 * time.Minute
 
 type PrePush struct {
 	sparkwing.Base
@@ -57,30 +70,7 @@ func (PrePush) ShortHelp() string {
 }
 
 func (PrePush) Help() string {
-	return "Explicit release-boundary verification. Runs the full golangci-lint set, " +
-		"`go test -race ./...` in the .sparkwing pipeline module, " +
-		"the pkg/store suite against an embedded Postgres (the store-postgres " +
-		"pipeline, which needs no Docker), " +
-		"binary-mode govulncheck against every shipped Go executable, the " +
-		"sparkwing-ecosystem version-freshness check (deps must be at " +
-		"the latest released tag, or replaced with a not-behind local " +
-		"path), the chaos gate (the adversarial admission suite in " +
-		"internal/chaos, which fault-injects a real daemon and asserts " +
-		"the concurrency invariants), the public API-surface drift gate " +
-		"(the `pkg/` snapshot " +
-		"under .apidiff/ must match HEAD), refuses to push if any " +
-		"committed go.mod contains a `replace` line other than " +
-		"`.sparkwing/go.mod`'s dogfood self-replace to `..`, and refuses to push " +
-		"if `go.work` / `go.work.sum` have been committed (workspaces are " +
-		"local-iteration scaffolding and can't be resolved by the Go " +
-		"module proxy), validates + offline-plans the Mode 3 Postgres " +
-		"Terraform module for both engine knobs (bin/check-terraform.sh), " +
-		"and validates every GitHub Actions workflow with pinned actionlint. " +
-		"Not read-only: when the .sparkwing sparkwing pin is behind the " +
-		"latest released tag, pre-push bumps the pin and pkg/scaffold's " +
-		"fallback version, tidies .sparkwing/go.mod, regenerates the public " +
-		"API snapshots, and commits the result " +
-		"so the bump rides along with the push."
+	return "Runs release-boundary checks for lint, race tests, Postgres storage, admission faults, binary vulnerabilities, dependency versions, public API snapshots, documentation examples, generated references, shell scripts, Terraform, and GitHub Actions. Rejects committed Go workspaces and replacement directives except the pipeline module replacement pointing to the SDK checkout. A stale SDK pin triggers a version update, module tidy, API snapshot regeneration, and a commit that joins the push."
 }
 
 func (PrePush) Examples() []sparkwing.Example {
@@ -89,12 +79,12 @@ func (PrePush) Examples() []sparkwing.Example {
 	}
 }
 
-func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, p.run)
+func (pipeline *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
+	sparkwing.Job(plan, runContext.Pipeline, pipeline.run).Timeout(prePushTimeout)
 	return nil
 }
 
-func (p *PrePush) run(ctx context.Context) error {
+func (pipeline *PrePush) run(ctx context.Context) error {
 	var failures []string
 
 	if err := checkNoReplaceDirectivesInCommittedGoMods(ctx); err != nil {
@@ -124,7 +114,7 @@ func (p *PrePush) run(ctx context.Context) error {
 	}
 
 	versionOptions := VersionFreshnessOptions{
-		AllowReleaseLineSelfReplace: p.AllowReleaseLineSelfReplace,
+		AllowReleaseLineSelfReplace: pipeline.AllowReleaseLineSelfReplace,
 	}
 	if err := CheckVersionsFreshnessWithOptions(ctx, sparkwing.WorkDir(), versionOptions); err != nil {
 		failures = append(failures, err.Error())
@@ -320,60 +310,59 @@ func (p *PrePush) run(ctx context.Context) error {
 }
 
 func committedGoMods(ctx context.Context) ([]string, error) {
-	// safety: git -C anchors paths to repo root regardless of process cwd.
-	out, err := sparkwing.Bash(ctx,
+	output, err := sparkwing.Bash(ctx,
 		`git -C "$SPARKWING_WORKDIR" ls-files '*go.mod'`,
 	).Env("SPARKWING_WORKDIR", sparkwing.Path()).String()
 	if err != nil {
 		return nil, fmt.Errorf("list go.mod files: %w", err)
 	}
-	var mods []string
-	for _, rel := range strings.Split(strings.TrimSpace(out), "\n") {
-		if rel != "" && !isTestdataPath(rel) {
-			mods = append(mods, rel)
+	var moduleFiles []string
+	for _, relativePath := range strings.Split(strings.TrimSpace(output), "\n") {
+		if relativePath != "" && !isTestdataPath(relativePath) {
+			moduleFiles = append(moduleFiles, relativePath)
 		}
 	}
-	return mods, nil
+	return moduleFiles, nil
 }
 
-func isTestdataPath(rel string) bool {
-	return strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/")
+func isTestdataPath(relativePath string) bool {
+	return strings.HasPrefix(relativePath, "testdata/") || strings.Contains(relativePath, "/testdata/")
 }
 
 func committedModuleDirs(ctx context.Context) ([]string, error) {
-	mods, err := committedGoMods(ctx)
+	moduleFiles, err := committedGoMods(ctx)
 	if err != nil {
 		return nil, err
 	}
-	dirs := make([]string, 0, len(mods))
-	for _, m := range mods {
-		dirs = append(dirs, filepath.Dir(m))
+	directories := make([]string, 0, len(moduleFiles))
+	for _, moduleFile := range moduleFiles {
+		directories = append(directories, filepath.Dir(moduleFile))
 	}
-	return dirs, nil
+	return directories, nil
 }
 
 func checkNoReplaceDirectivesInCommittedGoMods(ctx context.Context) error {
-	mods, err := committedGoMods(ctx)
+	moduleFiles, err := committedGoMods(ctx)
 	if err != nil {
 		return err
 	}
 	var offenders []string
-	for _, rel := range mods {
-		abs := sparkwing.Path(rel)
-		data, rerr := os.ReadFile(abs)
-		if rerr != nil {
-			return fmt.Errorf("read %s: %w", rel, rerr)
+	for _, relativePath := range moduleFiles {
+		absolutePath := sparkwing.Path(relativePath)
+		data, readError := os.ReadFile(absolutePath)
+		if readError != nil {
+			return fmt.Errorf("read %s: %w", relativePath, readError)
 		}
-		mf, perr := modfile.Parse(rel, data, nil)
-		if perr != nil {
-			return fmt.Errorf("parse %s: %w", rel, perr)
+		moduleFile, parseError := modfile.Parse(relativePath, data, nil)
+		if parseError != nil {
+			return fmt.Errorf("parse %s: %w", relativePath, parseError)
 		}
-		for _, r := range mf.Replace {
-			if isSparkwingDogfoodReplace(rel, r) {
+		for _, replacement := range moduleFile.Replace {
+			if isSparkwingDogfoodReplace(relativePath, replacement) {
 				continue
 			}
 			offenders = append(offenders,
-				fmt.Sprintf("%s: %s => %s", rel, r.Old.Path, r.New.Path))
+				fmt.Sprintf("%s: %s => %s", relativePath, replacement.Old.Path, replacement.New.Path))
 		}
 	}
 	if len(offenders) == 0 {
@@ -385,26 +374,26 @@ func checkNoReplaceDirectivesInCommittedGoMods(ctx context.Context) error {
 	)
 }
 
-func isSparkwingDogfoodReplace(path string, r *modfile.Replace) bool {
+func isSparkwingDogfoodReplace(path string, replacement *modfile.Replace) bool {
 	return path == ".sparkwing/go.mod" &&
-		r.Old.Path == "github.com/sparkwing-dev/sparkwing" &&
-		r.Old.Version == "" &&
-		r.New.Path == ".." &&
-		r.New.Version == ""
+		replacement.Old.Path == "github.com/sparkwing-dev/sparkwing" &&
+		replacement.Old.Version == "" &&
+		replacement.New.Path == ".." &&
+		replacement.New.Version == ""
 }
 
 func checkNoCommittedGoWorkFiles(ctx context.Context) error {
-	out, err := sparkwing.Bash(ctx,
+	output, err := sparkwing.Bash(ctx,
 		`git ls-files | grep -E '(^|/)go\.work(\.sum)?$' || true`,
 	).String()
 	if err != nil {
 		return fmt.Errorf("scan go.work files: %w", err)
 	}
-	out = strings.TrimSpace(out)
-	if out == "" {
+	output = strings.TrimSpace(output)
+	if output == "" {
 		return nil
 	}
-	files := strings.Split(out, "\n")
+	files := strings.Split(output, "\n")
 	return fmt.Errorf(
 		"refusing to push: %d committed go.work file(s) (remove + add to .gitignore):\n    %s",
 		len(files), strings.Join(files, "\n    "),

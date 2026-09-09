@@ -19,6 +19,8 @@ var sessionProcessTable = processTable
 
 var sessionIdentityLookup = sessionIdentity
 
+const processTableTimeout = 2 * time.Second
+
 const DefaultTerminationGrace = time.Second
 
 const guardedSessionTerminateGrace = DefaultTerminationGrace
@@ -38,6 +40,7 @@ type Info struct {
 	Group   int
 	Session int
 	State   string
+	Exiting bool
 
 	Birth string
 }
@@ -49,7 +52,7 @@ type SessionIdentity struct {
 }
 
 type Group struct {
-	cmd        *exec.Cmd
+	command    *exec.Cmd
 	id         int
 	leaderDone chan struct{}
 	leaderErr  error
@@ -61,7 +64,7 @@ type Group struct {
 	waitErr    error
 	session    bool
 	inspectMu  sync.Mutex
-	inspect    func(int, bool, bool) (bool, error)
+	inspect    func(context.Context, int, bool, bool) (bool, error)
 }
 
 func Supported() error { return platformSupport() }
@@ -72,14 +75,14 @@ func CaptureSession(pid int) (SessionIdentity, error) {
 	if err := GuardedSessionSupported(); err != nil {
 		return SessionIdentity{}, err
 	}
-	sid, token, err := sessionIdentity(pid)
+	sessionID, token, err := sessionIdentity(pid)
 	if err != nil {
 		return SessionIdentity{}, err
 	}
-	if pid <= 1 || sid != pid || token == "" {
+	if pid <= 1 || sessionID != pid || token == "" {
 		return SessionIdentity{}, fmt.Errorf("process %d is not a stable session leader", pid)
 	}
-	return SessionIdentity{LeaderPID: pid, SessionID: sid, BirthToken: token}, nil
+	return SessionIdentity{LeaderPID: pid, SessionID: sessionID, BirthToken: token}, nil
 }
 
 func SessionQuiescent(identity SessionIdentity) (bool, error) {
@@ -146,21 +149,15 @@ type backoffPoll struct {
 }
 
 func newBackoffPoll(base, max time.Duration) *backoffPoll {
-	if base <= 0 {
-		base = guardedSessionPollInterval
-	}
-	if max < base {
-		max = base
-	}
 	return &backoffPoll{interval: base, max: max}
 }
 
-func (p *backoffPoll) next() time.Duration {
-	current := p.interval
-	if p.interval < p.max {
-		p.interval *= 2
-		if p.interval > p.max {
-			p.interval = p.max
+func (poll *backoffPoll) next() time.Duration {
+	current := poll.interval
+	if poll.interval < poll.max {
+		poll.interval *= 2
+		if poll.interval > poll.max {
+			poll.interval = poll.max
 		}
 	}
 	return current
@@ -191,25 +188,25 @@ type SessionTable struct {
 }
 
 func CaptureSessionTable() (*SessionTable, error) {
-	processes, err := sessionProcessTable(true)
+	processes, err := sessionProcessTable(context.Background(), true)
 	if err != nil {
 		return nil, err
 	}
 	return &SessionTable{processes: processes}, nil
 }
 
-func (t *SessionTable) SessionEmpty(identity SessionIdentity) (bool, error) {
-	if t == nil {
+func (table *SessionTable) SessionEmpty(identity SessionIdentity) (bool, error) {
+	if table == nil {
 		return false, fmt.Errorf("nil process session table")
 	}
-	return inspectSessionTable(t.processes, identity, false)
+	return inspectSessionTable(table.processes, identity, false)
 }
 
 func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) {
 	if err := validateSessionIdentity(identity); err != nil {
 		return false, err
 	}
-	processes, err := sessionProcessTable(true)
+	processes, err := sessionProcessTable(context.Background(), true)
 	if err != nil {
 		return false, err
 	}
@@ -243,8 +240,7 @@ func inspectSessionTable(processes []Info, identity SessionIdentity, excludeLead
 			var err error
 			_, token, err = sessionIdentityLookup(identity.LeaderPID)
 			if errors.Is(err, ErrProcessAbsent) {
-				// safety: leader exit between snapshot and lookup is an empty-session
-				// observation, not an inspection failure that callers should retry.
+				// SAFETY: Leader disappearance between snapshot and lookup is a valid observation.
 				leaderInSession = false
 			} else if err != nil {
 				return false, err
@@ -284,227 +280,239 @@ func processTerminated(state string) bool {
 	}
 }
 
-func Start(cmd *exec.Cmd) (*Group, error) {
-	return start(cmd, false)
+func Start(command *exec.Cmd) (*Group, error) {
+	return start(command, false)
 }
 
-func StartSession(cmd *exec.Cmd) (*Group, error) {
-	return start(cmd, true)
+func StartSession(command *exec.Cmd) (*Group, error) {
+	return start(command, true)
 }
 
-func start(cmd *exec.Cmd, session bool) (*Group, error) {
+func start(command *exec.Cmd, session bool) (*Group, error) {
 	if err := platformSupport(); err != nil {
 		return nil, err
 	}
-	if err := configure(cmd, session); err != nil {
+	if err := configure(command, session); err != nil {
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
+	if err := command.Start(); err != nil {
 		return nil, err
 	}
-	g := &Group{
-		cmd:        cmd,
-		id:         cmd.Process.Pid,
+	group := &Group{
+		command:    command,
+		id:         command.Process.Pid,
 		leaderDone: make(chan struct{}),
 		cleanup:    make(chan struct{}, 1),
 		session:    session,
 		inspect:    descendantsEmpty,
 	}
 	go func() {
-		err := waitLeaderExit(g.id)
-		g.leaderMu.Lock()
-		g.leaderErr = err
-		g.leaderMu.Unlock()
-		close(g.leaderDone)
+		err := waitLeaderExit(group.id)
+		group.leaderMu.Lock()
+		group.leaderErr = err
+		group.leaderMu.Unlock()
+		close(group.leaderDone)
 	}()
-	return g, nil
+	return group, nil
 }
 
-func (g *Group) ID() int { return g.id }
+func (group *Group) ID() int { return group.id }
 
-func (g *Group) LeaderExited() <-chan struct{} { return g.leaderDone }
+// LeaderExited closes when observation completes, including observation failure.
+func (group *Group) LeaderExited() <-chan struct{} { return group.leaderDone }
 
-func (g *Group) Reaped() bool {
-	return g.reapedFlag.Load()
+// WaitLeaderExit waits for the leader observer to finish and returns its result.
+func (group *Group) WaitLeaderExit() error {
+	<-group.leaderDone
+	return group.leaderExitError()
 }
 
-func (g *Group) SetDescendantProbe(probe func(group int, exited, session bool) (bool, error)) {
-	g.inspectMu.Lock()
-	defer g.inspectMu.Unlock()
+func (group *Group) Reaped() bool {
+	return group.reapedFlag.Load()
+}
+
+func (group *Group) SetDescendantProbe(probe func(context.Context, int, bool, bool) (bool, error)) {
+	group.inspectMu.Lock()
+	defer group.inspectMu.Unlock()
 	if probe == nil {
-		g.inspect = descendantsEmpty
+		group.inspect = descendantsEmpty
 		return
 	}
-	g.inspect = probe
+	group.inspect = probe
 }
 
-func (g *Group) descendantProbe() func(int, bool, bool) (bool, error) {
-	g.inspectMu.Lock()
-	defer g.inspectMu.Unlock()
-	return g.inspect
+func (group *Group) descendantProbe() func(context.Context, int, bool, bool) (bool, error) {
+	group.inspectMu.Lock()
+	defer group.inspectMu.Unlock()
+	return group.inspect
 }
 
-func (g *Group) Kill() error {
-	g.finishMu.Lock()
-	defer g.finishMu.Unlock()
-	if g.reaped {
+func (group *Group) Kill() error {
+	group.finishMu.Lock()
+	defer group.finishMu.Unlock()
+	if group.reaped {
 		return nil
 	}
-	return signalKill(g.id, g.leaderHasExited(), g.session)
+	return group.signal(context.Background(), group.leaderHasExited(), signalKill)
 }
 
-func (g *Group) Finish(ctx context.Context, grace time.Duration) error {
-	if err := g.awaitLeader(ctx); err != nil {
-		return fmt.Errorf("%w: wait for group %d leader: %w", ErrCleanup, g.id, err)
+func (group *Group) signal(ctx context.Context, exited bool, send func(context.Context, int, bool, bool) error) error {
+	// SAFETY: Caller cancellation must permit termination.
+	inspectionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), processTableTimeout)
+	defer cancel()
+	return send(inspectionCtx, group.id, exited, group.session)
+}
+
+func (group *Group) Finish(ctx context.Context, grace time.Duration) error {
+	if err := group.awaitLeader(ctx); err != nil {
+		return fmt.Errorf("%w: wait for group %d leader: %w", ErrCleanup, group.id, err)
 	}
-	return g.finish(ctx, grace)
+	return group.finish(ctx, grace)
 }
 
-func (g *Group) Terminate(ctx context.Context, grace time.Duration) error {
-	g.finishMu.Lock()
-	if g.reaped {
-		err := g.waitErr
-		g.finishMu.Unlock()
+func (group *Group) Terminate(ctx context.Context, grace time.Duration) error {
+	group.finishMu.Lock()
+	if group.reaped {
+		err := group.waitErr
+		group.finishMu.Unlock()
 		return err
 	}
-	err := signalTerminate(g.id, g.leaderHasExited(), g.session)
-	g.finishMu.Unlock()
+	err := group.signal(ctx, group.leaderHasExited(), signalTerminate)
+	group.finishMu.Unlock()
 	if err != nil {
-		return fmt.Errorf("%w: terminate group %d: %w", ErrCleanup, g.id, err)
+		return fmt.Errorf("%w: terminate group %d: %w", ErrCleanup, group.id, err)
 	}
 
 	graceCtx, cancel := boundedContext(ctx, grace)
-	err = g.awaitLeader(graceCtx)
+	err = group.awaitLeader(graceCtx)
 	cancel()
 	if err != nil {
-		g.finishMu.Lock()
-		if g.reaped {
-			result := g.waitErr
-			g.finishMu.Unlock()
-			return result
+		group.finishMu.Lock()
+		if group.reaped {
+			waitErr := group.waitErr
+			group.finishMu.Unlock()
+			return waitErr
 		}
-		err = signalKill(g.id, g.leaderHasExited(), g.session)
-		g.finishMu.Unlock()
+		err = group.signal(ctx, group.leaderHasExited(), signalKill)
+		group.finishMu.Unlock()
 		if err != nil {
-			return fmt.Errorf("%w: kill group %d: %w", ErrCleanup, g.id, err)
+			return fmt.Errorf("%w: kill group %d: %w", ErrCleanup, group.id, err)
 		}
 	}
-	if err := g.awaitLeader(ctx); err != nil {
-		return fmt.Errorf("%w: wait for killed group %d leader: %w", ErrCleanup, g.id, err)
+	if err := group.awaitLeader(ctx); err != nil {
+		return fmt.Errorf("%w: wait for killed group %d leader: %w", ErrCleanup, group.id, err)
 	}
-	return g.finish(ctx, grace)
+	return group.finish(ctx, grace)
 }
 
-func (g *Group) finish(ctx context.Context, grace time.Duration) error {
-	// safety: the cleanup slot serialises cleanups so only one reaps, while
-	// finishMu stays free during the descendant wait, which has no bound. Kill
-	// signals without either, and Terminate leaves on its own deadline rather
-	// than queueing behind a wait it cannot shorten.
-	if err := g.acquireCleanup(ctx); err != nil {
-		if reaped, reapErr := g.reapedResult(); reaped {
-			return reapErr
+func (group *Group) finish(ctx context.Context, grace time.Duration) error {
+	// SAFETY: The cleanup slot gives one caller ownership of reaping. finishMu
+	// remains free while descendants drain so Kill can proceed.
+	if err := group.acquireCleanup(ctx); err != nil {
+		if reaped, reapError := group.reapedResult(); reaped {
+			return reapError
 		}
-		return fmt.Errorf("%w: await group %d cleanup: %w", ErrCleanup, g.id, err)
+		return fmt.Errorf("%w: await group %d cleanup: %w", ErrCleanup, group.id, err)
 	}
-	defer func() { <-g.cleanup }()
-	if reaped, err := g.reapedResult(); reaped {
+	defer func() { <-group.cleanup }()
+	if reaped, err := group.reapedResult(); reaped {
 		return err
 	}
-	if err := g.leaderExitError(); err != nil {
-		return fmt.Errorf("%w: observe group %d leader: %w", ErrCleanup, g.id, err)
+	if err := group.leaderExitError(); err != nil {
+		return fmt.Errorf("%w: observe group %d leader: %w", ErrCleanup, group.id, err)
 	}
-	if err := g.emptyDescendants(ctx, grace); err != nil {
+	if err := group.emptyDescendants(ctx, grace); err != nil {
 		return fmt.Errorf("%w: %w", ErrCleanup, err)
 	}
-	g.finishMu.Lock()
-	defer g.finishMu.Unlock()
-	if g.reaped {
-		return g.waitErr
+	group.finishMu.Lock()
+	defer group.finishMu.Unlock()
+	if group.reaped {
+		return group.waitErr
 	}
-	g.waitErr = g.cmd.Wait()
-	g.reaped = true
-	g.reapedFlag.Store(true)
-	return g.waitErr
+	group.waitErr = group.command.Wait()
+	group.reaped = true
+	group.reapedFlag.Store(true)
+	return group.waitErr
 }
 
-func (g *Group) acquireCleanup(ctx context.Context) error {
+func (group *Group) acquireCleanup(ctx context.Context) error {
 	select {
-	case g.cleanup <- struct{}{}:
+	case group.cleanup <- struct{}{}:
 		return nil
 	default:
 	}
 	select {
-	case g.cleanup <- struct{}{}:
+	case group.cleanup <- struct{}{}:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func (g *Group) reapedResult() (bool, error) {
-	g.finishMu.Lock()
-	defer g.finishMu.Unlock()
-	return g.reaped, g.waitErr
+func (group *Group) reapedResult() (bool, error) {
+	group.finishMu.Lock()
+	defer group.finishMu.Unlock()
+	return group.reaped, group.waitErr
 }
 
-func (g *Group) awaitLeader(ctx context.Context) error {
+func (group *Group) awaitLeader(ctx context.Context) error {
 	select {
-	case <-g.leaderDone:
-		return g.leaderExitError()
+	case <-group.leaderDone:
+		return group.leaderExitError()
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-func (g *Group) leaderExitError() error {
-	g.leaderMu.Lock()
-	defer g.leaderMu.Unlock()
-	return g.leaderErr
+func (group *Group) leaderExitError() error {
+	group.leaderMu.Lock()
+	defer group.leaderMu.Unlock()
+	return group.leaderErr
 }
 
-func (g *Group) leaderHasExited() bool {
+func (group *Group) leaderHasExited() bool {
 	select {
-	case <-g.leaderDone:
-		return true
+	case <-group.leaderDone:
+		return group.leaderExitError() == nil
 	default:
 		return false
 	}
 }
 
-func boundedContext(parent context.Context, d time.Duration) (context.Context, context.CancelFunc) {
-	if d <= 0 {
-		d = 100 * time.Millisecond
+func boundedContext(parent context.Context, duration time.Duration) (context.Context, context.CancelFunc) {
+	if duration <= 0 {
+		duration = 100 * time.Millisecond
 	}
-	return context.WithTimeout(parent, d)
+	return context.WithTimeout(parent, duration)
 }
 
-func (g *Group) emptyDescendants(ctx context.Context, grace time.Duration) error {
-	empty, err := g.descendantProbe()(g.id, true, g.session)
+func (group *Group) emptyDescendants(ctx context.Context, grace time.Duration) error {
+	empty, err := group.descendantProbe()(ctx, group.id, true, group.session)
 	if err != nil || empty {
 		return err
 	}
-	if err := signalTerminate(g.id, true, g.session); err != nil {
+	if err := group.signal(ctx, true, signalTerminate); err != nil {
 		return err
 	}
 	graceCtx, cancel := boundedContext(ctx, grace)
-	err = g.waitDescendantsEmpty(graceCtx)
+	err = group.waitDescendantsEmpty(graceCtx)
 	cancel()
 	if err == nil {
 		return nil
 	}
-	if err := signalKill(g.id, true, g.session); err != nil {
+	if err := group.signal(ctx, true, signalKill); err != nil {
 		return err
 	}
-	return g.waitDescendantsEmpty(ctx)
+	return group.waitDescendantsEmpty(ctx)
 }
 
-func (g *Group) waitDescendantsEmpty(ctx context.Context) error {
+func (group *Group) waitDescendantsEmpty(ctx context.Context) error {
 	poll := newBackoffPoll(guardedSessionPollInterval, descendantMaxPollInterval)
 	timer := time.NewTimer(poll.next())
 	defer timer.Stop()
 	reported := false
 	for {
-		empty, err := g.descendantProbe()(g.id, true, g.session)
+		empty, err := group.descendantProbe()(ctx, group.id, true, group.session)
 		if err != nil {
 			return err
 		}
@@ -513,21 +521,21 @@ func (g *Group) waitDescendantsEmpty(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("group %d descendants remained: %w", g.id, ctx.Err())
+			return fmt.Errorf("group %d descendants remained: %w", group.id, ctx.Err())
 		case <-timer.C:
 			next := poll.next()
 			if !reported && next >= descendantEscalationInterval {
 				reported = true
 				slog.Warn("process group descendants still live; slowing the wait",
-					"group", g.id, "poll_interval", next.String())
+					"group", group.id, "poll_interval", next.String())
 			}
 			timer.Reset(next)
 		}
 	}
 }
 
-func List() ([]Info, error) { return processTable(false) }
+func List() ([]Info, error) { return processTable(context.Background(), false) }
 
-func ListSessions() ([]Info, error) { return processTable(true) }
+func ListSessions() ([]Info, error) { return processTable(context.Background(), true) }
 
 func IgnoreTermination() { ignoreTermination() }

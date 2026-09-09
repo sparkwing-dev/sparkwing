@@ -79,8 +79,12 @@ func TestIdentityProbeRejectsAReplacedOrSymlinkedStage(t *testing.T) {
 		}
 		original := path + ".original"
 		defer func() {
-			_ = os.Remove(original)
-			cleanup()
+			if err := os.Remove(original); err != nil {
+				t.Error(err)
+			}
+			if err := cleanup(); err != nil {
+				t.Error(err)
+			}
 		}()
 		_, err = asset.probeStagedIdentity(path, target, "v1.2.3", func(path string) {
 			if err := os.Rename(path, original); err != nil {
@@ -103,8 +107,12 @@ func TestIdentityProbeRejectsAReplacedOrSymlinkedStage(t *testing.T) {
 		}
 		original := filepath.Join(filepath.Dir(path), "original")
 		defer func() {
-			_ = os.Remove(original)
-			cleanup()
+			if err := os.Remove(original); err != nil {
+				t.Error(err)
+			}
+			if err := cleanup(); err != nil {
+				t.Error(err)
+			}
 		}()
 		_, err = asset.probeStagedIdentity(path, target, "v1.2.3", func(path string) {
 			if err := os.Rename(path, original); err != nil {
@@ -138,7 +146,9 @@ func TestIdentityProbeRejectsAReplacedOrSymlinkedStage(t *testing.T) {
 		if err := os.Symlink(outside, directory); err != nil {
 			t.Fatal(err)
 		}
-		cleanup()
+		if err := cleanup(); err != nil {
+			t.Fatal(err)
+		}
 		body, err := os.ReadFile(marker)
 		if err != nil || string(body) != "outside" {
 			t.Fatalf("cleanup followed replacement: body=%q err=%v", body, err)
@@ -150,4 +160,26 @@ func TestIdentityProbeRejectsAReplacedOrSymlinkedStage(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestStageProbeCleanupAllowsAbsentPaths(t *testing.T) {
+	asset := Verified{bytes: []byte("fixture")}
+	path, cleanup, err := asset.stageProbe("fixture-probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanup(); err != nil {
+		t.Fatalf("cleanup with missing executable: %v", err)
+	}
+	if err := cleanup(); err != nil {
+		t.Fatalf("cleanup with missing directory: %v", err)
+	}
 }
