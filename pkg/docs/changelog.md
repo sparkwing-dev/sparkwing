@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.48.1] - 2026-09-09
 ### Changed
 
 - **cli (Breaking):** Piped foreground runs now emit a compact NDJSON summary
