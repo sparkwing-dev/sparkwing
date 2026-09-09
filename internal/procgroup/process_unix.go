@@ -150,7 +150,7 @@ func signalSession(ctx context.Context, leader int, signal syscall.Signal) error
 	}
 	groups := map[int]bool{}
 	for _, process := range processes {
-		if process.Session == leader && process.Group > 1 && !processTerminated(process.State) {
+		if process.Session == leader && process.Group > 1 && !process.Exiting && !processTerminated(process.State) {
 			groups[process.Group] = true
 		}
 	}
@@ -187,13 +187,13 @@ func sendGroupSignal(ctx context.Context, group int, signal syscall.Signal) erro
 	if !errors.Is(err, syscall.EPERM) {
 		return err
 	}
-	// SAFETY: Darwin denies signals to zombie-only groups; verify termination after the denial.
+	// SAFETY: Darwin denies signals during exit; verify every member has committed to exit.
 	processes, inspectionErr := sessionProcessTable(ctx, false)
 	if inspectionErr != nil {
 		return errors.Join(err, inspectionErr)
 	}
 	for _, process := range processes {
-		if process.Group == group && !processTerminated(process.State) {
+		if process.Group == group && !process.Exiting && !processTerminated(process.State) {
 			return err
 		}
 	}
