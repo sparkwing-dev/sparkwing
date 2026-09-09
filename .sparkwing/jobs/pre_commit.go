@@ -389,7 +389,7 @@ func forEachGoModuleEnv(ctx context.Context, label, cmd string, unset []string, 
 	}
 	var failures []string
 	for _, dir := range dirs {
-		packages, err := modulePackageArgs(ctx, dir)
+		packages, err := modulePackageArgs(ctx, dir, label != "go build")
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", dir, err))
 			continue
@@ -414,15 +414,24 @@ func forEachGoModuleEnv(ctx context.Context, label, cmd string, unset []string, 
 		label, len(failures), strings.Join(failures, "\n  - "))
 }
 
-func modulePackageArgs(ctx context.Context, dir string) ([]string, error) {
+func modulePackageArgs(ctx context.Context, dir string, testOnly bool) ([]string, error) {
 	// safety: -e keeps broken product packages in the list for vet/build/test to reject.
-	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list -e -f '{{.ImportPath}}' ./...`, dir)).String()
+	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list -e -f '{{.ImportPath}} {{len .GoFiles}}' ./...`, dir)).String()
 	if err != nil {
 		return nil, fmt.Errorf("list module packages: %w", err)
 	}
 	var packages []string
-	for _, path := range strings.Fields(out) {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		path := fields[0]
 		if strings.Contains("/"+path+"/", "/node_modules/") {
+			continue
+		}
+		// safety: go build refuses a package that holds only tests, which ./... skipped silently.
+		if !testOnly && fields[1] == "0" {
 			continue
 		}
 		packages = append(packages, fmt.Sprintf("%q", path))
