@@ -130,11 +130,16 @@ func TestDarwinMemorySample_QueuesUntilRecovery(t *testing.T) {
 	inactive := uint64(245760)
 	var readErr error
 	d.sampler = hostSamplerFunc(func() (HostStat, error) {
-		stat, err := sampleDarwinHost(func(context.Context) ([]byte, error) {
-			return fmt.Appendf(nil, "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 4096.\nPages inactive: %d.\n", inactive), readErr
-		})
-		stat.TotalCores, stat.TotalMemoryBytes = 8, 16<<30
-		return stat, err
+		stat := HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30}
+		if readErr != nil {
+			return stat, readErr
+		}
+		output := fmt.Sprintf("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 4096.\nPages inactive: %d.\n", inactive)
+		stat.FreeMemoryBytes, stat.MemoryMeasured = darwinFreeMemory(stat.TotalMemoryBytes, output)
+		if !stat.MemoryMeasured {
+			t.Fatal("invalid memory fixture")
+		}
+		return stat, nil
 	})
 	d.refreshHeadroom()
 	holder, _, err := d.ledger.Submit(admission.Request{ID: "small-worker", Cores: 0.1, MemoryBytes: 32 << 20})
