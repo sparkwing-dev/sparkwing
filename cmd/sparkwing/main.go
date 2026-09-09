@@ -122,6 +122,9 @@ func dispatchRun(args []string) error {
 	if flags.unknownRunnerFlag != "" {
 		return fmt.Errorf("run: unknown runner flag %q; see `sparkwing run --help`, or put pipeline arguments after --", flags.unknownRunnerFlag)
 	}
+	if separator := slices.Index(passthrough, "--"); separator >= 0 {
+		passthrough = slices.Delete(passthrough, separator, separator+1)
+	}
 	priority := ""
 	if flags.prioritySet {
 		priority, err = validatePriorityFlag(flags.priority)
