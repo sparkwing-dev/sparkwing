@@ -19,7 +19,10 @@ this file is a menu and checklist, not a command that every change must run.
   `TestMain` hands the suite to `internal/testleak`, so a package fails when a
   goroutine outlives its tests. A new test package needs that file too; copy an
   existing one. A package that must tolerate a goroutine passes its own
-  `goleak` option from its `TestMain` and says why in a `safety:` comment.
+  `goleak` option from its `TestMain` and says why in a `safety:` comment. A
+  helper process a test spawns by re-executing the test binary runs without the
+  check, so a goroutine such a helper leaves behind fails nothing; the check
+  covers the suite, not the children it starts.
 - **Go result caching:** ordinary `test` and `pre-commit` checks preserve the
   caller's temporary-directory settings so Go can reuse passing results.
   Test fixtures own cleanup through `t.TempDir`, `t.Cleanup`, or deferred
