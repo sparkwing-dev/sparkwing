@@ -210,6 +210,7 @@ func TestStatusLinuxAfterInstall(t *testing.T) {
 				t.Errorf("State.Detail = %q, want it to carry %q", state.Detail, tc.wantDetail)
 			}
 			wantProbe := []string{
+				"systemctl --user show -p FragmentPath --value sparkwing-crons.timer",
 				"systemctl --user is-enabled sparkwing-crons.timer",
 				"systemctl --user is-active sparkwing-crons.timer",
 			}
@@ -459,6 +460,7 @@ func TestUninstallRemovesManagedFilesAndRepeatsCleanly(t *testing.T) {
 				return []string{filepath.Join(UnitDir(h), ServiceName), filepath.Join(UnitDir(h), TimerName)}
 			},
 			wantCalls: []string{
+				"systemctl --user show -p FragmentPath --value sparkwing-crons.timer",
 				"systemctl --user disable --now sparkwing-crons.timer",
 				"systemctl --user daemon-reload",
 			},
@@ -635,5 +637,48 @@ func TestExecIsRequiredOnceACommandIsNeeded(t *testing.T) {
 	h.Exec = nil
 	if _, err := Install(h); err == nil || !strings.Contains(err.Error(), "Host.Exec") {
 		t.Errorf("Install error = %v, want it to name Host.Exec", err)
+	}
+}
+
+func TestLinuxStatusAndUninstallLeaveAStrangersUnitAlone(t *testing.T) {
+	exec := &fakeExec{}
+	h := linuxHost(t, exec)
+	if _, err := Install(h); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	exec.rules = append(exec.rules, rule{"systemctl --user show -p FragmentPath", "/elsewhere/systemd/user/sparkwing-crons.timer\n", nil})
+	exec.calls = nil
+
+	st, err := Status(h)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !st.Installed || st.Enabled {
+		t.Fatalf("status = %+v, want installed and not enabled", st)
+	}
+	if !strings.Contains(st.Detail, "/elsewhere/") {
+		t.Fatalf("detail should name the loaded unit: %q", st.Detail)
+	}
+	for _, c := range exec.calls {
+		if strings.Contains(c, "is-enabled") || strings.Contains(c, "is-active") {
+			t.Fatalf("status asked systemd about a unit it does not own: %v", exec.calls)
+		}
+	}
+
+	exec.calls = nil
+	st, err = Uninstall(h)
+	if err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	for _, c := range exec.calls {
+		if strings.Contains(c, "disable") {
+			t.Fatalf("uninstall disabled a unit it does not own: %v", exec.calls)
+		}
+	}
+	if !strings.Contains(st.Detail, "left alone") {
+		t.Fatalf("detail = %q", st.Detail)
+	}
+	if _, err := os.Stat(filepath.Join(UnitDir(h), TimerName)); !os.IsNotExist(err) {
+		t.Fatalf("our timer file should be removed: %v", err)
 	}
 }

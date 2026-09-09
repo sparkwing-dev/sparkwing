@@ -81,6 +81,10 @@ func statusLinux(h Host) (State, error) {
 	if !state.Installed {
 		return state, nil
 	}
+	if loaded := loadedElsewhere(h, timerPath); loaded != "" {
+		state.Detail = fmt.Sprintf("systemd runs %s from %s, not from %s", TimerName, loaded, timerPath)
+		return state, nil
+	}
 	enabledOut, enabledErr := h.run("systemctl", "--user", "is-enabled", TimerName)
 	activeOut, activeErr := h.run("systemctl", "--user", "is-active", TimerName)
 	switch {
@@ -114,13 +118,19 @@ func uninstallLinux(h Host) (State, error) {
 	}
 
 	var disableErr error
-	if out, err := h.run("systemctl", "--user", "disable", "--now", TimerName); err != nil && !notLoaded(out) {
-		disableErr = fmt.Errorf("crontimer: systemctl --user disable --now %s: %w: %s", TimerName, err, strings.TrimSpace(out))
+	loaded := loadedElsewhere(h, timerPath)
+	if loaded == "" {
+		if out, err := h.run("systemctl", "--user", "disable", "--now", TimerName); err != nil && !notLoaded(out) {
+			disableErr = fmt.Errorf("crontimer: systemctl --user disable --now %s: %w: %s", TimerName, err, strings.TrimSpace(out))
+		}
 	}
 	if err := removeManaged(service, timer); err != nil {
 		return State{Path: timerPath}, errors.Join(disableErr, err)
 	}
 	state := State{Path: timerPath, Detail: "the sparkwing cron timer is removed"}
+	if loaded != "" {
+		state.Detail = fmt.Sprintf("the files under %s are removed; systemd still runs %s from %s, which is left alone", filepath.Dir(timerPath), TimerName, loaded)
+	}
 	if out, err := h.run("systemctl", "--user", "daemon-reload"); err != nil {
 		return state, errors.Join(disableErr, fmt.Errorf("crontimer: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out)))
 	}
@@ -270,4 +280,20 @@ func firstSystemdWord(s string) string {
 		}
 	}
 	return strings.ReplaceAll(b.String(), "%%", "%")
+}
+
+// loadedElsewhere returns the unit file the user session actually runs the
+// timer from when that is not the one at timerPath. systemctl addresses units
+// by name, so a ConfigHome that is not the session's would otherwise be asked
+// about, enabled, and disabled against a stranger's file.
+func loadedElsewhere(h Host, timerPath string) string {
+	out, err := h.run("systemctl", "--user", "show", "-p", "FragmentPath", "--value", TimerName)
+	if err != nil {
+		return ""
+	}
+	loaded := strings.TrimSpace(out)
+	if loaded == "" || loaded == timerPath {
+		return ""
+	}
+	return loaded
 }
