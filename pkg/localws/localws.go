@@ -268,9 +268,6 @@ func buildHandler(
 	root.Handle("GET /api/v1/capacity/profiles/explain", webHandler)
 	if parts.ctrl != nil {
 		ctrlHandler := parts.ctrl.Handler()
-		if opts.ReadOnly {
-			ctrlHandler = readOnlyMiddleware(ctrlHandler)
-		}
 		root.Handle("/api/v1/", ctrlHandler)
 		root.Handle("/webhooks/", ctrlHandler)
 	}
@@ -281,6 +278,9 @@ func buildHandler(
 		guard := newSchemaGuard(parts.store, cancel)
 		handler = guard.middleware(root)
 		go guard.poll(ctx, schemaPollInterval)
+	}
+	if opts.ReadOnly {
+		handler = readOnlyMiddleware(handler)
 	}
 	return web.SecurityHeadersMiddleware(webOpts, originGuard(handler, opts.originPolicy()))
 }
