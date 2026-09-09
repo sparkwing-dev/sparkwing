@@ -15,7 +15,7 @@
 // [Config] is the top-level document with one or more [Pipeline]
 // entries. Each Pipeline carries [Triggers], [Guards], argument
 // defaults, a profile selector, and runner requirements. Triggers fan
-// out by source: [PushTrigger], [PullRequestTrigger], a schedule
-// expression, [WebhookTrigger], [PreHookTrigger], [PostHookTrigger],
-// and [PostCommitHookTrigger].
+// out by source: [PushTrigger], [PullRequestTrigger],
+// [ScheduleTrigger], [WebhookTrigger], [PreHookTrigger],
+// [PostHookTrigger], and [PostCommitHookTrigger].
 package pipelines

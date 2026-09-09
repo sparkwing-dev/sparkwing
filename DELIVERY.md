@@ -185,6 +185,11 @@ this file is a menu and checklist, not a command that every change must run.
   public binaries and images after that tag.
 - **Independent verification:** for user-facing local-execution changes, build
   the intended revision with `SKIP_WEB_BUILD=1 bash bin/install.sh` when the web
-  bundle is unchanged, then exercise the installed CLI and daemon. Verify SDK,
+  bundle is unchanged, then exercise the installed CLI and daemon. To exercise a
+  branch against real runs without replacing the binary every other repo and
+  timer resolve, install it under its own name beside the real one:
+  `SPARKWING_INSTALL_NAME=sparkwing-crons bash bin/install.sh` writes
+  `~/.local/bin/sparkwing-crons`, which shares the home and store; an additive
+  store migration keeps the older `sparkwing` working on the same database. Verify SDK,
   templates, integrations, browser behavior, or release assets when those
   surfaces changed.

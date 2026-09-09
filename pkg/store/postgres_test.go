@@ -114,6 +114,93 @@ func TestSchemaV31PostgresFreshAndV30UpgradeShape(t *testing.T) {
 	})
 }
 
+func TestSchemaV32PostgresFreshAndV31UpgradeShape(t *testing.T) {
+	t.Run("fresh", func(t *testing.T) {
+		assertPostgresCronShape(t, openPGTestStore(t))
+	})
+	t.Run("v31 upgrade", func(t *testing.T) {
+		scoped := pgTestSchemaDSN(t)
+		ctx := context.Background()
+		st, err := store.OpenPostgres(ctx, scoped)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, statement := range []string{
+			`DROP TABLE cron_fires`,
+			`DROP TABLE cron_schedules`,
+			`DELETE FROM sparkwing_schema_version WHERE version >= 32`,
+		} {
+			if _, err := st.DB().ExecContext(ctx, statement); err != nil {
+				_ = st.Close()
+				t.Fatalf("downgrade with %q: %v", statement, err)
+			}
+		}
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+		up, err := store.OpenPostgres(ctx, scoped)
+		if err != nil {
+			t.Fatalf("upgrade v31: %v", err)
+		}
+		defer up.Close()
+		assertPostgresCronShape(t, up)
+		if got, err := up.CurrentSchemaVersion(ctx); err != nil || got != store.ExpectedSchemaVersion() {
+			t.Fatalf("schema version = %d, err = %v, want %d", got, err, store.ExpectedSchemaVersion())
+		}
+	})
+}
+
+func assertPostgresCronShape(t *testing.T, st *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	for table, columns := range map[string][]string{
+		"cron_schedules": {
+			"id", "repo_path", "pipeline", "cron", "tz", "overlap", "catch_up_ns",
+			"paused", "declared", "armed_at", "armed_by", "updated_at", "cursor_at",
+			"last_fired_at", "last_run_id", "last_outcome", "next_due_at",
+		},
+		"cron_fires": {"id", "schedule_id", "due_at", "decided_at", "outcome", "run_id", "detail"},
+	} {
+		for _, column := range columns {
+			var present int
+			if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
+ WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2`,
+				table, column).Scan(&present); err != nil {
+				t.Fatalf("inspect %s.%s: %v", table, column, err)
+			}
+			if present != 1 {
+				t.Errorf("postgres schema missing %s.%s", table, column)
+			}
+		}
+	}
+	// safety: the SQLite twin declares these as INTEGER, so a replacer miss
+	// would silently give Postgres a 32-bit column that truncates UnixNano.
+	for table, columns := range map[string][]string{
+		"cron_schedules": {"catch_up_ns", "armed_at", "updated_at", "cursor_at", "last_fired_at", "next_due_at"},
+		"cron_fires":     {"due_at", "decided_at"},
+	} {
+		for _, column := range columns {
+			var dataType string
+			if err := st.DB().QueryRowContext(ctx, `SELECT data_type FROM information_schema.columns
+ WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2`,
+				table, column).Scan(&dataType); err != nil {
+				t.Fatalf("inspect %s.%s type: %v", table, column, err)
+			}
+			if dataType != "bigint" {
+				t.Errorf("%s.%s is %s, want bigint", table, column, dataType)
+			}
+		}
+	}
+	var indexes int
+	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_indexes
+ WHERE schemaname = current_schema() AND indexname = 'idx_cron_fires_schedule_decided'`).Scan(&indexes); err != nil {
+		t.Fatal(err)
+	}
+	if indexes != 1 {
+		t.Errorf("idx_cron_fires_schedule_decided count = %d, want 1", indexes)
+	}
+}
+
 func assertPostgresExecutionPolicyShape(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()

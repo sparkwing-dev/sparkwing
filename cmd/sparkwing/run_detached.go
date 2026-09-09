@@ -183,6 +183,12 @@ type submission struct {
 	Priority       string
 	IdempotencyKey string
 	RequestID      string
+
+	// safety: empty keeps the source `run --sw-detached` writes; only a caller
+	// with its own name for the launch sets this.
+	Source string
+
+	ScheduleID string
 }
 
 func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.Paths, sub submission) (submitResult, error) {
@@ -243,6 +249,9 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	if sub.RequestID != "" {
 		triggerEnv[SubmitRequestIDKey] = sub.RequestID
 	}
+	if sub.ScheduleID != "" {
+		triggerEnv[orchestrator.CronScheduleKey] = sub.ScheduleID
+	}
 	var userName string
 	if u, uerr := user.Current(); uerr == nil {
 		userName = u.Username
@@ -254,7 +263,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		ID:             runID,
 		Pipeline:       sub.Pipeline,
 		Args:           sub.Args,
-		TriggerSource:  triggerSource(submitTriggerSourcePrefix),
+		TriggerSource:  submissionSource(sub),
 		TriggerUser:    userName,
 		TriggerEnv:     triggerEnv,
 		GitBranch:      branch,
@@ -308,6 +317,14 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		IdempotencyKey: sub.IdempotencyKey,
 		RequestID:      sub.RequestID,
 	}, nil
+}
+
+// safety: a named source passes through verbatim; pipelines branch on that exact word.
+func submissionSource(sub submission) string {
+	if sub.Source != "" {
+		return sub.Source
+	}
+	return triggerSource(submitTriggerSourcePrefix)
 }
 
 func discardRefWorktree(ctx context.Context, paths orchestrator.Paths, dir string) {

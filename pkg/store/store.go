@@ -1031,7 +1031,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 31
+const expectedSchemaVersion = 32
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1415,6 +1415,54 @@ var nodeClaimOffersTablePostgres = strings.NewReplacer(
 	"INTEGER", "BIGINT",
 ).Replace(nodeClaimOffersTableSQLite)
 
+const cronSchedulesTableSQLite = `CREATE TABLE IF NOT EXISTS cron_schedules (
+    id            TEXT PRIMARY KEY,
+    repo_path     TEXT NOT NULL,
+    pipeline      TEXT NOT NULL,
+    cron          TEXT NOT NULL,
+    tz            TEXT NOT NULL,
+    -- skip | queue
+    overlap       TEXT NOT NULL,
+    catch_up_ns   INTEGER NOT NULL,
+    paused        INTEGER NOT NULL DEFAULT 0,
+    -- 0 once the repository stops declaring the schedule, which keeps the
+    -- row and its history readable after the declaration is withdrawn.
+    declared      INTEGER NOT NULL DEFAULT 1,
+    armed_at      INTEGER NOT NULL,
+    armed_by      TEXT NOT NULL DEFAULT '',
+    updated_at    INTEGER NOT NULL,
+    -- last due instant resolved, however it resolved, so a tick never
+    -- reconsiders an instant an earlier tick already decided.
+    cursor_at     INTEGER NOT NULL,
+    last_fired_at INTEGER,
+    last_run_id   TEXT NOT NULL DEFAULT '',
+    last_outcome  TEXT NOT NULL DEFAULT '',
+    -- NULL when the expression never matches again.
+    next_due_at   INTEGER,
+    UNIQUE(repo_path, pipeline)
+);`
+
+var cronSchedulesTablePostgres = strings.NewReplacer(
+	"INTEGER", "BIGINT",
+).Replace(cronSchedulesTableSQLite)
+
+const cronFiresTableSQLite = `CREATE TABLE IF NOT EXISTS cron_fires (
+    id          TEXT PRIMARY KEY,
+    schedule_id TEXT NOT NULL,
+    due_at      INTEGER NOT NULL,
+    decided_at  INTEGER NOT NULL,
+    -- fired | skipped_overlap | missed | failed
+    outcome     TEXT NOT NULL,
+    run_id      TEXT NOT NULL DEFAULT '',
+    detail      TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_cron_fires_schedule_decided
+    ON cron_fires(schedule_id, decided_at DESC);`
+
+var cronFiresTablePostgres = strings.NewReplacer(
+	"INTEGER", "BIGINT",
+).Replace(cronFiresTableSQLite)
+
 // SkewError is returned by Open when the database lists a schema
 // requirement this binary does not know. Callers can use errors.As to
 // detect the condition (e.g. for surfacing a custom upgrade prompt in
@@ -1793,9 +1841,19 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyFleetMigrationSQLite(ctx, tx)
 	case 31:
 		return applyExecutionPolicyMigrationSQLite(ctx, tx)
+	case 32:
+		return applyCronsMigration(ctx, tx, cronSchedulesTableSQLite, cronFiresTableSQLite)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
+}
+
+func applyCronsMigration(ctx context.Context, tx *storeTx, schedules, fires string) error {
+	if _, err := tx.ExecContext(ctx, schedules); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, fires)
+	return err
 }
 
 func applyExecutionPolicyMigrationSQLite(ctx context.Context, tx *storeTx) error {
@@ -1993,6 +2051,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyFleetMigrationPostgres(ctx, tx)
 	case 31:
 		return applyExecutionPolicyMigrationPostgres(ctx, tx)
+	case 32:
+		return applyCronsMigration(ctx, tx, cronSchedulesTablePostgres, cronFiresTablePostgres)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

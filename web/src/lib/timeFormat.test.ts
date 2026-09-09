@@ -1,7 +1,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { fmtDateTime } from "./timeFormat";
+import { fmtDateTime, fmtUntil } from "./timeFormat";
 
 function localISO(
   year: number,
@@ -48,5 +48,46 @@ describe("fmtDateTime", () => {
   it("degrades instead of throwing on junk", () => {
     assert.equal(fmtDateTime(""), "--");
     assert.equal(fmtDateTime("not-a-date"), "not-a-date");
+  });
+});
+
+describe("fmtUntil", () => {
+  const now = Date.parse("2026-09-08T12:00:00Z");
+
+  function ahead(ms: number): string {
+    return new Date(now + ms).toISOString();
+  }
+
+  it("counts seconds under a minute", () => {
+    assert.equal(fmtUntil(ahead(45_000), now), "in 45s");
+  });
+
+  it("counts whole minutes under an hour", () => {
+    assert.equal(fmtUntil(ahead(12 * 60_000 + 30_000), now), "in 12m");
+  });
+
+  it("pairs hours with minutes under a day", () => {
+    assert.equal(fmtUntil(ahead(4 * 3_600_000 + 12 * 60_000), now), "in 4h 12m");
+    assert.equal(fmtUntil(ahead(4 * 3_600_000), now), "in 4h");
+  });
+
+  it("drops to whole days past 24 hours", () => {
+    assert.equal(fmtUntil(ahead(3 * 86_400_000 + 5 * 3_600_000), now), "in 3d");
+  });
+
+  it("reads an elapsed instant as now", () => {
+    assert.equal(fmtUntil(ahead(0), now), "now");
+    assert.equal(fmtUntil(ahead(-90_000), now), "now");
+  });
+
+  it("degrades instead of throwing on junk", () => {
+    assert.equal(fmtUntil("", now), "--");
+    assert.equal(fmtUntil(null, now), "--");
+    assert.equal(fmtUntil("not-a-date", now), "--");
+  });
+
+  it("defaults to the wall clock", () => {
+    const target = new Date(Date.now() + 3_630_000).toISOString();
+    assert.equal(fmtUntil(target), "in 1h");
   });
 });

@@ -31,14 +31,17 @@ The CLI binary ships with the dashboard embedded; nothing else needs to be insta
 
 For the bind address and the other `dashboard start` flags, see [cli-dashboard.md](cli-dashboard.md).
 
-## Why no daemon
+## Why no resident process
 
-A daemon would buy a queue, a scheduler, and a shared HTTP API. Locally that complexity is not worth it:
+Locally, nothing needs to stay up between runs:
 
 - **Concurrency**: run five `sparkwing`s at once and you get five entries. That is the user's call.
 - **History**: the local store is the history.
 - **Webhooks and remote triggering**: that is the cluster's job.
-- **Background runs**: `sparkwing ... &` works in any shell.
+- **Background runs**: `sparkwing ... &` works in any shell, and `sparkwing run --sw-detached` hands the run to a consumer that exits when the queue drains.
+- **Schedules**: an OS timer runs `sparkwing crons tick` every minute and sparkwing evaluates the cadences inside that tick, so the machine holds a timer rather than a scheduler. See [crons.md](crons.md).
+
+The one daemon on a local machine is `wingd`, the admission daemon. It starts on demand when a pipeline needs a concurrency decision, serves the runs that asked for it, and exits when it goes idle. `sparkwing daemon status` reports it and never starts one.
 
 ## Multi-run demo
 

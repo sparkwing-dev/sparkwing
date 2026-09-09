@@ -97,6 +97,10 @@ type ConsumerIdentity struct {
 	PID     int       `json:"pid"`
 	Version string    `json:"version,omitempty"`
 	Started time.Time `json:"started"`
+	// Host names the process serving the consumer when it is not a supervisor
+	// of its own ("dashboard"), so a submitter that wants a newer consumer
+	// knows stopping this PID would stop something else.
+	Host string `json:"host,omitempty"`
 }
 
 func ConsumerPID(home string) (int, bool) {
@@ -148,6 +152,10 @@ type ConsumerOptions struct {
 
 	Version string
 
+	// Host is recorded in the identity file when the consumer is served inside
+	// another process rather than by its own supervisor.
+	Host string
+
 	Ready chan<- struct{}
 
 	NoStaleClaimSweep bool
@@ -183,7 +191,7 @@ func ServeConsumer(ctx context.Context, opts ConsumerOptions) error {
 	defer func() { _ = flockUnlock(lockF) }()
 
 	if b, merr := json.Marshal(ConsumerIdentity{
-		PID: os.Getpid(), Version: opts.Version, Started: time.Now(),
+		PID: os.Getpid(), Version: opts.Version, Started: time.Now(), Host: opts.Host,
 	}); merr == nil {
 		_ = fssecure.WriteFile(layout.PID, append(b, '\n'))
 	}
@@ -696,8 +704,10 @@ func (s *inFlightSet) len() int {
 	return len(s.ids)
 }
 
-func RunLocalTriggerConsumer(ctx context.Context, home string, st *store.Store, logger *slog.Logger) error {
-	_, err := runLocalTriggerConsumerWithRetryInterval(ctx, home, st, logger, consumerElectionRetryInterval)
+// RunLocalTriggerConsumer serves this home's trigger consumer inside the
+// calling process, a dashboard, and records version as the build it runs.
+func RunLocalTriggerConsumer(ctx context.Context, home string, st *store.Store, logger *slog.Logger, version string) error {
+	_, err := runLocalTriggerConsumerWithRetryInterval(ctx, home, st, logger, version, consumerElectionRetryInterval)
 	return err
 }
 
@@ -706,6 +716,7 @@ func runLocalTriggerConsumerWithRetryInterval(
 	home string,
 	st *store.Store,
 	logger *slog.Logger,
+	version string,
 	retryInterval time.Duration,
 ) (<-chan struct{}, error) {
 	if logger == nil {
@@ -717,7 +728,7 @@ func runLocalTriggerConsumerWithRetryInterval(
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		serveConsumerContending(ctx, home, st, logger, retryInterval)
+		serveConsumerContending(ctx, home, st, logger, version, retryInterval)
 	}()
 	return done, nil
 }
@@ -729,6 +740,7 @@ func serveConsumerContending(
 	home string,
 	st *store.Store,
 	logger *slog.Logger,
+	version string,
 	retryInterval time.Duration,
 ) {
 	announcedStandDown := false
@@ -737,6 +749,8 @@ func serveConsumerContending(
 			Home:              home,
 			Store:             st,
 			Logger:            logger,
+			Version:           version,
+			Host:              "dashboard",
 			IdleTimeout:       -1,
 			NoStaleClaimSweep: true,
 		})

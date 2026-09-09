@@ -64,7 +64,7 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 			}
 		}},
 		{"scheduled-report", triggerBlocks["schedule"], func(t *testing.T, tr pipelines.Triggers) {
-			if tr.Schedule == "" {
+			if tr.Schedule == nil {
 				t.Error("scheduled-report declares no schedule; its help says it prints one")
 			}
 		}},
@@ -333,7 +333,7 @@ func TestMultiTriggerYAMLParses(t *testing.T) {
 		t.Fatalf("multi-trigger entry does not parse: %v\n%s", err, block)
 	}
 	on := cfg.Pipelines[0].On
-	if on.Push == nil || on.PullRequest == nil || on.Schedule == "" {
+	if on.Push == nil || on.PullRequest == nil || on.Schedule == nil {
 		t.Errorf("decoded %+v; want all three declared", on)
 	}
 }

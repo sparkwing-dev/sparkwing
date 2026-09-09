@@ -54,7 +54,7 @@ func TestDashboardConsumerRetakeUsesControlledElectionRetryInterval(t *testing.T
 				matchesCall = func(call *ast.CallExpr) bool {
 					name, ok := call.Fun.(*ast.Ident)
 					return ok && name.Name == "runLocalTriggerConsumerWithRetryInterval" &&
-						len(call.Args) == 5 && isTenMilliseconds(call.Args[4])
+						len(call.Args) == 6 && isTenMilliseconds(call.Args[5])
 				}
 			}
 			found := false
@@ -80,7 +80,7 @@ func TestDashboardConsumerRetakeUsesControlledElectionRetryInterval(t *testing.T
 
 func callsWithLastArg(call *ast.CallExpr, name, arg string) bool {
 	callee, ok := call.Fun.(*ast.Ident)
-	return ok && callee.Name == name && len(call.Args) == 5 && isIdent(call.Args[4], arg)
+	return ok && callee.Name == name && len(call.Args) == 6 && isIdent(call.Args[5], arg)
 }
 
 func isIdent(expr ast.Expr, name string) bool {

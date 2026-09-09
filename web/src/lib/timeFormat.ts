@@ -88,3 +88,22 @@ export function fmtAgo(ts: string): string {
   if (sec < 86_400) return `${Math.floor(sec / 3600)}h ago`;
   return `${Math.floor(sec / 86_400)}d ago`;
 }
+
+// Counts forward to an instant: "in 45s", "in 12m", "in 4h 12m", "in 3d".
+// An instant that has already passed reads "now", because a due schedule is
+// waiting on the next tick rather than running late by a measurable amount.
+export function fmtUntil(ts: string | null | undefined, now?: number): string {
+  if (!ts) return "--";
+  const target = new Date(ts).getTime();
+  if (isNaN(target)) return "--";
+  const sec = Math.floor((target - (now ?? Date.now())) / 1000);
+  if (sec <= 0) return "now";
+  if (sec < 60) return `in ${sec}s`;
+  if (sec < 3600) return `in ${Math.floor(sec / 60)}m`;
+  if (sec < 86_400) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    return m ? `in ${h}h ${m}m` : `in ${h}h`;
+  }
+  return `in ${Math.floor(sec / 86_400)}d`;
+}

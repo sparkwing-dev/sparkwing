@@ -10,6 +10,9 @@ func (c *Config) Find(name string) *Pipeline
 func (c *Config) Names() []string
 func (c *Config) PipelinesByEntrypoint() map[string][]*Pipeline
 func (c *Config) Validate() error
+const DefaultScheduleCatchUp = time.Hour
+const DefaultScheduleOverlap = ScheduleOverlapSkip
+const DefaultScheduleTZ = "UTC"
 type GuardContext struct {
 	ProfileName string
 
@@ -78,6 +81,23 @@ type PushTrigger struct {
 
 	Paths []string
 }
+const ScheduleOverlapQueue = "queue"
+const ScheduleOverlapSkip = "skip"
+const ScheduleTZLocal = "local"
+type ScheduleTrigger struct {
+	Cron string
+
+	TZ string
+
+	Overlap string
+
+	CatchUp string
+}
+func (s *ScheduleTrigger) CatchUpDuration() (time.Duration, error)
+func (s *ScheduleTrigger) Location() (*time.Location, error)
+func (s *ScheduleTrigger) OverlapPolicy() string
+func (s *ScheduleTrigger) UnmarshalYAML(node *yaml.Node) error
+func (s *ScheduleTrigger) Validate(pipeline string) error
 type SecretEntry struct {
 	Name     string
 	Required bool
@@ -90,7 +110,7 @@ type Triggers struct {
 
 	PullRequest *PullRequestTrigger
 
-	Schedule string
+	Schedule *ScheduleTrigger
 
 	Webhook *WebhookTrigger
 

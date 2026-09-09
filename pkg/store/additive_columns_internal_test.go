@@ -38,6 +38,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// has never heard of cannot refuse one of its inserts.
 	28: nil,
 	29: {nodesOrderCols},
+	// safety: v32 adds two tables of its own and no column, and nothing older
+	// reads them, so an older binary keeps writing the migrated database.
+	32: nil,
 }
 
 func columnSpecMaps() []map[string]string {

@@ -414,6 +414,7 @@ func TestBuildHandler_SecurityHeadersOnEveryLocalRoute(t *testing.T) {
 		"/api/v1/pipelines",
 		"/api/v1/capabilities",
 		"/api/v1/runs",
+		"/api/v1/crons",
 	} {
 		t.Run(path, func(t *testing.T) {
 			resp, err := http.Get(srv.URL + path)

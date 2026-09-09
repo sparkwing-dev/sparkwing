@@ -34,10 +34,10 @@ func describeTriggers(on pipelines.Triggers) []triggerLine {
 			Advisory: advisoryFields("branches", len(t.Branches) > 0, "actions", len(t.Actions) > 0),
 		})
 	}
-	if on.Schedule != "" {
+	if t := on.Schedule; t != nil {
 		out = append(out, triggerLine{
 			Event:  "schedule",
-			Detail: on.Schedule + " (UTC)",
+			Detail: scheduleDetail(t),
 		})
 	}
 	if t := on.Webhook; t != nil {
@@ -53,6 +53,25 @@ func describeTriggers(on pipelines.Triggers) []triggerLine {
 		out = append(out, triggerLine{Event: "post_commit"})
 	}
 	return out
+}
+
+func scheduleDetail(t *pipelines.ScheduleTrigger) string {
+	tz := t.TZ
+	if tz == "" {
+		tz = pipelines.DefaultScheduleTZ
+	}
+	detail := fmt.Sprintf("%s (%s)", t.Cron, tz)
+	var extra []string
+	if policy := t.OverlapPolicy(); policy != pipelines.DefaultScheduleOverlap {
+		extra = append(extra, "overlap "+policy)
+	}
+	if window, err := t.CatchUpDuration(); err == nil && window != pipelines.DefaultScheduleCatchUp {
+		extra = append(extra, "catch-up "+window.String())
+	}
+	if len(extra) > 0 {
+		detail += ", " + strings.Join(extra, ", ")
+	}
+	return detail
 }
 
 func advisoryFields(pairs ...any) string {

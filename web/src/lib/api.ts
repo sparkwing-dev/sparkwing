@@ -1158,3 +1158,123 @@ export async function getCapacityExplain(
   if (!res || !res.ok) return null;
   return res.json();
 }
+
+export interface CronTimerState {
+  installed: boolean;
+  foreign: boolean;
+  enabled: boolean;
+  stale: boolean;
+  path: string;
+  binary: string;
+  detail: string;
+}
+
+export interface CronTick {
+  // Empty until the timer has ticked at least once on this host.
+  at: string;
+  host: string;
+  version: string;
+  error: string;
+}
+
+export interface CronHealth {
+  timer: CronTimerState;
+  last_tick: CronTick;
+  tick_stale: boolean;
+  schedules: number;
+  armed: number;
+  paused: number;
+  undeclared: number;
+  detail: string;
+}
+
+export type CronState = "armed" | "paused" | "undeclared";
+
+export type CronOutcome = "" | "fired" | "skipped_overlap" | "missed" | "failed";
+
+export interface CronSchedule {
+  id: string;
+  name: string;
+  repo_path: string;
+  pipeline: string;
+  cron: string;
+  tz: string;
+  overlap: string;
+  catch_up_ns: number;
+  paused: boolean;
+  declared: boolean;
+  state: CronState;
+  armed_at: string;
+  updated_at: string;
+  last_fired_at: string | null;
+  last_run_id: string;
+  last_outcome: CronOutcome;
+  next_due_at: string | null;
+}
+
+export interface CronFire {
+  id: string;
+  schedule_id: string;
+  due_at: string;
+  decided_at: string;
+  outcome: CronOutcome;
+  run_id: string;
+  detail: string;
+  run_status: string;
+}
+
+export interface CronsOverview {
+  health: CronHealth;
+  schedules: CronSchedule[];
+}
+
+export interface CronDetail {
+  schedule: CronSchedule;
+  fires: CronFire[];
+  upcoming: string[];
+}
+
+export async function getCrons(): Promise<CronsOverview | null> {
+  const res = await authFetch(`${API_URL}/api/v1/crons`, {
+    cache: "no-store",
+  }).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json();
+}
+
+export async function getCron(id: string): Promise<CronDetail | null> {
+  const res = await authFetch(
+    `${API_URL}/api/v1/crons/${encodeURIComponent(id)}`,
+    { cache: "no-store" },
+  ).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json();
+}
+
+async function postCron<T>(id: string, action: string): Promise<T> {
+  const res = await authFetch(
+    `${API_URL}/api/v1/crons/${encodeURIComponent(id)}/${action}`,
+    { method: "POST" },
+  );
+  if (!res.ok) {
+    const text = (await res.text().catch(() => "")).trim();
+    throw new Error(text || `${action} failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function pauseCron(id: string): Promise<CronSchedule> {
+  const body = await postCron<{ schedule: CronSchedule }>(id, "pause");
+  return body.schedule;
+}
+
+export async function resumeCron(id: string): Promise<CronSchedule> {
+  const body = await postCron<{ schedule: CronSchedule }>(id, "resume");
+  return body.schedule;
+}
+
+export async function runCronNow(
+  id: string,
+): Promise<{ run_id: string; schedule: CronSchedule }> {
+  return postCron<{ run_id: string; schedule: CronSchedule }>(id, "run");
+}

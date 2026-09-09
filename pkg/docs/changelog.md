@@ -22,6 +22,60 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **dashboard:** A Crons tab lists this host's armed pipeline schedules with a
+  health banner for the OS timer and the last tick, and a detail pane carrying
+  a schedule's recent fires -- each with the status of the run it launched --
+  and its next five due instants. Pause, resume and run-now are one click from
+  the row. It reads the same store `sparkwing crons` does, over local routes
+  `GET /api/v1/crons`, `GET /api/v1/crons/{id}` and
+  `POST /api/v1/crons/{id}/pause|resume|run`, where `{id}` is a schedule id, a
+  `repo/pipeline` name, or a bare pipeline name unique to this host. A
+  read-only dashboard serves the reads and refuses the three writes.
+
+- **store:** The runs store advances to schema 32 with two tables for
+  pipeline schedules: `cron_schedules`, one row per armed repository
+  checkout and pipeline, and `cron_fires`, its history of resolved due
+  instants pruned to the newest 200 per schedule. The migration is additive
+  -- it declares no schema requirement and alters no existing table -- so a
+  binary built before it keeps opening and writing the same database. See
+  the [migration note](docs/migrations/_unreleased.md#scheduled-pipelines-and-runs-store-schema-32).
+
+- **cli:** `sparkwing crons` runs a pipeline's declared `on.schedule` cadence
+  from the machine you arm. `crons install` records a repository's schedules
+  against this host -- compiling each pipeline first, because a schedule fires
+  unattended -- and writes one OS timer for the whole host: a systemd user
+  timer on Linux, a launchd agent on macOS, both calling `sparkwing crons
+  tick` every minute. Sparkwing evaluates the cron expressions inside that
+  tick, so one timer serves every armed schedule and no process stays
+  resident. Each tick locks, re-reads what the armed repositories declare, and
+  resolves every due instant exactly once: launched, skipped because the
+  previous scheduled run is still going, or recorded missed when it fell
+  outside the catch-up window. A scheduled run goes through the detached
+  submission path with the trigger source `schedule` and the schedule's id on
+  its trigger. `crons list`, `show`, `next` and `status` inspect it, `pause`,
+  `resume` and `run` drive it, and `crons uninstall` disarms a checkout,
+  removing the timer once nothing is left armed. `crons status` exits non-zero
+  when schedules are armed and the host is not evaluating them. See
+  [docs/crons.md](docs/crons.md).
+
+### Changed
+
+- **config + sdk (Breaking):** `on.schedule` accepts a mapping as well as a
+  cron string. `cron` sets the cadence, `tz` the IANA zone it is read in
+  (default `UTC`; `local` means the host's own), `overlap` what happens when
+  a fire comes due while the previous scheduled run is still running (`skip`
+  records it as skipped, `queue` launches it and lets admission order the
+  two), and `catch_up` how long after a due minute a late fire may still
+  happen (default `1h`, floor `2m`). The bare cron string still parses and
+  means the same thing. Sparkwing validates the expression when the config
+  loads, so a malformed cron fails the command that reads it rather than the
+  run. For Go callers `pipelines.Triggers.Schedule` changed from `string` to
+  `*pipelines.ScheduleTrigger`: read `t.Schedule.Cron` where you read
+  `t.Schedule`, and test `t.Schedule != nil` where you tested `!= ""`. See
+  the [migration
+  guide](docs/migrations/_unreleased.md#onschedule-takes-a-mapping).
 
 ### Changed
 
@@ -49,8 +103,8 @@ code change to unlock.
   reports expose fields directly and report failures only on stderr.
   See the [migration guide](docs/migrations/v0.46.0.md#discovery-and-report-output)
   and the [CLI output reference](docs/cli.md#output).
-- **cli (Breaking):** Command and documentation indexes now default to bounded pages, with native query filters and a typed continuation record. Documentation search returns snippets unless bodies are requested; selected sections are readable with `docs read --topic <slug> --section <start_line>`. Use `--limit 0` for exhaustive indexes. See the [migration guide](docs/migrations/v0.46.0.md#bounded-discovery).
 
+- **cli (Breaking):** Command and documentation indexes now default to bounded pages, with native query filters and a typed continuation record. Documentation search returns snippets unless bodies are requested; selected sections are readable with `docs read --topic <slug> --section <start_line>`. Use `--limit 0` for exhaustive indexes. See the [migration guide](docs/migrations/v0.46.0.md#bounded-discovery).
 
 ### Added
 
@@ -68,6 +122,7 @@ code change to unlock.
   `stray_session_reaped` event on its node. Steps do not get to daemonize by
   accident: a process that leaves its step session with `setsid` is the one
   thing the sweep cannot see, and that stays unsupported.
+
 - **sdk:** `sparkwing/cleanup`.`Register` lets a sparks library guarantee a
   resource it starts outside the step's process tree -- a container, cluster,
   or release -- is torn down if the step's node dies before the library's own
@@ -79,6 +134,7 @@ code change to unlock.
   helm, or kind. `docker.Run` is the first user -- it registers `docker rm -f`
   for its container, so a one-shot container no longer outlives a node killed
   mid-run.
+
 - **cli:** `--sw-priority VALUE` on `sparkwing run` and `sparkwing pipeline
   run` sets the run's local admission priority from the command line. VALUE is an integer, or `front` / `back` for one step past the
   highest or lowest priority waiting when the run starts (an empty queue
@@ -88,6 +144,7 @@ code change to unlock.
   carries the request on its trigger and resolves `front` / `back` when the
   consumer launches it, against the queue it actually joins; the value never
   takes part in idempotency-key matching.
+
 - **cli:** `sparkwing queue priority --run ID --set VALUE` re-ranks a run that
   is already queued, without restarting it. `front` and `back` resolve
   against the waiters that are not part of the run, so asking twice is
@@ -100,10 +157,15 @@ code change to unlock.
   run the consumer has not claimed is not visible here); exit 4 is an
   unreachable daemon, as for `sparkwing queue`. The queue header counts
   reprioritized runs in its outcome summary.
+
 - **wingd:** `set_priority` / `set_priority_ack` control messages, and a
   `priority_overrides` map in the persisted ledger snapshot. No protocol
   major bump: an older daemon answers `unsupported`, and the client says
   which versions disagree and how to restart the daemon.
+
+- **cli:** The CLI embeds the IANA time zone database, so a schedule's `tz:`
+  resolves on a host with no zoneinfo of its own -- which is what a systemd or
+  launchd job on a slim image finds.
 
 ### Removed
 
