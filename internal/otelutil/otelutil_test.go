@@ -3,7 +3,6 @@ package otelutil
 import (
 	"bytes"
 	"context"
-	"go.opentelemetry.io/otel"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
