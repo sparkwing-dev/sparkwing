@@ -8,7 +8,9 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,39 +66,95 @@ func TestIdentityProbeTimeoutTerminatesItsProcessGroup(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
 	path := filepath.Join(t.TempDir(), "probe")
 	body := []byte(fmt.Sprintf(`#!/bin/sh
+/bin/sleep 2
 /bin/sleep 30 &
 printf '%%s' "$!" > %q
+printf r >&3
 wait
 `, pidFile))
 	if err := os.WriteFile(path, body, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
+	readyReader, readyWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyReader.Close()
+	defer readyWriter.Close()
+	ctx, cancel := context.WithCancelCause(context.Background())
 	cmd := exec.CommandContext(ctx, path)
 	cmd.Env = []string{}
+	cmd.ExtraFiles = []*os.File{readyWriter}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.WaitDelay = 100 * time.Millisecond
-	started := time.Now()
-	runErr := runProbeProcess(ctx, cmd, cmd.WaitDelay)
-	if runErr == nil {
-		t.Fatal("timed-out probe process succeeded")
+	cmd.WaitDelay = probeWaitDelay
+	finished := make(chan struct{})
+	var runErr error
+	go func() {
+		runErr = runProbeProcess(ctx, cmd, cmd.WaitDelay)
+		close(finished)
+	}()
+	defer func() {
+		cancel(context.Canceled)
+		<-finished
+	}()
+	ready := make(chan error, 1)
+	readerFinished := make(chan struct{})
+	go func() {
+		defer close(readerFinished)
+		var signal [1]byte
+		_, err := io.ReadFull(readyReader, signal[:])
+		ready <- err
+	}()
+	defer func() {
+		_ = readyReader.Close()
+		<-readerFinished
+	}()
+	startup, stopStartup := context.WithTimeout(context.Background(), 10*time.Second)
+	defer stopStartup()
+	select {
+	case err := <-ready:
+		if err != nil {
+			t.Fatalf("probe readiness: %v", err)
+		}
+	case <-finished:
+		t.Fatalf("probe exited before readiness: %v", runErr)
+	case <-startup.Done():
+		t.Fatal("probe did not become ready")
 	}
-	if ctx.Err() != context.DeadlineExceeded {
-		t.Fatalf("probe context error = %v", ctx.Err())
-	}
-	if elapsed := time.Since(started); elapsed >= 3*time.Second {
-		t.Fatalf("timed-out probe cleanup took %s", elapsed)
-	}
-	body, err := os.ReadFile(pidFile)
+	body, err = os.ReadFile(pidFile)
 	if err != nil {
-		t.Fatalf("read descendant pid: %v (run error: %v; stdout: %q; stderr: %q)", err, runErr, stdout.String(), stderr.String())
+		t.Fatalf("read descendant pid: %v", err)
 	}
 	pid, err := strconv.Atoi(string(body))
 	if err != nil {
 		t.Fatal(err)
+	}
+	defer func() { _ = syscall.Kill(pid, syscall.SIGKILL) }()
+	timeout, stopTimeout := context.WithTimeout(context.Background(), time.Second)
+	defer stopTimeout()
+	select {
+	case <-finished:
+		t.Fatalf("probe exited before timeout: %v", runErr)
+	case <-timeout.Done():
+		cancel(context.Cause(timeout))
+	}
+	cleanup, stopCleanup := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stopCleanup()
+	select {
+	case <-finished:
+	case <-cleanup.Done():
+		t.Fatal("timed-out probe cleanup exceeded three seconds")
+	}
+	if runErr == nil {
+		t.Fatal("timed-out probe process succeeded")
+	}
+	if !errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+		t.Fatalf("probe context cause = %v", context.Cause(ctx))
+	}
+	if cmd.ProcessState == nil {
+		t.Fatalf("timed-out probe leader was not reaped: %v", runErr)
 	}
 	assertProcessGone(t, pid)
 }
