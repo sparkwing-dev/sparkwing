@@ -39,8 +39,8 @@ func disposeProbeProcess(command *exec.Cmd, waitForLeader func() error) error {
 	if errors.Is(killErr, os.ErrProcessDone) {
 		killErr = nil
 	}
-	// SAFETY: Group signaling has ended. Reaping waits for OS-confirmed leader exit;
-	// WaitDelay bounds inherited pipes, while kernel process exit has no deadline.
-	_ = waitForLeader()
-	return errors.Join(killErr, command.Wait())
+	// SAFETY: Join the observer before Wait reaps the leader. WaitDelay bounds
+	// inherited pipes; kernel process exit has no deadline.
+	observerErr := waitForLeader()
+	return errors.Join(killErr, observerErr, command.Wait())
 }
