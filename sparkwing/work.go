@@ -415,10 +415,6 @@ func CoerceSpawnEachJob(v any) (Workable, error) {
 	case func(ctx context.Context) error:
 		return &jobFn{fn: j}, nil
 	}
-	rv := reflect.ValueOf(v)
-	if rv.IsValid() && rv.Type().Implements(reflect.TypeOf((*Workable)(nil)).Elem()) {
-		return rv.Interface().(Workable), nil
-	}
 	return nil, fmt.Errorf("sparkwing: JobSpawnEach: per-item job has unsupported type %T", v)
 }
 
@@ -756,26 +752,6 @@ func (s *SpawnSpec) markDone(out any) {
 	s.out = out
 	close(s.done)
 	s.mu.Unlock()
-}
-
-//lint:ignore U1000 reader half of unwired SpawnSpec.Get scaffolding; keep paired with markDone
-func (s *SpawnSpec) awaitDone(ctx context.Context) error {
-	s.mu.Lock()
-	if s.resolved {
-		s.mu.Unlock()
-		return nil
-	}
-	if s.done == nil {
-		s.done = make(chan struct{})
-	}
-	ch := s.done
-	s.mu.Unlock()
-	select {
-	case <-ch:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 // Needs declares which Steps / Spawns inside the same Work must
