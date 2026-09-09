@@ -32,8 +32,7 @@ func TestGroupHelperProcess(t *testing.T) {
 		holdHelperProcess(os.Getenv(procgroupReadyEnv))
 	case "leader":
 		if err := startReadyGroupDescendant(false); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
+			exitGroupHelper(err)
 		}
 		IgnoreTermination()
 		os.Exit(0)
@@ -44,8 +43,7 @@ func TestGroupHelperProcess(t *testing.T) {
 		holdHelperProcess("")
 	case "session-leader":
 		if err := startReadyGroupDescendant(true); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
+			exitGroupHelper(err)
 		}
 		os.Exit(0)
 	case "session-stubborn":
@@ -54,7 +52,7 @@ func TestGroupHelperProcess(t *testing.T) {
 		child.Env = append(os.Environ(), helperMode+"=descendant")
 		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := child.Start(); err != nil {
-			os.Exit(2)
+			exitGroupHelper(err)
 		}
 		holdHelperProcess("")
 	case "session-parked":
@@ -63,8 +61,7 @@ func TestGroupHelperProcess(t *testing.T) {
 	case "owner":
 		ForwardTerminationToOwned()
 		if err := startOwnedSessionDescendant(os.Getenv(procgroupOwnedPID)); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
+			exitGroupHelper(err)
 		}
 		holdHelperProcess(os.Getenv(procgroupReadyEnv))
 	case "session-cooperative":
@@ -73,57 +70,62 @@ func TestGroupHelperProcess(t *testing.T) {
 		signal.Notify(term, syscall.SIGTERM)
 		signal.Notify(release, syscall.SIGUSR1)
 		if err := os.WriteFile(os.Getenv(procgroupReadyEnv), []byte("ready"), 0o600); err != nil {
-			os.Exit(2)
+			exitGroupHelper(err)
 		}
 		<-term
 		if err := os.WriteFile(os.Getenv(procgroupTermSeen), []byte("term"), 0o600); err != nil {
-			os.Exit(2)
+			exitGroupHelper(err)
 		}
 		<-release
 		if err := os.WriteFile(os.Getenv("SPARKWING_PROCGROUP_MARKER"), []byte("clean"), 0o600); err != nil {
-			os.Exit(2)
+			exitGroupHelper(err)
 		}
 		os.Exit(0)
 	}
 }
 
-func holdHelperProcess(ready string) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		os.Exit(2)
-	}
-	if fdText := os.Getenv(procgroupReadyFD); fdText != "" {
-		fd, err := strconv.Atoi(fdText)
-		if err != nil {
-			_ = ln.Close()
-			os.Exit(2)
-		}
-		readyPipe := os.NewFile(uintptr(fd), "procgroup-helper-ready")
-		if _, err := readyPipe.Write([]byte{1}); err != nil {
-			_ = readyPipe.Close()
-			_ = ln.Close()
-			os.Exit(2)
-		}
-		_ = readyPipe.Close()
-	}
-	if ready != "" {
-		if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
-			_ = ln.Close()
-			os.Exit(2)
-		}
-	}
-	if _, err := ln.Accept(); err != nil {
-		os.Exit(2)
+func exitGroupHelper(err error) {
+	if _, writeErr := fmt.Fprintln(os.Stderr, err); writeErr != nil {
+		os.Exit(3)
 	}
 	os.Exit(2)
 }
 
-func startReadyGroupDescendant(setpgid bool) error {
+func holdHelperProcess(ready string) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		exitGroupHelper(err)
+	}
+	if descriptorText := os.Getenv(procgroupReadyFD); descriptorText != "" {
+		descriptor, err := strconv.Atoi(descriptorText)
+		if err != nil || descriptor < 3 {
+			exitGroupHelper(errors.Join(fmt.Errorf("invalid readiness descriptor %q", descriptorText), err, listener.Close()))
+		}
+		readyPipe := os.NewFile(uintptr(descriptor), "procgroup-helper-ready")
+		_, writeErr := readyPipe.Write([]byte{1})
+		if err := errors.Join(writeErr, readyPipe.Close()); err != nil {
+			exitGroupHelper(errors.Join(err, listener.Close()))
+		}
+	}
+	if ready != "" {
+		if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
+			exitGroupHelper(errors.Join(err, listener.Close()))
+		}
+	}
+	connection, acceptErr := listener.Accept()
+	var connectionCloseErr error
+	if connection != nil {
+		connectionCloseErr = connection.Close()
+	}
+	exitGroupHelper(errors.Join(errors.New("helper listener stopped blocking"), acceptErr, connectionCloseErr, listener.Close()))
+}
+
+func startReadyGroupDescendant(setpgid bool) (startErr error) {
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("create descendant readiness pipe: %w", err)
 	}
-	defer reader.Close()
+	defer func() { startErr = errors.Join(startErr, reader.Close()) }()
 	child := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
 	child.Env = append(os.Environ(), helperMode+"=descendant", procgroupReadyFD+"=3")
 	child.ExtraFiles = []*os.File{writer}
@@ -131,53 +133,49 @@ func startReadyGroupDescendant(setpgid bool) error {
 		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 	if err := child.Start(); err != nil {
-		_ = writer.Close()
-		return fmt.Errorf("start descendant: %w", err)
+		return errors.Join(fmt.Errorf("start descendant: %w", err), writer.Close())
 	}
-	_ = writer.Close()
-	readyErr := awaitProcgroupReadyByte(reader, 3*time.Second)
-	if readyErr == nil {
+	readinessErr := writer.Close()
+	if readinessErr == nil {
+		readinessErr = awaitProcgroupReadyByte(reader, 3*time.Second)
+	}
+	if readinessErr == nil {
 		return nil
 	}
 	killErr := child.Process.Kill()
+	if errors.Is(killErr, os.ErrProcessDone) {
+		killErr = nil
+	}
 	waited := make(chan error, 1)
-	go func() {
-		waited <- child.Wait()
-	}()
+	go func() { waited <- child.Wait() }()
 	join := time.NewTimer(time.Second)
 	defer join.Stop()
 	select {
-	case <-waited:
-		if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
-			return fmt.Errorf("%w; kill descendant: %v", readyErr, killErr)
-		}
-		return readyErr
+	case waitErr := <-waited:
+		return errors.Join(readinessErr, killErr, waitErr)
 	case <-join.C:
-		if killErr != nil {
-			return fmt.Errorf("%w; kill descendant: %v; wait did not return", readyErr, killErr)
-		}
-		return fmt.Errorf("%w; descendant did not stop after kill", readyErr)
+		return errors.Join(readinessErr, killErr, errors.New("descendant did not stop after kill"))
 	}
 }
 
 func awaitProcgroupReadyByte(reader *os.File, timeout time.Duration) error {
-	type readyResult struct {
-		n     int
+	type readinessRead struct {
+		count int
 		value byte
 		err   error
 	}
-	ready := make(chan readyResult, 1)
+	ready := make(chan readinessRead, 1)
 	go func() {
-		buf := make([]byte, 1)
-		n, err := reader.Read(buf)
-		ready <- readyResult{n: n, value: buf[0], err: err}
+		buffer := make([]byte, 1)
+		count, err := reader.Read(buffer)
+		ready <- readinessRead{count: count, value: buffer[0], err: err}
 	}()
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	select {
-	case result := <-ready:
-		if result.err != nil || result.n != 1 || result.value != 1 {
-			return fmt.Errorf("invalid readiness signal: n=%d value=%d err=%v", result.n, result.value, result.err)
+	case readiness := <-ready:
+		if readiness.err != nil || readiness.count != 1 || readiness.value != 1 {
+			return errors.Join(fmt.Errorf("invalid readiness signal: count=%d value=%d", readiness.count, readiness.value), readiness.err)
 		}
 		return nil
 	case <-deadline.C:
@@ -186,13 +184,13 @@ func awaitProcgroupReadyByte(reader *os.File, timeout time.Duration) error {
 }
 
 func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"=session-parked")
-	group, err := StartSession(cmd)
+	command := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	command.Env = append(os.Environ(), helperMode+"=session-parked")
+	group, err := StartSession(command)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { terminateForTest(group) })
+	t.Cleanup(func() { terminateForTest(t, group) })
 	identity, err := CaptureSession(group.ID())
 	if err != nil {
 		t.Fatalf("capture session: %v", err)
@@ -208,9 +206,9 @@ func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
 	if err != nil || empty {
 		t.Fatalf("live parked session empty=%v err=%v", empty, err)
 	}
-	wrong := identity
-	wrong.BirthToken += "-reused"
-	if empty, err := SessionEmpty(wrong); err != nil || !empty {
+	reusedIdentity := identity
+	reusedIdentity.BirthToken += "-reused"
+	if empty, err := SessionEmpty(reusedIdentity); err != nil || !empty {
 		t.Fatalf("changed leader birth identity empty=%v err=%v, want original session gone", empty, err)
 	}
 }
@@ -222,7 +220,7 @@ func TestSessionEmptyTreatsReusedLeaderAsTheOriginalSessionGone(t *testing.T) {
 		sessionProcessTable = originalTable
 		sessionIdentityLookup = originalIdentity
 	})
-	sessionProcessTable = func(bool) ([]Info, error) {
+	sessionProcessTable = func(context.Context, bool) ([]Info, error) {
 		return []Info{{PID: 81, Group: 81, Session: 81, State: "R"}}, nil
 	}
 	sessionIdentityLookup = func(int) (int, string, error) {
@@ -244,7 +242,7 @@ func TestSessionEmptyRetainsAdmissionWhenReusedLeaderHasLiveSessionMembers(t *te
 		sessionProcessTable = originalTable
 		sessionIdentityLookup = originalIdentity
 	})
-	sessionProcessTable = func(bool) ([]Info, error) {
+	sessionProcessTable = func(context.Context, bool) ([]Info, error) {
 		return []Info{
 			{PID: 81, Group: 81, Session: 81, State: "R"},
 			{PID: 93, Group: 93, Session: 81, State: "R"},
@@ -266,13 +264,13 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 	marker := filepath.Join(t.TempDir(), "cleanup-complete")
 	ready := marker + ".ready"
 	termSeen := marker + ".term"
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"=session-cooperative", "SPARKWING_PROCGROUP_MARKER="+marker, procgroupReadyEnv+"="+ready, procgroupTermSeen+"="+termSeen)
-	group, err := StartSession(cmd)
+	command := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	command.Env = append(os.Environ(), helperMode+"=session-cooperative", "SPARKWING_PROCGROUP_MARKER="+marker, procgroupReadyEnv+"="+ready, procgroupTermSeen+"="+termSeen)
+	group, err := StartSession(command)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { terminateForTest(group) })
+	t.Cleanup(func() { terminateForTest(t, group) })
 	identity, err := CaptureSession(group.ID())
 	if err != nil {
 		t.Fatalf("capture cooperative session: %v", err)
@@ -292,8 +290,10 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 			case <-terminateFinished:
 				released = true
 			default:
-				if syscall.Kill(group.ID(), syscall.SIGUSR1) == nil {
+				if err := syscall.Kill(group.ID(), syscall.SIGUSR1); err == nil || errors.Is(err, syscall.ESRCH) {
 					released = true
+				} else {
+					t.Errorf("release cooperative cleanup: %v", err)
 				}
 			}
 		}
@@ -331,20 +331,20 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 
 func TestSessionTerminateKillsStubbornLeaderAndNestedGroup(t *testing.T) {
 	ready := filepath.Join(t.TempDir(), "descendant-ready")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"=session-stubborn", procgroupReadyEnv+"="+ready)
-	g, err := StartSession(cmd)
+	command := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	command.Env = append(os.Environ(), helperMode+"=session-stubborn", procgroupReadyEnv+"="+ready)
+	group, err := StartSession(command)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { terminateForTest(g) })
+	t.Cleanup(func() { terminateForTest(t, group) })
 	waitForProcgroupReady(t, ready, 3*time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := g.Terminate(ctx, 50*time.Millisecond); errors.Is(err, ErrCleanup) {
+	if err := group.Terminate(ctx, 50*time.Millisecond); err != nil && (!group.Reaped() || !expectedHelperTermination(err)) {
 		t.Fatalf("terminate stubborn session: %v", err)
 	}
-	if !g.Reaped() {
+	if !group.Reaped() {
 		t.Fatal("stubborn session leader was not reaped")
 	}
 }
@@ -375,13 +375,13 @@ func waitForProcgroupReady(t *testing.T, path string, timeout time.Duration) {
 }
 
 func TestTerminateSessionReturnsOnlyAfterStubbornSessionIsEmpty(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"=session-stubborn")
-	group, err := StartSession(cmd)
+	command := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	command.Env = append(os.Environ(), helperMode+"=session-stubborn")
+	group, err := StartSession(command)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { terminateForTest(group) })
+	t.Cleanup(func() { terminateForTest(t, group) })
 	identity, err := CaptureSession(group.ID())
 	if err != nil {
 		t.Fatalf("capture stubborn session: %v", err)
@@ -396,122 +396,122 @@ func TestTerminateSessionReturnsOnlyAfterStubbornSessionIsEmpty(t *testing.T) {
 }
 
 func TestSessionCleanupIncludesNestedProcessGroups(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"=session-leader")
-	g, err := StartSession(cmd)
+	command := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	command.Env = append(os.Environ(), helperMode+"=session-leader")
+	group, err := StartSession(command)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { terminateForTest(g) })
+	t.Cleanup(func() { terminateForTest(t, group) })
 	select {
-	case <-g.LeaderExited():
+	case <-group.LeaderExited():
 	case <-time.After(3 * time.Second):
 		t.Fatal("session leader did not exit")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := g.Finish(ctx, 50*time.Millisecond); err != nil {
+	if err := group.Finish(ctx, 50*time.Millisecond); err != nil {
 		t.Fatalf("finish session: %v", err)
 	}
-	if !g.Reaped() {
+	if !group.Reaped() {
 		t.Fatal("session leader was not reaped")
 	}
 }
 
 func TestGroupRetainsLeaderAnchorUntilDescendantsAreEmpty(t *testing.T) {
-	g := startHelper(t, "leader")
-	t.Cleanup(func() { terminateForTest(g) })
+	group := startHelper(t, "leader")
+	t.Cleanup(func() { terminateForTest(t, group) })
 	select {
-	case <-g.LeaderExited():
+	case <-group.LeaderExited():
 	case <-time.After(3 * time.Second):
 		t.Fatal("leader did not exit")
 	}
-	if g.Reaped() {
+	if group.Reaped() {
 		t.Fatal("leader was reaped before descendant cleanup")
 	}
-	if err := validateAnchor(g.ID(), true); err != nil {
+	if err := validateAnchor(group.ID(), true); err != nil {
 		t.Fatalf("unreaped ownership anchor: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := g.Finish(ctx, 50*time.Millisecond); err != nil {
+	if err := group.Finish(ctx, 50*time.Millisecond); err != nil {
 		t.Fatalf("finish group: %v", err)
 	}
-	if !g.Reaped() {
+	if !group.Reaped() {
 		t.Fatal("group leader was not reaped after descendants emptied")
 	}
-	if err := g.Kill(); err != nil {
+	if err := group.Kill(); err != nil {
 		t.Fatalf("post-reap kill should be a no-op, got %v", err)
 	}
 }
 
 func TestGroupCleanupFailureRetainsAnchorForRetry(t *testing.T) {
-	g := startHelper(t, "short")
-	t.Cleanup(func() { terminateForTest(g) })
+	group := startHelper(t, "short")
+	t.Cleanup(func() { terminateForTest(t, group) })
 	select {
-	case <-g.LeaderExited():
+	case <-group.LeaderExited():
 	case <-time.After(3 * time.Second):
 		t.Fatal("leader did not exit")
 	}
-	want := errors.New("injected membership failure")
-	g.SetDescendantProbe(func(int, bool, bool) (bool, error) { return false, want })
+	inspectionErr := errors.New("injected membership failure")
+	group.SetDescendantProbe(func(context.Context, int, bool, bool) (bool, error) { return false, inspectionErr })
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	err := g.Finish(ctx, 20*time.Millisecond)
+	err := group.Finish(ctx, 20*time.Millisecond)
 	cancel()
-	if !errors.Is(err, ErrCleanup) || !errors.Is(err, want) {
+	if !errors.Is(err, ErrCleanup) || !errors.Is(err, inspectionErr) {
 		t.Fatalf("finish error = %v, want retained cleanup failure", err)
 	}
-	if g.Reaped() {
+	if group.Reaped() {
 		t.Fatal("failed cleanup reaped its ownership anchor")
 	}
-	if err := validateAnchor(g.ID(), true); err != nil {
+	if err := validateAnchor(group.ID(), true); err != nil {
 		t.Fatalf("failed cleanup lost ownership anchor: %v", err)
 	}
-	g.SetDescendantProbe(nil)
+	group.SetDescendantProbe(nil)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
-	err = g.Finish(ctx, 20*time.Millisecond)
+	err = group.Finish(ctx, 20*time.Millisecond)
 	cancel()
 	if err != nil {
 		t.Fatalf("retry finish: %v", err)
 	}
-	if !g.Reaped() {
+	if !group.Reaped() {
 		t.Fatal("successful retry did not reap the anchor")
 	}
 }
 
 func TestGroupLifecycleStressLeavesEveryGroupReaped(t *testing.T) {
-	const count = 50
-	groups := make([]*Group, 0, count)
-	for range count {
+	const groupCount = 50
+	groups := make([]*Group, 0, groupCount)
+	for range groupCount {
 		group := startHelper(t, "leader")
 		groups = append(groups, group)
 		t.Cleanup(func() {
 			if !group.Reaped() {
-				terminateForTest(group)
+				terminateForTest(t, group)
 			}
 		})
 	}
-	type finishResult struct {
-		id  int
-		err error
+	type groupCompletion struct {
+		groupID int
+		err     error
 	}
-	results := make(chan finishResult, count)
+	completions := make(chan groupCompletion, groupCount)
 	for _, group := range groups {
 		go func(group *Group) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			results <- finishResult{id: group.ID(), err: group.Finish(ctx, 50*time.Millisecond)}
+			completions <- groupCompletion{groupID: group.ID(), err: group.Finish(ctx, 50*time.Millisecond)}
 		}(group)
 	}
-	var firstFailure *finishResult
-	for range count {
-		result := <-results
-		if result.err != nil && firstFailure == nil {
-			firstFailure = &result
+	var firstFailure *groupCompletion
+	for range groupCount {
+		completion := <-completions
+		if completion.err != nil && firstFailure == nil {
+			firstFailure = &completion
 		}
 	}
 	if firstFailure != nil {
-		t.Fatalf("finish group %d: %v", firstFailure.id, firstFailure.err)
+		t.Fatalf("finish group %d: %v", firstFailure.groupID, firstFailure.err)
 	}
 	for _, group := range groups {
 		if !group.Reaped() {
@@ -521,29 +521,29 @@ func TestGroupLifecycleStressLeavesEveryGroupReaped(t *testing.T) {
 }
 
 func TestConcurrentFinishAndTerminateNeverLoseCompletedCleanup(t *testing.T) {
-	const count = 50
-	for iteration := range count {
+	const iterations = 50
+	for iteration := range iterations {
 		t.Run(fmt.Sprintf("iteration-%d", iteration), func(t *testing.T) {
 			t.Parallel()
-			g := startConcurrentCleanupHelper(t)
+			group := startConcurrentCleanupHelper(t)
 			results := make(chan error, 2)
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				defer cancel()
-				results <- g.Finish(ctx, 10*time.Millisecond)
+				results <- group.Finish(ctx, 10*time.Millisecond)
 			}()
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				defer cancel()
-				results <- g.Terminate(ctx, 10*time.Millisecond)
+				results <- group.Terminate(ctx, 10*time.Millisecond)
 			}()
 			for range 2 {
-				if err := <-results; errors.Is(err, ErrCleanup) {
+				if err := <-results; err != nil && (!group.Reaped() || !expectedHelperTermination(err)) {
 					t.Fatalf("completed concurrent cleanup reported failure: %v", err)
 				}
 			}
-			if !g.Reaped() {
-				t.Fatalf("group %d was not reaped", g.ID())
+			if !group.Reaped() {
+				t.Fatalf("group %d was not reaped", group.ID())
 			}
 		})
 	}
@@ -551,13 +551,13 @@ func TestConcurrentFinishAndTerminateNeverLoseCompletedCleanup(t *testing.T) {
 
 func startHelper(t *testing.T, mode string) *Group {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"="+mode)
-	g, err := Start(cmd)
+	command := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	command.Env = append(os.Environ(), helperMode+"="+mode)
+	group, err := Start(command)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return g
+	return group
 }
 
 func startConcurrentCleanupHelper(t *testing.T) *Group {
@@ -566,29 +566,45 @@ func startConcurrentCleanupHelper(t *testing.T) *Group {
 	if err != nil {
 		t.Fatalf("create helper readiness pipe: %v", err)
 	}
-	defer reader.Close()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"=concurrent-cleanup", procgroupReadyFD+"=3")
-	cmd.ExtraFiles = []*os.File{writer}
-	g, err := Start(cmd)
-	_ = writer.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close readiness reader: %v", err)
+		}
+	}()
+	command := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	command.Env = append(os.Environ(), helperMode+"=concurrent-cleanup", procgroupReadyFD+"=3")
+	command.ExtraFiles = []*os.File{writer}
+	group, err := Start(command)
+	closeErr := writer.Close()
 	if err != nil {
-		t.Fatalf("start ready helper: %v", err)
+		t.Fatalf("start ready helper: %v", errors.Join(err, closeErr))
 	}
 	t.Cleanup(func() {
-		if !g.Reaped() {
-			terminateForTest(g)
+		if !group.Reaped() {
+			terminateForTest(t, group)
 		}
 	})
-	if err := awaitProcgroupReadyByte(reader, 3*time.Second); err != nil {
-		terminateForTest(g)
+	if err := errors.Join(closeErr, awaitProcgroupReadyByte(reader, 3*time.Second)); err != nil {
+		terminateForTest(t, group)
 		t.Fatalf("wait for helper readiness: %v", err)
 	}
-	return g
+	return group
 }
 
-func terminateForTest(g *Group) {
+func terminateForTest(t *testing.T, group *Group) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = g.Terminate(ctx, 20*time.Millisecond)
+	if err := group.Terminate(ctx, 20*time.Millisecond); err != nil && (!group.Reaped() || !expectedHelperTermination(err)) {
+		t.Errorf("terminate helper group: %v", err)
+	}
+}
+
+func expectedHelperTermination(err error) bool {
+	var exitErr *exec.ExitError
+	if errors.Is(err, ErrCleanup) || !errors.As(err, &exitErr) {
+		return false
+	}
+	status, ok := exitErr.Sys().(syscall.WaitStatus)
+	return ok && status.Signaled() && (status.Signal() == syscall.SIGTERM || status.Signal() == syscall.SIGKILL)
 }
