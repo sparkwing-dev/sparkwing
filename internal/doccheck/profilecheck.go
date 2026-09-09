@@ -50,6 +50,5 @@ func checkProfileConfigs(documentationDirectory string) bool {
 		}
 		return false
 	}
-	fmt.Println("\nALL profiles.yaml DOC EXAMPLES PARSE")
 	return true
 }

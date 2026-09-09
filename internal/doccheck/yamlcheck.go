@@ -44,6 +44,5 @@ func checkYAMLConfigs(documentationDirectory string) bool {
 		}
 		return false
 	}
-	fmt.Println("\nALL sparkwing.yaml DOC EXAMPLES PARSE")
 	return true
 }
