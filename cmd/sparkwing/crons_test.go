@@ -70,7 +70,9 @@ const cronsMinutelyRepo = `pipelines:
   - name: every-minute
     entrypoint: EveryMinute
     on:
-      schedule: "* * * * *"
+      schedule:
+        cron: "* * * * *"
+        where: local
 `
 
 func TestCronsInstallArmsTheRepoAndInstallsTheTimer(t *testing.T) {
@@ -201,7 +203,9 @@ func TestCronsRunLaunchesRegardlessOfCadence(t *testing.T) {
   - name: yearly
     entrypoint: Yearly
     on:
-      schedule: "@yearly"
+      schedule:
+        cron: "@yearly"
+        where: local
 `)
 	captureStdout(t, func() {
 		if err := runCronsInstall([]string{"--repo", repo, "--no-prove", "--no-timer", "-o", "pretty"}); err != nil {
@@ -242,7 +246,9 @@ func TestCronsListAndNextEmitNDJSON(t *testing.T) {
   - name: nightly
     entrypoint: Nightly
     on:
-      schedule: "0 3 * * *"
+      schedule:
+        cron: "0 3 * * *"
+        where: local
 `} {
 		repo := cronsTestRepo(t, body)
 		captureStdout(t, func() {
@@ -262,7 +268,7 @@ func TestCronsListAndNextEmitNDJSON(t *testing.T) {
 		t.Fatalf("list emitted %d row(s):\n%s", len(rows), list)
 	}
 	for _, r := range rows {
-		if r.Name == "" || r.State != crons.StateArmed {
+		if r.Display == "" || r.State != crons.StateArmed {
 			t.Errorf("row: %+v", r)
 		}
 	}
@@ -594,5 +600,54 @@ func TestCronLauncherStopsCountingAPendingRunOnceItIsStale(t *testing.T) {
 	}
 	if stale {
 		t.Error("a pending run older than the catch-up window still counts as active")
+	}
+}
+
+func TestCronsPauseAndResumeNameTheScheduleTheWayListDoes(t *testing.T) {
+	_, _ = cronsTestHome(t)
+	repo := cronsTestRepo(t, `pipelines:
+  - name: sweep
+    entrypoint: Sweep
+    on:
+      schedule:
+        - name: quick
+          cron: "*/5 * * * *"
+          where: local
+`)
+	captureStdout(t, func() {
+		if err := runCronsInstall([]string{"--repo", repo, "--no-prove", "--no-timer", "-o", "pretty"}); err != nil {
+			t.Fatalf("crons install: %v", err)
+		}
+	})
+	want := filepath.Base(repo) + "/sweep/quick"
+
+	paused := captureStdout(t, func() {
+		if err := runCronsPause([]string{"sweep/quick", "-o", "pretty"}); err != nil {
+			t.Fatalf("crons pause: %v", err)
+		}
+	})
+	if !strings.Contains(paused, want+" is paused") {
+		t.Errorf("pause named the schedule as %q, want %q:\n%s", strings.TrimSpace(paused), want, paused)
+	}
+	resumed := captureStdout(t, func() {
+		if err := runCronsResume([]string{"sweep/quick", "-o", "pretty"}); err != nil {
+			t.Fatalf("crons resume: %v", err)
+		}
+	})
+	if !strings.Contains(resumed, want+" is armed") {
+		t.Errorf("resume named the schedule as %q, want %q:\n%s", strings.TrimSpace(resumed), want, resumed)
+	}
+}
+
+func TestCronsLockAndUnlockDoNotAdvertiseProfile(t *testing.T) {
+	for _, cmd := range []Command{cmdCronsLock, cmdCronsUnlock} {
+		for _, flag := range cmd.Flags {
+			if flag.Name == "profile" {
+				t.Errorf("%s advertises --profile, which it refuses", cmd.Path)
+			}
+		}
+	}
+	if !strings.Contains(cmdCrons.Description, "every verb but tick, lock and unlock") {
+		t.Errorf("the crons group still claims every verb but tick takes --profile:\n%s", cmdCrons.Description)
 	}
 }

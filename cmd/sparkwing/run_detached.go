@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -189,6 +190,11 @@ type submission struct {
 	Source string
 
 	ScheduleID string
+
+	// safety: a locked cron schedule pins its own binary, and the consumer
+	// execs this file instead of compiling the checkout.
+	PinnedBinary string
+	PinnedDigest string
 }
 
 func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.Paths, sub submission) (submitResult, error) {
@@ -250,7 +256,11 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		triggerEnv[SubmitRequestIDKey] = sub.RequestID
 	}
 	if sub.ScheduleID != "" {
-		triggerEnv[orchestrator.CronScheduleKey] = sub.ScheduleID
+		triggerEnv[crons.ScheduleEnvKey] = sub.ScheduleID
+	}
+	if sub.PinnedBinary != "" {
+		triggerEnv[crons.PinnedBinaryEnvKey] = sub.PinnedBinary
+		triggerEnv[crons.PinnedDigestEnvKey] = sub.PinnedDigest
 	}
 	var userName string
 	if u, uerr := user.Current(); uerr == nil {

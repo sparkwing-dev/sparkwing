@@ -117,6 +117,7 @@ func newHarness(t *testing.T, now time.Time) *harness {
 			Host:     "test-host",
 			Version:  "test",
 			LockPath: filepath.Join(home, "crons.lock"),
+			PinRoot:  filepath.Join(home, "crons"),
 			ArmedBy:  "tester@test-host",
 		},
 		store: st, launcher: launcher, clock: c, home: home,
@@ -140,32 +141,65 @@ func writeRepo(t *testing.T, name, pipelinesBody string) string {
 const everyMinute = `  - name: every-minute
     entrypoint: EveryMinute
     on:
-      schedule: "* * * * *"
+      schedule:
+        cron: "* * * * *"
+        where: local
 `
 
-func TestScheduleIDIsStableAndScopedToTheCheckout(t *testing.T) {
-	first := ScheduleID("/repos/alpha", "nightly")
-	if first != ScheduleID("/repos/alpha", "nightly") {
+func TestScheduleIDIsStableAndScopedToTheCheckoutPipelineAndEntry(t *testing.T) {
+	first := ScheduleID("/repos/alpha", "nightly", "")
+	if first != ScheduleID("/repos/alpha", "nightly", "") {
 		t.Fatal("ScheduleID is not stable for the same inputs")
 	}
 	if !strings.HasPrefix(first, ScheduleIDPrefix) || len(first) != len(ScheduleIDPrefix)+scheduleIDHexLen {
 		t.Fatalf("ScheduleID shape %q", first)
 	}
-	if first == ScheduleID("/repos/beta", "nightly") {
+	if first != ScheduleID("/repos/alpha", "nightly", store.CronScheduleDefaultName) {
+		t.Fatal("the lone entry and the entry named default are not the same schedule")
+	}
+	if first == ScheduleID("/repos/beta", "nightly", "") {
 		t.Fatal("two checkouts share a schedule id")
 	}
-	if first == ScheduleID("/repos/alpha", "weekly") {
+	if first == ScheduleID("/repos/alpha", "weekly", "") {
 		t.Fatal("two pipelines in one checkout share a schedule id")
 	}
-	if ScheduleID("/repos/a", "bc") == ScheduleID("/repos/ab", "c") {
+	if first == ScheduleID("/repos/alpha", "nightly", "quick") {
+		t.Fatal("a named entry shares the default entry's id")
+	}
+	if ScheduleID("/repos/alpha", "nightly", "quick") == ScheduleID("/repos/alpha", "nightly", "slow") {
+		t.Fatal("two entries of one pipeline share a schedule id")
+	}
+	if ScheduleID("/repos/a", "bc", "") == ScheduleID("/repos/ab", "c", "") {
 		t.Fatal("the separator does not separate the fields")
+	}
+	if ScheduleID("/repos/a", "b", "cd") == ScheduleID("/repos/a", "bc", "d") {
+		t.Fatal("the separator does not separate the entry name")
 	}
 }
 
-func TestDisplayNameIsRepoBaseAndPipeline(t *testing.T) {
-	got := DisplayName(store.CronSchedule{RepoPath: "/repos/alpha", Pipeline: "nightly"})
-	if got != "alpha/nightly" {
+// safety: rows armed before entries carried names keep their ids, so this is
+// the exact hash a v0.47.0 host wrote for that checkout and pipeline.
+func TestScheduleIDOfADefaultEntryDidNotMove(t *testing.T) {
+	if got := ScheduleID("/repos/alpha", "nightly", ""); got != "crn_5c7401ef046c" {
+		t.Fatalf("ScheduleID = %q; a moved id disarms every schedule armed before it", got)
+	}
+	if got := ScheduleID("/repos/alpha", "nightly", "quick"); got != "crn_dbed746315e4" {
+		t.Fatalf("ScheduleID of a named entry = %q", got)
+	}
+}
+
+func TestDisplayNameCarriesTheEntryNameForEveryEntryButDefault(t *testing.T) {
+	lone := store.CronSchedule{RepoPath: "/repos/alpha", Pipeline: "nightly"}
+	if got := DisplayName(lone); got != "alpha/nightly" {
 		t.Fatalf("DisplayName = %q", got)
+	}
+	lone.Name = store.CronScheduleDefaultName
+	if got := DisplayName(lone); got != "alpha/nightly" {
+		t.Fatalf("DisplayName of the default entry = %q", got)
+	}
+	named := store.CronSchedule{RepoPath: "/repos/alpha", Pipeline: "sweep", Name: "quick"}
+	if got := DisplayName(named); got != "alpha/sweep/quick" {
+		t.Fatalf("DisplayName of a named entry = %q", got)
 	}
 }
 
@@ -173,12 +207,15 @@ func TestDeclaredSchedulesReadsBothYAMLShapes(t *testing.T) {
 	root := writeRepo(t, "svc", `  - name: nightly
     entrypoint: Nightly
     on:
-      schedule: "0 3 * * *"
+      schedule:
+        cron: "0 3 * * *"
+        where: local
   - name: hourly
     entrypoint: Hourly
     on:
       schedule:
         cron: "@hourly"
+        where: local
         tz: America/Denver
         overlap: queue
         catch_up: 6h
@@ -234,14 +271,14 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
 	h := newHarness(t, now)
 	root := writeRepo(t, "svc", everyMinute)
 
-	report, err := h.svc.Arm(ctx, root, nil)
+	report, err := h.svc.Arm(ctx, root, ArmOptions{})
 	if err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
 	if report.Armed != 1 || report.Refreshed != 0 || report.Withdrawn != 0 {
 		t.Fatalf("first arm: %+v", report)
 	}
-	id := ScheduleID(root, "every-minute")
+	id := ScheduleID(root, "every-minute", "")
 	sched, err := h.store.GetCronSchedule(ctx, id)
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
@@ -271,12 +308,13 @@ func TestArmCreatesThenRefreshesWithoutClobberingState(t *testing.T) {
     on:
       schedule:
         cron: "*/5 * * * *"
+        where: local
         tz: America/Denver
         overlap: queue
 `), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
-	report, err = h.svc.Arm(ctx, root, nil)
+	report, err = h.svc.Arm(ctx, root, ArmOptions{})
 	if err != nil {
 		t.Fatalf("re-Arm: %v", err)
 	}
@@ -304,23 +342,25 @@ func TestArmWithdrawsASchedulTheRepoStoppedDeclaring(t *testing.T) {
 	root := writeRepo(t, "svc", everyMinute+`  - name: nightly
     entrypoint: Nightly
     on:
-      schedule: "0 3 * * *"
+      schedule:
+        cron: "0 3 * * *"
+        where: local
 `)
-	if _, err := h.svc.Arm(ctx, root, nil); err != nil {
+	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"),
 		[]byte("pipelines:\n"+everyMinute), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
-	report, err := h.svc.Arm(ctx, root, nil)
+	report, err := h.svc.Arm(ctx, root, ArmOptions{})
 	if err != nil {
 		t.Fatalf("re-Arm: %v", err)
 	}
 	if report.Withdrawn != 1 || len(report.Withdrawals) != 1 || report.Withdrawals[0] != "svc/nightly" {
 		t.Fatalf("withdrawal: %+v", report)
 	}
-	sched, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "nightly"))
+	sched, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "nightly", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -334,7 +374,9 @@ func TestArmWritesNothingWhenTheProofFails(t *testing.T) {
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	root := writeRepo(t, "svc", everyMinute)
 	proofErr := errors.New("does not compile")
-	_, err := h.svc.Arm(ctx, root, func(string, string) error { return proofErr })
+	_, err := h.svc.Arm(ctx, root, ArmOptions{
+		Prove: func(context.Context, string, string) (Proof, error) { return Proof{}, proofErr },
+	})
 	if !errors.Is(err, proofErr) {
 		t.Fatalf("Arm error = %v, want the proof's", err)
 	}
@@ -353,16 +395,18 @@ func TestDisarmRemovesEverySchedulOfTheRepo(t *testing.T) {
 	root := writeRepo(t, "svc", everyMinute+`  - name: nightly
     entrypoint: Nightly
     on:
-      schedule: "0 3 * * *"
+      schedule:
+        cron: "0 3 * * *"
+        where: local
 `)
 	other := writeRepo(t, "other", everyMinute)
-	if _, err := h.svc.Arm(ctx, root, nil); err != nil {
+	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	if _, err := h.svc.Arm(ctx, other, nil); err != nil {
+	if _, err := h.svc.Arm(ctx, other, ArmOptions{}); err != nil {
 		t.Fatalf("Arm other: %v", err)
 	}
-	removed, err := h.svc.Disarm(ctx, root)
+	removed, err := h.svc.DisarmRepo(ctx, root)
 	if err != nil {
 		t.Fatalf("Disarm: %v", err)
 	}
@@ -385,11 +429,13 @@ func TestRefreshUpdatesWithdrawsAndReportsAMissingCheckout(t *testing.T) {
 	dropped := writeRepo(t, "dropped", everyMinute+`  - name: nightly
     entrypoint: Nightly
     on:
-      schedule: "0 3 * * *"
+      schedule:
+        cron: "0 3 * * *"
+        where: local
 `)
 	gone := writeRepo(t, "gone", everyMinute)
 	for _, root := range []string{edited, dropped, gone} {
-		if _, err := h.svc.Arm(ctx, root, nil); err != nil {
+		if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 			t.Fatalf("Arm %s: %v", root, err)
 		}
 	}
@@ -398,7 +444,9 @@ func TestRefreshUpdatesWithdrawsAndReportsAMissingCheckout(t *testing.T) {
   - name: every-minute
     entrypoint: EveryMinute
     on:
-      schedule: "0 4 * * *"
+      schedule:
+        cron: "0 4 * * *"
+        where: local
 `), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
@@ -423,14 +471,14 @@ func TestRefreshUpdatesWithdrawsAndReportsAMissingCheckout(t *testing.T) {
 	if report.Withdrawn != 1 {
 		t.Errorf("Withdrawn = %d, want only the dropped pipeline", report.Withdrawn)
 	}
-	changed, err := h.store.GetCronSchedule(ctx, ScheduleID(edited, "every-minute"))
+	changed, err := h.store.GetCronSchedule(ctx, ScheduleID(edited, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
 	if changed.Cron != "0 4 * * *" {
 		t.Errorf("edited cron = %q", changed.Cron)
 	}
-	vanished, err := h.store.GetCronSchedule(ctx, ScheduleID(gone, "every-minute"))
+	vanished, err := h.store.GetCronSchedule(ctx, ScheduleID(gone, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -465,7 +513,9 @@ func TestRefreshWritesNothingWhenTheDeclarationIsUnchanged(t *testing.T) {
   - name: every-minute
     entrypoint: EveryMinute
     on:
-      schedule: "0 4 * * *"
+      schedule:
+        cron: "0 4 * * *"
+        where: local
 `), 0o644); err != nil {
 		t.Fatalf("rewrite config: %v", err)
 	}
@@ -484,10 +534,10 @@ func TestRefreshWritesNothingWhenTheDeclarationIsUnchanged(t *testing.T) {
 func armOne(t *testing.T, h *harness, root string) store.CronSchedule {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := h.svc.Arm(ctx, root, nil); err != nil {
+	if _, err := h.svc.Arm(ctx, root, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	sched, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "every-minute"))
+	sched, err := h.store.GetCronSchedule(ctx, ScheduleID(root, "every-minute", ""))
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
@@ -500,7 +550,9 @@ func TestTickWithNothingDue(t *testing.T) {
 	armOne(t, h, writeRepo(t, "svc", `  - name: every-minute
     entrypoint: EveryMinute
     on:
-      schedule: "0 3 * * *"
+      schedule:
+        cron: "0 3 * * *"
+        where: local
 `))
 	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
 	report, err := h.svc.Tick(ctx, false)
@@ -604,6 +656,7 @@ func TestTickAsksActiveWithTheSchedulesCatchUpWindow(t *testing.T) {
     on:
       schedule:
         cron: "* * * * *"
+        where: local
         catch_up: 15m
 `))
 	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
@@ -629,6 +682,7 @@ func TestTickQueuesOverAnActiveRunWhenThePolicySaysSo(t *testing.T) {
     on:
       schedule:
         cron: "* * * * *"
+        where: local
         overlap: queue
 `))
 	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
@@ -660,6 +714,7 @@ func TestTickRecordsACatchUpBacklogAsOneMissAndAdvancesTheCursor(t *testing.T) {
     on:
       schedule:
         cron: "* * * * *"
+        where: local
         catch_up: 2m
 `))
 	h.clock.set(at(t, "2026-01-01T01:00:20Z"))
@@ -804,10 +859,10 @@ func TestTickRecordsALauncherFailureAndKeepsGoing(t *testing.T) {
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	broken := armOne(t, h, writeRepo(t, "broken", everyMinute))
 	healthyRoot := writeRepo(t, "healthy", everyMinute)
-	if _, err := h.svc.Arm(ctx, healthyRoot, nil); err != nil {
+	if _, err := h.svc.Arm(ctx, healthyRoot, ArmOptions{}); err != nil {
 		t.Fatalf("Arm: %v", err)
 	}
-	healthy := ScheduleID(healthyRoot, "every-minute")
+	healthy := ScheduleID(healthyRoot, "every-minute", "")
 
 	first, second := broken.ID, healthy
 	if broken.RepoPath > healthyRoot {
@@ -903,7 +958,9 @@ func TestResolveByIDDisplayNameAndBarePipeline(t *testing.T) {
 	root := writeRepo(t, "svc", everyMinute+`  - name: nightly
     entrypoint: Nightly
     on:
-      schedule: "0 3 * * *"
+      schedule:
+        cron: "0 3 * * *"
+        where: local
 `)
 	sched := armOne(t, h, root)
 
@@ -925,7 +982,7 @@ func TestResolveNamesTheCandidatesWhenABareNameIsAmbiguous(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	for _, name := range []string{"alpha", "beta"} {
-		if _, err := h.svc.Arm(ctx, writeRepo(t, name, everyMinute), nil); err != nil {
+		if _, err := h.svc.Arm(ctx, writeRepo(t, name, everyMinute), ArmOptions{}); err != nil {
 			t.Fatalf("Arm %s: %v", name, err)
 		}
 	}
@@ -987,6 +1044,7 @@ func TestUpcomingReadsTheScheduleInItsOwnZone(t *testing.T) {
     on:
       schedule:
         cron: "0 3 * * *"
+        where: local
         tz: America/Denver
 `))
 	got, err := h.svc.Upcoming(ctx, sched.ID, 2)
@@ -1013,7 +1071,7 @@ func TestListAndShowDeriveNameStateAndZone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(rows) != 1 || rows[0].Name != "svc/every-minute" || rows[0].State != StateArmed {
+	if len(rows) != 1 || rows[0].Display != "svc/every-minute" || rows[0].State != StateArmed {
 		t.Fatalf("rows: %+v", rows)
 	}
 	if rows[0].Location != time.UTC {

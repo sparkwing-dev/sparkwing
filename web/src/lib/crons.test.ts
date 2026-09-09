@@ -2,13 +2,20 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { CronHealth, CronSchedule } from "./api";
 import {
+  declaredVsEffective,
+  fmtArgs,
   fmtCatchUp,
   fmtOverlap,
   healthBanner,
+  isOverridden,
+  lockBadge,
+  lockNote,
   outcomeLabel,
   outcomeTone,
+  overrideMarker,
   partitionUndeclared,
   scheduleCounts,
+  shortRef,
   sortSchedules,
   stateTone,
 } from "./crons";
@@ -17,15 +24,28 @@ function schedule(over: Partial<CronSchedule> = {}): CronSchedule {
   return {
     id: "crn_0123456789ab",
     name: "dotfiles/nightly-vault-sweep",
+    schedule_name: "default",
     repo_path: "/home/me/code/dotfiles",
     pipeline: "nightly-vault-sweep",
+    where: "local",
     cron: "0 3 * * *",
     tz: "America/Denver",
     overlap: "skip",
     catch_up_ns: 3_600_000_000_000,
+    args: { depth: "deep" },
+    lock: { ref: "", binary: "", digest: "", state: "follows" },
+    override: { fields: [], stale: false, set_at: "" },
+    effective: {
+      cron: "0 3 * * *",
+      tz: "America/Denver",
+      overlap: "skip",
+      catch_up_ns: 3_600_000_000_000,
+      args: { depth: "deep" },
+    },
     paused: false,
     declared: true,
     state: "armed",
+    state_detail: "",
     armed_at: "2026-09-08T20:00:00Z",
     updated_at: "2026-09-08T23:59:00Z",
     last_fired_at: "2026-09-08T09:00:00Z",
@@ -58,10 +78,19 @@ function health(over: Partial<CronHealth> = {}): CronHealth {
     armed: 2,
     paused: 1,
     undeclared: 0,
+    locked: 0,
+    following: 3,
+    ahead: 0,
+    missing_binary: 0,
+    stale_override: 0,
     detail: "3 schedules armed on this host",
+    remedy: "",
     ...over,
   };
 }
+
+const PIN_REMEDY =
+  "re-run `sparkwing crons install` to pin the checkout as it stands";
 
 describe("sortSchedules", () => {
   it("orders armed schedules by the next due instant", () => {
@@ -235,12 +264,21 @@ describe("healthBanner", () => {
 describe("scheduleCounts", () => {
   it("omits the zero buckets", () => {
     assert.equal(
-      scheduleCounts(health({ paused: 0, undeclared: 0 })),
+      scheduleCounts(health({ paused: 0, undeclared: 0, following: 0 })),
       "3 declared · 2 armed",
     );
     assert.equal(
-      scheduleCounts(health({ paused: 1, undeclared: 2 })),
+      scheduleCounts(health({ paused: 1, undeclared: 2, following: 0 })),
       "3 declared · 2 armed · 1 paused · 2 undeclared",
+    );
+  });
+
+  it("counts what is pinned, what follows the checkout and what has drifted", () => {
+    assert.equal(
+      scheduleCounts(
+        health({ paused: 0, undeclared: 0, locked: 2, following: 1, ahead: 1 }),
+      ),
+      "3 declared · 2 armed · 2 locked · 1 following · 1 ahead",
     );
   });
 });
@@ -280,5 +318,214 @@ describe("fmtCatchUp", () => {
     assert.equal(fmtCatchUp(45_000_000_000), "45s");
     assert.equal(fmtCatchUp(26 * 3600 * 1_000_000_000), "1d 2h");
     assert.equal(fmtCatchUp(0), "off");
+  });
+});
+
+describe("lockBadge", () => {
+  it("carries the abbreviated commit on a clean pin", () => {
+    const badge = lockBadge({
+      ref: "abc1234def5678",
+      binary: "/home/me/.sparkwing/crons/crn_1/pipeline",
+      digest: "sha256:aa",
+      state: "pinned",
+    });
+    assert.equal(badge.tone, "ok");
+    assert.equal(badge.label, "pinned abc1234");
+  });
+
+  it("leads with the drift and tones each state", () => {
+    const lock = { ref: "abc1234def5678", binary: "/p", digest: "d", state: "ahead" as const };
+    assert.deepEqual(lockBadge(lock), { tone: "warning", label: "ahead" });
+    assert.deepEqual(lockBadge({ ...lock, state: "dirty" }), {
+      tone: "warning",
+      label: "dirty",
+    });
+    assert.deepEqual(lockBadge({ ...lock, state: "missing" }), {
+      tone: "danger",
+      label: "missing",
+    });
+  });
+
+  it("calls an unpinned schedule follows, whatever it carries", () => {
+    assert.deepEqual(
+      lockBadge({ ref: "", binary: "", digest: "", state: "follows" }),
+      { tone: "muted", label: "follows" },
+    );
+    assert.deepEqual(lockBadge(null), { tone: "muted", label: "follows" });
+  });
+
+  it("names a pin whose ref the server did not send", () => {
+    assert.equal(
+      lockBadge({ ref: "", binary: "/p", digest: "d", state: "pinned" }).label,
+      "pinned",
+    );
+  });
+});
+
+describe("shortRef", () => {
+  it("abbreviates to seven characters and leaves shorter refs alone", () => {
+    assert.equal(shortRef("abc1234def5678"), "abc1234");
+    assert.equal(shortRef("abc12"), "abc12");
+    assert.equal(shortRef(""), "");
+  });
+});
+
+describe("lockNote", () => {
+  it("says what each state runs, and what to run when it wants attention", () => {
+    assert.match(lockNote({ ref: "", binary: "", digest: "", state: "follows" }), /compiles the checkout/);
+    const pinned = { ref: "abc1234", binary: "/p", digest: "d", state: "pinned" as const };
+    assert.match(lockNote(pinned), /runs the pinned binary/);
+    assert.doesNotMatch(lockNote(pinned), /crons install/);
+    assert.match(lockNote({ ...pinned, state: "ahead" }), /newer commits[\s\S]*crons install/);
+    assert.match(lockNote({ ...pinned, state: "dirty" }), /uncommitted edits[\s\S]*crons install/);
+    assert.match(lockNote({ ...pinned, state: "missing" }), /fires nothing[\s\S]*crons install/);
+  });
+});
+
+describe("fmtArgs", () => {
+  it("renders the flags a launch passes, sorted by key", () => {
+    assert.equal(fmtArgs({ depth: "deep", "dry-run": "true" }), "--depth=deep --dry-run=true");
+    assert.equal(fmtArgs({ b: "2", a: "1" }), "--a=1 --b=2");
+    assert.equal(fmtArgs({}), "-");
+    assert.equal(fmtArgs(null), "-");
+  });
+});
+
+describe("overrideMarker", () => {
+  it("returns nothing for a schedule running what its repo declares", () => {
+    assert.equal(overrideMarker(schedule()), null);
+  });
+
+  it("names the overridden fields", () => {
+    const marker = overrideMarker(
+      schedule({ override: { fields: ["cron", "args"], stale: false, set_at: "2026-09-08T20:00:00Z" } }),
+    );
+    assert.equal(marker?.label, "override");
+    assert.equal(marker?.tone, "muted");
+    assert.match(marker!.title, /overrides cron, args/);
+  });
+
+  it("warns about an override whose declaration has moved under it", () => {
+    const marker = overrideMarker(
+      schedule({ override: { fields: ["cron"], stale: true, set_at: "2026-09-08T20:00:00Z" } }),
+    );
+    assert.equal(marker?.tone, "warning");
+    assert.match(marker!.title, /declaration that has changed/);
+  });
+
+  it("reads one field at a time", () => {
+    const s = schedule({ override: { fields: ["cron"], stale: false, set_at: "" } });
+    assert.equal(isOverridden(s, "cron"), true);
+    assert.equal(isOverridden(s, "tz"), false);
+  });
+});
+
+describe("declaredVsEffective", () => {
+  it("pairs every overridable field with what this host runs", () => {
+    const rows = declaredVsEffective(schedule());
+    assert.deepEqual(
+      rows.map((r) => r.field),
+      ["cron", "tz", "overlap", "catch_up", "args"],
+    );
+    assert.deepEqual(
+      rows.map((r) => r.overridden),
+      [false, false, false, false, false],
+    );
+    const cron = rows[0];
+    assert.equal(cron.declared, "0 3 * * *");
+    assert.equal(cron.effective, "0 3 * * *");
+  });
+
+  it("marks the overridden rows and renders each field in its own units", () => {
+    const rows = declaredVsEffective(
+      schedule({
+        override: { fields: ["cron", "catch_up", "args"], stale: true, set_at: "2026-09-08T20:00:00Z" },
+        effective: {
+          cron: "0 5 * * *",
+          tz: "America/Denver",
+          overlap: "skip",
+          catch_up_ns: 120_000_000_000,
+          args: { depth: "shallow", "dry-run": "true" },
+        },
+      }),
+    );
+    const by = Object.fromEntries(rows.map((r) => [r.field, r]));
+    assert.equal(by.cron.effective, "0 5 * * *");
+    assert.equal(by.cron.overridden, true);
+    assert.equal(by.tz.overridden, false);
+    assert.equal(by.overlap.declared, "skip if running");
+    assert.equal(by.catch_up.declared, "1h");
+    assert.equal(by.catch_up.effective, "2m");
+    assert.equal(by.args.declared, "--depth=deep");
+    assert.equal(by.args.effective, "--depth=shallow --dry-run=true");
+    assert.equal(by.args.overridden, true);
+  });
+
+  it("labels the catch-up row the way the detail pane reads it", () => {
+    assert.deepEqual(
+      declaredVsEffective(schedule()).map((r) => r.label),
+      ["cron", "tz", "overlap", "catch-up", "args"],
+    );
+  });
+});
+
+describe("healthBanner drift", () => {
+  it("calls a gone pinned binary a warning and carries the server's remedy", () => {
+    const banner = healthBanner(
+      health({ locked: 1, following: 2, missing_binary: 1, remedy: `1 pinned binary/binaries are gone; ${PIN_REMEDY}` }),
+    );
+    assert.equal(banner.tone, "warning");
+    assert.match(banner.headline, /pinned pipeline binary is gone/);
+    assert.match(banner.remedy, /crons install/);
+  });
+
+  it("warns when the checkout has moved past a pin", () => {
+    const one = healthBanner(
+      health({ locked: 2, ahead: 1, remedy: `1 schedule(s) are pinned behind the checkout; ${PIN_REMEDY}` }),
+    );
+    assert.equal(one.tone, "warning");
+    assert.match(one.headline, /moved past a pin/);
+    assert.match(one.remedy, /pin the checkout as it stands/);
+    const many = healthBanner(health({ locked: 3, ahead: 2 }));
+    assert.match(many.headline, /moved past 2 pins/);
+  });
+
+  it("prefers the gone binary over the pin the checkout has passed", () => {
+    const banner = healthBanner(health({ missing_binary: 1, ahead: 2, stale_override: 1 }));
+    assert.match(banner.headline, /binary is gone/);
+  });
+
+  it("names the schedule whose override went stale", () => {
+    const rows = [
+      schedule({ id: "a", name: "dotfiles/nightly", override: { fields: ["cron"], stale: true, set_at: "" } }),
+      schedule({ id: "b", name: "sparkwing/bench" }),
+    ];
+    const banner = healthBanner(health({ stale_override: 1 }), rows);
+    assert.equal(banner.tone, "warning");
+    assert.match(banner.headline, /dotfiles\/nightly/);
+    assert.match(banner.headline, /declaration that has changed/);
+  });
+
+  it("cuts a long list of stale overrides to a count", () => {
+    const rows = ["one", "two", "three", "four"].map((n) =>
+      schedule({ id: n, name: `repo/${n}`, override: { fields: ["cron"], stale: true, set_at: "" } }),
+    );
+    const banner = healthBanner(health({ stale_override: 4 }), rows);
+    assert.match(banner.headline, /repo\/one, repo\/two and 2 more/);
+  });
+
+  it("falls back to a count when it has no rows to name", () => {
+    const banner = healthBanner(health({ stale_override: 2 }));
+    assert.match(banner.headline, /^2 overrides were set/);
+  });
+
+  it("leaves a host with no drift alone", () => {
+    const banner = healthBanner(health({ locked: 3, following: 0 }));
+    assert.equal(banner.tone, "ok");
+  });
+
+  it("prefers a stopped tick over any pin drift it hides", () => {
+    const banner = healthBanner(health({ tick_stale: true, missing_binary: 1 }));
+    assert.match(banner.headline, /ticks have stopped/);
   });
 });

@@ -22,6 +22,7 @@ import (
 func runCronsStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsStatus.Path, flag.ContinueOnError)
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsStatus, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -31,6 +32,9 @@ func runCronsStatus(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsStatus.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsStatusProfile(*on, format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -63,6 +67,8 @@ func renderCronsHealth(w io.Writer, h crons.Health, now time.Time, format string
 		fmt.Fprintf(w, "timer\t%s\n", cronsTimerWord(h))
 		fmt.Fprintf(w, "tick\t%s\n", cronsTickWord(h, now))
 		fmt.Fprintf(w, "schedules\t%d\t%d\t%d\n", h.Armed, h.Paused, h.Undeclared)
+		fmt.Fprintf(w, "locks\t%d\t%d\t%d\t%d\t%d\n",
+			h.Locked, h.Following, h.Ahead, h.MissingBinary, h.StaleOverride)
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -81,10 +87,18 @@ func renderCronsHealth(w io.Writer, h crons.Health, now time.Time, format string
 		fmt.Fprintf(tw, "tick error\t%s\n", h.LastTick.Error)
 	}
 	fmt.Fprintf(tw, "schedules\t%d armed, %d paused, %d undeclared\n", h.Armed, h.Paused, h.Undeclared)
+	fmt.Fprintf(tw, "locks\t%d locked (%d behind the checkout, %d with the binary gone), %d following\n",
+		h.Locked, h.Ahead, h.MissingBinary, h.Following)
+	if h.StaleOverride > 0 {
+		fmt.Fprintf(tw, "overrides\t%d set against a declaration that has moved\n", h.StaleOverride)
+	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "\n%s\n", h.Detail)
+	if h.Remedy != "" {
+		fmt.Fprintf(w, "%s\n", h.Remedy)
+	}
 	return nil
 }
 
@@ -118,6 +132,7 @@ func runCronsList(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsList.Path, flag.ContinueOnError)
 	all := fs.Bool("all", false, "include schedules the repo no longer declares")
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	nowFlag := cronsNowFlag(fs)
 	if err := parseAndCheck(cmdCronsList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -128,6 +143,9 @@ func runCronsList(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsList.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsListProfile(*on, format, *all)
 	}
 	session, release, err := openCrons(*nowFlag)
 	if err != nil {
@@ -159,7 +177,8 @@ func renderCronsList(w io.Writer, rows []crons.Row, hidden int, now time.Time, f
 		return ndjson.Write(w, rows)
 	case "plain":
 		for _, r := range rows {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.ID, r.Name, r.Cron, cronTZLabel(r.CronSchedule), r.State)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				r.ID, r.Display, r.Effective.Cron, cronsZoneLabel(r.Effective.TZ), cronsLockWord(r), r.State)
 		}
 		return nil
 	}
@@ -172,7 +191,8 @@ func renderCronsList(w io.Writer, rows []crons.Row, hidden int, now time.Time, f
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "SCHEDULE\tNAME\tCRON\tTZ\tNEXT\tLAST\tOUTCOME\tSTATE")
+	fmt.Fprintln(tw, "SCHEDULE\tNAME\tCRON\tTZ\tLOCK\tNEXT\tLAST\tOUTCOME\tSTATE")
+	overridden, staleOverride := false, false
 	for _, r := range rows {
 		next := "-"
 		if r.NextDueAt != nil {
@@ -182,12 +202,28 @@ func renderCronsList(w io.Writer, rows []crons.Row, hidden int, now time.Time, f
 		if r.LastFiredAt != nil {
 			last = cronRelTime(now, *r.LastFiredAt)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.ID, r.Name, r.Cron, cronTZLabel(r.CronSchedule), next, last,
+		cron := r.Effective.Cron
+		if len(r.OverrideFields) > 0 {
+			cron += "*"
+			overridden = true
+			if r.OverrideStale {
+				cron += "!"
+				staleOverride = true
+			}
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			r.ID, r.Display, cron, cronsZoneLabel(r.Effective.TZ), cronsLockWord(r), next, last,
 			dashIfEmpty(r.LastOutcome), r.State)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
+	}
+	if overridden {
+		fmt.Fprintln(w, "\n* this host overrides the declared value; `sparkwing crons show <name>` has both")
+	}
+	if staleOverride {
+		fmt.Fprintln(w, "! the repo has changed the declaration since that override was set; "+
+			"`sparkwing crons install` re-bases it")
 	}
 	if hidden > 0 {
 		fmt.Fprintf(w, "\n%d schedule(s) the repo no longer declares are hidden; `sparkwing crons list --all` shows them\n", hidden)
@@ -209,6 +245,7 @@ func runCronsShow(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsShow.Path, flag.ContinueOnError)
 	fires := fs.Int("fires", 10, "how many recent fires to show")
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsShow, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -222,6 +259,9 @@ func runCronsShow(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsShow.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsShowProfile(*on, fs.Arg(0), format, *fires)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -260,15 +300,38 @@ func renderCronsShow(w io.Writer, report cronsShowReport, format string) error {
 		return err
 	}
 	r := report.Row
+	decl := r.Declaration()
+	eff := r.Effective
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "schedule\t%s\n", r.ID)
-	fmt.Fprintf(tw, "name\t%s\n", r.Name)
+	fmt.Fprintf(tw, "name\t%s\n", r.Display)
+	fmt.Fprintf(tw, "entry\t%s\n", r.ScheduleName)
 	fmt.Fprintf(tw, "repo\t%s\n", r.RepoPath)
 	fmt.Fprintf(tw, "pipeline\t%s\n", r.Pipeline)
-	fmt.Fprintf(tw, "cron\t%s\n", r.Cron)
-	fmt.Fprintf(tw, "tz\t%s\n", cronTZLabel(r.CronSchedule))
-	fmt.Fprintf(tw, "overlap\t%s\n", r.Overlap)
-	fmt.Fprintf(tw, "catch up\t%s\n", r.CatchUp)
+	fmt.Fprintf(tw, "where\t%s\n", dashIfEmpty(r.Where))
+	fmt.Fprintln(tw, "\t")
+	fmt.Fprintln(tw, "FIELD\tDECLARED\tOVERRIDE\tEFFECTIVE")
+	fmt.Fprintf(tw, "cron\t%s\t%s\t%s\n", decl.Cron, cronsOverrideValue(r.Override, "cron"), eff.Cron)
+	fmt.Fprintf(tw, "tz\t%s\t%s\t%s\n",
+		cronsZoneLabel(decl.TZ), cronsOverrideValue(r.Override, "tz"), cronsZoneLabel(eff.TZ))
+	fmt.Fprintf(tw, "overlap\t%s\t%s\t%s\n", decl.Overlap, cronsOverrideValue(r.Override, "overlap"), eff.Overlap)
+	fmt.Fprintf(tw, "catch up\t%s\t%s\t%s\n", decl.CatchUp, cronsOverrideValue(r.Override, "catch_up"), eff.CatchUp)
+	fmt.Fprintf(tw, "args\t%s\t%s\t%s\n",
+		cronsArgsLabel(decl.Args), cronsOverrideValue(r.Override, "args"), cronsArgsLabel(eff.Args))
+	fmt.Fprintln(tw, "\t")
+	fmt.Fprintf(tw, "lock\t%s\n", cronsShowLock(r))
+	if r.Lock.Binary != "" {
+		fmt.Fprintf(tw, "binary\t%s\n", r.Lock.Binary)
+		fmt.Fprintf(tw, "digest\t%s\n", dashIfEmpty(r.Lock.Digest))
+	}
+	if r.Override != nil {
+		stale := "no"
+		if r.OverrideStale {
+			stale = "yes: the repo has changed the declaration since; `sparkwing crons install` re-bases it"
+		}
+		fmt.Fprintf(tw, "override set\t%s\n", cronAbsTime(r.Override.SetAt, r.Location))
+		fmt.Fprintf(tw, "override stale\t%s\n", stale)
+	}
 	fmt.Fprintf(tw, "state\t%s\n", r.State)
 	fmt.Fprintf(tw, "armed\t%s by %s\n", cronAbsTime(r.ArmedAt, r.Location), dashIfEmpty(r.ArmedBy))
 	fmt.Fprintf(tw, "cursor\t%s\n", cronAbsTime(r.CursorAt, r.Location))
@@ -294,15 +357,15 @@ func renderCronsShow(w io.Writer, report cronsShowReport, format string) error {
 	}
 	fmt.Fprintln(w)
 	ft := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(ft, "DUE\tDECIDED\tOUTCOME\tRUN\tDETAIL")
+	fmt.Fprintln(ft, "DUE\tDECIDED\tOUTCOME\tRUN\tARGS\tDETAIL")
 	for _, f := range report.Fires {
 		run := dashIfEmpty(f.RunID)
 		if f.RunStatus != "" {
 			run = fmt.Sprintf("%s (%s)", f.RunID, f.RunStatus)
 		}
-		fmt.Fprintf(ft, "%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(ft, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			cronAbsTime(f.DueAt, r.Location), cronAbsTime(f.DecidedAt, r.Location),
-			f.Outcome, run, dashIfEmpty(f.Detail))
+			f.Outcome, run, cronsArgsLabel(f.Args), dashIfEmpty(f.Detail))
 	}
 	return ft.Flush()
 }
@@ -317,6 +380,7 @@ func runCronsNext(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsNext.Path, flag.ContinueOnError)
 	count := fs.Int("count", 5, "how many instants to show")
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	nowFlag := cronsNowFlag(fs)
 	if err := parseAndCheck(cmdCronsNext, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -333,6 +397,9 @@ func runCronsNext(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsNext.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsNextProfile(*on, fs.Arg(0), format, *count)
 	}
 	session, release, err := openCrons(*nowFlag)
 	if err != nil {
@@ -371,7 +438,7 @@ func runCronsNext(args []string) error {
 			return fmt.Errorf("crons next: %w", uerr)
 		}
 		for _, at := range instants {
-			out = append(out, cronsUpcoming{Schedule: r.ID, Name: r.Name, At: at})
+			out = append(out, cronsUpcoming{Schedule: r.ID, Name: r.Display, At: at})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })

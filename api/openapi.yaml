@@ -3162,6 +3162,228 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/crons:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [crons]
+      summary: Read the controller's scheduler health and every schedule pushed to it.
+      description: |
+        The same shape the local dashboard serves, so one client renders a
+        host's schedules and a controller's. `health.timer` describes the
+        controller's own evaluation loop rather than an OS timer.
+      responses:
+        "200":
+          description: Scheduler health and every stored schedule.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CronsOverview"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/crons/repos:
+    put:
+      x-sparkwing-scope: runs.write
+      tags: [crons]
+      summary: Replace one repository's controller schedules.
+      description: |
+        Upserts every schedule the body carries against `repo_url` and
+        withdraws the ones it no longer lists. Each row keeps its pause state,
+        cursor, history and override. `sha` pins every fire to one commit;
+        `follow` clones the tip of `branch` instead and ignores `sha`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CronRepoRequest"}
+      responses:
+        "200":
+          description: The repository's schedules as they now stand.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CronReposResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      x-sparkwing-scope: runs.write
+      tags: [crons]
+      summary: Remove every schedule pushed for one repository URL.
+      parameters:
+        - in: query
+          name: repo_url
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: How many schedules the repository had.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CronRepoDeleteResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/crons/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [crons]
+      summary: Read one schedule, its recent fires, and the instants it matches next.
+      description: |
+        `id` is a schedule id or any name the listing prints: a
+        `owner/repo/pipeline[/name]` display name, a `pipeline/name` pair, or a
+        pipeline name unique across the controller.
+      responses:
+        "200":
+          description: The schedule, its fires newest first, and its next instants.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CronDetail"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/crons/{id}/pause:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.write
+      tags: [crons]
+      summary: Stop a schedule firing, keeping it armed.
+      description: |
+        A paused schedule still advances its cursor on each tick, so resuming
+        it fires the next due instant rather than replaying the ones that
+        passed while it was paused.
+      responses:
+        "200":
+          description: The schedule as it now stands.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CronScheduleEnvelope"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/crons/{id}/resume:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.write
+      tags: [crons]
+      summary: Let a paused schedule fire again from its next due instant.
+      responses:
+        "200":
+          description: The schedule as it now stands.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CronScheduleEnvelope"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/crons/{id}/run:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.write
+      tags: [crons]
+      summary: Launch a schedule's pipeline now.
+      description: |
+        Creates the trigger and the pending run immediately, whatever the
+        cadence says and whether or not the schedule is paused, and records the
+        launch in its history. The cursor does not move, so the next due
+        instant still fires on time.
+      responses:
+        "200":
+          description: The run that started and the schedule as it now stands.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CronRunEnvelope"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/crons/{id}/disarm:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: runs.write
+      tags: [crons]
+      summary: Remove one schedule and its fire history.
+      description: |
+        Every sibling schedule of the same pipeline and repository stays armed.
+        To stop a schedule without losing its history, pause it instead.
+      responses:
+        "200":
+          description: The schedule as it stood when it went.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CronScheduleEnvelope"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
+  /api/v1/crons/{id}/override:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    put:
+      x-sparkwing-scope: runs.write
+      tags: [crons]
+      summary: Lay the controller's own cadence over what the repository declared.
+      description: |
+        A field the body leaves empty keeps the declared value, and a field
+        named again replaces the previous override. `args` replaces the
+        declared argument set whole. The result is validated the way a declared
+        cadence is, so an override that would stop the schedule evaluating is
+        refused here rather than at the next tick.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CronOverrideRequest"}
+      responses:
+        "200":
+          description: The schedule as it now stands.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CronScheduleEnvelope"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      x-sparkwing-scope: runs.write
+      tags: [crons]
+      summary: Return one schedule to what the repository declared.
+      responses:
+        "200":
+          description: The schedule as it now stands.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CronScheduleEnvelope"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -4081,3 +4303,212 @@ components:
               warmed_at: {type: string}
               checked_out_by: {type: string}
               checked_out_at: {type: string}
+    CronTimerState:
+      x-sparkwing-go-type: internal/crons.TimerStateView
+      type: object
+      description: |
+        The OS timer that calls the tick. A controller reports its own
+        evaluation loop here, with `detail` naming it.
+      properties:
+        installed: {type: boolean}
+        foreign: {type: boolean}
+        enabled: {type: boolean}
+        stale: {type: boolean}
+        path: {type: string}
+        binary: {type: string}
+        detail: {type: string}
+    CronTick:
+      x-sparkwing-go-type: internal/crons.TickView
+      type: object
+      description: The last tick recorded against the store; `at` is empty until one has landed.
+      properties:
+        at: {type: string}
+        host: {type: string}
+        version: {type: string}
+        error: {type: string}
+    CronHealth:
+      x-sparkwing-go-type: internal/crons.HealthView
+      type: object
+      description: Whether the evaluator is running, and what it holds.
+      properties:
+        timer: {$ref: "#/components/schemas/CronTimerState"}
+        last_tick: {$ref: "#/components/schemas/CronTick"}
+        tick_stale: {type: boolean}
+        schedules: {type: integer}
+        armed: {type: integer}
+        paused: {type: integer}
+        undeclared: {type: integer}
+        locked: {type: integer}
+        following: {type: integer}
+        ahead: {type: integer}
+        missing_binary: {type: integer}
+        stale_override: {type: integer}
+        detail: {type: string}
+        remedy: {type: string}
+    CronLock:
+      x-sparkwing-go-type: internal/crons.LockView
+      type: object
+      description: |
+        What a schedule runs. `state` is one of `follows`, `pinned`, `ahead`,
+        `dirty` or `missing`; the other members are empty while a schedule
+        follows the checkout.
+      properties:
+        ref: {type: string}
+        binary: {type: string}
+        digest: {type: string}
+        state: {type: string, enum: [follows, pinned, ahead, dirty, missing]}
+    CronOverrideState:
+      x-sparkwing-go-type: internal/crons.OverrideView
+      type: object
+      description: |
+        Which declared fields the evaluating side has overridden, and the
+        values it set. A field the override does not name is empty here, so
+        `fields` says which of the values below are meaningful.
+      properties:
+        fields: {type: array, items: {type: string}}
+        stale: {type: boolean}
+        set_at: {type: string}
+        cron: {type: string}
+        tz: {type: string}
+        overlap: {type: string}
+        catch_up_ns: {type: integer, format: int64}
+        args: {type: object, additionalProperties: {type: string}}
+    CronEffective:
+      x-sparkwing-go-type: internal/crons.EffectiveView
+      type: object
+      description: The cadence the schedule actually runs, after any override.
+      properties:
+        cron: {type: string}
+        tz: {type: string}
+        overlap: {type: string, enum: [skip, queue]}
+        catch_up_ns: {type: integer}
+        args: {type: object, additionalProperties: {type: string}}
+    CronSchedule:
+      x-sparkwing-go-type: internal/crons.ScheduleView
+      type: object
+      description: |
+        One schedule. `name` is the display name; `git_branch` is set only on a
+        schedule pushed to a controller.
+      properties:
+        id: {type: string}
+        name: {type: string}
+        schedule_name: {type: string}
+        repo_path: {type: string}
+        pipeline: {type: string}
+        where: {type: string, enum: [local, controller]}
+        git_branch: {type: string}
+        cron: {type: string}
+        tz: {type: string}
+        overlap: {type: string, enum: [skip, queue]}
+        catch_up_ns: {type: integer}
+        args: {type: object, additionalProperties: {type: string}}
+        lock: {$ref: "#/components/schemas/CronLock"}
+        override: {$ref: "#/components/schemas/CronOverrideState"}
+        effective: {$ref: "#/components/schemas/CronEffective"}
+        paused: {type: boolean}
+        declared: {type: boolean}
+        state: {type: string, enum: [armed, paused, undeclared]}
+        state_detail: {type: string}
+        armed_at: {type: string}
+        updated_at: {type: string}
+        last_fired_at: {type: string, nullable: true}
+        last_run_id: {type: string}
+        last_outcome: {type: string}
+        next_due_at: {type: string, nullable: true}
+    CronFire:
+      x-sparkwing-go-type: internal/crons.FireView
+      type: object
+      description: |
+        One resolved due instant. `run_status` is empty when the fire launched
+        nothing or its run has since been pruned.
+      properties:
+        id: {type: string}
+        schedule_id: {type: string}
+        due_at: {type: string}
+        decided_at: {type: string}
+        outcome: {type: string, enum: [fired, skipped_overlap, missed, failed]}
+        run_id: {type: string}
+        detail: {type: string}
+        args: {type: object, additionalProperties: {type: string}}
+        run_status: {type: string}
+    CronsOverview:
+      x-sparkwing-go-type: internal/crons.OverviewView
+      type: object
+      description: The evaluator's health and every schedule it holds.
+      properties:
+        health: {$ref: "#/components/schemas/CronHealth"}
+        schedules: {type: array, items: {$ref: "#/components/schemas/CronSchedule"}}
+    CronDetail:
+      x-sparkwing-go-type: internal/crons.DetailView
+      type: object
+      description: One schedule, its fires newest first, and the instants it matches next.
+      properties:
+        schedule: {$ref: "#/components/schemas/CronSchedule"}
+        fires: {type: array, items: {$ref: "#/components/schemas/CronFire"}}
+        upcoming: {type: array, items: {type: string}}
+    CronScheduleEnvelope:
+      x-sparkwing-go-type: internal/crons.ScheduleEnvelope
+      type: object
+      description: What a write to one schedule returns.
+      properties:
+        schedule: {$ref: "#/components/schemas/CronSchedule"}
+    CronRunEnvelope:
+      x-sparkwing-go-type: internal/crons.RunEnvelope
+      type: object
+      description: What a launch returns.
+      properties:
+        run_id: {type: string}
+        schedule: {$ref: "#/components/schemas/CronSchedule"}
+    CronRepoSchedule:
+      x-sparkwing-go-type: pkg/controller.cronRepoSchedule
+      type: object
+      description: One pushed entry, spelled the way the repository declares it.
+      properties:
+        pipeline: {type: string}
+        name: {type: string}
+        cron: {type: string}
+        tz: {type: string}
+        overlap: {type: string, enum: [skip, queue]}
+        catch_up: {type: string, description: A Go duration such as 6h.}
+        args: {type: object, additionalProperties: {type: string}}
+    CronRepoRequest:
+      x-sparkwing-go-type: pkg/controller.cronRepoRequest
+      type: object
+      required: [repo_url]
+      description: |
+        One repository's controller schedules as they should stand after the
+        call. `schedules` is optional, and omitting it -- or sending an empty
+        list -- is how a repository withdraws every schedule it had pushed:
+        the body is the whole set, so anything it does not carry is withdrawn.
+      properties:
+        repo_url: {type: string}
+        branch: {type: string}
+        sha: {type: string}
+        follow: {type: boolean}
+        schedules: {type: array, items: {$ref: "#/components/schemas/CronRepoSchedule"}}
+    CronReposResponse:
+      x-sparkwing-go-type: pkg/controller.cronReposResponse
+      type: object
+      description: The repository's rows as they now stand, and what the push withdrew.
+      properties:
+        schedules: {type: array, items: {$ref: "#/components/schemas/CronSchedule"}}
+        withdrawn: {type: array, items: {type: string}}
+    CronRepoDeleteResponse:
+      x-sparkwing-go-type: pkg/controller.cronRepoDeleteResponse
+      type: object
+      description: How many schedules a repository had.
+      properties:
+        repo_url: {type: string}
+        removed: {type: integer}
+    CronOverrideRequest:
+      x-sparkwing-go-type: pkg/controller.cronOverrideRequest
+      type: object
+      description: |
+        The controller's own values for one schedule. A member left empty keeps
+        the declared value; `args` replaces the declared set whole.
+      properties:
+        cron: {type: string}
+        tz: {type: string}
+        overlap: {type: string, enum: [skip, queue]}
+        catch_up: {type: string, description: A Go duration such as 6h.}
+        args: {type: object, additionalProperties: {type: string}}
