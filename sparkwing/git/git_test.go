@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -516,6 +517,9 @@ func TestFilesetHashFramesFileContents(t *testing.T) {
 	}
 }
 func TestFilesetHashIncludesPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows chmod does not change executable permissions")
+	}
 	dir := t.TempDir()
 	writeFile(t, dir, "run.sh", "echo hello")
 	a, err := FilesetHash(t.Context(), dir)
@@ -534,6 +538,9 @@ func TestFilesetHashIncludesPermissions(t *testing.T) {
 	}
 }
 func TestFilesetHashRejectsUnreadableFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows chmod does not remove read permissions")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root can read files without permission")
 	}
