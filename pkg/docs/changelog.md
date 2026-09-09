@@ -59,6 +59,13 @@ unlock.
   commit gate and is missing a `post-commit` notifier is now counted and named
   separately from one that refuses nothing
 
+- **admission:** A guarded command whose daemon restarted mid-run is
+  acknowledged when it completes. The guard sweep chose which client to
+  acknowledge before it probed the process table, so a client that reattached
+  inside that window was never acknowledged: `sparkwing queue exec` waited ten
+  seconds and reported "release admission: guard completion acknowledgement
+  timed out" for a command that had succeeded. The same staleness could
+  finalize a reattached run as abandoned.
 - **cli:** `sparkwing doctor` names a wedged admission daemon -- one that
   accepts connections and answers nothing -- and the commands that recover it,
   instead of reporting a raw socket read timeout the operator has to interpret

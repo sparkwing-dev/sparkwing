@@ -35,9 +35,10 @@ func TestGuardedReleasePersistenceFailureRetainsCapacity(t *testing.T) {
 		return wantErr
 	}
 
-	deliveries, released, err := d.releaseGuardDurably(decision.Lease.ID, session)
-	if !errors.Is(err, wantErr) || released || len(deliveries) != 0 {
-		t.Fatalf("guarded release = deliveries %d released %v err %v", len(deliveries), released, err)
+	release, err := d.releaseGuardDurably(decision.Lease.ID, session)
+	if !errors.Is(err, wantErr) || release.released || len(release.deliveries) != 0 {
+		t.Fatalf("guarded release = deliveries %d released %v err %v",
+			len(release.deliveries), release.released, err)
 	}
 	if _, ok := d.ledger.LeaseByID(decision.Lease.ID); !ok {
 		t.Fatal("persistence failure freed guarded capacity in memory")
@@ -79,13 +80,14 @@ func TestGuardedReleasePersistsPromotedTokenBeforeDelivery(t *testing.T) {
 		return nil
 	}
 
-	deliveries, released, err := d.releaseGuardDurably(holder.Lease.ID, session)
-	if err != nil || !released || len(deliveries) != 1 {
-		t.Fatalf("guarded release = deliveries %d released %v err %v", len(deliveries), released, err)
+	release, err := d.releaseGuardDurably(holder.Lease.ID, session)
+	if err != nil || !release.released || len(release.deliveries) != 1 {
+		t.Fatalf("guarded release = deliveries %d released %v err %v",
+			len(release.deliveries), release.released, err)
 	}
-	grant, ok := deliveries[0].msg.(*wingwire.Grant)
+	grant, ok := release.deliveries[0].msg.(*wingwire.Grant)
 	if !ok {
-		t.Fatalf("delivery = %T, want grant", deliveries[0].msg)
+		t.Fatalf("delivery = %T, want grant", release.deliveries[0].msg)
 	}
 	var persistedToken string
 	for _, lease := range persisted.Leases {

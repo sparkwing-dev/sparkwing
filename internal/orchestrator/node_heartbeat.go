@@ -12,7 +12,9 @@ func runNodeHeartbeatLoop(ctx context.Context, interval time.Duration, state Sta
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
-	_ = state.TouchNodeHeartbeat(ctx, runID, nodeID)
+	if err := state.TouchNodeHeartbeat(ctx, runID, nodeID); err != nil {
+		noteLostStateWrite(ctx, "touch node heartbeat", runID, err)
+	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {

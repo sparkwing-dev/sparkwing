@@ -50,7 +50,7 @@ func (r *NodeExecutor) toolSlotProvider(runID, nodeID string, delegate sparkwing
 					"position":     q.Position,
 					"queue_length": q.QueueLength,
 				})
-				_ = r.backends.State.AppendEvent(ctx, runID, nodeID, "concurrency_wait", payload)
+				noteEvent(ctx, r.backends.State, runID, nodeID, "concurrency_wait", payload)
 			}
 			detail := fmt.Sprintf("queued for %s: %d ahead of %d", key, max(0, q.Position-1), q.QueueLength)
 			if q.BlockingReason != "" {
@@ -60,7 +60,9 @@ func (r *NodeExecutor) toolSlotProvider(runID, nodeID string, delegate sparkwing
 				return
 			}
 			lastDetail = detail
-			_ = r.backends.State.UpdateNodeActivity(ctx, runID, nodeID, detail)
+			if err := r.backends.State.UpdateNodeActivity(ctx, runID, nodeID, detail); err != nil {
+				noteLostStateWrite(ctx, "update node activity", runID, err)
+			}
 			r.emitToolSlotLog(ctx, runID, nodeID, delegate, detail)
 		}
 
@@ -75,8 +77,10 @@ func (r *NodeExecutor) toolSlotProvider(runID, nodeID string, delegate sparkwing
 			return nil, err
 		}
 		if announced {
-			_ = r.backends.State.AppendEvent(ctx, runID, nodeID, "concurrency_promoted", nil)
-			_ = r.backends.State.UpdateNodeActivity(ctx, runID, nodeID, "")
+			noteEvent(ctx, r.backends.State, runID, nodeID, "concurrency_promoted", nil)
+			if err := r.backends.State.UpdateNodeActivity(ctx, runID, nodeID, ""); err != nil {
+				noteLostStateWrite(ctx, "update node activity", runID, err)
+			}
 			r.emitToolSlotLog(ctx, runID, nodeID, delegate,
 				fmt.Sprintf("admitted to %s after %s", key, time.Since(start).Round(time.Second)))
 		}
