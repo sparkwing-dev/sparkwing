@@ -67,7 +67,11 @@ The Go module pipeline authors import:
 ```go
 package jobs
 
-import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+import (
+    "context"
+
+    sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
 
 type Hello struct{ sw.Base }
 
