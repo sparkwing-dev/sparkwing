@@ -153,7 +153,6 @@ func TestCronScheduleMutatorsReportAnUnknownID(t *testing.T) {
 		"pause":    st.SetCronSchedulePaused(ctx, "crn_absent", true, cronBase),
 		"declared": st.SetCronScheduleDeclared(ctx, "crn_absent", false, cronBase),
 		"next due": st.SetCronScheduleNextDue(ctx, "crn_absent", &next, cronBase),
-		"delete":   st.DeleteCronSchedule(ctx, "crn_absent"),
 		"resolve":  st.ResolveCronDue(ctx, "crn_absent", cronBase, nil, nil, cronBase),
 	} {
 		if !errors.Is(err, store.ErrNotFound) {
@@ -212,34 +211,29 @@ func TestSetCronScheduleNextDueClearsAndSets(t *testing.T) {
 	}
 }
 
-func TestDeleteCronScheduleTakesItsFires(t *testing.T) {
+func TestResolveCronDueNeverRewindsTheCursor(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
-	kept := armCron(t, st, "crn_keep", "/repo/two", "build", cronBase)
-	doomed := armCron(t, st, "crn_gone", "/repo/one", "nightly", cronBase)
-	for _, id := range []string{kept.ID, doomed.ID} {
-		at := cronBase.Add(time.Minute)
-		if err := st.ResolveCronDue(ctx, id, at, nil, &store.CronFire{
-			DueAt: at, DecidedAt: at, Outcome: store.CronOutcomeFired, RunID: "run-" + id,
-		}, at); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := st.DeleteCronSchedule(ctx, doomed.ID); err != nil {
+	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
+	ahead := cronBase.Add(time.Hour)
+	if err := st.ResolveCronDue(ctx, sched.ID, ahead, nil, nil, ahead); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.GetCronSchedule(ctx, doomed.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("deleted schedule still readable: %v", err)
+	behind := cronBase.Add(time.Minute)
+	if err := st.ResolveCronDue(ctx, sched.ID, behind, nil, &store.CronFire{
+		DueAt: behind, DecidedAt: behind, Outcome: store.CronOutcomeFired, RunID: "run-1",
+	}, behind); err != nil {
+		t.Fatal(err)
 	}
-	fires, err := st.ListCronFires(ctx, doomed.ID, 0)
+	got, err := st.GetCronSchedule(ctx, sched.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fires) != 0 {
-		t.Errorf("deleted schedule kept %d fires", len(fires))
+	if !got.CursorAt.Equal(ahead) {
+		t.Errorf("cursor = %v, want the newer %v", got.CursorAt, ahead)
 	}
-	if fires, err = st.ListCronFires(ctx, kept.ID, 0); err != nil || len(fires) != 1 {
-		t.Fatalf("sibling fires = %d (err %v), want 1", len(fires), err)
+	if got.LastRunID != "run-1" {
+		t.Errorf("last run = %q, want the older resolve still recorded", got.LastRunID)
 	}
 }
 

@@ -223,30 +223,6 @@ func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *tim
 		nullNanos(next), now.UnixNano(), id)
 }
 
-// DeleteCronSchedule disarms a schedule and drops its fire history.
-func (s *Store) DeleteCronSchedule(ctx context.Context, id string) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM cron_fires WHERE schedule_id = ?`, id); err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM cron_schedules WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return notFound("cron schedule", id)
-	}
-	return tx.Commit()
-}
-
 // DeleteCronSchedulesForRepo disarms every schedule of one repository
 // checkout and returns how many rows went, so a caller can report an
 // uninstall that found nothing.
@@ -275,10 +251,12 @@ func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string)
 	return int(affected), nil
 }
 
-// ResolveCronDue advances the schedule past one due instant: cursor
-// moves to cursor, the next match to next, and fire, when given, joins
-// the schedule's history. The cursor and the history move together so
-// a tick that dies between them cannot fire the same instant twice.
+// ResolveCronDue advances the schedule past one due instant: the cursor
+// moves forward to cursor, the next match to next, and fire, when given,
+// joins the schedule's history. The cursor only ever moves forward, so a
+// caller holding an older reading cannot rewind one a concurrent tick
+// already advanced. The cursor and the history move together so a tick
+// that dies between them cannot fire the same instant twice.
 // A fired outcome also stamps last_fired_at, last_run_id and
 // last_outcome; every other outcome stamps last_outcome alone, leaving
 // the last successful launch on the row. fire.ID is minted when empty.
@@ -304,19 +282,23 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 		return err
 	}
 
-	update := `UPDATE cron_schedules SET cursor_at = ?, next_due_at = ?, updated_at = ? WHERE id = ?`
+	// safety: `crons run` resolves outside the tick lock, so a stale cursor must
+	// never pull a concurrent tick's newer one backwards onto instants it
+	// already resolved.
+	advance := "cursor_at = " + s.greatest() + "(cursor_at, ?)"
+	update := `UPDATE cron_schedules SET ` + advance + `, next_due_at = ?, updated_at = ? WHERE id = ?`
 	args := []any{cursor.UnixNano(), nullNanos(next), now.UnixNano(), id}
 	if fire != nil {
 		if fire.Outcome == CronOutcomeFired {
 			update = `UPDATE cron_schedules
-                         SET cursor_at = ?, next_due_at = ?, updated_at = ?,
+                         SET ` + advance + `, next_due_at = ?, updated_at = ?,
                              last_fired_at = ?, last_run_id = ?, last_outcome = ?
                        WHERE id = ?`
 			args = []any{cursor.UnixNano(), nullNanos(next), now.UnixNano(),
 				fire.DecidedAt.UnixNano(), fire.RunID, fire.Outcome, id}
 		} else {
 			update = `UPDATE cron_schedules
-                         SET cursor_at = ?, next_due_at = ?, updated_at = ?, last_outcome = ?
+                         SET ` + advance + `, next_due_at = ?, updated_at = ?, last_outcome = ?
                        WHERE id = ?`
 			args = []any{cursor.UnixNano(), nullNanos(next), now.UnixNano(), fire.Outcome, id}
 		}
