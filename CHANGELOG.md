@@ -22,8 +22,8 @@ unlock.
 
 ### Fixed
 
-- **cache:** A profile's `cache.binaries` sub-spec now routes `bin/<hash>`
-  reads; it was parsed, validated, and documented but never consumed
+- **cache:** A profile's `cache.binaries` sub-spec routes `bin/<hash>` reads
+  It was parsed, validated and documented but never consumed.
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
   staged files out of their commits
 - **logs:** Concurrent filesystem appends keep each record and its newline together

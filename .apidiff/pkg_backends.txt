@@ -17,7 +17,6 @@ type Spec struct {
 
 	Binaries *Spec
 }
-func (s *Spec) BinaryCache() *Spec
 func (s *Spec) ResolvedToken() string
 func (s *Spec) ValidateFields(surface string) error
 func (s *Spec) ValidateSecrets() error
@@ -27,6 +26,7 @@ type Surfaces struct {
 	Logs    *Spec
 	State   *Spec
 }
+func (s Surfaces) BinaryCache() *Spec
 func (s Surfaces) Validate(name string) error
 const TypeAzureBlob = "azure-blob"
 const TypeController = "controller"

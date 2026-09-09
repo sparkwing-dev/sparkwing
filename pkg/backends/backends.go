@@ -19,6 +19,25 @@ type Surfaces struct {
 	State   *Spec `yaml:"state,omitempty"`
 }
 
+// BinaryCache returns the backend that serves compiled pipeline binaries
+// (bin/<hash>). That is the cache surface itself unless the surface
+// declares a binaries sub-spec, which isolates binaries to their own
+// destination -- a shared s3 bucket while the rest of the cache stays on
+// local disk, say.
+//
+// Only one level is read. Binaries lives on Spec, so it recurses
+// structurally, but a binaries block inside a binaries block is ignored
+// rather than rejected: refusing it would fail a config that loads today.
+func (s Surfaces) BinaryCache() *Spec {
+	if s.Cache == nil {
+		return nil
+	}
+	if s.Cache.Binaries != nil {
+		return s.Cache.Binaries
+	}
+	return s.Cache
+}
+
 // Spec is one backend declaration. Type is the discriminator; the
 // remaining fields are interpreted per-type by the storeurl factories
 // (state/cache/logs) and the secrets resolver (secrets).
@@ -48,24 +67,8 @@ type Spec struct {
 	// Binaries is an optional nested override on Cache that isolates
 	// compiled pipeline binaries to a separate destination (e.g.
 	// shared s3 bucket while the rest of cache stays on disk). Only
-	// valid on the cache surface.
+	// valid on the cache surface, and read through Surfaces.BinaryCache.
 	Binaries *Spec `yaml:"binaries,omitempty"`
-}
-
-// BinaryCache returns the spec that serves compiled pipeline binaries
-// (bin/<hash>). That is the cache surface itself unless the surface
-// declares a binaries sub-spec, which isolates binaries to their own
-// destination -- a shared s3 bucket while the rest of the cache stays
-// on local disk, say. Only the cache surface carries the sub-spec;
-// calling this on another surface returns that surface.
-func (s *Spec) BinaryCache() *Spec {
-	if s == nil {
-		return nil
-	}
-	if s.Binaries != nil {
-		return s.Binaries
-	}
-	return s
 }
 
 // Backend type discriminators.
