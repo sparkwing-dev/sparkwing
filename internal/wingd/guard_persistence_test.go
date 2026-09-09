@@ -19,10 +19,11 @@ func TestGuardedReleasePersistenceFailureRetainsCapacity(t *testing.T) {
 		t.Fatalf("submit guarded lease: decision=%s err=%v", decision.Kind, err)
 	}
 	session := wingwire.ProcessSession{LeaderPID: 71, SessionID: 71, BirthToken: "birth-71"}
+	completion := &conn{runID: "guarded"}
 	daemon := &Daemon{
 		layout:              layout{state: filepath.Join(t.TempDir(), "state.json")},
 		ledger:              ledger,
-		guards:              map[admission.LeaseID]*sessionGuardState{decision.Lease.ID: {persistedGuard: persistedGuard{LeaseID: decision.Lease.ID, RunID: "guarded", Session: session}}},
+		guards:              map[admission.LeaseID]*sessionGuardState{decision.Lease.ID: {persistedGuard: persistedGuard{LeaseID: decision.Lease.ID, RunID: "guarded", Session: session}, completion: completion, disconnected: true}},
 		byRun:               map[string]*conn{},
 		leaseRun:            map[admission.LeaseID]string{decision.Lease.ID: "guarded"},
 		leaseCharge:         map[admission.LeaseID]wingwire.HostResources{},
@@ -38,6 +39,9 @@ func TestGuardedReleasePersistenceFailureRetainsCapacity(t *testing.T) {
 	deliveries, release, err := daemon.releaseGuardDurably(decision.Lease.ID, session)
 	if !errors.Is(err, wantErr) || release == nil || len(deliveries) != 0 {
 		t.Fatalf("guarded release = deliveries %d release %v err %v", len(deliveries), release, err)
+	}
+	if release.completion != completion || !release.finalize {
+		t.Fatalf("persistence failure lost current completion ownership: %+v", release)
 	}
 	if _, ok := daemon.ledger.LeaseByID(decision.Lease.ID); !ok {
 		t.Fatal("persistence failure freed guarded capacity in memory")

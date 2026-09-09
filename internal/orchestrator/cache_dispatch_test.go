@@ -49,11 +49,11 @@ func installCacheStepGate(t *testing.T) *cacheStepGate {
 
 func cacheStep() func(ctx context.Context) error {
 	return func(ctx context.Context) error {
-		cur := cacheCounter.inflight.Add(1)
+		inflight := cacheCounter.inflight.Add(1)
 		defer cacheCounter.inflight.Add(-1)
 		for {
 			peak := cacheCounter.max.Load()
-			if cur <= peak || cacheCounter.max.CompareAndSwap(peak, cur) {
+			if inflight <= peak || cacheCounter.max.CompareAndSwap(peak, inflight) {
 				break
 			}
 		}
@@ -602,9 +602,9 @@ func resetCacheCounter() {
 	resetLeaderBarrier()
 }
 
-func claimManualChildTrigger(t *testing.T, ctx context.Context, st *store.Store, childID string) {
+func claimManualChildTrigger(t *testing.T, ctx context.Context, runStore *store.Store, childID string) {
 	t.Helper()
-	trigger, err := st.ClaimSpecificTrigger(ctx, childID, store.DefaultLeaseDuration)
+	trigger, err := runStore.ClaimSpecificTrigger(ctx, childID, store.DefaultLeaseDuration)
 	if err != nil {
 		t.Fatalf("claim child trigger %q for manual run: %v", childID, err)
 	}
@@ -614,10 +614,10 @@ func claimManualChildTrigger(t *testing.T, ctx context.Context, st *store.Store,
 }
 
 func cacheCounterBump() func() {
-	cur := cacheCounter.inflight.Add(1)
+	inflight := cacheCounter.inflight.Add(1)
 	for {
 		peak := cacheCounter.max.Load()
-		if cur <= peak || cacheCounter.max.CompareAndSwap(peak, cur) {
+		if inflight <= peak || cacheCounter.max.CompareAndSwap(peak, inflight) {
 			break
 		}
 	}
@@ -627,7 +627,7 @@ func cacheCounterBump() func() {
 func TestConcurrency_QueueSerializesConcurrentHolders(t *testing.T) {
 	resetCacheCounter()
 	gate := installCacheStepGate(t)
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	done := make(chan *orchestrator.Result, 1)
 	finished := make(chan struct{})
@@ -638,24 +638,29 @@ func TestConcurrency_QueueSerializesConcurrentHolders(t *testing.T) {
 	})
 	go func() {
 		defer close(finished)
-		res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "cache-queue-serialize", RunID: "cache-queue-single"})
-		done <- res
+		runResult, err := orchestrator.RunLocal(ctx, paths, orchestrator.Options{Pipeline: "cache-queue-serialize", RunID: "cache-queue-single"})
+		if err != nil {
+			t.Errorf("run cache serialization pipeline: %v", err)
+		}
+		done <- runResult
 	}()
 	select {
 	case <-gate.started:
-	case <-time.After(time.Second):
+	case result := <-done:
+		t.Fatalf("run ended before the first cache body started: %+v", result)
+	case <-ctx.Done():
 		t.Fatal("first cache body did not start")
 	}
-	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:cache-queue-key", 1, 1)
+	waitForCacheConcurrencyPopulation(t, ctx, paths.StateDB(), "g:cache-queue-key", 1, 1)
 	gate.letRun()
-	var res *orchestrator.Result
+	var runResult *orchestrator.Result
 	select {
-	case res = <-done:
+	case runResult = <-done:
 	case <-ctx.Done():
 		t.Fatal("cache serialization run did not finish")
 	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q err=%v", res.Status, res.Error)
+	if runResult.Status != "success" {
+		t.Fatalf("status = %q err=%v", runResult.Status, runResult.Error)
 	}
 	if peak := cacheCounter.max.Load(); peak > 1 {
 		t.Fatalf("Concurrency(Queue) peak concurrency = %d, want 1", peak)
@@ -665,21 +670,24 @@ func TestConcurrency_QueueSerializesConcurrentHolders(t *testing.T) {
 func TestConcurrency_QueueSerializesAcrossRuns(t *testing.T) {
 	resetCacheCounter()
 	gate := installCacheStepGate(t)
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	done := make(chan *orchestrator.Result, 2)
 	finished := make(chan struct{})
-	var wg sync.WaitGroup
+	var workers sync.WaitGroup
 	for index := range 2 {
-		wg.Add(1)
+		workers.Add(1)
 		go func() {
-			defer wg.Done()
-			res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "cache-queue-serialize", RunID: fmt.Sprintf("cache-queue-run-%d", index)})
-			done <- res
+			defer workers.Done()
+			runResult, err := orchestrator.RunLocal(ctx, paths, orchestrator.Options{Pipeline: "cache-queue-serialize", RunID: fmt.Sprintf("cache-queue-run-%d", index)})
+			if err != nil {
+				t.Errorf("run cache serialization pipeline: %v", err)
+			}
+			done <- runResult
 		}()
 	}
 	go func() {
-		wg.Wait()
+		workers.Wait()
 		close(finished)
 	}()
 	t.Cleanup(func() {
@@ -689,16 +697,18 @@ func TestConcurrency_QueueSerializesAcrossRuns(t *testing.T) {
 	})
 	select {
 	case <-gate.started:
-	case <-time.After(time.Second):
+	case result := <-done:
+		t.Fatalf("run ended before the first cache body started: %+v", result)
+	case <-ctx.Done():
 		t.Fatal("first cross-run cache body did not start")
 	}
-	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:cache-queue-key", 1, 3)
+	waitForCacheConcurrencyPopulation(t, ctx, paths.StateDB(), "g:cache-queue-key", 1, 3)
 	gate.letRun()
 	for range 2 {
 		select {
-		case res := <-done:
-			if res.Status != "success" {
-				t.Fatalf("cross-run status = %q, want success", res.Status)
+		case runResult := <-done:
+			if runResult.Status != "success" {
+				t.Fatalf("cross-run status = %q, want success", runResult.Status)
 			}
 		case <-ctx.Done():
 			t.Fatal("cross-run cache serialization did not finish")
@@ -712,45 +722,45 @@ func TestConcurrency_QueueSerializesAcrossRuns(t *testing.T) {
 
 func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	paths := newPaths(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
-		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-leader"})
-		leaderDone <- res
+		runResult, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "cache-skip-leader"})
+		leaderDone <- runResult
 	}()
 	waitForLeaderHolding(t)
 	var waitLeaderOnce sync.Once
-	var leaderRes *orchestrator.Result
+	var leaderResult *orchestrator.Result
 	waitLeader := func() *orchestrator.Result {
 		releaseLeaderBarrier()
-		waitLeaderOnce.Do(func() { leaderRes = <-leaderDone })
-		return leaderRes
+		waitLeaderOnce.Do(func() { leaderResult = <-leaderDone })
+		return leaderResult
 	}
 	t.Cleanup(func() { _ = waitLeader() })
 
-	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-skip-follower"})
+	followerResult, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "cache-skip-follower"})
 	if err != nil {
 		t.Fatalf("follower run: %v", err)
 	}
-	if followerRes.Status != "success" {
-		t.Fatalf("follower status = %q, want success (skipped-concurrent counts as OK)", followerRes.Status)
+	if followerResult.Status != "success" {
+		t.Fatalf("follower status = %q, want success (skipped-concurrent counts as OK)", followerResult.Status)
 	}
 
-	st, _ := store.Open(p.StateDB())
-	defer func() { _ = st.Close() }()
-	fnodes, _ := st.ListNodes(context.Background(), followerRes.RunID)
-	if len(fnodes) != 1 {
-		t.Fatalf("follower: expected 1 node, got %d", len(fnodes))
+	runStore, _ := store.Open(paths.StateDB())
+	defer func() { _ = runStore.Close() }()
+	followerNodes, _ := runStore.ListNodes(context.Background(), followerResult.RunID)
+	if len(followerNodes) != 1 {
+		t.Fatalf("follower: expected 1 node, got %d", len(followerNodes))
 	}
-	if fnodes[0].Outcome != string(sparkwing.SkippedConcurrent) {
-		t.Fatalf("follower outcome = %q, want skipped-concurrent", fnodes[0].Outcome)
+	if followerNodes[0].Outcome != string(sparkwing.SkippedConcurrent) {
+		t.Fatalf("follower outcome = %q, want skipped-concurrent", followerNodes[0].Outcome)
 	}
 
 	releaseLeaderBarrier()
-	leaderRes = waitLeader()
-	if leaderRes.Status != "success" {
-		t.Fatalf("leader status = %q, want success", leaderRes.Status)
+	leaderResult = waitLeader()
+	if leaderResult.Status != "success" {
+		t.Fatalf("leader status = %q, want success", leaderResult.Status)
 	}
 
 	if peak := cacheCounter.max.Load(); peak > 1 {
@@ -760,23 +770,23 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 
 func TestConcurrency_FailResolvesFollowerAsFailed(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	paths := newPaths(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
-		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-fail-leader"})
-		leaderDone <- res
+		runResult, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "cache-fail-leader"})
+		leaderDone <- runResult
 	}()
 	waitForLeaderHolding(t)
 
-	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-fail-follower"})
-	if followerRes.Status != "failed" {
-		t.Fatalf("follower status = %q, want failed (OnLimit:Fail under held slot)", followerRes.Status)
+	followerResult, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "cache-fail-follower"})
+	if followerResult.Status != "failed" {
+		t.Fatalf("follower status = %q, want failed (OnLimit:Fail under held slot)", followerResult.Status)
 	}
 
-	st, _ := store.Open(p.StateDB())
-	defer func() { _ = st.Close() }()
-	nodes, _ := st.ListNodes(context.Background(), followerRes.RunID)
+	runStore, _ := store.Open(paths.StateDB())
+	defer func() { _ = runStore.Close() }()
+	nodes, _ := runStore.ListNodes(context.Background(), followerResult.RunID)
 	if len(nodes) != 1 {
 		t.Fatalf("follower run: expected 1 node, got %d", len(nodes))
 	}
@@ -788,41 +798,41 @@ func TestConcurrency_FailResolvesFollowerAsFailed(t *testing.T) {
 	}
 
 	releaseLeaderBarrier()
-	leaderRes := <-leaderDone
-	if leaderRes.Status != "success" {
-		t.Fatalf("leader status = %q, want success", leaderRes.Status)
+	leaderResult := <-leaderDone
+	if leaderResult.Status != "success" {
+		t.Fatalf("leader status = %q, want success", leaderResult.Status)
 	}
 }
 
 func TestCache_MemoizesAcrossRuns(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	paths := newPaths(t)
 
-	res1, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-memoize"})
+	firstRun, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "cache-memoize"})
 	if err != nil {
 		t.Fatalf("run 1: %v", err)
 	}
-	if res1.Status != "success" {
-		t.Fatalf("run 1 status = %q", res1.Status)
+	if firstRun.Status != "success" {
+		t.Fatalf("run 1 status = %q", firstRun.Status)
 	}
 	if ran := cacheCounter.inflight.Load(); ran != 1 {
 		t.Fatalf("run 1 body invocations = %d, want 1", ran)
 	}
 
-	res2, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-memoize"})
+	secondRun, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "cache-memoize"})
 	if err != nil {
 		t.Fatalf("run 2: %v", err)
 	}
-	if res2.Status != "success" {
-		t.Fatalf("run 2 status = %q", res2.Status)
+	if secondRun.Status != "success" {
+		t.Fatalf("run 2 status = %q", secondRun.Status)
 	}
 	if ran := cacheCounter.inflight.Load(); ran != 1 {
 		t.Fatalf("run 2 body invocations (cumulative) = %d, want still 1", ran)
 	}
 
-	st, _ := store.Open(p.StateDB())
-	defer func() { _ = st.Close() }()
-	nodes, _ := st.ListNodes(context.Background(), res2.RunID)
+	runStore, _ := store.Open(paths.StateDB())
+	defer func() { _ = runStore.Close() }()
+	nodes, _ := runStore.ListNodes(context.Background(), secondRun.RunID)
 	if len(nodes) != 1 {
 		t.Fatalf("run 2: expected 1 node, got %d", len(nodes))
 	}
@@ -833,20 +843,20 @@ func TestCache_MemoizesAcrossRuns(t *testing.T) {
 
 func TestConcurrency_DriftWarnEventEmitted(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	paths := newPaths(t)
 
-	r1, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-drift-a"})
-	if err != nil || r1.Status != "success" {
-		t.Fatalf("run 1: status=%q err=%v", r1.Status, err)
+	firstRun, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "cache-drift-a"})
+	if err != nil || firstRun.Status != "success" {
+		t.Fatalf("run 1: status=%q err=%v", firstRun.Status, err)
 	}
-	r2, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-drift-b"})
-	if err != nil || r2.Status != "success" {
-		t.Fatalf("run 2: status=%q err=%v", r2.Status, err)
+	secondRun, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "cache-drift-b"})
+	if err != nil || secondRun.Status != "success" {
+		t.Fatalf("run 2: status=%q err=%v", secondRun.Status, err)
 	}
 
-	st, _ := store.Open(p.StateDB())
-	defer func() { _ = st.Close() }()
-	events, _ := st.ListEventsAfter(context.Background(), r2.RunID, 0, 500)
+	runStore, _ := store.Open(paths.StateDB())
+	defer func() { _ = runStore.Close() }()
+	events, _ := runStore.ListEventsAfter(context.Background(), secondRun.RunID, 0, 500)
 	found := false
 	for _, e := range events {
 		if e.Kind == "concurrency_drift" {
@@ -864,11 +874,11 @@ func TestConcurrency_DriftWarnEventEmitted(t *testing.T) {
 
 func waitForConcurrencyHolder(t *testing.T, dbPath, holderID string) {
 	t.Helper()
-	st, err := store.Open(dbPath)
+	runStore, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = st.Close() }()
+	defer func() { _ = runStore.Close() }()
 	deadlineAt := time.Now().Add(15 * time.Second)
 	pollCtx, cancel := context.WithDeadline(context.Background(), deadlineAt)
 	defer cancel()
@@ -876,7 +886,7 @@ func waitForConcurrencyHolder(t *testing.T, dbPath, holderID string) {
 	defer poll.Stop()
 	for time.Now().Before(deadlineAt) {
 		var count int
-		err := st.DB().QueryRowContext(pollCtx,
+		err := runStore.DB().QueryRowContext(pollCtx,
 			`SELECT COUNT(*) FROM concurrency_holders WHERE holder_id = ?`,
 			holderID,
 		).Scan(&count)
@@ -899,14 +909,14 @@ func waitForConcurrencyHolder(t *testing.T, dbPath, holderID string) {
 	t.Fatalf("timed out waiting for concurrency holder %q", holderID)
 }
 
-func waitForSpawnedChildTrigger(t *testing.T, ctx context.Context, st *store.Store, parentRunID, parentNodeID, pipeline string) string {
+func waitForSpawnedChildTrigger(t *testing.T, ctx context.Context, runStore *store.Store, parentRunID, parentNodeID, pipeline string) string {
 	t.Helper()
 	pollCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
 	for {
-		childID, err := st.FindSpawnedChildTriggerID(pollCtx, parentRunID, parentNodeID, pipeline)
+		childID, err := runStore.FindSpawnedChildTriggerID(pollCtx, parentRunID, parentNodeID, pipeline)
 		if err != nil {
 			if pollCtx.Err() != nil {
 				t.Fatalf("waiting for child trigger: %v", pollCtx.Err())
@@ -925,14 +935,14 @@ func waitForSpawnedChildTrigger(t *testing.T, ctx context.Context, st *store.Sto
 	}
 }
 
-func waitForPlanAdmissionWaiter(t *testing.T, ctx context.Context, st *store.Store, key, runID string, childDone <-chan *orchestrator.Result) {
+func waitForPlanAdmissionWaiter(t *testing.T, ctx context.Context, runStore *store.Store, key, runID string, childDone <-chan *orchestrator.Result) {
 	t.Helper()
 	pollCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
 	for {
-		state, err := st.GetConcurrencyState(pollCtx, key)
+		state, err := runStore.GetConcurrencyState(pollCtx, key)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			if pollCtx.Err() != nil {
 				t.Fatalf("waiting for run %q to queue for %s: %v", runID, key, pollCtx.Err())
@@ -961,15 +971,19 @@ func waitForCacheConcurrencyPopulation(t *testing.T, ctx context.Context, dbPath
 	t.Helper()
 	pollCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	st, err := store.Open(dbPath)
+	runStore, err := store.OpenReadOnly(dbPath)
 	if err != nil {
 		t.Fatalf("open concurrency store: %v", err)
 	}
-	defer func() { _ = st.Close() }()
+	defer func() {
+		if err := runStore.Close(); err != nil {
+			t.Errorf("close observed run store: %v", err)
+		}
+	}()
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
 	for {
-		state, err := st.GetConcurrencyState(pollCtx, key)
+		state, err := runStore.GetConcurrencyState(pollCtx, key)
 		if err == nil && len(state.Holders) == holders && len(state.Waiters) == waiters {
 			return
 		}
@@ -992,15 +1006,19 @@ func waitForCacheEvent(t *testing.T, ctx context.Context, dbPath, runID, kind st
 	t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	st, err := store.Open(dbPath)
+	runStore, err := store.OpenReadOnly(dbPath)
 	if err != nil {
 		t.Fatalf("open store while waiting for %s: %v", kind, err)
 	}
-	defer func() { _ = st.Close() }()
+	defer func() {
+		if err := runStore.Close(); err != nil {
+			t.Errorf("close observed run store: %v", err)
+		}
+	}()
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
 	for {
-		events, err := st.ListEventsAfter(ctx, runID, 0, 500)
+		events, err := runStore.ListEventsAfter(ctx, runID, 0, 500)
 		if err != nil {
 			t.Fatalf("list %s events while waiting for %s: %v", runID, kind, err)
 		}
@@ -1096,21 +1114,24 @@ func waitForProgressTimeoutResumed(t *testing.T, attemptCtx context.Context) {
 func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
 	gate := installCacheStepGate(t)
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	done := make(chan *orchestrator.Result, 2)
 	finished := make(chan struct{})
-	var wg sync.WaitGroup
+	var workers sync.WaitGroup
 	for index := range 2 {
-		wg.Add(1)
+		workers.Add(1)
 		go func() {
-			defer wg.Done()
-			res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "plan-level-queue", RunID: fmt.Sprintf("plan-queue-run-%d", index)})
-			done <- res
+			defer workers.Done()
+			runResult, err := orchestrator.RunLocal(ctx, paths, orchestrator.Options{Pipeline: "plan-level-queue", RunID: fmt.Sprintf("plan-queue-run-%d", index)})
+			if err != nil {
+				t.Errorf("run cache serialization pipeline: %v", err)
+			}
+			done <- runResult
 		}()
 	}
 	go func() {
-		wg.Wait()
+		workers.Wait()
 		close(finished)
 	}()
 	t.Cleanup(func() {
@@ -1120,16 +1141,18 @@ func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	})
 	select {
 	case <-gate.started:
-	case <-time.After(time.Second):
+	case result := <-done:
+		t.Fatalf("run ended before the first cache body started: %+v", result)
+	case <-ctx.Done():
 		t.Fatal("first plan-level cache body did not start")
 	}
-	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:plan-level-key", 1, 1)
+	waitForCacheConcurrencyPopulation(t, ctx, paths.StateDB(), "g:plan-level-key", 1, 1)
 	gate.letRun()
 	for range 2 {
 		select {
-		case res := <-done:
-			if res.Status != "success" {
-				t.Fatalf("plan-level status = %q, want success", res.Status)
+		case runResult := <-done:
+			if runResult.Status != "success" {
+				t.Fatalf("plan-level status = %q, want success", runResult.Status)
 			}
 		case <-ctx.Done():
 			t.Fatal("plan-level cache serialization did not finish")
@@ -1144,7 +1167,7 @@ func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 func TestConcurrency_PlanLevelQueueEmitsAdmissionEvents(t *testing.T) {
 	resetCacheCounter()
 	gate := installCacheStepGate(t)
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
@@ -1162,30 +1185,38 @@ func TestConcurrency_PlanLevelQueueEmitsAdmissionEvents(t *testing.T) {
 	})
 	go func() {
 		defer close(leaderFinished)
-		res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{
+		runResult, err := orchestrator.RunLocal(ctx, paths, orchestrator.Options{
 			Pipeline: "plan-level-queue",
 			RunID:    "plan-queue-leader",
 		})
-		leaderDone <- res
+		if err != nil {
+			t.Errorf("run cache serialization pipeline: %v", err)
+		}
+		leaderDone <- runResult
 	}()
 	select {
 	case <-gate.started:
-	case <-time.After(time.Second):
+	case result := <-leaderDone:
+		t.Fatalf("run ended before the first cache body started: %+v", result)
+	case <-ctx.Done():
 		t.Fatal("plan queue event leader body did not start")
 	}
-	waitForConcurrencyHolder(t, p.StateDB(), "plan-queue-leader/-")
+	waitForConcurrencyHolder(t, paths.StateDB(), "plan-queue-leader/-")
 
 	followerStarted.Store(true)
 	go func() {
 		defer close(followerFinished)
-		res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{
+		runResult, err := orchestrator.RunLocal(ctx, paths, orchestrator.Options{
 			Pipeline: "plan-level-queue",
 			RunID:    "plan-queue-follower",
 		})
-		followerDone <- res
+		if err != nil {
+			t.Errorf("run cache serialization pipeline: %v", err)
+		}
+		followerDone <- runResult
 	}()
-	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:plan-level-key", 1, 1)
-	waitForCacheEvent(t, ctx, p.StateDB(), "plan-queue-follower", "concurrency_wait_update")
+	waitForCacheConcurrencyPopulation(t, ctx, paths.StateDB(), "g:plan-level-key", 1, 1)
+	waitForCacheEvent(t, ctx, paths.StateDB(), "plan-queue-follower", "concurrency_wait_update")
 	gate.letRun()
 	var follower *orchestrator.Result
 	select {
@@ -1205,12 +1236,12 @@ func TestConcurrency_PlanLevelQueueEmitsAdmissionEvents(t *testing.T) {
 		t.Fatal("timed out waiting for leader")
 	}
 
-	st, err := store.Open(p.StateDB())
+	runStore, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = st.Close() }()
-	events, err := st.ListEventsAfter(context.Background(), "plan-queue-follower", 0, 500)
+	defer func() { _ = runStore.Close() }()
+	events, err := runStore.ListEventsAfter(context.Background(), "plan-queue-follower", 0, 500)
 	if err != nil {
 		t.Fatalf("ListEventsAfter: %v", err)
 	}
@@ -1244,15 +1275,15 @@ func TestConcurrency_PlanLevelQueueEmitsAdmissionEvents(t *testing.T) {
 
 func TestConcurrency_PlanLevelEvictedBeforeDispatchCancelsRun(t *testing.T) {
 	resetLeaderBarrier()
-	p := newPaths(t)
+	paths := newPaths(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
-		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		runResult, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 			Pipeline: "plan-level-cancel-others",
 			RunID:    "plan-cancel-leader",
 		})
-		leaderDone <- res
+		leaderDone <- runResult
 	}()
 	t.Cleanup(func() {
 		releaseLeaderBarrier()
@@ -1266,15 +1297,15 @@ func TestConcurrency_PlanLevelEvictedBeforeDispatchCancelsRun(t *testing.T) {
 
 	victimDone := make(chan *orchestrator.Result, 1)
 	go func() {
-		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		runResult, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 			Pipeline: "plan-level-cancel-others-quick",
 			RunID:    "plan-cancel-victim",
 		})
-		victimDone <- res
+		victimDone <- runResult
 	}()
-	waitForConcurrencyHolder(t, p.StateDB(), "plan-cancel-victim/-")
+	waitForConcurrencyHolder(t, paths.StateDB(), "plan-cancel-victim/-")
 
-	evictor, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+	evictor, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 		Pipeline: "plan-level-cancel-others-quick",
 		RunID:    "plan-cancel-evictor",
 	})
@@ -1342,15 +1373,15 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	st, err := store.Open(p.StateDB())
+	runStore, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = runStore.Close() })
 
-	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	acquisition, err := runStore.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-key",
 		HolderID: "external-plan-holder/-",
 		RunID:    "external-plan-holder",
@@ -1360,8 +1391,8 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	if err != nil {
 		t.Fatalf("external acquire: %v", err)
 	}
-	if resp.Kind != store.AcquireGranted {
-		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	if acquisition.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", acquisition.Kind)
 	}
 
 	parentDone := make(chan *orchestrator.Result, 1)
@@ -1373,7 +1404,7 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	var releaseErr error
 	releaseHolder := func() error {
 		releaseOnce.Do(func() {
-			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+			_, _, _, releaseErr = runStore.ReleaseAndNotify(context.Background(),
 				"g:plan-level-queued-await-key", "external-plan-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
 		})
 		return releaseErr
@@ -1391,27 +1422,27 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	})
 	go func() {
 		defer close(parentFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline:            parentPipeline,
 			RunID:               "queued-await-parent",
 			DispatchWaitTimeout: dispatchTimeout,
 		})
-		parentDone <- res
+		parentDone <- runResult
 	}()
 
-	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-parent", "spawn", "plan-level-queued-await-child")
-	claimManualChildTrigger(t, ctx, st, childID)
+	childID := waitForSpawnedChildTrigger(t, ctx, runStore, "queued-await-parent", "spawn", "plan-level-queued-await-child")
+	claimManualChildTrigger(t, ctx, runStore, childID)
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-parent",
 		})
-		childDone <- res
+		childDone <- runResult
 	}()
-	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-key", childID, childDone)
+	waitForPlanAdmissionWaiter(t, ctx, runStore, "g:plan-level-queued-await-key", childID, childDone)
 	var attemptCtx context.Context
 	select {
 	case attemptCtx = <-gate.started:
@@ -1443,23 +1474,23 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 }
 
 func TestDispatchWatchdog_UnclaimedUnboundedChildStillTimesOutParent(t *testing.T) {
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	done := make(chan *orchestrator.Result, 1)
 	go func() {
-		res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{
+		runResult, _ := orchestrator.RunLocal(ctx, paths, orchestrator.Options{
 			Pipeline:            "unbounded-await-parent",
 			DispatchWaitTimeout: 100 * time.Millisecond,
 		})
-		done <- res
+		done <- runResult
 	}()
 
 	select {
-	case res := <-done:
-		if res == nil || res.Status != "failed" || res.Error == nil || !strings.Contains(res.Error.Error(), "dispatch_wait_timeout") {
-			t.Fatalf("result = %+v, want dispatch_wait_timeout for unclaimed unbounded child", res)
+	case runResult := <-done:
+		if runResult == nil || runResult.Status != "failed" || runResult.Error == nil || !strings.Contains(runResult.Error.Error(), "dispatch_wait_timeout") {
+			t.Fatalf("result = %+v, want dispatch_wait_timeout for unclaimed unbounded child", runResult)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("unclaimed unbounded child disabled the parent dispatch watchdog")
@@ -1471,15 +1502,15 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	st, err := store.Open(p.StateDB())
+	runStore, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = runStore.Close() })
 
-	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	acquisition, err := runStore.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-key",
 		HolderID: "external-continue-holder/-",
 		RunID:    "external-continue-holder",
@@ -1489,8 +1520,8 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	if err != nil {
 		t.Fatalf("external acquire: %v", err)
 	}
-	if resp.Kind != store.AcquireGranted {
-		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	if acquisition.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", acquisition.Kind)
 	}
 
 	parentDone := make(chan *orchestrator.Result, 1)
@@ -1502,7 +1533,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	var releaseErr error
 	releaseHolder := func() error {
 		releaseOnce.Do(func() {
-			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+			_, _, _, releaseErr = runStore.ReleaseAndNotify(context.Background(),
 				"g:plan-level-queued-await-key", "external-continue-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
 		})
 		return releaseErr
@@ -1520,26 +1551,26 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	})
 	go func() {
 		defer close(parentFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-then-continue-parent",
 			RunID:    "queued-await-continue-parent",
 		})
-		parentDone <- res
+		parentDone <- runResult
 	}()
 
-	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-continue-parent", "spawn", "plan-level-queued-await-child")
-	claimManualChildTrigger(t, ctx, st, childID)
+	childID := waitForSpawnedChildTrigger(t, ctx, runStore, "queued-await-continue-parent", "spawn", "plan-level-queued-await-child")
+	claimManualChildTrigger(t, ctx, runStore, childID)
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-continue-parent",
 		})
-		childDone <- res
+		childDone <- runResult
 	}()
-	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-key", childID, childDone)
+	waitForPlanAdmissionWaiter(t, ctx, runStore, "g:plan-level-queued-await-key", childID, childDone)
 	var attemptCtx context.Context
 	select {
 	case attemptCtx = <-gate.started:
@@ -1576,7 +1607,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for parent after releasing queued child")
 	}
-	parentNodes, err := st.ListNodes(ctx, "queued-await-continue-parent")
+	parentNodes, err := runStore.ListNodes(ctx, "queued-await-continue-parent")
 	if err != nil {
 		t.Fatalf("list parent nodes: %v", err)
 	}
@@ -1598,15 +1629,15 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	st, err := store.Open(p.StateDB())
+	runStore, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = runStore.Close() })
 
-	resp, err := st.AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
+	acquisition, err := runStore.AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-key",
 		HolderID: "external-plan-holder/-",
 		RunID:    "external-plan-holder",
@@ -1616,8 +1647,8 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 	if err != nil {
 		t.Fatalf("external acquire: %v", err)
 	}
-	if resp.Kind != store.AcquireGranted {
-		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	if acquisition.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", acquisition.Kind)
 	}
 
 	parentDone := make(chan *orchestrator.Result, 1)
@@ -1629,7 +1660,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 	var releaseErr error
 	releaseHolder := func() error {
 		releaseOnce.Do(func() {
-			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+			_, _, _, releaseErr = runStore.ReleaseAndNotify(context.Background(),
 				"g:plan-level-queued-await-key", "external-plan-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
 		})
 		return releaseErr
@@ -1647,26 +1678,26 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 	})
 	go func() {
 		defer close(parentFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-parent",
 			RunID:    "queued-await-cancel-parent",
 		})
-		parentDone <- res
+		parentDone <- runResult
 	}()
 
-	childID := waitForSpawnedChildTrigger(t, context.Background(), st, "queued-await-cancel-parent", "spawn", "plan-level-queued-await-child")
-	claimManualChildTrigger(t, context.Background(), st, childID)
+	childID := waitForSpawnedChildTrigger(t, context.Background(), runStore, "queued-await-cancel-parent", "spawn", "plan-level-queued-await-child")
+	claimManualChildTrigger(t, context.Background(), runStore, childID)
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-cancel-parent",
 		})
-		childDone <- res
+		childDone <- runResult
 	}()
-	waitForPlanAdmissionWaiter(t, context.Background(), st, "g:plan-level-queued-await-key", childID, childDone)
+	waitForPlanAdmissionWaiter(t, context.Background(), runStore, "g:plan-level-queued-await-key", childID, childDone)
 	var attemptCtx context.Context
 	select {
 	case attemptCtx = <-gate.started:
@@ -1714,15 +1745,15 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	st, err := store.Open(p.StateDB())
+	runStore, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = runStore.Close() })
 
-	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	acquisition, err := runStore.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-remaining-budget-key",
 		HolderID: "external-remaining-budget-holder/-",
 		RunID:    "external-remaining-budget-holder",
@@ -1732,8 +1763,8 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	if err != nil {
 		t.Fatalf("external acquire: %v", err)
 	}
-	if resp.Kind != store.AcquireGranted {
-		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	if acquisition.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", acquisition.Kind)
 	}
 
 	parentDone := make(chan *orchestrator.Result, 1)
@@ -1745,7 +1776,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	var releaseErr error
 	releaseHolder := func() error {
 		releaseOnce.Do(func() {
-			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+			_, _, _, releaseErr = runStore.ReleaseAndNotify(context.Background(),
 				"g:plan-level-queued-await-remaining-budget-key", "external-remaining-budget-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
 		})
 		return releaseErr
@@ -1763,11 +1794,11 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	})
 	go func() {
 		defer close(parentFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-remaining-budget-parent",
 			RunID:    "queued-await-remaining-budget-parent",
 		})
-		parentDone <- res
+		parentDone <- runResult
 	}()
 	var attemptCtx context.Context
 	select {
@@ -1781,19 +1812,19 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	}
 	gate.release()
 
-	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-remaining-budget-parent", "spawn", "plan-level-queued-await-remaining-budget-child")
-	claimManualChildTrigger(t, ctx, st, childID)
+	childID := waitForSpawnedChildTrigger(t, ctx, runStore, "queued-await-remaining-budget-parent", "spawn", "plan-level-queued-await-remaining-budget-child")
+	claimManualChildTrigger(t, ctx, runStore, childID)
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-remaining-budget-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-remaining-budget-parent",
 		})
-		childDone <- res
+		childDone <- runResult
 	}()
-	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-remaining-budget-key", childID, childDone)
+	waitForPlanAdmissionWaiter(t, ctx, runStore, "g:plan-level-queued-await-remaining-budget-key", childID, childDone)
 	waitForNodeTimeoutPaused(t, attemptCtx)
 	if !orchestrator.NodeTimeoutPausedForTest(attemptCtx) {
 		t.Fatal("parent node timeout was not paused during child admission")
@@ -1840,7 +1871,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for parent after releasing queued child; parent timeout may still be suppressed")
 	}
-	parentNodes, err := st.ListNodes(ctx, "queued-await-remaining-budget-parent")
+	parentNodes, err := runStore.ListNodes(ctx, "queued-await-remaining-budget-parent")
 	if err != nil {
 		t.Fatalf("list parent nodes: %v", err)
 	}
@@ -1863,15 +1894,15 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	st, err := store.Open(p.StateDB())
+	runStore, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = runStore.Close() })
 
-	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	acquisition, err := runStore.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-early-resume-key",
 		HolderID: "external-early-resume-holder/-",
 		RunID:    "external-early-resume-holder",
@@ -1881,8 +1912,8 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	if err != nil {
 		t.Fatalf("external acquire: %v", err)
 	}
-	if resp.Kind != store.AcquireGranted {
-		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	if acquisition.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", acquisition.Kind)
 	}
 
 	parentDone := make(chan *orchestrator.Result, 1)
@@ -1894,7 +1925,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	var releaseErr error
 	releaseHolder := func() error {
 		releaseOnce.Do(func() {
-			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+			_, _, _, releaseErr = runStore.ReleaseAndNotify(context.Background(),
 				"g:plan-level-queued-await-early-resume-key", "external-early-resume-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
 		})
 		return releaseErr
@@ -1913,11 +1944,11 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	})
 	go func() {
 		defer close(parentFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-early-resume-parent",
 			RunID:    "queued-await-early-resume-parent",
 		})
-		parentDone <- res
+		parentDone <- runResult
 	}()
 	var attemptCtx context.Context
 	select {
@@ -1931,19 +1962,19 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	}
 	gate.release()
 
-	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-early-resume-parent", "spawn", "plan-level-queued-await-early-resume-child")
-	claimManualChildTrigger(t, ctx, st, childID)
+	childID := waitForSpawnedChildTrigger(t, ctx, runStore, "queued-await-early-resume-parent", "spawn", "plan-level-queued-await-early-resume-child")
+	claimManualChildTrigger(t, ctx, runStore, childID)
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-early-resume-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-early-resume-parent",
 		})
-		childDone <- res
+		childDone <- runResult
 	}()
-	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-early-resume-key", childID, childDone)
+	waitForPlanAdmissionWaiter(t, ctx, runStore, "g:plan-level-queued-await-early-resume-key", childID, childDone)
 	waitForNodeTimeoutPaused(t, attemptCtx)
 	if !orchestrator.NodeTimeoutPausedForTest(attemptCtx) {
 		t.Fatal("parent node timeout was not paused during child admission")
@@ -2025,14 +2056,14 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	st, err := store.Open(p.StateDB())
+	runStore, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
-	backends := orchestrator.LocalBackends(p, st, nil)
+	t.Cleanup(func() { _ = runStore.Close() })
+	backends := orchestrator.LocalBackends(paths, runStore, nil)
 	observed := &missedPromotionBackend{
 		ConcurrencyBackend: backends.Concurrency,
 		key:                "g:plan-level-queued-await-missed-promotion-key",
@@ -2040,7 +2071,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 	}
 	backends.Concurrency = observed
 
-	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+	acquisition, err := runStore.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-missed-promotion-key",
 		HolderID: "external-missed-promotion-holder/-",
 		RunID:    "external-missed-promotion-holder",
@@ -2050,8 +2081,8 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 	if err != nil {
 		t.Fatalf("external acquire: %v", err)
 	}
-	if resp.Kind != store.AcquireGranted {
-		t.Fatalf("external acquire = %s, want granted", resp.Kind)
+	if acquisition.Kind != store.AcquireGranted {
+		t.Fatalf("external acquire = %s, want granted", acquisition.Kind)
 	}
 
 	parentDone := make(chan *orchestrator.Result, 1)
@@ -2063,7 +2094,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 	var releaseErr error
 	releaseHolder := func() error {
 		releaseOnce.Do(func() {
-			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+			_, _, _, releaseErr = runStore.ReleaseAndNotify(context.Background(),
 				"g:plan-level-queued-await-missed-promotion-key", "external-missed-promotion-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
 		})
 		return releaseErr
@@ -2082,11 +2113,11 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 	})
 	go func() {
 		defer close(parentFinished)
-		res, _ := orchestrator.Run(ctx, backends, orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, backends, orchestrator.Options{
 			Pipeline: "plan-level-queued-await-missed-promotion-parent",
 			RunID:    "queued-await-missed-promotion-parent",
 		})
-		parentDone <- res
+		parentDone <- runResult
 	}()
 	var attemptCtx context.Context
 	select {
@@ -2100,24 +2131,24 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 	}
 	gate.release()
 
-	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-missed-promotion-parent", "spawn", "plan-level-queued-await-missed-promotion-child")
+	childID := waitForSpawnedChildTrigger(t, ctx, runStore, "queued-await-missed-promotion-parent", "spawn", "plan-level-queued-await-missed-promotion-child")
 	observed.runID = childID
-	claimManualChildTrigger(t, ctx, st, childID)
+	claimManualChildTrigger(t, ctx, runStore, childID)
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		res, _ := orchestrator.Run(ctx, backends, orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, backends, orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-missed-promotion-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-missed-promotion-parent",
 		})
-		childDone <- res
+		childDone <- runResult
 	}()
-	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-missed-promotion-key", childID, childDone)
+	waitForPlanAdmissionWaiter(t, ctx, runStore, "g:plan-level-queued-await-missed-promotion-key", childID, childDone)
 	waitForMissedPromotionChecks(t, observed)
 	waitForNodeTimeoutPaused(t, attemptCtx)
 	if !orchestrator.NodeTimeoutPausedForTest(attemptCtx) || orchestrator.ForceNodeTimeoutForTest(attemptCtx) {
-		t.Fatal("parent timeout was not safely paused across missed promotion checks")
+		t.Fatal("parent timeout was not paused across missed promotion checks")
 	}
 	pausedRemaining, paused, ok := orchestrator.NodeTimeoutStateForTest(attemptCtx)
 	if !ok || !paused || pausedRemaining <= 0 || pausedRemaining > controlledRemainder {
@@ -2161,16 +2192,16 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	st, err := store.Open(p.StateDB())
+	runStore, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { _ = runStore.Close() })
 
 	for _, key := range []string{"g:plan-level-queued-await-multi-key-a", "g:plan-level-queued-await-multi-key-b"} {
-		resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		acquisition, err := runStore.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 			Key:      key,
 			HolderID: "external-" + key + "/-",
 			RunID:    "external-" + key,
@@ -2180,8 +2211,8 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 		if err != nil {
 			t.Fatalf("external acquire %s: %v", key, err)
 		}
-		if resp.Kind != store.AcquireGranted {
-			t.Fatalf("external acquire %s = %s, want granted", key, resp.Kind)
+		if acquisition.Kind != store.AcquireGranted {
+			t.Fatalf("external acquire %s = %s, want granted", key, acquisition.Kind)
 		}
 	}
 
@@ -2196,7 +2227,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 	releaseHolder := func(index int) error {
 		releaseOnce[index].Do(func() {
 			key := keys[index]
-			_, _, _, releaseErr[index] = st.ReleaseAndNotify(context.Background(),
+			_, _, _, releaseErr[index] = runStore.ReleaseAndNotify(context.Background(),
 				key, "external-"+key+"/-", "success", "", "", 0, store.DefaultConcurrencyLease)
 		})
 		return releaseErr[index]
@@ -2217,11 +2248,11 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 	})
 	go func() {
 		defer close(parentFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-multi-key-parent",
 			RunID:    "queued-await-multi-key-parent",
 		})
-		parentDone <- res
+		parentDone <- runResult
 	}()
 	var attemptCtx context.Context
 	select {
@@ -2235,24 +2266,24 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 	}
 	gate.release()
 
-	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-multi-key-parent", "spawn", "plan-level-queued-await-multi-key-child")
-	claimManualChildTrigger(t, ctx, st, childID)
+	childID := waitForSpawnedChildTrigger(t, ctx, runStore, "queued-await-multi-key-parent", "spawn", "plan-level-queued-await-multi-key-child")
+	claimManualChildTrigger(t, ctx, runStore, childID)
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-multi-key-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-multi-key-parent",
 		})
-		childDone <- res
+		childDone <- runResult
 	}()
 	keyA := keys[0]
 	keyB := keys[1]
-	waitForPlanAdmissionWaiter(t, ctx, st, keyA, childID, childDone)
+	waitForPlanAdmissionWaiter(t, ctx, runStore, keyA, childID, childDone)
 	waitForNodeTimeoutPaused(t, attemptCtx)
 	if !orchestrator.NodeTimeoutPausedForTest(attemptCtx) || orchestrator.ForceNodeTimeoutForTest(attemptCtx) {
-		t.Fatal("parent timeout was not safely paused for key A admission")
+		t.Fatal("parent timeout was not paused for key A admission")
 	}
 	firstRemaining, firstPaused, firstOK := orchestrator.NodeTimeoutStateForTest(attemptCtx)
 	if !firstOK || !firstPaused || firstRemaining <= 0 || firstRemaining > controlledRemainder {
@@ -2261,10 +2292,10 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 	if err := releaseHolder(0); err != nil {
 		t.Fatalf("release key A holder: %v", err)
 	}
-	waitForPlanAdmissionWaiter(t, ctx, st, keyB, childID, childDone)
+	waitForPlanAdmissionWaiter(t, ctx, runStore, keyB, childID, childDone)
 	waitForNodeTimeoutPaused(t, attemptCtx)
 	if !orchestrator.NodeTimeoutPausedForTest(attemptCtx) || orchestrator.ForceNodeTimeoutForTest(attemptCtx) {
-		t.Fatal("parent timeout was not safely paused for key B admission")
+		t.Fatal("parent timeout was not paused for key B admission")
 	}
 	secondRemaining, secondPaused, secondOK := orchestrator.NodeTimeoutStateForTest(attemptCtx)
 	if !secondOK || !secondPaused || secondRemaining <= 0 || secondRemaining > firstRemaining {
@@ -2304,33 +2335,33 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 
 func TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	paths := newPaths(t)
 	ctx := context.Background()
-	st, err := store.Open(p.StateDB())
+	runStore, err := store.Open(paths.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer runStore.Close()
 
 	parentDone := make(chan *orchestrator.Result, 1)
 	go func() {
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline: "plan-level-slow-plan-await-parent",
 			RunID:    "slow-plan-await-parent",
 		})
-		parentDone <- res
+		parentDone <- runResult
 	}()
 
-	childID := waitForSpawnedChildTrigger(t, ctx, st, "slow-plan-await-parent", "spawn", "plan-level-slow-plan-await-child")
-	claimManualChildTrigger(t, ctx, st, childID)
+	childID := waitForSpawnedChildTrigger(t, ctx, runStore, "slow-plan-await-parent", "spawn", "plan-level-slow-plan-await-child")
+	claimManualChildTrigger(t, ctx, runStore, childID)
 	childDone := make(chan *orchestrator.Result, 1)
 	go func() {
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
 			Pipeline:    "plan-level-slow-plan-await-child",
 			RunID:       childID,
 			ParentRunID: "slow-plan-await-parent",
 		})
-		childDone <- res
+		childDone <- runResult
 	}()
 
 	select {
@@ -2350,14 +2381,14 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning(t *testing.
 
 func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 	resetCacheCounter()
-	p := newPaths(t)
+	paths := newPaths(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	leaderFinished := make(chan struct{})
 	go func() {
 		defer close(leaderFinished)
-		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "plan-level-skip-leader"})
-		leaderDone <- res
+		runResult, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{Pipeline: "plan-level-skip-leader"})
+		leaderDone <- runResult
 	}()
 	t.Cleanup(func() {
 		releaseLeaderBarrier()
@@ -2371,14 +2402,14 @@ func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 
 	snapshotBefore := cacheCounter.inflight.Load()
 
-	followerRes, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+	followerResult, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 		Pipeline: "plan-level-skip-follower",
 	})
 	if err != nil {
 		t.Fatalf("follower: %v", err)
 	}
-	if followerRes.Status != "success" {
-		t.Fatalf("follower status = %q, want success (Skip treats plan-level full slot as OK)", followerRes.Status)
+	if followerResult.Status != "success" {
+		t.Fatalf("follower status = %q, want success after skipping the occupied plan slot", followerResult.Status)
 	}
 
 	if current := cacheCounter.inflight.Load(); current != snapshotBefore {
@@ -2410,16 +2441,16 @@ func testCancelOthersStopsLeader(t *testing.T, leaderPipeline, followerPipeline 
 	t.Helper()
 	orchestrator.SetSlotObservationIntervalForTest(t, 10*time.Millisecond)
 	resetCacheCounter()
-	p := newPaths(t)
+	paths := newPaths(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	leaderFinished := make(chan struct{})
 	go func() {
 		defer close(leaderFinished)
-		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		runResult, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 			Pipeline: leaderPipeline,
 		})
-		leaderDone <- res
+		leaderDone <- runResult
 	}()
 	t.Cleanup(func() {
 		releaseLeaderBarrier()
@@ -2432,16 +2463,16 @@ func testCancelOthersStopsLeader(t *testing.T, leaderPipeline, followerPipeline 
 	waitForLeaderHolding(t)
 
 	followerStart := time.Now()
-	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+	followerResult, _ := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 		Pipeline: followerPipeline,
 	})
 	followerElapsed := time.Since(followerStart)
 
-	if followerRes.Status != "success" {
-		t.Fatalf("follower status = %q, want success (evicted leader, took slot)", followerRes.Status)
+	if followerResult.Status != "success" {
+		t.Fatalf("follower status = %q, want success after evicting the leader", followerResult.Status)
 	}
 	if followerElapsed > 5*time.Second {
-		t.Fatalf("follower took %s; expected eviction well under 5s", followerElapsed)
+		t.Fatalf("follower took %s, want no more than 5s", followerElapsed)
 	}
 
 	select {
