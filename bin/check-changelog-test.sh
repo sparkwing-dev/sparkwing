@@ -22,6 +22,43 @@ if ! /bin/bash "$fixture/bin/check-changelog.sh"; then
   exit 1
 fi
 
+check_surface() {
+  local changed="$1" want="$2" output status
+  mkdir -p "$(dirname "$fixture/$changed")"
+  printf 'fixture change\n' > "$fixture/$changed"
+  git -C "$fixture" add -- "$changed"
+  status=0
+  output="$(/bin/bash "$fixture/bin/check-changelog.sh" 2>&1)" || status=$?
+  if [[ "$status" -ne "$want" ]]; then
+    printf 'check-changelog-test: %s exited %s, want %s\n%s\n' "$changed" "$status" "$want" "$output" >&2
+    exit 1
+  fi
+  if [[ "$want" -eq 1 ]]; then
+    if [[ "$output" != *"CHANGELOG.md update required"* || "$output" != *"$changed"* ]]; then
+      printf 'check-changelog-test: missing covered-surface diagnostic for %s\n%s\n' "$changed" "$output" >&2
+      exit 1
+    fi
+    printf '\n- Changed fixture default.\n' >> "$fixture/CHANGELOG.md"
+    /bin/bash "$fixture/bin/check-changelog.sh"
+    git -C "$fixture" show HEAD:CHANGELOG.md > "$fixture/CHANGELOG.md"
+  fi
+  git -C "$fixture" rm -qf -- "$changed"
+}
+
+for chart in sparkwing-full sparkwing-runner-bundle; do
+  for surface in values.yaml values.schema.json templates/runner.yaml Chart.yaml Chart.lock; do
+    check_surface "charts/$chart/$surface" 1
+  done
+  check_surface "charts/$chart/README.md" 0
+done
+check_surface charts/sparkwing-full/charts/sparkwing-runner-bundle-0.1.7.tgz 1
+check_surface internal/runners/k8s/k8s.go 1
+check_surface internal/runners/k8s/k8s_test.go 0
+check_surface internal/orchestrator/dispatch.go 0
+check_surface internal/configref/configref.go 0
+check_surface charts/vendor_test.go 0
+check_surface charts/testdata/values.yaml 0
+
 changed=$'sparkwing/name with spaces\nand newline.go'
 printf 'package fixture\n' > "$fixture/$changed"
 git -C "$fixture" add -- "$changed"

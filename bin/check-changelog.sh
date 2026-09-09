@@ -161,9 +161,13 @@ is_covered() {
   case "$f" in
     *_test.go)            return 1 ;;
     */testdata/*)         return 1 ;;
+    internal/runners/k8s/k8s.go) return 0 ;;
     internal/*)           return 1 ;;
     docs/*|examples/*)    return 1 ;;
     bench/*|build/*)      return 1 ;;
+    charts/*/values.yaml|charts/*/values.schema.json) return 0 ;;
+    charts/*/templates/*|charts/*/charts/*.tgz) return 0 ;;
+    charts/*/Chart.yaml|charts/*/Chart.lock) return 0 ;;
     charts/*|install/*)   return 1 ;;
     web/*|node_modules/*) return 1 ;;
     pkg/*.go|pkg/*/*)     return 0 ;;
