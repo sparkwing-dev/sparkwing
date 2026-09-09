@@ -19,7 +19,7 @@ func TestGuardedReleasePersistenceFailureRetainsCapacity(t *testing.T) {
 		t.Fatalf("submit guarded lease: decision=%s err=%v", decision.Kind, err)
 	}
 	session := wingwire.ProcessSession{LeaderPID: 71, SessionID: 71, BirthToken: "birth-71"}
-	d := &Daemon{
+	daemon := &Daemon{
 		layout:              layout{state: filepath.Join(t.TempDir(), "state.json")},
 		ledger:              ledger,
 		guards:              map[admission.LeaseID]*sessionGuardState{decision.Lease.ID: {persistedGuard: persistedGuard{LeaseID: decision.Lease.ID, RunID: "guarded", Session: session}}},
@@ -31,18 +31,18 @@ func TestGuardedReleasePersistenceFailureRetainsCapacity(t *testing.T) {
 		disconnectedPending: map[string]struct{}{},
 	}
 	wantErr := errors.New("state unavailable")
-	d.persistWrite = func(string, admission.Snapshot, []admissionEvent, []string, []persistedGuard) error {
+	daemon.persistWrite = func(string, admission.Snapshot, []admissionEvent, []string, []persistedGuard) error {
 		return wantErr
 	}
 
-	deliveries, released, err := d.releaseGuardDurably(decision.Lease.ID, session)
-	if !errors.Is(err, wantErr) || released || len(deliveries) != 0 {
-		t.Fatalf("guarded release = deliveries %d released %v err %v", len(deliveries), released, err)
+	deliveries, release, err := daemon.releaseGuardDurably(decision.Lease.ID, session)
+	if !errors.Is(err, wantErr) || release == nil || len(deliveries) != 0 {
+		t.Fatalf("guarded release = deliveries %d release %v err %v", len(deliveries), release, err)
 	}
-	if _, ok := d.ledger.LeaseByID(decision.Lease.ID); !ok {
+	if _, ok := daemon.ledger.LeaseByID(decision.Lease.ID); !ok {
 		t.Fatal("persistence failure freed guarded capacity in memory")
 	}
-	if d.guards[decision.Lease.ID] == nil {
+	if daemon.guards[decision.Lease.ID] == nil {
 		t.Fatal("persistence failure discarded guarded process authority")
 	}
 }
@@ -62,7 +62,7 @@ func TestGuardedReleasePersistsPromotedTokenBeforeDelivery(t *testing.T) {
 	}
 	session := wingwire.ProcessSession{LeaderPID: 72, SessionID: 72, BirthToken: "birth-72"}
 	follower := &conn{runID: "follower", role: roleWaiter, resources: wingwire.HostResources{Cores: 1}}
-	d := &Daemon{
+	daemon := &Daemon{
 		layout:              layout{state: filepath.Join(t.TempDir(), "state.json")},
 		ledger:              ledger,
 		guards:              map[admission.LeaseID]*sessionGuardState{holder.Lease.ID: {persistedGuard: persistedGuard{LeaseID: holder.Lease.ID, RunID: "guarded", Session: session}}},
@@ -74,14 +74,14 @@ func TestGuardedReleasePersistsPromotedTokenBeforeDelivery(t *testing.T) {
 		disconnectedPending: map[string]struct{}{},
 	}
 	var persisted admission.Snapshot
-	d.persistWrite = func(_ string, snap admission.Snapshot, _ []admissionEvent, _ []string, _ []persistedGuard) error {
-		persisted = snap
+	daemon.persistWrite = func(_ string, snapshot admission.Snapshot, _ []admissionEvent, _ []string, _ []persistedGuard) error {
+		persisted = snapshot
 		return nil
 	}
 
-	deliveries, released, err := d.releaseGuardDurably(holder.Lease.ID, session)
-	if err != nil || !released || len(deliveries) != 1 {
-		t.Fatalf("guarded release = deliveries %d released %v err %v", len(deliveries), released, err)
+	deliveries, release, err := daemon.releaseGuardDurably(holder.Lease.ID, session)
+	if err != nil || release == nil || len(deliveries) != 1 {
+		t.Fatalf("guarded release = deliveries %d release %v err %v", len(deliveries), release, err)
 	}
 	grant, ok := deliveries[0].msg.(*wingwire.Grant)
 	if !ok {
