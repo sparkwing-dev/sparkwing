@@ -23,6 +23,10 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cli:** Documentation searches reuse the embedded catalog instead of rebuilding it for every document
+
 ## [v0.47.0] - 2026-09-09
 ### Added
 
