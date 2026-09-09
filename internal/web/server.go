@@ -598,7 +598,7 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 	}
 	defer body.Close()
 
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		writeErr(w, http.StatusInternalServerError, fmt.Errorf("streaming not supported"))
 		return
@@ -606,7 +606,11 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	out := streamhttp.NewWriter(w, 30*time.Second)
+	out, err := streamhttp.NewWriter(w, 30*time.Second)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 
 	format := negotiateLogFormat(r)
@@ -618,7 +622,9 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 				if _, werr := out.Write(buf[:n]); werr != nil {
 					return
 				}
-				flusher.Flush()
+				if err := out.Flush(); err != nil {
+					return
+				}
 			}
 			if err != nil {
 				return
@@ -626,11 +632,11 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 		}
 	}
 
-	streamPrettySSE(body, out, flusher, format)
+	streamPrettySSE(body, out, out.Flush, format)
 }
 
 func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request, runID string) {
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		writeErr(w, http.StatusInternalServerError, fmt.Errorf("streaming not supported"))
 		return
@@ -652,11 +658,19 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-	out := streamhttp.NewWriter(w, 30*time.Second)
+	out, err := streamhttp.NewWriter(w, 30*time.Second)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 
-	_, _ = out.Write([]byte(": open\n\n"))
-	flusher.Flush()
+	if _, err := out.Write([]byte(": open\n\n")); err != nil {
+		return
+	}
+	if err := out.Flush(); err != nil {
+		return
+	}
 
 	ctx := r.Context()
 	const (
@@ -685,13 +699,19 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 			afterSeq = ev.Seq
 		}
 		if len(events) > 0 {
-			flusher.Flush()
+			if err := out.Flush(); err != nil {
+				return
+			}
 			lastHB = time.Now()
 		}
 
 		if terminal && len(events) == 0 {
-			_, _ = out.Write([]byte("event: stream_end\ndata: {}\n\n"))
-			flusher.Flush()
+			if _, err := out.Write([]byte("event: stream_end\ndata: {}\n\n")); err != nil {
+				return
+			}
+			if err := out.Flush(); err != nil {
+				return
+			}
 			return
 		}
 
@@ -699,7 +719,9 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 			if _, werr := out.Write([]byte(": keepalive\n\n")); werr != nil {
 				return
 			}
-			flusher.Flush()
+			if err := out.Flush(); err != nil {
+				return
+			}
 			lastHB = time.Now()
 		}
 

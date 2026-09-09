@@ -1045,7 +1045,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
@@ -1059,10 +1059,18 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	out := streamhttp.NewWriter(w, 30*time.Second)
+	out, err := streamhttp.NewWriter(w, 30*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(out, ": open")
-	flusher.Flush()
+	if _, err := fmt.Fprintln(out, ": open"); err != nil {
+		return
+	}
+	if err := out.Flush(); err != nil {
+		return
+	}
 
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
@@ -1079,7 +1087,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			if _, err := fmt.Fprintln(out, ": keepalive"); err != nil {
 				return
 			}
-			flusher.Flush()
+			if err := out.Flush(); err != nil {
+				return
+			}
 		case <-ticker.C:
 			names, err := nodeLogNames(root, runID, nodeID)
 			if err != nil {
@@ -1103,7 +1113,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if wrote {
-				flusher.Flush()
+				if err := out.Flush(); err != nil {
+					return
+				}
 			}
 		}
 	}
@@ -1415,6 +1427,7 @@ func (r *statusRecorder) Flush() {
 	}
 }
 
+// Unwrap lets ResponseController reach the connection through request logging.
 func (r *statusRecorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
 }
