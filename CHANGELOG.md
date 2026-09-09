@@ -20,8 +20,26 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
+  group has no members until its source job completes, so every `JobGroup`
+  setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
+  compiles, reads as configuration, and is dropped. Configure the generated
+  jobs from the value the fan-out callback returns.
+- **cli:** `runner-label` flags a blank label on `WhenRunner`, and every rule
+  now follows a builder chain split across statements, so a group bound to a
+  variable and configured on a later line is checked like a single expression.
+- **cli:** `sparkwing doctor --timeout` bounds the daemon and local-state
+  checks, defaulting to the 10 seconds doctor always used. Each check takes a
+  slice of it, so one unanswering daemon leaves the rest of the report its
+  budget, and a sweep that runs out prints what it reached alongside the error
+
 ### Fixed
 
+- **cli:** `sparkwing doctor` names a wedged admission daemon -- one that
+  accepts connections and answers nothing -- and the commands that recover it,
+  instead of reporting a raw socket read timeout the operator has to interpret
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
   staged files out of their commits
 - **logs:** Concurrent filesystem appends keep each record and its newline together
@@ -30,7 +48,6 @@ unlock.
 - **telemetry:** Immediate shutdown flushes OTLP logs after initialization
 - **logs:** Secret masking inspects JSON-visible fields and retains redacted
   error messages in JSON output
-
 - **cache:** Pipeline binary keys include Go packages named `web`
 - **cache:** Oversized dependency responses and workspace uploads fail before
   storing truncated content
@@ -48,6 +65,21 @@ unlock.
   when OTLP logging is disabled
 - **sdk:** Fileset hashes distinguish file boundaries and permissions, and
   report unreadable inputs. Existing hash-derived image tags change once.
+- **cli:** Interrupting a run while it prepares the pipeline binary stops the
+  toolchain. `go build` and the compilers and linker it spawned end with the
+  CLI instead of compiling on without it. Where a platform cannot own a
+  process group, cancellation reaches the `go` process alone.
+
+### Removed
+
+- **sdk (Breaking):** `AcquireLintSlot`, the `LintSlot` type and
+  `SPARKWING_LINT_SLOTS`. A slot lent every worktree one alias path so they
+  could share a linter cache; git resolves the alias to the real worktree and
+  reports that as the repository root, so findings recorded under the alias sat
+  outside the diff and `new-from-merge-base` dropped every one -- a tree with
+  eight findings linted clean in three seconds. Hand each worktree
+  `ToolCacheDir("golangci-lint")`. See
+  [lint slots removed](docs/migrations/_unreleased.md#lint-slots-removed).
 
 ## [v0.48.1] - 2026-09-09
 ### Changed

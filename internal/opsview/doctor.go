@@ -41,6 +41,28 @@ const doctorRunDirGrace = 10 * time.Minute
 
 const doctorRejectionPatternThreshold = 3
 
+// doctorProbeShare is the fraction of doctor's remaining budget one daemon
+// probe may spend. Reporting a daemon that accepts connections and never
+// answers is doctor's job, so the daemon it cannot ask must not be able to
+// spend the budget the rest of the report needs.
+const doctorProbeShare = 4
+
+// doctorProbeFloor keeps a probe long enough to be worth attempting when
+// doctor's budget is nearly gone. The parent deadline still caps it.
+const doctorProbeFloor = 250 * time.Millisecond
+
+// probeBudget slices the caller's deadline. A caller that set none is left
+// alone: the probe carries its own ceiling, so an unbounded doctor still
+// terminates.
+func probeBudget(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return context.WithCancel(ctx)
+	}
+	slice := max(time.Until(deadline)/doctorProbeShare, doctorProbeFloor)
+	return context.WithTimeout(ctx, slice)
+}
+
 type DoctorReport struct {
 	DryRun bool `json:"dry_run"`
 
@@ -144,6 +166,11 @@ type DoctorDaemon struct {
 	Version string `json:"version,omitempty"`
 
 	ProtocolMajor int `json:"protocol_major,omitempty"`
+
+	// Wedged reports a daemon that accepted the connection and answered
+	// nothing. It holds the socket, so no successor can bind it and a drain
+	// that needs a handshake cannot replace it.
+	Wedged bool `json:"wedged,omitempty"`
 
 	Detail string `json:"detail,omitempty"`
 }
@@ -301,7 +328,7 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 		return report, err
 	}
 	if homeRoot == nil {
-		report.Daemon = probeDaemon(ctx, home)
+		report.Daemon = probeDaemonBudgeted(ctx, home)
 		diagnoseInstallConflict(&report)
 		return report, nil
 	}
@@ -331,8 +358,8 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 		defer func() { _ = st.Close() }()
 	}
 
-	report.Daemon = probeDaemon(ctx, home)
-	queueState, queueRead := probeDaemonQueue(ctx, &report)
+	report.Daemon = probeDaemonBudgeted(ctx, home)
+	queueState, queueRead := probeDaemonQueueBudgeted(ctx, &report)
 	daemonLive := liveDaemonRuns(queueState, queueRead)
 
 	var boxHolders []boxslot.Holder
@@ -863,9 +890,29 @@ func probeDaemon(ctx context.Context, home string) DoctorDaemon {
 			APISocket: apiSock,
 			Detail:    "nothing is listening; no admission is being arbitrated on this home",
 		}
+	case errors.Is(err, wingdclient.ErrDaemonWedged):
+		return DoctorDaemon{
+			State:     ReachUnreachable,
+			Socket:    sock,
+			APISocket: apiSock,
+			Wedged:    true,
+			Detail:    "the daemon holds this socket and answered nothing, so no run is being admitted and no successor can bind it",
+		}
 	default:
 		return DoctorDaemon{State: ReachUnreachable, Socket: sock, APISocket: apiSock, Detail: err.Error()}
 	}
+}
+
+func probeDaemonBudgeted(ctx context.Context, home string) DoctorDaemon {
+	probeCtx, cancel := probeBudget(ctx)
+	defer cancel()
+	return probeDaemon(probeCtx, home)
+}
+
+func probeDaemonQueueBudgeted(ctx context.Context, report *DoctorReport) (wingwire.QueueState, bool) {
+	probeCtx, cancel := probeBudget(ctx)
+	defer cancel()
+	return probeDaemonQueue(probeCtx, report)
 }
 
 func diagnoseDaemonHealth(selfVersion string, queueState wingwire.QueueState, queueRead bool, report *DoctorReport) {
@@ -1002,6 +1049,11 @@ func probeDaemonQueue(ctx context.Context, report *DoctorReport) (wingwire.Queue
 	}
 	report.Daemon.Reachable = false
 	report.Daemon.State = ReachUnreachable
+	if errors.Is(err, wingdclient.ErrDaemonWedged) {
+		report.Daemon.Wedged = true
+		report.Daemon.Detail = "the daemon answered a handshake and then stopped answering, so its queue state is unknown and no run it holds can be arbitrated"
+		return wingwire.QueueState{}, false
+	}
 	report.Daemon.Detail = "daemon handshake succeeded but its queue state could not be read: " + err.Error()
 	return wingwire.QueueState{}, false
 }
@@ -1369,6 +1421,11 @@ func RenderDoctor(w io.Writer, r DoctorReport, format, legacyLine string) error 
 
 func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "daemon\t%s\n", r.Daemon.State)
+	wedged := 0
+	if r.Daemon.Wedged {
+		wedged = 1
+	}
+	fmt.Fprintf(w, "daemon_wedged\t%d\n", wedged)
 	fmt.Fprintf(w, "permission_repairs\t%d\n", len(r.PermissionRepairs))
 	permissionUnverified := 0
 	if r.PermissionAuditUnverified {
@@ -1581,11 +1638,18 @@ func renderDaemonSection(w io.Writer, r DoctorReport) {
 	case ReachAbsent:
 		fmt.Fprintf(w, "daemon: none running -- %s\n", d.Detail)
 	default:
-		fmt.Fprintf(w, "\nwarning: could not reach the admission daemon, so its health is unknown\n  %s\n", d.Detail)
+		headline := "could not reach the admission daemon, so its health is unknown"
+		if d.Wedged {
+			headline = "the admission daemon is wedged -- it holds its socket and answers nothing"
+		}
+		fmt.Fprintf(w, "\nwarning: %s\n  %s\n", headline, d.Detail)
 		if d.Socket != "" {
 			fmt.Fprintf(w, "  socket: %s\n", d.Socket)
 		}
 		fmt.Fprint(w, "  the rejection-pattern, version-skew and lockout checks did not run, and orphaned run rows were left alone because a blind sweep cannot tell a dead run from one the daemon is holding\n")
+		if d.Wedged {
+			fmt.Fprintf(w, "  Recover with:\n    lsof %s\n      then, against the pid it names:\n    kill -USR1 <pid>   # dumps the daemon's goroutines to wingd/d.log\n    kill <pid>         # `sparkwing daemon restart` needs a handshake this daemon will not answer\n", d.Socket)
+		}
 	}
 }
 
