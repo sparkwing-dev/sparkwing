@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,39 +19,39 @@ func TestParseRunFlags_Only(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"space-separated", []string{"--sw-only", "test-phase-*"}, "test-phase-*"},
-		{"equals-form", []string{"--sw-only=test-phase-*"}, "test-phase-*"},
+		{"space-separated", []string{"--sw-only", "fictional-stage-*"}, "fictional-stage-*"},
+		{"equals-form", []string{"--sw-only=fictional-stage-*"}, "fictional-stage-*"},
 		{"empty-trailing-flag-falls-through", []string{"--sw-only"}, ""},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			wf, pass := parseRunFlags(tc.args)
-			if wf.only != tc.want {
-				t.Errorf("only = %q, want %q", wf.only, tc.want)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			flags, passthroughArgs := parseRunFlags(testCase.args)
+			if flags.only != testCase.want {
+				t.Errorf("only = %q, want %q", flags.only, testCase.want)
 			}
-			if tc.want == "" && !slices.Contains(pass, "--sw-only") {
-				t.Errorf("incomplete --sw-only should pass through; got passthrough=%v", pass)
+			if testCase.want == "" && !slices.Contains(passthroughArgs, "--sw-only") {
+				t.Errorf("incomplete --sw-only should pass through; got passthrough=%v", passthroughArgs)
 			}
 		})
 	}
 }
 
 func TestParseRunFlags_NoCache(t *testing.T) {
-	wf, pass := parseRunFlags([]string{"--sw-no-cache"})
-	if !wf.noCache {
+	flags, passthroughArgs := parseRunFlags([]string{"--sw-no-cache"})
+	if !flags.noCache {
 		t.Errorf("noCache: want true got false")
 	}
-	if len(pass) != 0 {
-		t.Errorf("passthrough should be empty, got %v", pass)
+	if len(passthroughArgs) != 0 {
+		t.Errorf("passthrough should be empty, got %v", passthroughArgs)
 	}
 }
 
 func TestParseRunFlags_RunHandleFile(t *testing.T) {
-	wf, pass := parseRunFlags([]string{"--sw-run-handle-file", "/tmp/run.json", "--target", "prod"})
-	if wf.runHandleFile != "/tmp/run.json" {
-		t.Fatalf("runHandleFile = %q", wf.runHandleFile)
+	flags, passthroughArgs := parseRunFlags([]string{"--sw-run-handle-file", "/tmp/run.json", "--target", "prod"})
+	if flags.runHandleFile != "/tmp/run.json" {
+		t.Fatalf("runHandleFile = %q", flags.runHandleFile)
 	}
-	if got := strings.Join(pass, " "); got != "--target prod" {
+	if got := strings.Join(passthroughArgs, " "); got != "--target prod" {
 		t.Fatalf("passthrough = %q", got)
 	}
 }
@@ -63,22 +64,22 @@ func TestRemoveEnvDropsAmbientRunHandle(t *testing.T) {
 }
 
 func TestParseRunFlags_LocalOnly(t *testing.T) {
-	wf, pass := parseRunFlags([]string{"--sw-local-only"})
-	if !wf.localOnly {
+	flags, passthroughArgs := parseRunFlags([]string{"--sw-local-only"})
+	if !flags.localOnly {
 		t.Errorf("localOnly: want true got false")
 	}
-	if len(pass) != 0 {
-		t.Errorf("passthrough should be empty, got %v", pass)
+	if len(passthroughArgs) != 0 {
+		t.Errorf("passthrough should be empty, got %v", passthroughArgs)
 	}
 }
 
 func TestParseRunFlags_FleetAndLocalOnlyCoexist(t *testing.T) {
-	wf, pass := parseRunFlags([]string{"--sw-fleet", "--sw-local-only"})
-	if !wf.fleet || !wf.localOnly {
-		t.Fatalf("flags = %+v", wf)
+	flags, passthroughArgs := parseRunFlags([]string{"--sw-fleet", "--sw-local-only"})
+	if !flags.fleet || !flags.localOnly {
+		t.Fatalf("flags = %+v", flags)
 	}
-	if len(pass) != 0 {
-		t.Fatalf("passthrough = %v", pass)
+	if len(passthroughArgs) != 0 {
+		t.Fatalf("passthrough = %v", passthroughArgs)
 	}
 }
 
@@ -122,20 +123,20 @@ func TestDispatchFleetEmptyConfigNamesEnrollmentCommand(t *testing.T) {
 }
 
 func TestParseRunFlags_OnlyAndNoCacheCoexist(t *testing.T) {
-	wf, _ := parseRunFlags([]string{"--sw-only=lint-*", "--sw-no-cache"})
-	if wf.only != "lint-*" {
-		t.Errorf("only = %q, want lint-*", wf.only)
+	flags, _ := parseRunFlags([]string{"--sw-only=fictional-check-*", "--sw-no-cache"})
+	if flags.only != "fictional-check-*" {
+		t.Errorf("only = %q, want fictional-check-*", flags.only)
 	}
-	if !wf.noCache {
+	if !flags.noCache {
 		t.Errorf("noCache: want true got false")
 	}
 }
 
 func TestParseRunFlags_UnknownFlagsPassThrough(t *testing.T) {
-	_, pass := parseRunFlags([]string{"--sw-only=*", "--user-flag", "v", "--other"})
-	wantPass := []string{"--user-flag", "v", "--other"}
-	if !slices.Equal(pass, wantPass) {
-		t.Errorf("passthrough = %v, want %v", pass, wantPass)
+	_, passthroughArgs := parseRunFlags([]string{"--sw-only=*", "--user-flag", "v", "--other"})
+	expectedArguments := []string{"--user-flag", "v", "--other"}
+	if !slices.Equal(passthroughArgs, expectedArguments) {
+		t.Errorf("passthrough = %v, want %v", passthroughArgs, expectedArguments)
 	}
 }
 
@@ -149,35 +150,35 @@ func TestParseRunFlags_Profile(t *testing.T) {
 		{"equals-form", []string{"--profile=prod"}, "prod"},
 		{"empty-trailing-flag-falls-through", []string{"--profile"}, ""},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			wf, pass := parseRunFlags(tc.args)
-			if wf.profile != tc.want {
-				t.Errorf("profile = %q, want %q", wf.profile, tc.want)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			flags, passthroughArgs := parseRunFlags(testCase.args)
+			if flags.profile != testCase.want {
+				t.Errorf("profile = %q, want %q", flags.profile, testCase.want)
 			}
-			if tc.want == "" && !slices.Contains(pass, "--profile") {
-				t.Errorf("incomplete --profile should pass through; got passthrough=%v", pass)
+			if testCase.want == "" && !slices.Contains(passthroughArgs, "--profile") {
+				t.Errorf("incomplete --profile should pass through; got passthrough=%v", passthroughArgs)
 			}
 		})
 	}
 }
 
 func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
-	wf, pass := parseRunFlags([]string{"--profile", "local", "--target", "prod"})
-	if wf.profile != "local" {
-		t.Errorf("profile = %q, want local", wf.profile)
+	flags, passthroughArgs := parseRunFlags([]string{"--profile", "local", "--target", "prod"})
+	if flags.profile != "local" {
+		t.Errorf("profile = %q, want local", flags.profile)
 	}
-	if !slices.Contains(pass, "--target") || !slices.Contains(pass, "prod") {
-		t.Errorf("--target should fall through to pipeline args; passthrough=%v", pass)
+	if !slices.Contains(passthroughArgs, "--target") || !slices.Contains(passthroughArgs, "prod") {
+		t.Errorf("--target should fall through to pipeline args; passthrough=%v", passthroughArgs)
 	}
 }
 
 func TestParseRunFlags_RetiredSwProfileFallsThrough(t *testing.T) {
-	wf, pass := parseRunFlags([]string{"--sw-profile", "remote"})
-	if wf.profile != "" {
-		t.Errorf("--sw-profile should not set profile; got %q", wf.profile)
+	flags, passthroughArgs := parseRunFlags([]string{"--sw-profile", "remote"})
+	if flags.profile != "" {
+		t.Errorf("--sw-profile should not set profile; got %q", flags.profile)
 	}
-	if err := checkRetiredWhereFlags(pass, nil); err == nil || !strings.Contains(err.Error(), "--sw-profile") {
+	if err := checkRetiredWhereFlags(passthroughArgs, nil); err == nil || !strings.Contains(err.Error(), "--sw-profile") {
 		t.Errorf("checkRetiredWhereFlags: want --sw-profile pointer, got %v", err)
 	}
 }
@@ -205,17 +206,17 @@ func TestParseRunFlags_IsolatedHome(t *testing.T) {
 		{"equals-form", []string{"--sw-isolated-home=/tmp/gate"}, "/tmp/gate"},
 		{"empty-trailing-flag-falls-through", []string{"--sw-isolated-home"}, ""},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			wf, pass := parseRunFlags(tc.args)
-			if wf.isolatedHome != tc.want {
-				t.Errorf("isolatedHome = %q, want %q", wf.isolatedHome, tc.want)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			flags, passthroughArgs := parseRunFlags(testCase.args)
+			if flags.isolatedHome != testCase.want {
+				t.Errorf("isolatedHome = %q, want %q", flags.isolatedHome, testCase.want)
 			}
-			if tc.want == "" && !slices.Contains(pass, "--sw-isolated-home") {
-				t.Errorf("incomplete --sw-isolated-home should pass through; got passthrough=%v", pass)
+			if testCase.want == "" && !slices.Contains(passthroughArgs, "--sw-isolated-home") {
+				t.Errorf("incomplete --sw-isolated-home should pass through; got passthrough=%v", passthroughArgs)
 			}
-			if tc.want != "" && len(pass) != 0 {
-				t.Errorf("passthrough should be empty, got %v", pass)
+			if testCase.want != "" && len(passthroughArgs) != 0 {
+				t.Errorf("passthrough should be empty, got %v", passthroughArgs)
 			}
 		})
 	}
@@ -274,12 +275,12 @@ func TestApplyIsolatedHomeReportsADirectoryItCannotPrepare(t *testing.T) {
 func TestParseRunFlags_SeparatorPreservesPipelineArguments(t *testing.T) {
 	want := []string{"--", "--sw-priority", "back", "--sw-no-cache", "--sw-mystery", "--profile", "fictional"}
 	args := append([]string{"--sw-priority=front"}, want...)
-	flags, pass := parseRunFlags(args)
+	flags, passthroughArgs := parseRunFlags(args)
 	if flags.priority != "front" || !flags.prioritySet || flags.noCache || flags.profile != "" {
 		t.Fatalf("runner flags = %+v", flags)
 	}
-	if !slices.Equal(pass, want) {
-		t.Fatalf("pipeline arguments = %q, want %q", pass, want)
+	if !slices.Equal(passthroughArgs, want) {
+		t.Fatalf("pipeline arguments = %q, want %q", passthroughArgs, want)
 	}
 }
 
@@ -291,7 +292,7 @@ func TestDispatchRun_UnknownRunnerFlagPrecedesSideEffects(t *testing.T) {
 			home := filepath.Join(t.TempDir(), "home")
 			missing := filepath.Join(t.TempDir(), "missing")
 			err := dispatchRun([]string{"fictional", "--sw-isolated-home", home, "--sw-cd", missing, unknown})
-			if err == nil || !strings.Contains(err.Error(), "unknown runner flag "+"\""+unknown+"\"") {
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("unknown runner flag %q", unknown)) {
 				t.Errorf("dispatch error = %v, want unknown runner flag %q", err, unknown)
 			}
 			if _, err := os.Stat(home); !os.IsNotExist(err) {
