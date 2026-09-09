@@ -65,6 +65,8 @@ code change to unlock.
   reports expose fields directly and report failures only on stderr.
   See the [migration guide](docs/migrations/v0.46.0.md#discovery-and-report-output)
   and the [CLI output reference](docs/cli.md#output).
+- **cli (Breaking):** Command and documentation indexes now default to bounded pages, with native query filters and a typed continuation record. Documentation search returns snippets unless bodies are requested; selected sections are readable with `docs read --topic <slug> --section <start_line>`. Use `--limit 0` for exhaustive indexes. See [migration](docs/migrations/_unreleased.md#bounded-discovery).
+
 
 ### Added
 

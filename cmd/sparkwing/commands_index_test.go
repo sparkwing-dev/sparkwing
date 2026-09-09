@@ -21,6 +21,9 @@ func TestCommandsJSONCarriesIndexFieldsOnly(t *testing.T) {
 		t.Fatal("commands -o json returned no records")
 	}
 	for i, rec := range records {
+		if rec["kind"] == "page" {
+			continue
+		}
 		for k := range rec {
 			if !indexKeys[k] {
 				t.Errorf("record %d (%v) carries non-index field %q", i, rec["path"], k)
@@ -35,7 +38,7 @@ func TestCommandsJSONCarriesIndexFieldsOnly(t *testing.T) {
 }
 
 func TestCommandsJSONSubcommandCountMatchesTheListing(t *testing.T) {
-	records := decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "-o", "json"))
+	records := decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "--limit", "0", "-o", "json"))
 	children := map[string]int{}
 	for _, c := range records {
 		fields := strings.Fields(c.Path)
@@ -86,7 +89,7 @@ func TestCommandsJSONOmitsHiddenUnlessAsked(t *testing.T) {
 	}
 
 	found := false
-	for _, c := range decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "--include-hidden", "-o", "json")) {
+	for _, c := range decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "--include-hidden", "--limit", "0", "-o", "json")) {
 		if c.Path != hidden {
 			continue
 		}

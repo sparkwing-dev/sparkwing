@@ -265,20 +265,21 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"    ci-pr-check defaults to pull_request and scheduled-report to schedule;\n" +
 	"    the rest to manual. Any shape takes any --on, so a PR-triggered single\n" +
 	"    check is `--template minimal --on pull_request`\n" +
-	"- `sparkwing docs search -q <what you are doing>` -- the doc section that\n" +
-	"  answers it, plus any worked pipeline that already does it\n" +
+	"- `sparkwing docs search -q <what you are doing>` -- bounded snippets of the sections that\n" +
+	"  answer it, plus any worked pipeline that already does it\n" +
 	"- `sparkwing docs read --guide authoring` -- the DAG model, the idioms the linter\n" +
 	"  enforces, how a pipeline fires, and the config schema, in one call\n" +
 	"- `sparkwing pipeline lint` then `sparkwing run <n>` -- check it without guessing\n"
 
-const agentBlockBody = "- `sparkwing commands` -- one-line index of every verb; `--path <prefix>` to\n" +
-	"  narrow, `<path> --help` for one verb, `-o json` for the full records\n" +
+const agentBlockBody = "- `sparkwing commands --query <task>` -- bounded command index; `--path <prefix>` to\n" +
+	"  narrow, `<path> --help` for one verb, `-o json` for structured metadata\n" +
 	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
 	"- `sparkwing run <name>` -- run a pipeline\n" +
 	"- `sparkwing run <name> --sw-isolated-home <dir>` -- gate a branch whose pipeline binary\n" +
 	"  is newer than this machine's admission daemon: the run keeps its state and config under\n" +
 	"  <dir> and hosts a daemon there from the sparkwing you invoked\n" +
-	"- `sparkwing docs search -q <symbol-or-key>` -- the section that answers it, not the whole page\n" +
+	"- `sparkwing docs search -q <symbol-or-key>` -- 20 ranked snippets; read a hit with\n" +
+	"  `sparkwing docs read --topic <slug> --section <start_line>`\n" +
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n" +
 	"- `sparkwing info -o json` -- this same context as JSON, when you want to parse it\n"
 
@@ -442,7 +443,7 @@ func gatherInfo() Info {
 		Version:         parseInfoVersion(installedVersion()),
 		Binary:          binary,
 		Docs: InfoDocs{
-			CLI:                     "sparkwing docs list / read --topic <slug> / all",
+			CLI:                     "sparkwing docs list --query <topic> / search -q <task> / read --topic <slug>",
 			WebURL:                  "https://sparkwing.dev/docs/",
 			LLMsFullURL:             "https://sparkwing.dev/llms-full.txt",
 			LLMsTXTURL:              "https://sparkwing.dev/llms.txt",
