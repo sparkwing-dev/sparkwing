@@ -13,6 +13,7 @@ const (
 	RuleUnusedRef         = "unused-ref"
 	RuleGuardMisuse       = "guard-misuse"
 	RuleGroupCacheShared  = "group-cache-shared"
+	RuleDynamicGroupInert = "dynamic-group-inert"
 )
 
 type Finding struct {
@@ -44,8 +45,8 @@ func Rules() []RuleDoc {
 		},
 		{
 			Name:    RuleRunnerLabel,
-			Forbids: "blank runner labels and Inline jobs that also declare Requires/Prefers",
-			Why:     "A blank label matches no runner (a typo that strands the job). An Inline job runs in-process, so a runner-label requirement on it can never be honored; declaring both signals confused placement intent.",
+			Forbids: "blank runner labels on Requires/Prefers/WhenRunner, and Inline jobs that also declare Requires/Prefers",
+			Why:     "A label the author wrote reads as a constraint either way, and neither shape is one: an empty string is dropped when labels are normalized, so the term vanishes, and a whitespace label survives and matches no runner, so the term can never be satisfied. An Inline job runs in-process, where Requires and Prefers select nothing; declaring both signals confused placement intent. WhenRunner is honored on an inline job, matched against the inline runner, so it is not flagged there.",
 		},
 		{
 			Name:    RuleUnusedRef,
@@ -56,6 +57,11 @@ func Rules() []RuleDoc {
 			Name:    RuleGroupCacheShared,
 			Forbids: "Memoize() applied to a fan-out or grouped set of jobs",
 			Why:     "A group's Memoize applies one key function to every member, so the members share a single cache entry and replay each other's results -- a matrix over Go 1.23 and 1.24 would store one pass and reuse it for both, which looks like a fast green build and is not a build at all. Key each member instead: range over JobGroup.Members() and call Memoize on the *JobNode.",
+		},
+		{
+			Name:    RuleDynamicGroupInert,
+			Forbids: "JobGroup setters applied to a JobFanOutDynamic result",
+			Why:     "A dynamic group has no members until its source job completes, and every JobGroup setter -- Memoize, Requires, Retry, Needs, Env, and the rest -- applies to the members present when it is called. On a dynamic group that is none of them, so the call compiles, reads as configuration, and changes nothing. Configure the generated jobs from the value the fan-out callback returns; Requires, Prefers, and WhenRunner have provider interfaces a Workable can implement.",
 		},
 		{
 			Name:    RuleGuardMisuse,

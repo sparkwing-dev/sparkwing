@@ -50,14 +50,6 @@ func lintCommandFor(holdsBudget bool) string {
 	return fmt.Sprintf("golangci-lint run %s ./...", flag)
 }
 
-func shouldLeaseLintPath(string) bool {
-	// safety: the slot cache is shared by every worktree that leases it, and
-	// golangci-lint answers from findings cached under the tree the slot pointed
-	// at last: a leased lint reported 0 issues for a tree with eight. Each
-	// checkout keeps its own cache until the slot keys its cache by tree.
-	return false
-}
-
 func runGolangciLint(ctx context.Context) error {
 	gcURL := os.Getenv("SPARKWING_GITCACHE_URL")
 	gcToken := os.Getenv("SPARKWING_CACHE_TOKEN")
@@ -83,16 +75,10 @@ func runGolangciLint(ctx context.Context) error {
 	release, holdsBudget := sparkwing.ToolSlot(ctx, lintBudget, lintSlotCost())
 	defer release()
 
+	// safety: each worktree keeps its own cache. A cache shared between trees
+	// replays findings under the path of the tree that filled it, and those sit
+	// outside this tree's diff, so the baseline filter drops every one.
 	cacheDir := sparkwing.ToolCacheDir("golangci-lint")
-	var lintSlot *sparkwing.LintSlot
-	if shouldLeaseLintPath(gcURL) {
-		lintSlot, err = sparkwing.AcquireLintSlot("golangci-lint")
-		if err != nil {
-			return fmt.Errorf("golangci-lint: could not acquire a reusable cache path: %w", err)
-		}
-		defer lintSlot.Release()
-		cacheDir = lintSlot.Cache
-	}
 	if holdsBudget {
 		sparkwing.Info(ctx, "golangci-lint: holding %s; running parallel (cache %s)", lintBudget, cacheDir)
 	} else {
@@ -110,12 +96,9 @@ func runGolangciLint(ctx context.Context) error {
 			continue
 		}
 		stepStart := time.Now()
-		cmd := sparkwing.Bash(lintCtx, lintCommandFor(holdsBudget))
-		if lintSlot != nil {
-			cmd = lintSlot.ConfigureIn(cmd, dir, "GOLANGCI_LINT_CACHE")
-		} else {
-			cmd = cmd.Dir(dir).Env("GOLANGCI_LINT_CACHE", cacheDir)
-		}
+		cmd := sparkwing.Bash(lintCtx, lintCommandFor(holdsBudget)).
+			Dir(dir).
+			Env("GOLANGCI_LINT_CACHE", cacheDir)
 		if _, runErr := cmd.Run(); runErr != nil {
 			failures = append(failures,
 				fmt.Sprintf("%s: %s", dir, describeLintFailure(lintCtx, time.Since(stepStart), runErr)))

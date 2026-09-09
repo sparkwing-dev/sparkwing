@@ -18,11 +18,17 @@ import (
 
 type doctorReport = opsview.DoctorReport
 
+// doctorDefaultTimeout bounds the daemon and local-state checks. Doctor is the
+// verb an operator reaches for when the machine is already misbehaving, so it
+// answers within a budget rather than waiting on whatever is stuck.
+const doctorDefaultTimeout = 10 * time.Second
+
 func runDoctor(args []string) error {
 	fs := flag.NewFlagSet(cmdDoctor.Path, flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "report what would be repaired without changing anything")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")
+	timeout := fs.Duration("timeout", doctorDefaultTimeout, "budget for the daemon and local-state checks; each takes a slice of it")
 	if err := parseAndCheck(cmdDoctor, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -37,11 +43,14 @@ func runDoctor(args []string) error {
 		return fmt.Errorf("doctor: unexpected positional %q (doctor takes flags only)", fs.Arg(0))
 	}
 
+	if *timeout <= 0 {
+		return fmt.Errorf("doctor: --timeout must be positive, got %s", *timeout)
+	}
 	p, err := homePaths(*home)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
 	report, err := diagnose(ctx, p, *home, *dryRun)
@@ -52,7 +61,10 @@ func runDoctor(args []string) error {
 }
 
 func renderPartialDoctor(w io.Writer, report doctorReport, format string, diagnoseErr error) error {
-	if len(report.PermissionRepairs) == 0 && !report.PermissionAuditUnverified {
+	// A spent budget is the one failure whose partial report is worth more than
+	// the error: what doctor did reach is what says where the machine is stuck.
+	if len(report.PermissionRepairs) == 0 && !report.PermissionAuditUnverified &&
+		!errors.Is(diagnoseErr, context.DeadlineExceeded) {
 		return diagnoseErr
 	}
 	return errors.Join(renderDoctor(w, report, format), diagnoseErr)

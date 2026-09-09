@@ -241,7 +241,7 @@ func TestRules_EveryRuleIsDocumented(t *testing.T) {
 	want := map[string]bool{
 		RulePlanIO: false, RulePlanRuntimeBranch: false, RuleRunnerLabel: false,
 		RuleUnusedRef: false, RuleGuardMisuse: false,
-		RuleGroupCacheShared: false,
+		RuleGroupCacheShared: false, RuleDynamicGroupInert: false,
 	}
 	for _, d := range Rules() {
 		if _, ok := want[d.Name]; !ok {
@@ -295,7 +295,7 @@ type P struct{ sw.Base }
 func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	sw.JobFanOut(plan, "matrix", []string{"1.23", "1.24"}, func(v string) (string, any) {
 		return v, nil
-	}).Memoize(func(ctx context.Context) sw.CacheKey { return sw.Key("tests") })
+	}).Memoize(func(ctx context.Context) (sw.CacheKey, error) { return sw.Key("tests"), nil })
 	return nil
 }
 `
@@ -326,7 +326,7 @@ import (
 type P struct{ sw.Base }
 
 func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-	sw.Job(plan, "test", &T{}).Memoize(func(ctx context.Context) sw.CacheKey { return sw.Key("tests") })
+	sw.Job(plan, "test", &T{}).Memoize(func(ctx context.Context) (sw.CacheKey, error) { return sw.Key("tests"), nil })
 	return nil
 }
 
@@ -336,5 +336,127 @@ type T struct{ sw.Base }
 		if f.Rule == RuleGroupCacheShared {
 			t.Errorf("flagged a single-job Cache: %+v", f)
 		}
+	}
+}
+
+func TestDynamicGroupInert_FlagsEverySetter(t *testing.T) {
+	const src = `package jobs
+
+import (
+	"context"
+
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+type P struct{ sw.Base }
+
+func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
+	shards := sw.Job(plan, "discover", &T{})
+	sw.JobFanOutDynamic(plan, "matrix", shards, func(v string) (string, any) {
+		return v, nil
+	}).Memoize(func(ctx context.Context) (sw.CacheKey, error) { return sw.Key("tests"), nil }).Requires("gpu")
+	return nil
+}
+
+type T struct{ sw.Base }
+`
+	findings := lintSource(t, src)
+	if got := countRule(findings, RuleDynamicGroupInert); got != 2 {
+		t.Fatalf("got %d %s findings, want 2: %+v", got, RuleDynamicGroupInert, findings)
+	}
+	if got := countRule(findings, RuleGroupCacheShared); got != 0 {
+		t.Fatalf("a dynamic group has no members to share a cache entry; got %d %s findings", got, RuleGroupCacheShared)
+	}
+	for _, f := range findings {
+		if f.Rule == RuleDynamicGroupInert && strings.Contains(f.Message, "Requires") &&
+			!strings.Contains(f.Message, "RequiresProvider") {
+			t.Errorf("the label finding does not name the way out: %q", f.Message)
+		}
+	}
+}
+
+func TestDynamicGroupInert_ReadersAreClean(t *testing.T) {
+	const src = `package jobs
+
+import (
+	"context"
+
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+type P struct{ sw.Base }
+
+func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
+	shards := sw.Job(plan, "discover", &T{})
+	matrix := sw.JobFanOutDynamic(plan, "matrix", shards, func(v string) (string, any) {
+		return v, nil
+	})
+	sw.Job(plan, "collect", &T{}).Needs(matrix)
+	_ = matrix.Members()
+	return nil
+}
+
+type T struct{ sw.Base }
+`
+	if got := countRule(lintSource(t, src), RuleDynamicGroupInert); got != 0 {
+		t.Fatalf("reading a dynamic group is not configuring it; got %d findings", got)
+	}
+}
+
+func TestChainSplitAcrossStatementsIsChecked(t *testing.T) {
+	const src = `package jobs
+
+import (
+	"context"
+
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+type P struct{ sw.Base }
+
+func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
+	matrix := sw.JobFanOut(plan, "matrix", []string{"1.23", "1.24"}, func(v string) (string, any) {
+		return v, nil
+	})
+	matrix.Memoize(func(ctx context.Context) (sw.CacheKey, error) { return sw.Key("tests"), nil })
+
+	shards := sw.Job(plan, "discover", &T{})
+	dyn := sw.JobFanOutDynamic(plan, "dyn", shards, func(v string) (string, any) {
+		return v, nil
+	})
+	dyn.Retry(3)
+	return nil
+}
+
+type T struct{ sw.Base }
+`
+	findings := lintSource(t, src)
+	if got := countRule(findings, RuleGroupCacheShared); got != 1 {
+		t.Fatalf("got %d %s findings for a group memoized on the next line, want 1: %+v", got, RuleGroupCacheShared, findings)
+	}
+	if got := countRule(findings, RuleDynamicGroupInert); got != 1 {
+		t.Fatalf("got %d %s findings for a dynamic group configured on the next line, want 1: %+v", got, RuleDynamicGroupInert, findings)
+	}
+}
+
+func TestRunnerLabel_FlagsBlankWhenRunnerLabel(t *testing.T) {
+	src := fixtureHeader + `func (p *P) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "a", nil).WhenRunner("")
+	return nil
+}`
+	findings := lintSource(t, src)
+	if got := countRule(findings, RuleRunnerLabel); got != 1 {
+		t.Fatalf("runner-label findings = %d, want 1: %+v", got, findings)
+	}
+}
+
+func TestRunnerLabel_InlineWithWhenRunnerIsClean(t *testing.T) {
+	src := fixtureHeader + `func (p *P) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "a", nil).Inline().WhenRunner("local")
+	return nil
+}`
+	findings := lintSource(t, src)
+	if got := countRule(findings, RuleRunnerLabel); got != 0 {
+		t.Fatalf("WhenRunner is matched against the inline runner; got %d findings: %+v", got, findings)
 	}
 }

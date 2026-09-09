@@ -75,10 +75,11 @@ type sessionGuardState struct {
 	graceTimer   *time.Timer
 }
 
-type guardReconcileState struct {
-	persistedGuard
+type guardRelease struct {
+	deliveries []delivery
 	completion *conn
 	finalize   bool
+	released   bool
 }
 
 func processSessionMatches(got, want *wingwire.ProcessSession) bool {
@@ -125,30 +126,33 @@ func (d *Daemon) handleGuardComplete(c *conn, req *wingwire.GuardComplete) {
 		}
 		return
 	}
-	d.completeEmptyGuard(guardReconcileState{persistedGuard: guard.persistedGuard, completion: c})
+	d.completeEmptyGuard(guard.persistedGuard)
 }
 
-func (d *Daemon) completeEmptyGuard(guard guardReconcileState) {
-	deliveries, released, err := d.releaseGuardDurably(guard.LeaseID, guard.Session)
+func (d *Daemon) completeEmptyGuard(guard persistedGuard) {
+	release, err := d.releaseGuardDurably(guard.LeaseID, guard.Session)
 	if err != nil {
+		// safety: the guard stays reconcilable, so the next sweep retries the
+		// release; closing the client here would let it report success on a
+		// lease the daemon still holds.
 		d.cfg.logf("guard: persist completion for %s: %v", guard.RunID, err)
-		if guard.completion != nil {
-			guard.completion.close()
-		}
 		return
 	}
-	if !released {
+	if !release.released {
 		return
 	}
-	for _, delivery := range deliveries {
+	for _, delivery := range release.deliveries {
 		if err := delivery.c.send(delivery.msg); err != nil {
 			go d.handleDisconnect(delivery.c)
 		}
 	}
-	if guard.completion != nil {
-		_ = guard.completion.send(&wingwire.GuardCompleteAck{})
+	if release.completion != nil {
+		if sendErr := release.completion.send(&wingwire.GuardCompleteAck{}); sendErr != nil {
+			d.cfg.logf("guard: acknowledge completion for %s: %v", guard.RunID, sendErr)
+			release.completion.close()
+		}
 	}
-	if guard.finalize {
+	if release.finalize {
 		d.finalizeAsync(guard.RunID)
 	}
 }
@@ -187,7 +191,7 @@ func (d *Daemon) expireGuardGrace(id admission.LeaseID, session wingwire.Process
 	// reattached in that window would be handed a lease over an already dead
 	// process tree, so reattach is refused from here until the outcome is known.
 	guard.terminating = true
-	reclaim := guardReconcileState{persistedGuard: guard.persistedGuard, completion: guard.completion, finalize: true}
+	reclaim := guard.persistedGuard
 	d.mu.Unlock()
 
 	d.cfg.logf("guard: run %s lost its client %s ago; terminating the guarded session",
@@ -277,13 +281,11 @@ func (d *Daemon) persistedGuardsLocked() []persistedGuard {
 	return guards
 }
 
-func (d *Daemon) reconcilableGuardsLocked() []guardReconcileState {
-	guards := make([]guardReconcileState, 0, len(d.guards))
+func (d *Daemon) reconcilableGuardsLocked() []persistedGuard {
+	guards := make([]persistedGuard, 0, len(d.guards))
 	for _, guard := range d.guards {
 		if guard.disconnected || guard.completion != nil {
-			guards = append(guards, guardReconcileState{
-				persistedGuard: guard.persistedGuard, completion: guard.completion, finalize: guard.disconnected,
-			})
+			guards = append(guards, guard.persistedGuard)
 		}
 	}
 	sort.Slice(guards, func(i, j int) bool { return guards[i].LeaseID < guards[j].LeaseID })
@@ -371,26 +373,29 @@ func (d *Daemon) guardEmptyProbe() (func(wingwire.ProcessSession) (bool, error),
 	return d.guardInspector.Empty, nil
 }
 
-func (d *Daemon) releaseGuardDurably(leaseID admission.LeaseID, session wingwire.ProcessSession) ([]delivery, bool, error) {
+func (d *Daemon) releaseGuardDurably(leaseID admission.LeaseID, session wingwire.ProcessSession) (guardRelease, error) {
 	d.persistMu.Lock()
 	defer d.persistMu.Unlock()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	current := d.guards[leaseID]
 	if current == nil || current.Session != session {
-		return nil, false, nil
+		return guardRelease{}, nil
 	}
+	// safety: a sweep picks its guards before it probes the process table, so a
+	// client that reattached inside that window is visible only here.
+	result := guardRelease{completion: current.completion, finalize: current.disconnected}
 	previous := d.ledger.Snapshot()
 	members := guardLeaseMembers(previous, leaseID)
 	if len(members) == 0 {
-		return nil, false, fmt.Errorf("guarded lease %s has no members", leaseID)
+		return guardRelease{}, fmt.Errorf("guarded lease %s has no members", leaseID)
 	}
 	var events []admission.Event
 	for _, member := range members {
 		released, err := d.ledger.Release(leaseID, member)
 		if err != nil {
 			d.restoreGuardedTransition(previous)
-			return nil, false, fmt.Errorf("apply guarded release %s: %w", leaseID, err)
+			return guardRelease{}, fmt.Errorf("apply guarded release %s: %w", leaseID, err)
 		}
 		events = append(events, released...)
 	}
@@ -411,15 +416,16 @@ func (d *Daemon) releaseGuardDurably(leaseID admission.LeaseID, session wingwire
 	}
 	if writeErr != nil {
 		d.restoreGuardedTransition(previous)
-		return nil, false, writeErr
+		return guardRelease{}, writeErr
 	}
 
 	d.stopGuardGraceLocked(current)
 	delete(d.guards, leaseID)
-	deliveries := d.routeLocked(events)
+	result.deliveries = d.routeLocked(events)
+	result.released = true
 	d.persistedEventSeq = next.EventSeq
 	d.touchLocked()
-	return deliveries, true, nil
+	return result, nil
 }
 
 func (d *Daemon) restoreGuardedTransition(snapshot admission.Snapshot) {
