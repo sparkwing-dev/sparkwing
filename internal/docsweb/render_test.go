@@ -1,8 +1,11 @@
 package docsweb
 
 import (
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
 func noLinks(string) (string, bool) { return "", false }
@@ -144,6 +147,52 @@ func TestOnlyLocalAndHTTPLinksBecomeAnchors(t *testing.T) {
 			}
 			if !strings.Contains(got, "text") {
 				t.Errorf("rendered %q, want the link text kept either way", got)
+			}
+		})
+	}
+}
+
+func TestHashLeadingListContinuationStaysInItsItem(t *testing.T) {
+	for _, marker := range []string{"- ", "1. "} {
+		for _, continuation := range []string{"#1305", "#fff", "#!/bin/sh"} {
+			got := render(t, marker+"before\n  "+continuation+"\n  after")
+			want := "<li>before " + continuation + " after</li>"
+			if !strings.Contains(got, want) || strings.Contains(got, "<p>") {
+				t.Errorf("%q with %q: got %q, want item %q and no paragraph", marker, continuation, got, want)
+			}
+		}
+	}
+}
+
+func TestShippedPagesPreserveSourceHeadings(t *testing.T) {
+	closedComment := regexp.MustCompile(`(?s)<!--.*?-->`)
+	heading := regexp.MustCompile(`^#{1,} `)
+	for _, page := range docs.List() {
+		t.Run(page.Slug, func(t *testing.T) {
+			source, err := docs.ReadRaw(page.Slug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := render(t, source)
+			if strings.TrimSpace(source) != "" && strings.TrimSpace(got) == "" {
+				t.Fatal("non-empty page rendered empty")
+			}
+			counts := make(map[string]int)
+			inCode := false
+			for _, line := range strings.Split(closedComment.ReplaceAllString(source, ""), "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "```") {
+					inCode = !inCode
+					continue
+				}
+				if !inCode && heading.MatchString(line) {
+					counts[strings.TrimSpace(render(t, line))]++
+				}
+			}
+			for want, count := range counts {
+				if found := strings.Count(got, want); found < count {
+					t.Errorf("source heading %q appears %d times, rendered %d times", want, count, found)
+				}
 			}
 		})
 	}

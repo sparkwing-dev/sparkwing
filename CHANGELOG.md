@@ -23,6 +23,10 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **docs:** Keep hash-leading list continuations in their list items
+
 ## [v0.47.0] - 2026-09-09
 ### Added
 
