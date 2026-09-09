@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **development:** Repository-owned candidate install hook for Xwing rebuilds
+  the selected web and CLI sources into private staging
+
 ### Fixed
 
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
