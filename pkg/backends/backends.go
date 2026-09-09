@@ -250,6 +250,9 @@ func layerSpec(base, over *Spec) *Spec {
 	if merged.TokenEnv == "" {
 		merged.TokenEnv = base.TokenEnv
 	}
+	if merged.Controller == "" {
+		merged.Controller = base.Controller
+	}
 	if merged.Binaries == nil {
 		merged.Binaries = base.Binaries
 	}
