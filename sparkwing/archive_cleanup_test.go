@@ -1,6 +1,8 @@
 package sparkwing
 
 import (
+	"archive/tar"
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -22,5 +24,40 @@ func TestStagedExtractionPreservesCleanupFailure(t *testing.T) {
 	})
 	if !errors.Is(err, rejected) || !errors.Is(err, syscall.ENOTDIR) {
 		t.Fatalf("extract error = %v, want rejection and cleanup ENOTDIR", err)
+	}
+}
+
+func TestExtractionPreservesRequiredMutationFailure(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		headers []*tar.Header
+		cause   error
+	}{
+		{"remove nonempty directory", []*tar.Header{
+			{Name: "folder", Typeflag: tar.TypeDir, Mode: 0o700},
+			{Name: "folder/child", Typeflag: tar.TypeReg, Mode: 0o600},
+			{Name: "folder", Typeflag: tar.TypeReg, Mode: 0o600},
+		}, syscall.ENOTEMPTY},
+		{"restore mode on missing target", []*tar.Header{
+			{Name: "folder", Typeflag: tar.TypeDir, Mode: 0o700},
+			{Name: "folder", Typeflag: tar.TypeSymlink, Linkname: "missing"},
+		}, os.ErrNotExist},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var archive bytes.Buffer
+			writer := tar.NewWriter(&archive)
+			for _, header := range testCase.headers {
+				if err := writer.WriteHeader(header); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			err := extractTarInRoot(tar.NewReader(&archive), t.TempDir(), tarExtractPolicy{allowSymlinks: true})
+			if !errors.Is(err, testCase.cause) {
+				t.Fatalf("extraction error = %v, want %v", err, testCase.cause)
+			}
+		})
 	}
 }
