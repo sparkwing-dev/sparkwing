@@ -65,10 +65,10 @@ func TestLocalQueue_NoDaemonDoesNotReadLikeAnIdleDaemon(t *testing.T) {
 	if strings.TrimSpace(jsonNoDaemon) == "{}" {
 		t.Fatalf("no-daemon json is still a bare {}, which is what an idle daemon looks like:\n%s", jsonNoDaemon)
 	}
-	if !strings.Contains(jsonNoDaemon, `"reachable": false`) {
+	if !strings.Contains(jsonNoDaemon, `"reachable":false`) {
 		t.Errorf("no-daemon json does not state that no daemon was reached:\n%s", jsonNoDaemon)
 	}
-	if !strings.Contains(renderLocalQueueFor(t, idle, "json"), `"reachable": true`) {
+	if !strings.Contains(renderLocalQueueFor(t, idle, "json"), `"reachable":true`) {
 		t.Errorf("idle-daemon json does not state that the daemon was reached")
 	}
 }

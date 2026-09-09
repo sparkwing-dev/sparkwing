@@ -245,7 +245,7 @@ func (p *PrePush) run(ctx context.Context) error {
 		`cd "$ROOT" &&
 		TMP="$(mktemp -d)" &&
 		trap 'rm -rf "$TMP"' EXIT &&
-		go run ./cmd/sparkwing commands -o markdown --split-dir "$TMP" >/dev/null &&
+		go run ./cmd/sparkwing commands --format markdown --output plain --split-dir "$TMP" >/dev/null &&
 		fail=0 &&
 		for f in "$TMP"/*.md; do
 			diff -u "docs/$(basename "$f")" "$f" || fail=1

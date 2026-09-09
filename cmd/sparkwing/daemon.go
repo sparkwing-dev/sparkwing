@@ -337,7 +337,6 @@ func emitDaemonReport(report daemonReport, output string) error {
 	switch output {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(report)
 	case "plain":
 		if !report.Running {

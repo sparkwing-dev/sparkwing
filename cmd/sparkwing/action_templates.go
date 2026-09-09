@@ -219,7 +219,6 @@ func showTemplateDetail(name string, body bool, output string) error {
 			out.RenderedBody = rendered
 		}
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	case "pretty", "":
 		printTemplateDetail(tmpl, rendered, body)

@@ -45,6 +45,7 @@ func runRunsConsumer(args []string) error {
 
 func runRunsConsumerStart(args []string) error {
 	fs := flag.NewFlagSet(cmdJobsConsumerStart.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	idle := fs.Duration("idle", 0, "exit after this long with no work (default 5m; 0 means the default)")
 	claimLease := fs.Duration("claim-lease", 0,
@@ -55,6 +56,11 @@ func runRunsConsumerStart(args []string) error {
 		}
 		return err
 	}
+	mode, err := resolveOutputFormat(*output, fs.Name())
+	if err != nil {
+		return err
+	}
+
 	layout, err := orchestrator.ConsumerLayoutFor(*home)
 	if err != nil {
 		return err
@@ -63,14 +69,12 @@ func runRunsConsumerStart(args []string) error {
 		return err
 	}
 	pid, _ := orchestrator.ConsumerPID(layout.Home)
-	fmt.Fprintf(os.Stdout, "trigger consumer running (pid %d)\n", pid)
-	fmt.Fprintf(os.Stdout, "  home: %s\n", layout.Home)
-	fmt.Fprintf(os.Stdout, "  log:  %s\n", layout.Log)
-	return nil
+	return writeServiceStatus(os.Stdout, serviceStatus{Service: "consumer", State: "running", PID: pid, Home: layout.Home, Log: layout.Log}, mode, fmt.Sprintf("trigger consumer running (pid %d)\n  home: %s\n  log:  %s\n", pid, layout.Home, layout.Log))
 }
 
 func runRunsConsumerStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdJobsConsumerStatus.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	if err := parseAndCheck(cmdJobsConsumerStatus, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -78,6 +82,11 @@ func runRunsConsumerStatus(args []string) error {
 		}
 		return err
 	}
+	mode, err := resolveOutputFormat(*output, fs.Name())
+	if err != nil {
+		return err
+	}
+
 	layout, err := orchestrator.ConsumerLayoutFor(*home)
 	if err != nil {
 		return err
@@ -87,18 +96,18 @@ func runRunsConsumerStatus(args []string) error {
 		return err
 	}
 	if !running {
-		fmt.Fprintln(os.Stdout, "trigger consumer not running")
+		if err := writeServiceStatus(os.Stdout, serviceStatus{Service: "consumer", State: "stopped", Home: layout.Home, Log: layout.Log}, mode, "trigger consumer not running\n"); err != nil {
+			return err
+		}
 		return exitErrorf(1, "not running")
 	}
 	pid, _ := orchestrator.ConsumerPID(layout.Home)
-	fmt.Fprintf(os.Stdout, "trigger consumer running (pid %d)\n", pid)
-	fmt.Fprintf(os.Stdout, "  home: %s\n", layout.Home)
-	fmt.Fprintf(os.Stdout, "  log:  %s\n", layout.Log)
-	return nil
+	return writeServiceStatus(os.Stdout, serviceStatus{Service: "consumer", State: "running", PID: pid, Home: layout.Home, Log: layout.Log}, mode, fmt.Sprintf("trigger consumer running (pid %d)\n  home: %s\n  log:  %s\n", pid, layout.Home, layout.Log))
 }
 
 func runRunsConsumerStop(args []string) error {
 	fs := flag.NewFlagSet(cmdJobsConsumerStop.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	if err := parseAndCheck(cmdJobsConsumerStop, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -106,21 +115,23 @@ func runRunsConsumerStop(args []string) error {
 		}
 		return err
 	}
+	mode, err := resolveOutputFormat(*output, fs.Name())
+	if err != nil {
+		return err
+	}
+
 	layout, err := orchestrator.ConsumerLayoutFor(*home)
 	if err != nil {
 		return err
 	}
 	pid, ok := orchestrator.ConsumerPID(layout.Home)
 	if !ok {
-		fmt.Fprintln(os.Stdout, "trigger consumer not running")
-		return nil
+		return writeServiceStatus(os.Stdout, serviceStatus{Service: "consumer", State: "stopped", Home: layout.Home, Log: layout.Log}, mode, "trigger consumer not running\n")
 	}
 	if err := stopSupervisor(pid, layout.PID); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "trigger consumer stopped (pid %d)\n", pid)
-	fmt.Fprintln(os.Stdout, "queued runs stay queued; the next `sparkwing run <pipeline> --sw-detached` starts a consumer again")
-	return nil
+	return writeServiceStatus(os.Stdout, serviceStatus{Service: "consumer", State: "stopped", PID: pid, Home: layout.Home, Log: layout.Log}, mode, fmt.Sprintf("trigger consumer stopped (pid %d)\nqueued runs stay queued; the next `sparkwing run <pipeline> --sw-detached` starts a consumer again\n", pid))
 }
 
 func ensureTriggerConsumer(home string, idle, claimLease time.Duration) error {

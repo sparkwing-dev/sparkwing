@@ -338,11 +338,19 @@ func removeEnv(env []string, key string) []string {
 }
 
 func runSparkwing(args []string) error {
-	gitenv.Unbind()
-	if len(args) == 0 {
-		PrintHelp(cmdSparkwing, os.Stderr)
-		os.Exit(2)
+	args = moveRootOutput(args)
+	if cmd, ok := commandHelp(args); ok {
+		requested, _, err := requestedOutput(args)
+		if err != nil {
+			return err
+		}
+		mode, err := resolveOutputFormat(requested, cmd.Path)
+		if err != nil {
+			return err
+		}
+		return writeCommandHelp(*cmd, os.Stdout, mode)
 	}
+	gitenv.Unbind()
 	noteVersionTransition(os.Stderr, args[0])
 	switch args[0] {
 	case "info":
@@ -793,30 +801,21 @@ func runJobs(args []string) error {
 }
 
 func resolveOutputFormat(outFmt, cmdPath string) (string, error) {
-	switch outFmt {
-	case "", "pretty", "json", "plain":
-	default:
-		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
-	}
-	if outFmt == "" {
-		return "pretty", nil
-	}
-	return outFmt, nil
+	return resolveTTYAwareOutput(outFmt, cmdPath)
 }
 
 func resolveTTYAwareOutput(outFmt, cmdPath string) (string, error) {
 	switch outFmt {
-	case "", "pretty", "json", "plain":
+	case "pretty", "json", "plain":
+		return outFmt, nil
+	case "":
+		if color.IsInteractiveStdout() {
+			return "pretty", nil
+		}
+		return "json", nil
 	default:
 		return "", fmt.Errorf("%s: -o/--output must be one of pretty|json|plain, got %q", cmdPath, outFmt)
 	}
-	if outFmt != "" {
-		return outFmt, nil
-	}
-	if color.IsInteractiveStdout() {
-		return "pretty", nil
-	}
-	return "json", nil
 }
 
 func isTerminalRunStatus(s string) bool {

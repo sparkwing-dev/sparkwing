@@ -305,7 +305,6 @@ func runPipelineDescribe(args []string) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
 		return enc.Encode(found)
 	case "plain":
 		fmt.Println(found.Name)

@@ -41,7 +41,7 @@ profiles:
   team: { state: { type: s3, bucket: team, prefix: state } }
 `)
 	out := captureStdout(t, func() {
-		if err := runProfileCmd([]string{"--profile", "team"}); err != nil {
+		if err := runProfileCmd([]string{"--profile", "team", "--output", "pretty"}); err != nil {
 			t.Errorf("profile: %v", err)
 		}
 	})

@@ -254,7 +254,6 @@ func aggregateWorkItems(nodes []*store.Node, steps []*store.NodeStep) []SummaryW
 func renderSummary(s RunSummary, opts SummaryOpts, out io.Writer) error {
 	if opts.JSON {
 		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
 		return enc.Encode(s)
 	}
 	fmt.Fprintf(out, "run:       %s\n", s.RunID)

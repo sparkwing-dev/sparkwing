@@ -12,7 +12,6 @@ func RenderStats(w io.Writer, qs wingwire.QueueState, format string) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
 		return enc.Encode(qs.Events)
 	case "plain":
 		if line := FmtEventsLine(qs.Events); line != "" {

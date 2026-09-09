@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
@@ -49,6 +51,10 @@ func runDocsList(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsList.Path, flag.ContinueOnError)
 	var output string
 	var wf docsWebFlags
+	query := fs.StringP("query", "q", "", "match words against topic slug, title and summary")
+	var paging discoveryPaging
+	fs.IntVar(&paging.limit, "limit", 40, "maximum records; 0 returns every remaining match")
+	fs.StringVar(&paging.cursor, "cursor", "", "continue after next_cursor with the same filters")
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsList, fs, args); err != nil {
@@ -56,6 +62,9 @@ func runDocsList(args []string) error {
 			return nil
 		}
 		return err
+	}
+	if paging.limit < 0 {
+		return fmt.Errorf("--limit must be zero or greater")
 	}
 	ctx, cancel := newWebContext()
 	defer cancel()
@@ -65,13 +74,13 @@ func runDocsList(args []string) error {
 	}
 	printDiscoveryWarning(resolution)
 	if !resolution.useWeb {
-		return renderDocsList(docs.List(), output)
+		return renderDocsPage(docs.List(), *query, paging, output)
 	}
 	entries, err := resolution.client.DocIndex(ctx, resolution.version)
 	if err != nil {
 		return fmt.Errorf("docs list --web %s: %w", resolution.version, err)
 	}
-	return renderDocsList(entries, output)
+	return renderDocsPage(entries, *query, paging, output)
 }
 
 func runDocsGuides(args []string) error {
@@ -109,8 +118,10 @@ func runDocsGuides(args []string) error {
 
 func runDocsRead(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsRead.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "pretty | json | plain")
 	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, mcp)")
 	guide := fs.String("guide", "", "read a named set of topics instead of one (see `sparkwing docs guides`)")
+	section := fs.Int("section", 0, "read the embedded section whose start_line was returned by docs search")
 	var wf docsWebFlags
 	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsRead, fs, args); err != nil {
@@ -118,6 +129,9 @@ func runDocsRead(args []string) error {
 			return nil
 		}
 		return err
+	}
+	if fs.Changed("section") && (*section < 1 || *guide != "" || wf.web) {
+		return fmt.Errorf("docs read: --section requires a positive start_line, an embedded --topic, and no --guide or --web")
 	}
 	if *topic == "" && fs.NArg() > 0 {
 		*topic = fs.Arg(0)
@@ -130,8 +144,7 @@ func runDocsRead(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Print(body)
-		return nil
+		return writeDocument(os.Stdout, *topic, body, *output)
 	}
 	if *topic == "" {
 		PrintHelp(cmdDocsRead, os.Stderr)
@@ -147,32 +160,42 @@ func runDocsRead(args []string) error {
 	if !resolution.useWeb {
 		body, err := docs.Read(*topic)
 		if err != nil {
-			var b strings.Builder
-			fmt.Fprintf(&b, "%v\n\navailable topics:\n", err)
-			for _, e := range docs.List() {
-				fmt.Fprintf(&b, "  %s\n", e.Slug)
+			return fmt.Errorf("%w; use sparkwing docs list --query <topic>", err)
+		}
+		if *section > 0 {
+			sections, err := docs.Sections(*topic)
+			if err != nil {
+				return err
 			}
-			return errors.New(strings.TrimRight(b.String(), "\n"))
+			found := false
+			for _, selected := range sections {
+				if selected.StartLine == *section {
+					body, found = selected.Body, true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("docs read: no section starts at line %d in %s; repeat docs search for this build", *section, *topic)
+			}
 		}
-		fmt.Print(body)
 		if !strings.HasSuffix(body, "\n") {
-			fmt.Println()
+			body += "\n"
 		}
-		return nil
+		return writeDocument(os.Stdout, *topic, body, *output)
 	}
 	body, err := fetchDocWeb(ctx, resolution, *topic)
 	if err != nil {
 		return err
 	}
-	fmt.Print(body)
 	if !strings.HasSuffix(body, "\n") {
-		fmt.Println()
+		body += "\n"
 	}
-	return nil
+	return writeDocument(os.Stdout, *topic, body, *output)
 }
 
 func runDocsAll(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsAll.Path, flag.ContinueOnError)
+	output := fs.StringP("output", "o", "", "pretty | json | plain")
 	if err := parseAndCheck(cmdDocsAll, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -182,8 +205,19 @@ func runDocsAll(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("docs all: unexpected positional %q", fs.Arg(0))
 	}
-	fmt.Print(docs.All())
-	return nil
+	if *output == "json" {
+		for _, entry := range docs.List() {
+			body, err := docs.Read(entry.Slug)
+			if err != nil {
+				return err
+			}
+			if err := writeDocument(os.Stdout, entry.Slug, body, *output); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return writeText(os.Stdout, "document", docs.All(), *output)
 }
 
 func runDocsSearch(args []string) error {
@@ -191,6 +225,9 @@ func runDocsSearch(args []string) error {
 	var query string
 	var output string
 	var topicsOnly, withBody bool
+	var paging discoveryPaging
+	fs.IntVar(&paging.limit, "limit", 20, "maximum records; 0 returns every remaining match")
+	fs.StringVar(&paging.cursor, "cursor", "", "continue after next_cursor with the same filters")
 	fs.StringVarP(&query, "query", "q", "", "search terms (every token must match somewhere)")
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
 	fs.BoolVar(&withBody, "body", false, "print each matching section in full instead of a snippet")
@@ -201,6 +238,9 @@ func runDocsSearch(args []string) error {
 		}
 		return err
 	}
+	if paging.limit < 0 {
+		return fmt.Errorf("--limit must be zero or greater")
+	}
 	if query == "" && fs.NArg() > 0 {
 		query = strings.Join(fs.Args(), " ")
 	}
@@ -209,19 +249,74 @@ func runDocsSearch(args []string) error {
 		return errors.New("docs search: --query is required (e.g. --query \"pull_request\")")
 	}
 	if topicsOnly {
-		return renderDocsList(docs.Search(query), output)
+		return renderDocsPage(docs.Search(query), "", paging, output)
 	}
-	if strings.EqualFold(output, "pretty") || output == "" {
+	hits := docs.SearchSections(query)
+	keys := make([]string, len(hits))
+	for i, hit := range hits {
+		keys[i] = fmt.Sprintf("%s:%d", hit.Slug, hit.StartLine)
+	}
+	start, end, page, err := paging.bounds(keys)
+	if err != nil {
+		return err
+	}
+	if output == "pretty" && paging.cursor == "" {
 		printExampleHits(searchExamples(query), 4)
 	}
-	return renderDocsSections(docs.SearchSections(query), query, withBody, output)
+	if err := renderDocsSections(hits[start:end], query, withBody, output); err != nil {
+		return err
+	}
+	return page.write(output)
+}
+
+type sectionResult struct {
+	Slug       string `json:"slug"`
+	Heading    string `json:"heading"`
+	Level      int    `json:"level"`
+	StartLine  int    `json:"start_line"`
+	EndLine    int    `json:"end_line"`
+	Breadcrumb string `json:"breadcrumb,omitempty"`
+	Snippet    string `json:"snippet"`
+	Body       string `json:"body,omitempty"`
+}
+
+func renderDocsPage(entries []docs.Entry, query string, paging discoveryPaging, output string) error {
+	filtered := make([]docs.Entry, 0, len(entries))
+	for _, entry := range entries {
+		if matchesDiscoveryQuery(query, entry.Slug+" "+entry.Title+" "+entry.Summary) {
+			filtered = append(filtered, entry)
+		}
+	}
+	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Slug < filtered[j].Slug })
+	keys := make([]string, len(filtered))
+	for i, entry := range filtered {
+		keys[i] = entry.Slug
+	}
+	start, end, page, err := paging.bounds(keys)
+	if err != nil {
+		return err
+	}
+	if err := renderDocsList(filtered[start:end], output); err != nil {
+		return err
+	}
+	return page.write(output)
 }
 
 func renderDocsSections(hits []docs.Section, query string, withBody bool, output string) error {
 	switch strings.ToLower(output) {
 	case "json":
 
-		return ndjson.Write(os.Stdout, hits)
+		encoder := json.NewEncoder(os.Stdout)
+		for _, hit := range hits {
+			row := sectionResult{Slug: hit.Slug, Heading: hit.Heading, Level: hit.Level, StartLine: hit.StartLine, EndLine: hit.EndLine, Breadcrumb: hit.Breadcrumb, Snippet: sectionSnippet(hit, query)}
+			if withBody {
+				row.Body = hit.Body
+			}
+			if err := encoder.Encode(row); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "plain":
 		for _, h := range hits {
 			fmt.Printf("%s:%d\t%s\n", h.Slug, h.StartLine, sectionLabel(h))
@@ -244,11 +339,11 @@ func renderDocsSections(hits []docs.Section, query string, withBody bool, output
 				fmt.Printf("%s\n\n", h.Body)
 				continue
 			}
-			fmt.Printf("  %s\n\n", color.Dim(sectionSnippet(h, query)))
+			fmt.Printf("  %s\n", color.Dim(sectionSnippet(h, query)))
 		}
 		if !withBody {
 			fmt.Printf("%s %s\n", color.Dim("read them in full:"),
-				color.Cyan(fmt.Sprintf("sparkwing docs search -q %q --body", query)))
+				color.Cyan("sparkwing docs read --topic <slug> --section <start_line>"))
 		}
 		return nil
 	default:
@@ -280,10 +375,11 @@ func sectionSnippet(s docs.Section, query string) string {
 
 func truncateLine(s string) string {
 	const max = 110
-	if len(s) <= max {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max] + "..."
+	return string(runes[:max]) + "..."
 }
 
 func renderDocsList(entries []docs.Entry, output string) error {

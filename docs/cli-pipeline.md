@@ -1,4 +1,4 @@
-<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
+<!-- GENERATED from the CLI command registry by `sparkwing commands --format markdown --output plain`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->
 <!-- markdownlint-disable MD004 MD007 MD030 MD032 -->
 # CLI reference: sparkwing pipeline
 
@@ -78,7 +78,7 @@ hidden flag shouldn't surprise you.
 | Flag | Description |
 |---|---|
 | `--name NAME` | Pipeline name to describe (required) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 
@@ -107,7 +107,7 @@ score descending; agents should prefer -o json for consumption.
 | Flag | Description |
 |---|---|
 | `--query TEXT` | Search query (one or more tokens, all must hit some field) (required) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 
@@ -150,7 +150,7 @@ pipeline ever runs.
 |---|---|
 | `--name NAME` | Pipeline to explain (one of --name or --all required) |
 | `--all` | Validate every pipeline in this repo's sparkwing.yaml; non-zero exit on any failure |
-| `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 
@@ -305,6 +305,7 @@ Lists every managed hook file under .git/hooks/ along with the pipelines it invo
 
 | Flag | Description |
 |---|---|
+| `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints hook names. |
 | `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 
 ### Examples
@@ -411,7 +412,7 @@ override with --dir.
 | `--all` | Lint every pipeline in this repo's sparkwing.yaml; the default, non-zero exit on any violation |
 | `--rules` | Print each rule's charter (what it forbids and why) and exit |
 | `--dir DIR` | Directory of pipeline source to scan (default: <.sparkwing>/jobs) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `-C, --sw-cd DIR` | Operate as if started in this directory (re-anchors the .sparkwing search) |
 
 ### Examples
@@ -448,7 +449,7 @@ omitted.
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 | `--all` | Include entries marked hidden |
 
 ### Examples
@@ -618,7 +619,7 @@ with 'sparkwing run <name>' to actually dispatch.
 | `--name NAME` | Pipeline to plan |
 | `--start-at STEP` | Skip every WorkStep upstream of STEP in the resulting plan |
 | `--stop-at STEP` | Skip every WorkStep downstream of STEP in the resulting plan |
-| `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
 
 ### Examples
 

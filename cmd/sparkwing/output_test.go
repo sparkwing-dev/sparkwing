@@ -12,7 +12,7 @@ func TestResolveOutputFormat(t *testing.T) {
 		want    string
 		wantErr string
 	}{
-		{name: "empty defaults to pretty", outFmt: "", want: "pretty"},
+		{name: "empty defaults to json", outFmt: "", want: "json"},
 		{name: "pretty passes through", outFmt: "pretty", want: "pretty"},
 		{name: "json passes through", outFmt: "json", want: "json"},
 		{name: "plain passes through", outFmt: "plain", want: "plain"},

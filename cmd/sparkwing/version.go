@@ -76,30 +76,16 @@ func runVersion(args []string) error {
 	report := gatherVersionReport(*offline)
 
 	if *changelog {
-		printVersionChangelog(os.Stdout, report)
+		return writeRenderedText(os.Stdout, "document", output, func(w io.Writer) { printVersionChangelog(w, report) })
+	}
+	switch output {
+	case "json":
+		return json.NewEncoder(os.Stdout).Encode(report)
+	case "plain":
+		fmt.Println(report.CLI.Installed)
 		return nil
 	}
 
-	if output == "table" {
-		output = "pretty"
-	}
-	switch strings.ToLower(output) {
-	case "json", "":
-		if output == "" {
-			output = "pretty"
-		}
-		if output == "json" {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(report)
-		}
-	case "plain":
-		fmt.Println(report.CLI.Installed)
-		if report.LatestRelease != "" {
-			fmt.Println(report.LatestRelease)
-		}
-		return nil
-	}
 	printVersionTable(report)
 	return nil
 }

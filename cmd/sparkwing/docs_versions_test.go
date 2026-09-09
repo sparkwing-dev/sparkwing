@@ -200,7 +200,7 @@ func TestRunDocsCache_ClearOnEmptyIsNotAnError(t *testing.T) {
 func TestRunDocsCache_InfoOnEmptyDescribesAbsence(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	out := captureStdout(t, func() {
-		if err := runDocsCache([]string{"info"}); err != nil {
+		if err := runDocsCache([]string{"info", "--output", "pretty"}); err != nil {
 			t.Errorf("info on empty cache: %v", err)
 		}
 	})
