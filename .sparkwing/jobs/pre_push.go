@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,12 +28,16 @@ func runActionlint(jobContext context.Context) error {
 	return err
 }
 
-func runReleaseBinaryVulnerabilityScan(jobContext context.Context) error {
+func runReleaseBinaryVulnerabilityScan(jobContext context.Context) (resultErr error) {
 	scanDirectory, err := os.MkdirTemp("", "sparkwing-release-vulnerability-*")
 	if err != nil {
 		return fmt.Errorf("create release vulnerability scan directory: %w", err)
 	}
-	defer os.RemoveAll(scanDirectory)
+	defer func() {
+		if err := os.RemoveAll(scanDirectory); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove release vulnerability scan directory: %w", err))
+		}
+	}()
 
 	for _, binary := range publicBinaries {
 		artifact := filepath.Join(scanDirectory, binary)
