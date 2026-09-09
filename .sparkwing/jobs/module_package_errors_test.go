@@ -17,7 +17,7 @@ func TestModulePackageDiscoveryRejectsProductErrorsBeforeCommand(t *testing.T) {
 			root := gateFixtureRepo(t)
 			writeGoFile(t, filepath.Join(root, "broken", "source.go"), source)
 			gitAddAll(t, root)
-			err := forEachGoModule(context.Background(), "probe", "touch tool-ran", nil, true)
+			err := forEachGoModule(context.Background(), "probe", "touch tool-ran; true ./...", nil, true)
 			if err == nil || !strings.Contains(err.Error(), "list packages") {
 				t.Errorf("gate error = %v, want package discovery failure", err)
 			}
