@@ -353,6 +353,16 @@ Steps do not get to daemonize by accident: a process that leaves its step
 session with `setsid` is outside the ledger's view, and that is the one
 unsupported way to outlive a run.
 
+An interrupted job is stopped, not unwound. The commands its steps started do
+end, because the job kills their sessions as described above, but nothing
+inside the step's own Go code runs: the signal does not arrive there as a
+cancelled context, so a `defer` does not fire and neither does a `select` on
+`ctx.Done()`. That is what `runs bounce` rests on -- the supervisor records the
+outcome, and the killed job writes no terminal row of its own. Teardown
+therefore belongs in the ledger rather than in a `defer`: start a resource as a
+step command so its session is reaped, or register a cleanup command for
+anything that lives outside that tree.
+
 Resources a step starts *outside* its process tree -- a container, a Kind
 cluster, a Helm release -- are core's blind spot: they live in another daemon,
 not in the session the sweep kills. A sparks library that starts one registers

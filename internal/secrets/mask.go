@@ -1,7 +1,9 @@
 package secrets
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -205,18 +207,44 @@ func (m *Masker) maskValue(v any, depth int) (any, bool) {
 	case error:
 		masked := m.Mask(t.Error())
 		if masked == t.Error() {
-			return t, false
+			if _, changed := m.maskJSON(t, depth); !changed {
+				return t, false
+			}
+			masked = maskedValue
 		}
 		return maskedError{msg: masked, err: t}, true
 	default:
-		// safety: an attribute of any other type still renders through fmt in a
-		// log sink, so it is masked by its rendering rather than passed through.
+		// safety: text and JSON sinks can render different fields of the same value.
 		rendered := fmt.Sprint(v)
 		masked := m.Mask(rendered)
 		if masked == rendered {
-			return v, false
+			return m.maskJSON(v, depth)
 		}
 		return masked, true
+	}
+}
+
+func (m *Masker) maskJSON(v any, depth int) (any, bool) {
+	switch v.(type) {
+	case nil, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr, float32, float64:
+		return v, false
+	}
+
+	encoded, err := json.Marshal(v)
+	if err != nil {
+		return v, false
+	}
+	var decoded any
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
+		return v, false
+	}
+	switch decoded.(type) {
+	case map[string]any, []any, string:
+		return m.maskValue(decoded, depth)
+	default:
+		return v, false
 	}
 }
 
@@ -226,6 +254,8 @@ type maskedError struct {
 }
 
 func (e maskedError) Error() string { return e.msg }
+
+func (e maskedError) MarshalJSON() ([]byte, error) { return json.Marshal(e.msg) }
 
 func (e maskedError) Unwrap() error { return e.err }
 
