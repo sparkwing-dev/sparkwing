@@ -270,3 +270,51 @@ func TestApplyIsolatedHomeReportsADirectoryItCannotPrepare(t *testing.T) {
 		t.Errorf("error = %q, want it to name the flag", err)
 	}
 }
+
+func TestParseRunFlags_SeparatorPreservesPipelineArguments(t *testing.T) {
+	want := []string{"--", "--sw-priority", "back", "--sw-no-cache", "--sw-mystery", "--profile", "fictional"}
+	args := append([]string{"--sw-priority=front"}, want...)
+	flags, pass := parseRunFlags(args)
+	if flags.priority != "front" || !flags.prioritySet || flags.noCache || flags.profile != "" {
+		t.Fatalf("runner flags = %+v", flags)
+	}
+	if !slices.Equal(pass, want) {
+		t.Fatalf("pipeline arguments = %q, want %q", pass, want)
+	}
+}
+
+func TestDispatchRun_UnknownRunnerFlagPrecedesSideEffects(t *testing.T) {
+	for _, unknown := range []string{"--sw-mystery", "--sw-mystery=value"} {
+		t.Run(unknown, func(t *testing.T) {
+			t.Setenv("SPARKWING_HOME", "")
+			t.Setenv("XDG_CONFIG_HOME", "")
+			home := filepath.Join(t.TempDir(), "home")
+			missing := filepath.Join(t.TempDir(), "missing")
+			err := dispatchRun([]string{"fictional", "--sw-isolated-home", home, "--sw-cd", missing, unknown})
+			if err == nil || !strings.Contains(err.Error(), "unknown runner flag "+"\""+unknown+"\"") {
+				t.Errorf("dispatch error = %v, want unknown runner flag %q", err, unknown)
+			}
+			if _, err := os.Stat(home); !os.IsNotExist(err) {
+				t.Errorf("isolated home stat = %v, want no directory", err)
+			}
+			if os.Getenv("SPARKWING_HOME") != "" || os.Getenv("XDG_CONFIG_HOME") != "" {
+				t.Error("rejected runner flag changed the environment")
+			}
+		})
+	}
+}
+
+func TestDispatchRun_RetiredRunnerFlagKeepsMigrationHint(t *testing.T) {
+	err := dispatchRun([]string{"fictional", "--sw-profile", "fictional"})
+	if err == nil || !strings.Contains(err.Error(), "--profile") || strings.Contains(err.Error(), "unknown runner flag") {
+		t.Fatalf("dispatch error = %v, want retired profile flag migration", err)
+	}
+}
+
+func TestDispatchRun_SeparatorPassesRetiredFlagsToPipeline(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	err := dispatchRun([]string{"fictional", "--sw-cd", missing, "--", "--sw-profile", "fictional"})
+	if err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("dispatch error = %v, want pipeline directory lookup", err)
+	}
+}
