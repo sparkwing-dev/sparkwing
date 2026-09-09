@@ -26,6 +26,88 @@ unlock.
   options before the separator fail before execution setup. Put pipeline-owned options
   that use this prefix after `--`.
 
+### Added
+
+- **cli (Breaking):** `sparkwing crons` arms a subset of a repo's schedules,
+  pins what they run, and lets one host edit a declared cadence. `crons install` takes `--only`
+  to arm named pipelines or `pipeline/name` entries, reports the entries that
+  fire from the controller instead of arming them, and pins by default: the
+  compile that proves a pipeline builds is kept as the schedule's binary under
+  `<home>/crons/`, recorded with the checkout's commit, so a checkout updated
+  afterwards cannot change what runs unattended. `--follow` arms
+  without a pin, and the new `crons lock` and `crons unlock` move one schedule
+  between the two. `crons disarm` removes a single schedule, `crons set`
+  overrides its cron, zone, overlap policy, catch-up window or arguments on this
+  host alone, and `crons reset` drops that override. `crons list` gains a LOCK
+  column and marks an overridden expression, `crons show` prints declared,
+  override and effective values side by side, and `crons status` counts what is
+  pinned, what follows the checkout, what the checkout has moved past, and which
+  overrides were set against a declaration that has since changed. A scheduled
+  launch passes the schedule's arguments the way `sparkwing run <pipeline> --key
+  value` does, and each fire records what it ran with. See
+  [crons.md](docs/crons.md) and the [migration
+  note](docs/migrations/v0.48.0.md#armed-schedules-are-pinned).
+
+- **controller:** A controller evaluates the `where: controller` schedules
+  pushed to it. `PUT /api/v1/crons/repos` (runs.write) upserts one
+  repository's schedules against its clone URL and withdraws the ones the push
+  no longer carries, pinned at a commit or following a branch tip;
+  `GET /api/v1/crons` and `GET /api/v1/crons/{id}` (runs.read) serve the same
+  JSON shape the local dashboard already reads, and
+  `POST /api/v1/crons/{id}/pause|resume|run|disarm`, `PUT` and
+  `DELETE /api/v1/crons/{id}/override` and `DELETE /api/v1/crons/repos`
+  (runs.write) drive one. The controller ticks every minute under a lease held
+  in the runs store, so several controllers sharing one store resolve each due
+  instant exactly once, and each fire writes the trigger, the pending run and
+  the dispatch an operator's `pipeline trigger` writes, keyed
+  `<schedule id>@<due instant>` so a repeated tick reaches the first run. The
+  dashboard proxies every route at the same scope. See
+  [crons.md](docs/crons.md#controller-schedules).
+
+- **cli:** Every `sparkwing crons` verb but `tick`, `lock` and `unlock` takes
+  `--profile NAME` and acts on that profile's controller instead of this host,
+  rendering with the same renderer as the local path. A controller schedule is
+  pinned by the commit it was pushed at, which is why the two pin verbs have no
+  controller form. `crons install --profile` reads the repo's
+  `where: controller` entries, requires a git origin, resolves HEAD and the
+  branch, refuses a HEAD no remote branch carries (every fire would fail at the
+  clone) and warns on a dirty working tree, seeds the controller's git cache
+  with that commit, and pushes them; `--follow` clones the branch tip at each
+  fire instead of pinning.
+  `crons uninstall --profile` removes them, and `crons status --profile`
+  reports the controller's loop and its last tick.
+
+- **store (Breaking):** The runs store advances to schema 34, which keeps
+  several schedules for one pipeline and pins what they run. `cron_schedules`
+  gains a schedule name (`default` for the lone schedule of a pipeline), where
+  the schedule fires, the arguments its launch passes, the commit, pipeline
+  binary and sha256 digest it is locked to, and this host's override of the
+  declared cadence alongside the declaration that override was set against,
+  plus the branch a controller schedule was pushed from. Its unique key widens
+  from `(repo_path, pipeline)` to include the name, and `cron_fires` records
+  the arguments each launch was given. The migration declares the schema
+  requirement `cron-schedule-names-v1`: a binary older than this release
+  refuses the store, because it would rewrite a named or pushed row through
+  the key it still believes in and fire a pinned schedule by compiling the
+  checkout. Update every pinned SDK on the machine with
+  `sparkwing repos update`, then re-run `sparkwing crons install` so the OS
+  timer runs the new binary. See the [migration
+  note](docs/migrations/v0.48.0.md#runs-store-schema-34-named-locked-schedules).
+
+### Changed
+
+- **config + sdk (Breaking):** `on.schedule` takes a list of named entries, and
+  every entry declares `where` it fires -- `local` for a host armed with
+  `sparkwing crons install`, `controller` for a controller it was installed on.
+  `where` has no default, so a schedule already declared needs `where: local`
+  added to keep firing from its host. An entry also takes a `name`, required
+  once a pipeline declares more than one, and `args` keyed by CLI flag name the
+  way the pipeline's own `args:` are. In Go, `Triggers.Schedule` is now a
+  `pipelines.ScheduleTriggers` slice: `t.Schedule != nil` becomes
+  `len(t.Schedule) > 0`, and `t.Schedule.Cron` becomes a range over the
+  entries. See the [migration
+  note](docs/migrations/v0.48.0.md#onschedule-entries-say-where-they-fire).
+
 ## [v0.47.1] - 2026-09-09
 ### Fixed
 

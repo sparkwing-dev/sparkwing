@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -34,10 +36,10 @@ func describeTriggers(on pipelines.Triggers) []triggerLine {
 			Advisory: advisoryFields("branches", len(t.Branches) > 0, "actions", len(t.Actions) > 0),
 		})
 	}
-	if t := on.Schedule; t != nil {
+	for i := range on.Schedule {
 		out = append(out, triggerLine{
 			Event:  "schedule",
-			Detail: scheduleDetail(t),
+			Detail: scheduleDetail(&on.Schedule[i]),
 		})
 	}
 	if t := on.Webhook; t != nil {
@@ -60,13 +62,16 @@ func scheduleDetail(t *pipelines.ScheduleTrigger) string {
 	if tz == "" {
 		tz = pipelines.DefaultScheduleTZ
 	}
-	detail := fmt.Sprintf("%s (%s)", t.Cron, tz)
+	detail := fmt.Sprintf("%s: %s (%s) where %s", t.EffectiveName(), t.Cron, tz, t.Where)
 	var extra []string
 	if policy := t.OverlapPolicy(); policy != pipelines.DefaultScheduleOverlap {
 		extra = append(extra, "overlap "+policy)
 	}
 	if window, err := t.CatchUpDuration(); err == nil && window != pipelines.DefaultScheduleCatchUp {
 		extra = append(extra, "catch-up "+window.String())
+	}
+	for _, key := range slices.Sorted(maps.Keys(t.Args)) {
+		extra = append(extra, "arg "+key+"="+t.Args[key])
 	}
 	if len(extra) > 0 {
 		detail += ", " + strings.Join(extra, ", ")

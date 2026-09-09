@@ -617,7 +617,12 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 		discoveryContext, cancelDiscovery := context.WithTimeout(context.Background(), 5*time.Second)
 		services, discoveryErr := discovery.ServicesFor(discoveryContext, runProfile.ControllerURL(), runProfile.ControllerToken())
 		cancelDiscovery()
-		seedTriggerSource(runProfile, services.CachePod, discoveryErr, repoURL, sha)
+		repoDir, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			fmt.Fprintf(os.Stderr, "sparkwing run: gitcache seed skipped (cwd: %v)\n", cwdErr)
+		} else {
+			seedTriggerSource(runProfile, services.CachePod, discoveryErr, repoDir, repoURL, sha)
+		}
 	}
 
 	c := client.NewWithToken(runProfile.ControllerURL(), nil, runProfile.ControllerToken())
@@ -650,15 +655,10 @@ func seedWorkingTreeSnapshot(runProfile *profile.Profile, cacheURL, repoURL stri
 	return controllerErr
 }
 
-func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryErr error, repoURL, sha string) {
-	repoDir, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "sparkwing run: gitcache seed skipped (cwd: %v)\n", err)
-		return
-	}
+func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryErr error, repoDir, repoURL, sha string) {
 	if cacheURL != "" {
 		refreshContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err = bincache.RefreshRepo(refreshContext, cacheURL, bincache.CacheToken(), repoURL)
+		err := bincache.RefreshRepo(refreshContext, cacheURL, bincache.CacheToken(), repoURL)
 		cancel()
 		if err == nil {
 			return
@@ -676,7 +676,7 @@ func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryEr
 	}
 
 	refreshContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	err = bincache.RefreshRepoViaController(refreshContext, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL)
+	err := bincache.RefreshRepoViaController(refreshContext, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL)
 	cancel()
 	if err == nil {
 		return

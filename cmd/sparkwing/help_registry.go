@@ -3822,46 +3822,85 @@ Each tick resolves every due instant exactly once: it launches the run, skips
 it when the previous scheduled run is still going and the policy is skip, or
 records it missed when it fell outside the catch-up window. A scheduled run
 carries the trigger source "schedule" and executes through the same detached
-path as ` + "`sparkwing run --sw-detached`" + `.`,
-	SubcommandOrder: []string{"install", "uninstall", "status", "list", "show", "next", "pause", "resume", "run", "tick"},
+path as ` + "`sparkwing run --sw-detached`" + `.
+
+Arming pins by default: install compiles the pipeline and keeps that binary, so
+a checkout updated afterwards does not change what runs unattended. Re-run
+install to move the pin, ` + "`crons unlock`" + ` to follow the checkout again,
+and ` + "`crons set`" + ` to override a declared cadence on this host alone.
+
+--profile NAME points every verb but tick, lock and unlock at a controller
+instead of this host.
+` + "`crons install --profile`" + ` pushes the repo's ` + "`where: controller`" + `
+entries to it, pinned at HEAD unless --follow; the controller evaluates them
+from a loop of its own, one evaluator per store, and each fire becomes a
+trigger the cluster clones and runs.`,
+	SubcommandOrder: []string{
+		"install", "uninstall", "disarm", "lock", "unlock", "set", "reset",
+		"status", "list", "show", "next", "pause", "resume", "run", "tick",
+	},
 	Examples: []Example{
 		{"Arm this repo's schedules on this host", "sparkwing crons install"},
 		{"See what is armed and when it next fires", "sparkwing crons list"},
 		{"Check the timer and the last tick", "sparkwing crons status"},
+		{"Push this repo's controller schedules", "sparkwing crons install --profile prod"},
 	},
 }
 
 var cmdCronsInstall = Command{
 	Path:     "sparkwing crons install",
 	Synopsis: "Arm a repo's declared schedules on this host and install the OS timer",
-	Description: `Reads .sparkwing/sparkwing.yaml, records every pipeline that
-declares on.schedule against this home, and ensures the OS timer that runs the
-tick.
+	Description: `Reads .sparkwing/sparkwing.yaml, records every on.schedule
+entry that declares "where: local" against this home, and ensures the OS timer
+that runs the tick. An entry declaring "where: controller" is reported and left
+alone: this host does not fire it.
 
 Each pipeline is compiled first and has to appear in the binary's own
 description, because a schedule fires unattended: a pipeline that will not
-build is refused here instead of during unattended execution. --no-prove arms
-without that proof.
+build is refused here before unattended execution. That compile is also
+the pin: the binary is copied under the sparkwing home and recorded with the
+checkout's HEAD, so every fire runs what was armed however the checkout moves
+afterwards. --follow arms without a pin, and each fire compiles the checkout.
+--no-prove skips the compile, and so pins nothing.
+
+--only arms a subset, naming pipelines or pipeline/name entries; a name the
+repo does not declare is refused before anything is written.
 
 A repo that declares no schedule is reported as nothing to arm and installs no
-timer. Re-running install republishes what the repo declares: a changed cron,
-zone, overlap policy or catch-up window is stored, a pipeline that stopped
-declaring a cadence is marked undeclared, and pause state, cursor and fire
-history survive.
+timer. Re-running install is the explicit update: it re-pins at the current
+checkout, republishes what the repo declares, marks a pipeline that stopped
+declaring a cadence undeclared, and re-bases this host's overrides onto the new
+declaration. Pause state, cursor, fire history and the override values survive.
 
 Arming is per host. Another machine runs the same schedule only when the
-schedule is also armed on that machine.`,
+schedule is also armed on that machine.
+
+--profile NAME pushes the repo's "where: controller" entries to that
+controller instead, and reports the "where: local" ones as this host's. The
+push needs a git origin, because the cluster clones the source at each fire; it
+pins every fire to the checkout's HEAD unless --follow, which clones the branch
+tip. A HEAD no remote branch carries is refused, because every fire would fail
+at the clone; uncommitted edits are a warning, since the pushed commit is what
+runs. Re-running the push is the explicit update, and it moves the pin.`,
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Arm every registered repo instead of one", Group: "Input"},
-		{Name: "no-prove", Desc: "Arm without compiling the pipelines first", Group: "Behavior"},
+		{Name: "only", Argument: "NAMES", Desc: "Arm only these pipelines or pipeline/name entries (comma-separated or repeatable)", Group: "Filter"},
+		{Name: "follow", Desc: "Arm without pinning, so every fire compiles the checkout", Group: "Behavior"},
+		{Name: "no-prove", Desc: "Arm without compiling the pipelines first, which pins nothing", Group: "Behavior"},
 		{Name: "no-timer", Desc: "Arm without installing the OS timer, for a host that runs the tick from its own scheduler", Group: "Behavior", Hidden: true},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
+	GroupOrder: []string{"Input", "Filter", "Behavior", "Output"},
 	Examples: []Example{
 		{"Arm the current repo", "sparkwing crons install"},
 		{"Arm a different repo", "sparkwing crons install --repo /path/to/repo"},
+		{"Arm two entries only", "sparkwing crons install --only nightly,sweep/quick"},
+		{"Arm without pinning", "sparkwing crons install --follow"},
 		{"Arm every registered repo", "sparkwing crons install --fleet"},
+		{"Push the controller entries to a cluster", "sparkwing crons install --profile prod"},
+		{"Push them following the branch tip", "sparkwing crons install --profile prod --follow"},
 	},
 }
 
@@ -3872,8 +3911,12 @@ var cmdCronsUninstall = Command{
 from this home. When no schedule remains armed anywhere, the OS timer goes
 too: the timer exists to serve armed schedules and nothing else.
 
---fleet disarms every schedule this home holds.`,
+--fleet disarms every schedule this home holds.
+
+--profile NAME deletes the repo's schedules from that controller instead,
+naming the repo by its git origin.`,
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Disarm every schedule this home holds", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
@@ -3881,6 +3924,116 @@ too: the timer exists to serve armed schedules and nothing else.
 	Examples: []Example{
 		{"Disarm the current repo", "sparkwing crons uninstall"},
 		{"Disarm everything on this host", "sparkwing crons uninstall --fleet"},
+		{"Remove this repo from a controller", "sparkwing crons uninstall --profile prod"},
+	},
+}
+
+var cmdCronsDisarm = Command{
+	Path:     "sparkwing crons disarm",
+	Synopsis: "Remove one schedule from this host",
+	Description: `Deletes one schedule, its fire history and its pinned
+pipeline binary. Every other schedule of the same pipeline and repo stays
+armed.
+
+To stop a schedule without losing its history, pause it instead.`,
+	PosArgs: []PosArg{
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
+	},
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
+	},
+	Examples: []Example{
+		{"Remove one named entry", "sparkwing crons disarm sweep/quick"},
+	},
+}
+
+var cmdCronsLock = Command{
+	Path:     "sparkwing crons lock",
+	Synopsis: "Pin one schedule to the checkout as it stands",
+	Description: `Compiles the pipeline, keeps that binary under the sparkwing
+home, and records the checkout's HEAD against the schedule. Every later fire
+runs that binary, so editing or updating the checkout does not change what an
+unattended run executes.
+
+The pin covers the pipeline the repo declares. Scripts and binaries the
+pipeline runs from the checkout or from PATH are outside it.`,
+	PosArgs: []PosArg{
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
+	},
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
+	},
+	Examples: []Example{
+		{"Pin a schedule at HEAD", "sparkwing crons lock nightly"},
+	},
+}
+
+var cmdCronsUnlock = Command{
+	Path:     "sparkwing crons unlock",
+	Synopsis: "Let one schedule follow the checkout again",
+	Description: `Drops the pin and the pinned binary, so every later fire
+compiles the checkout as it stands at that minute, and the tick's refresh reads
+the repo's declaration again.`,
+	PosArgs: []PosArg{
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
+	},
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
+	},
+	Examples: []Example{
+		{"Follow the checkout again", "sparkwing crons unlock nightly"},
+	},
+}
+
+var cmdCronsSet = Command{
+	Path:     "sparkwing crons set",
+	Synopsis: "Override a declared cadence on this host",
+	Description: `Lays this host's own value over what the repo declares, for
+the cron expression, the zone, the overlap policy, the catch-up window and the
+launch's arguments. Everything left unnamed keeps the declared value, and a
+field named again replaces the previous override.
+
+--arg replaces the declared argument set whole, so name every argument the
+schedule should launch with.
+
+The override survives re-arming; ` + "`sparkwing crons reset`" + ` drops it.
+` + "`sparkwing crons list`" + ` marks an overridden expression with *, and
+` + "`sparkwing crons show`" + ` prints the declared, override and effective
+value side by side.`,
+	PosArgs: []PosArg{
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
+	},
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
+		{Name: "cron", Argument: "EXPR", Desc: "Cron expression to run instead of the declared one", Group: "Input"},
+		{Name: "tz", Argument: "ZONE", Desc: "Zone the expression is read in, such as America/Denver or local", Group: "Input"},
+		{Name: "overlap", Argument: "POLICY", Desc: "What a due instant does while the previous run is going: skip|queue", Group: "Input"},
+		{Name: "catch-up", Argument: "DUR", Desc: "How late a due instant may still fire, such as 6h", Group: "Input"},
+		{Name: "arg", Argument: "K=V", Desc: "Argument the launch passes (repeatable; replaces the declared set)", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
+	},
+	Examples: []Example{
+		{"Run it later on this host", "sparkwing crons set nightly --cron '0 5 * * *'"},
+		{"Read the expression locally", "sparkwing crons set nightly --tz local"},
+		{"Launch with arguments", "sparkwing crons set sweep/quick --arg depth=shallow --arg dry-run=true"},
+	},
+}
+
+var cmdCronsReset = Command{
+	Path:     "sparkwing crons reset",
+	Synopsis: "Drop this host's override of a schedule",
+	Description: `Returns the schedule to what the repo declares. The pin, the
+pause state, the cursor and the fire history are untouched.`,
+	PosArgs: []PosArg{
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
+	},
+	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
+	},
+	Examples: []Example{
+		{"Run what the repo declares", "sparkwing crons reset nightly"},
 	},
 }
 
@@ -3894,13 +4047,18 @@ reported, and how many schedules are armed, paused, and undeclared.
 
 Exits non-zero when schedules are armed and the timer is not running, runs
 another binary, or has not ticked in the last few minutes, so a check script
-can read the exit code. A host with nothing armed is healthy.`,
+can read the exit code. A host with nothing armed is healthy.
+
+--profile NAME reads a controller's scheduler instead: its counts, when its
+loop last ticked, and what that tick reported.`,
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
 		{"Read the host's scheduler health", "sparkwing crons status"},
 		{"Machine-readable", "sparkwing crons status -o json"},
+		{"Read a controller's scheduler", "sparkwing crons status --profile prod"},
 	},
 }
 
@@ -3914,6 +4072,7 @@ fired, that fire's outcome, and whether it is armed, paused, or undeclared.
 Schedules the repo no longer declares are hidden behind a count; --all shows
 them. They keep their history and never fire.`,
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "all", Desc: "Include schedules the repo no longer declares", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "sw-now", Argument: "RFC3339", Desc: "Read the relative times as of this instant", Group: "Behavior", Hidden: true},
@@ -3921,6 +4080,7 @@ them. They keep their history and never fire.`,
 	Examples: []Example{
 		{"What is armed here", "sparkwing crons list"},
 		{"Include withdrawn schedules", "sparkwing crons list --all"},
+		{"What a controller evaluates", "sparkwing crons list --profile prod"},
 		{"Machine-readable (NDJSON)", "sparkwing crons list -o json"},
 	},
 }
@@ -3936,9 +4096,10 @@ status, and the reason for any outcome that is not a launch.
 NAME is a schedule id, a repo/pipeline name, or a bare pipeline name that is
 unique across this host's schedules.`,
 	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "fires", Argument: "N", Desc: "How many recent fires to show", Default: "10", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
@@ -3955,9 +4116,10 @@ var cmdCronsNext = Command{
 schedule name to inspect one expression; omit it to merge upcoming times
 from every armed schedule.`,
 	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name; omit for every armed schedule"},
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name; omit for every armed schedule"},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "count", Argument: "N", Desc: "How many instants to show", Default: "5", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "sw-now", Argument: "RFC3339", Desc: "Walk forward from this instant instead of now", Group: "Behavior", Hidden: true},
@@ -3975,9 +4137,10 @@ var cmdCronsPause = Command{
 resuming it fires the next due instant instead of replaying the ones that
 passed while it was paused.`,
 	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -3991,9 +4154,10 @@ var cmdCronsResume = Command{
 	Description: `Resumes at the next due instant. The instants that passed while the schedule
 was paused are behind its cursor and do not run.`,
 	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -4011,9 +4175,10 @@ schedule's history as a manual fire.
 The cursor does not move: a manual run is not one of the cadence's due
 instants, so the next one still fires on time.`,
 	PosArgs: []PosArg{
-		{Name: "NAME", Desc: "Schedule id, repo/pipeline, or a unique pipeline name", Required: true},
+		{Name: "NAME", Desc: "Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name", Required: true},
 	},
 	Flags: []FlagSpec{
+		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for this host", Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 	},
 	Examples: []Example{
@@ -4026,8 +4191,10 @@ var cmdCronsTick = Command{
 	Synopsis: "Evaluate every armed schedule once (the OS timer's entry point)",
 	Description: `What the systemd timer or launchd agent runs every minute.
 It takes an exclusive lock so two ticks never resolve the same instant,
-re-reads what the armed repos declare, evaluates every declared unpaused
-schedule against its cursor, launches what is due, and records each outcome.
+re-reads the declaration of every schedule that follows its checkout -- a
+pinned schedule keeps the declaration it was armed with -- evaluates every
+declared unpaused schedule against its cursor, launches what is due, and
+records each outcome.
 
 Quiet on success: one summary line and the id of each run it launched. It
 exits non-zero only when the tick itself could not run, so a schedule that

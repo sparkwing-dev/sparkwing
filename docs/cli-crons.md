@@ -24,10 +24,27 @@ records it missed when it fell outside the catch-up window. A scheduled run
 carries the trigger source "schedule" and executes through the same detached
 path as `sparkwing run --sw-detached`.
 
+Arming pins by default: install compiles the pipeline and keeps that binary, so
+a checkout updated afterwards does not change what runs unattended. Re-run
+install to move the pin, `crons unlock` to follow the checkout again,
+and `crons set` to override a declared cadence on this host alone.
+
+--profile NAME points every verb but tick, lock and unlock at a controller
+instead of this host.
+`crons install --profile` pushes the repo's `where: controller`
+entries to it, pinned at HEAD unless --follow; the controller evaluates them
+from a loop of its own, one evaluator per store, and each fire becomes a
+trigger the cluster clones and runs.
+
 ### Subcommands
 
 - `install` -- Arm a repo's declared schedules on this host and install the OS timer
 - `uninstall` -- Disarm a repo's schedules, and remove the timer when nothing is left
+- `disarm` -- Remove one schedule from this host
+- `lock` -- Pin one schedule to the checkout as it stands
+- `unlock` -- Let one schedule follow the checkout again
+- `set` -- Override a declared cadence on this host
+- `reset` -- Drop this host's override of a schedule
 - `status` -- Report the OS timer, the last tick, and what is armed here
 - `list` -- List the schedules armed on this host
 - `show` -- Show one schedule's full record and its recent fires
@@ -48,37 +65,86 @@ sparkwing crons list
 
 # Check the timer and the last tick
 sparkwing crons status
+
+# Push this repo's controller schedules
+sparkwing crons install --profile prod
+```
+
+## `sparkwing crons disarm`
+
+Remove one schedule from this host
+
+Deletes one schedule, its fire history and its pinned
+pipeline binary. Every other schedule of the same pipeline and repo stays
+armed.
+
+To stop a schedule without losing its history, pause it instead.
+
+### Arguments
+
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--profile NAME` | Profile name; omit for this host |
+| `-o, --output FMT` | Output format: pretty\|json\|plain |
+
+### Examples
+
+```sh
+# Remove one named entry
+sparkwing crons disarm sweep/quick
 ```
 
 ## `sparkwing crons install`
 
 Arm a repo's declared schedules on this host and install the OS timer
 
-Reads .sparkwing/sparkwing.yaml, records every pipeline that
-declares on.schedule against this home, and ensures the OS timer that runs the
-tick.
+Reads .sparkwing/sparkwing.yaml, records every on.schedule
+entry that declares "where: local" against this home, and ensures the OS timer
+that runs the tick. An entry declaring "where: controller" is reported and left
+alone: this host does not fire it.
 
 Each pipeline is compiled first and has to appear in the binary's own
 description, because a schedule fires unattended: a pipeline that will not
-build is refused here instead of during unattended execution. --no-prove arms
-without that proof.
+build is refused here before unattended execution. That compile is also
+the pin: the binary is copied under the sparkwing home and recorded with the
+checkout's HEAD, so every fire runs what was armed however the checkout moves
+afterwards. --follow arms without a pin, and each fire compiles the checkout.
+--no-prove skips the compile, and so pins nothing.
+
+--only arms a subset, naming pipelines or pipeline/name entries; a name the
+repo does not declare is refused before anything is written.
 
 A repo that declares no schedule is reported as nothing to arm and installs no
-timer. Re-running install republishes what the repo declares: a changed cron,
-zone, overlap policy or catch-up window is stored, a pipeline that stopped
-declaring a cadence is marked undeclared, and pause state, cursor and fire
-history survive.
+timer. Re-running install is the explicit update: it re-pins at the current
+checkout, republishes what the repo declares, marks a pipeline that stopped
+declaring a cadence undeclared, and re-bases this host's overrides onto the new
+declaration. Pause state, cursor, fire history and the override values survive.
 
 Arming is per host. Another machine runs the same schedule only when the
 schedule is also armed on that machine.
+
+--profile NAME pushes the repo's "where: controller" entries to that
+controller instead, and reports the "where: local" ones as this host's. The
+push needs a git origin, because the cluster clones the source at each fire; it
+pins every fire to the checkout's HEAD unless --follow, which clones the branch
+tip. A HEAD no remote branch carries is refused, because every fire would fail
+at the clone; uncommitted edits are a warning, since the pushed commit is what
+runs. Re-running the push is the explicit update, and it moves the pin.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Arm every registered repo instead of one |
-| `--no-prove` | Arm without compiling the pipelines first |
+| `--only NAMES` | Arm only these pipelines or pipeline/name entries (comma-separated or repeatable) |
+| `--follow` | Arm without pinning, so every fire compiles the checkout |
+| `--no-prove` | Arm without compiling the pipelines first, which pins nothing |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -90,8 +156,20 @@ sparkwing crons install
 # Arm a different repo
 sparkwing crons install --repo /path/to/repo
 
+# Arm two entries only
+sparkwing crons install --only nightly,sweep/quick
+
+# Arm without pinning
+sparkwing crons install --follow
+
 # Arm every registered repo
 sparkwing crons install --fleet
+
+# Push the controller entries to a cluster
+sparkwing crons install --profile prod
+
+# Push them following the branch tip
+sparkwing crons install --profile prod --follow
 ```
 
 ## `sparkwing crons list`
@@ -109,6 +187,7 @@ them. They keep their history and never fire.
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--all` | Include schedules the repo no longer declares |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
@@ -121,8 +200,40 @@ sparkwing crons list
 # Include withdrawn schedules
 sparkwing crons list --all
 
+# What a controller evaluates
+sparkwing crons list --profile prod
+
 # Machine-readable (NDJSON)
 sparkwing crons list -o json
+```
+
+## `sparkwing crons lock`
+
+Pin one schedule to the checkout as it stands
+
+Compiles the pipeline, keeps that binary under the sparkwing
+home, and records the checkout's HEAD against the schedule. Every later fire
+runs that binary, so editing or updating the checkout does not change what an
+unattended run executes.
+
+The pin covers the pipeline the repo declares. Scripts and binaries the
+pipeline runs from the checkout or from PATH are outside it.
+
+### Arguments
+
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FMT` | Output format: pretty\|json\|plain |
+
+### Examples
+
+```sh
+# Pin a schedule at HEAD
+sparkwing crons lock nightly
 ```
 
 ## `sparkwing crons next`
@@ -135,12 +246,13 @@ from every armed schedule.
 
 ### Arguments
 
-- `NAME` (optional) -- Schedule id, repo/pipeline, or a unique pipeline name; omit for every armed schedule
+- `NAME` (optional) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name; omit for every armed schedule
 
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--count N` | How many instants to show (default: 5) |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
@@ -164,12 +276,13 @@ passed while it was paused.
 
 ### Arguments
 
-- `NAME` (required) -- Schedule id, repo/pipeline, or a unique pipeline name
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
 
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -177,6 +290,31 @@ passed while it was paused.
 ```sh
 # Pause a schedule
 sparkwing crons pause fictional-nightly
+```
+
+## `sparkwing crons reset`
+
+Drop this host's override of a schedule
+
+Returns the schedule to what the repo declares. The pin, the
+pause state, the cursor and the fire history are untouched.
+
+### Arguments
+
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--profile NAME` | Profile name; omit for this host |
+| `-o, --output FMT` | Output format: pretty\|json\|plain |
+
+### Examples
+
+```sh
+# Run what the repo declares
+sparkwing crons reset nightly
 ```
 
 ## `sparkwing crons resume`
@@ -188,12 +326,13 @@ was paused are behind its cursor and do not run.
 
 ### Arguments
 
-- `NAME` (required) -- Schedule id, repo/pipeline, or a unique pipeline name
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
 
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -216,12 +355,13 @@ instants, so the next one still fires on time.
 
 ### Arguments
 
-- `NAME` (required) -- Schedule id, repo/pipeline, or a unique pipeline name
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
 
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -229,6 +369,52 @@ instants, so the next one still fires on time.
 ```sh
 # Run a schedule's pipeline now
 sparkwing crons run fictional-nightly
+```
+
+## `sparkwing crons set`
+
+Override a declared cadence on this host
+
+Lays this host's own value over what the repo declares, for
+the cron expression, the zone, the overlap policy, the catch-up window and the
+launch's arguments. Everything left unnamed keeps the declared value, and a
+field named again replaces the previous override.
+
+--arg replaces the declared argument set whole, so name every argument the
+schedule should launch with.
+
+The override survives re-arming; `sparkwing crons reset` drops it.
+`sparkwing crons list` marks an overridden expression with *, and
+`sparkwing crons show` prints the declared, override and effective
+value side by side.
+
+### Arguments
+
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--profile NAME` | Profile name; omit for this host |
+| `--cron EXPR` | Cron expression to run instead of the declared one |
+| `--tz ZONE` | Zone the expression is read in, such as America/Denver or local |
+| `--overlap POLICY` | What a due instant does while the previous run is going: skip\|queue |
+| `--catch-up DUR` | How late a due instant may still fire, such as 6h |
+| `--arg K=V` | Argument the launch passes (repeatable; replaces the declared set) |
+| `-o, --output FMT` | Output format: pretty\|json\|plain |
+
+### Examples
+
+```sh
+# Run it later on this host
+sparkwing crons set nightly --cron '0 5 * * *'
+
+# Read the expression locally
+sparkwing crons set nightly --tz local
+
+# Launch with arguments
+sparkwing crons set sweep/quick --arg depth=shallow --arg dry-run=true
 ```
 
 ## `sparkwing crons show`
@@ -245,12 +431,13 @@ unique across this host's schedules.
 
 ### Arguments
 
-- `NAME` (required) -- Schedule id, repo/pipeline, or a unique pipeline name
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
 
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--fires N` | How many recent fires to show (default: 10) |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
@@ -277,10 +464,14 @@ Exits non-zero when schedules are armed and the timer is not running, runs
 another binary, or has not ticked in the last few minutes, so a check script
 can read the exit code. A host with nothing armed is healthy.
 
+--profile NAME reads a controller's scheduler instead: its counts, when its
+loop last ticked, and what that tick reported.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
 
 ### Examples
@@ -291,6 +482,9 @@ sparkwing crons status
 
 # Machine-readable
 sparkwing crons status -o json
+
+# Read a controller's scheduler
+sparkwing crons status --profile prod
 ```
 
 ## `sparkwing crons tick`
@@ -299,8 +493,10 @@ Evaluate every armed schedule once (the OS timer's entry point)
 
 What the systemd timer or launchd agent runs every minute.
 It takes an exclusive lock so two ticks never resolve the same instant,
-re-reads what the armed repos declare, evaluates every declared unpaused
-schedule against its cursor, launches what is due, and records each outcome.
+re-reads the declaration of every schedule that follows its checkout -- a
+pinned schedule keeps the declaration it was armed with -- evaluates every
+declared unpaused schedule against its cursor, launches what is due, and
+records each outcome.
 
 Quiet on success: one summary line and the id of each run it launched. It
 exits non-zero only when the tick itself could not run, so a schedule that
@@ -338,10 +534,14 @@ too: the timer exists to serve armed schedules and nothing else.
 
 --fleet disarms every schedule this home holds.
 
+--profile NAME deletes the repo's schedules from that controller instead,
+naming the repo by its git origin.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--profile NAME` | Profile name; omit for this host |
 | `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Disarm every schedule this home holds |
 | `-o, --output FMT` | Output format: pretty\|json\|plain |
@@ -354,4 +554,32 @@ sparkwing crons uninstall
 
 # Disarm everything on this host
 sparkwing crons uninstall --fleet
+
+# Remove this repo from a controller
+sparkwing crons uninstall --profile prod
+```
+
+## `sparkwing crons unlock`
+
+Let one schedule follow the checkout again
+
+Drops the pin and the pinned binary, so every later fire
+compiles the checkout as it stands at that minute, and the tick's refresh reads
+the repo's declaration again.
+
+### Arguments
+
+- `NAME` (required) -- Schedule id, repo/pipeline[/name], pipeline/name, or a unique pipeline name
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FMT` | Output format: pretty\|json\|plain |
+
+### Examples
+
+```sh
+# Follow the checkout again
+sparkwing crons unlock nightly
 ```
