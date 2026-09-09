@@ -56,6 +56,10 @@ CHANGELOG links here.
   the cadence, what a late tick should do, or what an overlapping run
   should do. The mapping carries those answers, and arming a host is a
   separate, explicit step on that host: `sparkwing crons install`.
+- **Older SDK pins:** a pipeline binary built against an SDK before this
+  release reads `schedule:` as a string, so a repo pinned to one must keep the
+  scalar form until it bumps; the mapping form makes that binary warn that the
+  project config is unreadable and run with the caller's arguments only.
 
 ## Executor registration and contribution budgets
 
