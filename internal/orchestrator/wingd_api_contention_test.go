@@ -70,6 +70,10 @@ const foreignHold = 3 * time.Second
 // holds a write transaction, and holds the read routes and the admission
 // path's own store read clear of it.
 func TestWingdAPIReadsDoNotWaitOnAForeignWriter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("samples API traffic through a sustained foreign write lock")
+	}
+
 	home := wingdTestHome(t)
 	createStore(t, home)
 	sock, runs := startAPIDaemon(t, home, nil)

@@ -9,6 +9,12 @@ this file is a menu and checklist, not a command that every change must run.
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
+- **Orchestrator iteration:** `GOWORK=off go test -short -count=1
+  -timeout=5m ./internal/orchestrator` keeps the inexpensive `RunLocal` and
+  daemon coverage. It skips the process-per-node binary fixtures, scaffolded
+  headless module, and tests that exercise sustained contention or real
+  timeout windows. Run without `-short` when changing those boundaries. The
+  normal `test` and `pre-commit` pipelines retain those tests.
 - **Goroutine leaks:** every package with tests carries a `leak_test.go` whose
   `TestMain` hands the suite to `internal/testleak`, so a package fails when a
   goroutine outlives its tests. A new test package needs that file too; copy an

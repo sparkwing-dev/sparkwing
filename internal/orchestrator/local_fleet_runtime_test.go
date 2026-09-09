@@ -68,6 +68,10 @@ func TestPrepareLocalFleetRuntimeRequiresExactConfigAndLocalSQLite(t *testing.T)
 // safety: a schema-31 helper may observe a sealed candidate, but cannot reserve
 // capacity or execute it until its exact compiled body has been attested.
 func TestForegroundFleetAuthorityRequiresBodyAttestationThenFallsBackToCoordinator(t *testing.T) {
+	if testing.Short() {
+		t.Skip("exercises the fleet coordinator fallback delay")
+	}
+
 	fleetHelperBodyCalls.Store(0)
 	fleetCoordinatorBodyCalls.Store(0)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
