@@ -28,19 +28,32 @@ const cronsLogFile = "crons.log"
 
 const cronsLockFile = "crons.lock"
 
+const cronsPinDir = "crons"
+
 func runCrons(args []string) error {
 	if handleParentHelp(cmdCrons, args) {
 		return nil
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdCrons, os.Stderr)
-		return errors.New("crons: subcommand required (install|uninstall|status|list|show|next|pause|resume|run|tick)")
+		return errors.New("crons: subcommand required " +
+			"(install|uninstall|disarm|lock|unlock|set|reset|status|list|show|next|pause|resume|run|tick)")
 	}
 	switch args[0] {
 	case "install":
 		return runCronsInstall(args[1:])
 	case "uninstall":
 		return runCronsUninstall(args[1:])
+	case "disarm":
+		return runCronsDisarm(args[1:])
+	case "lock":
+		return runCronsLock(args[1:])
+	case "unlock":
+		return runCronsUnlock(args[1:])
+	case "set":
+		return runCronsSet(args[1:])
+	case "reset":
+		return runCronsReset(args[1:])
 	case "status":
 		return runCronsStatus(args[1:])
 	case "list":
@@ -102,6 +115,7 @@ func openCrons(nowRFC string) (*cronsSession, func(), error) {
 			Host:     host,
 			Version:  installedVersion(),
 			LockPath: filepath.Join(paths.Root, cronsLockFile),
+			PinRoot:  filepath.Join(paths.Root, cronsPinDir),
 			ArmedBy:  armedBy(host),
 		},
 		store: st,
@@ -155,11 +169,17 @@ type cronLauncher struct {
 }
 
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, _ time.Time) (string, error) {
+	// safety: the effective arguments are passed as a submission's own, exactly
+	// as `sparkwing run <pipeline> --key value` would, so the repository's
+	// defaults and the pipeline's own args still merge underneath them.
 	result, err := persistSubmission(ctx, l.store, l.paths, submission{
-		Pipeline:   s.Pipeline,
-		RepoDir:    s.RepoPath,
-		Source:     scheduleTriggerSource,
-		ScheduleID: s.ID,
+		Pipeline:     s.Pipeline,
+		RepoDir:      s.RepoPath,
+		Source:       scheduleTriggerSource,
+		ScheduleID:   s.ID,
+		Args:         s.Effective().Args,
+		PinnedBinary: s.LockedBinary,
+		PinnedDigest: s.LockedDigest,
 	})
 	if err != nil {
 		return "", err
@@ -309,11 +329,4 @@ func cronAbsTime(t time.Time, loc *time.Location) string {
 		loc = time.UTC
 	}
 	return t.In(loc).Format("2006-01-02 15:04:05 MST")
-}
-
-func cronTZLabel(s store.CronSchedule) string {
-	if s.TZ == "" {
-		return "UTC"
-	}
-	return s.TZ
 }

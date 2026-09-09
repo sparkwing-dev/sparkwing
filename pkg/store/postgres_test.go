@@ -201,6 +201,135 @@ func assertPostgresCronShape(t *testing.T, st *store.Store) {
 	}
 }
 
+func TestSchemaV33PostgresFreshAndV32UpgradeShape(t *testing.T) {
+	t.Run("fresh", func(t *testing.T) {
+		assertPostgresNamedCronShape(t, openPGTestStore(t))
+	})
+	t.Run("v32 upgrade", func(t *testing.T) {
+		scoped := pgTestSchemaDSN(t)
+		ctx := context.Background()
+		st, err := store.OpenPostgres(ctx, scoped)
+		if err != nil {
+			t.Fatal(err)
+		}
+		statements := []string{`DROP INDEX idx_cron_schedules_repo_pipeline_name`}
+		for _, column := range []string{
+			"schedule_name", "where_", "git_branch", "args", "locked_ref", "locked_binary", "locked_digest",
+			"override_cron", "override_tz", "override_overlap", "override_catch_up_ns",
+			"override_args", "override_base", "override_set_at",
+		} {
+			statements = append(statements, `ALTER TABLE cron_schedules DROP COLUMN `+column)
+		}
+		statements = append(statements,
+			// safety: unnamed, so Postgres mints the constraint name a v32
+			// database really carries rather than the test asserting a name it
+			// chose for the migration to find.
+			`ALTER TABLE cron_schedules ADD UNIQUE (repo_path, pipeline)`,
+			`ALTER TABLE cron_fires DROP COLUMN args`,
+			`DELETE FROM sparkwing_schema_version WHERE version >= 33`,
+		)
+		for _, statement := range statements {
+			if _, err := st.DB().ExecContext(ctx, statement); err != nil {
+				_ = st.Close()
+				t.Fatalf("downgrade with %q: %v", statement, err)
+			}
+		}
+		seedV32CronRowsPostgres(t, st)
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+		up, err := store.OpenPostgres(ctx, scoped)
+		if err != nil {
+			t.Fatalf("upgrade v32: %v", err)
+		}
+		defer up.Close()
+		assertPostgresNamedCronShape(t, up)
+		if got, err := up.CurrentSchemaVersion(ctx); err != nil || got != store.ExpectedSchemaVersion() {
+			t.Fatalf("schema version = %d, err = %v, want %d", got, err, store.ExpectedSchemaVersion())
+		}
+		assertTwoNamesOnOnePipeline(t, up, "/repo/one", "nightly")
+	})
+}
+
+// safety: the rows a v32 store held, so the upgrade is measured against a table
+// with data in it rather than an empty one.
+func seedV32CronRowsPostgres(t *testing.T, st *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	armedNS := cronBase.UnixNano()
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
+		`INSERT INTO cron_schedules
+         (id, repo_path, pipeline, cron, tz, overlap, catch_up_ns, armed_at, armed_by,
+          updated_at, cursor_at, last_run_id, last_outcome)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		"crn_nightly", "/repo/one", "nightly", "0 * * * *", "UTC", store.CronOverlapSkip,
+		int64(time.Hour), armedNS, "korey", armedNS, armedNS, "run-1", store.CronOutcomeFired,
+	); err != nil {
+		t.Fatalf("insert a v32 schedule: %v", err)
+	}
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
+		`INSERT INTO cron_fires (id, schedule_id, due_at, decided_at, outcome, run_id, detail)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`),
+		"crf_nightly", "crn_nightly", armedNS, armedNS, store.CronOutcomeFired, "run-1", "",
+	); err != nil {
+		t.Fatalf("insert a v32 fire: %v", err)
+	}
+}
+
+func assertPostgresNamedCronShape(t *testing.T, st *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	for table, columns := range map[string][]string{
+		"cron_schedules": {
+			"schedule_name", "where_", "git_branch", "args", "locked_ref", "locked_binary", "locked_digest",
+			"override_cron", "override_tz", "override_overlap", "override_catch_up_ns",
+			"override_args", "override_base", "override_set_at",
+		},
+		"cron_fires": {"args"},
+	} {
+		for _, column := range columns {
+			var present int
+			if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
+ WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2`,
+				table, column).Scan(&present); err != nil {
+				t.Fatalf("inspect %s.%s: %v", table, column, err)
+			}
+			if present != 1 {
+				t.Errorf("postgres schema missing %s.%s", table, column)
+			}
+		}
+	}
+	// safety: the SQLite twin declares these as INTEGER, so a replacer miss
+	// would silently give Postgres a 32-bit column that truncates UnixNano.
+	for _, column := range []string{"override_catch_up_ns", "override_set_at"} {
+		var dataType string
+		if err := st.DB().QueryRowContext(ctx, `SELECT data_type FROM information_schema.columns
+ WHERE table_schema = current_schema() AND table_name = 'cron_schedules' AND column_name = $1`,
+			column).Scan(&dataType); err != nil {
+			t.Fatalf("inspect cron_schedules.%s type: %v", column, err)
+		}
+		if dataType != "bigint" {
+			t.Errorf("cron_schedules.%s is %s, want bigint", column, dataType)
+		}
+	}
+	var indexes int
+	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_indexes
+ WHERE schemaname = current_schema() AND indexname = 'idx_cron_schedules_repo_pipeline_name'`).Scan(&indexes); err != nil {
+		t.Fatal(err)
+	}
+	if indexes != 1 {
+		t.Errorf("idx_cron_schedules_repo_pipeline_name count = %d, want 1", indexes)
+	}
+	var narrow int
+	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_constraint
+ WHERE conrelid = 'cron_schedules'::regclass AND conname = 'cron_schedules_repo_path_pipeline_key'`).Scan(&narrow); err != nil {
+		t.Fatal(err)
+	}
+	if narrow != 0 {
+		t.Errorf("the (repo_path, pipeline) unique constraint survived the widening")
+	}
+}
+
 func assertPostgresExecutionPolicyShape(t *testing.T, st *store.Store) {
 	t.Helper()
 	ctx := context.Background()

@@ -26,6 +26,16 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/concurrency/{key}/release` | `admin` |
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `admin` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `runs.read` |
+| `GET` | `/api/v1/crons` | `runs.read` |
+| `DELETE` | `/api/v1/crons/repos` | `runs.write` |
+| `PUT` | `/api/v1/crons/repos` | `runs.write` |
+| `GET` | `/api/v1/crons/{id}` | `runs.read` |
+| `POST` | `/api/v1/crons/{id}/disarm` | `runs.write` |
+| `DELETE` | `/api/v1/crons/{id}/override` | `runs.write` |
+| `PUT` | `/api/v1/crons/{id}/override` | `runs.write` |
+| `POST` | `/api/v1/crons/{id}/pause` | `runs.write` |
+| `POST` | `/api/v1/crons/{id}/resume` | `runs.write` |
+| `POST` | `/api/v1/crons/{id}/run` | `runs.write` |
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
 | `POST` | `/api/v1/gitcache/git/{path...}` | `admin` |

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -158,8 +159,15 @@ func requirementsThrough(version int) []string {
 			names = append(names, declared...)
 		}
 	}
+	return sortedSet(names)
+}
+
+// safety: one name may be declared by more than one version -- a migration that
+// repairs an earlier one repeats it -- and a requirement list is a set, so a
+// caller diffing two of them must not see it twice.
+func sortedSet(names []string) []string {
 	sort.Strings(names)
-	return names
+	return slices.Compact(names)
 }
 
 func requirementsToBackfill(listed []SchemaRequirement, version int) []string {
@@ -227,8 +235,7 @@ func requirementsBetween(from, to int) []string {
 			names = append(names, declared...)
 		}
 	}
-	sort.Strings(names)
-	return names
+	return sortedSet(names)
 }
 
 // safety: name the highest stamp among the unknown requirements, because a build

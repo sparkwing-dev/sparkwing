@@ -297,10 +297,13 @@ var triggerBlocks = map[string]string{
       # GitHub webhook at this pipeline.
       push: {}
 `,
-	"schedule": `      # Cron cadence, read in UTC. 09:00 daily. Arm it on this
-      # host with ` + "`sparkwing crons install`" + `; expand it to a mapping
-      # (cron, tz, overlap, catch_up) to change the zone or the policy.
-      schedule: "0 9 * * *"
+	"schedule": `      # Cron cadence, read in UTC. 09:00 daily. ` + "`where`" + ` is required
+      # and has no default: ` + "`local`" + ` fires from a host you arm with
+      # ` + "`sparkwing crons install`" + `, ` + "`controller`" + ` from a controller. Add
+      # tz, overlap, catch_up, args or a second named entry to the list.
+      schedule:
+        cron: "0 9 * * *"
+        where: local
 `,
 	"manual": "",
 }
@@ -776,7 +779,9 @@ import (
 // pipeline's .sparkwing/sparkwing.yaml entry:
 //
 //   on:
-//     schedule: "0 8 * * *"   # daily at 08:00 UTC
+//     schedule:
+//       cron: "0 8 * * *"   # daily at 08:00 UTC
+//       where: local        # required; local fires from the host you arm
 //
 // Then arm it on the host that should run it with
 // "sparkwing crons install".

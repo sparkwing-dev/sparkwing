@@ -1619,6 +1619,47 @@ func (c *Client) post(ctx context.Context, path string, body any, wantStatus int
 	return nil
 }
 
+func (c *Client) put(ctx context.Context, path string, body any, wantStatus int, out any) error {
+	return c.sendJSON(ctx, http.MethodPut, path, body, wantStatus, out)
+}
+
+func (c *Client) deleteJSON(ctx context.Context, path string, wantStatus int, out any) error {
+	return c.sendJSON(ctx, http.MethodDelete, path, nil, wantStatus, out)
+}
+
+func (c *Client) sendJSON(ctx context.Context, method, path string, body any, wantStatus int, out any) error {
+	var reader io.Reader
+	if body != nil {
+		buf, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal body: %w", err)
+		}
+		reader = bytes.NewReader(buf)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return notFound(resp)
+	}
+	if resp.StatusCode != wantStatus {
+		return readHTTPError(resp)
+	}
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
+	}
+	return nil
+}
+
 func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStatus int) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+path, bytes.NewReader(body))
