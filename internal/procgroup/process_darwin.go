@@ -13,6 +13,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const darwinProcessFlagExiting = 0x00002000
+
 var darwinProcessListing = func() ([]byte, error) {
 	return unix.SysctlRaw("kern.proc.all")
 }
@@ -54,6 +56,7 @@ func processTable(ctx context.Context, withSessions bool) ([]Info, error) {
 			Group:   int(process.Eproc.Pgid),
 			Session: sessionID,
 			State:   darwinProcessState(process.Proc.P_stat),
+			Exiting: process.Proc.P_flag&darwinProcessFlagExiting != 0,
 			Birth:   darwinBirthToken(process),
 		})
 	}
