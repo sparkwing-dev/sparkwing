@@ -66,7 +66,7 @@ type NodeExecutor struct {
 }
 
 func NewNodeExecutor(backends Backends) *NodeExecutor {
-	return &NodeExecutor{backends: backends, labels: []string{"local"}}
+	return &NodeExecutor{backends: backends, labels: defaultLocalLabels()}
 }
 
 func (r *NodeExecutor) AdvertisedLabels() []string {

@@ -43,6 +43,7 @@ func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
 		"SPARKWING_HOME="+home,
 		"SPARKWING_WINGD_BIN="+wingdHostBin(t),
 		"SPARKWING_LOG_FORMAT=json",
+		"SPARKWING_LOG_LEVEL=debug",
 		"PROC_PROBE_DIR="+probe,
 		"SPARKWING_PROFILES="+profiles,
 		"SPARKWING_PROFILE=modetwo",

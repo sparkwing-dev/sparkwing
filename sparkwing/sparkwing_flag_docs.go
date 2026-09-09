@@ -48,7 +48,7 @@ var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-consumer-idle", Argument: "DUR", Desc: "Detached only, and only if this starts a consumer: how long it stays alive with no work (default 5m)", Group: "System"},
 	{Name: "sw-consumer-claim-lease", Argument: "DUR", Desc: "Detached only, and only if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m)", Group: "System"},
 	{Name: "sw-output", Argument: "FORMAT", Desc: "Detached only: run-handle format, pretty|json|plain (default: pretty on a TTY, json when piped)", Group: "System"},
-	{Name: "sw-verbose", Short: "v", Desc: "Enable debug logging", Group: "System"},
+	{Name: "sw-verbose", Short: "v", Desc: "Enable debug logging and the complete live JSON event stream", Group: "System"},
 	{Name: "sw-start-at", Argument: "STEP", Desc: "Start the run at STEP", Group: "System", Hot: true},
 	{Name: "sw-stop-at", Argument: "STEP", Desc: "Stop the run after STEP", Group: "System", Hot: true},
 	{Name: "sw-only", Argument: "GLOB", Desc: "Run only jobs whose ID matches GLOB (plus their Needs ancestors)", Group: "System", Hot: true},

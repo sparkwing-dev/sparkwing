@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"runtime"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -135,5 +136,55 @@ func TestRun_WhenRunnerCommaOrMatchesLocal(t *testing.T) {
 	}
 	if nodes[0].Outcome != string(sparkwing.Success) {
 		t.Errorf("outcome = %q, want %q (comma-OR should match local)", nodes[0].Outcome, sparkwing.Success)
+	}
+}
+
+type whenRunnerPlatformPipe struct{ sparkwing.Base }
+
+func (whenRunnerPlatformPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	for id, label := range map[string]string{
+		"current-os":   "os=" + runtime.GOOS,
+		"current-arch": "arch=" + runtime.GOARCH,
+		"foreign-os":   "os=other-" + runtime.GOOS,
+		"foreign-arch": "arch=other-" + runtime.GOARCH,
+	} {
+		sparkwing.Job(plan, id, func(context.Context) error { return nil }).WhenRunner(label)
+	}
+	return nil
+}
+
+func init() {
+	register("when-runner-platform", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &whenRunnerPlatformPipe{} })
+}
+
+func TestRun_WhenRunnerUsesCurrentLocalPlatform(t *testing.T) {
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "when-runner-platform"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("run status = %q: %v", res.Status, res.Error)
+	}
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	nodes, err := st.ListNodes(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"current-os": string(sparkwing.Success), "current-arch": string(sparkwing.Success),
+		"foreign-os": string(sparkwing.Skipped), "foreign-arch": string(sparkwing.Skipped),
+	}
+	if len(nodes) != len(want) {
+		t.Fatalf("got %d nodes, want %d", len(nodes), len(want))
+	}
+	for _, node := range nodes {
+		if node.Outcome != want[node.NodeID] {
+			t.Errorf("%s outcome = %q, want %q", node.NodeID, node.Outcome, want[node.NodeID])
+		}
 	}
 }

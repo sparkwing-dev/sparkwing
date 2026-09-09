@@ -20,6 +20,13 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **cli (Breaking):** Piped foreground runs now emit a compact NDJSON summary
+  instead of every log event. Node progress and failure details are bounded;
+  stored logs stay complete. Add `--sw-verbose` for the full live event stream.
+  See [compact run output migration](docs/migrations/compact-run-output.md).
+
 ### Fixed
 
 - **orchestrator:** A node the local orchestrator runs itself is attributed to
@@ -35,6 +42,7 @@ unlock.
   from a host's own admission daemon or loopback controller
   (`controller.Server.WithLocalExecution`); a cluster controller refuses the
   shape, so no `runs.write` caller can attribute a node it never ran.
+- **orchestrator:** Run local jobs whose `WhenRunner` labels match the current OS or architecture
 
 - **local execution:** macOS admission reads available memory from VM page
   counters. Memory pressure levels no longer inflate available bytes and admit
