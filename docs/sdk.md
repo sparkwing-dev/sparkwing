@@ -628,6 +628,29 @@ m := j.Manifest.Get(ctx)
 `sw.RefTo[T]` requires a job struct to embed `sw.Produces[T]`. It panics
 if that marker is missing or declares another output type.
 
+`Get` panics when the reference cannot be resolved. For a
+compare-to-last-run pipeline that is the normal first state --
+`sw.RefToLastRun` has no successful run to read on the pipeline's first
+run -- so read those refs with `TryGet`, which reports the miss instead:
+
+```go
+prev, ok := j.Prev.TryGet(ctx)
+if !ok {
+    return j.buildEverything(ctx) // bootstrap run: nothing to compare against
+}
+```
+
+`ok` is false when the upstream node has not completed, when no
+successful run within `MaxAge` exists, and when the run that was found
+stored no output; the value is the zero `T`. Every miss is logged at
+warn level naming the pipeline and node, because "no matching run" is
+also what a misspelled pipeline name produces.
+
+`TryGet` still panics for the two failures a pipeline author cannot
+handle at runtime: no resolver in context, which happens only outside a
+dispatched step, and stored output that does not fit `T`. Keep `Get`
+where a missing output is itself a programmer mistake.
+
 Untyped pipelines (no typed output) skip both `sw.Produces[T]` and
 `sw.RefTo[T]`; pass plain bytes via env vars or sibling steps.
 

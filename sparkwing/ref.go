@@ -3,6 +3,7 @@ package sparkwing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -72,55 +73,120 @@ func (r Ref[T]) Job() string { return r.NodeID }
 // Panics rather than returning errors so step bodies stay tight
 // for the common case (one-shot read at the top of a step). A
 // failed Get is a programmer mistake (missing Needs(), wrong
-// pipeline name) and should crash loud.
+// pipeline name) and should crash loud. Where a missing output is
+// an expected state -- the bootstrap run of a compare-to-last-run
+// pipeline has no previous run to read -- use TryGet.
 func (r Ref[T]) Get(ctx context.Context) T {
+	out, _, err := r.resolve(ctx)
+	if err != nil {
+		panic(err.Error())
+	}
+	return out
+}
+
+// TryGet resolves the reference like Get but reports an absent upstream
+// output instead of panicking. A step can then treat absence as a
+// normal state:
+//
+//	prev, ok := j.Prev.TryGet(ctx)
+//	if !ok {
+//	    return j.buildEverything(ctx) // bootstrap run: nothing to compare against
+//	}
+//
+// The bootstrap run of a compare-to-last-run pipeline is what this
+// exists for: RefToLastRun has no successful run to read on a
+// pipeline's first run, and Get panics there.
+//
+// ok is false when the upstream node has not completed, when no
+// successful run within MaxAge exists, and when the run that was found
+// stored no output. Every miss is logged at warn level naming the
+// pipeline and node, because "no matching run" is also what a
+// misspelled pipeline name produces and a silent bootstrap branch would
+// hide it forever.
+//
+// TryGet still panics for the two failures a pipeline author cannot
+// handle at runtime: no resolver in context, which happens only outside
+// a dispatched step, and stored output that does not fit T. Use Get
+// when a missing output is itself a programmer mistake.
+func (r Ref[T]) TryGet(ctx context.Context) (T, bool) {
+	var zero T
+	out, present, err := r.resolve(ctx)
+	if err != nil {
+		if !errors.As(err, new(*refMiss)) {
+			panic(err.Error())
+		}
+		Warn(ctx, "Ref.TryGet: %v", err)
+		return zero, false
+	}
+	if !present {
+		Warn(ctx, "Ref.TryGet: %s stored no output; treating it as absent", r.describe())
+		return zero, false
+	}
+	return out, true
+}
+
+// refMiss marks the resolution failures TryGet reports rather than
+// panics on: an upstream that has not produced an output yet.
+type refMiss struct{ err error }
+
+func (m *refMiss) Error() string { return m.err.Error() }
+
+func (r Ref[T]) describe() string {
+	if r.Pipeline != "" {
+		return fmt.Sprintf("%s/%s", r.Pipeline, r.NodeID)
+	}
+	return r.NodeID
+}
+
+// resolve reads the referenced output. present is false when nothing
+// was stored to read, which Get renders as the zero T and TryGet
+// reports as a miss.
+func (r Ref[T]) resolve(ctx context.Context) (value T, present bool, err error) {
 	if r.Pipeline != "" {
 		return r.getCrossPipeline(ctx)
 	}
 	return r.getInRun(ctx)
 }
 
-func (r Ref[T]) getInRun(ctx context.Context) T {
+func (r Ref[T]) getInRun(ctx context.Context) (T, bool, error) {
 	jsonResolve := jsonResolverFromContext(ctx)
-	var zero T
+	var out T
 	if jsonResolve == nil {
-		panic(fmt.Sprintf("sparkwing: Ref[%T].Get called without a resolver in context", zero))
+		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get called without a resolver in context", out)
 	}
 	data, ok := jsonResolve(r.NodeID)
 	if !ok {
-		panic(fmt.Sprintf("sparkwing: Ref[%T].Get: node %q has not completed", zero, r.NodeID))
+		return out, false, &refMiss{fmt.Errorf("sparkwing: Ref[%T].Get: node %q has not completed", out, r.NodeID)}
 	}
-	var out T
 	if err := json.Unmarshal(data, &out); err != nil {
-		panic(fmt.Sprintf("sparkwing: Ref[%T].Get: unmarshal node %q output: %v", zero, r.NodeID, err))
+		var zero T
+		return zero, false, fmt.Errorf("sparkwing: Ref[%T].Get: unmarshal node %q output: %w", zero, r.NodeID, err)
 	}
 	Debug(ctx, "Ref.Get(%s): %d bytes", r.NodeID, len(data))
-	return out
+	return out, true, nil
 }
 
-func (r Ref[T]) getCrossPipeline(ctx context.Context) T {
+func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
+	var out T
 	resolver := pipelineResolverFromContext(ctx)
 	if resolver == nil {
-		var zero T
-		panic(fmt.Sprintf("sparkwing: Ref[%T].Get called without a pipeline resolver in context (pipeline=%q node=%q)",
-			zero, r.Pipeline, r.NodeID))
+		return out, false, fmt.Errorf("sparkwing: Ref[%T].Get called without a pipeline resolver in context (pipeline=%q node=%q)",
+			out, r.Pipeline, r.NodeID)
 	}
 	resolved, err := resolver.resolve(ctx, r.Pipeline, r.NodeID, r.MaxAge)
 	if err != nil {
-		var zero T
-		panic(fmt.Sprintf("sparkwing: Ref[%T].Get failed (pipeline=%q node=%q): %v",
-			zero, r.Pipeline, r.NodeID, err))
+		return out, false, &refMiss{fmt.Errorf("sparkwing: Ref[%T].Get failed (pipeline=%q node=%q): %w",
+			out, r.Pipeline, r.NodeID, err)}
 	}
-	var out T
 	if len(resolved.Data) == 0 || string(resolved.Data) == "null" {
-		return out
+		return out, false, nil
 	}
 	if err := json.Unmarshal(resolved.Data, &out); err != nil {
 		var zero T
-		panic(fmt.Sprintf("sparkwing: Ref[%T].Get: unmarshal %s/%s output from run %s: %v",
-			zero, r.Pipeline, r.NodeID, resolved.RunID, err))
+		return zero, false, fmt.Errorf("sparkwing: Ref[%T].Get: unmarshal %s/%s output from run %s: %w",
+			zero, r.Pipeline, r.NodeID, resolved.RunID, err)
 	}
-	return out
+	return out, true, nil
 }
 
 // RefTo returns a Ref[T] pointing at an in-run node's output. The
@@ -162,8 +228,9 @@ type refOpts struct {
 }
 
 // MaxAge bounds cross-pipeline ref resolution to runs whose
-// finished_at is within d. On miss, Get produces a clear "no run
-// within X of now" error instead of returning stale output.
+// finished_at is within d. On miss, Get panics with a clear "no run
+// within X of now" message and TryGet reports the miss, rather than
+// either returning stale output.
 func MaxAge(d time.Duration) RefOption {
 	return func(o *refOpts) { o.maxAge = d }
 }
@@ -188,6 +255,9 @@ func MaxAge(d time.Duration) RefOption {
 //	        sw.MaxAge(24*time.Hour),
 //	    ),
 //	})
+//
+// A pipeline's first run has no prior successful run to read, so read
+// the ref with TryGet unless a missing prior run should crash the step.
 func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T] {
 	o := refOpts{}
 	for _, opt := range opts {

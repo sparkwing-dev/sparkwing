@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **sdk:** `Ref[T].TryGet(ctx)` returns `(T, bool)` instead of panicking when
+  the upstream output is absent. `TryGet` exists for the bootstrap run of a
+  compare-to-last-run pipeline: `RefToLastRun` has no successful run to read on
+  a pipeline's first run, and `Get` panics there. Misses are logged at warn
+  level. `Get` is unchanged.
+
 ### Fixed
 
 - **cache:** Pipeline binary keys include Go packages named `web`

@@ -543,6 +543,7 @@ type Ref[T any] struct {
 }
 func (r Ref[T]) Get(ctx context.Context) T
 func (r Ref[T]) Job() string
+func (r Ref[T]) TryGet(ctx context.Context) (T, bool)
 type RefOption func(*refOpts)
 type RefTarget struct {
 	Pipeline string
@@ -897,6 +898,7 @@ func (p orPredicate) String() string
 func (p profilePredicate) Eval(ctx PredicateContext) bool
 func (p profilePredicate) String() string
 func (c *recoveryFn) Work(w *Work) (*WorkStep, error)
+func (m *refMiss) Error() string
 func (r *remoteControllerResolver) Resolve(ctx context.Context, name string) (string, bool, error)
 func (remotePredicate) Eval(ctx PredicateContext) bool
 func (remotePredicate) String() string

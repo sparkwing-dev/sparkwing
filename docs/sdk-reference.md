@@ -1259,6 +1259,7 @@ type Ref[T any] struct {
 - `func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T]` -- RefToLastRun returns a Ref[T] pointing at node nodeID in the most recent successful run of pipeline.
 - `func (r Ref[T]) Get(ctx context.Context) T` -- Get resolves the reference to a typed T value.
 - `func (r Ref[T]) Job() string` -- Job returns the upstream node id this reference points at.
+- `func (r Ref[T]) TryGet(ctx context.Context) (T, bool)` -- TryGet resolves the reference like Get but reports an absent upstream output instead of panicking.
 
 ### type RefOption
 
