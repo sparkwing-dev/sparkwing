@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -24,6 +26,18 @@ const (
 	CronOutcomeFailed         = "failed"
 )
 
+// Where a schedule's due instants are evaluated and launched. Exported
+// wire values.
+const (
+	CronWhereLocal      = "local"
+	CronWhereController = "controller"
+)
+
+// CronScheduleDefaultName is the name a repository's lone schedule for a
+// pipeline carries, so a pipeline that declares one cadence needs no name
+// anywhere.
+const CronScheduleDefaultName = "default"
+
 // safety: the store mints fire ids because neither dialect autoincrements a text primary key.
 const cronFireIDPrefix = "crf_"
 
@@ -33,19 +47,39 @@ const maxCronFiresPerSchedule = 200
 const defaultCronFireLimit = 50
 
 // CronSchedule is one armed pipeline schedule. The declaration fields
-// (Cron, TZ, Overlap, CatchUp) come from the repository's
-// sparkwing.yaml; the rest is host state the evaluator advances.
-// Declared goes false when the repository stops declaring it, which
-// keeps the row and its fire history readable after the withdrawal.
+// (Cron, TZ, Overlap, CatchUp, Where, Args and the lock) come from the
+// repository's sparkwing.yaml and the arming host; the rest is host
+// state the evaluator advances. Declared goes false when the repository
+// stops declaring it, which keeps the row and its fire history readable
+// after the withdrawal. What actually runs is [CronSchedule.Effective],
+// which lays Override over the declaration.
 type CronSchedule struct {
 	ID       string `json:"id"`
 	RepoPath string `json:"repo_path"`
 	Pipeline string `json:"pipeline"`
-	Cron     string `json:"cron"`
-	TZ       string `json:"tz"`
-	Overlap  string `json:"overlap"`
+	// Name distinguishes several schedules of one pipeline;
+	// [CronScheduleDefaultName] when the pipeline declares one.
+	Name    string `json:"name"`
+	Cron    string `json:"cron"`
+	TZ      string `json:"tz"`
+	Overlap string `json:"overlap"`
 	// CatchUp is how far back a tick will still fire a missed instant.
-	CatchUp   time.Duration `json:"catch_up"`
+	CatchUp time.Duration `json:"catch_up"`
+	// Where is CronWhereLocal or CronWhereController.
+	Where string `json:"where"`
+	// Args are the CLI arguments the scheduled launch passes, keyed by
+	// flag name.
+	Args map[string]string `json:"args,omitempty"`
+	// LockedRef is the commit the schedule is pinned to, empty when it
+	// follows the checkout. LockedBinary and LockedDigest name the
+	// pipeline binary that pin resolved to and the cache digest it was
+	// built from.
+	LockedRef    string `json:"locked_ref,omitempty"`
+	LockedBinary string `json:"locked_binary,omitempty"`
+	LockedDigest string `json:"locked_digest,omitempty"`
+	// Override is the host's edit of the declaration, nil when the
+	// schedule runs what the repository declares.
+	Override  *CronOverride `json:"override,omitempty"`
 	Paused    bool          `json:"paused"`
 	Declared  bool          `json:"declared"`
 	ArmedAt   time.Time     `json:"armed_at"`
@@ -61,16 +95,99 @@ type CronSchedule struct {
 	NextDueAt *time.Time `json:"next_due_at,omitempty"`
 }
 
+// CronDeclaration is the cadence a schedule runs: what the repository
+// declared, or that with the host's override laid over it.
+type CronDeclaration struct {
+	Cron         string            `json:"cron"`
+	TZ           string            `json:"tz"`
+	Overlap      string            `json:"overlap"`
+	CatchUp      time.Duration     `json:"catch_up"`
+	Where        string            `json:"where"`
+	Args         map[string]string `json:"args,omitempty"`
+	LockedRef    string            `json:"locked_ref,omitempty"`
+	LockedBinary string            `json:"locked_binary,omitempty"`
+	LockedDigest string            `json:"locked_digest,omitempty"`
+}
+
+// CronOverride is a host's edit of a declared schedule. An empty Cron,
+// TZ or Overlap and a nil CatchUp leave that field to the declaration;
+// a nil Args does the same, while an empty non-nil Args overrides the
+// declaration to no arguments at all. Base is the declaration the
+// override was set against, so a reader can tell an override whose
+// declaration has moved under it since.
+type CronOverride struct {
+	Cron    string            `json:"cron,omitempty"`
+	TZ      string            `json:"tz,omitempty"`
+	Overlap string            `json:"overlap,omitempty"`
+	CatchUp *time.Duration    `json:"catch_up,omitempty"`
+	Args    map[string]string `json:"args,omitempty"`
+	Base    CronDeclaration   `json:"base"`
+	SetAt   time.Time         `json:"set_at"`
+}
+
+// CronLock pins a schedule to one commit and the pipeline binary built
+// from it. A zero CronLock unlocks the schedule, which then follows the
+// checkout.
+type CronLock struct {
+	Ref    string `json:"ref,omitempty"`
+	Binary string `json:"binary,omitempty"`
+	Digest string `json:"digest,omitempty"`
+}
+
+// Declaration returns the cadence the repository declared, before any
+// host override.
+func (s CronSchedule) Declaration() CronDeclaration {
+	return CronDeclaration{
+		Cron:         s.Cron,
+		TZ:           s.TZ,
+		Overlap:      s.Overlap,
+		CatchUp:      s.CatchUp,
+		Where:        s.Where,
+		Args:         s.Args,
+		LockedRef:    s.LockedRef,
+		LockedBinary: s.LockedBinary,
+		LockedDigest: s.LockedDigest,
+	}
+}
+
+// Effective returns the cadence this schedule actually runs: the
+// declaration with every overridden field replaced. Where and the lock
+// are not overridable, so they come from the declaration either way.
+func (s CronSchedule) Effective() CronDeclaration {
+	decl := s.Declaration()
+	if s.Override == nil {
+		return decl
+	}
+	if s.Override.Cron != "" {
+		decl.Cron = s.Override.Cron
+	}
+	if s.Override.TZ != "" {
+		decl.TZ = s.Override.TZ
+	}
+	if s.Override.Overlap != "" {
+		decl.Overlap = s.Override.Overlap
+	}
+	if s.Override.CatchUp != nil {
+		decl.CatchUp = *s.Override.CatchUp
+	}
+	if s.Override.Args != nil {
+		decl.Args = s.Override.Args
+	}
+	return decl
+}
+
 // CronFire is one resolved due instant. RunID is set only for
-// CronOutcomeFired; Detail carries the reason for the other outcomes.
+// CronOutcomeFired; Detail carries the reason for the other outcomes,
+// and Args the arguments the launch was given.
 type CronFire struct {
-	ID         string    `json:"id"`
-	ScheduleID string    `json:"schedule_id"`
-	DueAt      time.Time `json:"due_at"`
-	DecidedAt  time.Time `json:"decided_at"`
-	Outcome    string    `json:"outcome"`
-	RunID      string    `json:"run_id,omitempty"`
-	Detail     string    `json:"detail,omitempty"`
+	ID         string            `json:"id"`
+	ScheduleID string            `json:"schedule_id"`
+	DueAt      time.Time         `json:"due_at"`
+	DecidedAt  time.Time         `json:"decided_at"`
+	Outcome    string            `json:"outcome"`
+	RunID      string            `json:"run_id,omitempty"`
+	Detail     string            `json:"detail,omitempty"`
+	Args       map[string]string `json:"args,omitempty"`
 }
 
 // CronTick is the last OS tick this store saw. A zero At means no tick
@@ -89,27 +206,52 @@ const (
 	metaKeyCronLastTickError   = "crons.last_tick_error"
 )
 
-const cronScheduleColumns = `id, repo_path, pipeline, cron, tz, overlap, catch_up_ns, paused, declared,
+const cronScheduleInsertColumns = `id, repo_path, pipeline, schedule_name, cron, tz, overlap, catch_up_ns,
+       where_, args, locked_ref, locked_binary, locked_digest, paused, declared,
        armed_at, armed_by, updated_at, cursor_at, last_fired_at, last_run_id, last_outcome, next_due_at`
 
-const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, detail`
+const cronScheduleOverrideColumns = `override_cron, override_tz, override_overlap, override_catch_up_ns,
+       override_args, override_base, override_set_at`
+
+const cronScheduleColumns = cronScheduleInsertColumns + `,
+       ` + cronScheduleOverrideColumns
+
+var cronScheduleInsertPlaceholders = placeholders(strings.Count(cronScheduleInsertColumns, ",") + 1)
+
+const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, detail, args`
 
 // ArmCronSchedule records the declaration on a host, returning the
-// stored row and whether it was created. An existing row keeps its id,
-// arming stamp, pause state, cursor, and last-fire fields: re-arming
-// republishes what the repository declares and re-marks the schedule
-// declared, it does not restart its history. ArmedAt defaults to now
-// on a create when the caller leaves it zero, and an empty Overlap
-// means CronOverlapSkip.
+// stored row and whether it was created. A schedule is keyed by
+// repository path, pipeline and name, so one pipeline can carry several
+// cadences. An existing row keeps its id, arming stamp, pause state,
+// cursor, last-fire fields and override: re-arming republishes what the
+// repository declares and re-marks the schedule declared, it does not
+// restart its history or discard the host's edits. ArmedAt defaults to
+// now on a create when the caller leaves it zero, an empty Name means
+// [CronScheduleDefaultName], an empty Overlap means CronOverlapSkip, and
+// an empty Where means CronWhereLocal.
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error) {
 	if sched.ID == "" || sched.RepoPath == "" || sched.Pipeline == "" {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: id, repo_path and pipeline required")
+	}
+	if sched.Name == "" {
+		sched.Name = CronScheduleDefaultName
 	}
 	if sched.Overlap == "" {
 		sched.Overlap = CronOverlapSkip
 	}
 	if sched.Overlap != CronOverlapSkip && sched.Overlap != CronOverlapQueue {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: unknown overlap policy %q", sched.Overlap)
+	}
+	if sched.Where == "" {
+		sched.Where = CronWhereLocal
+	}
+	if sched.Where != CronWhereLocal && sched.Where != CronWhereController {
+		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: unknown where %q", sched.Where)
+	}
+	args, err := encodeCronArgs(sched.Args)
+	if err != nil {
+		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: %w", err)
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -119,8 +261,9 @@ func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now tim
 
 	var id string
 	err = tx.QueryRowContext(ctx,
-		`SELECT id FROM cron_schedules WHERE repo_path = ? AND pipeline = ?`+tx.forUpdate(),
-		sched.RepoPath, sched.Pipeline).Scan(&id)
+		`SELECT id FROM cron_schedules
+          WHERE repo_path = ? AND pipeline = ? AND schedule_name = ?`+tx.forUpdate(),
+		sched.RepoPath, sched.Pipeline, sched.Name).Scan(&id)
 	created = errors.Is(err, sql.ErrNoRows)
 	if err != nil && !created {
 		return CronSchedule{}, false, err
@@ -132,10 +275,12 @@ func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now tim
 			armedAt = now
 		}
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO cron_schedules (`+cronScheduleColumns+`)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, sched.RepoPath, sched.Pipeline, sched.Cron, sched.TZ, sched.Overlap,
-			int64(sched.CatchUp), boolToInt(sched.Paused), 1,
+INSERT INTO cron_schedules (`+cronScheduleInsertColumns+`)
+VALUES (`+cronScheduleInsertPlaceholders+`)`,
+			id, sched.RepoPath, sched.Pipeline, sched.Name, sched.Cron, sched.TZ, sched.Overlap,
+			int64(sched.CatchUp), sched.Where, args,
+			sched.LockedRef, sched.LockedBinary, sched.LockedDigest,
+			boolToInt(sched.Paused), 1,
 			armedAt.UnixNano(), sched.ArmedBy, now.UnixNano(), now.UnixNano(),
 			nullNanos(sched.LastFiredAt), sched.LastRunID, sched.LastOutcome,
 			nullNanos(sched.NextDueAt),
@@ -144,10 +289,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		}
 	} else if _, err := tx.ExecContext(ctx, `
 UPDATE cron_schedules
-   SET cron = ?, tz = ?, overlap = ?, catch_up_ns = ?, declared = 1,
+   SET cron = ?, tz = ?, overlap = ?, catch_up_ns = ?, where_ = ?, args = ?,
+       locked_ref = ?, locked_binary = ?, locked_digest = ?, declared = 1,
        updated_at = ?, next_due_at = ?
  WHERE id = ?`,
-		sched.Cron, sched.TZ, sched.Overlap, int64(sched.CatchUp),
+		sched.Cron, sched.TZ, sched.Overlap, int64(sched.CatchUp), sched.Where, args,
+		sched.LockedRef, sched.LockedBinary, sched.LockedDigest,
 		now.UnixNano(), nullNanos(sched.NextDueAt), id,
 	); err != nil {
 		return CronSchedule{}, false, err
@@ -163,11 +310,11 @@ UPDATE cron_schedules
 }
 
 // ListCronSchedules returns every schedule armed on this host, ordered
-// by repository path then pipeline.
+// by repository path, pipeline, then schedule name.
 func (s *Store) ListCronSchedules(ctx context.Context) (out []CronSchedule, err error) {
 	rows, err := s.query(ctx, `SELECT `+cronScheduleColumns+`
   FROM cron_schedules
- ORDER BY repo_path, pipeline`)
+ ORDER BY repo_path, pipeline, schedule_name`)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +365,94 @@ func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *tim
 		nullNanos(next), now.UnixNano(), id)
 }
 
+// SetCronScheduleLock pins a schedule to a commit and the pipeline
+// binary built from it, so an updated checkout cannot change what an
+// unattended run executes. A zero [CronLock] unlocks the schedule,
+// which then follows the checkout again.
+func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error {
+	return s.updateCronSchedule(ctx, id,
+		`UPDATE cron_schedules
+            SET locked_ref = ?, locked_binary = ?, locked_digest = ?, updated_at = ?
+          WHERE id = ?`,
+		lock.Ref, lock.Binary, lock.Digest, now.UnixNano(), id)
+}
+
+// SetCronOverride replaces this host's edit of the declaration whole:
+// every field the override leaves unset returns to what the repository
+// declares. Base and SetAt come from the argument, and SetAt defaults
+// to now when it is zero.
+func (s *Store) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error {
+	if o.Overlap != "" && o.Overlap != CronOverlapSkip && o.Overlap != CronOverlapQueue {
+		return fmt.Errorf("SetCronOverride: unknown overlap policy %q", o.Overlap)
+	}
+	var overrideArgs any
+	if o.Args != nil {
+		encoded, err := encodeCronArgs(o.Args)
+		if err != nil {
+			return fmt.Errorf("SetCronOverride: %w", err)
+		}
+		overrideArgs = encoded
+	}
+	base, err := json.Marshal(o.Base)
+	if err != nil {
+		return fmt.Errorf("SetCronOverride: encode base declaration: %w", err)
+	}
+	setAt := o.SetAt
+	if setAt.IsZero() {
+		setAt = now
+	}
+	var catchUp any
+	if o.CatchUp != nil {
+		catchUp = int64(*o.CatchUp)
+	}
+	return s.updateCronSchedule(ctx, id,
+		`UPDATE cron_schedules
+            SET override_cron = ?, override_tz = ?, override_overlap = ?,
+                override_catch_up_ns = ?, override_args = ?, override_base = ?,
+                override_set_at = ?, updated_at = ?
+          WHERE id = ?`,
+		o.Cron, o.TZ, o.Overlap, catchUp, overrideArgs, string(base),
+		setAt.UnixNano(), now.UnixNano(), id)
+}
+
+// ClearCronOverride drops this host's edit, returning the schedule to
+// what the repository declares.
+func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error {
+	return s.updateCronSchedule(ctx, id,
+		`UPDATE cron_schedules
+            SET override_cron = NULL, override_tz = NULL, override_overlap = NULL,
+                override_catch_up_ns = NULL, override_args = NULL, override_base = NULL,
+                override_set_at = NULL, updated_at = ?
+          WHERE id = ?`,
+		now.UnixNano(), id)
+}
+
+// DeleteCronSchedule disarms one schedule and drops its fire history,
+// leaving every sibling schedule of the same pipeline armed. An unknown
+// id is an error wrapping [ErrNotFound].
+func (s *Store) DeleteCronSchedule(ctx context.Context, id string) (err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM cron_fires WHERE schedule_id = ?`, id); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM cron_schedules WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return notFound("cron schedule", id)
+	}
+	return tx.Commit()
+}
+
 // DeleteCronSchedulesForRepo disarms every schedule of one repository
 // checkout and returns how many rows went, so a caller can report an
 // uninstall that found nothing.
@@ -261,6 +496,12 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 	}
 	if fire != nil && !knownCronOutcome(fire.Outcome) {
 		return fmt.Errorf("ResolveCronDue: unknown outcome %q", fire.Outcome)
+	}
+	fireArgs := "{}"
+	if fire != nil {
+		if fireArgs, err = encodeCronArgs(fire.Args); err != nil {
+			return fmt.Errorf("ResolveCronDue: %w", err)
+		}
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -312,9 +553,9 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 			}
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO cron_fires (`+cronFireColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO cron_fires (`+cronFireColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			fireID, id, fire.DueAt.UnixNano(), fire.DecidedAt.UnixNano(),
-			fire.Outcome, fire.RunID, fire.Detail); err != nil {
+			fire.Outcome, fire.RunID, fire.Detail, fireArgs); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -349,12 +590,16 @@ func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int)
 	for rows.Next() {
 		var fire CronFire
 		var dueNS, decidedNS int64
+		var args string
 		if err := rows.Scan(&fire.ID, &fire.ScheduleID, &dueNS, &decidedNS,
-			&fire.Outcome, &fire.RunID, &fire.Detail); err != nil {
+			&fire.Outcome, &fire.RunID, &fire.Detail, &args); err != nil {
 			return nil, err
 		}
 		fire.DueAt = time.Unix(0, dueNS)
 		fire.DecidedAt = time.Unix(0, decidedNS)
+		if fire.Args, err = decodeCronArgs(args); err != nil {
+			return nil, fmt.Errorf("cron fire %s: %w", fire.ID, err)
+		}
 		out = append(out, fire)
 	}
 	return out, rows.Err()
@@ -452,12 +697,18 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 	var sched CronSchedule
 	var catchUpNS, armedNS, updatedNS, cursorNS int64
 	var paused, declared int64
-	var lastFiredNS, nextDueNS sql.NullInt64
+	var args string
+	var lastFiredNS, nextDueNS, overrideCatchUpNS, overrideSetNS sql.NullInt64
+	var overrideCron, overrideTZ, overrideOverlap, overrideArgs, overrideBase sql.NullString
 	if err := scan(
-		&sched.ID, &sched.RepoPath, &sched.Pipeline, &sched.Cron, &sched.TZ, &sched.Overlap,
-		&catchUpNS, &paused, &declared,
+		&sched.ID, &sched.RepoPath, &sched.Pipeline, &sched.Name,
+		&sched.Cron, &sched.TZ, &sched.Overlap, &catchUpNS, &sched.Where, &args,
+		&sched.LockedRef, &sched.LockedBinary, &sched.LockedDigest,
+		&paused, &declared,
 		&armedNS, &sched.ArmedBy, &updatedNS, &cursorNS,
 		&lastFiredNS, &sched.LastRunID, &sched.LastOutcome, &nextDueNS,
+		&overrideCron, &overrideTZ, &overrideOverlap, &overrideCatchUpNS,
+		&overrideArgs, &overrideBase, &overrideSetNS,
 	); err != nil {
 		return CronSchedule{}, err
 	}
@@ -469,7 +720,65 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 	sched.CursorAt = time.Unix(0, cursorNS)
 	sched.LastFiredAt = nanosToTime(lastFiredNS)
 	sched.NextDueAt = nanosToTime(nextDueNS)
+	var err error
+	if sched.Args, err = decodeCronArgs(args); err != nil {
+		return CronSchedule{}, fmt.Errorf("cron schedule %s: %w", sched.ID, err)
+	}
+	if !overrideSetNS.Valid {
+		return sched, nil
+	}
+	override := CronOverride{
+		Cron:    overrideCron.String,
+		TZ:      overrideTZ.String,
+		Overlap: overrideOverlap.String,
+		SetAt:   time.Unix(0, overrideSetNS.Int64),
+	}
+	if overrideCatchUpNS.Valid {
+		catchUp := time.Duration(overrideCatchUpNS.Int64)
+		override.CatchUp = &catchUp
+	}
+	// safety: an override to no arguments at all is a stored '{}', which has to
+	// read back as an empty map rather than the nil that means "not overridden".
+	if overrideArgs.Valid {
+		override.Args = map[string]string{}
+		if err := json.Unmarshal([]byte(overrideArgs.String), &override.Args); err != nil {
+			return CronSchedule{}, fmt.Errorf("cron schedule %s: decode override args: %w", sched.ID, err)
+		}
+	}
+	if overrideBase.Valid && overrideBase.String != "" {
+		if err := json.Unmarshal([]byte(overrideBase.String), &override.Base); err != nil {
+			return CronSchedule{}, fmt.Errorf("cron schedule %s: decode override base: %w", sched.ID, err)
+		}
+	}
+	sched.Override = &override
 	return sched, nil
+}
+
+// safety: encoding/json sorts map keys, so two equal argument sets always
+// store the same bytes and compare equal wherever they are read back.
+func encodeCronArgs(args map[string]string) (string, error) {
+	if len(args) == 0 {
+		return "{}", nil
+	}
+	encoded, err := json.Marshal(args)
+	if err != nil {
+		return "", fmt.Errorf("encode args: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func decodeCronArgs(raw string) (map[string]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	args := map[string]string{}
+	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+		return nil, fmt.Errorf("decode args: %w", err)
+	}
+	if len(args) == 0 {
+		return nil, nil
+	}
+	return args, nil
 }
 
 func knownCronOutcome(outcome string) bool {

@@ -1031,7 +1031,7 @@ var schemaPostgres = func() string {
 	return r.Replace(schemaSQLite)
 }()
 
-const expectedSchemaVersion = 32
+const expectedSchemaVersion = 33
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1415,15 +1415,34 @@ var nodeClaimOffersTablePostgres = strings.NewReplacer(
 	"INTEGER", "BIGINT",
 ).Replace(nodeClaimOffersTableSQLite)
 
+// safety: a named index rather than an inline UNIQUE, so widening the key can
+// drop it by name on both dialects; SQLite's inline form mints an internal
+// autoindex no statement can name.
+const cronSchedulesUniqueIndex = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_schedules_repo_pipeline_name
+    ON cron_schedules(repo_path, pipeline, schedule_name);`
+
 const cronSchedulesTableSQLite = `CREATE TABLE IF NOT EXISTS cron_schedules (
     id            TEXT PRIMARY KEY,
     repo_path     TEXT NOT NULL,
     pipeline      TEXT NOT NULL,
+    -- 'default' when the repository declares a single schedule for the pipeline.
+    schedule_name TEXT NOT NULL DEFAULT 'default',
     cron          TEXT NOT NULL,
     tz            TEXT NOT NULL,
     -- skip | queue
     overlap       TEXT NOT NULL,
     catch_up_ns   INTEGER NOT NULL,
+    -- local | controller
+    where_        TEXT NOT NULL DEFAULT 'local',
+    -- JSON object of CLI argument name to value, passed to the scheduled run.
+    args          TEXT NOT NULL DEFAULT '{}',
+    -- commit the schedule is pinned to; empty means it follows the checkout.
+    locked_ref    TEXT NOT NULL DEFAULT '',
+    -- the pipeline binary that pin resolved to and the cache digest it was
+    -- built from, both empty while the schedule follows the checkout.
+    locked_binary TEXT NOT NULL DEFAULT '',
+    locked_digest TEXT NOT NULL DEFAULT '',
     paused        INTEGER NOT NULL DEFAULT 0,
     -- 0 once the repository stops declaring the schedule, which keeps the
     -- row and its history readable after the declaration is withdrawn.
@@ -1439,12 +1458,41 @@ const cronSchedulesTableSQLite = `CREATE TABLE IF NOT EXISTS cron_schedules (
     last_outcome  TEXT NOT NULL DEFAULT '',
     -- NULL when the expression never matches again.
     next_due_at   INTEGER,
-    UNIQUE(repo_path, pipeline)
-);`
+    -- host overrides of the declaration, each NULL when that field is not
+    -- overridden. override_base is the declaration the override was set
+    -- against, so a reader can tell an override the repository has since
+    -- moved under; both it and override_set_at are NULL when the schedule
+    -- carries no override.
+    override_cron        TEXT,
+    override_tz          TEXT,
+    override_overlap     TEXT,
+    override_catch_up_ns INTEGER,
+    override_args        TEXT,
+    override_base        TEXT,
+    override_set_at      INTEGER
+);` + cronSchedulesUniqueIndex
 
 var cronSchedulesTablePostgres = strings.NewReplacer(
 	"INTEGER", "BIGINT",
 ).Replace(cronSchedulesTableSQLite)
+
+var cronScheduleNamedCols = map[string]string{
+	"schedule_name":        "TEXT NOT NULL DEFAULT 'default'",
+	"where_":               "TEXT NOT NULL DEFAULT 'local'",
+	"args":                 "TEXT NOT NULL DEFAULT '{}'",
+	"locked_ref":           "TEXT NOT NULL DEFAULT ''",
+	"locked_binary":        "TEXT NOT NULL DEFAULT ''",
+	"locked_digest":        "TEXT NOT NULL DEFAULT ''",
+	"override_cron":        "TEXT",
+	"override_tz":          "TEXT",
+	"override_overlap":     "TEXT",
+	"override_catch_up_ns": "INTEGER",
+	"override_args":        "TEXT",
+	"override_base":        "TEXT",
+	"override_set_at":      "INTEGER",
+}
+
+var cronFireArgsCols = map[string]string{"args": "TEXT NOT NULL DEFAULT '{}'"}
 
 const cronFiresTableSQLite = `CREATE TABLE IF NOT EXISTS cron_fires (
     id          TEXT PRIMARY KEY,
@@ -1454,7 +1502,9 @@ const cronFiresTableSQLite = `CREATE TABLE IF NOT EXISTS cron_fires (
     -- fired | skipped_overlap | missed | failed
     outcome     TEXT NOT NULL,
     run_id      TEXT NOT NULL DEFAULT '',
-    detail      TEXT NOT NULL DEFAULT ''
+    detail      TEXT NOT NULL DEFAULT '',
+    -- JSON object of the arguments the launch was given.
+    args        TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_cron_fires_schedule_decided
     ON cron_fires(schedule_id, decided_at DESC);`
@@ -1843,6 +1893,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyExecutionPolicyMigrationSQLite(ctx, tx)
 	case 32:
 		return applyCronsMigration(ctx, tx, cronSchedulesTableSQLite, cronFiresTableSQLite)
+	case 33:
+		return applyNamedCronsMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1853,6 +1905,54 @@ func applyCronsMigration(ctx context.Context, tx *storeTx, schedules, fires stri
 		return err
 	}
 	_, err := tx.ExecContext(ctx, fires)
+	return err
+}
+
+// safety: SQLite cannot widen a UNIQUE key in place, so a v32 schedule table is
+// rebuilt; renaming it out of the way lets the current definition create the new
+// shape, which keeps one source for it.
+var cronSchedulesNameRebuildSQLite = []string{
+	`ALTER TABLE cron_schedules RENAME TO cron_schedules_unnamed`,
+	cronSchedulesTableSQLite,
+	`INSERT INTO cron_schedules (id, repo_path, pipeline, cron, tz, overlap, catch_up_ns,
+     paused, declared, armed_at, armed_by, updated_at, cursor_at,
+     last_fired_at, last_run_id, last_outcome, next_due_at)
+     SELECT id, repo_path, pipeline, cron, tz, overlap, catch_up_ns,
+            paused, declared, armed_at, armed_by, updated_at, cursor_at,
+            last_fired_at, last_run_id, last_outcome, next_due_at
+       FROM cron_schedules_unnamed`,
+	`DROP TABLE cron_schedules_unnamed`,
+}
+
+func applyNamedCronsMigrationSQLite(ctx context.Context, tx *storeTx) error {
+	have, err := tableColumns(ctx, tx, "cron_schedules")
+	if err != nil {
+		return err
+	}
+	if !have["schedule_name"] {
+		for _, stmt := range cronSchedulesNameRebuildSQLite {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				return err
+			}
+		}
+	}
+	return ensureColumnsSQLite(ctx, tx, "cron_fires", cronFireArgsCols)
+}
+
+func applyNamedCronsMigrationPostgres(ctx context.Context, tx *storeTx) error {
+	if err := addColumnsTx(ctx, tx, "cron_schedules", cronScheduleNamedCols); err != nil {
+		return err
+	}
+	if err := addColumnsTx(ctx, tx, "cron_fires", cronFireArgsCols); err != nil {
+		return err
+	}
+	// safety: v32 spelled the key as an inline UNIQUE, which Postgres named for
+	// it; the widened key arrives as an index this migration can name itself.
+	if _, err := tx.ExecContext(ctx,
+		`ALTER TABLE cron_schedules DROP CONSTRAINT IF EXISTS cron_schedules_repo_path_pipeline_key`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, cronSchedulesUniqueIndex)
 	return err
 }
 
@@ -2053,6 +2153,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyExecutionPolicyMigrationPostgres(ctx, tx)
 	case 32:
 		return applyCronsMigration(ctx, tx, cronSchedulesTablePostgres, cronFiresTablePostgres)
+	case 33:
+		return applyNamedCronsMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
