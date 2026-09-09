@@ -1,8 +1,10 @@
 package cache
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -852,8 +854,28 @@ func TestHandleProxy_ConfiguredBaseStaysPubliclyCacheable(t *testing.T) {
 }
 
 func TestHandleProxy_MissingHostIsRejected(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"name":"pkg"}`)
+	}))
+	defer upstream.Close()
+
+	transport := &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if addr != upstream.Listener.Addr().String() {
+			return nil, fmt.Errorf("test refused non-fixture upstream %q", addr)
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, addr)
+	}}
+	previousClient := proxyClient
+	client := *proxyClient
+	client.Transport = transport
+	proxyClient = &client
+	t.Cleanup(func() {
+		transport.CloseIdleConnections()
+		proxyClient = previousClient
+	})
 	withTestProxy(t, map[string]Registry{
-		"npm": {Name: "npm", Upstream: "https://registry.npmjs.org", RewriteBody: true},
+		"npm": {Name: "npm", Upstream: upstream.URL, RewriteBody: true},
 	}, func() {
 		req := httptest.NewRequest(http.MethodGet, "/proxy/npm/pkg", nil)
 		req.Host = ""
