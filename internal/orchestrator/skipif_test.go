@@ -192,8 +192,8 @@ func TestSkipIf_SlowPredicateDefaultsToRun(t *testing.T) {
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-slow"})
 	elapsed := time.Since(start)
 
-	if elapsed > 1*time.Second {
-		t.Fatalf("slow predicate should time out near 200ms, took %s", elapsed)
+	if budget := timingBudget(1 * time.Second); elapsed > budget {
+		t.Fatalf("slow predicate should time out near 200ms, took %s (budget %s)", elapsed, budget)
 	}
 	if !slowRan.Load() {
 		t.Fatal("job should run when predicate times out")
