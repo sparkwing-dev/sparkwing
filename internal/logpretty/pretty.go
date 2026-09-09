@@ -735,12 +735,12 @@ func (p *PrettyRenderer) writeRunBlockSummaries(w io.Writer, nodes []any) {
 			fmt.Fprintln(w)
 		}
 		hue := p.hueFor(e.nodeID)
-		header := p.color(e.nodeID, ansiBold+hue)
+		header := p.color(p.sanitizeInline(e.nodeID), ansiBold+hue)
 		if e.stepID != "" {
-			header += p.color(" › ", ansiDim) + p.color(e.stepID, ansiBold)
+			header += p.color(" › ", ansiDim) + p.color(p.sanitizeInline(e.stepID), ansiBold)
 		}
 		fmt.Fprintln(w, "  "+header)
-		RenderMarkdownSummary(w, "    ", e.md)
+		RenderMarkdownSummary(w, "    ", p.sanitize(e.md))
 	}
 }
 
@@ -1195,7 +1195,7 @@ func asMillis(v any) (int64, bool) {
 }
 
 func RenderMarkdownSummary(out io.Writer, prefix, md string) {
-	body := strings.TrimRight(md, "\n")
+	body := strings.TrimRight(SanitizeANSI(md), "\n")
 	lines := strings.Split(body, "\n")
 
 	var table []string
