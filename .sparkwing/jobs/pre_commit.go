@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -434,7 +435,11 @@ func forEachGoModuleEnv(ctx context.Context, label, command string, unset []stri
 	}
 	var failures []string
 	for _, directory := range directories {
-		if empty, err := moduleHasNoPackages(ctx, directory); err == nil && empty {
+		empty, err := moduleHasNoPackages(ctx, directory)
+		if err != nil {
+			return fmt.Errorf("%s: %w", label, err)
+		}
+		if empty {
 			continue
 		}
 		script := withoutInherited(fmt.Sprintf("cd %q && %s", directory, command), unset)
@@ -454,12 +459,19 @@ func forEachGoModuleEnv(ctx context.Context, label, command string, unset []stri
 }
 
 func moduleHasNoPackages(ctx context.Context, directory string) (bool, error) {
-	output, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list ./... 2>&1 || true`, directory)).String()
+	root, err := sourcePolicyRoot()
 	if err != nil {
 		return false, err
 	}
-	output = strings.TrimSpace(output)
-	return output == "" || strings.Contains(output, "matched no packages"), nil
+	command := exec.CommandContext(ctx, "go", "list", "./...")
+	command.Dir = filepath.Join(root, directory)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	output, err := command.Output()
+	if err != nil {
+		return false, fmt.Errorf("list packages in %s: %w: %s", directory, errors.Join(err, ctx.Err()), strings.TrimSpace(stderr.String()))
+	}
+	return strings.TrimSpace(string(output)) == "", nil
 }
 
 var trackerIDPattern = regexp.MustCompile(`\b(IMP|SDK|LOCAL|RUN|ORG|REG|TOD)-[0-9]+\b`)

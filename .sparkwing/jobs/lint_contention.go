@@ -25,11 +25,11 @@ const lintReserveCores = 2.0
 var lintBudget = sparkwing.BoxToolBudget("golangci-lint", grantableCores(), lintLockWait)
 
 func grantableCores() float64 {
-	c := float64(goruntime.NumCPU()) - lintReserveCores
-	if c < 1 {
-		c = 1
+	cores := float64(goruntime.NumCPU()) - lintReserveCores
+	if cores < 1 {
+		cores = 1
 	}
-	return c
+	return cores
 }
 
 func lintSlotCost() int {
@@ -51,18 +51,15 @@ func lintCommandFor(holdsBudget bool) string {
 }
 
 func shouldLeaseLintPath(string) bool {
-	// safety: the slot cache is shared by every worktree that leases it, and
-	// golangci-lint answers from findings cached under the tree the slot pointed
-	// at last: a leased lint reported 0 issues for a tree with eight. Each
-	// checkout keeps its own cache until the slot keys its cache by tree.
+	// SAFETY: Shared lint slots can return findings cached for another checkout.
 	return false
 }
 
 func runGolangciLint(ctx context.Context) error {
-	gcURL := os.Getenv("SPARKWING_GITCACHE_URL")
-	gcToken := os.Getenv("SPARKWING_CACHE_TOKEN")
+	cacheURL := os.Getenv("SPARKWING_GITCACHE_URL")
+	cacheToken := os.Getenv("SPARKWING_CACHE_TOKEN")
 
-	restored, restoredBytes, restoreErr := sparkwing.RestoreLintCache(ctx, gcURL)
+	restored, restoredBytes, restoreErr := sparkwing.RestoreLintCache(ctx, cacheURL)
 	switch {
 	case restoreErr != nil:
 		sparkwing.Warn(ctx, "lint cache: restore: %v", restoreErr)
@@ -70,7 +67,7 @@ func runGolangciLint(ctx context.Context) error {
 		sparkwing.Info(ctx, "lint cache: restored %d bytes from blob store", restoredBytes)
 	}
 
-	dirs, err := committedModuleDirs(ctx)
+	directories, err := committedModuleDirs(ctx)
 	if err != nil {
 		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
 	}
@@ -78,25 +75,25 @@ func runGolangciLint(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	sparkwing.Info(ctx, "golangci-lint: %s", describeLintScope(dirs, baseline))
+	sparkwing.Info(ctx, "golangci-lint: %s", describeLintScope(directories, baseline))
 
 	release, holdsBudget := sparkwing.ToolSlot(ctx, lintBudget, lintSlotCost())
 	defer release()
 
-	cacheDir := sparkwing.ToolCacheDir("golangci-lint")
+	cacheDirectory := sparkwing.ToolCacheDir("golangci-lint")
 	var lintSlot *sparkwing.LintSlot
-	if shouldLeaseLintPath(gcURL) {
+	if shouldLeaseLintPath(cacheURL) {
 		lintSlot, err = sparkwing.AcquireLintSlot("golangci-lint")
 		if err != nil {
 			return fmt.Errorf("golangci-lint: could not acquire a reusable cache path: %w", err)
 		}
 		defer lintSlot.Release()
-		cacheDir = lintSlot.Cache
+		cacheDirectory = lintSlot.Cache
 	}
 	if holdsBudget {
-		sparkwing.Info(ctx, "golangci-lint: holding %s; running parallel (cache %s)", lintBudget, cacheDir)
+		sparkwing.Info(ctx, "golangci-lint: holding %s; running parallel (cache %s)", lintBudget, cacheDirectory)
 	} else {
-		sparkwing.Warn(ctx, "golangci-lint: no box budget; falling back to the tool's own box-wide lock (cache %s)", cacheDir)
+		sparkwing.Warn(ctx, "golangci-lint: no box budget; falling back to the tool's own box-wide lock (cache %s)", cacheDirectory)
 	}
 
 	lintCtx, cancel := context.WithTimeout(ctx, lintLockWait)
@@ -104,44 +101,48 @@ func runGolangciLint(ctx context.Context) error {
 
 	lintStart := time.Now()
 	var failures []string
-	for _, dir := range dirs {
-		if empty, emptyErr := moduleHasNoPackages(lintCtx, dir); emptyErr == nil && empty {
-			sparkwing.Info(lintCtx, "golangci-lint: %s holds no packages to lint", dir)
+	for _, directory := range directories {
+		empty, err := moduleHasNoPackages(lintCtx, directory)
+		if err != nil {
+			return fmt.Errorf("golangci-lint: %w", err)
+		}
+		if empty {
+			sparkwing.Info(lintCtx, "golangci-lint: %s holds no packages to lint", directory)
 			continue
 		}
 		stepStart := time.Now()
-		cmd := sparkwing.Bash(lintCtx, lintCommandFor(holdsBudget))
+		command := sparkwing.Bash(lintCtx, lintCommandFor(holdsBudget))
 		if lintSlot != nil {
-			cmd = lintSlot.ConfigureIn(cmd, dir, "GOLANGCI_LINT_CACHE")
+			command = lintSlot.ConfigureIn(command, directory, "GOLANGCI_LINT_CACHE")
 		} else {
-			cmd = cmd.Dir(dir).Env("GOLANGCI_LINT_CACHE", cacheDir)
+			command = command.Dir(directory).Env("GOLANGCI_LINT_CACHE", cacheDirectory)
 		}
-		if _, runErr := cmd.Run(); runErr != nil {
+		if _, runErr := command.Run(); runErr != nil {
 			failures = append(failures,
-				fmt.Sprintf("%s: %s", dir, describeLintFailure(lintCtx, time.Since(stepStart), runErr)))
+				fmt.Sprintf("%s: %s", directory, describeLintFailure(lintCtx, time.Since(stepStart), runErr)))
 			continue
 		}
-		sparkwing.Info(lintCtx, "golangci-lint: %s clean (%s)", dir, time.Since(stepStart).Round(time.Second))
+		sparkwing.Info(lintCtx, "golangci-lint: %s clean (%s)", directory, time.Since(stepStart).Round(time.Second))
 	}
-	lintDur := time.Since(lintStart)
+	lintDuration := time.Since(lintStart)
 	if len(failures) > 0 {
 		return fmt.Errorf("golangci-lint failed in %d of %d module(s):\n  - %s",
-			len(failures), len(dirs), strings.Join(failures, "\n  - "))
+			len(failures), len(directories), strings.Join(failures, "\n  - "))
 	}
 
-	savedBytes, saveErr := sparkwing.SaveLintCache(ctx, gcURL, gcToken)
+	savedBytes, saveErr := sparkwing.SaveLintCache(ctx, cacheURL, cacheToken)
 	switch {
 	case saveErr != nil:
 		sparkwing.Warn(ctx, "lint cache: save: %v", saveErr)
 	case savedBytes > 0:
-		sparkwing.Info(ctx, "lint cache: saved %d bytes (lint ran %s)", savedBytes, lintDur.Round(time.Second))
+		sparkwing.Info(ctx, "lint cache: saved %d bytes (lint ran %s)", savedBytes, lintDuration.Round(time.Second))
 	}
 	return nil
 }
 
-func describeLintScope(dirs []string, baseline string) string {
+func describeLintScope(directories []string, baseline string) string {
 	return fmt.Sprintf("scope is %d committed module(s) -- %s (%s)",
-		len(dirs), strings.Join(dirs, ", "), baseline)
+		len(directories), strings.Join(directories, ", "), baseline)
 }
 
 func resolveLintBaseline(ctx context.Context) (string, error) {
