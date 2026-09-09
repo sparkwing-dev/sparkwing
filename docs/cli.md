@@ -212,3 +212,35 @@ concurrent runs there should queue against each other -- see
 This is the operational face of *sparkwing does not require sparkwing*:
 the pipeline binary is the product, and it stays functional alone -- the
 CLI adds the coordination.
+
+## Bounded discovery
+
+Use `sparkwing commands --query status` to find a command by path or
+synopsis, then read that command's `--help`. The index sorts command paths
+lexically and returns at most 40 command records. `--path` restricts a
+subtree before query filtering and pagination. Child counts describe the
+full visible registry, even when a child is outside the current page.
+
+`docs list --query <topic>` returns at most 40 topic metadata records.
+`docs search --query <question>` ranks matching sections before choosing
+its 20-result page. Search records include a short snippet, without body
+content. Read a selected hit with `docs read --topic <slug> --section
+<start_line>`. Section selectors refer to the embedded docs in this binary;
+they do not apply to web documents or multi-topic guides. `--body` on search
+explicitly includes the bodies of the selected page.
+
+All three indexes emit compact NDJSON by default when piped. A final
+`kind: "page"` record reports `total`, `returned`, `limit`, `truncated`, and
+`next_cursor` when another page exists. Pass that cursor with `--cursor`,
+keeping the same filters and binary version. Command/topic cursors name the
+last lexical path/slug; search cursors name the last ranked section as
+`slug:start_line`. An unknown cursor fails instead of silently restarting.
+Metadata records retain their existing selection fields; readers must
+recognize the final page record rather than treat it as a command/topic.
+
+`--limit 0` explicitly returns every remaining match. Plain mode prints
+paths or selectors only; continuation information goes to stderr. Pretty
+mode includes a short page footer. Explicit `commands --format markdown`
+exports the exhaustive reference and rejects query/pagination flags; a
+`--path` export still selects the requested subtree. Use `--output plain`
+when redirecting the Markdown artifact to a file.

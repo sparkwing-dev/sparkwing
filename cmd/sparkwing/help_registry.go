@@ -408,45 +408,33 @@ var cmdCommands = Command{
 	Path:             "sparkwing commands",
 	Synopsis:         "Index of every command: one path and synopsis per line",
 	HideFromComplete: true,
-	Description: `The whole CLI as one index -- 139 verbs, one line each, so
-"what is this CLI" is answered by reading rather than by
-walking every -h page.
+	Description: `Search command paths and synopses with --query; every word must match.
+--path narrows to a subtree, with or without the leading sparkwing.
+Results are lexical, at most 40 by default. JSON ends with a kind:page
+record reporting total, returned, truncated and next_cursor. Continue
+with --cursor and the same filters, or --limit 0 for every match.
 
-Drill down two ways: '<any path> --help' for one verb's flags,
-arguments, and examples, or --path PREFIX to narrow this list
-to a subtree. The prefix may leave off the leading 'sparkwing'
-(--path runs and --path "sparkwing runs" select the same
-subtree). It matches whole path components, so --path run
-selects 'run' and its subcommands and not the separate 'runs'
-group, and a prefix that matches nothing is an error rather
-than an empty listing.
+Rows carry path, synopsis and full-tree subcommand_count. Read a selected
+command with <path> --help. Hidden commands require --include-hidden.
+Plain prints paths only, with continuation on stderr.
 
--o json is this same index for a program to parse: path,
-synopsis, and subcommand_count per verb, as NDJSON -- one
-complete JSON object per line, so 'head -5' returns five whole
-records instead of a truncated array. It carries no
-description, flags, or examples; that is what '<path> --help'
-prints, from the same Command values and always current.
-Hidden commands are dispatchable but stay out of every
-listing, because their help points at what to use instead;
---include-hidden lists them, flagged.
-
--o plain is one path per line for shell consumption; --format markdown renders the full reference page, and with --split-dir
-writes the docs/cli-*.md reference (one page per top-level
-command group plus a cli-reference.md index).`,
+--format markdown exports the full reference and rejects query/pagination flags. --split-dir writes generated files.`,
 	Flags: []FlagSpec{
+		{Name: "query", Short: "q", Argument: "TEXT", Desc: "Match every word against paths and synopses", Group: "Selection"},
+		{Name: "limit", Argument: "N", Desc: "Maximum records; 0 returns every remaining match", Default: "40", Group: "Selection"},
+		{Name: "cursor", Argument: "CURSOR", Desc: "Continue after next_cursor with the same filters and binary version", Group: "Selection"},
 		{Name: "format", Argument: "markdown", Desc: "Export the full command reference as Markdown", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "split-dir", Argument: "DIR", Desc: "With --format markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages", Group: "Output"},
 		{Name: "path", Argument: "PREFIX", Desc: "Only emit commands at or under PREFIX, matched by whole path components, with or without the leading 'sparkwing' (runs, sparkwing runs, runs list); a prefix matching nothing is an error", Group: "Filter"},
 		{Name: "include-hidden", Desc: "Also emit Hidden:true commands (default: skip)", Group: "Filter"},
 	},
-	GroupOrder: []string{"Output", "Filter", "Other"},
+	GroupOrder: []string{"Selection", "Filter", "Output", "Other"},
 	Examples: []Example{
-		{"Full CLI surface (agent self-discovery)", "sparkwing commands"},
+		{"Find status commands", "sparkwing commands --query status"},
 		{"Just the pipelines subtree", "sparkwing commands --path pipeline"},
 		{"The same subtree, fully qualified", "sparkwing commands --path \"sparkwing pipeline\""},
-		{"All paths, one per line", "sparkwing commands -o plain"},
+		{"All paths, one per line", "sparkwing commands --limit 0 -o plain"},
 	},
 }
 
@@ -576,28 +564,22 @@ and 4 when the daemon's socket cannot be reached at all.`,
 var cmdDocs = Command{
 	Path:     "sparkwing docs",
 	Synopsis: "Embedded user docs (offline)",
-	Description: `The sparkwing docs are shipped inside the binary. ` +
-		"`sparkwing docs read --topic getting-started`" + ` returns the
-raw markdown to stdout; ` + "`sparkwing docs all`" + ` dumps every
-doc in one shot for an agent that wants the full corpus in
-context. The docs match the binary version exactly -- no risk of
-the website explaining a flag your CLI doesn't have.
+	Description: `The docs ship inside this binary and match its version.
+Start with docs search --query <question> for a page of short snippets,
+then docs read --topic <slug> --section <start_line> for one selected hit.
+Docs list pages through topic metadata; --query narrows that index.
+JSON indexes end with a typed page summary and continuation cursor.
 
-Discovery: ` + "`sparkwing docs list -o json`" + ` returns slug + title +
-summary for every topic. ` + "`sparkwing docs search --query pull_request`" + `
-returns the matching sections -- topic, heading, line range -- so a
-narrow question does not cost a whole page.
-
-When one page leaves you a lookup short, ` + "`sparkwing docs guides`" + `
-lists task-sized sets of topics; ` + "`sparkwing docs read --guide authoring`" + `
-returns the whole set in one call.`,
+Selected reads return JSON document records when piped. Explicit
+--output plain prints the original Markdown. Use --web and --version
+on list/read when comparing another published version.
+Guides group related topics; all is an explicit exhaustive export.`,
 	SubcommandOrder: []string{"list", "read", "guides", "all", "search", "migrations", "versions", "cache"},
 	Examples: []Example{
-		{"List all topics (table)", "sparkwing docs list"},
-		{"List all topics (agent-readable)", "sparkwing docs list -o json"},
+		{"List topic metadata", "sparkwing docs list"},
+		{"List topic metadata (agent-readable)", "sparkwing docs list -o json"},
 		{"Read one topic", "sparkwing docs read --topic pipelines"},
 		{"Read one topic at a specific version (online)", "sparkwing docs read --topic pipelines --version v0.3.0 --web"},
-		{"Slurp the whole corpus into context", "sparkwing docs all"},
 		{"Find docs that mention warm pool", "sparkwing docs search --query \"warm pool\""},
 		{"List migration guides this CLI knows", "sparkwing docs migrations list"},
 		{"Pipe every guide up to v0.4.0 into context", "sparkwing docs migrations between --to v0.4.0"},
@@ -608,21 +590,25 @@ returns the whole set in one call.`,
 var cmdDocsList = Command{
 	Path:     "sparkwing docs list",
 	Synopsis: "Enumerate every doc topic",
-	Description: `Walks the docs corpus and prints one row per topic with its
-slug, first-H1 title, and first-paragraph summary. By default reads
-the binary's embedded copy (hermetic, version-locked); pass --web
-to fetch from sparkwing.dev for another version.`,
+	Description: `List topic metadata in lexical slug order, at most 40 rows by default.
+--query matches words in slugs, titles and summaries before pagination.
+JSON ends with a kind:page record; continue with --cursor and the same
+filters. --limit 0 emits every match. Bodies belong to docs read.
+The embedded copy matches this binary; --web reads another version.`,
 	Flags: []FlagSpec{
+		{Name: "query", Short: "q", Argument: "TEXT", Desc: "Match words in slug, title and summary", Group: "Selection"},
+		{Name: "limit", Argument: "N", Desc: "Maximum records; 0 returns every remaining match", Default: "40", Group: "Selection"},
+		{Name: "cursor", Argument: "CURSOR", Desc: "Continue after next_cursor with the same filters and binary version", Group: "Selection"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
 		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version.", Group: "Source"},
 		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
 	},
-	GroupOrder: []string{"Source", "Output", "Other"},
+	GroupOrder: []string{"Selection", "Source", "Output", "Other"},
 	Examples: []Example{
 		{"Human-readable table", "sparkwing docs list"},
 		{"Agent-readable", "sparkwing docs list -o json"},
-		{"Slug-per-line for shell loops", "sparkwing docs list -o plain"},
+		{"Slug-per-line for shell loops", "sparkwing docs list --limit 0 -o plain"},
 		{"List the v0.3.0 corpus from sparkwing.dev", "sparkwing docs list --web --version v0.3.0"},
 	},
 }
@@ -630,7 +616,9 @@ to fetch from sparkwing.dev for another version.`,
 var cmdDocsRead = Command{
 	Path:     "sparkwing docs read",
 	Synopsis: "Read one document",
-	Description: `Reads the named topic. Piped output is one JSON document record;
+	Description: `Reads the named topic, or one embedded section selected by its start_line
+from docs search (--section). Section selection requires --topic and
+cannot combine with --guide or --web. Piped output is one JSON document record;
 --output plain prints raw Markdown. The slug is
 the filename under /docs/ minus .md (run ` + "`sparkwing docs list`" + ` to
 see them all). Subdirs use slash-separated paths (e.g.
@@ -640,6 +628,7 @@ Default source is the binary's embedded corpus. Use --web to fetch
 from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 --version latest.`,
 	Flags: []FlagSpec{
+		{Name: "section", Argument: "START_LINE", Desc: "Read one embedded section returned by search", RequiresFlags: []string{"topic"}, ConflictsWith: []string{"guide", "web"}, Group: "Selection"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain (pretty on a terminal, json when piped)", Group: "Output"},
 		{Name: "topic", Argument: "NAME", Desc: "Doc slug (e.g. getting-started, pipelines, mcp)", Group: "Selection"},
 		{Name: "guide", Argument: "NAME", Desc: "Read a task-sized set of topics instead of one (`sparkwing docs guides`)", Group: "Selection"},
@@ -664,7 +653,7 @@ var cmdDocsAll = Command{
 --output plain prints the full Markdown corpus with page headers.`,
 	Flags: []FlagSpec{{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain (pretty on a terminal, json when piped)", Group: "Output"}},
 	Examples: []Example{
-		{"Slurp every doc into context", "sparkwing docs all"},
+		{"Explicit exhaustive document export", "sparkwing docs all"},
 	},
 }
 
@@ -692,19 +681,18 @@ read end to end; reach those with ` + "`sparkwing docs search`" + `.`,
 var cmdDocsSearch = Command{
 	Path:     "sparkwing docs search",
 	Synopsis: "Find the section that answers a question",
-	Description: `Returns the doc sections containing every space-separated
-token in --query (case-insensitive), best first: a heading hit outranks
-a body hit, and a shorter section outranks a longer one holding the same
-match. Each result names its topic, heading, and line range.
+	Description: `Find matching sections, ranked before pagination. Every query word must
+match; heading matches rank ahead of body matches. The default page has
+20 hits with topic, heading, line range and a short snippet, never bodies.
+JSON ends with a kind:page record; --cursor continues the same query.
+--limit 0 returns all matches. Use the same binary for continuation.
 
-Sections rather than whole topics because the reference pages run to
-tens of thousands of tokens, and the question is usually narrow -- what
-a ` + "`pull_request`" + ` trigger looks like, what fields ` + "`ApprovalConfig`" + ` has.
-Add --body to print the matching sections in full.
-
---topics restores the old behavior, listing whole matching topics in the
-same shape as ` + "`sparkwing docs list`" + `.`,
+Read one hit with docs read --topic <slug> --section <start_line>.
+--body explicitly includes full bodies for this page. --topics lists
+matching topic metadata instead of sections.`,
 	Flags: []FlagSpec{
+		{Name: "limit", Argument: "N", Desc: "Maximum records; 0 returns every remaining match", Default: "20", Group: "Selection"},
+		{Name: "cursor", Argument: "CURSOR", Desc: "Continue after next_cursor with the same filters and binary version", Group: "Selection"},
 		{Name: "query", Short: "q", Argument: "TEXT", Desc: "Search terms (every token must match)", Required: true, Group: "Selection"},
 		{Name: "body", Desc: "Print each matching section in full instead of a snippet", Group: "Selection"},
 		{Name: "topics", Desc: "List whole matching topics instead of sections", Group: "Selection"},
@@ -714,8 +702,8 @@ same shape as ` + "`sparkwing docs list`" + `.`,
 	Examples: []Example{
 		{"Where a PR trigger is defined", "sparkwing docs search --query pull_request"},
 		{"Read the matching sections in full", "sparkwing docs search -q ApprovalConfig --body"},
-		{"JSON for agents (topic, heading, line range, body)", "sparkwing docs search -q approval -o json"},
-		{"Whole topics, as before", "sparkwing docs search -q \"warm pool\" --topics"},
+		{"Compact snippets for agents", "sparkwing docs search -q approval -o json"},
+		{"Matching topic metadata", "sparkwing docs search -q \"warm pool\" --topics"},
 	},
 }
 

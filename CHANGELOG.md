@@ -49,6 +49,9 @@ code change to unlock.
 
 ## [Unreleased]
 
+- **cli (Breaking):** Command and documentation indexes now default to bounded pages, with native query filters and a typed continuation record. Documentation search returns snippets unless bodies are requested; selected sections are readable with `docs read --topic <slug> --section <start_line>`. Use `--limit 0` for exhaustive indexes. See [migration](docs/migrations/_unreleased.md#bounded-discovery).
+
+
 ### Added
 
 - **runtime + cli:** Every step command a run starts is recorded in a ledger
