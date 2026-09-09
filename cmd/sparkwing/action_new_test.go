@@ -340,3 +340,37 @@ func TestMultiTriggerYAMLParses(t *testing.T) {
 		t.Errorf("decoded %+v; want all three declared", on)
 	}
 }
+
+func TestAppendPipelinesYAML_PreservesOtherSections(t *testing.T) {
+	for _, tail := range []string{
+		"sparks:\n  - name: tools\n    source: example.com/tools\n    version: v1.0.0\n",
+		"defaults: {}\n",
+		"profiles: {}\n",
+	} {
+		t.Run(strings.Split(tail, ":")[0], func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, projectconfig.Filename)
+			body := "# project comment\npipelines:\n  - name: existing\n    entrypoint: Existing\n" + tail
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := appendPipelinesYAML(dir, "sample", "Sample", true, "    on:\n      pre_commit: {}\n"); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := projectconfig.Load(path)
+			if err != nil {
+				t.Fatalf("scaffolded config does not parse: %v", err)
+			}
+			if len(cfg.Pipelines) != 2 || cfg.Pipelines[0].Name != "existing" || cfg.Pipelines[1].Name != "sample" || !cfg.Pipelines[1].Hidden || cfg.Pipelines[1].On.PreHook == nil {
+				t.Fatalf("pipelines = %+v", cfg.Pipelines)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(after), "# project comment") || !strings.Contains(string(after), tail) {
+				t.Fatalf("lost existing config: %s", after)
+			}
+		})
+	}
+}

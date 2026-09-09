@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	flag "github.com/spf13/pflag"
+	"gopkg.in/yaml.v3"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -887,16 +888,50 @@ func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool, tri
 	if err != nil {
 		return err
 	}
-	var b bytes.Buffer
-	b.Write(existing)
-	if len(existing) > 0 && !bytes.HasSuffix(existing, []byte("\n")) {
-		b.WriteByte('\n')
+	var doc yaml.Node
+	if err := yaml.Unmarshal(existing, &doc); err != nil {
+		return err
 	}
-	fmt.Fprintf(&b, "\n  - name: %s\n    entrypoint: %s\n", name, entrypoint)
+	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("%s: top-level YAML is not a mapping", path)
+	}
+	root := doc.Content[0]
+	var pipelines *yaml.Node
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == "pipelines" {
+			pipelines = root.Content[i+1]
+			break
+		}
+	}
+	if pipelines == nil {
+		pipelines = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		root.Content = append(root.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "pipelines"}, pipelines)
+	} else if pipelines.Tag == "!!null" {
+		pipelines.Kind, pipelines.Tag, pipelines.Value = yaml.SequenceNode, "!!seq", ""
+	}
+	if pipelines.Kind != yaml.SequenceNode {
+		return fmt.Errorf("%s: pipelines must be a sequence", path)
+	}
+	var entry bytes.Buffer
+	fmt.Fprintf(&entry, "  - name: %s\n    entrypoint: %s\n", name, entrypoint)
 	if hidden {
-		b.WriteString("    hidden: true\n")
+		entry.WriteString("    hidden: true\n")
 	}
-	b.WriteString(trigger)
+	entry.WriteString(trigger)
+	var added yaml.Node
+	if err := yaml.Unmarshal(entry.Bytes(), &added); err != nil {
+		return err
+	}
+	pipelines.Content = append(pipelines.Content, added.Content[0].Content[0])
+	var b bytes.Buffer
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return err
+	}
+	if err := enc.Close(); err != nil {
+		return err
+	}
 	return os.WriteFile(path, b.Bytes(), 0o644)
 }
 
