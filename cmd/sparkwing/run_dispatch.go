@@ -489,23 +489,33 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory 
 	out, err := exec.Command("git", "-C", repoRoot,
 		"worktree", "add", "--detach", "--quiet", "--", temporaryDir, string(commit)).CombinedOutput()
 	if err != nil {
-		_ = os.RemoveAll(temporaryDir)
+		if cleanupErr := os.RemoveAll(temporaryDir); cleanupErr != nil {
+			slog.Warn("could not remove temporary worktree directory", "path", temporaryDir, "error", cleanupErr)
+		}
 		return "", "", nil, fmt.Errorf("git worktree add %s: %w: %s",
 			ref, err, strings.TrimSpace(string(out)))
 	}
 
 	pipelineDirectory = filepath.Join(temporaryDir, ".sparkwing")
 	if fi, statErr := os.Stat(pipelineDirectory); statErr != nil || !fi.IsDir() {
-		_ = exec.Command("git", "-C", repoRoot,
-			"worktree", "remove", "--force", temporaryDir).Run()
-		_ = os.RemoveAll(temporaryDir)
+		if cleanupErr := exec.Command("git", "-C", repoRoot,
+			"worktree", "remove", "--force", "--", temporaryDir).Run(); cleanupErr != nil {
+			slog.Warn("could not remove temporary Git worktree", "path", temporaryDir, "error", cleanupErr)
+		}
+		if cleanupErr := os.RemoveAll(temporaryDir); cleanupErr != nil {
+			slog.Warn("could not remove temporary worktree directory", "path", temporaryDir, "error", cleanupErr)
+		}
 		return "", "", nil, fmt.Errorf("ref %s has no .sparkwing/ directory", ref)
 	}
 
 	cleanup = func() {
-		_ = exec.Command("git", "-C", repoRoot,
-			"worktree", "remove", "--force", "--", temporaryDir).Run()
-		_ = os.RemoveAll(temporaryDir)
+		if cleanupErr := exec.Command("git", "-C", repoRoot,
+			"worktree", "remove", "--force", "--", temporaryDir).Run(); cleanupErr != nil {
+			slog.Warn("could not remove temporary Git worktree", "path", temporaryDir, "error", cleanupErr)
+		}
+		if cleanupErr := os.RemoveAll(temporaryDir); cleanupErr != nil {
+			slog.Warn("could not remove temporary worktree directory", "path", temporaryDir, "error", cleanupErr)
+		}
 		// safety: git keeps the registration under the origin repository, where a
 		// leftover one blocks adding the same path again.
 		if err := exec.Command("git", "-C", repoRoot, "worktree", "prune").Run(); err != nil {
