@@ -23,6 +23,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.47.1] - 2026-09-09
 ### Fixed
 
 - **pool:** Count successful PVC checkouts and returns in the existing metrics
