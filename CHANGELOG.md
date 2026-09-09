@@ -26,6 +26,7 @@ code change to unlock.
 ### Fixed
 
 - **cli:** Documentation searches reuse the embedded catalog instead of rebuilding it for every document
+- **cache:** Keep registry responses with different Accept headers in separate cache entries
 
 ## [v0.47.0] - 2026-09-09
 ### Added
