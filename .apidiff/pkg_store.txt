@@ -744,7 +744,7 @@ func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUs
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error)
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
-func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error)
+func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error)
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
@@ -777,7 +777,7 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
-func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error)
+func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name, repo string) error
 func (s *Store) DeleteSession(rawSession string) error
@@ -807,7 +807,7 @@ func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)
 func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
 func (s *Store) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error)
-func (s *Store) GetCronTick(ctx context.Context) (CronTick, error)
+func (s *Store) GetCronTick(ctx context.Context) (tick CronTick, err error)
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
@@ -826,8 +826,8 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
-func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) ([]CronFire, error)
-func (s *Store) ListCronSchedules(ctx context.Context) ([]CronSchedule, error)
+func (s *Store) ListCronFires(ctx context.Context, scheduleID string, limit int) (out []CronFire, err error)
+func (s *Store) ListCronSchedules(ctx context.Context) (out []CronSchedule, err error)
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error)
@@ -896,7 +896,7 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
 func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
-func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) error
+func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error)
 func (s *Store) ResolveExecutorMembership(ctx context.Context, claimant ClaimIdentity, executorName string, summary ExecutorSchedulingSummary) (ExecutorMembershipSnapshot, error)
 func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
