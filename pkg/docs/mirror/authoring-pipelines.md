@@ -224,8 +224,12 @@ below).
 
 ## Runner labels (`runner-label`)
 
-The linter rejects blank runner labels. An `Inline()` job executes on
-the dispatcher's host, where `Requires` and `Prefers` do not select a runner.
+The linter rejects blank runner labels on `Requires`, `Prefers`, and
+`WhenRunner`. An empty string is dropped when labels are normalized, so the
+term vanishes; a whitespace label survives and matches no runner, so the term
+can never be satisfied. An `Inline()` job executes on the dispatcher's host,
+where `Requires` and `Prefers` select no runner; `WhenRunner` still applies
+there, matched against the inline runner.
 
 Avoid blank labels and labels on inline jobs:
 
@@ -299,6 +303,38 @@ A key callback returns `(CacheKey, error)`. Return errors when inputs
 cannot be read; return `sparkwing.NoCache, nil` to bypass memoization.
 Errors, panics, empty keys, and resolution deadlines fail before dispatch.
 Use `.CacheDir()` to restore dependency directories before executing a job.
+
+## Configuring a dynamic fan-out (`dynamic-group-inert`)
+
+`JobFanOutDynamic` builds its members from an upstream job's output, so the
+group is empty while `Plan()` runs. Every `JobGroup` setter applies to the
+members present when it is called, which on a dynamic group is none of them:
+the call compiles, reads as configuration, and is dropped.
+
+Don't configure the group:
+
+```go
+shards := sparkwing.Job(plan, "discover", &Discover{})
+sparkwing.JobFanOutDynamic(plan, "bench", shards, func(s Shard) (string, any) {
+    return s.Name, &Bench{Shard: s}
+}).Requires("gpu").Retry(2) // neither reaches a generated job
+```
+
+Do configure the jobs the callback returns. `Requires`, `Prefers`, and
+`WhenRunner` have provider interfaces a `Workable` implements, and each
+generated instance can answer from its own data:
+
+```go
+type Bench struct {
+    sparkwing.Base
+    Shard Shard
+}
+
+func (b Bench) Requires() []string { return []string{b.Shard.Runner} }
+```
+
+The group itself stays useful as a dependency target: `Needs(group)` on a
+downstream job waits for every generated member.
 
 ## Declarative trigger filters and run guards
 

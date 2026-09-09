@@ -20,6 +20,17 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **cli:** `pipeline lint` gains `dynamic-group-inert`. A `JobFanOutDynamic`
+  group has no members until its source job completes, so every `JobGroup`
+  setter on it -- `Memoize`, `Requires`, `Retry`, `Needs`, and the rest --
+  compiles, reads as configuration, and is dropped. Configure the generated
+  jobs from the value the fan-out callback returns.
+- **cli:** `runner-label` flags a blank label on `WhenRunner`, and every rule
+  now follows a builder chain split across statements, so a group bound to a
+  variable and configured on a later line is checked like a single expression.
+
 ### Fixed
 
 - **cache:** Pipeline binary keys include Go packages named `web`
