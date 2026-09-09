@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -200,6 +201,8 @@ func TestEnvVarWalkReadsNestedPackagesAndSkipsNestedModules(t *testing.T) {
 	write("tools/go.mod", "module fake-tools\n\ngo 1.26\n")
 	write("tools/tool.go", "package tools\n\nimport \"os\"\n\nvar d = os.Getenv(\"SPARKWING_OTHER_MODULE\")\n")
 
+	runSnapshotGit(t, root, "init", "--quiet")
+	runSnapshotGit(t, root, "add", "-A")
 	names, dynamic, err := envVarsRead(root)
 	if err != nil {
 		t.Fatal(err)
@@ -223,6 +226,8 @@ func TestEnvVarWalkReportsAComputedRead(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	runSnapshotGit(t, root, "init", "--quiet")
+	runSnapshotGit(t, root, "add", "-A")
 	_, dynamic, err := envVarsRead(root)
 	if err != nil {
 		t.Fatal(err)
@@ -255,6 +260,8 @@ func TestEnvVarWalkFollowsEnvHelpersToTheirCallSites(t *testing.T) {
 		"var a = envOr(\"SPARKWING_VIA_HELPER\", \"\")\n"+
 		"var b = envOr(wedge, \"\")\n")
 
+	runSnapshotGit(t, root, "init", "--quiet")
+	runSnapshotGit(t, root, "add", "-A")
 	names, dynamic, err := envVarsRead(root)
 	if err != nil {
 		t.Fatal(err)
@@ -372,31 +379,34 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 }
 
 func moduleFiles(root string) ([]string, error) {
+	cmd := exec.Command("git", "-C", root, "ls-files", "-z", "--", "*.go", "*go.mod")
+	data, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("list tracked module files: %w", err)
+	}
+	tracked := make(map[string]bool)
+	for _, path := range strings.Split(string(data), "\x00") {
+		tracked[path] = true
+	}
 	var out []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+files:
+	for path := range tracked {
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			continue
 		}
-		if d.IsDir() {
-			if path == root {
-				return nil
-			}
-			switch d.Name() {
+		for dir := filepath.Dir(path); dir != "."; dir = filepath.Dir(dir) {
+			switch filepath.Base(dir) {
 			case ".git", "testdata", "node_modules", "vendor":
-				return fs.SkipDir
+				continue files
 			}
-			if _, statErr := os.Stat(filepath.Join(path, "go.mod")); statErr == nil {
-				return fs.SkipDir
+			if tracked[filepath.ToSlash(filepath.Join(dir, "go.mod"))] {
+				continue files
 			}
-			return nil
 		}
-		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
-			out = append(out, path)
-		}
-		return nil
-	})
+		out = append(out, filepath.Join(root, path))
+	}
 	sort.Strings(out)
-	return out, err
+	return out, nil
 }
 
 func stringConstants(files map[string]*ast.File) map[string]string {
@@ -577,4 +587,39 @@ func exprText(fileSet *token.FileSet, e ast.Expr) string {
 		return "<unprintable>"
 	}
 	return b.String()
+}
+
+func TestEnvVarWalkIgnoresUntrackedScratch(t *testing.T) {
+	root := t.TempDir()
+	runSnapshotGit(t, root, "init", "--quiet")
+	tracked := filepath.Join(root, "main.go")
+	body := "package main\nimport \"os\"\nvar value = os.Getenv(\"SPARKWING_TRACKED\")\n"
+	if err := os.WriteFile(tracked, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runSnapshotGit(t, root, "add", "main.go")
+	for _, rel := range []string{"scratch.go", ".claude-scratch/backup.go"} {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(strings.ReplaceAll(body, "SPARKWING_TRACKED", "SPARKWING_SCRATCH")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names, _, err := envVarsRead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(names, ","); got != "SPARKWING_TRACKED" {
+		t.Fatalf("reads = %q, want only the tracked variable", got)
+	}
+	runSnapshotGit(t, root, "add", "scratch.go")
+	names, _, err = envVarsRead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(names, ","); got != "SPARKWING_SCRATCH,SPARKWING_TRACKED" {
+		t.Fatalf("reads after staging scratch = %q", got)
+	}
 }

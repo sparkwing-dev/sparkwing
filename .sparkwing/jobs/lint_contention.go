@@ -88,16 +88,17 @@ func runGolangciLint(ctx context.Context) error {
 	lintStart := time.Now()
 	var failures []string
 	for _, directory := range directories {
-		empty, err := moduleHasNoPackages(lintCtx, directory)
+		packages, err := modulePackageArgs(lintCtx, directory, true)
 		if err != nil {
 			return fmt.Errorf("golangci-lint: %w", err)
 		}
-		if empty {
+		if len(packages) == 0 {
 			sparkwing.Info(lintCtx, "golangci-lint: %s holds no packages to lint", directory)
 			continue
 		}
 		stepStart := time.Now()
-		command := sparkwing.Bash(lintCtx, lintCommandFor(holdsBudget)).Dir(directory).Env("GOLANGCI_LINT_CACHE", cacheDirectory)
+		invocation := strings.TrimSuffix(lintCommandFor(holdsBudget), "./...") + strings.Join(packages, " ")
+		command := sparkwing.Bash(lintCtx, invocation).Dir(directory).Env("GOLANGCI_LINT_CACHE", cacheDirectory)
 		if _, runErr := command.Run(); runErr != nil {
 			failures = append(failures,
 				fmt.Sprintf("%s: %s", directory, describeLintFailure(lintCtx, time.Since(stepStart), runErr)))
