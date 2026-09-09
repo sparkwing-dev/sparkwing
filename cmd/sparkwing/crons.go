@@ -172,16 +172,14 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, _ time.T
 	if err != nil {
 		return "", err
 	}
-	// safety: the run is durably queued, so a consumer that will not start is a
-	// delay rather than a lost fire; the timer's log carries the reason.
-	if cerr := ensureTriggerConsumer(l.paths.Root, 0, 0); cerr != nil {
-		slog.Default().Warn("scheduled run queued with no consumer to execute it",
-			"run_id", result.RunID, "schedule", s.ID, "error", cerr)
+	if cerr := cronsEnsureConsumer(l.paths.Root); cerr != nil {
+		return "", fmt.Errorf("run %s stays queued and will start when a consumer does, but none could be started now: %w",
+			result.RunID, cerr)
 	}
 	return result.RunID, nil
 }
 
-func (l cronLauncher) Active(ctx context.Context, runID string) (bool, error) {
+func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error) {
 	if _, err := orchestrator.ReconcileOrphanedLocalRuns(ctx, l.store, 0); err != nil {
 		return false, err
 	}
@@ -195,8 +193,29 @@ func (l cronLauncher) Active(ctx context.Context, runID string) (bool, error) {
 	if run == nil {
 		return false, nil
 	}
-	return run.Status == "pending" || run.Status == "running", nil
+	switch run.Status {
+	case "running":
+		return true, nil
+	case "pending":
+		// safety: nothing reconciles a run no consumer ever claimed, so a skip
+		// policy would read it as active for ever and never fire again.
+		return time.Since(runQueuedAt(run)) <= staleAfter, nil
+	}
+	return false, nil
 }
+
+// safety: CreatedAt is the trigger-intake stamp a detached submission writes;
+// StartedAt is all a row from before that column has.
+func runQueuedAt(run *store.Run) time.Time {
+	if !run.CreatedAt.IsZero() {
+		return run.CreatedAt
+	}
+	return run.StartedAt
+}
+
+// safety: tests replace this to exercise a launch with no consumer, without
+// spawning one.
+var cronsEnsureConsumer = func(home string) error { return ensureTriggerConsumer(home, 0, 0) }
 
 // cronsTimerHost describes this machine to internal/crontimer. Tests replace it
 // with a host whose service manager and unit directory are fakes.
@@ -216,13 +235,15 @@ func defaultCronsTimerHost(paths orchestrator.Paths) (crontimer.Host, error) {
 		return crontimer.Host{}, err
 	}
 	env := map[string]string{}
-	// The daemon host is resolved from PATH at run time, so a side-by-side build
-	// (see SPARKWING_INSTALL_NAME in bin/install.sh) names its own daemon here
-	// or its scheduled runs meet the released daemon and refuse the build.
-	for _, key := range []string{"SPARKWING_HOME", wingdclient.HostBinEnv} {
-		if v := os.Getenv(key); v != "" {
-			env[key] = v
-		}
+	if v := os.Getenv("SPARKWING_HOME"); v != "" {
+		env["SPARKWING_HOME"] = v
+	}
+	// safety: the daemon host is resolved from PATH at run time, so a
+	// side-by-side build (SPARKWING_INSTALL_NAME in bin/install.sh) names its
+	// own daemon here or its scheduled runs meet the released daemon and are
+	// refused.
+	if v := os.Getenv(wingdclient.HostBinEnv); v != "" {
+		env[wingdclient.HostBinEnv] = v
 	}
 	return crontimer.Host{
 		GOOS:       runtime.GOOS,

@@ -175,7 +175,7 @@ describe("healthBanner", () => {
 
   it("names the foreign unit it found", () => {
     const banner = healthBanner(
-      health({ timer: { ...health().timer, foreign: true } }),
+      health({ timer: { ...health().timer, installed: false, foreign: true } }),
     );
     assert.equal(banner.tone, "warning");
     assert.match(banner.headline, /sparkwing did not write it/);

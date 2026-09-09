@@ -200,6 +200,9 @@ func serviceUnit(h Host) string {
 	// A oneshot's cgroup is killed when its main process exits, which would take
 	// the run consumer and the admission daemon the tick just started with it.
 	b.WriteString("[Service]\nType=oneshot\nKillMode=process\n")
+	// safety: a tick that hangs on a lock or a store would otherwise hold the
+	// unit active and swallow every following minute.
+	b.WriteString("TimeoutStartSec=5m\n")
 	fmt.Fprintf(&b, "ExecStart=%s crons tick\n", systemdWord(h.Binary))
 	for _, kv := range envPairs(h) {
 		fmt.Fprintf(&b, "Environment=%s\n", systemdAssignment(kv[0], kv[1]))

@@ -31,12 +31,13 @@ type Health struct {
 // Healthy reports whether this host is evaluating what it armed. A host with
 // nothing armed is healthy: there is nothing for the timer to do. A recent
 // tick counts as evidence on its own, so a host driving the tick from its own
-// scheduler passes without a sparkwing timer.
+// scheduler passes without a sparkwing timer. A tick that landed but reported
+// a failure is not health: something armed here was not evaluated.
 func (h Health) Healthy() bool {
 	if h.Armed == 0 {
 		return true
 	}
-	if h.TickStale || h.Timer.Foreign || h.Timer.Stale {
+	if h.TickStale || h.Timer.Foreign || h.Timer.Stale || h.LastTick.Error != "" {
 		return false
 	}
 	return h.Timer.Enabled || !h.LastTick.At.IsZero()

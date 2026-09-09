@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -59,21 +60,32 @@ type Declared struct {
 }
 
 // DeclaredSchedules reads <repoRoot>/.sparkwing/sparkwing.yaml and returns the
-// pipelines that declare a schedule trigger, in declaration order. A repository
-// with no config file, or one that declares no cadence, yields no schedules and
-// no error; the config's own validation rejects a malformed cron before it gets
-// here.
+// pipelines that declare a schedule trigger, in declaration order. A readable
+// config that declares no cadence yields no schedules and no error; the
+// config's own validation rejects a malformed cron before it gets here.
+//
+// A checkout that is gone, or a config that cannot be read, is an error rather
+// than an empty answer. The two are indistinguishable to a caller that only
+// counts schedules, and reading the second as the first silently disarms
+// everything the host had armed.
 func DeclaredSchedules(repoRoot string) ([]Declared, error) {
 	root, err := filepath.Abs(repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s: %w", repoRoot, err)
 	}
-	cfg, err := projectconfig.Load(filepath.Join(root, ".sparkwing", projectconfig.Filename))
+	if _, err := os.Stat(root); err != nil {
+		return nil, fmt.Errorf("read the checkout at %s: %w", root, err)
+	}
+	path := filepath.Join(root, ".sparkwing", projectconfig.Filename)
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	cfg, err := projectconfig.Load(path)
 	if err != nil {
 		return nil, err
 	}
 	if cfg == nil {
-		return nil, nil
+		return nil, fmt.Errorf("read %s: it went away while it was being read", path)
 	}
 	var out []Declared
 	for _, p := range cfg.Pipelines {
@@ -93,8 +105,10 @@ type Launcher interface {
 
 	// Active reports whether the run is still pending or running, after
 	// reconciling runs whose executor died, so a crashed run never suppresses
-	// a schedule forever.
-	Active(ctx context.Context, runID string) (bool, error)
+	// a schedule forever. A run that has sat unclaimed for longer than
+	// staleAfter is not active either: nothing is going to pick it up, and an
+	// overlap policy of skip would otherwise wedge the schedule for good.
+	Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)
 }
 
 // Service evaluates schedules against one home's runs store.
@@ -236,9 +250,23 @@ func (s *Service) Pause(ctx context.Context, id string) error {
 	return s.Store.SetCronSchedulePaused(ctx, id, true, s.now())
 }
 
-// Resume lets a paused schedule fire again from its next due instant.
+// Resume lets a paused schedule fire again from its next due instant. The
+// cursor moves to now before the pause clears, so a host whose timer was off
+// for the whole pause still does not replay it.
 func (s *Service) Resume(ctx context.Context, id string) error {
-	return s.Store.SetCronSchedulePaused(ctx, id, false, s.now())
+	sched, err := s.Store.GetCronSchedule(ctx, id)
+	if err != nil {
+		return err
+	}
+	now := s.now()
+	next := sched.NextDueAt
+	if eval, perr := prepare(sched); perr == nil {
+		next = eval.nextAfter(now)
+	}
+	if err := s.Store.ResolveCronDue(ctx, id, now, next, nil, now); err != nil {
+		return err
+	}
+	return s.Store.SetCronSchedulePaused(ctx, id, false, now)
 }
 
 // Upcoming returns the next n instants a schedule matches after now, in the

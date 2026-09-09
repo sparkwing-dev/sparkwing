@@ -302,6 +302,10 @@ and the run schedules onto a runner by the same label rules as any other
 run. Another host reading the same repository stays idle until it is
 armed too.
 
+A controller does not evaluate schedules yet, so a cluster cadence has to
+come from an external timer that calls `sparkwing pipeline trigger
+<pipeline> --profile <profile>`.
+
 ## Worked examples
 
 ### Run only on the warm-runner pool

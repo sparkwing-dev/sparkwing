@@ -51,6 +51,18 @@ Every field, its accepted values, and its default are in
 the zone of whichever host evaluates the schedule, so a repository moved
 between machines follows the machine.
 
+### Daylight saving
+
+A schedule is walked in wall-clock time in its own zone, which settles the two
+days a year that have no single answer:
+
+- A minute that does not exist on the spring-forward day is skipped. `0 2 * * *`
+  in `America/Denver` does not run on 2026-03-08, because 02:00 never happens
+  that morning; the next run is 2026-03-09.
+- A minute that occurs twice on the fall-back night runs once, at its first
+  occurrence. A `*/15` schedule fires four times during that repeated hour, not
+  eight.
+
 ## Arming a host
 
 ```sh
@@ -69,6 +81,12 @@ expression, zone, overlap policy, or catch-up window is stored; a pipeline
 that stopped declaring a cadence is marked undeclared and stops firing while
 keeping its history. Pause state and the cursor survive, so re-arming does not
 replay anything.
+
+Only a config sparkwing could read withdraws a schedule. A checkout that has
+moved, been deleted, or sits on a volume that is not mounted is reported in the
+tick's errors and `sparkwing crons status`, and its rows are left armed --
+being unable to read a repository is not a decision to stop scheduling it. Run
+`sparkwing crons uninstall --repo <path>` to remove those rows for good.
 
 `sparkwing crons uninstall` disarms a checkout and drops its history. When
 nothing is left armed anywhere, the OS timer goes with it.

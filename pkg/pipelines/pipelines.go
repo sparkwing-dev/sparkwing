@@ -228,7 +228,7 @@ type PullRequestTrigger struct {
 }
 
 // ScheduleTrigger fires a pipeline on a cron cadence. Sparkwing evaluates it on every host where
-// `sparkwing crons install` armed the pipeline; a controller evaluates it for cluster runs.
+// `sparkwing crons install` armed the pipeline.
 //
 // The YAML accepts either shape:
 //

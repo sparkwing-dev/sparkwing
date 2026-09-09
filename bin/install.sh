@@ -11,10 +11,12 @@ DEST="${SPARKWING_INSTALL_BIN:-$HOME/.local/bin}"
 # binary and shares its home, so a branch can be exercised against real runs
 # without replacing the sparkwing every other repo and the timer resolve.
 NAME="${SPARKWING_INSTALL_NAME:-sparkwing}"
-case "$NAME" in
-  sparkwing|sparkwing-*) ;;
-  *) echo "install.sh: SPARKWING_INSTALL_NAME must be sparkwing or sparkwing-<slug>, got $NAME" >&2; exit 1 ;;
-esac
+# The name is joined onto $DEST, so the slug is held to lowercase, digits and
+# dashes: a bare `sparkwing-*` glob would accept `sparkwing-../../anything`.
+if ! printf '%s' "$NAME" | grep -Eq '^sparkwing(-[a-z0-9-]+)?$'; then
+  echo "install.sh: SPARKWING_INSTALL_NAME must be sparkwing or sparkwing-<slug>, got $NAME" >&2
+  exit 1
+fi
 mkdir -p "$DEST"
 
 export GOPRIVATE='github.com/sparkwing-dev/*'

@@ -58,9 +58,7 @@ func runCronsStatus(args []string) error {
 func renderCronsHealth(w io.Writer, h crons.Health, now time.Time, format string) error {
 	switch format {
 	case "json":
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(h)
+		return json.NewEncoder(w).Encode(h)
 	case "plain":
 		fmt.Fprintf(w, "timer\t%s\n", cronsTimerWord(h))
 		fmt.Fprintf(w, "tick\t%s\n", cronsTickWord(h, now))
@@ -256,10 +254,12 @@ func runCronsShow(args []string) error {
 }
 
 func renderCronsShow(w io.Writer, report cronsShowReport, format string) error {
-	if format == "json" {
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(report)
+	switch format {
+	case "json":
+		return json.NewEncoder(w).Encode(report)
+	case "plain":
+		_, err := fmt.Fprintln(w, report.Row.ID)
+		return err
 	}
 	r := report.Row
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)

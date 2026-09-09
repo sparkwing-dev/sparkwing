@@ -29,7 +29,7 @@ func (l *recordingLauncher) Launch(_ context.Context, s store.CronSchedule, due 
 	return id, nil
 }
 
-func (l *recordingLauncher) Active(_ context.Context, runID string) (bool, error) {
+func (l *recordingLauncher) Active(_ context.Context, runID string, _ time.Duration) (bool, error) {
 	return l.active[runID], nil
 }
 
@@ -300,13 +300,138 @@ func TestCronsShowEmitsOneJSONRecord(t *testing.T) {
 			t.Fatalf("crons show: %v", err)
 		}
 	})
-	var report cronsShowReport
-	if err := json.Unmarshal([]byte(out), &report); err != nil {
-		t.Fatalf("decode show json: %v\n%s", err, out)
-	}
+	report := oneJSONRecord[cronsShowReport](t, out)
 	if report.Pipeline != "every-minute" || report.Cron != "* * * * *" {
 		t.Fatalf("show record: %+v", report.Row)
 	}
+}
+
+func TestCronsVerbsEmitOneJSONRecordPerLine(t *testing.T) {
+	_, _ = cronsTestHome(t)
+	repo := cronsTestRepo(t, cronsMinutelyRepo)
+
+	install := captureStdout(t, func() {
+		if err := runCronsInstall([]string{"--repo", repo, "--no-prove", "--no-timer", "-o", "json"}); err != nil {
+			t.Fatalf("crons install: %v", err)
+		}
+	})
+	if armed := oneJSONRecord[cronsInstallReport](t, install); armed.Armed != 1 {
+		t.Errorf("install record: %+v", armed)
+	}
+
+	status := captureStdout(t, func() { _ = runCronsStatus([]string{"-o", "json"}) })
+	if health := oneJSONRecord[crons.Health](t, status); health.Armed != 1 {
+		t.Errorf("status record: %+v", health)
+	}
+
+	paused := captureStdout(t, func() {
+		if err := runCronsPause([]string{"every-minute", "-o", "json"}); err != nil {
+			t.Fatalf("crons pause: %v", err)
+		}
+	})
+	if row := oneJSONRecord[crons.Row](t, paused); row.State != crons.StatePaused {
+		t.Errorf("pause record: %+v", row)
+	}
+
+	ran := captureStdout(t, func() {
+		if err := runCronsRun([]string{"every-minute", "-o", "json"}); err != nil {
+			t.Fatalf("crons run: %v", err)
+		}
+	})
+	if launched := oneJSONRecord[cronsRunReport](t, ran); launched.RunID == "" {
+		t.Errorf("run record: %+v", launched)
+	}
+}
+
+func TestCronsInstallReportsWhatItArmedOnAPlatformWithNoTimer(t *testing.T) {
+	_, _ = cronsTestHome(t)
+	prior := cronsTimerHost
+	cronsTimerHost = func(paths orchestrator.Paths) (crontimer.Host, error) {
+		host, err := prior(paths)
+		host.GOOS = "windows"
+		return host, err
+	}
+	t.Cleanup(func() { cronsTimerHost = prior })
+
+	repo := cronsTestRepo(t, cronsMinutelyRepo)
+	var err error
+	out := captureStdout(t, func() {
+		err = runCronsInstall([]string{"--repo", repo, "--no-prove", "-o", "json"})
+	})
+	if err != nil {
+		t.Fatalf("a platform with no OS timer failed the install: %v", err)
+	}
+	report := oneJSONRecord[cronsInstallReport](t, out)
+	if report.Armed != 1 {
+		t.Errorf("install record: %+v", report)
+	}
+	if !strings.Contains(report.TimerSkip, "crons tick") {
+		t.Errorf("timer_skipped = %q, want the hint about driving the tick", report.TimerSkip)
+	}
+}
+
+func TestCronsInstallRendersTheReportWhenTheTimerStepFails(t *testing.T) {
+	_, _ = cronsTestHome(t)
+	blocked := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocked, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prior := cronsTimerHost
+	cronsTimerHost = func(paths orchestrator.Paths) (crontimer.Host, error) {
+		host, err := prior(paths)
+		host.ConfigHome = blocked
+		return host, err
+	}
+	t.Cleanup(func() { cronsTimerHost = prior })
+
+	repo := cronsTestRepo(t, cronsMinutelyRepo)
+	var err error
+	out := captureStdout(t, func() {
+		err = runCronsInstall([]string{"--repo", repo, "--no-prove", "-o", "json"})
+	})
+	if err == nil {
+		t.Fatal("a timer that could not be written exited zero")
+	}
+	report := oneJSONRecord[cronsInstallReport](t, out)
+	if report.Armed != 1 {
+		t.Errorf("the report did not survive the timer failure: %+v", report)
+	}
+	if report.TimerError == "" {
+		t.Errorf("timer_error is empty: %+v", report)
+	}
+}
+
+func TestCronsPlainPrintsThePrimaryValueOnly(t *testing.T) {
+	_, launcher := cronsTestHome(t)
+	repo := cronsTestRepo(t, cronsMinutelyRepo)
+	install := captureStdout(t, func() {
+		if err := runCronsInstall([]string{"--repo", repo, "--no-prove", "--no-timer", "-o", "plain"}); err != nil {
+			t.Fatalf("crons install: %v", err)
+		}
+	})
+	if install != filepath.Base(repo)+"/every-minute\n" {
+		t.Errorf("install plain = %q, want the armed name alone", install)
+	}
+
+	ran := captureStdout(t, func() {
+		if err := runCronsRun([]string{"every-minute", "-o", "plain"}); err != nil {
+			t.Fatalf("crons run: %v", err)
+		}
+	})
+	if len(launcher.launched) != 1 || ran != launcher.launched[0]+"\n" {
+		t.Errorf("run plain = %q, want the run id alone", ran)
+	}
+}
+
+// safety: one JSON line per verb is what makes a piped verb safe to cut with
+// head and jq.
+func oneJSONRecord[T any](t *testing.T, body string) T {
+	t.Helper()
+	records := decodeNDJSONLines[T](t, body)
+	if len(records) != 1 {
+		t.Fatalf("output carries %d record(s), want exactly one:\n%s", len(records), body)
+	}
+	return records[0]
 }
 
 func TestCronsResolveNamesTheCandidatesOrSaysNothingIsArmed(t *testing.T) {
@@ -395,4 +520,84 @@ func decodeNDJSONLines[T any](t *testing.T, body string) []T {
 		out = append(out, v)
 	}
 	return out
+}
+
+// safety: this is the launcher scheduled runs actually go through, against a
+// scratch home, so the queue and the consumer are the real ones.
+func cronsRealLauncher(t *testing.T) (cronLauncher, *store.Store) {
+	t.Helper()
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	paths, err := orchestrator.DefaultPaths()
+	if err != nil {
+		t.Fatalf("paths: %v", err)
+	}
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatalf("ensure root: %v", err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() {
+		if cerr := st.Close(); cerr != nil {
+			t.Errorf("close store: %v", cerr)
+		}
+	})
+	return cronLauncher{store: st, paths: paths}, st
+}
+
+func TestCronLaunchReportsAConsumerThatWillNotStart(t *testing.T) {
+	launcher, st := cronsRealLauncher(t)
+	prior := cronsEnsureConsumer
+	cronsEnsureConsumer = func(string) error { return errors.New("consumer did not take the queue lock") }
+	t.Cleanup(func() { cronsEnsureConsumer = prior })
+
+	sched := store.CronSchedule{ID: "crn_x", RepoPath: cronsTestRepo(t, cronsMinutelyRepo), Pipeline: "every-minute"}
+	runID, err := launcher.Launch(context.Background(), sched, time.Now())
+	if err == nil {
+		t.Fatal("a launch with no consumer to run it reported success")
+	}
+	if runID != "" {
+		t.Errorf("run id = %q, want none so the tick records a failure", runID)
+	}
+	for _, want := range []string{"stays queued", "consumer did not take the queue lock"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q is missing %q", err, want)
+		}
+	}
+	runs, lerr := st.ListRuns(context.Background(), store.RunFilter{})
+	if lerr != nil {
+		t.Fatalf("ListRuns: %v", lerr)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("the queued run did not survive the failure: %+v", runs)
+	}
+}
+
+func TestCronLauncherStopsCountingAPendingRunOnceItIsStale(t *testing.T) {
+	launcher, _ := cronsRealLauncher(t)
+	prior := cronsEnsureConsumer
+	cronsEnsureConsumer = func(string) error { return nil }
+	t.Cleanup(func() { cronsEnsureConsumer = prior })
+
+	ctx := context.Background()
+	sched := store.CronSchedule{ID: "crn_x", RepoPath: cronsTestRepo(t, cronsMinutelyRepo), Pipeline: "every-minute"}
+	runID, err := launcher.Launch(ctx, sched, time.Now())
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	fresh, err := launcher.Active(ctx, runID, time.Hour)
+	if err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	if !fresh {
+		t.Error("a run queued a moment ago is not active")
+	}
+	stale, err := launcher.Active(ctx, runID, time.Nanosecond)
+	if err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	if stale {
+		t.Error("a pending run older than the catch-up window still counts as active")
+	}
 }

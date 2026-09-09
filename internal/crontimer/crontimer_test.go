@@ -103,6 +103,7 @@ func TestInstallLinuxWritesBothUnitsAndEnablesTheTimer(t *testing.T) {
 		"# " + Marker,
 		"Type=oneshot",
 		"KillMode=process",
+		"TimeoutStartSec=5m",
 		"ExecStart=/usr/local/bin/sparkwing crons tick",
 		"Environment=PATH=/usr/local/bin:/usr/bin:/bin",
 		"Environment=SPARKWING_HOME=" + filepath.Join(h.Home, ".sparkwing"),
@@ -275,11 +276,13 @@ func TestInstallDarwinWritesThePlistAndBootstrapsIt(t *testing.T) {
 		"<key>SPARKWING_HOME</key>",
 		"<key>StandardOutPath</key>\n  <string>" + h.LogPath + "</string>",
 		"<key>StandardErrorPath</key>\n  <string>" + h.LogPath + "</string>",
-		"<key>ProcessType</key>\n  <string>Background</string>",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("plist missing %q:\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "ProcessType") {
+		t.Errorf("the agent still asks launchd to throttle it:\n%s", body)
 	}
 	var parsed struct{}
 	if err := xml.Unmarshal([]byte(body), &parsed); err != nil {

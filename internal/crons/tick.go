@@ -46,8 +46,9 @@ type Decision struct {
 // cursor, and resolves each due instant: a launch, a skip when the schedule's
 // previous run is still active and its policy is skip, or a miss when the
 // instant fell outside the catch-up window. Every outcome moves the cursor, so
-// no instant is ever considered twice. Paused and undeclared rows have their
-// next due instant republished and nothing else.
+// no instant is ever considered twice. Paused and undeclared rows fire
+// nothing; their cursor and next due instant still move, so neither is
+// replayed when the schedule comes back.
 //
 // One schedule's failure is recorded against that schedule and never aborts
 // the tick. dryRun evaluates and reports without launching anything or writing
@@ -108,9 +109,7 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 	}
 	if !sched.Declared || sched.Paused {
 		if !dryRun {
-			if err := s.Store.SetCronScheduleNextDue(ctx, sched.ID, eval.nextAfter(now), now); err != nil {
-				report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
-			}
+			s.advanceIdleCursor(ctx, sched, eval, now, report)
 		}
 		return
 	}
@@ -133,6 +132,23 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 		}
 	}
 	s.resolveDue(ctx, sched, eval, decision.Due, now, dryRun, report)
+}
+
+// safety: a cursor left where the pause found it reads as a backlog when the
+// schedule comes back, and a week of missed instants launches from it.
+func (s *Service) advanceIdleCursor(ctx context.Context, sched store.CronSchedule, eval evaluable,
+	now time.Time, report *TickReport) {
+	next := eval.nextAfter(now)
+	decision := cronspec.Decide(eval.schedule, eval.loc, sched.CursorAt, now, eval.catchUp)
+	var err error
+	if decision.Due.IsZero() {
+		err = s.Store.SetCronScheduleNextDue(ctx, sched.ID, next, now)
+	} else {
+		err = s.Store.ResolveCronDue(ctx, sched.ID, decision.Due, next, nil, now)
+	}
+	if err != nil {
+		report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
+	}
 }
 
 // recordMissed collapses a backlog into one row. A host that slept through a
@@ -185,7 +201,7 @@ func (s *Service) resolveDue(ctx context.Context, sched store.CronSchedule, eval
 	outcome, runID, detail := store.CronOutcomeFired, "", ""
 
 	if sched.Overlap == store.CronOverlapSkip && sched.LastRunID != "" {
-		active, err := s.Launcher.Active(ctx, sched.LastRunID)
+		active, err := s.Launcher.Active(ctx, sched.LastRunID, eval.catchUp)
 		switch {
 		case err != nil:
 			report.Errors = append(report.Errors,

@@ -172,7 +172,6 @@ func agentPlist(h Host) string {
 		fmt.Fprintf(&b, "  <key>StandardOutPath</key>\n  <string>%s</string>\n", xmlText(h.LogPath))
 		fmt.Fprintf(&b, "  <key>StandardErrorPath</key>\n  <string>%s</string>\n\n", xmlText(h.LogPath))
 	}
-	b.WriteString("  <key>ProcessType</key>\n  <string>Background</string>\n")
 	b.WriteString("</dict>\n</plist>\n")
 	return b.String()
 }

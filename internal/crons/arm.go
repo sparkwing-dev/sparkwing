@@ -131,9 +131,10 @@ func (s *Service) Disarm(ctx context.Context, repoRoot string) (int, error) {
 	return s.Store.DeleteCronSchedulesForRepo(ctx, root)
 }
 
-// RefreshReport says what one pass over the armed repositories changed. Errors
-// carries one sentence per repository that could not be read; a repository
-// that fails never blocks the others.
+// RefreshReport says what one pass over the armed repositories changed.
+// Updated counts the rows whose declaration actually moved, not the rows
+// looked at. Errors carries one sentence per repository that could not be
+// read; a repository that fails never blocks the others.
 type RefreshReport struct {
 	Repos     int      `json:"repos"`
 	Updated   int      `json:"updated"`
@@ -141,10 +142,23 @@ type RefreshReport struct {
 	Errors    []string `json:"errors,omitempty"`
 }
 
+// safety: the refresh runs every minute over every armed row, so an unchanged
+// declaration must not write: an updated_at that moves each minute tells an
+// operator nothing and costs a transaction per schedule.
+func republished(stored, declared store.CronSchedule) bool {
+	return stored.Declared &&
+		stored.Cron == declared.Cron &&
+		stored.TZ == declared.TZ &&
+		stored.Overlap == declared.Overlap &&
+		stored.CatchUp == declared.CatchUp
+}
+
 // Refresh re-reads every armed repository's sparkwing.yaml and republishes
 // what it finds, without proof: a changed cadence, zone, overlap policy or
-// catch-up window is stored, and a row the repository stopped declaring -- or
-// whose checkout is gone -- is marked undeclared.
+// catch-up window is stored, and a row the repository stopped declaring is
+// marked undeclared. A checkout that cannot be read at all is reported in
+// Errors and its rows are left alone, because a detached volume or a moved
+// directory is not a decision to stop scheduling.
 //
 // Refresh republishes rows that already exist. A pipeline that starts
 // declaring a schedule is armed by `sparkwing crons install`, because which
@@ -192,6 +206,9 @@ func (s *Service) Refresh(ctx context.Context) (RefreshReport, error) {
 			row, rerr := scheduleRow(d, sched.ArmedBy, now)
 			if rerr != nil {
 				report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), rerr))
+				continue
+			}
+			if republished(sched, row) {
 				continue
 			}
 			if _, _, err := s.Store.ArmCronSchedule(ctx, row, now); err != nil {

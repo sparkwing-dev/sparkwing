@@ -67,10 +67,12 @@ func runCronsPauseResume(cmd Command, args []string, pause bool) error {
 	if err != nil {
 		return fmt.Errorf("crons %s: %w", verb, err)
 	}
-	if format == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(row)
+	switch format {
+	case "json":
+		return json.NewEncoder(os.Stdout).Encode(row)
+	case "plain":
+		_, perr := fmt.Fprintln(os.Stdout, row.ID)
+		return perr
 	}
 	fmt.Fprintf(os.Stdout, "%s is %s\n", row.Name, row.State)
 	if !pause && row.NextDueAt != nil {
@@ -122,16 +124,22 @@ func runCronsRun(args []string) error {
 	report := cronsRunReport{
 		Schedule: sched.ID, Name: crons.DisplayName(sched), Pipeline: sched.Pipeline, RunID: runID,
 	}
-	if format == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(report)
+	switch format {
+	case "json":
+		return json.NewEncoder(os.Stdout).Encode(report)
+	case "plain":
+		_, perr := fmt.Fprintln(os.Stdout, report.RunID)
+		return perr
 	}
 	fmt.Fprintf(os.Stdout, "run %s submitted (%s)\n", report.RunID, report.Pipeline)
 	fmt.Fprintf(os.Stdout, "  follow: sparkwing runs logs --run %s --follow\n", report.RunID)
 	fmt.Fprintf(os.Stdout, "  cancel: sparkwing runs cancel --run %s\n", report.RunID)
 	return nil
 }
+
+// safety: matches TimeoutStartSec in the systemd unit, so a hung tick is cut
+// by whichever side notices first instead of holding the minute open.
+const cronsTickTimeout = 5 * time.Minute
 
 func runCronsTick(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsTick.Path, flag.ContinueOnError)
@@ -154,13 +162,17 @@ func runCronsTick(args []string) error {
 	}
 	defer release()
 
-	report, err := session.svc.Tick(context.Background(), *dryRun)
+	ctx, cancel := context.WithTimeout(context.Background(), cronsTickTimeout)
+	defer cancel()
+	report, err := session.svc.Tick(ctx, *dryRun)
 	switch {
 	case errors.Is(err, crons.ErrTickRunning):
 		// safety: the tick holding the lock is resolving this minute, so this
 		// one has nothing to do and exits clean for the timer.
 		fmt.Fprintln(os.Stdout, "tick: another tick is already running")
 		return nil
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("crons tick: gave up after %s; the store or a launch is not answering, and the next minute's tick will try again", cronsTickTimeout)
 	case err != nil:
 		return fmt.Errorf("crons tick: %w", err)
 	}
@@ -168,8 +180,12 @@ func runCronsTick(args []string) error {
 }
 
 func renderCronsTick(w io.Writer, report crons.TickReport, dryRun bool, format string) error {
-	if format == "json" {
+	switch format {
+	case "json":
 		return json.NewEncoder(w).Encode(report)
+	case "plain":
+		_, err := fmt.Fprintln(w, report.Summary())
+		return err
 	}
 	prefix := "tick"
 	if dryRun {

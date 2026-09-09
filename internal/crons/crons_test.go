@@ -18,13 +18,14 @@ import (
 // fakeLauncher records what a tick asked for and answers the overlap question
 // from a set of run ids the test declares still going.
 type fakeLauncher struct {
-	mu        sync.Mutex
-	launched  []string
-	runIDs    []string
-	nextRun   int
-	active    map[string]bool
-	launchErr error
-	activeErr error
+	mu         sync.Mutex
+	launched   []string
+	runIDs     []string
+	nextRun    int
+	active     map[string]bool
+	launchErr  error
+	activeErr  error
+	staleAfter []time.Duration
 }
 
 func newFakeLauncher(runIDs ...string) *fakeLauncher {
@@ -46,9 +47,10 @@ func (f *fakeLauncher) Launch(_ context.Context, s store.CronSchedule, due time.
 	return id, nil
 }
 
-func (f *fakeLauncher) Active(_ context.Context, runID string) (bool, error) {
+func (f *fakeLauncher) Active(_ context.Context, runID string, staleAfter time.Duration) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.staleAfter = append(f.staleAfter, staleAfter)
 	if f.activeErr != nil {
 		return false, f.activeErr
 	}
@@ -210,8 +212,19 @@ func TestDeclaredSchedulesReadsBothYAMLShapes(t *testing.T) {
 	}
 }
 
-func TestDeclaredSchedulesOnARepoWithNoConfig(t *testing.T) {
-	declared, err := DeclaredSchedules(t.TempDir())
+func TestDeclaredSchedulesRefusesToGuessAtAnUnreadableCheckout(t *testing.T) {
+	if _, err := DeclaredSchedules(t.TempDir()); err == nil {
+		t.Fatal("a checkout with no config read as declaring nothing")
+	}
+	if _, err := DeclaredSchedules(filepath.Join(t.TempDir(), "gone")); err == nil {
+		t.Fatal("a missing checkout read as declaring nothing")
+	}
+}
+
+func TestDeclaredSchedulesOnAConfigWithNoCadence(t *testing.T) {
+	declared, err := DeclaredSchedules(writeRepo(t, "svc", `  - name: manual
+    entrypoint: Manual
+`))
 	if err != nil {
 		t.Fatalf("DeclaredSchedules: %v", err)
 	}
@@ -371,7 +384,7 @@ func TestDisarmRemovesEverySchedulOfTheRepo(t *testing.T) {
 	}
 }
 
-func TestRefreshUpdatesWithdrawsAndSurvivesAMissingCheckout(t *testing.T) {
+func TestRefreshUpdatesWithdrawsAndReportsAMissingCheckout(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	edited := writeRepo(t, "edited", everyMinute)
@@ -410,11 +423,11 @@ func TestRefreshUpdatesWithdrawsAndSurvivesAMissingCheckout(t *testing.T) {
 	if report.Repos != 3 {
 		t.Errorf("Repos = %d, want 3", report.Repos)
 	}
-	if len(report.Errors) != 0 {
-		t.Errorf("Refresh errors: %v", report.Errors)
+	if len(report.Errors) != 1 || !strings.Contains(report.Errors[0], gone) {
+		t.Errorf("Refresh errors = %v, want one naming %s", report.Errors, gone)
 	}
-	if report.Withdrawn != 2 {
-		t.Errorf("Withdrawn = %d, want the dropped pipeline and the vanished checkout", report.Withdrawn)
+	if report.Withdrawn != 1 {
+		t.Errorf("Withdrawn = %d, want only the dropped pipeline", report.Withdrawn)
 	}
 	changed, err := h.store.GetCronSchedule(ctx, ScheduleID(edited, "every-minute"))
 	if err != nil {
@@ -427,8 +440,50 @@ func TestRefreshUpdatesWithdrawsAndSurvivesAMissingCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCronSchedule: %v", err)
 	}
-	if vanished.Declared {
-		t.Error("a vanished checkout's row is still declared")
+	if !vanished.Declared {
+		t.Error("a checkout that could not be read disarmed itself")
+	}
+}
+
+func TestRefreshWritesNothingWhenTheDeclarationIsUnchanged(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	root := writeRepo(t, "svc", everyMinute)
+	armed := armOne(t, h, root)
+
+	h.clock.set(at(t, "2026-01-01T00:01:30Z"))
+	report, err := h.svc.Refresh(ctx)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if report.Updated != 0 {
+		t.Errorf("Updated = %d, want none: nothing in the repo moved", report.Updated)
+	}
+	stored, err := h.store.GetCronSchedule(ctx, armed.ID)
+	if err != nil {
+		t.Fatalf("GetCronSchedule: %v", err)
+	}
+	if !stored.UpdatedAt.Equal(armed.UpdatedAt) {
+		t.Errorf("updated_at moved to %v on an unchanged repo", stored.UpdatedAt)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"), []byte(`pipelines:
+  - name: every-minute
+    entrypoint: EveryMinute
+    on:
+      schedule: "0 4 * * *"
+`), 0o644); err != nil {
+		t.Fatalf("rewrite config: %v", err)
+	}
+	report, err = h.svc.Refresh(ctx)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if report.Updated != 1 {
+		t.Fatalf("Updated = %d, want the edited cadence stored", report.Updated)
+	}
+	if stored, err = h.store.GetCronSchedule(ctx, armed.ID); err != nil || stored.Cron != "0 4 * * *" {
+		t.Fatalf("edited row = %+v (err %v)", stored, err)
 	}
 }
 
@@ -547,6 +602,31 @@ func TestTickSkipsWhenThePreviousRunIsStillGoing(t *testing.T) {
 	}
 }
 
+func TestTickAsksActiveWithTheSchedulesCatchUpWindow(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	armOne(t, h, writeRepo(t, "svc", `  - name: every-minute
+    entrypoint: EveryMinute
+    on:
+      schedule:
+        cron: "* * * * *"
+        catch_up: 15m
+`))
+	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
+	if _, err := h.svc.Tick(ctx, false); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	h.clock.set(at(t, "2026-01-01T00:02:05Z"))
+	if _, err := h.svc.Tick(ctx, false); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	h.launcher.mu.Lock()
+	defer h.launcher.mu.Unlock()
+	if len(h.launcher.staleAfter) != 1 || h.launcher.staleAfter[0] != 15*time.Minute {
+		t.Fatalf("Active was given %v, want the schedule's 15m catch-up", h.launcher.staleAfter)
+	}
+}
+
 func TestTickQueuesOverAnActiveRunWhenThePolicySaysSo(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
@@ -631,7 +711,7 @@ func TestTickRecordsACatchUpBacklogAsOneMissAndAdvancesTheCursor(t *testing.T) {
 	}
 }
 
-func TestTickOnlyRepublishesTheNextDueOfAPausedSchedule(t *testing.T) {
+func TestTickAdvancesAPausedScheduleWithoutFiring(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
 	sched := armOne(t, h, writeRepo(t, "svc", everyMinute))
@@ -655,6 +735,48 @@ func TestTickOnlyRepublishesTheNextDueOfAPausedSchedule(t *testing.T) {
 	}
 	if stored.NextDueAt == nil || !stored.NextDueAt.Equal(at(t, "2026-01-01T00:06:00Z")) {
 		t.Fatalf("next due = %v", stored.NextDueAt)
+	}
+	if !stored.CursorAt.Equal(at(t, "2026-01-01T00:05:00Z")) {
+		t.Fatalf("cursor = %v, want the latest instant that came due", stored.CursorAt)
+	}
+	fires, err := h.store.ListCronFires(ctx, sched.ID, 0)
+	if err != nil {
+		t.Fatalf("ListCronFires: %v", err)
+	}
+	if len(fires) != 0 {
+		t.Fatalf("a paused schedule recorded %+v", fires)
+	}
+}
+
+func TestResumeDoesNotReplayThePauseWindow(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	sched := armOne(t, h, writeRepo(t, "svc", everyMinute))
+	if err := h.svc.Pause(ctx, sched.ID); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	// safety: no tick lands during the pause, so only Resume can move the cursor.
+	h.clock.set(at(t, "2026-01-08T00:00:30Z"))
+	if err := h.svc.Resume(ctx, sched.ID); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	h.clock.set(at(t, "2026-01-08T00:01:05Z"))
+	report, err := h.svc.Tick(ctx, false)
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if report.Missed != 0 {
+		t.Fatalf("resuming replayed the week it was paused: %+v", report)
+	}
+	if report.Fired != 1 || len(h.launcher.launches()) != 1 {
+		t.Fatalf("tick: %+v, launches %v", report, h.launcher.launches())
+	}
+	fires, err := h.store.ListCronFires(ctx, sched.ID, 0)
+	if err != nil {
+		t.Fatalf("ListCronFires: %v", err)
+	}
+	if len(fires) != 1 || fires[0].Outcome != store.CronOutcomeFired {
+		t.Fatalf("fires: %+v", fires)
 	}
 }
 
@@ -965,6 +1087,33 @@ func TestHealthReportsAStaleTick(t *testing.T) {
 	}
 	if !strings.Contains(stale.Detail, "crons.log") {
 		t.Errorf("detail = %q, want the log named", stale.Detail)
+	}
+}
+
+func TestHealthIsUnhealthyWhenTheLastTickReportedAnError(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	armOne(t, h, writeRepo(t, "svc", everyMinute))
+	timer := fakeTimerHost(t, h.home, true)
+
+	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
+	if err := h.store.RecordCronTick(ctx, store.CronTick{
+		At: h.clock.now(), Host: "test-host", Error: "svc/every-minute: consumer will not start",
+	}); err != nil {
+		t.Fatalf("RecordCronTick: %v", err)
+	}
+	health, err := h.svc.Health(ctx, timer)
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if health.TickStale {
+		t.Fatalf("the tick just landed: %+v", health)
+	}
+	if health.Healthy() {
+		t.Fatal("a tick that reported a failure read as healthy")
+	}
+	if !strings.Contains(health.Detail, "consumer will not start") {
+		t.Errorf("detail = %q, want the tick's own reason", health.Detail)
 	}
 }
 

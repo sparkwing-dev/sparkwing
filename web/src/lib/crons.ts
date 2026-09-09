@@ -29,6 +29,15 @@ export function healthBanner(
   }
   const timer = health.timer;
   const armed = health.armed ?? 0;
+  // The server reports a foreign unit as installed: false, so this has to be
+  // read before the missing-timer branch or a stranger's unit reads as absent.
+  if (timer?.foreign) {
+    return {
+      tone: "warning",
+      headline: "A cron timer is installed here, but sparkwing did not write it.",
+      remedy: `Move or remove ${timer.path || "the unit"}, then re-run \`sparkwing crons install\`.`,
+    };
+  }
   if (!timer || !timer.installed) {
     return {
       tone: armed > 0 ? "danger" : "warning",
@@ -37,13 +46,6 @@ export function healthBanner(
           ? "No cron timer is installed on this host, so nothing will fire."
           : "No cron timer is installed on this host.",
       remedy: INSTALL_REMEDY,
-    };
-  }
-  if (timer.foreign) {
-    return {
-      tone: "warning",
-      headline: "A cron timer is installed here, but sparkwing did not write it.",
-      remedy: `Move or remove ${timer.path || "the unit"}, then re-run \`sparkwing crons install\`.`,
     };
   }
   if (timer.stale) {

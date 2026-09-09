@@ -26,6 +26,7 @@ type cronsInstallReport struct {
 	NothingToDo int               `json:"nothing_to_arm"`
 	Timer       *crontimer.State  `json:"timer,omitempty"`
 	TimerSkip   string            `json:"timer_skipped,omitempty"`
+	TimerError  string            `json:"timer_error,omitempty"`
 }
 
 type cronsRepoResult struct {
@@ -94,12 +95,13 @@ func runCronsInstall(args []string) error {
 		report.Repos = append(report.Repos, result)
 	}
 
-	if !*noTimer {
-		if terr := ensureCronsTimer(ctx, session, &report); terr != nil {
-			return fmt.Errorf("crons install: %w", terr)
-		}
-	} else {
-		report.TimerSkip = "--no-timer: " + unsupportedTimerHint
+	switch terr := ensureCronsTimer(ctx, session, &report, *noTimer); {
+	case errors.Is(terr, crontimer.ErrUnsupported):
+		// safety: a platform with no timer of its own still armed everything,
+		// so this is a hint about what to point at the tick, not a failure.
+		report.TimerSkip = fmt.Sprintf("%v; the schedules are armed, so %s", terr, unsupportedTimerHint)
+	case terr != nil:
+		report.TimerError = terr.Error()
 	}
 
 	if err := renderCronsInstall(report, format); err != nil {
@@ -108,12 +110,21 @@ func runCronsInstall(args []string) error {
 	if len(failed) > 0 {
 		return fmt.Errorf("crons install: %s", strings.Join(failed, ", "))
 	}
+	if report.TimerError != "" {
+		return fmt.Errorf("crons install: the schedules are armed but the timer is not: %s", report.TimerError)
+	}
 	return nil
 }
 
 // ensureCronsTimer writes the OS timer when this host has something armed and
 // no current timer of its own. A host with nothing armed keeps no timer.
-func ensureCronsTimer(ctx context.Context, session *cronsSession, report *cronsInstallReport) error {
+// Whatever it decides is recorded on the report, so the caller can render what
+// was armed even when the timer step is the thing that failed.
+func ensureCronsTimer(ctx context.Context, session *cronsSession, report *cronsInstallReport, skip bool) error {
+	if skip {
+		report.TimerSkip = "--no-timer: " + unsupportedTimerHint
+		return nil
+	}
 	rows, err := session.svc.List(ctx)
 	if err != nil {
 		return err
@@ -133,9 +144,6 @@ func ensureCronsTimer(ctx context.Context, session *cronsSession, report *cronsI
 		return err
 	}
 	state, err := crontimer.Status(host)
-	if errors.Is(err, crontimer.ErrUnsupported) {
-		return fmt.Errorf("%w.\nThe schedules are armed; %s", err, unsupportedTimerHint)
-	}
 	if err != nil {
 		return err
 	}
@@ -152,10 +160,16 @@ func ensureCronsTimer(ctx context.Context, session *cronsSession, report *cronsI
 }
 
 func renderCronsInstall(report cronsInstallReport, format string) error {
-	if format == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(report)
+	switch format {
+	case "json":
+		return json.NewEncoder(os.Stdout).Encode(report)
+	case "plain":
+		for _, r := range report.Repos {
+			for _, name := range r.Schedules {
+				fmt.Fprintln(os.Stdout, name)
+			}
+		}
+		return nil
 	}
 	multi := len(report.Repos) > 1
 	for _, r := range report.Repos {
@@ -183,6 +197,8 @@ func renderCronsInstall(report cronsInstallReport, format string) error {
 			report.Armed, report.Refreshed, report.Withdrawn, report.NothingToDo)
 	}
 	switch {
+	case report.TimerError != "":
+		fmt.Fprintf(os.Stdout, "timer: %s\n", report.TimerError)
 	case report.Timer != nil:
 		fmt.Fprintf(os.Stdout, "timer: %s\n", report.Timer.Detail)
 	case report.TimerSkip != "":
@@ -216,20 +232,20 @@ func runCronsUninstall(args []string) error {
 	defer release()
 
 	ctx := context.Background()
-	var roots []string
-	if *fleet {
-		rows, lerr := session.svc.List(ctx)
-		if lerr != nil {
-			return fmt.Errorf("crons uninstall: %w", lerr)
+	rows, err := session.svc.List(ctx)
+	if err != nil {
+		return fmt.Errorf("crons uninstall: %w", err)
+	}
+	namesByRepo := map[string][]string{}
+	var armedRoots []string
+	for _, r := range rows {
+		if _, seen := namesByRepo[r.RepoPath]; !seen {
+			armedRoots = append(armedRoots, r.RepoPath)
 		}
-		seen := map[string]bool{}
-		for _, r := range rows {
-			if !seen[r.RepoPath] {
-				seen[r.RepoPath] = true
-				roots = append(roots, r.RepoPath)
-			}
-		}
-	} else {
+		namesByRepo[r.RepoPath] = append(namesByRepo[r.RepoPath], r.Name)
+	}
+	roots := armedRoots
+	if !*fleet {
 		roots, err = cronsTargetRoots(*repo, false)
 		if err != nil {
 			return fmt.Errorf("crons uninstall: %w", err)
@@ -242,7 +258,7 @@ func runCronsUninstall(args []string) error {
 		if derr != nil {
 			return fmt.Errorf("crons uninstall: %w", derr)
 		}
-		report.Repos = append(report.Repos, cronsDisarmed{Repo: root, Removed: removed})
+		report.Repos = append(report.Repos, cronsDisarmed{Repo: root, Removed: removed, Schedules: namesByRepo[root]})
 		report.Removed += removed
 	}
 
@@ -281,15 +297,22 @@ type cronsUninstallReport struct {
 }
 
 type cronsDisarmed struct {
-	Repo    string `json:"repo"`
-	Removed int    `json:"removed"`
+	Repo      string   `json:"repo"`
+	Removed   int      `json:"removed"`
+	Schedules []string `json:"schedules,omitempty"`
 }
 
 func renderCronsUninstall(report cronsUninstallReport, format string) error {
-	if format == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(report)
+	switch format {
+	case "json":
+		return json.NewEncoder(os.Stdout).Encode(report)
+	case "plain":
+		for _, r := range report.Repos {
+			for _, name := range r.Schedules {
+				fmt.Fprintln(os.Stdout, name)
+			}
+		}
+		return nil
 	}
 	for _, r := range report.Repos {
 		fmt.Fprintf(os.Stdout, "disarmed %d schedule(s) in %s\n", r.Removed, r.Repo)
