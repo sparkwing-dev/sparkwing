@@ -25,6 +25,8 @@ code change to unlock.
 
 ### Fixed
 
+- **pool:** Count successful PVC checkouts and returns in the existing metrics
+
 - **cli:** Documentation searches reuse the embedded catalog instead of rebuilding it for every document
 - **cache:** Keep registry responses with different Accept headers in separate cache entries
 - **docs:** Keep hash-leading list continuations in their list items
