@@ -9,52 +9,22 @@ import (
 )
 
 // RunAndAwait triggers a fresh run of pipeline and waits for it to
-// reach terminal state, returning the typed output of nodeID from
-// that run. This is the imperative cross-pipeline path -- call it
-// from inside a step body when downstream work needs freshness tied
-// to the current moment. The declarative passive sibling is
-// sparkwing.RefToLastRun, which reads the most recent successful
-// run without triggering anything.
+// reach terminal state, returning the typed output of nodeID from that run.
+// The controller dispatches a separate process that fetches the target source.
+// Use Job to compose jobs within the calling pipeline's process.
 //
-// Remote-handoff primitive: RunAndAwait always submits the new run
-// as a trigger through the controller, which dispatches it to a
-// runner that fetches source via gitcache and executes the pipeline
-// in a separate process. That makes it the right tool for
-// cross-process work (different repo, different fleet, different
-// schedule) and the wrong tool for in-process composition. When
-// pipeline A in this repo wants to invoke pipeline B's job(s)
-// inline -- same package, same orchestrator, same filesystem --
-// import B's exported job type and add it to A's plan via
-// sparkwing.Job(plan, name, &B{}). The job runs as a regular node,
-// sub-steps appear natively in the parent's event stream, and
-// there's no controller hop. See .sparkwing/jobs/release.go for an
-// example (the release pipeline composes PreCommit and PrePush
-// directly as gate-pre-commit and gate-pre-push nodes).
+// Out is the target node's JSON-decoded output type. In is the target pipeline's
+// Inputs type passed through WithFreshInputs. Use NoInputs with WithFreshArgs
+// when the target's Inputs type cannot be imported.
 //
-// The two type parameters:
-//
-//   - Out: the JSON-decoded return type (the target node's output).
-//   - In: the target pipeline's Inputs struct, so callers feed args
-//     via WithFreshInputs(in In). Pipelines that take no flags use
-//     sparkwing.NoInputs.
-//
-// Cross-repo is the primary use case: pipeline A in repo foo can
-// spawn pipeline B from repo bar without importing bar's Go packages.
-// The contract is the wire shape: pipeline name + JSON output schema.
-//
-// Cycle protection: RunAndAwait carries the current run id as
-// parent_run_id on the spawned trigger; the controller walks the
-// ancestor chain and rejects the request with 409 if pipeline is
-// already in it.
+// The controller rejects a pipeline already present in the parent's ancestor
+// chain. Callers select a repository with WithFreshRepo for cross-repository runs.
 //
 //	build, err := sparkwing.RunAndAwait[BuildOut, BuildInputs](
-//	    ctx, "my-app-build-main", "artifact",
+//	    ctx, "widget-build", "artifact",
 //	    sparkwing.WithFreshInputs(BuildInputs{Service: "api"}),
 //	    sparkwing.WithFreshTimeout(10*time.Minute),
 //	)
-//
-// Callers that can't import the target's Inputs type pass
-// sparkwing.NoInputs and use WithFreshArgs as the escape hatch.
 func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error) {
 	var zero Out
 	cfg := awaitConfig{}
@@ -105,7 +75,7 @@ func WithFreshInputs[T any](in T) AwaitOption {
 	}
 }
 
-// AwaitOption tunes RunAndAwait's trigger + wait behavior.
+// AwaitOption configures the triggered run and the wait.
 type AwaitOption func(*awaitConfig)
 
 type awaitConfig struct {
@@ -135,15 +105,9 @@ func WithFreshArgs(args map[string]string) AwaitOption {
 	}
 }
 
-// WithFreshRepo declares which repo the spawned pipeline lives in
-// (e.g. "owner/repo"). Required for cross-repo awaits: without it
-// the controller falls back to inheriting the parent run's repo/SHA,
-// which silently builds the wrong code when the awaited pipeline is
-// registered in a different repo.
-//
-// When set, the child trigger lands at the branch tip of `repo`'s
-// `main` (no SHA pinning) so the child always builds the latest.
-// Pass WithFreshBranch to override.
+// WithFreshRepo selects the repository containing the spawned pipeline.
+// Use an owner/repository name such as "example/widgets" for cross-repository
+// awaits. The child runs at main's tip unless WithFreshBranch selects a branch.
 func WithFreshRepo(repo string) AwaitOption {
 	return func(c *awaitConfig) { c.repo = repo }
 }

@@ -34,16 +34,20 @@ func lintCacheKey(workdir string) string {
 }
 
 // SaveLintCache compresses the golangci-lint tool-cache directory for
-// the current WorkDir and PUTs it to gcURL/cache/<key>.
+// the current WorkDir and PUTs it to cacheURL/cache/<key>.
 // An empty URL or missing or empty cache returns zero bytes without a request.
-func SaveLintCache(ctx context.Context, gcURL, token string) (sent int64, resultErr error) {
-	if gcURL == "" {
+func SaveLintCache(ctx context.Context, cacheURL, token string) (sent int64, resultErr error) {
+	if cacheURL == "" {
 		return 0, nil
 	}
 	cacheDirectory := ToolCacheDir("golangci-lint")
 	empty, err := isDirEmpty(cacheDirectory)
 	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
+		_, statErr := os.Lstat(cacheDirectory)
+		if errors.Is(statErr, os.ErrNotExist) {
+			return 0, nil
+		}
+		err = errors.Join(err, statErr)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("save lint cache: inspect directory: %w", err)
@@ -65,7 +69,7 @@ func SaveLintCache(ctx context.Context, gcURL, token string) (sent int64, result
 		return 0, fmt.Errorf("save lint cache: seek: %w", err)
 	}
 
-	url := strings.TrimRight(gcURL, "/") + "/cache/" + LintCacheBlobKey()
+	url := strings.TrimRight(cacheURL, "/") + "/cache/" + LintCacheBlobKey()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPut, url, io.NewSectionReader(archiveFile, 0, size))
 	if err != nil {
 		return 0, err
@@ -97,12 +101,12 @@ func SaveLintCache(ctx context.Context, gcURL, token string) (sent int64, result
 // and expands it into the golangci-lint tool-cache directory.
 // An empty URL or HTTP 404 returns (false, 0, nil). I/O failures and archives
 // with another workdir return errors. SPARKWING_CACHE_TOKEN authenticates reads.
-func RestoreLintCache(ctx context.Context, gcURL string) (restored bool, received int64, resultErr error) {
-	if gcURL == "" {
+func RestoreLintCache(ctx context.Context, cacheURL string) (restored bool, received int64, resultErr error) {
+	if cacheURL == "" {
 		return false, 0, nil
 	}
 
-	url := strings.TrimRight(gcURL, "/") + "/cache/" + LintCacheBlobKey()
+	url := strings.TrimRight(cacheURL, "/") + "/cache/" + LintCacheBlobKey()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false, 0, err
@@ -229,9 +233,9 @@ func extractLintCacheArchive(reader io.Reader, destination, runningWorkdir strin
 	}
 
 	if err := extractTarInRoot(archiveReader, destination, tarExtractPolicy{
-		minDirPerm:  0o700,
-		minFilePerm: 0o600,
-		rename:      lintCacheEntryName,
+		minDirectoryPermissions: 0o700,
+		minFilePerm:             0o600,
+		rename:                  lintCacheEntryName,
 	}); err != nil {
 		return fmt.Errorf("extract lint cache: %w", err)
 	}

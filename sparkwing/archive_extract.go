@@ -8,17 +8,18 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
-// SAFETY: Bounds one extraction, so a gzip bomb cannot fill the disk.
+// SAFETY: Bounds decompressed archive output.
 var maxExtractBytes = int64(20 << 30)
 
 type tarExtractPolicy struct {
-	allowSymlinks bool
-	minDirPerm    fs.FileMode
-	minFilePerm   fs.FileMode
-	rename        func(name string) (string, bool)
+	allowSymlinks           bool
+	minDirectoryPermissions fs.FileMode
+	minFilePerm             fs.FileMode
+	rename                  func(name string) (string, bool)
 }
 
 func extractTarInRoot(archiveReader *tar.Reader, directory string, policy tarExtractPolicy) (resultErr error) {
@@ -28,11 +29,11 @@ func extractTarInRoot(archiveReader *tar.Reader, directory string, policy tarExt
 	}
 	defer func() { resultErr = errors.Join(resultErr, root.Close()) }()
 
-	type dirMode struct {
+	type directoryMode struct {
 		path string
 		mode fs.FileMode
 	}
-	var deferredDirModes []dirMode
+	var deferredDirectoryModes []directoryMode
 	var written int64
 
 	for {
@@ -68,8 +69,8 @@ func extractTarInRoot(archiveReader *tar.Reader, directory string, policy tarExt
 			}
 			// SAFETY: Chmod ignores the umask, so clamp the archive's mode
 			// instead of letting it leave a world-writable directory.
-			mode := header.FileInfo().Mode().Perm()&maxDirPerm | policy.minDirPerm
-			deferredDirModes = append(deferredDirModes, dirMode{relative, mode})
+			mode := header.FileInfo().Mode().Perm()&maxDirPerm | policy.minDirectoryPermissions
+			deferredDirectoryModes = append(deferredDirectoryModes, directoryMode{relative, mode})
 
 		case tar.TypeReg:
 			if err := mkdirParent(root, relative); err != nil {
@@ -117,10 +118,13 @@ func extractTarInRoot(archiveReader *tar.Reader, directory string, policy tarExt
 		}
 	}
 
+	sort.SliceStable(deferredDirectoryModes, func(left, right int) bool {
+		return strings.Count(deferredDirectoryModes[left].path, string(filepath.Separator)) < strings.Count(deferredDirectoryModes[right].path, string(filepath.Separator))
+	})
 	// SAFETY: Deepest-first restores nested read-only directories
 	// without locking out their own just-extracted contents.
-	for index := len(deferredDirModes) - 1; index >= 0; index-- {
-		directoryMode := deferredDirModes[index]
+	for index := len(deferredDirectoryModes) - 1; index >= 0; index-- {
+		directoryMode := deferredDirectoryModes[index]
 		if err := root.Chmod(directoryMode.path, directoryMode.mode); err != nil {
 			return err
 		}

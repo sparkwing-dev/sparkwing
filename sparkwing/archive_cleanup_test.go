@@ -77,7 +77,9 @@ func TestExtractionRestoresChildModesBeforeRestrictiveParent(t *testing.T) {
 	writer := tar.NewWriter(&archive)
 	for _, header := range []*tar.Header{
 		{Name: "parent/child", Typeflag: tar.TypeDir, Mode: 0o500},
+		{Name: "parent/child", Typeflag: tar.TypeDir, Mode: 0o700},
 		{Name: "parent", Typeflag: tar.TypeDir, Mode: 0},
+		{Name: ".", Typeflag: tar.TypeDir, Mode: 0},
 	} {
 		if err := writer.WriteHeader(header); err != nil {
 			t.Fatal(err)

@@ -48,7 +48,7 @@ type ParallelFailurePolicy string
 
 const (
 	// FailFast cancels ordinary in-flight siblings after the first decisive
-	// failure. It is the default and preserves the historical Work behavior.
+	// failure. It is the default policy.
 	FailFast ParallelFailurePolicy = "fail-fast"
 	// CollectAll lets every independent or already-ready item finish so one run
 	// can report the full failure set. It does not satisfy a failed prerequisite;
@@ -73,7 +73,7 @@ func (w *Work) ParallelFailures(policy ParallelFailurePolicy) *Work {
 }
 
 // ParallelFailurePolicy returns the configured policy. The zero value is
-// [FailFast] for backward compatibility.
+// [FailFast].
 func (w *Work) ParallelFailurePolicy() ParallelFailurePolicy {
 	if w == nil || w.failures == "" {
 		return FailFast
@@ -302,9 +302,6 @@ func StepGet[T any](ctx context.Context, step *WorkStep) T {
 // The returned *SpawnSpec accepts .Needs to declare which Steps must
 // complete before the spawn fires, and .Get(ctx) for typed output.
 //
-// "Spawn" is a lifecycle suffix here -- the verb adds a Plan Job
-// from inside Work, hence the Job- prefix.
-//
 // Accepts the same argument shapes as sparkwing.Job's third arg
 // (Workable struct or func(ctx) error closure).
 func JobSpawn(w *Work, id string, x any) *SpawnSpec {
@@ -472,15 +469,9 @@ func (s *WorkStep) ID() string { return s.id }
 // that return only error.
 func (s *WorkStep) OutputType() reflect.Type { return s.outType }
 
-// WorkDep is the closed type set accepted by Work-layer [WorkStep.Needs]
-// and the Needs methods on [StepGroup], [SpawnSpec], and [SpawnGenSpec].
-// The unexported marker method `workDepID()` prevents callers from
-// passing arbitrary values; the Plan-layer [Dep] types are NOT WorkDep
-// and vice versa, so the two layers cannot cross by accident.
-//
-// Implementations: [*WorkStep], [*StepGroup], [*SpawnSpec],
-// [*SpawnGenSpec]. By-name references via a typed-string sentinel are
-// intentionally not supported -- store and pass the upstream's handle.
+// WorkDep is the closed type set accepted by Work dependency methods.
+// Pass an upstream [*WorkStep], [*StepGroup], [*SpawnSpec], or [*SpawnGenSpec]
+// handle. The unexported marker restricts implementations to these SDK types.
 type WorkDep interface {
 	workDepID() string
 }
@@ -654,8 +645,7 @@ func (s *WorkStep) awaitDone(ctx context.Context) error {
 // StepGroup is a handle to a named group of Steps. Returned by
 // sparkwing.GroupSteps. Downstream .Needs(group) expands eagerly to
 // the group's members. Modifiers (Needs, SkipIf) delegate to every
-// member, mirroring the *WorkStep modifier surface so future
-// step-level modifiers can be added uniformly to both.
+// member.
 type StepGroup struct {
 	name    string
 	members []*WorkStep
@@ -829,8 +819,7 @@ type SpawnGenSpec struct {
 
 func (g *SpawnGenSpec) syntheticID() string { return g.id }
 
-// ID exposes the synthetic id (e.g. "__spawn_each_0") to renderers
-// and the orchestrator's snapshot walker.
+// ID returns the generated identifier used by renderers and snapshots.
 func (g *SpawnGenSpec) ID() string { return g.id }
 
 // Items returns the input slice value.
