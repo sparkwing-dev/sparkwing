@@ -70,9 +70,13 @@ this file is a menu and checklist, not a command that every change must run.
   it on every pull request and uploads gosec findings to code scanning. The
   release workflow runs it and hosted CodeQL against the resolved tag commit
   before any artifact build. CodeQL reports alerts; gosec, govulncheck,
-  gitleaks, and `npm audit` fail the gate. Run the local pipeline when a change
-  touches an HTTP handler, auth, file paths built from input, subprocess
-  arguments, or a dependency. Verify dashboard changes against real local state
+  gitleaks, and `npm audit` fail the gate. The npm scanner retries a registry
+  that times out or answers 5xx, and reuses a recorded pass for a day when
+  `web/package-lock.json` and `web/package.json` are byte-identical to the pass,
+  so an unreachable registry fails as its own error rather than as an advisory
+  and an unchanged dependency set is still re-asked daily. Run the local
+  pipeline when a change touches an HTTP handler, auth, file paths built from
+  input, subprocess arguments, or a dependency. Verify dashboard changes against real local state
   with `bash bin/dev-start.sh` (dashboard backend on :4343, `next dev` on :3100)
   and stop it with `bash bin/dev-stop.sh`; the browser gate uses deterministic
   API fixtures on OS-assigned local ports and does not replace that product
