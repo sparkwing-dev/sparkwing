@@ -20,6 +20,10 @@ this file is a menu and checklist, not a command that every change must run.
   goroutine outlives its tests. A new test package needs that file too; copy an
   existing one. A package that must tolerate a goroutine passes its own
   `goleak` option from its `TestMain` and says why in a `safety:` comment.
+- **Go result caching:** ordinary `test` and `pre-commit` checks preserve the
+  caller's temporary-directory settings so Go can reuse passing results.
+  Test fixtures own cleanup through `t.TempDir`, `t.Cleanup`, or deferred
+  removal. Forced race and Postgres runs retain their per-run scratch roots.
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured alone on an
   idle 16-core Linux box, `GOWORK=off go test -count=1 <pkg>`:
