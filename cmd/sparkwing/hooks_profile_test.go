@@ -140,7 +140,6 @@ func TestRunPipelineForProof_SelectsLocalOrPinnedStorage(t *testing.T) {
 					t.Errorf("proof inherited %q", value)
 				}
 			}
-
 		})
 	}
 }

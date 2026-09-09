@@ -516,6 +516,7 @@ func TestFilesetHashFramesFileContents(t *testing.T) {
 		t.Fatalf("different file sets collided: %s", a)
 	}
 }
+
 func TestFilesetHashIncludesPermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows chmod does not change executable permissions")
@@ -537,6 +538,7 @@ func TestFilesetHashIncludesPermissions(t *testing.T) {
 		t.Fatalf("executable bit did not change hash: %s", a)
 	}
 }
+
 func TestFilesetHashRejectsUnreadableFiles(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows chmod does not remove read permissions")
@@ -554,6 +556,7 @@ func TestFilesetHashRejectsUnreadableFiles(t *testing.T) {
 		t.Fatal("accepted unreadable build input")
 	}
 }
+
 func TestFilesetHashOmitsDeletedTrackedFiles(t *testing.T) {
 	dir := withRepo(t)
 	writeFile(t, dir, "keep", "content")
