@@ -22,6 +22,26 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+### Fixed
+
+- **pool:** Count successful PVC checkouts and returns in the existing metrics
+
+- **cli:** Documentation searches reuse the embedded catalog instead of rebuilding it for every document
+- **cache:** Keep registry responses with different Accept headers in separate cache entries
+- **docs:** Keep hash-leading list continuations in their list items
+- **Runs logs:** Short, unfiltered local tails read from the end of the log
+  instead of loading its full history. Output and filter ordering are unchanged.
+
+### Security
+
+- **deps:** `google.golang.org/grpc` moves to v1.83.2 for CVE-2026-84445, a
+  denial of service in its xDS server. The HIGH finding failed the image scan
+  that gates every published release, which is why v0.46.0 and v0.47.0 carry
+  tags but no binaries; this release publishes them.
+
+
+## [v0.47.0] - 2026-09-09
 ### Added
 
 - **dashboard:** The DAG tab is shown for every run. A run that ended before
@@ -80,6 +100,10 @@ code change to unlock.
   the [migration
   guide](docs/migrations/v0.47.0.md#onschedule-takes-a-mapping).
 
+- **templates:** The embedded sparks-core registry is v0.32.0, whose
+  `contentkey` helpers return `(CacheKey, error)`, so the `cached-test-suite`,
+  `go-affected-tests` and `skip-if-paths-unchanged` scaffolds compile against
+  the `CacheKeyFn` this release requires.
 - **sdk (Breaking):** `CacheKeyFn` now returns `(CacheKey, error)`.
   Key errors, panics, empty keys, and expired resolution deadlines fail
   before dispatch. Return `NoCache, nil` to bypass memoization explicitly.

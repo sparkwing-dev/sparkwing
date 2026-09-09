@@ -269,6 +269,9 @@ func (p *Pool) Checkout(ctx context.Context, jobID string) (string, error) {
 		}
 		// safety: %q escapes a caller-supplied job id that would otherwise forge a log line.
 		log.Printf("pool: checked out PVC %s for job %q", pvc.Name, jobID)
+		if PoolCheckouts != nil {
+			PoolCheckouts.Add(ctx, 1)
+		}
 		return pvc.Name, nil
 	}
 	return "", nil
@@ -280,11 +283,17 @@ func (p *Pool) Checkout(ctx context.Context, jobID string) (string, error) {
 // warmed-at timestamp is preserved so the refresher can see how long
 // ago the last full warm was.
 func (p *Pool) Return(ctx context.Context, pvcName string) error {
-	return p.setState(ctx, pvcName, StateClean, map[string]string{
+	if err := p.setState(ctx, pvcName, StateClean, map[string]string{
 		AnnCheckedOutBy: "",
 		AnnCheckedOutAt: "",
 		AnnHeartbeatAt:  "",
-	})
+	}); err != nil {
+		return err
+	}
+	if PoolReturns != nil {
+		PoolReturns.Add(ctx, 1)
+	}
+	return nil
 }
 
 // NextToWarm returns the PVC most in need of warming, or "" if none.

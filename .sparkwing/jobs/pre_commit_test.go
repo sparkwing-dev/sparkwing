@@ -178,7 +178,7 @@ func TestTheTestStepDoesNotHandTheGateIndexToTheSuitesItRuns(t *testing.T) {
 	gitAddAll(t, root)
 	t.Setenv("GIT_INDEX_FILE", gateIndexSnapshot(t, root))
 
-	if err := forEachGoModule(ctx, "go test", "go test ./...", nil); err == nil {
+	if err := forEachGoModule(ctx, "go test", "go test ./...", nil, true); err == nil {
 		t.Fatal("the probe must fail while the gate's index reaches it")
 	}
 	if err := runTest(ctx); err != nil {
@@ -930,6 +930,21 @@ func TestHomeResolutionExemptions(t *testing.T) {
 
 			if err := checkHomeResolution(context.Background()); err != nil {
 				t.Errorf("the gate refused %s: %v", testCase.name, err)
+			}
+		})
+	}
+}
+
+func TestGoStepsIgnoreBrokenGoInNodeModules(t *testing.T) {
+	root := gateFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, "web", "node_modules", "dependency", "broken.go"),
+		"package dependency\n\nfunc Broken( {\n")
+	for name, step := range map[string]func(context.Context) error{
+		"vet": runVet, "build": runBuild, "test": runTest,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := step(context.Background()); err != nil {
+				t.Fatalf("node_modules changed the product %s verdict: %v", name, err)
 			}
 		})
 	}

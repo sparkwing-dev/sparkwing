@@ -18,7 +18,7 @@ import (
 
 func expireProxyCacheEntry(t *testing.T, registry, path string) {
 	t.Helper()
-	metaPath := filepath.Join(proxyDir, registry, proxyCacheKey(registry, path)+".meta")
+	metaPath := filepath.Join(proxyDir, registry, proxyCacheKey(registry, path, "")+".meta")
 	metaData, err := os.ReadFile(metaPath)
 	if err != nil {
 		t.Fatal(err)
@@ -38,8 +38,8 @@ func expireProxyCacheEntry(t *testing.T, registry, path string) {
 }
 
 func TestProxyCacheKey_Deterministic(t *testing.T) {
-	k1 := proxyCacheKey("npm", "lodash/-/lodash-4.17.21.tgz")
-	k2 := proxyCacheKey("npm", "lodash/-/lodash-4.17.21.tgz")
+	k1 := proxyCacheKey("npm", "lodash/-/lodash-4.17.21.tgz", "")
+	k2 := proxyCacheKey("npm", "lodash/-/lodash-4.17.21.tgz", "")
 	if k1 != k2 {
 		t.Error("same input should produce same key")
 	}
@@ -49,13 +49,13 @@ func TestProxyCacheKey_Deterministic(t *testing.T) {
 }
 
 func TestProxyCacheKey_Different(t *testing.T) {
-	k1 := proxyCacheKey("npm", "lodash/-/lodash-4.17.21.tgz")
-	k2 := proxyCacheKey("npm", "express/-/express-4.18.2.tgz")
+	k1 := proxyCacheKey("npm", "lodash/-/lodash-4.17.21.tgz", "")
+	k2 := proxyCacheKey("npm", "express/-/express-4.18.2.tgz", "")
 	if k1 == k2 {
 		t.Error("different paths should produce different keys")
 	}
 
-	k3 := proxyCacheKey("pypi", "lodash/-/lodash-4.17.21.tgz")
+	k3 := proxyCacheKey("pypi", "lodash/-/lodash-4.17.21.tgz", "")
 	if k1 == k3 {
 		t.Error("different registries should produce different keys")
 	}
@@ -220,7 +220,7 @@ func TestHandleProxy_ImmutableCaching(t *testing.T) {
 			t.Fatalf("expected 1 upstream hit, got %d", hitCount.Load())
 		}
 
-		key := proxyCacheKey("test", "pkg/-/pkg-1.0.0.tgz")
+		key := proxyCacheKey("test", "pkg/-/pkg-1.0.0.tgz", "")
 		metaData, err := os.ReadFile(filepath.Join(proxyDir, "test", key+".meta"))
 		if err != nil {
 			t.Fatalf("reading meta: %v", err)
@@ -472,7 +472,7 @@ func TestHandleProxy_ForgedHostDoesNotPoisonLaterRequests(t *testing.T) {
 			t.Errorf("expected a rewrite against the second request Host, got: %s", body)
 		}
 
-		cached, err := os.ReadFile(filepath.Join(proxyDir, "npm", proxyCacheKey("npm", "pkg")+".body"))
+		cached, err := os.ReadFile(filepath.Join(proxyDir, "npm", proxyCacheKey("npm", "pkg", "")+".body"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -501,7 +501,7 @@ func TestHandleProxy_PublicBaseRewritesAndCaches(t *testing.T) {
 			t.Errorf("expected the configured base, got: %s", w1.Body.String())
 		}
 
-		cached, err := os.ReadFile(filepath.Join(proxyDir, "npm", proxyCacheKey("npm", "pkg")+".body"))
+		cached, err := os.ReadFile(filepath.Join(proxyDir, "npm", proxyCacheKey("npm", "pkg", "")+".body"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -665,7 +665,7 @@ func TestNormalizeProxyPublicBase(t *testing.T) {
 
 func writeCachedProxyEntry(t *testing.T, registry, path string, body []byte, immutable bool) {
 	t.Helper()
-	key := proxyCacheKey(registry, path)
+	key := proxyCacheKey(registry, path, "")
 	meta := proxyMeta{
 		Path:        path,
 		ContentType: "application/json",
@@ -866,6 +866,46 @@ func TestHandleProxy_MissingHostIsRejected(t *testing.T) {
 		}
 		if strings.Contains(w.Body.String(), "evil.example.com") {
 			t.Errorf("untrusted forwarded host leaked into the response: %s", w.Body.String())
+		}
+	})
+}
+
+func TestHandleProxy_CachesAcceptRepresentationsSeparately(t *testing.T) {
+	var fetches atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetches.Add(1)
+		contentType := r.Header.Get("Accept")
+		if contentType == "" {
+			contentType = "text/plain"
+		}
+		w.Header().Set("Content-Type", contentType)
+		fmt.Fprint(w, contentType)
+	}))
+	defer upstream.Close()
+
+	withTestProxy(t, map[string]Registry{
+		"pypi": {Name: "pypi", Upstream: upstream.URL},
+	}, func() {
+		for _, cacheStatus := range []string{"MISS", "HIT"} {
+			for _, accept := range []string{"text/html", "application/vnd.pypi.simple.v1+json", ""} {
+				req := httptest.NewRequest(http.MethodGet, "/proxy/pypi/simple/requests/", nil)
+				req.Header.Set("Accept", accept)
+				w := httptest.NewRecorder()
+				handleProxy(w, req)
+				wantType := accept
+				if wantType == "" {
+					wantType = "text/plain"
+				}
+				if w.Code != http.StatusOK || w.Body.String() != wantType || w.Header().Get("Content-Type") != wantType {
+					t.Errorf("Accept %q: status=%d type=%q body=%q", accept, w.Code, w.Header().Get("Content-Type"), w.Body.String())
+				}
+				if got := w.Header().Get("X-Proxy-Cache"); got != cacheStatus {
+					t.Errorf("Accept %q: cache=%q, want %q", accept, got, cacheStatus)
+				}
+			}
+		}
+		if got := fetches.Load(); got != 3 {
+			t.Errorf("upstream requests=%d, want 3", got)
 		}
 	})
 }
