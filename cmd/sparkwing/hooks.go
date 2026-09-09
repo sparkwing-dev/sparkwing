@@ -226,7 +226,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 		if err != nil {
 			return false, err
 		}
-		return githooks.Survey(git, repoRoot, declared).Gated(), nil
+		return githooks.Survey(git, repoRoot, declared).Gated(), errors.New("installation rejected; prior hooks and core.hooksPath remain unchanged")
 	}
 	currentGlobalHooks := chainableGlobalHooks(git, hooksDir)
 	currentGlobalState, err := captureGlobalHookState(git, hooksDir, currentGlobalHooks)
@@ -302,13 +302,13 @@ func prepareHookInstall(git githooks.Git, repoRoot, hooksDir string, unforwarded
 	}
 	if !plan.reads {
 		if scope == "local" {
-			fmt.Fprintf(os.Stdout, "\nwarning: git reads hooks from %s, not %s, so nothing was installed\n"+
-				"  this repo sets its own core.hooksPath, which was deliberate, so the install leaves it alone; clear it with `git -C %s config --unset core.hooksPath`, then re-run `sparkwing pipeline hooks install`\n",
+			fmt.Fprintf(os.Stderr, "\nwarning: git reads hooks from %s, not %s, so nothing was installed\n"+
+				"  this repo sets its own core.hooksPath, so the install leaves it alone; clear it with `git -C %s config --unset core.hooksPath`, then re-run `sparkwing pipeline hooks install`\n",
 				active, hooksDir, repoRoot)
 			return plan, false
 		}
 		if len(unforwarded) > 0 {
-			fmt.Fprintf(os.Stdout, "\nwarning: core.hooksPath left alone: nothing here can hand off to the machine's %s\n"+
+			fmt.Fprintf(os.Stderr, "\nwarning: core.hooksPath left alone: nothing here can hand off to the machine's %s\n"+
 				"  claiming it would stop that hook firing in this repo; remove the hook(s) of that name from %s so the install can forward them, then re-run `sparkwing pipeline hooks install`\n"+
 				"  until then git keeps reading %s, so nothing was installed\n",
 				strings.Join(unforwarded, ", "), hooksDir, active)
@@ -319,12 +319,12 @@ func prepareHookInstall(git githooks.Git, repoRoot, hooksDir string, unforwarded
 	if len(unproven) == 0 {
 		return plan, true
 	}
-	fmt.Fprintln(os.Stdout, "\nwarning: installation rejected because a required gate proof failed")
+	fmt.Fprintln(os.Stderr, "\nwarning: installation rejected because a required gate proof failed")
 	for _, hookName := range slices.Sorted(maps.Keys(unproven)) {
-		fmt.Fprintf(os.Stdout, "  %s: %v\n", hookName, unproven[hookName])
+		fmt.Fprintf(os.Stderr, "  %s: %v\n", hookName, unproven[hookName])
 	}
-	fmt.Fprintln(os.Stdout, "  prior hooks and core.hooksPath remain unchanged")
-	fmt.Fprintln(os.Stdout, "  fix the gate(s), then re-run `sparkwing pipeline hooks install`; `--no-prove` arms them without the proof")
+	fmt.Fprintln(os.Stderr, "  prior hooks and core.hooksPath remain unchanged")
+	fmt.Fprintln(os.Stderr, "  fix the gate(s), then re-run `sparkwing pipeline hooks install`; `--no-prove` arms them without the proof")
 	return plan, false
 }
 
@@ -594,7 +594,9 @@ func armHooks(git githooks.Git, repoRoot, hooksDir string, unforwarded []string,
 	}
 	gates := declaredGates(slices.Sorted(maps.Keys(hooksToRun)))
 	if len(githooks.Gates(hooksDir)) == 0 {
-		fmt.Fprintf(os.Stdout, "\nwarning: no gate runs in %s, so this repo's commits stay ungated\n", hooksDir)
+		if len(gates) > 0 {
+			return false, fmt.Errorf("no declared gate runs in %s", hooksDir)
+		}
 		return false, nil
 	}
 	if !plan.reads {
@@ -605,7 +607,11 @@ func armHooks(git githooks.Git, repoRoot, hooksDir string, unforwarded []string,
 			"  the global core.hooksPath (%s) would otherwise shadow these hooks; its own hooks still fire, chained after this repo's\n",
 			hooksDir, plan.active)
 	}
-	return gatesLive(hooksDir, gates), nil
+	gated := gatesLive(hooksDir, gates)
+	if len(gates) > 0 && !gated {
+		return false, fmt.Errorf("not all declared gates run in %s", hooksDir)
+	}
+	return gated, nil
 }
 
 func declaredGates(hookNames []string) []string {
@@ -651,21 +657,33 @@ func proveGates(prove Prover, repoRoot string, hooksToRun map[string][]string) m
 
 func runPipelineForProof(profileName string) Prover {
 	return func(repoRoot, pipeline string) error {
-		args := []string{"run", pipeline, "--sw-local-only"}
-		if profileName != "" {
-			args = []string{"run", pipeline, "--profile", profileName}
+		cmd, err := pipelineProofCommand(repoRoot, pipeline, profileName)
+		if err != nil {
+			return err
 		}
-		cmd := exec.Command("sparkwing", args...)
-		cmd.Dir = repoRoot
-		env := removeEnv(os.Environ(), "SPARKWING_PROFILE")
-		env = removeEnv(env, "SPARKWING_SECRETS_PROFILE")
-		cmd.Env = append(env, "SPARKWING_LOG_FORMAT=quiet")
 		out, err := cmd.CombinedOutput()
 		if err == nil {
 			return nil
 		}
 		return fmt.Errorf("%w: %s", err, lastLine(out))
 	}
+}
+
+func pipelineProofCommand(repoRoot, pipeline, profileName string) (*exec.Cmd, error) {
+	args := []string{"run", pipeline, "--sw-local-only"}
+	if profileName != "" {
+		args = []string{"run", pipeline, "--profile", profileName}
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("locate sparkwing executable: %w", err)
+	}
+	cmd := exec.Command(self, args...)
+	cmd.Dir = repoRoot
+	env := removeEnv(os.Environ(), "SPARKWING_PROFILE")
+	env = removeEnv(env, "SPARKWING_SECRETS_PROFILE")
+	cmd.Env = append(env, "SPARKWING_LOG_FORMAT=quiet")
+	return cmd, nil
 }
 
 func lastLine(out []byte) string {

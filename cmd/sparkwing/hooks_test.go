@@ -80,6 +80,15 @@ func installInto(t *testing.T, git githooks.Git, repo string) string {
 	return out
 }
 
+func rejectedInstallOutput(t *testing.T, git githooks.Git, repo string) string {
+	t.Helper()
+	return captureStderr(t, func() {
+		if _, err := installHooks(git, repo, filepath.Join(repo, ".sparkwing"), installOptions{}); err == nil {
+			t.Fatal("rejected installation returned success")
+		}
+	})
+}
+
 func TestRenderHookScript_BlockingHooksAbortOnFailure(t *testing.T) {
 	for _, hook := range []string{"pre-commit", "pre-push"} {
 		script := renderHookScript(hook, []string{"lint", "test"}, false, "")
@@ -293,7 +302,11 @@ func TestHooksInstall_RefusesTheClaimWhenAHandWrittenHookBlocksAGlobalForwarder(
 			writeRepoFile(t, filepath.Join(repo, ".git", "hooks", blocked), mine)
 
 			git := &fakeGit{global: global}
-			out := installInto(t, git.run, repo)
+			out := captureStderr(t, func() {
+				if _, err := installHooks(git.run, repo, filepath.Join(repo, ".sparkwing"), installOptions{}); err == nil {
+					t.Fatal("rejected installation returned success")
+				}
+			})
 			if got := readRepoFile(t, filepath.Join(repo, ".git", "hooks", blocked)); got != mine {
 				t.Errorf("install overwrote a hook it does not manage:\n%s", got)
 			}
@@ -387,7 +400,11 @@ func TestHooksInstall_IgnoresGlobalFilesGitWouldNeverRunAsAHook(t *testing.T) {
 func TestHooksInstall_WarnsWhenTheRepositorySetsItsOwnHooksPath(t *testing.T) {
 	repo := gateRepo(t)
 	git := &fakeGit{local: filepath.Join(repo, ".githooks")}
-	out := installInto(t, git.run, repo)
+	out := captureStderr(t, func() {
+		if _, err := installHooks(git.run, repo, filepath.Join(repo, ".sparkwing"), installOptions{}); err == nil {
+			t.Fatal("rejected installation returned success")
+		}
+	})
 
 	if len(git.writes) != 0 {
 		t.Errorf("install overwrote a core.hooksPath the repo set deliberately: %v", git.writes)
@@ -559,7 +576,7 @@ func TestHooksUninstall_LeavesAHooksPathItDidNotClaim(t *testing.T) {
 	repo := gateRepo(t)
 	own := filepath.Join(repo, ".githooks")
 	git := &fakeGit{global: t.TempDir(), local: own}
-	installInto(t, git.run, repo)
+	rejectedInstallOutput(t, git.run, repo)
 
 	captureStdout(t, func() {
 		if err := uninstallHooks(git.run, repo); err != nil {
@@ -587,7 +604,7 @@ func TestHooksGuidance_NamesCommandsTheCLIDispatches(t *testing.T) {
 	texts := map[string]string{
 		"remedy for a machine-wide override": shadow.Remedy(),
 		"remedy for a repository override":   repoScoped.Remedy(),
-		"install refusing the claim":         installInto(t, (&fakeGit{global: global}).run, repo),
+		"install refusing the claim":         rejectedInstallOutput(t, (&fakeGit{global: global}).run, repo),
 		"rendered hook script":               renderHookScript("pre-commit", []string{"lint"}, true, ""),
 		"status with nothing installed": captureStdout(t, func() {
 			if err := statusHooks((&fakeGit{}).run, empty, "pretty"); err != nil {

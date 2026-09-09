@@ -73,13 +73,13 @@ func TestInstallFleet_CountsWhatItArmedAndNamesWhatItDidNot(t *testing.T) {
 	out := captureStdout(t, func() {
 		err = installFleet(installOptions{prove: proverFailingIn(red)})
 	})
-	if err != nil {
-		t.Fatalf("installFleet: %v", err)
+	if err == nil {
+		t.Fatal("rejected installation returned success")
 	}
-	if !strings.Contains(out, "1 repo(s) armed, 1 with no gate to arm, 1 left ungated, 0 failed") {
+	if !strings.Contains(out, "1 repo(s) armed, 1 with no gate to arm, 0 left ungated, 1 failed") {
 		t.Errorf("summary does not match what the sweep did:\n%s", out)
 	}
-	if !strings.Contains(out, "still ungated: redgate") {
+	if !strings.Contains(err.Error(), "redgate") {
 		t.Errorf("the sweep did not name the repo it left ungated:\n%s", out)
 	}
 }
@@ -110,8 +110,8 @@ func TestInstallFleet_LeavesTheRepoWhoseGateCannotRunUnarmed(t *testing.T) {
 	f.registerRepos(t, f.repo, red)
 
 	captureStdout(t, func() {
-		if err := installFleet(installOptions{prove: proverFailingIn(red)}); err != nil {
-			t.Fatalf("installFleet: %v", err)
+		if err := installFleet(installOptions{prove: proverFailingIn(red)}); err == nil {
+			t.Fatal("rejected installation returned success")
 		}
 	})
 	if got, err := f.tryGit(red, "config", "--local", "core.hooksPath"); err == nil {

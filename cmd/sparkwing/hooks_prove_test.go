@@ -83,12 +83,12 @@ func TestHooksInstall_LeavesTheHooksPathAloneWhenNoGatePasses(t *testing.T) {
 	f := newChainFixture(t)
 	var proved []string
 	var gated bool
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		var err error
 		gated, err = installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"),
 			installOptions{prove: recordingProver(errors.New("admission unreachable"), &proved)})
-		if err != nil {
-			t.Fatalf("installHooks: %v", err)
+		if err == nil {
+			t.Fatal("rejected installation returned success")
 		}
 	})
 	if gated {
@@ -112,8 +112,8 @@ func TestHooksInstall_KeepsTheHooksOfARepoItCannotArm(t *testing.T) {
 	var proved []string
 	captureStdout(t, func() {
 		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"),
-			installOptions{prove: recordingProver(errors.New("admission unreachable"), &proved)}); err != nil {
-			t.Fatalf("installHooks: %v", err)
+			installOptions{prove: recordingProver(errors.New("admission unreachable"), &proved)}); err == nil {
+			t.Fatal("rejected installation returned success")
 		}
 	})
 	if _, err := os.Stat(prior); err != nil {
@@ -133,8 +133,8 @@ func TestHooksInstall_ArmsNothingWhenTheGateIsRedAndAPostCommitHookIsDeclared(t 
 		var err error
 		gated, err = installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"),
 			installOptions{prove: recordingProver(errors.New("admission unreachable"), &proved)})
-		if err != nil {
-			t.Fatalf("installHooks: %v", err)
+		if err == nil {
+			t.Fatal("rejected installation returned success")
 		}
 	})
 	if len(proved) != 1 || proved[0] != "gate" {
@@ -181,12 +181,12 @@ func TestHooksInstall_FailedReinstallKeepsThePriorLiveGate(t *testing.T) {
 	priorConfig := f.git(t, "config", "--local", "core.hooksPath")
 	var proved []string
 	var gated bool
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		var err error
 		gated, err = installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"),
 			installOptions{prove: recordingProver(errors.New("gate went red"), &proved)})
-		if err != nil {
-			t.Fatalf("installHooks: %v", err)
+		if err == nil {
+			t.Fatal("rejected installation returned success")
 		}
 	})
 	if len(proved) != 1 || proved[0] != "gate" {
@@ -210,10 +210,10 @@ func TestHooksInstall_RepeatedFailedProofLeavesAFreshRepoUnchanged(t *testing.T)
 	f := newChainFixture(t)
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), twoGateProject)
 	install := func() string {
-		return captureStdout(t, func() {
+		return captureStderr(t, func() {
 			if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"),
-				installOptions{prove: redPushGate}); err != nil {
-				t.Fatalf("installHooks: %v", err)
+				installOptions{prove: redPushGate}); err == nil {
+				t.Fatal("rejected installation returned success")
 			}
 		})
 	}
@@ -237,10 +237,10 @@ func TestHooksInstall_RepeatedFailedProofLeavesAFreshRepoUnchanged(t *testing.T)
 func TestHooksInstall_FailedProofDoesNotInstallAPartialGate(t *testing.T) {
 	f := newChainFixture(t)
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), twoGateProject)
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"),
-			installOptions{prove: redPushGate}); err != nil {
-			t.Fatalf("installHooks: %v", err)
+			installOptions{prove: redPushGate}); err == nil {
+			t.Fatal("rejected installation returned success")
 		}
 	})
 	hooks := filepath.Join(f.repo, ".git", "hooks")
@@ -283,10 +283,10 @@ func TestHooksInstall_FailedProofRestoresManagedHooksForwardersAndConfigByteForB
 	}
 	priorConfig := f.git(t, "config", "--local", "core.hooksPath")
 
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		gated, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{prove: redPushGate})
-		if err != nil {
-			t.Fatalf("failed reinstall: %v", err)
+		if err == nil {
+			t.Fatal("rejected installation returned success")
 		}
 		if !gated {
 			t.Error("restored managed gates were reported ungated")
@@ -566,10 +566,10 @@ func TestHooksInstall_LeavesAHandWrittenHookAloneWhenItsGateDoesNotPass(t *testi
 	prePush := filepath.Join(f.repo, ".git", "hooks", "pre-push")
 	writeExec(t, prePush, handWritten)
 
-	out := captureStdout(t, func() {
+	out := captureStderr(t, func() {
 		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"),
-			installOptions{prove: redPushGate}); err != nil {
-			t.Fatalf("installHooks: %v", err)
+			installOptions{prove: redPushGate}); err == nil {
+			t.Fatal("rejected installation returned success")
 		}
 	})
 	if got := readRepoFile(t, prePush); got != handWritten {
@@ -623,5 +623,48 @@ func TestDeclaredHookNames_UnreadableProjectDeclaresNothing(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("declaredHookNames = %v, want nil for a directory with no project", got)
+	}
+}
+
+func TestHooksInstall_RejectionReturnsAnErrorOnStderr(t *testing.T) {
+	f := newChainFixture(t)
+	var installErr error
+	var stdout string
+	stderr := captureStderr(t, func() {
+		stdout = captureStdout(t, func() {
+			_, installErr = installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{prove: func(_, _ string) error { return errors.New("proof failed") }})
+		})
+	})
+	if installErr == nil {
+		t.Error("rejected installation returned success")
+	}
+	if !strings.Contains(stderr, "proof failed") {
+		t.Errorf("stderr = %q", stderr)
+	}
+	if strings.Contains(stdout, "warning:") {
+		t.Errorf("warning went to stdout: %s", stdout)
+	}
+}
+
+func TestHooksInstall_MissingDeclaredGateRestoresPriorHooks(t *testing.T) {
+	for name, config := range map[string]string{"gate only": gateProject, "gate and notifier": gateAndNotifyProject} {
+		t.Run(name, func(t *testing.T) {
+			repo := gateRepo(t)
+			writeRepoFile(t, filepath.Join(repo, ".sparkwing", "sparkwing.yaml"), config)
+			hook := filepath.Join(repo, ".git", "hooks", "pre-commit")
+			prior := "#!/bin/sh\necho hand written\n"
+			writeExec(t, hook, prior)
+			captureStdout(t, func() {
+				if _, err := installHooks((&fakeGit{}).run, repo, filepath.Join(repo, ".sparkwing"), installOptions{}); err == nil {
+					t.Fatal("missing declared gate returned success")
+				}
+			})
+			if got := readRepoFile(t, hook); got != prior {
+				t.Errorf("prior hook changed: %q", got)
+			}
+			if _, err := os.Stat(filepath.Join(repo, ".git", "hooks", "post-commit")); !os.IsNotExist(err) {
+				t.Errorf("partial post-commit hook survived: %v", err)
+			}
+		})
 	}
 }
