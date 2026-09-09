@@ -325,14 +325,40 @@ func (fs *fetchState) allowClone(name string) bool {
 	return true
 }
 
-func (fs *fetchState) cloneCooldownRemaining(name string) time.Duration {
+// markError records why a clone or fetch failed, so /health and the next
+// refusal can name it instead of pointing at the log.
+func (fs *fetchState) markError(name, msg string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	rs := fs.entry(name)
+	rs.lastError = msg
+	rs.lastErrorAt = time.Now()
+}
+
+func (fs *fetchState) lastErrorFor(name string) string {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 	rs := fs.repos[name]
-	if rs == nil || rs.lastClone.IsZero() {
+	if rs == nil || rs.lastError == "" {
+		return "none recorded"
+	}
+	return rs.lastError
+}
+
+func (fs *fetchState) cloneCooldownRemaining(name string) time.Duration {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	if rs := fs.repos[name]; rs != nil {
+		return cooldownRemaining(rs.lastClone)
+	}
+	return 0
+}
+
+func cooldownRemaining(last time.Time) time.Duration {
+	if last.IsZero() {
 		return 0
 	}
-	left := recloneCooldown - time.Since(rs.lastClone)
+	left := recloneCooldown - time.Since(last)
 	if left < 0 {
 		return 0
 	}
@@ -342,15 +368,10 @@ func (fs *fetchState) cloneCooldownRemaining(name string) time.Duration {
 func (fs *fetchState) recloneCooldownRemaining(name string) time.Duration {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
-	rs := fs.repos[name]
-	if rs == nil || rs.lastReclone.IsZero() {
-		return 0
+	if rs := fs.repos[name]; rs != nil {
+		return cooldownRemaining(rs.lastReclone)
 	}
-	left := recloneCooldown - time.Since(rs.lastReclone)
-	if left < 0 {
-		return 0
-	}
-	return left.Truncate(time.Second)
+	return 0
 }
 
 var mirrorFetch = func(timeout time.Duration, bareRepo string) (string, error) {
@@ -514,11 +535,8 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 				log.Printf("background fetch: %s failed (retry in %s): %s", e.Name(), rs.backoff, errMsg)
 			} else {
 
-				rs = bgFetch.entry(e.Name())
-				rs.lastError = ""
-				rs.backoff = 0
-				rs.lastOK = time.Now()
 				bgFetch.mu.Unlock()
+				bgFetch.markFetched(e.Name())
 				log.Printf("background fetch: %s ok", e.Name())
 			}
 		}
@@ -594,17 +612,20 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
 		if !bgFetch.allowClone(stateKey(hash)) {
 			left := bgFetch.cloneCooldownRemaining(stateKey(hash))
-			log.Printf("archive: mirror for %s is missing and cloning is on cooldown (%s left)", hash, left)
+			last := bgFetch.lastErrorFor(stateKey(hash))
+			log.Printf("archive: mirror for %s is missing and cloning is on cooldown (%s left): %s", hash, left, last)
 			http.Error(w, fmt.Sprintf(
 				"mirror is missing and cloning is on cooldown for another %s -- a clone already ran for this repo and the mirror is still absent.\n"+
-					"This needs an operator: a recovery reclone deletes the mirror before it clones, so a clone that keeps failing leaves nothing behind, "+
-					"and cloning on every archive request costs a full download each time. Fix the git error in the gitcache log, then retry.",
-				left), http.StatusBadGateway)
+					"last error: %s\n"+
+					"This needs an operator: the mirror was either never cloned successfully or removed by a recovery reclone, which deletes it before it clones. "+
+					"Cloning on every archive request costs a full download each time. Fix the git error above, then retry.",
+				left, last), http.StatusBadGateway)
 			return
 		}
 		// #nosec G706 -- the repository URL is validated at registration and redacted here
 		log.Printf("background fetch: cloning %s → %s", sourceurl.Redact(repoURL), hash)
 		if out, err := cloneMirror(repoURL, bareRepo); err != nil {
+			bgFetch.markError(stateKey(hash), fmt.Sprintf("clone failed: %s", err))
 			http.Error(w, fmt.Sprintf("clone failed: %s\n%s", err, sshHint(out)), http.StatusInternalServerError)
 			return
 		}
@@ -2169,13 +2190,17 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 
 		// #nosec G706 -- the repository name is pattern-validated and the URL is redacted
 		log.Printf("git register: cloning %s as %q", sourceurl.Redact(repoURL), name)
-		if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
+		if out, err := cloneMirror(repoURL, bareRepo); err != nil {
+			bgFetch.markError(stateKey(hash), fmt.Sprintf("clone failed: %s", err))
 			log.Printf("git register: clone failed (will need seed): %s %s", err, sshHint(out))
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "hash": hash, "cloned": false})
 			return
 		}
 		enableSHAFetch(bareRepo)
+		// safety: registering is an explicit operator action, so it is also the
+		// way out of a clone cooldown a failing repo earned.
+		bgFetch.markFetched(stateKey(hash))
 	} else {
 		enableSHAFetch(bareRepo)
 	}
@@ -2341,15 +2366,26 @@ func resolveGitRepo(name string) (string, error) {
 	if _, err := os.Stat(bareRepo); err == nil {
 		return bareRepo, nil
 	}
+	// safety: handleGit reaches this twice per runner clone, so an auto-clone
+	// that keeps failing would re-download upstream on every hit.
+	if !bgFetch.allowClone(stateKey(hash)) {
+		return "", fmt.Errorf(
+			"repo %q registered but not cloned -- cloning is on cooldown for another %s after a failed attempt (%s); "+
+				"fix that error, then re-register the repo to clear the cooldown",
+			name, bgFetch.cloneCooldownRemaining(stateKey(hash)), bgFetch.lastErrorFor(stateKey(hash)),
+		)
+	}
 	// #nosec G706 -- the repository name is pattern-validated and its URL was validated at registration
 	log.Printf("gitcache: registered repo %q missing on disk; auto-cloning %s", name, repoURL)
-	if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
+	if out, err := cloneMirror(repoURL, bareRepo); err != nil {
+		bgFetch.markError(stateKey(hash), fmt.Sprintf("auto-clone failed: %s", err))
 		return "", fmt.Errorf(
 			"repo %q registered but not cloned -- auto-clone failed (%w%s); seed manually via POST /sync/seed?repo=%s&sha=<commit>",
 			name, err, sshHint(out), repoURL,
 		)
 	}
 	enableSHAFetch(bareRepo)
+	bgFetch.markFetched(stateKey(hash))
 	// #nosec G706 -- the repository name is pattern-validated
 	log.Printf("gitcache: auto-clone complete for %q at %s", name, bareRepo)
 	return bareRepo, nil
