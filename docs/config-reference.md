@@ -49,7 +49,7 @@ The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs t
 |---|---|---|---|
 | `push` | `PushTrigger` | no | Push fires on a git push the controller receives via webhook. |
 | `pull_request` | `PullRequestTrigger` | no | PullRequest fires on a GitHub pull_request event the controller receives via webhook. The run checks out the PR head; base ref and PR number reach the pipeline on RunContext.Trigger.PullRequest. |
-| `schedule` | `ScheduleTrigger` | no | Schedule fires the pipeline on a cron cadence. It accepts a bare cron string or a mapping of cron, tz, overlap and catch_up. |
+| `schedule` | `ScheduleTriggers` | no | Schedule fires the pipeline on one or more cron cadences. It accepts a bare cron string, one mapping, or a list of mappings; every entry declares where it fires. |
 | `webhook` | `WebhookTrigger` | no | Webhook exposes a custom HTTP path that fires the pipeline. |
 | `pre_commit` | `PreHookTrigger` | no | PreHook fires from the installed git pre-commit hook. |
 | `pre_push` | `PostHookTrigger` | no | PostHook fires from the installed git pre-push hook. |
@@ -73,10 +73,13 @@ The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs t
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `name` | `string` | no | Name distinguishes several cadences on one pipeline and appears in `sparkwing crons list` as <repo>/<pipeline>/<name>. Required once a pipeline declares more than one entry; a lone entry is named "default". It matches `^[a-z0-9][a-z0-9-]*$` and is at most 40 characters. |
 | `cron` | `string` | **yes** | Cron is a five-field cron expression (minute hour day-of-month month day-of-week) with the usual lists, ranges, steps, month and day names, and the @hourly/@daily/@weekly/@monthly/@yearly aliases. |
+| `where` | `string` | **yes** | Where says which side fires this entry: "local" fires from a host that armed it with `sparkwing crons install`, "controller" from a controller it was installed on. One side per entry, and there is no default, so nothing fires somewhere you did not say it should. Declare one entry per side to fire from both. |
 | `tz` | `string` | no | TZ is the IANA zone the expression is read in, such as America/Denver. Default UTC. The word "local" means the zone of the host that runs the schedule. |
 | `overlap` | `string` | no | Overlap decides what happens when the cadence comes due while the previous scheduled run is still running: "skip" (default) records the fire as skipped, "queue" launches it anyway and lets admission order it. |
 | `catch_up` | `string` | no | CatchUp is how long after its due minute a fire may still happen when the host was asleep or the timer was late, as a Go duration such as 1h or 30m. Default 1h; values under 2m are rejected. A due minute older than the window is recorded as missed. |
+| `args` | `map[string]string` | no | Args supplies argument values for this cadence's runs, keyed by CLI flag name exactly like `args:` on the pipeline. They sit above pipeline.args and below a host's own override for the schedule, so guards' `arg:` tokens read them and the fire records what it ran with. |
 
 ## `on.webhook`
 

@@ -6,7 +6,7 @@ declares the cadence; one host evaluates it.
 
 ## A schedule
 
-A schedule is one pipeline's `on.schedule` cadence, armed on one host. Two
+A schedule is one of a pipeline's `on.schedule` entries, armed on one host. Two
 things make one:
 
 1. The repository declares the cadence in `.sparkwing/sparkwing.yaml`.
@@ -16,23 +16,17 @@ Declaring is not arming. Another machine with the same checkout stays idle
 until it is armed too, so two hosts never race for the same instant.
 
 Each schedule carries an id -- `crn_` and twelve hex characters, derived from
-the checkout path and the pipeline name -- and a display name of
-`<repo directory>/<pipeline>`. Commands accept any of the three: the id, the
-display name, or a bare pipeline name that is unique across the host.
+the checkout path, the pipeline name, and the entry's name -- and a display
+name of `<repo directory>/<pipeline>` for the entry named `default`, or
+`<repo directory>/<pipeline>/<name>` for any other. Commands accept any of the
+three: the id, the display name, or a bare pipeline name that is unique across
+the host.
 
 ## Declaring the cadence
 
-The short form is a five-field cron expression, read in UTC:
-
-```yaml
-pipelines:
-  - name: nightly-rebuild
-    entrypoint: NightlyRebuild
-    on:
-      schedule: "0 3 * * *"
-```
-
-The long form sets the zone and the policies:
+One entry is a cron expression and the side that fires it. `where` is
+required and has no default, so nothing fires somewhere the repository did not
+say it should; `local` is the side a host arms:
 
 ```yaml
 pipelines:
@@ -41,6 +35,19 @@ pipelines:
     on:
       schedule:
         cron: "0 3 * * *"
+        where: local
+```
+
+The same entry sets the zone and the policies:
+
+```yaml
+pipelines:
+  - name: nightly-rebuild
+    entrypoint: NightlyRebuild
+    on:
+      schedule:
+        cron: "0 3 * * *"
+        where: local
         tz: America/Denver
         overlap: queue
         catch_up: 6h
@@ -50,6 +57,37 @@ Every field, its accepted values, and its default are in
 [scheduling.md](scheduling.md#schedule-triggers-cron). `tz: local` resolves to
 the zone of whichever host evaluates the schedule, so a repository moved
 between machines follows the machine.
+
+### Several cadences on one pipeline
+
+`on.schedule` takes a list, so one pipeline can carry more than one cadence.
+Each entry then needs a `name`, unique within the pipeline, which becomes the
+last segment of the schedule's display name and the way `pause`, `resume` and
+`run` address it. `args` gives an entry its own argument values, keyed by CLI
+flag name exactly as `args:` on the pipeline is, so two cadences of the same
+pipeline run different work:
+
+```yaml
+pipelines:
+  - name: sweep
+    entrypoint: Sweep
+    on:
+      schedule:
+        - name: quick
+          cron: "*/15 * * * *"
+          where: local
+          args:
+            depth: shallow
+        - name: full
+          cron: "0 4 * * *"
+          where: local
+          args:
+            depth: deep
+```
+
+A schedule's args sit above the pipeline's own `args:` and below a host's
+override, and the run executes with the merged set, so a `guards:` token like
+`arg:depth=deep` reads them and each fire records what it ran with.
 
 ### Daylight saving
 

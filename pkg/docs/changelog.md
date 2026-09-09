@@ -23,6 +23,35 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **store:** The runs store advances to schema 33, which keeps several
+  schedules for one pipeline and pins what they run. `cron_schedules` gains a
+  schedule name (`default` for the lone schedule of a pipeline), where the
+  schedule fires, the arguments its launch passes, the commit, pipeline binary
+  and cache digest it is locked to, and this host's override of the declared
+  cadence alongside the declaration that override was set against. Its unique
+  key widens from `(repo_path, pipeline)` to include the name, and `cron_fires`
+  records the arguments each launch was given. The migration is additive -- it
+  declares no schema requirement and every column it adds carries a default --
+  so a binary built before it keeps opening and writing the same database. See
+  the [migration
+  note](docs/migrations/_unreleased.md#runs-store-schema-33-named-locked-schedules).
+
+### Changed
+
+- **config + sdk (Breaking):** `on.schedule` takes a list of named entries, and
+  every entry declares `where` it fires -- `local` for a host armed with
+  `sparkwing crons install`, `controller` for a controller it was installed on.
+  `where` has no default, so a schedule already declared needs `where: local`
+  added to keep firing from its host. An entry also takes a `name`, required
+  once a pipeline declares more than one, and `args` keyed by CLI flag name the
+  way the pipeline's own `args:` are. In Go, `Triggers.Schedule` is now a
+  `pipelines.ScheduleTriggers` slice: `t.Schedule != nil` becomes
+  `len(t.Schedule) > 0`, and `t.Schedule.Cron` becomes a range over the
+  entries. See the [migration
+  note](docs/migrations/_unreleased.md#onschedule-entries-say-where-they-fire).
+
 ### Fixed
 
 - **pool:** Count successful PVC checkouts and returns in the existing metrics
