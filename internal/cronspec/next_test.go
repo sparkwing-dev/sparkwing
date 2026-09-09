@@ -113,6 +113,18 @@ func TestNext(t *testing.T) {
 			want:  utc(2025, time.May, 13, 0, 0),
 		},
 		{
+			name:  "a day-of-month step is not a restriction",
+			expr:  "0 3 */2 * 1",
+			after: utc(2025, time.May, 1, 0, 0),
+			want:  utc(2025, time.May, 5, 3, 0),
+		},
+		{
+			name:  "a day-of-week step is not a restriction",
+			expr:  "0 3 13 * */2",
+			after: utc(2025, time.May, 1, 0, 0),
+			want:  utc(2025, time.May, 13, 3, 0),
+		},
+		{
 			name:  "leap day in a leap year",
 			expr:  "0 0 29 2 *",
 			after: utc(2023, time.March, 1, 0, 0),

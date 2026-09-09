@@ -11,7 +11,10 @@ const yearHorizon = 5
 // means UTC.
 //
 // When both day-of-month and day-of-week are restricted, a day matches if
-// either field matches, as standard cron does.
+// either field matches, as standard cron does. A field counts as restricted
+// only when it does not begin with `*`, which is the flag Vixie cron sets, so
+// `0 3 */2 * 1` means every second day and every Monday, not their
+// intersection.
 //
 // Across a daylight-saving transition the walk follows the wall clock: a minute
 // that does not exist on a spring-forward day is skipped, and a minute that

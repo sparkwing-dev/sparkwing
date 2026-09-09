@@ -3,6 +3,10 @@ package cronspec_test
 import (
 	"testing"
 	"time"
+
+	// safety: the DST rules this suite pins are the reason it exists, so it must
+	// not skip itself on a host with no zone database.
+	_ "time/tzdata"
 )
 
 func loadZone(t *testing.T, name string) *time.Location {

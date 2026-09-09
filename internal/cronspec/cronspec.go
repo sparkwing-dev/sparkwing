@@ -111,9 +111,16 @@ func Parse(expr string) (*Schedule, error) {
 		month:         masks[3],
 		dow:           dow,
 		src:           src,
-		domRestricted: tokens[2] != "*",
-		dowRestricted: tokens[4] != "*",
+		domRestricted: dayRestricted(tokens[2]),
+		dowRestricted: dayRestricted(tokens[4]),
 	}, nil
+}
+
+// safety: Vixie cron reads the day-field star flag off the first character
+// alone, so `*/2` is as unrestricted as `*`: the two day fields OR together
+// only when neither begins with one.
+func dayRestricted(field string) bool {
+	return !strings.HasPrefix(field, "*")
 }
 
 // String returns the expression as given, trimmed and single-spaced. An alias
