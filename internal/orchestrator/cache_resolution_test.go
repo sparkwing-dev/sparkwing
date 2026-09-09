@@ -2,9 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -12,7 +14,7 @@ import (
 )
 
 func TestCacheResolutionFailureStopsDispatch(t *testing.T) {
-	for _, failure := range []string{"empty", "panic"} {
+	for _, failure := range []string{"empty", "panic", "error", "error-with-key"} {
 		t.Run(failure, func(t *testing.T) {
 			state := consumerTestStore(t, t.TempDir())
 			const runID = "sample-run"
@@ -23,20 +25,27 @@ func TestCacheResolutionFailureStopsDispatch(t *testing.T) {
 			if err := state.CreateNode(t.Context(), store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
 				t.Fatal(err)
 			}
+			cause := errors.New("sample resolver " + failure)
 			var resolutions atomic.Int32
 			var executions atomic.Int32
 			plan := sparkwing.NewPlan()
 			node := sparkwing.Job(plan, nodeID, func(context.Context) error {
 				executions.Add(1)
 				return nil
-			}).Memoize(func(context.Context) sparkwing.CacheKey {
+			}).Memoize(func(context.Context) (sparkwing.CacheKey, error) {
 				if resolutions.Add(1) > 1 {
-					return "sample-key"
+					return "sample-key", nil
 				}
 				if failure == "panic" {
 					panic("sample resolver panic")
 				}
-				return ""
+				if failure == "error" {
+					return "", cause
+				}
+				if failure == "error-with-key" {
+					return "sample-key", cause
+				}
+				return "", nil
 			})
 			executor := NewNodeExecutor(Backends{State: localState{st: state}})
 			result, handled := executor.runNodeWithCache(t.Context(), runner.Request{RunID: runID, Node: node})
@@ -45,6 +54,9 @@ func TestCacheResolutionFailureStopsDispatch(t *testing.T) {
 			}
 			if !strings.Contains(result.Err.Error(), failure) {
 				t.Errorf("resolution error = %v", result.Err)
+			}
+			if strings.HasPrefix(failure, "error") && !errors.Is(result.Err, cause) {
+				t.Errorf("resolver cause lost: %v", result.Err)
 			}
 			persisted, err := state.GetNode(t.Context(), runID, nodeID)
 			if err != nil {
@@ -57,5 +69,39 @@ func TestCacheResolutionFailureStopsDispatch(t *testing.T) {
 				t.Errorf("resolutions=%d executions=%d", resolutions.Load(), executions.Load())
 			}
 		})
+	}
+}
+
+func TestCacheResolutionAllowsExplicitBypass(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	node := sparkwing.Job(plan, "sample", func(context.Context) error { return nil }).Memoize(
+		func(context.Context) (sparkwing.CacheKey, error) { return sparkwing.NoCache, nil },
+	)
+	result, handled := NewNodeExecutor(Backends{}).runNodeWithCache(t.Context(), runner.Request{Node: node})
+	if handled || result.Err != nil {
+		t.Fatalf("explicit bypass = (%v, handled=%t)", result.Err, handled)
+	}
+}
+
+func TestCacheResolutionRejectsEndedContext(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		var resolverContext context.Context
+		var cancel context.CancelFunc
+		wanted := context.Canceled
+		if expired {
+			resolverContext, cancel = context.WithDeadline(t.Context(), time.Time{})
+			wanted = context.DeadlineExceeded
+		} else {
+			resolverContext, cancel = context.WithCancel(t.Context())
+		}
+		cancel()
+		var calls atomic.Int32
+		key, err := safeCacheKey(resolverContext, func(context.Context) (sparkwing.CacheKey, error) {
+			calls.Add(1)
+			return "sample-key", nil
+		}, "sample")
+		if key != "" || !errors.Is(err, wanted) || calls.Load() != 0 {
+			t.Errorf("ended context = (%q, %v), calls=%d", key, err, calls.Load())
+		}
 	}
 }
