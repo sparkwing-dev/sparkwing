@@ -215,10 +215,19 @@ func darwinPIDList(pids []int) string {
 }
 
 func sampleHost() (HostStat, error) {
+	return sampleDarwinHost(func(ctx context.Context) ([]byte, error) {
+		return exec.CommandContext(ctx, "/usr/bin/vm_stat").Output()
+	})
+}
+
+func sampleDarwinHost(readMemory func(context.Context) ([]byte, error)) (HostStat, error) {
 	stat := HostStat{TotalCores: float64(runtime.NumCPU())}
 
 	if mem, err := unix.SysctlUint64("hw.memsize"); err == nil {
 		stat.TotalMemoryBytes = mem
+	}
+	if stat.TotalMemoryBytes == 0 {
+		return stat, fmt.Errorf("wingd: hw.memsize unavailable")
 	}
 
 	if raw, err := unix.SysctlRaw("vm.loadavg"); err == nil && len(raw) >= 24 {
@@ -230,18 +239,59 @@ func sampleHost() (HostStat, error) {
 		}
 	}
 
-	level, err := unix.SysctlUint32("kern.memorystatus_level")
-	stat.FreeMemoryBytes, stat.MemoryMeasured = darwinFreeMemory(stat.TotalMemoryBytes, level, err == nil)
-
-	if stat.TotalMemoryBytes == 0 {
-		return stat, fmt.Errorf("wingd: hw.memsize unavailable")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	output, err := readMemory(ctx)
+	if err != nil {
+		return stat, fmt.Errorf("wingd: vm_stat: %w", err)
 	}
+	stat.FreeMemoryBytes, stat.MemoryMeasured = darwinFreeMemory(stat.TotalMemoryBytes, string(output))
+	if !stat.MemoryMeasured {
+		return stat, fmt.Errorf("wingd: vm_stat returned invalid memory counters")
+	}
+
 	return stat, nil
 }
 
-func darwinFreeMemory(total uint64, level uint32, read bool) (uint64, bool) {
-	if !read || level > 100 {
+func darwinFreeMemory(total uint64, output string) (uint64, bool) {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	pageText, ok := strings.CutPrefix(lines[0], "Mach Virtual Memory Statistics: (page size of ")
+	if !ok {
 		return 0, false
 	}
-	return uint64(float64(total) * float64(level) / 100.0), true
+	pageText, ok = strings.CutSuffix(pageText, " bytes)")
+	if !ok {
+		return 0, false
+	}
+	pageSize, err := strconv.ParseUint(pageText, 10, 64)
+	if err != nil || pageSize == 0 || pageSize&(pageSize-1) != 0 || total < pageSize {
+		return 0, false
+	}
+
+	var pages uint64
+	seen := make(map[string]bool, 2)
+	for _, line := range lines[1:] {
+		name, value, found := strings.Cut(line, ":")
+		if !found || (name != "Pages free" && name != "Pages inactive") {
+			continue
+		}
+		if seen[name] {
+			return 0, false
+		}
+		seen[name] = true
+		value, found = strings.CutSuffix(strings.TrimSpace(value), ".")
+		if !found {
+			return 0, false
+		}
+		count, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || count > total/pageSize-pages {
+			return 0, false
+		}
+		pages += count
+	}
+	if len(seen) != 2 {
+		return 0, false
+	}
+	// safety: purgeable pages overlap VM queues; compressor pages are already excluded.
+	return pages * pageSize, true
 }

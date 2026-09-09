@@ -22,6 +22,10 @@ unlock.
 
 ### Fixed
 
+- **local execution:** macOS admission reads available memory from VM page
+  counters. Memory pressure levels no longer inflate available bytes and admit
+  excess work on hosts under compression.
+
 - **cli:** Run arguments after `--` pass unchanged to the pipeline. Unknown `--sw-*`
   options before the separator fail before execution setup. Put pipeline-owned options
   that use this prefix after `--`.

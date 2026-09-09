@@ -1184,8 +1184,13 @@ that does not mean "wait for the window to age out." There are two:
   reapplies its newest effective value within 30 seconds, so a recovered
   reading near an admission threshold cannot strand a waiter indefinitely.
   A failed sample updates neither timestamp and cannot apply its returned values.
-  When a dimension cannot be read at all -- macOS with no
-  `kern.memorystatus_level`, a platform with no host-pressure sensor -- the
+  On macOS, memory availability is the sum of free and inactive pages from
+  `vm_stat`, multiplied by its reported page size. Purgeable, speculative,
+  and compressor counters add no capacity. A failed command or invalid counters
+  return a sample error with memory unmeasured; refresh retains the previous
+  admission limits. This does not guarantee safe admission during a prolonged
+  sensor outage, and startup without a valid sample still uses configured capacity.
+  When a dimension cannot be read at all on a platform without a host sensor, the
   cell prints `unmeasured` rather than a figure, an `external: unmeasured on
   <dimension> (host sensor unavailable); no external load subtracted from
   available` line says what admission did about it, and the JSON row carries
