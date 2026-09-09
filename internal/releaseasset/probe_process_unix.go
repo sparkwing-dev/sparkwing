@@ -5,25 +5,42 @@ package releaseasset
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
-func runProbeProcess(ctx context.Context, cmd *exec.Cmd, cleanupTimeout time.Duration) error {
-	group, err := procgroup.StartSession(cmd)
+func runProbeProcess(ctx context.Context, command *exec.Cmd, cleanupTimeout time.Duration) error {
+	group, err := procgroup.StartSession(command)
 	if err != nil {
 		return err
 	}
-	err = group.Finish(ctx, cleanupTimeout/2)
+	return finishProbeProcess(ctx, command, group, cleanupTimeout)
+}
+
+func finishProbeProcess(ctx context.Context, command *exec.Cmd, group *procgroup.Group, cleanupTimeout time.Duration) error {
+	err := group.Finish(ctx, cleanupTimeout/2)
 	if err == nil || group.Reaped() {
 		return err
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	defer cancel()
-	if cleanupErr := group.Terminate(cleanupCtx, cleanupTimeout/2); cleanupErr != nil {
-		return errors.Join(err, cleanupErr)
+	err = errors.Join(err, group.Terminate(cleanupCtx, cleanupTimeout/2))
+	if group.Reaped() {
+		return err
 	}
-	return err
+	return errors.Join(err, disposeProbeProcess(command, group.WaitLeaderExit))
+}
+
+func disposeProbeProcess(command *exec.Cmd, waitForLeader func() error) error {
+	killErr := command.Process.Kill()
+	if errors.Is(killErr, os.ErrProcessDone) {
+		killErr = nil
+	}
+	// SAFETY: Join the observer before Wait reaps the leader. WaitDelay bounds
+	// inherited pipes; kernel process exit has no deadline.
+	observerErr := waitForLeader()
+	return errors.Join(killErr, observerErr, command.Wait())
 }

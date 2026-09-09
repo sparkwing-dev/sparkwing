@@ -131,8 +131,8 @@ func ManifestDigest(manifest []byte, assetName string) (string, error) {
 }
 
 // VerifyExecutableIdentity stages authenticated bytes in a private directory,
-// then probes their offline identity with bounded runtime, output, and environment.
-func (asset Verified) VerifyExecutableIdentity(target Target, version string) (buildinfo.Identity, error) {
+// then probes their offline identity with a timeout, output limit, and empty environment.
+func (asset Verified) VerifyExecutableIdentity(target Target, version string) (identity buildinfo.Identity, resultErr error) {
 	name, err := target.Name()
 	if err != nil {
 		return buildinfo.Identity{}, err
@@ -148,11 +148,11 @@ func (asset Verified) VerifyExecutableIdentity(target Target, version string) (b
 	if err != nil {
 		return buildinfo.Identity{}, err
 	}
-	defer cleanup()
+	defer func() { resultErr = errors.Join(resultErr, cleanup()) }()
 	return asset.probeStagedIdentity(path, target, version, nil)
 }
 
-func (asset Verified) stageProbe(name string) (string, func(), error) {
+func (asset Verified) stageProbe(name string) (string, func() error, error) {
 	directory, err := fssecure.MkdirPrivateTemp("", ".sparkwing-release-probe-")
 	if err != nil {
 		return "", nil, fmt.Errorf("create private %s probe directory: %w", name, err)
@@ -160,39 +160,44 @@ func (asset Verified) stageProbe(name string) (string, func(), error) {
 	path := filepath.Join(directory, name)
 	directoryIdentity, err := os.Lstat(directory)
 	if err != nil {
-		_ = os.Remove(directory)
-		return "", nil, fmt.Errorf("inspect private %s probe directory: %w", name, err)
+		return "", nil, fmt.Errorf("inspect private %s probe directory: %w", name, errors.Join(err, removeProbePath(directory)))
 	}
-	// safety: Cleanup touches the child only while its secured parent retains the same
-	// identity, then uses non-recursive removes so replacements are never walked.
-	cleanup := func() {
+	// SAFETY: Child removal requires the secured parent identity.
+	// Nonrecursive removal preserves unexpected directory contents.
+	cleanup := func() error {
 		current, currentErr := os.Lstat(directory)
+		if errors.Is(currentErr, os.ErrNotExist) {
+			return nil
+		}
+		var childErr error
 		if currentErr == nil && current.IsDir() && current.Mode()&os.ModeSymlink == 0 &&
 			os.SameFile(directoryIdentity, current) {
-			_ = os.Remove(path)
+			childErr = removeProbePath(path)
 		}
-		_ = os.Remove(directory)
+		return errors.Join(currentErr, childErr, removeProbePath(directory))
 	}
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o700)
 	if err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("stage %s identity probe: %w", name, err)
+		return "", nil, fmt.Errorf("stage %s identity probe: %w", name, errors.Join(err, cleanup()))
 	}
 	if _, err := file.Write(asset.bytes); err != nil {
-		_ = file.Close()
-		cleanup()
-		return "", nil, fmt.Errorf("stage %s identity probe: %w", name, err)
+		return "", nil, fmt.Errorf("stage %s identity probe: %w", name, errors.Join(err, file.Close(), cleanup()))
 	}
 	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		cleanup()
-		return "", nil, fmt.Errorf("sync %s identity probe: %w", name, err)
+		return "", nil, fmt.Errorf("sync %s identity probe: %w", name, errors.Join(err, file.Close(), cleanup()))
 	}
 	if err := file.Close(); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("close %s identity probe: %w", name, err)
+		return "", nil, fmt.Errorf("close %s identity probe: %w", name, errors.Join(err, cleanup()))
 	}
 	return path, cleanup, nil
+}
+
+func removeProbePath(path string) error {
+	err := os.Remove(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func (asset Verified) probeStagedIdentity(path string, target Target, version string, beforeExec func(string)) (buildinfo.Identity, error) {
@@ -235,16 +240,14 @@ func (asset Verified) probeStagedIdentity(path string, target Target, version st
 	stdout.limit = maxProbeOutput
 	stderr.limit = maxProbeOutput
 	// #nosec G702 -- signatures and digest authenticate these bytes before the constrained offline identity probe.
-	cmd := exec.CommandContext(ctx, path, "version", "-o", "json", "--offline")
-	cmd.Dir = filepath.Dir(path)
-	cmd.Env = []string{}
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	cmd.WaitDelay = probeWaitDelay
-	if err := runProbeProcess(ctx, cmd, probeWaitDelay); err != nil {
-		if ctx.Err() != nil {
-			return buildinfo.Identity{}, fmt.Errorf("probe %s identity: %w", name, ctx.Err())
-		}
+	command := exec.CommandContext(ctx, path, "version", "-o", "json", "--offline")
+	command.Dir = filepath.Dir(path)
+	command.Env = []string{}
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	command.WaitDelay = probeWaitDelay
+	if err := runProbeProcess(ctx, command, probeWaitDelay); err != nil {
+		err = errors.Join(err, ctx.Err())
 		detail := strings.TrimSpace(stderr.String())
 		if detail != "" {
 			return buildinfo.Identity{}, fmt.Errorf("probe %s identity: %w: %s", name, err, detail)
@@ -295,12 +298,12 @@ func requireJSONEnd(decoder *json.Decoder) error {
 	return errors.New("unexpected trailing JSON value")
 }
 
-func digestFile(path string) (string, error) {
+func digestFile(path string) (digest string, resultErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { resultErr = errors.Join(resultErr, file.Close()) }()
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
 		return "", err

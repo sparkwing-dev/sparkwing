@@ -4,9 +4,11 @@ package procgroup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -34,7 +36,7 @@ func TestCaptureSessionTableCostsOneListingForManySessions(t *testing.T) {
 		sessionIdentityLookup = originalIdentity
 	})
 	listings := 0
-	sessionProcessTable = func(bool) ([]Info, error) {
+	sessionProcessTable = func(context.Context, bool) ([]Info, error) {
 		listings++
 		return []Info{{PID: 81, Group: 81, Session: 81, State: "R"}}, nil
 	}
@@ -44,9 +46,9 @@ func TestCaptureSessionTableCostsOneListingForManySessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("capture session table: %v", err)
 	}
-	live, err := table.SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "birth-81"})
-	if err != nil || live {
-		t.Fatalf("live session empty=%v err=%v, want it held", live, err)
+	liveSessionEmpty, err := table.SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "birth-81"})
+	if err != nil || liveSessionEmpty {
+		t.Fatalf("live session empty=%v err=%v, want it held", liveSessionEmpty, err)
 	}
 	gone, err := table.SessionEmpty(SessionIdentity{LeaderPID: 90, SessionID: 90, BirthToken: "birth-90"})
 	if err != nil || !gone {
@@ -57,44 +59,48 @@ func TestCaptureSessionTableCostsOneListingForManySessions(t *testing.T) {
 	}
 }
 
-func TestWaitDescendantsEmptyBacksOffWhileTheTreeRefusesToDie(t *testing.T) {
-	const window = 500 * time.Millisecond
-	probes := &atomic.Int64{}
-	g := &Group{id: 4242}
-	g.SetDescendantProbe(func(int, bool, bool) (bool, error) {
-		probes.Add(1)
-		return false, nil
+func TestWaitDescendantsEmptyBacksOffUntilDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const window = 500 * time.Millisecond
+		probes := &atomic.Int64{}
+		group := &Group{id: 4242}
+		group.SetDescendantProbe(func(context.Context, int, bool, bool) (bool, error) {
+			probes.Add(1)
+			return false, nil
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), window)
+		defer cancel()
+		if err := group.waitDescendantsEmpty(ctx); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("wait error = %v, want deadline exceeded", err)
+		}
+
+		unpaced := int64(window / guardedSessionPollInterval)
+		if got := probes.Load(); got >= unpaced/2 {
+			t.Fatalf("process-table probes = %d in %s; an unpaced wait would be about %d", got, window, unpaced)
+		}
+		if got := probes.Load(); got < 2 {
+			t.Fatalf("process-table probes = %d; want repeated inspection", got)
+		}
 	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), window)
-	defer cancel()
-	if err := g.waitDescendantsEmpty(ctx); err == nil {
-		t.Fatal("wait returned success while descendants remained")
-	}
-
-	unpaced := int64(window / guardedSessionPollInterval)
-	if got := probes.Load(); got >= unpaced/2 {
-		t.Fatalf("process-table probes = %d in %s; an unpaced wait would be about %d", got, window, unpaced)
-	}
-	if got := probes.Load(); got < 2 {
-		t.Fatalf("process-table probes = %d; the wait stopped watching", got)
-	}
 }
 
-func TestWaitDescendantsEmptyStillAnswersQuickly(t *testing.T) {
-	probes := &atomic.Int64{}
-	g := &Group{id: 4243}
-	g.SetDescendantProbe(func(int, bool, bool) (bool, error) {
-		return probes.Add(1) > 1, nil
-	})
+func TestWaitDescendantsEmptyUsesInitialPollInterval(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		probes := &atomic.Int64{}
+		group := &Group{id: 4243}
+		group.SetDescendantProbe(func(context.Context, int, bool, bool) (bool, error) {
+			return probes.Add(1) > 1, nil
+		})
 
-	start := time.Now()
-	if err := g.waitDescendantsEmpty(context.Background()); err != nil {
-		t.Fatalf("wait for an emptied group: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
-		t.Fatalf("observing an emptied group took %s, want about the base poll interval", elapsed)
-	}
+		start := time.Now()
+		if err := group.waitDescendantsEmpty(context.Background()); err != nil {
+			t.Fatalf("wait for an emptied group: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed != guardedSessionPollInterval {
+			t.Fatalf("observing an emptied group took %s, want the initial poll interval", elapsed)
+		}
+	})
 }
 
 func TestSessionTableAnswersLeaderIdentityFromItsOwnSnapshot(t *testing.T) {
@@ -104,7 +110,7 @@ func TestSessionTableAnswersLeaderIdentityFromItsOwnSnapshot(t *testing.T) {
 		sessionProcessTable = originalTable
 		sessionIdentityLookup = originalIdentity
 	})
-	sessionProcessTable = func(bool) ([]Info, error) {
+	sessionProcessTable = func(context.Context, bool) ([]Info, error) {
 		return []Info{{PID: 81, Group: 81, Session: 81, State: "R", Birth: "birth-81"}}, nil
 	}
 	sessionIdentityLookup = func(int) (int, string, error) {
@@ -120,9 +126,9 @@ func TestSessionTableAnswersLeaderIdentityFromItsOwnSnapshot(t *testing.T) {
 	if err != nil || empty {
 		t.Fatalf("live guarded session empty=%v err=%v, want it held", empty, err)
 	}
-	reused, err := table.SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "older-birth"})
-	if err != nil || !reused {
-		t.Fatalf("reused leader empty=%v err=%v, want the original session gone", reused, err)
+	reusedSessionEmpty, err := table.SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "older-birth"})
+	if err != nil || !reusedSessionEmpty {
+		t.Fatalf("reused leader empty=%v err=%v, want the original session gone", reusedSessionEmpty, err)
 	}
 }
 
@@ -133,7 +139,7 @@ func TestLeaderExitDuringInspectionIsAnAnswerNotAFailure(t *testing.T) {
 		sessionProcessTable = originalTable
 		sessionIdentityLookup = originalIdentity
 	})
-	sessionProcessTable = func(bool) ([]Info, error) {
+	sessionProcessTable = func(context.Context, bool) ([]Info, error) {
 		return []Info{{PID: 81, Group: 81, Session: 81, State: "R"}}, nil
 	}
 	sessionIdentityLookup = func(pid int) (int, string, error) {
@@ -148,7 +154,7 @@ func TestLeaderExitDuringInspectionIsAnAnswerNotAFailure(t *testing.T) {
 		t.Fatal("session reported empty while the snapshot still showed a live member")
 	}
 
-	sessionProcessTable = func(bool) ([]Info, error) { return nil, nil }
+	sessionProcessTable = func(context.Context, bool) ([]Info, error) { return nil, nil }
 	empty, err = SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "birth-81"})
 	if err != nil || !empty {
 		t.Fatalf("departed session empty=%v err=%v, want it empty", empty, err)
