@@ -248,6 +248,7 @@ type repoFetchState struct {
 	lastOK      time.Time
 	lastReclone time.Time
 	reclones    []time.Time
+	lastClone   time.Time
 }
 
 var bgFetch = &fetchState{repos: map[string]*repoFetchState{}}
@@ -272,6 +273,7 @@ func (fs *fetchState) markFetched(name string) {
 	rs.backoff = 0
 
 	rs.nextRetry = time.Time{}
+	rs.lastClone = time.Time{}
 }
 
 func (fs *fetchState) fresh(name string) bool {
@@ -306,6 +308,37 @@ func (fs *fetchState) allowReclone(name string) bool {
 	return true
 }
 
+// allowClone bounds the clone-if-missing path. A recovery reclone deletes
+// the mirror before cloning, so a reclone that fails leaves no mirror and
+// every later request would re-download the whole repository. Recording
+// the attempt costs nothing on the happy path: a clone that succeeds
+// leaves a mirror, and markFetched clears the record.
+func (fs *fetchState) allowClone(name string) bool {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	rs := fs.entry(name)
+	now := time.Now()
+	if !rs.lastClone.IsZero() && now.Sub(rs.lastClone) < recloneCooldown {
+		return false
+	}
+	rs.lastClone = now
+	return true
+}
+
+func (fs *fetchState) cloneCooldownRemaining(name string) time.Duration {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	rs := fs.repos[name]
+	if rs == nil || rs.lastClone.IsZero() {
+		return 0
+	}
+	left := recloneCooldown - time.Since(rs.lastClone)
+	if left < 0 {
+		return 0
+	}
+	return left.Truncate(time.Second)
+}
+
 func (fs *fetchState) recloneCooldownRemaining(name string) time.Duration {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
@@ -322,6 +355,10 @@ func (fs *fetchState) recloneCooldownRemaining(name string) time.Duration {
 
 var mirrorFetch = func(timeout time.Duration, bareRepo string) (string, error) {
 	return gitCmdTimeout(timeout, "-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+}
+
+var cloneMirror = func(repoURL, bareRepo string) (string, error) {
+	return gitCmd("clone", "--bare", "--", repoURL, bareRepo)
 }
 
 var recloneMirror = func(repoURL, bareRepo string) (string, error) {
@@ -555,9 +592,19 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	bareRepo := filepath.Join(repoDir, hash+".git")
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
+		if !bgFetch.allowClone(stateKey(hash)) {
+			left := bgFetch.cloneCooldownRemaining(stateKey(hash))
+			log.Printf("archive: mirror for %s is missing and cloning is on cooldown (%s left)", hash, left)
+			http.Error(w, fmt.Sprintf(
+				"mirror is missing and cloning is on cooldown for another %s -- a clone already ran for this repo and the mirror is still absent.\n"+
+					"This needs an operator: a recovery reclone deletes the mirror before it clones, so a clone that keeps failing leaves nothing behind, "+
+					"and cloning on every archive request costs a full download each time. Fix the git error in the gitcache log, then retry.",
+				left), http.StatusBadGateway)
+			return
+		}
 		// #nosec G706 -- the repository URL is validated at registration and redacted here
 		log.Printf("background fetch: cloning %s → %s", sourceurl.Redact(repoURL), hash)
-		if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
+		if out, err := cloneMirror(repoURL, bareRepo); err != nil {
 			http.Error(w, fmt.Sprintf("clone failed: %s\n%s", err, sshHint(out)), http.StatusInternalServerError)
 			return
 		}

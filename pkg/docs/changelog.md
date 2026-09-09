@@ -24,6 +24,10 @@ unlock.
 
 - **cli:** Image rollouts reject blank image or tag values and leave unrelated
   staged files out of their commits
+- **gitcache:** A repository whose mirror is missing is cloned at most once per
+  reclone cooldown. A recovery reclone deletes the mirror before cloning, so a
+  reclone that failed left every later `/archive` request re-downloading the
+  whole repository
 - **logs:** Concurrent filesystem appends keep each record and its newline together
 - **logs:** S3 log deletion reports per-object failures
 - **sdk:** Backend overlays preserve the inherited controller name

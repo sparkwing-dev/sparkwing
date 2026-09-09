@@ -168,6 +168,14 @@ underlying git error, the remaining cooldown, and a pointer to the fix.
 Each reclone logs loudly with the `recovery reclone:` prefix and the repo
 hash, and increments the `sparkwing.gitcache.recovery_reclones` counter.
 
+The same cooldown bounds the clone-if-missing path, because a reclone
+deletes the mirror before it clones: a reclone whose own clone fails
+leaves no mirror at all, and without the bound every later `/archive`
+request re-downloaded the whole repository. A repo whose mirror is absent
+is still cloned once; a second request inside `RECLONE_COOLDOWN` that
+still finds no mirror returns `502` naming the remaining cooldown. A
+successful fetch or clone clears the record.
+
 Health problems to expect from `GET /health`:
 
 | Problem text | What it means |
