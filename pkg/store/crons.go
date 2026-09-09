@@ -290,8 +290,10 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
                          SET ` + advance + `, next_due_at = ?, updated_at = ?,
                              last_fired_at = ?, last_run_id = ?, last_outcome = ?
                        WHERE id = ?`
-			args = []any{cursor.UnixNano(), nullNanos(next), now.UnixNano(),
-				fire.DecidedAt.UnixNano(), fire.RunID, fire.Outcome, id}
+			args = []any{
+				cursor.UnixNano(), nullNanos(next), now.UnixNano(),
+				fire.DecidedAt.UnixNano(), fire.RunID, fire.Outcome, id,
+			}
 		} else {
 			update = `UPDATE cron_schedules
                          SET ` + advance + `, next_due_at = ?, updated_at = ?, last_outcome = ?

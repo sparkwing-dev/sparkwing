@@ -135,7 +135,8 @@ func (s *Service) tickOne(ctx context.Context, sched store.CronSchedule, now tim
 // safety: a cursor left where the pause found it reads as a backlog when the
 // schedule comes back, and a week of missed instants launches from it.
 func (s *Service) advanceIdleCursor(ctx context.Context, sched store.CronSchedule, eval evaluable,
-	now time.Time, report *TickReport) {
+	now time.Time, report *TickReport,
+) {
 	next := eval.nextAfter(now)
 	decision := cronspec.Decide(eval.schedule, eval.loc, sched.CursorAt, now, eval.catchUp)
 	var err error
@@ -151,7 +152,8 @@ func (s *Service) advanceIdleCursor(ctx context.Context, sched store.CronSchedul
 
 // safety: a backlog collapses to one row; a week of a slept-through minutely schedule is not ten thousand fires.
 func (s *Service) recordMissed(ctx context.Context, sched store.CronSchedule, eval evaluable,
-	decision cronspec.Decision, now time.Time, dryRun bool, report *TickReport) {
+	decision cronspec.Decision, now time.Time, dryRun bool, report *TickReport,
+) {
 	last := decision.Due
 	if decision.Fire {
 		last = lastInstantBefore(eval, sched.CursorAt, decision.Due)
@@ -191,7 +193,8 @@ func lastInstantBefore(eval evaluable, cursor, due time.Time) time.Time {
 }
 
 func (s *Service) resolveDue(ctx context.Context, sched store.CronSchedule, eval evaluable,
-	due, now time.Time, dryRun bool, report *TickReport) {
+	due, now time.Time, dryRun bool, report *TickReport,
+) {
 	outcome, runID, detail := store.CronOutcomeFired, "", ""
 
 	if sched.Overlap == store.CronOverlapSkip && sched.LastRunID != "" {
