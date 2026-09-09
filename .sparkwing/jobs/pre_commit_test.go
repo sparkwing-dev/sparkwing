@@ -934,3 +934,18 @@ func TestHomeResolutionExemptions(t *testing.T) {
 		})
 	}
 }
+
+func TestGoStepsIgnoreBrokenGoInNodeModules(t *testing.T) {
+	root := gateFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, "web", "node_modules", "dependency", "broken.go"),
+		"package dependency\n\nfunc Broken( {\n")
+	for name, step := range map[string]func(context.Context) error{
+		"vet": runVet, "build": runBuild, "test": runTest,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := step(context.Background()); err != nil {
+				t.Fatalf("node_modules changed the product %s verdict: %v", name, err)
+			}
+		})
+	}
+}
