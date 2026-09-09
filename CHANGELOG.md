@@ -41,7 +41,6 @@ unlock.
 - **telemetry:** Immediate shutdown flushes OTLP logs after initialization
 - **logs:** Secret masking inspects JSON-visible fields and retains redacted
   error messages in JSON output
-
 - **cache:** Pipeline binary keys include Go packages named `web`
 - **cache:** Oversized dependency responses and workspace uploads fail before
   storing truncated content
