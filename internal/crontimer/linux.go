@@ -187,7 +187,9 @@ func serviceUnit(h Host) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n", Marker)
 	b.WriteString("[Unit]\nDescription=sparkwing crons tick\n\n")
-	b.WriteString("[Service]\nType=oneshot\n")
+	// A oneshot's cgroup is killed when its main process exits, which would take
+	// the run consumer and the admission daemon the tick just started with it.
+	b.WriteString("[Service]\nType=oneshot\nKillMode=process\n")
 	fmt.Fprintf(&b, "ExecStart=%s crons tick\n", systemdWord(h.Binary))
 	for _, kv := range envPairs(h) {
 		fmt.Fprintf(&b, "Environment=%s\n", systemdAssignment(kv[0], kv[1]))

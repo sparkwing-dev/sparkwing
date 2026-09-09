@@ -102,6 +102,7 @@ func TestInstallLinuxWritesBothUnitsAndEnablesTheTimer(t *testing.T) {
 	for _, want := range []string{
 		"# " + Marker,
 		"Type=oneshot",
+		"KillMode=process",
 		"ExecStart=/usr/local/bin/sparkwing crons tick",
 		"Environment=PATH=/usr/local/bin:/usr/bin:/bin",
 		"Environment=SPARKWING_HOME=" + filepath.Join(h.Home, ".sparkwing"),
@@ -268,6 +269,7 @@ func TestInstallDarwinWritesThePlistAndBootstrapsIt(t *testing.T) {
 		"<string>tick</string>",
 		"<key>StartInterval</key>\n  <integer>60</integer>",
 		"<key>RunAtLoad</key>\n  <false/>",
+		"<key>AbandonProcessGroup</key>\n  <true/>",
 		"<key>PATH</key>\n    <string>/opt/homebrew/bin:/usr/bin:/bin</string>",
 		"<key>SPARKWING_HOME</key>",
 		"<key>StandardOutPath</key>\n  <string>" + h.LogPath + "</string>",

@@ -169,9 +169,7 @@ func runCronsTick(args []string) error {
 
 func renderCronsTick(w io.Writer, report crons.TickReport, dryRun bool, format string) error {
 	if format == "json" {
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(report)
+		return json.NewEncoder(w).Encode(report)
 	}
 	prefix := "tick"
 	if dryRun {
