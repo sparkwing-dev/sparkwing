@@ -28,17 +28,11 @@ func (StorePostgres) ShortHelp() string {
 }
 
 func (StorePostgres) Help() string {
-	return "Runs `go test ./pkg/store/...` with SPARKWING_TEST_STORE=postgres, so every " +
-		"store test that opens through pkg/store/storetest exercises the Postgres dialect " +
-		"instead of a SQLite file. When SPARKWING_TEST_PG_URL is already set the run uses " +
-		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
-		"directory under a temporary root and its binaries under the persistent tool cache, " +
-		"and stops the server and removes the data directory whether the suite passes, " +
-		"fails, or is interrupted. A run killed outright before its teardown finishes can leave " +
-		"a sparkwing-store-postgres-* directory under TMPDIR. A failing suite prints the tail of the server log, " +
-		"which embedded-postgres only makes available once the server has stopped. A server " +
-		"that will not start is retried once on a fresh port and then fails the step with " +
-		"the cause; the suite is never skipped. Needs no Docker."
+	return "Runs `go test ./pkg/store/...` with SPARKWING_TEST_STORE=postgres. " +
+		"Uses SPARKWING_TEST_PG_URL when set; otherwise starts an embedded Postgres. " +
+		"A failing suite prints the server log tail. The embedded server stops and its " +
+		"data directory is removed on completion or interruption. If killed before " +
+		"cleanup finishes, the run can leave a sparkwing-store-postgres-* directory under TMPDIR."
 }
 
 func (StorePostgres) Examples() []sparkwing.Example {
@@ -51,8 +45,8 @@ func (StorePostgres) Examples() []sparkwing.Example {
 	}
 }
 
-func (p *StorePostgres) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, p.run).Timeout(storePostgresPrePushTimeout)
+func (pipeline *StorePostgres) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
+	sparkwing.Job(plan, runContext.Pipeline, pipeline.run).Timeout(storePostgresPrePushTimeout)
 	return nil
 }
 
@@ -62,13 +56,11 @@ const (
 	storePostgresPassword   = "postgres"
 	storePostgresDatabase   = "postgres"
 	storePostgresStartLimit = 2 * time.Minute
-	// safety: a reserved port can be taken between the reservation and the
+	// SAFETY: a reserved port can be taken between the reservation and the
 	// bind, so one fresh port is tried before the step fails.
-	storePostgresStartAttempts = 2
-	storePostgresLogLines      = 40
-	storePostgresRootPrefix    = "sparkwing-store-postgres-"
-	// safety: pre-push calls the step directly, so the Plan's timeout does
-	// not reach it; both read this.
+	storePostgresStartAttempts  = 2
+	storePostgresLogLines       = 40
+	storePostgresRootPrefix     = "sparkwing-store-postgres-"
 	storePostgresPrePushTimeout = 30 * time.Minute
 )
 
@@ -91,16 +83,16 @@ func storePostgresLayout(root, cache string, port uint32) storePostgresPaths {
 	}
 }
 
-func (l storePostgresPaths) config(logger io.Writer) embeddedpostgres.Config {
+func (layout storePostgresPaths) config(logger io.Writer) embeddedpostgres.Config {
 	return embeddedpostgres.DefaultConfig().
 		Version(storePostgresVersion).
 		Username(storePostgresUser).
 		Password(storePostgresPassword).
 		Database(storePostgresDatabase).
-		Port(l.Port).
-		RuntimePath(l.Runtime).
-		DataPath(l.Data).
-		BinariesPath(l.Binaries).
+		Port(layout.Port).
+		RuntimePath(layout.Runtime).
+		DataPath(layout.Data).
+		BinariesPath(layout.Binaries).
 		Logger(logger).
 		StartTimeout(storePostgresStartLimit)
 }
@@ -114,12 +106,10 @@ func freeLocalPort() (uint32, error) {
 	if err := listener.Close(); err != nil {
 		return 0, fmt.Errorf("release the reserved port: %w", err)
 	}
-	// safety: the port is unbound between here and postgres binding it, so a
-	// concurrent listener can still take it; a start failure names the port.
 	return uint32(port), nil
 }
 
-func (p *StorePostgres) run(ctx context.Context) error {
+func (pipeline *StorePostgres) run(ctx context.Context) error {
 	if dsn := os.Getenv("SPARKWING_TEST_PG_URL"); dsn != "" {
 		sparkwing.Info(ctx, "using the configured SPARKWING_TEST_PG_URL")
 		return runStoreSuiteAgainst(ctx, dsn)
@@ -178,37 +168,35 @@ type storePostgresRun struct {
 	report     func(tail string)
 }
 
-func runStorePostgresSuite(ctx context.Context, r storePostgresRun) (err error) {
+func runStorePostgresSuite(ctx context.Context, run storePostgresRun) (err error) {
 	defer func() {
-		if removeErr := r.remove(); removeErr != nil {
+		if removeErr := run.remove(); removeErr != nil {
 			err = errors.Join(err, fmt.Errorf("remove the postgres data directory: %w", removeErr))
 		}
 	}()
 
-	dsn, startErr := r.start()
+	dsn, startErr := run.start()
 	if startErr != nil {
 		return startErr
 	}
 
 	var once sync.Once
 	var stopErr error
-	stop := func() { once.Do(func() { stopErr = r.stop() }) }
+	stop := func() { once.Do(func() { stopErr = run.stop() }) }
 	defer func() {
 		stop()
 		if stopErr != nil {
 			err = errors.Join(err, fmt.Errorf("stop embedded postgres: %w", stopErr))
 		}
-		// safety: embedded-postgres copies the server log into the writer
-		// only inside Start and Stop, so the tail is read after the stop.
-		if err != nil && r.serverLog != nil && r.report != nil {
-			r.report(r.serverLog())
+		// SAFETY: Stopping the server flushes its log into the writer.
+		if err != nil && run.serverLog != nil && run.report != nil {
+			run.report(run.serverLog())
 		}
 	}()
 
-	interrupts := r.interrupts
+	interrupts := run.interrupts
 	if interrupts == nil {
-		// safety: pkg/runner installs no handler, so an unhandled SIGINT
-		// kills this process before any defer can stop the server.
+		// SAFETY: Unhandled signals terminate the process before deferred server cleanup.
 		signaled := make(chan os.Signal, 1)
 		signal.Notify(signaled, os.Interrupt, syscall.SIGTERM)
 		defer signal.Stop(signaled)
@@ -216,23 +204,23 @@ func runStorePostgresSuite(ctx context.Context, r storePostgresRun) (err error) 
 	}
 
 	done := make(chan error, 1)
-	go func() { done <- r.suite(ctx, dsn) }()
+	go func() { done <- run.suite(ctx, dsn) }()
 	select {
 	case suiteErr := <-done:
 		return suiteErr
 	case <-ctx.Done():
 		stop()
 		return ctx.Err()
-	case sig := <-interrupts:
+	case receivedSignal := <-interrupts:
 		stop()
-		return fmt.Errorf("interrupted by %s while the store suite was running", sig)
+		return fmt.Errorf("interrupted by %s while the store suite was running", receivedSignal)
 	}
 }
 
-func lastLines(text string, n int) string {
+func lastLines(text string, count int) string {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	if len(lines) > count {
+		lines = lines[len(lines)-count:]
 	}
 	return strings.Join(lines, "\n")
 }
@@ -274,11 +262,11 @@ func runStorePostgresIfTouched(ctx context.Context) error {
 }
 
 func storeFiles(all []string) []string {
-	out := make([]string, 0, len(all))
-	for _, f := range all {
-		if strings.HasPrefix(f, "pkg/store/") && !isTestdataPath(f) {
-			out = append(out, f)
+	files := make([]string, 0, len(all))
+	for _, file := range all {
+		if strings.HasPrefix(file, "pkg/store/") && !isTestdataPath(file) {
+			files = append(files, file)
 		}
 	}
-	return out
+	return files
 }

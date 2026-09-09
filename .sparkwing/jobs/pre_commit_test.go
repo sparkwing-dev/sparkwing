@@ -773,7 +773,7 @@ func TestStagedScopeSkipsNodeModules(t *testing.T) {
 		"package internal\n\nfunc Mine() int { return 2 }\n")
 	gitAddAll(t, root)
 
-	files, scope, err := changeScope(context.Background(), "Go file(s)", existingGoFiles)
+	files, scope, err := changeScope(context.Background(), "Go file(s)", goSourceFiles)
 	if err != nil {
 		t.Fatal(err)
 	}

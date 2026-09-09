@@ -171,7 +171,10 @@ var homeRules = []homeRule{
 }
 
 func checkHomeResolution(ctx context.Context) error {
-	root := regexCheckRoot()
+	root, err := sourcePolicyRoot()
+	if err != nil {
+		return err
+	}
 	files, err := sparkwing.Bash(ctx, `git ls-files -- '*.go'`).Lines()
 	if err != nil {
 		return fmt.Errorf("list the tracked Go files: %w", err)
@@ -187,6 +190,9 @@ func checkHomeResolution(ctx context.Context) error {
 		}
 		source, err := os.ReadFile(filepath.Join(root, file))
 		if err != nil {
+			if err := sourceFileError(filepath.Join(root, file), err); err != nil {
+				return fmt.Errorf("read source file %s: %w", file, err)
+			}
 			continue
 		}
 		code := strippedGoComments(string(source))
@@ -239,7 +245,7 @@ func runGofmt(ctx context.Context) error {
 }
 
 func runFormatters(ctx context.Context) error {
-	files, scope, err := changeScope(ctx, "Go file(s)", existingGoFiles)
+	files, scope, err := changeScope(ctx, "Go file(s)", goSourceFiles)
 	if err != nil {
 		return err
 	}
@@ -265,11 +271,18 @@ func runFormatters(ctx context.Context) error {
 }
 
 func changeScope(ctx context.Context, noun string, keep func([]string) []string) ([]string, string, error) {
+	if _, err := sourcePolicyRoot(); err != nil {
+		return nil, "", err
+	}
 	staged, err := listNames(ctx, `git diff --cached --name-only --diff-filter=ACMR`)
 	if err != nil {
 		return nil, "", fmt.Errorf("list the staged change: %w", err)
 	}
-	if files := keep(staged); len(files) > 0 {
+	files, err := existingSourceFiles(keep(staged))
+	if err != nil {
+		return nil, "", err
+	}
+	if len(files) > 0 {
 		return files, fmt.Sprintf("%d staged %s", len(files), noun), nil
 	}
 	base, err := resolveGateBase(ctx)
@@ -280,7 +293,10 @@ func changeScope(ctx context.Context, noun string, keep func([]string) []string)
 	if err != nil {
 		return nil, "", fmt.Errorf("list the change since %s: %w", base, err)
 	}
-	files := keep(changed)
+	files, err = existingSourceFiles(keep(changed))
+	if err != nil {
+		return nil, "", err
+	}
 	return files, fmt.Sprintf("nothing staged, so %d %s changed since %s (%s)",
 		len(files), noun, gateBaselineRef, base), nil
 }
@@ -303,18 +319,44 @@ func listNames(ctx context.Context, command string) ([]string, error) {
 	return sparkwing.Bash(ctx, command).Lines()
 }
 
-func existingGoFiles(all []string) []string {
-	output := make([]string, 0, len(all))
+func goSourceFiles(all []string) []string {
+	files := make([]string, 0, len(all))
 	for _, file := range all {
-		if !strings.HasSuffix(file, ".go") || strings.Contains(file, "node_modules/") {
-			continue
+		if strings.HasSuffix(file, ".go") && !strings.Contains(file, "node_modules/") {
+			files = append(files, file)
 		}
-		if _, statErr := os.Stat(filepath.Join(regexCheckRoot(), file)); statErr != nil {
-			continue
-		}
-		output = append(output, file)
 	}
-	return output
+	return files
+}
+
+func existingSourceFiles(all []string) ([]string, error) {
+	root, err := sourcePolicyRoot()
+	if err != nil {
+		return nil, err
+	}
+	files := make([]string, 0, len(all))
+	for _, file := range all {
+		path := filepath.Join(root, file)
+		if _, err := os.Stat(path); err != nil {
+			if err := sourceFileError(path, err); err != nil {
+				return nil, fmt.Errorf("inspect source file %s: %w", file, err)
+			}
+			continue
+		}
+		files = append(files, file)
+	}
+	return files, nil
+}
+
+func sourceFileError(path string, readErr error) error {
+	if !errors.Is(readErr, os.ErrNotExist) {
+		return readErr
+	}
+	_, statErr := os.Lstat(path)
+	if errors.Is(statErr, os.ErrNotExist) {
+		return nil
+	}
+	return errors.Join(readErr, statErr)
 }
 
 func sweepableFiles(all []string) []string {
@@ -454,11 +496,20 @@ func checkEmDashes(ctx context.Context) error {
 		return err
 	}
 	sparkwing.Info(ctx, "em-dashes: %s", scope)
-	root := regexCheckRoot()
+	root, err := sourcePolicyRoot()
+	if err != nil {
+		return err
+	}
 	var bad []string
 	for _, file := range files {
 		source, err := os.ReadFile(filepath.Join(root, file))
-		if err != nil || len(source) == 0 {
+		if err != nil {
+			if err := sourceFileError(filepath.Join(root, file), err); err != nil {
+				return fmt.Errorf("read source file %s: %w", file, err)
+			}
+			continue
+		}
+		if len(source) == 0 {
 			continue
 		}
 		// SAFETY: Binary files are excluded from text checks.
@@ -488,14 +539,23 @@ func checkTrackerIDs(ctx context.Context) error {
 		return err
 	}
 	sparkwing.Info(ctx, "tracker-ids: %s", scope)
-	root := regexCheckRoot()
+	root, err := sourcePolicyRoot()
+	if err != nil {
+		return err
+	}
 	var bad []string
 	for _, file := range files {
 		if file == "CHANGELOG.md" {
 			continue
 		}
 		source, err := os.ReadFile(filepath.Join(root, file))
-		if err != nil || len(source) == 0 {
+		if err != nil {
+			if err := sourceFileError(filepath.Join(root, file), err); err != nil {
+				return fmt.Errorf("read source file %s: %w", file, err)
+			}
+			continue
+		}
+		if len(source) == 0 {
 			continue
 		}
 		// SAFETY: Binary files are excluded from text checks.
@@ -520,6 +580,9 @@ func checkTrackerIDs(ctx context.Context) error {
 }
 
 func regexCheckFiles(ctx context.Context) ([]string, string, error) {
+	if _, err := sourcePolicyRoot(); err != nil {
+		return nil, "", err
+	}
 	if os.Getenv("SPARKWING_REGEX_SWEEP_ALL") != "" {
 		all, err := listNames(ctx, "git ls-files")
 		if err != nil {
@@ -531,12 +594,12 @@ func regexCheckFiles(ctx context.Context) ([]string, string, error) {
 	return changeScope(ctx, "file(s)", sweepableFiles)
 }
 
-func regexCheckRoot() string {
+func sourcePolicyRoot() (string, error) {
 	root := sparkwing.WorkDir()
-	if root == "" {
-		root = "."
+	if !filepath.IsAbs(root) {
+		return "", fmt.Errorf("source policy requires an absolute working directory, got %q", root)
 	}
-	return root
+	return root, nil
 }
 
 func init() {
