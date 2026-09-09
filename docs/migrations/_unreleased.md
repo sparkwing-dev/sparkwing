@@ -55,7 +55,7 @@ CHANGELOG links here.
 - **Why:** A recorded-but-unevaluated field could not say which host runs
   the cadence, what a late tick should do, or what an overlapping run
   should do. The mapping carries those answers, and arming a host is a
-  separate, explicit step on that host.
+  separate, explicit step on that host: `sparkwing crons install`.
 
 ## `runs submit` becomes `run --sw-detached`
 

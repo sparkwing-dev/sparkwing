@@ -1,0 +1,306 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/user"
+	"path/filepath"
+	"runtime"
+	"time"
+
+	flag "github.com/spf13/pflag"
+
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
+	"github.com/sparkwing-dev/sparkwing/internal/installsite"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+// scheduleTriggerSource is the trigger source a scheduled run carries. It is
+// the bare word sparkwing.TriggerInfo documents, with no host suffix, because
+// pipelines branch on it.
+const scheduleTriggerSource = "schedule"
+
+// cronsLogFile receives the timer's own output; the tick names it when
+// something went wrong that the store cannot hold.
+const cronsLogFile = "crons.log"
+
+const cronsLockFile = "crons.lock"
+
+func runCrons(args []string) error {
+	if handleParentHelp(cmdCrons, args) {
+		return nil
+	}
+	if len(args) == 0 {
+		PrintHelp(cmdCrons, os.Stderr)
+		return errors.New("crons: subcommand required (install|uninstall|status|list|show|next|pause|resume|run|tick)")
+	}
+	switch args[0] {
+	case "install":
+		return runCronsInstall(args[1:])
+	case "uninstall":
+		return runCronsUninstall(args[1:])
+	case "status":
+		return runCronsStatus(args[1:])
+	case "list":
+		return runCronsList(args[1:])
+	case "show":
+		return runCronsShow(args[1:])
+	case "next":
+		return runCronsNext(args[1:])
+	case "pause":
+		return runCronsPause(args[1:])
+	case "resume":
+		return runCronsResume(args[1:])
+	case "run":
+		return runCronsRun(args[1:])
+	case "tick":
+		return runCronsTick(args[1:])
+	default:
+		PrintHelp(cmdCrons, os.Stderr)
+		return fmt.Errorf("crons: unknown subcommand %q", args[0])
+	}
+}
+
+// cronsSession holds the store handle a crons verb works through. Close it
+// with the returned release.
+type cronsSession struct {
+	svc   *crons.Service
+	store *store.Store
+	paths orchestrator.Paths
+}
+
+// openCrons opens this home's runs store and builds the service over it. nowRFC
+// is the hidden --sw-now value, empty for the real clock.
+func openCrons(nowRFC string) (*cronsSession, func(), error) {
+	paths, err := orchestrator.DefaultPaths()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := paths.EnsureRoot(); err != nil {
+		return nil, nil, fmt.Errorf("ensure %s: %w", paths.Root, err)
+	}
+	clock, err := cronsClock(nowRFC)
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		return nil, nil, fmt.Errorf("open %s: %w", paths.StateDB(), err)
+	}
+	release := func() {
+		if cerr := st.Close(); cerr != nil {
+			slog.Default().Warn("close runs store", "path", paths.StateDB(), "error", cerr)
+		}
+	}
+	host, _ := os.Hostname()
+	session := &cronsSession{
+		svc: &crons.Service{
+			Store:    st,
+			Launcher: cronsLauncher(st, paths),
+			Now:      clock,
+			Host:     host,
+			Version:  installedVersion(),
+			LockPath: filepath.Join(paths.Root, cronsLockFile),
+			ArmedBy:  armedBy(host),
+		},
+		store: st,
+		paths: paths,
+	}
+	return session, release, nil
+}
+
+func cronsClock(nowRFC string) (func() time.Time, error) {
+	if nowRFC == "" {
+		return nil, nil
+	}
+	at, err := time.Parse(time.RFC3339, nowRFC)
+	if err != nil {
+		return nil, fmt.Errorf("--sw-now %q: expected an RFC3339 instant such as 2026-01-01T03:00:00Z", nowRFC)
+	}
+	return func() time.Time { return at }, nil
+}
+
+func armedBy(host string) string {
+	name := ""
+	if u, err := user.Current(); err == nil {
+		name = u.Username
+	}
+	switch {
+	case name == "" && host == "":
+		return ""
+	case host == "":
+		return name
+	case name == "":
+		return host
+	}
+	return name + "@" + host
+}
+
+func (s *cronsSession) now() time.Time {
+	if s.svc.Now != nil {
+		return s.svc.Now()
+	}
+	return time.Now()
+}
+
+// cronsLauncher builds the launcher a schedule fires through. Tests replace it
+// with one that records launches instead of starting runs.
+var cronsLauncher = func(st *store.Store, paths orchestrator.Paths) crons.Launcher {
+	return cronLauncher{store: st, paths: paths}
+}
+
+// cronLauncher turns a due schedule into a detached run against this home's
+// store, executed by the same resident consumer `run --sw-detached` uses.
+type cronLauncher struct {
+	store *store.Store
+	paths orchestrator.Paths
+}
+
+func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, _ time.Time) (string, error) {
+	result, err := persistSubmission(ctx, l.store, l.paths, submission{
+		Pipeline:   s.Pipeline,
+		RepoDir:    s.RepoPath,
+		Source:     scheduleTriggerSource,
+		ScheduleID: s.ID,
+	})
+	if err != nil {
+		return "", err
+	}
+	// safety: the run is durably queued, so a consumer that will not start is a
+	// delay rather than a lost fire; the timer's log carries the reason.
+	if cerr := ensureTriggerConsumer(l.paths.Root, 0, 0); cerr != nil {
+		slog.Default().Warn("scheduled run queued with no consumer to execute it",
+			"run_id", result.RunID, "schedule", s.ID, "error", cerr)
+	}
+	return result.RunID, nil
+}
+
+func (l cronLauncher) Active(ctx context.Context, runID string) (bool, error) {
+	if _, err := orchestrator.ReconcileOrphanedLocalRuns(ctx, l.store, 0); err != nil {
+		return false, err
+	}
+	run, err := l.store.GetRun(ctx, runID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	if run == nil {
+		return false, nil
+	}
+	return run.Status == "pending" || run.Status == "running", nil
+}
+
+// cronsTimerHost describes this machine to internal/crontimer. Tests replace it
+// with a host whose service manager and unit directory are fakes.
+var cronsTimerHost = defaultCronsTimerHost
+
+func defaultCronsTimerHost(paths orchestrator.Paths) (crontimer.Host, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return crontimer.Host{}, fmt.Errorf("resolve the home directory the timer is installed under: %w", err)
+	}
+	configHome := os.Getenv("XDG_CONFIG_HOME")
+	if configHome == "" {
+		configHome = filepath.Join(home, ".config")
+	}
+	binary, err := cronsTimerBinary()
+	if err != nil {
+		return crontimer.Host{}, err
+	}
+	env := map[string]string{}
+	if v := os.Getenv("SPARKWING_HOME"); v != "" {
+		env["SPARKWING_HOME"] = v
+	}
+	return crontimer.Host{
+		GOOS:       runtime.GOOS,
+		Home:       home,
+		ConfigHome: configHome,
+		Binary:     binary,
+		PathEnv:    os.Getenv("PATH"),
+		Env:        env,
+		LogPath:    filepath.Join(paths.Root, cronsLogFile),
+		UID:        os.Getuid(),
+		Exec:       crontimer.DefaultExec,
+	}, nil
+}
+
+// cronsTimerBinary is the sparkwing the unit runs. A systemd or launchd job
+// inherits no PATH of its own, so the absolute path is baked in.
+func cronsTimerBinary() (string, error) {
+	if self, err := installsite.Self(); err == nil && self != "" {
+		return self, nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve this sparkwing binary for the timer to run: %w", err)
+	}
+	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+		exe = resolved
+	}
+	return filepath.Abs(exe)
+}
+
+// unsupportedTimerHint names what to run where sparkwing has no OS timer of its
+// own, so an armed host is still reachable from the machine's own scheduler.
+const unsupportedTimerHint = "run `sparkwing crons tick` from any scheduler on this machine, once a minute"
+
+func cronsOutputFlag(fs *flag.FlagSet) *string {
+	return fs.StringP("output", "o", "", "output format: pretty|json|plain")
+}
+
+func cronsNowFlag(fs *flag.FlagSet) *string {
+	now := fs.String("sw-now", "", "evaluate as if it were this RFC3339 instant")
+	if err := fs.MarkHidden("sw-now"); err != nil {
+		panic(err)
+	}
+	return now
+}
+
+// cronRelTime reads a time against the tick's clock rather than the wall clock,
+// so --sw-now makes the whole rendering deterministic.
+func cronRelTime(now, t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	if t.After(now) {
+		return "in " + shortDuration(t.Sub(now))
+	}
+	return shortDuration(now.Sub(t)) + " ago"
+}
+
+func shortDuration(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+func cronAbsTime(t time.Time, loc *time.Location) string {
+	if t.IsZero() {
+		return "-"
+	}
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc).Format("2006-01-02 15:04:05 MST")
+}
+
+func cronTZLabel(s store.CronSchedule) string {
+	if s.TZ == "" {
+		return "UTC"
+	}
+	return s.TZ
+}

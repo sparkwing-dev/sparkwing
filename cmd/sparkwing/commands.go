@@ -53,6 +53,8 @@ var allCommands = []*Command{
 	&cmdApprove, &cmdDeny, &cmdApprovals, &cmdApprovalsList,
 	&cmdAnnotations, &cmdAnnotationsList, &cmdAnnotationsAdd,
 	&cmdRepos, &cmdReposList, &cmdReposInfo, &cmdReposUpdate,
+	&cmdCrons, &cmdCronsInstall, &cmdCronsUninstall, &cmdCronsStatus, &cmdCronsList,
+	&cmdCronsShow, &cmdCronsNext, &cmdCronsPause, &cmdCronsResume, &cmdCronsRun, &cmdCronsTick,
 }
 
 type CommandIndexJSON struct {

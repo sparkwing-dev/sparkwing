@@ -183,6 +183,15 @@ type submission struct {
 	Priority       string
 	IdempotencyKey string
 	RequestID      string
+
+	// Source replaces the trigger source written on the row. Empty keeps the
+	// value a `run --sw-detached` writes, so only a caller with its own name
+	// for the launch -- a cron tick writes "schedule" -- sets it.
+	Source string
+
+	// ScheduleID stamps the cron schedule that asked for this run onto the
+	// trigger, so the run traces back to its cadence.
+	ScheduleID string
 }
 
 func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.Paths, sub submission) (submitResult, error) {
@@ -243,6 +252,9 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	if sub.RequestID != "" {
 		triggerEnv[SubmitRequestIDKey] = sub.RequestID
 	}
+	if sub.ScheduleID != "" {
+		triggerEnv[orchestrator.CronScheduleKey] = sub.ScheduleID
+	}
 	var userName string
 	if u, uerr := user.Current(); uerr == nil {
 		userName = u.Username
@@ -254,7 +266,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		ID:             runID,
 		Pipeline:       sub.Pipeline,
 		Args:           sub.Args,
-		TriggerSource:  triggerSource(submitTriggerSourcePrefix),
+		TriggerSource:  submissionSource(sub),
 		TriggerUser:    userName,
 		TriggerEnv:     triggerEnv,
 		GitBranch:      branch,
@@ -308,6 +320,16 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		IdempotencyKey: sub.IdempotencyKey,
 		RequestID:      sub.RequestID,
 	}, nil
+}
+
+// submissionSource keeps the host suffix a submitted run carries while letting
+// a named source -- what `sparkwing.TriggerInfo` documents, and what a pipeline
+// branches on -- through verbatim.
+func submissionSource(sub submission) string {
+	if sub.Source != "" {
+		return sub.Source
+	}
+	return triggerSource(submitTriggerSourcePrefix)
 }
 
 func discardRefWorktree(ctx context.Context, paths orchestrator.Paths, dir string) {

@@ -295,11 +295,12 @@ pipelines:
 The expression is validated when the config loads, so a malformed cron
 fails the command that reads it rather than the run.
 
-Declaring the cadence does not arm it. Arming is explicit and per host:
-the host where the schedule is installed evaluates the expression, runs
-the pipeline locally at each due minute, and the run schedules onto a
-runner by the same label rules as any other run. Another host reading
-the same repository stays idle until it is armed too.
+Declaring the cadence does not arm it. Run `sparkwing crons install` on
+the host that should evaluate the schedule; see the [crons
+page](crons.md). That host runs the pipeline locally at each due minute,
+and the run schedules onto a runner by the same label rules as any other
+run. Another host reading the same repository stays idle until it is
+armed too.
 
 ## Worked examples
 

@@ -11,6 +11,7 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing commands`](cli-commands.md) -- Index of every command: one path and synopsis per line
 - [`sparkwing completion`](cli-completion.md) -- Emit a shell completion script (bash\|zsh\|fish)
 - [`sparkwing configure`](cli-configure.md) -- Configure laptop-local settings
+- [`sparkwing crons`](cli-crons.md) -- Arm, inspect and drive this host's local pipeline schedules
 - [`sparkwing daemon`](cli-daemon.md) -- Inspect or refresh the local admission daemon
 - [`sparkwing dashboard`](cli-dashboard.md) -- Manage the local dashboard + API server
 - [`sparkwing debug`](cli-debug.md) -- Interactive debugging for pipeline runs

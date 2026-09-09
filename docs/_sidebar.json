@@ -50,6 +50,7 @@
         "security",
         "auth",
         "hooks",
+        "crons",
         "api",
         "api-reference",
         "mcp"
@@ -63,6 +64,7 @@
         "cli-commands",
         "cli-completion",
         "cli-configure",
+        "cli-crons",
         "cli-daemon",
         "cli-dashboard",
         "cli-debug",

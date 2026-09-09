@@ -105,6 +105,26 @@ code change to unlock.
   -- it declares no schema requirement and alters no existing table -- so a
   binary built before it keeps opening and writing the same database. See
   the [migration note](docs/migrations/_unreleased.md#scheduled-pipelines-and-runs-store-schema-32).
+- **cli:** `sparkwing crons` runs a pipeline's declared `on.schedule` cadence
+  from the machine you arm. `crons install` records a repository's schedules
+  against this host -- compiling each pipeline first, because a schedule fires
+  unattended -- and writes one OS timer for the whole host: a systemd user
+  timer on Linux, a launchd agent on macOS, both calling `sparkwing crons
+  tick` every minute. Sparkwing evaluates the cron expressions inside that
+  tick, so one timer serves every armed schedule and no process stays
+  resident. Each tick locks, re-reads what the armed repositories declare, and
+  resolves every due instant exactly once: launched, skipped because the
+  previous scheduled run is still going, or recorded missed when it fell
+  outside the catch-up window. A scheduled run goes through the detached
+  submission path with the trigger source `schedule` and the schedule's id on
+  its trigger. `crons list`, `show`, `next` and `status` inspect it, `pause`,
+  `resume` and `run` drive it, and `crons uninstall` disarms a checkout,
+  removing the timer once nothing is left armed. `crons status` exits non-zero
+  when schedules are armed and the host is not evaluating them. See
+  [docs/crons.md](docs/crons.md).
+- **cli:** The CLI embeds the IANA time zone database, so a schedule's `tz:`
+  resolves on a host with no zoneinfo of its own -- which is what a systemd or
+  launchd job on a slim image finds.
 
 ### Changed
 

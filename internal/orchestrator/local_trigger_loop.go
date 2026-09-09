@@ -335,6 +335,12 @@ const SubmitRepoDirKey = "_SPARKWING_SUBMIT_REPO_DIR"
 // idempotency-key argument comparison.
 const SubmitPriorityKey = "_SPARKWING_SUBMIT_PRIORITY"
 
+// CronScheduleKey carries the id of the cron schedule that launched a run, so
+// one run traces back to the cadence that asked for it. The cron_fires table
+// is the authoritative join; this key answers the question from the run's own
+// row, which is where an operator reading `runs get` starts.
+const CronScheduleKey = "_SPARKWING_CRON_SCHEDULE"
+
 func submittedTriggerPriority(trig *store.Trigger) string {
 	if trig == nil {
 		return ""

@@ -38,6 +38,7 @@ docs/
   native-mode.md         the laptop model (detached dashboard)
   hooks.md               triggers (webhooks + opt-in pipeline hooks)
   scheduling.md          runner labels, .Requires/.Prefers/.WhenRunner
+  crons.md               local cron schedules: arming a host, the tick, inspecting
   warm-pool.md           warm PVC pool
   caching.md             node-level Cache modifier (.Cache / MemoizeOption)
   backends.md            per-profile state / cache / logs destinations
