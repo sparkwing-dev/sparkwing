@@ -376,6 +376,10 @@ func RunNodeOnce(
 				clearInspector := nodeTimeout.setDeadlineInspector(admissionDeadlineHandled)
 				defer clearInspector()
 			}
+			var awaitObs childAwaitObserver
+			awaitTimeout := func(cause error) error {
+				return fmt.Errorf("waiting for child %s: %w (%s)", childRunID, cause, awaitObs.evidence())
+			}
 			for {
 				updateTimeoutForAdmission(parentCtx)
 				if statusErr := currentAdmissionStatusErr(); statusErr != nil {
@@ -383,17 +387,27 @@ func RunNodeOnce(
 					return nil, fmt.Errorf("child %s plan admission status: %w", childRunID, statusErr)
 				}
 				run, err := stateClient.GetRun(pollCtx, childRunID)
-				if err == nil {
+				if err != nil {
+					awaitObs.observe("", err)
+					if awaitObs.firstError() {
+						logger.Warn("child run status poll failed; retrying until the wait times out",
+							"run_id", runID, "node", currentNode, "child_run_id", childRunID,
+							"pipeline", req.Pipeline, "err", err)
+					}
+				} else {
+					awaitObs.observe(run.Status, nil)
 					switch run.Status {
 					case "success":
 						updateTimeoutForAdmission(parentCtx)
 						if err := pollCtx.Err(); err != nil {
-							emitChildFinish("timeout", err.Error())
-							return nil, fmt.Errorf("waiting for child %s: %w", childRunID, err)
+							timeoutErr := awaitTimeout(err)
+							emitChildFinish("timeout", timeoutErr.Error())
+							return nil, timeoutErr
 						}
 						if deadline, ok := pollCtx.Deadline(); ok && time.Now().After(deadline) {
-							emitChildFinish("timeout", context.DeadlineExceeded.Error())
-							return nil, fmt.Errorf("waiting for child %s: %w", childRunID, context.DeadlineExceeded)
+							timeoutErr := awaitTimeout(context.DeadlineExceeded)
+							emitChildFinish("timeout", timeoutErr.Error())
+							return nil, timeoutErr
 						}
 						emitChildFinish("success", "")
 						if req.NodeID == "" {
@@ -420,8 +434,9 @@ func RunNodeOnce(
 				select {
 				case <-pollCtx.Done():
 					updateTimeoutForAdmission(parentCtx)
-					emitChildFinish("timeout", pollCtx.Err().Error())
-					return nil, fmt.Errorf("waiting for child %s: %w", childRunID, pollCtx.Err())
+					timeoutErr := awaitTimeout(pollCtx.Err())
+					emitChildFinish("timeout", timeoutErr.Error())
+					return nil, timeoutErr
 				case <-time.After(childAwaitPollInterval(pollCtx, admissionPauseActive())):
 				}
 			}
