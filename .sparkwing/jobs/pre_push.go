@@ -29,23 +29,28 @@ func runActionlint(ctx context.Context) error {
 }
 
 func runReleaseBinaryVulnerabilityScan(ctx context.Context) error {
+	return withReleaseScanDirectory(func(directory string) error {
+		for _, binary := range publicBinaries {
+			artifact := filepath.Join(directory, binary)
+			if _, err := sparkwing.Exec(ctx, "go", "build", "-trimpath", "-o", artifact, "./cmd/"+binary).
+				Env("GOWORK", "off").Run(); err != nil {
+				return fmt.Errorf("build release vulnerability artifact %s: %w", binary, err)
+			}
+			if _, err := sparkwing.Exec(ctx, "bash", "bin/check-release-binary-vulnerabilities.sh", artifact).Run(); err != nil {
+				return fmt.Errorf("scan release vulnerability artifact %s: %w", binary, err)
+			}
+		}
+		return nil
+	})
+}
+
+func withReleaseScanDirectory(run func(string) error) error {
 	directory, err := os.MkdirTemp("", "sparkwing-release-vulnerability-*")
 	if err != nil {
 		return fmt.Errorf("create release vulnerability scan directory: %w", err)
 	}
 	defer os.RemoveAll(directory)
-
-	for _, binary := range publicBinaries {
-		artifact := filepath.Join(directory, binary)
-		if _, err := sparkwing.Exec(ctx, "go", "build", "-trimpath", "-o", artifact, "./cmd/"+binary).
-			Env("GOWORK", "off").Run(); err != nil {
-			return fmt.Errorf("build release vulnerability artifact %s: %w", binary, err)
-		}
-		if _, err := sparkwing.Exec(ctx, "bash", "bin/check-release-binary-vulnerabilities.sh", artifact).Run(); err != nil {
-			return fmt.Errorf("scan release vulnerability artifact %s: %w", binary, err)
-		}
-	}
-	return nil
+	return run(directory)
 }
 
 const prePushTimeout = 30 * time.Minute
