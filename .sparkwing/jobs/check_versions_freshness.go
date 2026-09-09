@@ -248,14 +248,45 @@ func resolveLocalReplacePath(target, modPath string) (string, error) {
 }
 
 func localBehindRemote(ctx context.Context, localPath string) (bool, int, error) {
-	if _, err := os.Stat(filepath.Join(localPath, ".git")); err != nil {
+	root, err := gitCheckoutRoot(ctx, localPath)
+	if err != nil {
+		return false, 0, err
+	}
+	if root == "" {
 		return false, 0, nil
 	}
-	_ = runGit(ctx, localPath, "fetch", "--quiet", "origin", "main")
-	if err := runGit(ctx, localPath, "rev-parse", "--verify", "--quiet", "origin/main"); err != nil {
+	remotes, err := captureGit(ctx, root, "remote")
+	if err != nil {
+		return false, 0, fmt.Errorf("list remotes: %w", err)
+	}
+	hasOrigin := false
+	for _, remote := range strings.Fields(remotes) {
+		if remote == "origin" {
+			hasOrigin = true
+		}
+	}
+	if !hasOrigin {
 		return false, 0, nil
 	}
-	out, err := captureGit(ctx, localPath, "rev-list", "--count", "HEAD..origin/main")
+	if fetchErr := runGit(ctx, root, "fetch", "--quiet", "origin", "refs/heads/main"); fetchErr != nil {
+		if heads, err := captureGit(ctx, root, "ls-remote", "--heads", "origin", "refs/heads/main"); err == nil {
+			found := false
+			for _, line := range strings.Split(heads, "\n") {
+				fields := strings.Fields(line)
+				if len(fields) == 2 && fields[1] == "refs/heads/main" {
+					found = true
+				}
+			}
+			if !found {
+				return false, 0, nil
+			}
+		}
+		return false, 0, fmt.Errorf("fetch origin main: %w", fetchErr)
+	}
+	if err := runGit(ctx, root, "rev-parse", "--verify", "--quiet", "origin/main"); err != nil {
+		return false, 0, fmt.Errorf("fetched origin main but origin/main does not resolve: %w", err)
+	}
+	out, err := captureGit(ctx, root, "rev-list", "--count", "HEAD..origin/main")
 	if err != nil {
 		return false, 0, fmt.Errorf("rev-list HEAD..origin/main: %w", err)
 	}
@@ -264,6 +295,60 @@ func localBehindRemote(ctx context.Context, localPath string) (bool, int, error)
 		_, _ = fmt.Sscanf(s, "%d", &n)
 	}
 	return n > 0, n, nil
+}
+
+func gitCheckoutRoot(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel")
+	// safety: classify Git diagnostics consistently across locales.
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	out, err := cmd.Output()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 128 {
+			message := strings.TrimSpace(string(exit.Stderr))
+			if message == "fatal: this operation must be run in a work tree" {
+				return "", nil
+			}
+			if strings.HasPrefix(message, "fatal: not a git repository (or any ") {
+				metadata, statErr := hasGitMetadata(dir)
+				if statErr != nil {
+					return "", fmt.Errorf("inspect checkout metadata for %s: %w", dir, statErr)
+				}
+				if !metadata {
+					return "", nil
+				}
+			}
+		}
+		return "", fmt.Errorf("locate checkout for %s: %w", dir, err)
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return "", fmt.Errorf("git returned an empty checkout root for %s", dir)
+	}
+	return root, nil
+}
+
+func hasGitMetadata(dir string) (bool, error) {
+	path, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return false, err
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return false, err
+	}
+	for {
+		if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return false, nil
+		}
+		path = parent
+	}
 }
 
 func checkAgainstLatest(ctx context.Context, modulePath, pinned, fromModFile string) string {
