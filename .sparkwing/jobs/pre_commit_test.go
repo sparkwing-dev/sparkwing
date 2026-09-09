@@ -179,7 +179,7 @@ func TestTheTestStepDoesNotHandTheGateIndexToTheSuitesItRuns(t *testing.T) {
 	t.Setenv("GIT_INDEX_FILE", gateIndexSnapshot(t, root))
 
 	if err := forEachGoModule(ctx, "go test", "go test ./...", nil); err == nil {
-		t.Fatal("the probe must fail while the gate's index reaches it, or the pass below proves nothing")
+		t.Fatal("the probe must fail while the gate's index reaches it")
 	}
 	if err := runTest(ctx); err != nil {
 		t.Fatalf("the test step handed its suites the gate's index: %v", err)
@@ -714,7 +714,7 @@ func TestFormattersRefuseDriftTheStagedChangeIntroduces(t *testing.T) {
 	gitAddAll(t, root)
 
 	if err := runGofmt(ctx); err != nil {
-		t.Fatalf("gofmt must pass this file, or the step under test is redundant: %v", err)
+		t.Fatalf("gofmt must pass this file: %v", err)
 	}
 	err := runFormatters(ctx)
 	if err == nil {
@@ -837,7 +837,7 @@ func TestHomeResolutionRefusesEveryBypassShape(t *testing.T) {
 			ctx := context.Background()
 
 			if err := checkHomeResolution(ctx); err != nil {
-				t.Fatalf("the clean fixture must pass, or the failure below proves nothing: %v", err)
+				t.Fatalf("the clean fixture must pass: %v", err)
 			}
 
 			writeGoFile(t, filepath.Join(root, "internal", "bypass.go"), body)

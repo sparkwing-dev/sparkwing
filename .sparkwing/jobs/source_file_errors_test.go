@@ -62,7 +62,7 @@ func TestSourcePoliciesPreserveReadFailure(t *testing.T) {
 	}
 }
 
-func TestSourcePoliciesPreserveDeletedFiles(t *testing.T) {
+func TestSourcePoliciesAllowDeletedFiles(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")

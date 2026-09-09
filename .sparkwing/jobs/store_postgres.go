@@ -28,17 +28,11 @@ func (StorePostgres) ShortHelp() string {
 }
 
 func (StorePostgres) Help() string {
-	return "Runs `go test ./pkg/store/...` with SPARKWING_TEST_STORE=postgres, so every " +
-		"store test that opens through pkg/store/storetest exercises the Postgres dialect " +
-		"instead of a SQLite file. When SPARKWING_TEST_PG_URL is already set the run uses " +
-		"that server; otherwise it starts an embedded Postgres on a free port, with its data " +
-		"directory under a temporary root and its binaries under the persistent tool cache, " +
-		"and stops the server and removes the data directory whether the suite passes, " +
-		"fails, or is interrupted. A run killed outright before its teardown finishes can leave " +
-		"a sparkwing-store-postgres-* directory under TMPDIR. A failing suite prints the tail of the server log, " +
-		"which embedded-postgres only makes available once the server has stopped. A server " +
-		"that will not start is retried once on a fresh port and then fails the step with " +
-		"the cause."
+	return "Runs `go test ./pkg/store/...` with SPARKWING_TEST_STORE=postgres. " +
+		"Uses SPARKWING_TEST_PG_URL when set; otherwise starts an embedded Postgres. " +
+		"A failing suite prints the server log tail. The embedded server stops and its " +
+		"data directory is removed on completion or interruption. If killed before " +
+		"cleanup finishes, the run can leave a sparkwing-store-postgres-* directory under TMPDIR."
 }
 
 func (StorePostgres) Examples() []sparkwing.Example {
@@ -51,8 +45,8 @@ func (StorePostgres) Examples() []sparkwing.Example {
 	}
 }
 
-func (p *StorePostgres) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, rc.Pipeline, p.run).Timeout(storePostgresPrePushTimeout)
+func (pipeline *StorePostgres) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
+	sparkwing.Job(plan, runContext.Pipeline, pipeline.run).Timeout(storePostgresPrePushTimeout)
 	return nil
 }
 
@@ -115,7 +109,7 @@ func freeLocalPort() (uint32, error) {
 	return uint32(port), nil
 }
 
-func (p *StorePostgres) run(ctx context.Context) error {
+func (pipeline *StorePostgres) run(ctx context.Context) error {
 	if dsn := os.Getenv("SPARKWING_TEST_PG_URL"); dsn != "" {
 		sparkwing.Info(ctx, "using the configured SPARKWING_TEST_PG_URL")
 		return runStoreSuiteAgainst(ctx, dsn)
@@ -217,9 +211,9 @@ func runStorePostgresSuite(ctx context.Context, run storePostgresRun) (err error
 	case <-ctx.Done():
 		stop()
 		return ctx.Err()
-	case sig := <-interrupts:
+	case receivedSignal := <-interrupts:
 		stop()
-		return fmt.Errorf("interrupted by %s while the store suite was running", sig)
+		return fmt.Errorf("interrupted by %s while the store suite was running", receivedSignal)
 	}
 }
 

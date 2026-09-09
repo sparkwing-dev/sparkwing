@@ -31,8 +31,8 @@ func runRaceTouched(ctx context.Context) error {
 		for _, module := range mapKeys(targets) {
 			packages := targets[module]
 			sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(packages, " "))
-			cmd := boundedGoCommand(runtime.NumCPU(), "test", "-race -count=1 -timeout 30m "+strings.Join(packages, " "))
-			script := withoutInherited(fmt.Sprintf("cd %q && %s", module, cmd), productTestUnset)
+			command := boundedGoCommand(runtime.NumCPU(), "test", "-race -count=1 -timeout 30m "+strings.Join(packages, " "))
+			script := withoutInherited(fmt.Sprintf("cd %q && %s", module, command), productTestUnset)
 			if _, runErr := sparkwing.Bash(ctx, script).Env("TMPDIR", testRoot).Run(); runErr != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 			}
@@ -86,9 +86,9 @@ func owningModule(directory string, modules []string) string {
 	return best
 }
 
-func mapKeys[V any](module map[string]V) []string {
-	keys := make([]string, 0, len(module))
-	for k := range module {
+func mapKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for k := range values {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)

@@ -188,14 +188,14 @@ func checkHomeResolution(ctx context.Context) error {
 		if strings.HasPrefix(file, ".sparkwing/") || strings.Contains(file, "node_modules/") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(root, file))
+		source, err := os.ReadFile(filepath.Join(root, file))
 		if err != nil {
 			if err := sourceFileError(filepath.Join(root, file), err); err != nil {
 				return fmt.Errorf("read source file %s: %w", file, err)
 			}
 			continue
 		}
-		code := strippedGoComments(string(data))
+		code := strippedGoComments(string(source))
 		for i, rule := range homeRules {
 			if _, ok := rule.allowed[file]; ok {
 				continue
@@ -476,25 +476,25 @@ func checkEmDashes(ctx context.Context) error {
 	}
 	var bad []string
 	for _, file := range files {
-		data, err := os.ReadFile(filepath.Join(root, file))
+		source, err := os.ReadFile(filepath.Join(root, file))
 		if err != nil {
 			if err := sourceFileError(filepath.Join(root, file), err); err != nil {
 				return fmt.Errorf("read source file %s: %w", file, err)
 			}
 			continue
 		}
-		if len(data) == 0 {
+		if len(source) == 0 {
 			continue
 		}
 		// SAFETY: Binary files are excluded from text checks.
-		head := data
-		if len(head) > 8192 {
-			head = head[:8192]
+		prefix := source
+		if len(prefix) > 8192 {
+			prefix = prefix[:8192]
 		}
-		if bytes.IndexByte(head, 0) >= 0 {
+		if bytes.IndexByte(prefix, 0) >= 0 {
 			continue
 		}
-		if bytes.Contains(data, []byte("\u2014")) {
+		if bytes.Contains(source, []byte("\u2014")) {
 			bad = append(bad, file)
 		}
 	}
@@ -522,25 +522,25 @@ func checkTrackerIDs(ctx context.Context) error {
 		if file == "CHANGELOG.md" {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(root, file))
+		source, err := os.ReadFile(filepath.Join(root, file))
 		if err != nil {
 			if err := sourceFileError(filepath.Join(root, file), err); err != nil {
 				return fmt.Errorf("read source file %s: %w", file, err)
 			}
 			continue
 		}
-		if len(data) == 0 {
+		if len(source) == 0 {
 			continue
 		}
 		// SAFETY: Binary files are excluded from text checks.
-		head := data
-		if len(head) > 8192 {
-			head = head[:8192]
+		prefix := source
+		if len(prefix) > 8192 {
+			prefix = prefix[:8192]
 		}
-		if bytes.IndexByte(head, 0) >= 0 {
+		if bytes.IndexByte(prefix, 0) >= 0 {
 			continue
 		}
-		if trackerIDPattern.Match(data) {
+		if trackerIDPattern.Match(source) {
 			bad = append(bad, file)
 		}
 	}
