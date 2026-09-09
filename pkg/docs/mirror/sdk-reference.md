@@ -11,7 +11,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - [`sparkwing/cleanup`](sdk-cleanup.md) -- Package cleanup lets a sparks library guarantee that a resource it starts -- a container, a cluster, a release -- is torn down if the step's node dies before the library's own cleanup runs.
 - [`sparkwing/docker`](sdk-docker.md) -- Package docker is the sparkwing SDK's Docker-shelling helper layer: build, push, login, and deterministic tag computation.
 - [`sparkwing/git`](sdk-git.md) -- Package git is the sparkwing SDK's repo-inspection helper layer: commit SHA, branch, dirty-tree detection, deterministic fileset hash, tag listing, and safe tag push.
-- [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs provides sparkwing.CacheKeyFn helpers for declaring "what changed" inputs to a node's cache.
+- [`sparkwing/inputs`](sdk-inputs.md) -- Package inputs builds cache keys from files, environment variables, and constants.
 - [`sparkwing/planguard`](sdk-planguard.md) -- Package planguard implements the Plan() purity sentinel.
 - [`sparkwing/services`](sdk-services.md) -- Package services is the sparkwing SDK's sidecar-container helper: spin up postgres/redis/etc.
 
@@ -71,7 +71,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 
 ### type AfterRunFn
 
-AfterRunFn runs once after Run (including all retries) terminates.
+AfterRunFn receives the final Run error after all retries, or nil on success.
 
 ```
 type AfterRunFn func(ctx context.Context, err error)
@@ -80,7 +80,7 @@ type AfterRunFn func(ctx context.Context, err error)
 
 ### type ApprovalConfig
 
-ApprovalConfig describes a manual approval gate.
+ApprovalConfig configures a manual approval gate.
 
 ```
 type ApprovalConfig struct {
@@ -90,12 +90,8 @@ type ApprovalConfig struct {
     // Timeout bounds how long the gate waits for a human answer. Zero
     // means never time out.
     Timeout time.Duration
-    // OnExpiry controls how an unanswered gate resolves once Timeout
-    // elapses. The zero value is ApprovalFail ("something went wrong,
-    // the gate wasn't answered"). ApprovalDeny treats no-answer as a
-    // soft "no" and ApprovalApprove as a soft "yes". Named OnExpiry
-    // rather than OnTimeout to avoid confusion with Job.Timeout(),
-    // which is unrelated (per-attempt execution budget).
+    // OnExpiry selects ApprovalFail, ApprovalDeny, or ApprovalApprove when the
+    // timeout expires. The zero value uses ApprovalFail.
     OnExpiry ApprovalTimeoutPolicy
 }
 ```
@@ -103,7 +99,7 @@ type ApprovalConfig struct {
 
 ### type ApprovalGate
 
-ApprovalGate is the handle returned by sw.JobApproval.
+ApprovalGate exposes the modifiers supported by manual approval gates.
 
 ```
 type ApprovalGate struct {
@@ -111,12 +107,12 @@ type ApprovalGate struct {
 }
 ```
 
-- `func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate` -- JobApproval registers a manual approval gate under id and returns the gate handle for further configuration.
+- `func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate` -- JobApproval registers a gate that waits for a human decision.
 - `func (g *ApprovalGate) AfterRun(fn AfterRunFn) *ApprovalGate` -- AfterRun registers a hook that runs after the gate resolves (regardless of outcome).
 - `func (g *ApprovalGate) BeforeRun(fn BeforeRunFn) *ApprovalGate` -- BeforeRun registers a hook that runs before the gate is presented to the operator.
 - `func (g *ApprovalGate) ContinueOnError() *ApprovalGate` -- ContinueOnError marks the gate so a failed resolution is treated as a soft failure for downstream propagation.
-- `func (g *ApprovalGate) ID() string` -- ID returns the gate's node id.
-- `func (g *ApprovalGate) Job() *JobNode` -- Job returns the underlying *JobNode.
+- `func (g *ApprovalGate) ID() string`
+- `func (g *ApprovalGate) Job() *JobNode`
 - `func (g *ApprovalGate) Needs(deps ...Dep) *ApprovalGate` -- Needs declares hard upstream dependencies on the gate.
 - `func (g *ApprovalGate) NeedsOptional(deps ...Dep) *ApprovalGate` -- NeedsOptional declares soft upstream dependencies; missing IDs are silently dropped instead of failing the run.
 - `func (g *ApprovalGate) OnFailure(id string, x any) *ApprovalGate` -- OnFailure registers a recovery node that runs if the gate resolves to ApprovalFail.
@@ -214,15 +210,15 @@ type CacheKey string
 const NoCache CacheKey = "ck:nocache"
 ```
 
-- `func Key(parts ...any) CacheKey` -- Key composes a CacheKey from arbitrary parts.
+- `func Key(parts ...any) CacheKey` -- Key hashes the parts' fmt %v representations, separated by byte 0x1e, into a "ck:" prefix and 16 hexadecimal characters.
 - `func (k CacheKey) IsNoCache() bool` -- IsNoCache reports whether k is the explicit NoCache sentinel.
 
 ### type CacheKeyFn
 
-CacheKeyFn computes a cache key after upstream dependencies complete.
+CacheKeyFn computes a key after upstream dependencies complete.
 
 ```
-type CacheKeyFn func(ctx context.Context) CacheKey
+type CacheKeyFn func(ctx context.Context) (CacheKey, error)
 ```
 
 
@@ -346,7 +342,7 @@ type ConsumeOption func(*consumeEdge)
 
 ### type Dep
 
-Dep is the closed type set accepted by Plan-layer Needs and NeedsOptional.
+Dep accepts JobNode, ApprovalGate, and JobGroup handles as dependencies.
 
 ```
 type Dep interface {
@@ -529,7 +525,7 @@ type ExecResult struct {
 
 ### type ExpandGenerator
 
-ExpandGenerator is the closure signature for ExpandFrom.
+ExpandGenerator is the closure signature for JobFanOutDynamic.
 
 ```
 type ExpandGenerator func(ctx context.Context) []*JobNode
@@ -708,7 +704,7 @@ type InputSchema struct {
 
 ### type JobGroup
 
-JobGroup is a handle to a set of nodes.
+JobGroup holds nodes for dependency wiring and dashboard grouping.
 
 ```
 type JobGroup struct {
@@ -716,19 +712,19 @@ type JobGroup struct {
 }
 ```
 
-- `func GroupJobs(p *Plan, name string, nodes ...*JobNode) *JobGroup` -- GroupJobs declares a named bundle of existing Plan nodes.
-- `func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, any)) *JobGroup` -- JobFanOut is the Plan-time static fan-out helper.
-- `func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (string, any)) *JobGroup` -- JobFanOutDynamic is the runtime fan-out helper.
+- `func GroupJobs(p *Plan, name string, nodes ...*JobNode) *JobGroup` -- GroupJobs groups existing Plan nodes under name and returns a dependency target covering every member.
+- `func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, any)) *JobGroup` -- JobFanOut registers one job per item during plan construction.
+- `func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (string, any)) *JobGroup` -- JobFanOutDynamic registers one child per item in source's []T output after source completes.
 - `func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup` -- AfterRun registers a post-run hook on every member.
 - `func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup` -- BeforeRun registers a pre-run hook on every member.
 - `func (g *JobGroup) CacheDir(caches ...DirCache) *JobGroup` -- CacheDir registers dependency-directory caches on every member.
 - `func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup` -- Concurrency enrolls every member of the group in concurrency group g with the given admission cost.
 - `func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup` -- Consumes stages the given producer's artifacts into every member's workspace before it runs, and implies Needs(producer) on each.
 - `func (g *JobGroup) ContinueOnError() *JobGroup` -- ContinueOnError marks every member so downstream dependents proceed even on failure.
-- `func (g *JobGroup) Dynamic() bool` -- Dynamic reports whether this group's membership is determined at dispatch-time (ExpandFrom) rather than plan-construction (GroupJobs).
+- `func (g *JobGroup) Dynamic() bool` -- Dynamic reports whether this group's membership is determined at dispatch through JobFanOutDynamic.
 - `func (g *JobGroup) Env(key, value string) *JobGroup` -- Env sets a per-node environment variable on every member.
 - `func (g *JobGroup) Err() error` -- Err returns the expansion error, if any.
-- `func (g *JobGroup) Inline() *JobGroup` -- Inline marks every member for in-process execution.
+- `func (g *JobGroup) Inline() *JobGroup` -- Inline places every member on the dispatcher's host.
 - `func (g *JobGroup) Members() []*JobNode` -- Members returns the group's current nodes.
 - `func (g *JobGroup) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobGroup` -- Memoize memoizes every member of the group.
 - `func (g *JobGroup) Name() string` -- Name returns the group's declared name, or "" for an unnamed (structural-only) group.
@@ -737,19 +733,19 @@ type JobGroup struct {
 - `func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup` -- NoProgressTimeout sets the per-attempt inactivity timeout on every member.
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
 - `func (g *JobGroup) Outputs(globs ...string) *JobGroup` -- Outputs declares the same artifact output globs on every member.
-- `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers records ordered runner-label preferences for every member in plan-snapshot metadata and gives matching enrolled-executor offers a small boost bounded by their priority ceiling; legacy claims ignore it.
-- `func (g *JobGroup) Ready() <-chan struct{}` -- Ready returns a channel that closes once a dynamic group's expansion completes (success or failure).
-- `func (g *JobGroup) Requires(labels ...string) *JobGroup` -- Requires records label terms used to filter runner claims for every non-inline dispatched member.
+- `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers boosts matching enrolled-executor offers within their priority ceiling for every member.
+- `func (g *JobGroup) Ready() <-chan struct{}` -- Ready returns a channel that closes once a dynamic group's expansion completes, including on failure.
+- `func (g *JobGroup) Requires(labels ...string) *JobGroup` -- Requires constrains runner claims for every non-inline dispatched member.
 - `func (g *JobGroup) Resources(hints ...ResourceHint) *JobGroup` -- Resources pins the same peak on every member of the group.
 - `func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup` -- Retry configures every member to be re-attempted up to attempts additional times on failure.
 - `func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup` -- SkipIf registers a predicate on every member.
 - `func (g *JobGroup) Timeout(d time.Duration) *JobGroup` -- Timeout caps the per-attempt duration on every member.
-- `func (g *JobGroup) Verify(fn VerifyFn) *JobGroup` -- Verify registers the same postcondition check on every member.
+- `func (g *JobGroup) Verify(fn VerifyFn) *JobGroup` -- Verify registers a postcondition check on every member.
 - `func (g *JobGroup) WhenRunner(labels ...string) *JobGroup` -- WhenRunner marks every member as conditional on the dispatching runner advertising the listed labels.
 
 ### type JobNode
 
-JobNode is a single entry in a Plan.
+JobNode is a Plan entry wrapping a Workable.
 
 ```
 type JobNode struct {
@@ -757,13 +753,13 @@ type JobNode struct {
 }
 ```
 
-- `func Job(p *Plan, id string, x any) *JobNode` -- Job registers a Workable (or a bare func(ctx) error closure) under id and returns the node handle for further configuration (Needs, Env, etc.).
-- `func NewDetachedNode(id string, job Workable) *JobNode` -- NewDetachedNode builds a node with full Job-equivalent validation but does not register it on a Plan.
-- `func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode` -- AfterRun registers a hook to run once after Run terminates, including after all retries.
-- `func (n *JobNode) AfterRunHooks() []AfterRunFn` -- AfterRunHooks returns the node's registered post-run hooks.
+- `func Job(p *Plan, id string, x any) *JobNode` -- Job registers a Workable or func(context.Context) error under id.
+- `func NewDetachedNode(id string, job Workable) *JobNode` -- NewDetachedNode validates a node for runtime insertion without registering it on a Plan.
+- `func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode` -- AfterRun registers a hook invoked after Run and all retries finish.
+- `func (n *JobNode) AfterRunHooks() []AfterRunFn`
 - `func (n *JobNode) ApprovalConfig() *ApprovalConfig` -- ApprovalConfig returns the per-node approval configuration, or nil for non-approval nodes.
 - `func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode` -- BeforeRun registers a hook to run once before the node's Run method on the first attempt.
-- `func (n *JobNode) BeforeRunHooks() []BeforeRunFn` -- BeforeRunHooks returns the node's registered pre-run hooks.
+- `func (n *JobNode) BeforeRunHooks() []BeforeRunFn`
 - `func (n *JobNode) CacheDir(caches ...DirCache) *JobNode` -- CacheDir registers dependency-directory caches on the node: each declared directory is restored from the cache before the node's Run (on an exact key hit) and saved back after a successful Run whose restore missed.
 - `func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode` -- Concurrency enrolls the node in concurrency group g with the given admission cost (default 1).
 - `func (n *JobNode) ConcurrencyCost() int` -- ConcurrencyCost returns the admission cost declared via JobNode.Concurrency, or 0 when the node has no membership.
@@ -775,31 +771,31 @@ type JobNode struct {
 - `func (n *JobNode) DirCaches() []DirCache` -- DirCaches returns the node's declared dependency-directory caches, in declaration order.
 - `func (n *JobNode) Env(key, value string) *JobNode` -- Env sets a per-node environment variable.
 - `func (n *JobNode) EnvMap() map[string]string` -- EnvMap returns the node's declared environment.
-- `func (n *JobNode) ID() string` -- ID returns the node's identifier.
-- `func (n *JobNode) Inline() *JobNode` -- Inline marks the node to run on the dispatcher's own host rather than being handed to the configured Runner.
-- `func (n *JobNode) IsApproval() bool` -- IsApproval reports whether the node is an approval gate.
+- `func (n *JobNode) ID() string`
+- `func (n *JobNode) Inline() *JobNode` -- Inline places the node on the dispatcher's host.
+- `func (n *JobNode) IsApproval() bool`
 - `func (n *JobNode) IsContinueOnError() bool` -- IsContinueOnError reports whether downstream should ignore this node's failure for dispatch purposes.
 - `func (n *JobNode) IsInline() bool` -- IsInline reports whether the node was marked via Inline() to run on the dispatcher's own host.
-- `func (n *JobNode) IsOptional() bool` -- IsOptional reports whether the node is marked non-essential.
-- `func (n *JobNode) Job() Workable` -- Job returns the underlying user-authored job struct.
-- `func (n *JobNode) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobNode` -- Memoize skips re-running the node when its result is already known.
+- `func (n *JobNode) IsOptional() bool`
+- `func (n *JobNode) Job() Workable`
+- `func (n *JobNode) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobNode` -- Memoize replays a stored result when another node computed the same key.
 - `func (n *JobNode) MemoizeConfig() *MemoizeConfig` -- MemoizeConfig returns the node's resolved memoization configuration, or nil when JobNode.Memoize was not called.
 - `func (n *JobNode) Needs(deps ...Dep) *JobNode` -- Needs declares hard upstream dependencies.
-- `func (n *JobNode) NeedsGroups() []*JobGroup` -- NeedsGroups returns any dynamic groups (from ExpandFrom) this node is waiting on.
+- `func (n *JobNode) NeedsGroups() []*JobGroup` -- NeedsGroups returns any dynamic groups (from JobFanOutDynamic) this node is waiting on.
 - `func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode` -- NeedsOptional declares upstream dependencies that may or may not be present in the plan.
 - `func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode` -- NoProgressTimeout caps how long an attempt may run without emitting a node log record.
 - `func (n *JobNode) NoProgressTimeoutDuration() time.Duration` -- NoProgressTimeoutDuration returns the configured per-attempt inactivity timeout, or zero if disabled.
 - `func (n *JobNode) OnFailure(id string, x any) *JobNode` -- OnFailure registers a recovery node that runs only when this node terminates with outcome=failed; otherwise it's marked Skipped.
 - `func (n *JobNode) OnFailureNode() *JobNode` -- OnFailureNode returns the recovery node registered via OnFailure, or nil if none.
 - `func (n *JobNode) Optional() *JobNode` -- Optional marks the node as non-essential: a failure is logged as a warning and does not count toward the run's overall success/fail outcome.
-- `func (n *JobNode) OptionalDepIDs() []string` -- OptionalDepIDs returns the IDs declared via NeedsOptional.
+- `func (n *JobNode) OptionalDepIDs() []string`
 - `func (n *JobNode) OutputGlobs() []string` -- OutputGlobs returns the artifact output globs declared via Outputs (the union across calls), or nil if the node declared none.
 - `func (n *JobNode) OutputType() reflect.Type` -- OutputType returns the concrete Go type of the job's Run output, or nil if the job's Run returns no value beyond error.
 - `func (n *JobNode) Outputs(globs ...string) *JobNode` -- Outputs declares the files this node emits as artifacts, by glob, relative to its working directory.
-- `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers records ordered runner-label preferences in plan-snapshot metadata and gives matching enrolled-executor offers a small boost bounded by their priority ceiling; legacy claims ignore it.
-- `func (n *JobNode) PrefersLabels() []string` -- PrefersLabels returns the terms declared via Prefers.
+- `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers boosts enrolled-executor offers within their priority ceiling when runner labels match.
+- `func (n *JobNode) PrefersLabels() []string`
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires records label terms used to filter runner claims for non-inline dispatched jobs.
-- `func (n *JobNode) RequiresLabels() []string` -- RequiresLabels returns the terms declared via Requires.
+- `func (n *JobNode) RequiresLabels() []string`
 - `func (n *JobNode) ResourceHints() *ResourceHints` -- ResourceHints returns a copy of the resource pin declared via JobNode.Resources, or nil when the node declared none.
 - `func (n *JobNode) Resources(hints ...ResourceHint) *JobNode` -- Resources pins this node's peak CPU and memory.
 - `func (n *JobNode) ResultStep() *WorkStep` -- ResultStep returns the *WorkStep the Job designated as its typed output via Work's return value, or nil for untyped Jobs.
@@ -807,13 +803,13 @@ type JobNode struct {
 - `func (n *JobNode) RetryConfig() RetryConfig` -- RetryConfig returns the resolved retry envelope.
 - `func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode` -- SkipIf registers a predicate the orchestrator evaluates after this node's dependencies complete.
 - `func (n *JobNode) SkipIfBudget() time.Duration` -- SkipIfBudget returns the configured per-predicate evaluation budget, or zero for the orchestrator's default.
-- `func (n *JobNode) SkipPredicates() []SkipPredicate` -- SkipPredicates returns the node's registered skip predicates.
+- `func (n *JobNode) SkipPredicates() []SkipPredicate`
 - `func (n *JobNode) Timeout(d time.Duration) *JobNode` -- Timeout caps the per-attempt duration.
 - `func (n *JobNode) TimeoutDuration() time.Duration` -- TimeoutDuration returns the configured per-attempt timeout, or zero if unlimited.
 - `func (n *JobNode) Verifier() VerifyFn` -- Verifier returns the node's Verify postcondition, or nil if none.
-- `func (n *JobNode) Verify(fn VerifyFn) *JobNode` -- Verify registers a postcondition checked after the node's action succeeds.
+- `func (n *JobNode) Verify(fn VerifyFn) *JobNode` -- Verify checks a postcondition after each successful action attempt.
 - `func (n *JobNode) WhenRunner(labels ...string) *JobNode` -- WhenRunner marks the job as conditional on the dispatching runner advertising the listed labels (same comma-OR / AND semantics as Requires).
-- `func (n *JobNode) WhenRunnerLabels() []string` -- WhenRunnerLabels returns the terms declared via WhenRunner.
+- `func (n *JobNode) WhenRunnerLabels() []string`
 - `func (n *JobNode) Work() *Work` -- Work returns the materialized inner DAG for the node's job.
 
 ### type KeySource
@@ -908,12 +904,12 @@ type Logs = storage.LogStore
 
 ### type MemoizeConfig
 
-MemoizeConfig is a node's resolved memoization configuration: the key function that names the work plus the retention window for a stored result.
+MemoizeConfig holds a node's key function and result retention window.
 
 ```
 type MemoizeConfig struct {
     // Key computes the content key after upstream dependencies
-    // complete. Return [NoCache] to opt this invocation out.
+    // complete. Return [NoCache] with a nil error to bypass memoization.
     Key CacheKeyFn
     // TTL bounds how long a stored result remains reusable.
     TTL time.Duration
@@ -973,7 +969,7 @@ const (
 
 ### type Outcome
 
-Outcome is the terminal state of a node in a Plan run.
+Outcome is a terminal node state.
 
 ```
 type Outcome string
@@ -988,21 +984,16 @@ const (
     Skipped   Outcome = "skipped"
     Cancelled Outcome = "cancelled"
 
-    // SkippedConcurrent: .Memoize() arrival hit a full slot under
-    // OnLimit:Skip. Distinct from Skipped (which comes from SkipIf)
-    // so dashboards can surface the cause.
+    // SkippedConcurrent records a full concurrency group with OnLimit [Skip].
     SkippedConcurrent Outcome = "skipped-concurrent"
 
-    // Superseded: .Memoize() holder was evicted by a newer arrival under
-    // OnLimit:CancelOthers. Distinct from Cancelled (operator-driven)
-    // so dashboards can surface "evicted by newer run" vs "operator
-    // cancelled".
+    // Superseded records eviction by a concurrency group's [CancelOthers] policy.
     Superseded Outcome = "superseded"
 )
 ```
 
 - `func (o Outcome) OK() bool` -- OK reports whether the outcome satisfies downstream dependencies.
-- `func (o Outcome) Terminal() bool` -- Terminal reports whether the outcome ends the node's lifecycle.
+- `func (o Outcome) Terminal() bool` -- Terminal reports true for Outcome values.
 
 ### type ParallelFailurePolicy
 
@@ -1079,7 +1070,7 @@ type PipelineResolverFunc func(ctx context.Context, pipeline, nodeID string, max
 
 ### type Plan
 
-Plan is the typed DAG a pipeline returns from its Plan method.
+Plan holds the job graph populated by a pipeline's Plan method.
 
 ```
 type Plan struct {
@@ -1087,14 +1078,14 @@ type Plan struct {
 }
 ```
 
-- `func NewPlan() *Plan` -- NewPlan returns an empty Plan.
+- `func NewPlan() *Plan`
 - `func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires each declared plan-level budget before any node dispatches and releases it when the run reaches a terminal status.
 - `func (p *Plan) ConcurrencyCost() int` -- ConcurrencyCost returns the first plan-level admission cost declared via Plan.Concurrency, or 0 when the plan declared no whole-run coordination.
 - `func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the first group set via Plan.Concurrency, or nil when the plan declared no whole-run coordination.
-- `func (p *Plan) Expansions() []Expansion` -- Expansions returns the registered ExpandFrom generators.
-- `func (p *Plan) GroupSourceIDs(id string) []string` -- GroupSourceIDs returns the ids of the source nodes backing any ExpandFrom Groups this node waits on via Needs(group).
-- `func (p *Plan) Inputs() any` -- Inputs returns the parsed Inputs value the orchestrator handed to this pipeline's Plan() method, or nil for a Plan built directly (outside the registration path).
-- `func (p *Plan) IsDynamicNode(id string) bool` -- IsDynamicNode reports whether the node sources runtime-variable downstream work -- i.e.
+- `func (p *Plan) Expansions() []Expansion` -- Expansions returns the registered JobFanOutDynamic generators.
+- `func (p *Plan) GroupSourceIDs(id string) []string` -- GroupSourceIDs returns the ids of the source nodes backing any JobFanOutDynamic Groups this node waits on via Needs(group).
+- `func (p *Plan) Inputs() any` -- Inputs returns the parsed pipeline inputs, or nil for a Plan built directly.
+- `func (p *Plan) IsDynamicNode(id string) bool` -- IsDynamicNode reports whether the node supplies a dynamic fan-out expansion.
 - `func (p *Plan) Job(id string) *JobNode` -- Job returns the node with the given ID, or nil if absent.
 - `func (p *Plan) JobArgSchema(id string) *Schema` -- JobArgSchema returns the args schema for the named job, or nil when that job doesn't declare typed args.
 - `func (p *Plan) JobArgSchemas() map[string]*Schema` -- JobArgSchemas returns every job-args schema registered against this plan, keyed by node id.
@@ -1686,7 +1677,7 @@ SkipOption configures a SkipIf registration.
 type SkipOption func(*JobNode)
 ```
 
-- `func SkipBudget(d time.Duration) SkipOption` -- SkipBudget overrides the per-predicate evaluation budget.
+- `func SkipBudget(d time.Duration) SkipOption` -- SkipBudget sets the timeout applied to each predicate on the node.
 
 ### type SkipPredicate
 

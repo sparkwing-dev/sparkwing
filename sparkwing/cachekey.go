@@ -7,35 +7,19 @@ import (
 	"strings"
 )
 
-// NoCache is the typed sentinel returned from a [CacheKeyFn] to
-// explicitly opt this invocation out of memoization. It is distinct
-// from the zero CacheKey: returning
-// NoCache surfaces "explicit opt-out" in operator logs (cache row
-// "skipped: explicit opt-out"), while returning the zero value
-// surfaces a "missing key" warning. Both bypass memoization for the
-// invocation, but the operator-facing signal is different.
+// NoCache bypasses memoization when a [CacheKeyFn] returns it with a nil error.
+// An empty key fails resolution.
 const NoCache CacheKey = "ck:nocache"
 
 // IsNoCache reports whether k is the explicit [NoCache] sentinel.
-// The zero CacheKey is NOT NoCache.
 func (k CacheKey) IsNoCache() bool { return k == NoCache }
 
-// Key composes a CacheKey from arbitrary parts. Parts are stringified
-// (via fmt.Sprintf("%v")), joined with a separator unlikely to appear
-// in values, and SHA-256 hashed. The result is a 16-char hex digest
-// prefixed with "ck:" so cache rows are recognizable in logs.
-//
-//	sparkwing.Key("deploy", target, build.Output().Digest)
-//
-// Determinism caveats:
-//   - nil values hash to their Go zero stringification ("<nil>"); pass a
-//     sentinel string if distinction matters.
-//   - slices and maps stringify through Sprintf's default format, which
-//     is order-sensitive for maps. Avoid using raw maps as parts; pass
-//     a sorted slice of key=value strings instead.
-//   - Refs serialize to their NodeID by default. If you want the
-//     upstream's *output* in the key, resolve the Ref first:
-//     `sparkwing.Key(..., ref.Get(ctx).Digest)`.
+// Key hashes the parts' fmt %v representations, separated by byte 0x1e,
+// into a "ck:" prefix and 16 hexadecimal characters.
+// Choose parts with stable, distinct representations: formatting omits
+// type information, and a part containing 0x1e can alias multiple parts.
+// Resolve a [Ref] before passing its output into the key; a Ref itself
+// formats as its node ID.
 func Key(parts ...any) CacheKey {
 	var b strings.Builder
 	for i, p := range parts {

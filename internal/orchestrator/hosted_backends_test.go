@@ -40,7 +40,7 @@ func (hostedMemoPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.
 	first := sparkwing.Job(plan, "first", func(context.Context) error {
 		hostedMemoBodies.Add(1)
 		return nil
-	}).Memoize(func(context.Context) sparkwing.CacheKey { return sparkwing.Key("hosted", "memo-v1") })
+	}).Memoize(func(context.Context) (sparkwing.CacheKey, error) { return sparkwing.Key("hosted", "memo-v1"), nil })
 	sparkwing.Job(plan, "second", func(context.Context) error { return nil }).Needs(first)
 	return nil
 }
@@ -302,10 +302,7 @@ func TestHostedRun_SkewedDaemonStoreRunsStandalone(t *testing.T) {
 		t.Fatalf("ensure root: %v", err)
 	}
 
-	// safety: the daemon holds a store that records a requirement its binary
-	// does not understand, which is the daemon being older than the pin that
-	// migrated it. Two homes because one process cannot be both binaries at
-	// once.
+	// safety: separate homes let admission succeed while the API reads an unsupported store.
 	brokenHome := wingdTestHome(t)
 	requireUnknownFeature(t, PathsAt(brokenHome).StateDB())
 	startAPIDaemonOnFaultedStore(t, home, brokenHome)
@@ -344,8 +341,6 @@ func TestHostedRun_UnreadableDaemonStoreRefusesTheRun(t *testing.T) {
 		t.Fatalf("ensure root: %v", err)
 	}
 
-	// safety: a file that is not a database is unreadable for a reason age
-	// cannot explain, so it is the fault a run is still refused for.
 	brokenHome := wingdTestHome(t)
 	if err := PathsAt(brokenHome).EnsureRoot(); err != nil {
 		t.Fatalf("ensure broken root: %v", err)
@@ -671,8 +666,6 @@ func TestWingdAPI_UnknownRouteAnswersUnsupportedWithNoStore(t *testing.T) {
 	}
 }
 
-// safety: stamps a schema requirement no build knows, so opening the store at
-// path fails the way an older binary meeting a newer store does.
 func requireUnknownFeature(t *testing.T, path string) {
 	t.Helper()
 	st, err := store.Open(path)
@@ -732,9 +725,6 @@ func TestWingdAPI_ArtifactRouteFollowsTheConfiguredStore(t *testing.T) {
 	}
 }
 
-// safety: a refusal must not read like a success. The block promises
-// "everything else works" and the store it opens is what doctor reports as
-// runs that went standalone, so neither may survive a run that is refused.
 func TestHostedRun_ARefusedRunLeavesNoBlockAndNoStore(t *testing.T) {
 	registerHostedPipelines(t)
 	home := wingdTestHome(t)
@@ -784,9 +774,7 @@ func TestHostedRun_ARefusedRunLeavesNoBlockAndNoStore(t *testing.T) {
 	if _, err := os.Stat(paths.StandaloneStateDB()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stat %s = %v, want no standalone store after a refusal", paths.StandaloneStateDB(), err)
 	}
-	// safety: the lock file every standalone opener holds stays, so the
-	// directory does. What must not survive is a store, which is what doctor
-	// reads and what would report runs that went standalone when none did.
+	// safety: the retained lock file can keep this directory present.
 	entries, rerr := os.ReadDir(paths.StandaloneDir())
 	if rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
 		t.Fatalf("read %s: %v", paths.StandaloneDir(), rerr)

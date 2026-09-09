@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -48,9 +49,9 @@ func TestCacheResolutionFailureStopsDispatch(t *testing.T) {
 				return "", nil
 			})
 			executor := NewNodeExecutor(Backends{State: localState{st: state}})
-			result, handled := executor.runNodeWithCache(t.Context(), runner.Request{RunID: runID, Node: node})
-			if !handled || result.Outcome != sparkwing.Failed || result.Err == nil {
-				t.Fatalf("cache resolution = (%s, %v, handled=%t)", result.Outcome, result.Err, handled)
+			result := executor.RunNode(t.Context(), runner.Request{RunID: runID, NodeID: nodeID, Node: node})
+			if result.Outcome != sparkwing.Failed || result.Err == nil {
+				t.Fatalf("cache resolution = (%s, %v)", result.Outcome, result.Err)
 			}
 			if !strings.Contains(result.Err.Error(), failure) {
 				t.Errorf("resolution error = %v", result.Err)
@@ -96,12 +97,55 @@ func TestCacheResolutionRejectsEndedContext(t *testing.T) {
 		}
 		cancel()
 		var calls atomic.Int32
-		key, err := safeCacheKey(resolverContext, func(context.Context) (sparkwing.CacheKey, error) {
+		key, err := resolveCacheKey(resolverContext, func(context.Context) (sparkwing.CacheKey, error) {
 			calls.Add(1)
 			return "sample-key", nil
 		}, "sample")
 		if key != "" || !errors.Is(err, wanted) || calls.Load() != 0 {
 			t.Errorf("ended context = (%q, %v), calls=%d", key, err, calls.Load())
 		}
+	}
+}
+
+func TestCacheResolutionDeadlineAfterEntry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		key, err := resolveCacheKey(t.Context(), func(ctx context.Context) (sparkwing.CacheKey, error) {
+			calls.Add(1)
+			<-ctx.Done()
+			return "sample-key", nil
+		}, "sample")
+		if key != "" || !errors.Is(err, context.DeadlineExceeded) || calls.Load() != 1 {
+			t.Fatalf("expired resolver = (%q, %v), calls=%d", key, err, calls.Load())
+		}
+	})
+}
+
+func TestCacheResolutionCancellationLeavesRowForTeardown(t *testing.T) {
+	state := consumerTestStore(t, t.TempDir())
+	const runID = "sample-run"
+	const nodeID = "sample-node"
+	if err := state.CreateRun(t.Context(), store.Run{ID: runID, Pipeline: "sample", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.CreateNode(t.Context(), store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	plan := sparkwing.NewPlan()
+	node := sparkwing.Job(plan, nodeID, func(context.Context) error { return nil }).Memoize(
+		func(context.Context) (sparkwing.CacheKey, error) { return "sample-key", nil },
+	)
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	result := NewNodeExecutor(Backends{State: localState{st: state}}).RunNode(canceled, runner.Request{RunID: runID, NodeID: nodeID, Node: node})
+	if result.Outcome != sparkwing.Failed || !errors.Is(result.Err, context.Canceled) {
+		t.Fatalf("canceled node = (%s, %v)", result.Outcome, result.Err)
+	}
+	persisted, err := state.GetNode(t.Context(), runID, nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Outcome != "" {
+		t.Fatalf("outcome before teardown = %q", persisted.Outcome)
 	}
 }

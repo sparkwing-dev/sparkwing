@@ -30,11 +30,13 @@ func TestAssistedChildProcessHelper(t *testing.T) {
 		if os.Getenv(assistedChildHelperStubborn) == "1" {
 			platformIgnoreAssistedChildTermination()
 		}
-		if err := os.WriteFile(
-			os.Getenv(assistedChildHelperPIDFile),
-			[]byte(strconv.Itoa(os.Getpid())),
-			0o600,
-		); err != nil {
+		pidPath := os.Getenv(assistedChildHelperPIDFile)
+		pendingPIDPath := pidPath + ".pending"
+		if err := os.WriteFile(pendingPIDPath, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+			os.Exit(2)
+		}
+		// SAFETY: readers treat the final path as permission to terminate the descendant.
+		if err := os.Rename(pendingPIDPath, pidPath); err != nil {
 			os.Exit(2)
 		}
 		blockAssistedChildTestProcess()
@@ -80,11 +82,11 @@ func blockAssistedChildTestProcess() {
 
 func TestAssistedChildCancellationWaitsForStubbornDescendant(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
-	cmd := assistedChildHelperCommand("cancel", pidFile, true)
-	ctx, cancel := context.WithCancelCause(context.Background())
+	command := assistedChildHelperCommand("cancel", pidFile, true)
+	childContext, cancel := context.WithCancelCause(context.Background())
 	outcomes := make(chan assistedChildRunResult, 1)
 	go func() {
-		outcome, err := runAssistedChildProcess(ctx, cmd, discardAssistedChildLogger())
+		outcome, err := runAssistedChildProcess(childContext, command, discardAssistedChildLogger())
 		outcomes <- assistedChildRunResult{outcome: outcome, err: err}
 	}()
 
@@ -107,10 +109,10 @@ func TestAssistedChildCancellationWaitsForStubbornDescendant(t *testing.T) {
 
 func TestAssistedChildNormalExitCleansRemainingDescendant(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
-	cmd := assistedChildHelperCommand("exit", pidFile, false)
+	command := assistedChildHelperCommand("exit", pidFile, false)
 	outcomes := make(chan assistedChildRunResult, 1)
 	go func() {
-		outcome, err := runAssistedChildProcess(context.Background(), cmd, discardAssistedChildLogger())
+		outcome, err := runAssistedChildProcess(context.Background(), command, discardAssistedChildLogger())
 		outcomes <- assistedChildRunResult{outcome: outcome, err: err}
 	}()
 
@@ -127,17 +129,17 @@ func TestAssistedChildNormalExitCleansRemainingDescendant(t *testing.T) {
 
 func TestAssistedChildAlreadyCanceledDoesNotStart(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "started")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestAssistedChildProcessHelper$")
-	cmd.Env = append(os.Environ(), assistedChildHelperMode+"=mark", assistedChildHelperMarker+"="+marker)
-	ctx, cancel := context.WithCancel(context.Background())
+	command := exec.Command(os.Args[0], "-test.run=^TestAssistedChildProcessHelper$")
+	command.Env = append(os.Environ(), assistedChildHelperMode+"=mark", assistedChildHelperMarker+"="+marker)
+	childContext, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	outcome, err := runAssistedChildProcess(ctx, cmd, discardAssistedChildLogger())
+	outcome, err := runAssistedChildProcess(childContext, command, discardAssistedChildLogger())
 	if err != nil || !errors.Is(outcome.cancelCause, context.Canceled) {
 		t.Fatalf("pre-canceled result = %+v err=%v", outcome, err)
 	}
-	if cmd.Process != nil {
-		t.Fatalf("pre-canceled child started with pid %d", cmd.Process.Pid)
+	if command.Process != nil {
+		t.Fatalf("pre-canceled child started with pid %d", command.Process.Pid)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("pre-canceled child wrote marker: %v", err)
@@ -145,13 +147,13 @@ func TestAssistedChildAlreadyCanceledDoesNotStart(t *testing.T) {
 }
 
 func TestAssistedChildStartFailureReturnsWithoutAProcess(t *testing.T) {
-	cmd := exec.Command(filepath.Join(t.TempDir(), "missing-runner"))
-	outcome, err := runAssistedChildProcess(context.Background(), cmd, discardAssistedChildLogger())
+	command := exec.Command(filepath.Join(t.TempDir(), "missing-runner"))
+	outcome, err := runAssistedChildProcess(context.Background(), command, discardAssistedChildLogger())
 	if err == nil {
 		t.Fatalf("missing child result = %+v, want start error", outcome)
 	}
-	if cmd.Process != nil {
-		t.Fatalf("failed child start retained pid %d", cmd.Process.Pid)
+	if command.Process != nil {
+		t.Fatalf("failed child start retained pid %d", command.Process.Pid)
 	}
 }
 
@@ -192,9 +194,9 @@ func TestFailedAssistedChildCleanupLogsAndRetriesInspectionAndTermination(t *tes
 	if queryCalls != 5 || terminateCalls != 2 || !waited {
 		t.Fatalf("cleanup calls: query=%d terminate=%d waited=%v", queryCalls, terminateCalls, waited)
 	}
-	wantSleeps := []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
-	if fmt.Sprint(sleeps) != fmt.Sprint(wantSleeps) {
-		t.Fatalf("cleanup backoff = %v, want %v", sleeps, wantSleeps)
+	expectedDelays := []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
+	if fmt.Sprint(sleeps) != fmt.Sprint(expectedDelays) {
+		t.Fatalf("cleanup backoff = %v, want %v", sleeps, expectedDelays)
 	}
 	logText := logs.String()
 	if !strings.Contains(logText, "operation=query_job") || !strings.Contains(logText, "operation=terminate_job") {
@@ -246,14 +248,14 @@ func assistedChildHelperCommand(mode, pidFile string, stubborn bool) *exec.Cmd {
 	if stubborn {
 		stubbornValue = "1"
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestAssistedChildProcessHelper$")
-	cmd.Env = append(
+	command := exec.Command(os.Args[0], "-test.run=^TestAssistedChildProcessHelper$")
+	command.Env = append(
 		os.Environ(),
 		assistedChildHelperMode+"="+mode,
 		assistedChildHelperPIDFile+"="+pidFile,
 		assistedChildHelperStubborn+"="+stubbornValue,
 	)
-	return cmd
+	return command
 }
 
 func discardAssistedChildLogger() *slog.Logger {
@@ -265,13 +267,13 @@ func readAssistedChildPID(t *testing.T, path string) int {
 	if err := waitForAssistedChildPIDFile(path, 3*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(path)
+	contents, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read descendant pid: %v", err)
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	pid, err := strconv.Atoi(strings.TrimSpace(string(contents)))
 	if err != nil || pid <= 1 {
-		t.Fatalf("descendant pid = %q, err=%v", raw, err)
+		t.Fatalf("descendant pid = %q, err=%v", contents, err)
 	}
 	return pid
 }

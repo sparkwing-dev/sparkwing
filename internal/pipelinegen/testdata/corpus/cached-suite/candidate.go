@@ -5,6 +5,7 @@ import (
 	"time"
 
 	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/inputs"
 )
 
 type GenCachedSuite struct{ sw.Base }
@@ -21,16 +22,8 @@ func (GenCachedSuite) Examples() []sw.Example {
 
 func (GenCachedSuite) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	sw.Job(plan, "test", genCachedTest).
-		Cache(genCachedKey, sw.TTL(24*time.Hour))
+		Memoize(inputs.Files("**/*.go"), sw.TTL(24*time.Hour))
 	return nil
-}
-
-func genCachedKey(ctx context.Context) sw.CacheKey {
-	sources, err := sw.Glob("**/*.go")
-	if err != nil {
-		return sw.NoCache
-	}
-	return sw.Key("test-suite", sources)
 }
 
 func genCachedTest(ctx context.Context) error {

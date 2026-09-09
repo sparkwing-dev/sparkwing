@@ -5,35 +5,9 @@ All notable changes to **sparkwing** are documented here. Format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The release
 pipeline refuses to ship a new version without a matching entry below.
 
-## How to read this
-
-Each entry leads with a bold scope (`**sdk:**`, `**cli:**`, `**controller:**`,
-`**cache:**`, `**config:**`, `**release:**`, `**docs:**`, ...) so you can
-scan for the surface that affects you. Breaking changes are marked
-`- **scope (Breaking):**` -- the marker goes inside the bold scope, before
-the colon, which is the only form the changelog lint gate recognizes --
-plus a link to a section in that release's
-[migration guide](docs/migrations/) -- click through for before/after code,
-ordering guidance, and gotchas the inline summary can't fit.
-
-What belongs here:
-
-- User-facing behavior. New features, surfaces, defaults, removals, fixes
-  that an adopter would notice.
-- Breaking changes. Every break in an exported `pkg/` or `sparkwing/` API,
-  CLI flag, wire protocol, or YAML config field. Tagged `(Breaking)` inline.
-- Migration steps for breaking changes, linked to the per-release guide.
-
-What does **not** belong here:
-
-- Internal refactors invisible to adopters. Renames inside `internal/`,
-  test reshuffles, snapshot regenerations.
-- Per-commit narrative. The release page is the narrative; commits are
-  the audit trail. The pre-release manicuring agent (see
-  [docs/changelog-style.md](docs/changelog-style.md)) consolidates related
-  commits into one user-facing entry.
-- Internal-only design docs and dev-only tooling unless adopters
-  meaningfully see the result.
+Entries name the affected surface. A `(Breaking)` marker links to the
+release's migration guide. See [Changelog style](docs/changelog-style.md)
+for authoring rules.
 
 ## Pre-1.0 caveat
 
@@ -115,6 +89,15 @@ code change to unlock.
   `--sw-cd` work detached; flags a detached run cannot honor are refused with
   the same reasons as before. See the [migration
   guide](docs/migrations/v0.46.0.md#runs-submit-becomes-run---sw-detached).
+
+### Changed
+
+- **sdk (Breaking):** `CacheKeyFn` now returns `(CacheKey, error)`.
+  Key errors, panics, empty keys, and expired resolution deadlines fail
+  before dispatch. Return `NoCache, nil` to bypass memoization explicitly.
+  Input helpers propagate filesystem and Git failures; `inputs.Compose`
+  propagates errors and explicit bypasses. See the
+  [migration guide](docs/migrations/v0.46.0.md#cache-key-callbacks-return-errors).
 
 ## [v0.45.0] - 2026-09-08
 ### Changed
@@ -835,8 +818,10 @@ code change to unlock.
   cancel was requested on every beat but discarded the answer, so only the
   pre-dispatch check could act on it and a run flagged mid-flight -- through the
   controller's cancel endpoint against a shared store -- ran to completion. The
-  heartbeat now cancels the dispatch and records the run as `cancelled`, the way
-  the controller-backed worker already did.
+  heartbeat now cancels the dispatch and records the run as `cancelled`, along
+  with every node the killed child left unfinished, the way the
+  controller-backed worker already did. A dispatch that reaches its own failure
+  in the same moment keeps that failure.
 - **store:** `node_metrics` now carries the `ON DELETE CASCADE` foreign key to
   `runs` that every other child table has, so `sparkwing runs delete` and
   `sparkwing runs prune` remove a run's per-node CPU and memory samples instead
@@ -942,11 +927,6 @@ code change to unlock.
   `RequestNodeBounce` allocated its sequence the same way and holds the node
   row for the same reason. SQLite was never affected: its immediate
   transactions already serialized the pair.
-
-  heartbeat now cancels the dispatch and records the run as `cancelled`, along
-  with every node the killed child left unfinished, the way the
-  controller-backed worker already did. A dispatch that reaches its own failure
-  in the same moment keeps that failure.
 - **runners:** A warm-pool node cancelled while the orchestrator was still
   announcing it to the controller now reports `cancelled` instead of `failed`.
   The runner also revokes the node's readiness on that path, so a cancellation
@@ -1052,8 +1032,10 @@ code change to unlock.
   without rechecking, so a sweep that ran while a daemon for another
   `SPARKWING_HOME` was taking over deleted the successor's freshly bound
   socket, leaving clients spinning until they failed with "predecessor daemon
-  still holds the election lock". It now redials and confirms the path still
-  carries the same file before unlinking.
+  still holds the election lock". It now redials both the admission socket and
+  the API socket beside it, and unlinks nothing unless each still carries the
+  same file the dial found dead, so a path that answers again, or that has been
+  replaced or removed since, is left alone.
 - **cli:** `sparkwing secrets set` stores a value exactly as given. The local
   dotenv writer quoted a value only when it looked like it needed quoting and
   the reader never undid that quoting, so a secret holding a newline, a quote,
@@ -1099,10 +1081,6 @@ code change to unlock.
   running; and its marker surfaced as a node id in `sparkwing concurrency
   status`. Readers now accept either form, and writers keep emitting the
   current one so a runner still on the old release reads what it wrote.
-  still holds the election lock". It now redials both the admission socket and
-  the API socket beside it, and unlinks nothing unless each still carries the
-  same file the dial found dead, so a path that answers again, or that has been
-  replaced or removed since, is left alone.
 - **orchestrator:** S3-shared-state concurrency survives a rolling upgrade. The
   marker that tags an inherited holder inside a `concurrency/` slot object had
   changed shape, and nothing rewrites those objects, so an upgraded runner and a
@@ -3556,34 +3534,6 @@ version cannot be deleted; `go.mod` retracts it instead, and `go get
   each `modules[]` entry's Go module path is cross-checked against that
   directory's `go.mod`. The path argument is also accepted positionally, as
   the command's own examples show it.
-- **queue:** External CPU now subtracts measured live holder process-tree usage
-  instead of reserved lease capacity. Process reuse, overlapping trees, sensor
-  loss, and macOS sampling no longer make queue headroom contradict host load.
-- **queue:** Internal nodes and barriers now retain their owning run's original
-  queue rank, so a newer run cannot overtake an older live run by submitting
-  its work first. The daemon verifies the live owner lease before applying
-  that rank; invalid or stale ownership claims keep ordinary arrival order.
-- **queue:** Start-time estimates now remain unknown when an active holder has
-  outlived its measured duration, instead of promising immediate admission
-  while capacity is still occupied.
-- **queue:** Start and clear estimates now simulate host and semaphore
-  constraints together, including atomic multi-resource admission and
-  backfill. A waiter blocked by a semaphore no longer reports the earlier
-  host-only estimate, and unknown or overflowing resource bounds stay unknown.
-- **queue telemetry:** Run listings retain concurrent node admission waits,
-  distinguish plan-level admission from node admission, and correlate terminal
-  events with the matching request. Interleaved or stale events no longer erase
-  a live wait or make a run-level queue position look like node execution.
-- **local admission:** Explicit cancellation is persisted before execution is
-  signalled, applies atomically to every member of a shared lease, survives
-  daemon restart and connection replacement, and cannot resurrect a terminal
-  run through admission or reattachment.
-- **local admission:** Guarded session inspection now retains capacity when a
-  recycled leader PID coexists with live session members, ordinary unguarded
-  state remains readable by the previous release, and disconnected
-  cancellation gets the same cooperative cleanup window as its supervisor.
-- **queue telemetry:** Semaphore constraints now appear in the blocking reason
-  instead of leaving a blocked waiter with only its host-capacity explanation.
 - **queue:** External CPU now subtracts measured live holder process-tree usage
   instead of reserved lease capacity. Process reuse, overlapping trees, sensor
   loss, and macOS sampling no longer make queue headroom contradict host load.

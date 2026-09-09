@@ -286,15 +286,15 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 
-	var profName string
-	var profIsLocal bool
+	var profileName string
+	var profileIsLocal bool
 	if opts.Profile != nil {
-		profName = opts.Profile.Name
-		profIsLocal = opts.Profile.ControllerURL() == ""
+		profileName = opts.Profile.Name
+		profileIsLocal = opts.Profile.ControllerURL() == ""
 	}
 	ctx = sparkwingruntime.WithProfileResolution(ctx, sparkwing.ProfileResolutionContext{
-		Name:    profName,
-		IsLocal: profIsLocal,
+		Name:    profileName,
+		IsLocal: profileIsLocal,
 	})
 
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)
@@ -399,13 +399,13 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		ctx = sparkwing.WithSecretResolver(ctx,
 			secrets.NewCached(opts.SecretSource, masker).AsResolver())
 	}
-	pipeSec, err := sparkwingruntime.ResolvePipelineSecrets(ctx, reg, opts.PipelineYAML)
+	pipelineSecrets, err := sparkwingruntime.ResolvePipelineSecrets(ctx, reg, opts.PipelineYAML)
 	if err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
-	if pipeSec != nil {
-		ctx = sparkwingruntime.WithPipelineSecrets(ctx, pipeSec)
+	if pipelineSecrets != nil {
+		ctx = sparkwingruntime.WithPipelineSecrets(ctx, pipelineSecrets)
 	}
 	delegate := secrets.MaskingLogger(opts.Delegate, masker)
 
@@ -460,9 +460,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 				admitErr = cause
 			}
-			// safety: the one ending that never started, so it is the one that
-			// prints no block and gives back a store it created. Every other
-			// failure below wrote its run row and keeps both.
+			// safety: refused standalone runs release their temporary store; admitted runs retain it.
 			if opts.standalone != nil {
 				opts.standalone.refused = true
 			}
@@ -492,9 +490,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		// safety: release only after FinishRun below, so the daemon's
 		// orphan finalizer can never observe a still-running row.
 		defer lease.release()
-		// safety: admission has answered, so the block cannot promise
-		// "everything else works" above a refusal, and a store this run made
-		// for a run that never started is discarded by the caller instead.
+		// safety: announce the standalone store only after admission succeeds.
 		opts.standalone.announce()
 		if outcome == admitSkipped {
 			skipDispatch = true
@@ -1901,11 +1897,11 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 					if req.NodeID == "" {
 						return &sparkwing.ResolvedPipelineRef{RunID: childRunID}, nil
 					}
-					data, oerr := s.backends.State.GetNodeOutput(pollCtx, childRunID, req.NodeID)
-					if oerr != nil {
-						return nil, fmt.Errorf("get child %s/%s output: %w", childRunID, req.NodeID, oerr)
+					output, outputErr := s.backends.State.GetNodeOutput(pollCtx, childRunID, req.NodeID)
+					if outputErr != nil {
+						return nil, fmt.Errorf("get child %s/%s output: %w", childRunID, req.NodeID, outputErr)
 					}
-					return &sparkwing.ResolvedPipelineRef{RunID: childRunID, Data: data}, nil
+					return &sparkwing.ResolvedPipelineRef{RunID: childRunID, Data: output}, nil
 				case "failed":
 					emitChildFinish("failed", run.Error)
 					return nil, fmt.Errorf("child run %s failed: %s", childRunID, run.Error)
@@ -1953,7 +1949,7 @@ func (s *dispatchState) pipelineRef() sparkwing.PipelineResolver {
 		if err != nil {
 			return nil, fmt.Errorf("no matching run for pipeline %q (maxAge=%s): %w", pipeline, maxAge, err)
 		}
-		data, err := s.backends.State.GetNodeOutput(ctx, run.ID, nodeID)
+		output, err := s.backends.State.GetNodeOutput(ctx, run.ID, nodeID)
 		if err != nil {
 			return nil, fmt.Errorf("get node %s/%s output: %w", run.ID, nodeID, err)
 		}
@@ -1972,7 +1968,7 @@ func (s *dispatchState) pipelineRef() sparkwing.PipelineResolver {
 					"pipeline_ref audit event append failed: %v", evErr)
 			}
 		}
-		return &sparkwing.ResolvedPipelineRef{RunID: run.ID, Data: data}, nil
+		return &sparkwing.ResolvedPipelineRef{RunID: run.ID, Data: output}, nil
 	})
 }
 
@@ -2393,7 +2389,7 @@ func (s *dispatchState) invokeGenerator(exp sparkwing.Expansion) (out []*sparkwi
 }
 
 func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
-	if _, prerendered := s.getOutcome(node.ID()); prerendered {
+	if _, alreadyCompleted := s.getOutcome(node.ID()); alreadyCompleted {
 		return
 	}
 	parentID, claimed := s.claimedParent(node.ID())
@@ -2730,21 +2726,25 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 		return runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("approval node %q has nil config", node.ID())}
 	}
 
-	nlog, err := s.backends.Logs.OpenNodeLog(s.ctx, s.runID, node.ID(), s.delegate)
+	nodeLog, err := s.backends.Logs.OpenNodeLog(s.ctx, s.runID, node.ID(), s.delegate)
 	if err == nil {
-		nlog = wrapNodeLogWithMasker(nlog, s.masker)
+		nodeLog = wrapNodeLogWithMasker(nodeLog, s.masker)
 	}
 	if err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
-	defer func() { _ = nlog.Close() }()
+	defer func() {
+		if err := nodeLog.Close(); err != nil {
+			slog.Error("close approval node log", "run", s.runID, "node", node.ID(), "error", err)
+		}
+	}()
 
 	if err := s.backends.State.StartNode(s.ctx, s.runID, node.ID()); err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
 	_ = s.backends.State.AppendEvent(s.ctx, s.runID, node.ID(), "node_started", nil)
 	nodeStartTS := time.Now()
-	nlog.Emit(sparkwing.LogRecord{
+	nodeLog.Emit(sparkwing.LogRecord{
 		TS:    nodeStartTS,
 		Level: "info",
 		Event: "node_start",
@@ -2771,7 +2771,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 		"timeout_ms": timeoutMS,
 	})
 	_ = s.backends.State.AppendEvent(s.ctx, s.runID, node.ID(), "approval_requested", reqPayload)
-	nlog.Emit(sparkwing.LogRecord{
+	nodeLog.Emit(sparkwing.LogRecord{
 		TS:    time.Now(),
 		Level: "info",
 		Event: "approval_requested",
@@ -2787,44 +2787,46 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 	ticker := time.NewTicker(approvalPollInterval())
 	defer ticker.Stop()
 
-	res := s.pollApproval(node.ID(), deadline, onTimeout, ticker)
+	resolution := s.pollApproval(node.ID(), deadline, onTimeout, ticker)
 
-	if res.via != "" {
+	if resolution.via != "" {
 		resAttrs := map[string]any{
-			"resolution":  res.resolution,
-			"via":         res.via,
+			"resolution":  resolution.resolution,
+			"via":         resolution.via,
 			"duration_ms": time.Since(nodeStartTS).Milliseconds(),
 		}
-		if res.approver != "" {
-			resAttrs["approver"] = res.approver
+		if resolution.approver != "" {
+			resAttrs["approver"] = resolution.approver
 		}
-		if res.comment != "" {
-			resAttrs["comment"] = res.comment
+		if resolution.comment != "" {
+			resAttrs["comment"] = resolution.comment
 		}
-		nlog.Emit(sparkwing.LogRecord{
+		nodeLog.Emit(sparkwing.LogRecord{
 			TS:    time.Now(),
 			Level: "info",
 			Event: "approval_resolved",
-			Msg:   res.summary,
+			Msg:   resolution.summary,
 			Attrs: resAttrs,
 		})
-		_ = s.backends.State.AppendNodeAnnotation(s.ctx, s.runID, node.ID(), res.summary)
+		if err := s.backends.State.AppendNodeAnnotation(s.ctx, s.runID, node.ID(), resolution.summary); err != nil {
+			nodeLog.Log("error", fmt.Sprintf("record approval annotation: %v", err))
+		}
 	}
 
-	nlog.Emit(sparkwing.LogRecord{
+	nodeLog.Emit(sparkwing.LogRecord{
 		TS:    time.Now(),
 		Level: "info",
 		Event: "node_end",
 		Attrs: map[string]any{
-			"outcome":     string(res.outcome),
+			"outcome":     string(resolution.outcome),
 			"duration_ms": time.Since(nodeStartTS).Milliseconds(),
 		},
 	})
 
-	if err := s.backends.State.FinishNode(s.ctx, s.runID, node.ID(), string(res.outcome), res.errMsg, res.payload); err != nil {
+	if err := s.backends.State.FinishNode(s.ctx, s.runID, node.ID(), string(resolution.outcome), resolution.errMsg, resolution.payload); err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
-	outcome, errMsg := res.outcome, res.errMsg
+	outcome, errMsg := resolution.outcome, resolution.errMsg
 	if outcome == sparkwing.Failed && errMsg != "" {
 		return runner.Result{Outcome: outcome, Err: errors.New(errMsg), Output: nil}
 	}
@@ -2854,23 +2856,23 @@ func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeou
 		deadlineC = deadlineTimer.C
 	}
 	for {
-		got, err := s.backends.State.GetApproval(s.ctx, s.runID, nodeID)
+		approval, err := s.backends.State.GetApproval(s.ctx, s.runID, nodeID)
 		if err != nil {
 			if terminal := wedge.fail(fmt.Sprintf("approval poll %s/%s", s.runID, nodeID), err); terminal != nil {
 				return approvalResult{outcome: sparkwing.Failed, errMsg: terminal.Error()}
 			}
 		} else {
 			wedge.success()
-			if got.ResolvedAt != nil {
-				return approvalResolutionToOutcome(got.Resolution, got.Approver, got.Comment)
+			if approval.ResolvedAt != nil {
+				return approvalResolutionToOutcome(approval.Resolution, approval.Approver, approval.Comment)
 			}
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			if _, err := s.backends.State.ResolveApproval(s.ctx, s.runID, nodeID,
 				store.ApprovalResolutionTimedOut, "sparkwing", "timeout"); err != nil {
 				if errors.Is(err, store.ErrLockHeld) {
-					if got, err2 := s.backends.State.GetApproval(s.ctx, s.runID, nodeID); err2 == nil && got.ResolvedAt != nil {
-						return approvalResolutionToOutcome(got.Resolution, got.Approver, got.Comment)
+					if approval, err2 := s.backends.State.GetApproval(s.ctx, s.runID, nodeID); err2 == nil && approval.ResolvedAt != nil {
+						return approvalResolutionToOutcome(approval.Resolution, approval.Approver, approval.Comment)
 					}
 				}
 			}
@@ -3006,29 +3008,41 @@ func (s *dispatchState) runWithCap(node *sparkwing.JobNode, fn func(slot *worker
 	return fn(slot)
 }
 
-func safeCacheKey(ctx context.Context, fn sparkwing.CacheKeyFn, nodeID string) sparkwing.CacheKey {
-	pctx, cancel := context.WithTimeout(ctx, defaultPredicateTimeout)
+func resolveCacheKey(ctx context.Context, resolver sparkwing.CacheKeyFn, nodeID string) (sparkwing.CacheKey, error) {
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("resolve cache key for %s: %w", nodeID, err)
+	}
+	resolverContext, cancel := context.WithTimeout(ctx, defaultPredicateTimeout)
 	defer cancel()
-
-	done := make(chan sparkwing.CacheKey, 1)
+	type cacheKeyResolution struct {
+		key sparkwing.CacheKey
+		err error
+	}
+	done := make(chan cacheKeyResolution, 1)
 	go func() {
+		var resolved cacheKeyResolution
 		defer func() {
-			if r := recover(); r != nil {
-				sparkwing.LoggerFromContext(ctx).Log("error",
-					fmt.Sprintf("CacheKey(%s) panicked: %v (proceeding uncached)", nodeID, r))
-				done <- ""
+			if recovered := recover(); recovered != nil {
+				resolved = cacheKeyResolution{err: fmt.Errorf("resolver panic: %v", recovered)}
 			}
+			done <- resolved
 		}()
-		done <- fn(pctx)
+		resolved.key, resolved.err = resolver(resolverContext)
 	}()
-
 	select {
-	case k := <-done:
-		return k
-	case <-pctx.Done():
-		sparkwing.LoggerFromContext(ctx).Log("error",
-			fmt.Sprintf("CacheKey(%s) exceeded %s budget (proceeding uncached)", nodeID, defaultPredicateTimeout))
-		return ""
+	case resolved := <-done:
+		if err := resolverContext.Err(); err != nil {
+			return "", fmt.Errorf("resolve cache key for %s: %w", nodeID, err)
+		}
+		if resolved.err != nil {
+			return "", fmt.Errorf("resolve cache key for %s: %w", nodeID, resolved.err)
+		}
+		if resolved.key == "" {
+			return "", fmt.Errorf("resolve cache key for %s: empty key", nodeID)
+		}
+		return resolved.key, nil
+	case <-resolverContext.Done():
+		return "", fmt.Errorf("resolve cache key for %s: %w", nodeID, resolverContext.Err())
 	}
 }
 
@@ -3041,10 +3055,10 @@ func callBeforeRun(ctx context.Context, hook sparkwing.BeforeRunFn) (err error) 
 	return hook(ctx)
 }
 
-func callAfterRun(ctx context.Context, hook sparkwing.AfterRunFn, runErr error, index int, nlog NodeLog) {
+func callAfterRun(ctx context.Context, hook sparkwing.AfterRunFn, runErr error, index int, nodeLog NodeLog) {
 	defer func() {
 		if r := recover(); r != nil {
-			nlog.Log("error", fmt.Sprintf("AfterRun hook %d panicked: %v", index, r))
+			nodeLog.Log("error", fmt.Sprintf("AfterRun hook %d panicked: %v", index, r))
 		}
 	}()
 	hook(ctx, runErr)
