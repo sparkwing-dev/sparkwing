@@ -602,6 +602,12 @@ func resetCacheCounter() {
 	resetLeaderBarrier()
 }
 
+func manualChildDispatchBackends(paths orchestrator.Paths, runStore *store.Store) orchestrator.Backends {
+	backends := orchestrator.LocalBackends(paths, runStore, nil)
+	backends.LocalCoordination = false
+	return backends
+}
+
 func claimManualChildTrigger(t *testing.T, ctx context.Context, runStore *store.Store, childID string) {
 	t.Helper()
 	trigger, err := runStore.ClaimSpecificTrigger(ctx, childID, store.DefaultLeaseDuration)
@@ -1422,7 +1428,7 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	})
 	go func() {
 		defer close(parentFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline:            parentPipeline,
 			RunID:               "queued-await-parent",
 			DispatchWaitTimeout: dispatchTimeout,
@@ -1435,7 +1441,7 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-parent",
@@ -1477,10 +1483,15 @@ func TestDispatchWatchdog_UnclaimedUnboundedChildStillTimesOutParent(t *testing.
 	paths := newPaths(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	runStore, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = runStore.Close() })
 
 	done := make(chan *orchestrator.Result, 1)
 	go func() {
-		runResult, _ := orchestrator.RunLocal(ctx, paths, orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline:            "unbounded-await-parent",
 			DispatchWaitTimeout: 100 * time.Millisecond,
 		})
@@ -1551,7 +1562,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	})
 	go func() {
 		defer close(parentFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-then-continue-parent",
 			RunID:    "queued-await-continue-parent",
 		})
@@ -1563,7 +1574,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-continue-parent",
@@ -1678,7 +1689,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 	})
 	go func() {
 		defer close(parentFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-parent",
 			RunID:    "queued-await-cancel-parent",
 		})
@@ -1690,7 +1701,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-cancel-parent",
@@ -1794,7 +1805,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	})
 	go func() {
 		defer close(parentFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-remaining-budget-parent",
 			RunID:    "queued-await-remaining-budget-parent",
 		})
@@ -1817,7 +1828,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-remaining-budget-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-remaining-budget-parent",
@@ -1944,7 +1955,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	})
 	go func() {
 		defer close(parentFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-early-resume-parent",
 			RunID:    "queued-await-early-resume-parent",
 		})
@@ -1967,7 +1978,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-early-resume-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-early-resume-parent",
@@ -2063,7 +2074,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = runStore.Close() })
-	backends := orchestrator.LocalBackends(paths, runStore, nil)
+	backends := manualChildDispatchBackends(paths, runStore)
 	observed := &missedPromotionBackend{
 		ConcurrencyBackend: backends.Concurrency,
 		key:                "g:plan-level-queued-await-missed-promotion-key",
@@ -2248,7 +2259,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 	})
 	go func() {
 		defer close(parentFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-multi-key-parent",
 			RunID:    "queued-await-multi-key-parent",
 		})
@@ -2271,7 +2282,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 	childStarted.Store(true)
 	go func() {
 		defer close(childFinished)
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-multi-key-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-multi-key-parent",
@@ -2345,7 +2356,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning(t *testing.
 
 	parentDone := make(chan *orchestrator.Result, 1)
 	go func() {
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline: "plan-level-slow-plan-await-parent",
 			RunID:    "slow-plan-await-parent",
 		})
@@ -2356,7 +2367,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning(t *testing.
 	claimManualChildTrigger(t, ctx, runStore, childID)
 	childDone := make(chan *orchestrator.Result, 1)
 	go func() {
-		runResult, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(paths, runStore, nil), orchestrator.Options{
+		runResult, _ := orchestrator.Run(ctx, manualChildDispatchBackends(paths, runStore), orchestrator.Options{
 			Pipeline:    "plan-level-slow-plan-await-child",
 			RunID:       childID,
 			ParentRunID: "slow-plan-await-parent",

@@ -87,8 +87,13 @@ func init() {
 func TestRun_NestedSpawnRetryOf_Chained(t *testing.T) {
 	p := newPaths(t)
 	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
 
-	first, err := orchestrator.RunLocal(ctx, p,
+	first, err := orchestrator.Run(ctx, manualChildDispatchBackends(p, st),
 		orchestrator.Options{Pipeline: "spawn-retry-parent", RunID: "p1"})
 	if err != nil {
 		t.Fatalf("first run: %v", err)
@@ -96,12 +101,6 @@ func TestRun_NestedSpawnRetryOf_Chained(t *testing.T) {
 	if first.Status != "failed" {
 		t.Fatalf("first run status = %q, want failed (spawn should time out)", first.Status)
 	}
-
-	st, err := store.Open(p.StateDB())
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer func() { _ = st.Close() }()
 
 	firstChildID, err := st.FindSpawnedChildTriggerID(ctx, "p1", "spawner", "spawn-retry-child")
 	if err != nil {
@@ -111,13 +110,13 @@ func TestRun_NestedSpawnRetryOf_Chained(t *testing.T) {
 		t.Fatal("expected first run's spawner to record a child trigger row")
 	}
 
-	second, err := orchestrator.RunLocal(ctx, p,
+	second, err := orchestrator.Run(ctx, manualChildDispatchBackends(p, st),
 		orchestrator.Options{Pipeline: "spawn-retry-parent", RunID: "p2", RetryOf: "p1"})
 	if err != nil {
 		t.Fatalf("second (retry) run: %v", err)
 	}
 	if second.Status != "failed" {
-		t.Logf("second run status = %q (expected failed; non-fatal for this test)", second.Status)
+		t.Fatalf("second run status = %q, want failed while child remains unclaimed", second.Status)
 	}
 
 	secondChildID, err := st.FindSpawnedChildTriggerID(ctx, "p2", "spawner", "spawn-retry-child")
@@ -151,8 +150,13 @@ func TestRun_NestedSpawnRetryOf_NoPriorChild(t *testing.T) {
 	resetGateCounter()
 	p := newPaths(t)
 	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
 
-	first, err := orchestrator.RunLocal(ctx, p,
+	first, err := orchestrator.Run(ctx, manualChildDispatchBackends(p, st),
 		orchestrator.Options{Pipeline: "spawn-retry-early-fail", RunID: "ef1"})
 	if err != nil {
 		t.Fatalf("first run: %v", err)
@@ -160,12 +164,6 @@ func TestRun_NestedSpawnRetryOf_NoPriorChild(t *testing.T) {
 	if first.Status != "failed" {
 		t.Fatalf("first run status = %q, want failed (gate should fail)", first.Status)
 	}
-
-	st, err := store.Open(p.StateDB())
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer func() { _ = st.Close() }()
 
 	priorChildID, err := st.FindSpawnedChildTriggerID(ctx, "ef1", "spawner", "spawn-retry-child")
 	if err != nil {
@@ -175,7 +173,7 @@ func TestRun_NestedSpawnRetryOf_NoPriorChild(t *testing.T) {
 		t.Fatalf("first run created child trigger %q at spawner; expected none", priorChildID)
 	}
 
-	_, err = orchestrator.RunLocal(ctx, p,
+	_, err = orchestrator.Run(ctx, manualChildDispatchBackends(p, st),
 		orchestrator.Options{Pipeline: "spawn-retry-early-fail", RunID: "ef2", RetryOf: "ef1"})
 	if err != nil {
 		t.Fatalf("second (retry) run: %v", err)
