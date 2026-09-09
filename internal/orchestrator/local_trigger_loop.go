@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -175,9 +176,16 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		return fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
 	}
 
-	binPath, err := cache.compile(sparkwingDir)
+	binPath, err := pinnedTriggerBinary(trig)
 	if err != nil {
-		return fmt.Errorf("compile %s: %w", sparkwingDir, err)
+		return err
+	}
+	pinned := binPath != ""
+	if !pinned {
+		//nolint:contextcheck // the compile cache owns its own context, as it did before the pin.
+		if binPath, err = cache.compile(sparkwingDir); err != nil {
+			return fmt.Errorf("compile %s: %w", sparkwingDir, err)
+		}
 	}
 
 	logger.Info(
@@ -186,6 +194,7 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		"pipeline", trig.Pipeline,
 		"repo", trig.Repo,
 		"repo_dir", repoDir,
+		"pinned", pinned,
 	)
 
 	args := []string{"handle-trigger", "--local"}
@@ -373,11 +382,49 @@ const SubmitRepoDirKey = "_SPARKWING_SUBMIT_REPO_DIR"
 // idempotency-key argument comparison.
 const SubmitPriorityKey = "_SPARKWING_SUBMIT_PRIORITY"
 
-// CronScheduleKey carries the id of the cron schedule that launched a run, so
-// one run traces back to the cadence that asked for it. The cron_fires table
-// is the authoritative join; this key answers the question from the run's own
-// row, which is where an operator reading `runs get` starts.
-const CronScheduleKey = "_SPARKWING_CRON_SCHEDULE"
+// safety: the pin is what keeps an updated checkout out of an unattended run,
+// so a pin that cannot be executed fails the run rather than falling back to
+// compiling the checkout.
+func pinnedTriggerBinary(trig *store.Trigger) (string, error) {
+	if trig == nil {
+		return "", nil
+	}
+	path := strings.TrimSpace(trig.TriggerEnv[crons.PinnedBinaryEnvKey])
+	if path == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("the cron schedule pinned %q, which is not an absolute path", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf(
+			"the pipeline binary this cron schedule pinned is gone from %s, and the pin is what keeps an "+
+				"updated checkout from changing what runs: %w. Re-run `sparkwing crons install` to pin the "+
+				"checkout as it stands, or `sparkwing crons unlock` to follow it", path, err)
+	}
+	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf(
+			"the pipeline binary this cron schedule pinned at %s is not executable; re-run "+
+				"`sparkwing crons install` to pin it again", path)
+	}
+	want := strings.TrimSpace(trig.TriggerEnv[crons.PinnedDigestEnvKey])
+	if want == "" {
+		return path, nil
+	}
+	got, err := crons.FileDigest(path)
+	if err != nil {
+		return "", fmt.Errorf("read the pinned pipeline binary at %s to check it against the pin: %w", path, err)
+	}
+	if got != want {
+		return "", fmt.Errorf(
+			"the pipeline binary this cron schedule pinned at %s has been replaced: it hashes to %s, and the "+
+				"schedule was armed against %s. The pin is what keeps an unattended run from executing something "+
+				"nobody approved, so this run is refused; re-run `sparkwing crons install` to pin the checkout as "+
+				"it stands, or `sparkwing crons unlock` to follow it", path, got, want)
+	}
+	return path, nil
+}
 
 func submittedTriggerPriority(trig *store.Trigger) string {
 	if trig == nil {

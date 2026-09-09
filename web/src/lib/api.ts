@@ -1185,25 +1185,82 @@ export interface CronHealth {
   armed: number;
   paused: number;
   undeclared: number;
+  // Schedules running a pinned pipeline binary, and the ones compiling the
+  // checkout on every fire.
+  locked: number;
+  following: number;
+  // Pinned schedules the checkout has moved past, and pins whose binary is gone.
+  ahead: number;
+  missing_binary: number;
+  // Overrides set against a declaration that has changed since.
+  stale_override: number;
   detail: string;
+  // Empty when none of the counts above wants attention.
+  remedy: string;
 }
 
 export type CronState = "armed" | "paused" | "undeclared";
 
 export type CronOutcome = "" | "fired" | "skipped_overlap" | "missed" | "failed";
 
-export interface CronSchedule {
-  id: string;
-  name: string;
-  repo_path: string;
-  pipeline: string;
+// Where a schedule is evaluated. This dashboard reads one host's store, so
+// every row it serves is local.
+export type CronWhere = "local" | "controller";
+
+export type CronLockState =
+  | "follows"
+  | "pinned"
+  | "ahead"
+  | "dirty"
+  | "missing";
+
+export interface CronLock {
+  // Ref, binary and digest are empty while a schedule follows the checkout.
+  ref: string;
+  binary: string;
+  digest: string;
+  state: CronLockState;
+}
+
+export interface CronOverride {
+  // The declared fields this host has laid its own values over.
+  fields: string[];
+  stale: boolean;
+  // Empty when this host has set no override.
+  set_at: string;
+}
+
+// The cadence a schedule actually runs: the declaration with this host's
+// override laid over it.
+export interface CronEffective {
   cron: string;
   tz: string;
   overlap: string;
   catch_up_ns: number;
+  args: Record<string, string>;
+}
+
+export interface CronSchedule {
+  id: string;
+  // The display name: <repo>/<pipeline>, or <repo>/<pipeline>/<name>.
+  name: string;
+  schedule_name: string;
+  repo_path: string;
+  pipeline: string;
+  where: CronWhere;
+  cron: string;
+  tz: string;
+  overlap: string;
+  catch_up_ns: number;
+  args: Record<string, string>;
+  lock: CronLock;
+  override: CronOverride;
+  effective: CronEffective;
   paused: boolean;
   declared: boolean;
   state: CronState;
+  // What a locked schedule's pin is doing, empty while it follows the checkout.
+  state_detail: string;
   armed_at: string;
   updated_at: string;
   last_fired_at: string | null;
@@ -1220,6 +1277,8 @@ export interface CronFire {
   outcome: CronOutcome;
   run_id: string;
   detail: string;
+  // The arguments this fire launched with.
+  args: Record<string, string>;
   run_status: string;
 }
 

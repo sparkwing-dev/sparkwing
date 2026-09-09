@@ -8,15 +8,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-func TestYAMLExamplesMatchScheduleDecoding(t *testing.T) {
+func TestYAMLExamplesMatchScheduleValidation(t *testing.T) {
 	cases := []struct {
 		name     string
 		schedule string
 		valid    bool
 	}{
-		{name: "scalar", schedule: `"0 3 * * *"`, valid: true},
-		{name: "mapping", schedule: "\n        cron: '@daily'\n        tz: UTC\n        overlap: queue", valid: true},
-		{name: "unknown schedule field", schedule: "\n        cron: '@daily'\n        unexpected: value"},
+		{name: "scalar", schedule: `"0 3 * * *"`},
+		{name: "missing location", schedule: "\n        cron: '@daily'\n        tz: UTC\n        overlap: queue"},
+		{name: "explicit location", schedule: "\n        cron: '@daily'\n        where: local\n        tz: UTC\n        overlap: queue", valid: true},
+		{name: "named entry", schedule: "\n        - name: morning\n          cron: '@daily'\n          where: controller", valid: true},
+		{name: "unknown schedule field", schedule: "\n        - name: morning\n          cron: '@daily'\n          where: local\n          unexpected: value"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

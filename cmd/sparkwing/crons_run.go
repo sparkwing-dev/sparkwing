@@ -30,6 +30,7 @@ func runCronsPauseResume(cmd Command, args []string, pause bool) error {
 	}
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -43,6 +44,9 @@ func runCronsPauseResume(cmd Command, args []string, pause bool) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmd.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsPauseResumeProfile(*on, fs.Arg(0), format, pause)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -74,7 +78,7 @@ func runCronsPauseResume(cmd Command, args []string, pause bool) error {
 		_, perr := fmt.Fprintln(os.Stdout, row.ID)
 		return perr
 	}
-	fmt.Fprintf(os.Stdout, "%s is %s\n", row.Name, row.State)
+	fmt.Fprintf(os.Stdout, "%s is %s\n", row.Display, row.State)
 	if !pause && row.NextDueAt != nil {
 		fmt.Fprintf(os.Stdout, "  next: %s\n", cronAbsTime(*row.NextDueAt, row.Location))
 	}
@@ -91,6 +95,7 @@ type cronsRunReport struct {
 func runCronsRun(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsRun.Path, flag.ContinueOnError)
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsRun, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -104,6 +109,9 @@ func runCronsRun(args []string) error {
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsRun.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		return runCronsRunProfile(*on, fs.Arg(0), format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
