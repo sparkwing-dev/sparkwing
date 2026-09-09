@@ -43,7 +43,7 @@ code change to unlock.
   launch passes the schedule's arguments the way `sparkwing run <pipeline> --key
   value` does, and each fire records what it ran with. See
   [crons.md](docs/crons.md) and the [migration
-  note](docs/migrations/_unreleased.md#armed-schedules-are-pinned).
+  note](docs/migrations/v0.48.0.md#armed-schedules-are-pinned).
 
 - **controller:** A controller evaluates the `where: controller` schedules
   pushed to it. `PUT /api/v1/crons/repos` (runs.write) upserts one
@@ -89,7 +89,7 @@ code change to unlock.
   checkout. Bump every pinned SDK on the machine in one sitting with
   `sparkwing repos update`, then re-run `sparkwing crons install` so the OS
   timer runs the new binary. See the [migration
-  note](docs/migrations/_unreleased.md#runs-store-schema-34-named-locked-schedules).
+  note](docs/migrations/v0.48.0.md#runs-store-schema-34-named-locked-schedules).
 
 ### Changed
 
@@ -103,7 +103,7 @@ code change to unlock.
   `pipelines.ScheduleTriggers` slice: `t.Schedule != nil` becomes
   `len(t.Schedule) > 0`, and `t.Schedule.Cron` becomes a range over the
   entries. See the [migration
-  note](docs/migrations/_unreleased.md#onschedule-entries-say-where-they-fire).
+  note](docs/migrations/v0.48.0.md#onschedule-entries-say-where-they-fire).
 
 ## [v0.47.1] - 2026-09-09
 ### Fixed
