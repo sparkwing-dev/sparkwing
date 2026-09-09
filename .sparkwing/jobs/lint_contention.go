@@ -146,19 +146,31 @@ func describeLintScope(directories []string, baseline string) string {
 }
 
 func resolveLintBaseline(ctx context.Context) (string, error) {
-	sha, err := sparkwing.Bash(ctx,
-		`git -C "$SPARKWING_WORKDIR" rev-parse --verify --quiet "$LINT_BASELINE_REF^{commit}"`,
-	).Env("SPARKWING_WORKDIR", sparkwing.Path()).
-		Env("LINT_BASELINE_REF", gateBaselineRef).
-		String()
-	sha = strings.TrimSpace(sha)
-	if err != nil || sha == "" {
-		return "", fmt.Errorf("golangci-lint: cannot resolve baseline %s; run `%s`", gateBaselineRef, fetchBaselineHint())
+	commit, err := resolveBaselineCommit(ctx)
+	if err != nil {
+		return "", fmt.Errorf("golangci-lint: %w", err)
 	}
-	if len(sha) > 12 {
-		sha = sha[:12]
+	return fmt.Sprintf("baseline %s at %s", gateBaselineRef, commit), nil
+}
+
+func resolveBaselineCommit(ctx context.Context) (string, error) {
+	root, err := sourcePolicyRoot()
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf("baseline %s at %s", gateBaselineRef, sha), nil
+	output, err := sparkwing.Exec(ctx, "git", "rev-parse", "--verify", gateBaselineRef+"^{commit}").Dir(root).Capture()
+	if err != nil {
+		cause := errors.Join(err, ctx.Err())
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("resolve baseline %s: %w", gateBaselineRef, cause)
+		}
+		return "", fmt.Errorf("cannot resolve baseline %s; run `%s`: %w", gateBaselineRef, fetchBaselineHint(), cause)
+	}
+	commit := strings.TrimSpace(output.Stdout)
+	if commit == "" {
+		return "", fmt.Errorf("git rev-parse returned an empty commit ID for %s", gateBaselineRef)
+	}
+	return commit, nil
 }
 
 func fetchBaselineHint() string {
