@@ -11,9 +11,11 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type cronsInstallReport struct {
@@ -21,6 +23,7 @@ type cronsInstallReport struct {
 	Armed       int               `json:"armed"`
 	Refreshed   int               `json:"refreshed"`
 	Withdrawn   int               `json:"withdrawn"`
+	Controller  int               `json:"controller"`
 	NothingToDo int               `json:"nothing_to_arm"`
 	Timer       *crontimer.State  `json:"timer,omitempty"`
 	TimerSkip   string            `json:"timer_skipped,omitempty"`
@@ -28,17 +31,30 @@ type cronsInstallReport struct {
 }
 
 type cronsRepoResult struct {
-	Repo        string   `json:"repo"`
-	Schedules   []string `json:"schedules,omitempty"`
-	Withdrawals []string `json:"withdrawals,omitempty"`
-	Error       string   `json:"error,omitempty"`
+	Repo        string         `json:"repo"`
+	Schedules   []cronsArmed   `json:"schedules,omitempty"`
+	Controller  []string       `json:"controller,omitempty"`
+	Withdrawals []string       `json:"withdrawals,omitempty"`
+	Rebased     []crons.Rebase `json:"rebased,omitempty"`
+	Error       string         `json:"error,omitempty"`
+}
+
+type cronsArmed struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Lock   string `json:"lock"`
+	Ref    string `json:"ref,omitempty"`
+	Binary string `json:"binary,omitempty"`
 }
 
 func runCronsInstall(args []string) error {
 	fs := flag.NewFlagSet(cmdCronsInstall.Path, flag.ContinueOnError)
 	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	fleet := fs.Bool("fleet", false, "arm every registered repo")
-	noProve := fs.Bool("no-prove", false, "arm without compiling the pipelines first")
+	only := fs.StringSlice("only", nil, "arm only these pipelines or pipeline/name entries")
+	follow := fs.Bool("follow", false, "arm without pinning, so each fire compiles the checkout")
+	noProve := fs.Bool("no-prove", false, "arm without compiling the pipelines first, which also pins nothing")
+	on := addCronsProfileFlag(fs)
 	noTimer := fs.Bool("no-timer", false, "arm without installing the OS timer")
 	if err := fs.MarkHidden("no-timer"); err != nil {
 		return err
@@ -53,6 +69,12 @@ func runCronsInstall(args []string) error {
 	if *fleet && *repo != "" {
 		return errors.New("crons install: --fleet arms every registered repo; drop --repo or drop --fleet")
 	}
+	if *fleet && len(*only) > 0 {
+		return errors.New("crons install: --only names entries of one repo; drop --fleet or drop --only")
+	}
+	if *on != "" && *fleet {
+		return fmt.Errorf("crons install: %w", errCronsProfileAndFleet)
+	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsInstall.Path)
 	if err != nil {
 		return err
@@ -62,6 +84,9 @@ func runCronsInstall(args []string) error {
 	if err != nil {
 		return fmt.Errorf("crons install: %w", err)
 	}
+	if *on != "" {
+		return runCronsInstallProfile(*on, roots[0], *only, *follow, format)
+	}
 	session, release, err := openCrons("")
 	if err != nil {
 		return fmt.Errorf("crons install: %w", err)
@@ -69,26 +94,29 @@ func runCronsInstall(args []string) error {
 	defer release()
 
 	ctx := context.Background()
-	prove := cronsProver(*noProve)
+	opts := crons.ArmOptions{Only: *only, Follow: *follow, Prove: cronsProver(*noProve)}
 	report := cronsInstallReport{}
 	var failed []string
 	for _, root := range roots {
 		result := cronsRepoResult{Repo: root}
-		armed, aerr := session.svc.Arm(ctx, root, prove)
+		armed, aerr := session.svc.Arm(ctx, root, opts)
 		switch {
 		case aerr != nil:
 			result.Error = aerr.Error()
 			failed = append(failed, filepath.Base(root))
-		case len(armed.Schedules) == 0 && armed.Withdrawn == 0:
+		case len(armed.Schedules) == 0 && armed.Withdrawn == 0 && len(armed.Controller) == 0:
 			report.NothingToDo++
 		default:
 			for _, s := range armed.Schedules {
-				result.Schedules = append(result.Schedules, crons.DisplayName(s))
+				result.Schedules = append(result.Schedules, describeArmed(s))
 			}
+			result.Controller = armed.Controller
 			result.Withdrawals = armed.Withdrawals
+			result.Rebased = armed.Rebased
 			report.Armed += armed.Armed
 			report.Refreshed += armed.Refreshed
 			report.Withdrawn += armed.Withdrawn
+			report.Controller += len(armed.Controller)
 		}
 		report.Repos = append(report.Repos, result)
 	}
@@ -112,6 +140,31 @@ func runCronsInstall(args []string) error {
 		return fmt.Errorf("crons install: the schedules are armed but the timer is not: %s", report.TimerError)
 	}
 	return nil
+}
+
+func describeArmed(s store.CronSchedule) cronsArmed {
+	armed := cronsArmed{
+		ID:     s.ID,
+		Name:   crons.DisplayName(s),
+		Lock:   crons.LockFollows,
+		Ref:    s.LockedRef,
+		Binary: s.LockedBinary,
+	}
+	if s.LockedBinary != "" {
+		armed.Lock = crons.LockPinned
+	}
+	return armed
+}
+
+func (a cronsArmed) describe() string {
+	if a.Lock == crons.LockFollows {
+		return "follows the checkout"
+	}
+	lock := crons.Lock{Ref: a.Ref}
+	if a.Ref == "" {
+		return "pinned to " + a.Binary
+	}
+	return "pinned at " + lock.ShortRef() + " -> " + a.Binary
 }
 
 // safety: timer trouble lands on the report, not the error, so the caller still renders what was armed.
@@ -154,14 +207,24 @@ func ensureCronsTimer(ctx context.Context, session *cronsSession, report *cronsI
 	return nil
 }
 
+// safety: the cadence is what an override is measured against, so the two ends
+// of a re-base read as the two cron expressions and zones, not whole rows.
+func cronsDeclarationLabel(d store.CronDeclaration) string {
+	label := d.Cron
+	if d.TZ != "" {
+		label += " " + d.TZ
+	}
+	return dashIfEmpty(label)
+}
+
 func renderCronsInstall(report cronsInstallReport, format string) error {
 	switch format {
 	case "json":
 		return json.NewEncoder(os.Stdout).Encode(report)
 	case "plain":
 		for _, r := range report.Repos {
-			for _, name := range r.Schedules {
-				fmt.Fprintln(os.Stdout, name)
+			for _, s := range r.Schedules {
+				fmt.Fprintln(os.Stdout, s.Name)
 			}
 		}
 		return nil
@@ -174,22 +237,29 @@ func renderCronsInstall(report cronsInstallReport, format string) error {
 		switch {
 		case r.Error != "":
 			fmt.Fprintf(os.Stdout, "error: %s\n", r.Error)
-		case len(r.Schedules) == 0 && len(r.Withdrawals) == 0:
+		case len(r.Schedules) == 0 && len(r.Withdrawals) == 0 && len(r.Controller) == 0 && len(r.Rebased) == 0:
 			if !multi {
 				fmt.Fprintf(os.Stdout, "nothing to arm: no pipeline in %s declares a schedule\n", r.Repo)
 			}
 		default:
-			for _, name := range r.Schedules {
-				fmt.Fprintf(os.Stdout, "armed %s\n", name)
+			for _, s := range r.Schedules {
+				fmt.Fprintf(os.Stdout, "armed %s (%s)\n", s.Name, s.describe())
+			}
+			for _, name := range r.Controller {
+				fmt.Fprintf(os.Stdout, "skipped %s: it fires from the controller, not from this host\n", name)
 			}
 			for _, name := range r.Withdrawals {
 				fmt.Fprintf(os.Stdout, "withdrawn %s: the repo no longer declares it\n", name)
 			}
+			for _, rb := range r.Rebased {
+				fmt.Fprintf(os.Stdout, "re-based the override on %s: it was set against %s, now %s\n",
+					rb.Name, cronsDeclarationLabel(rb.From), cronsDeclarationLabel(rb.To))
+			}
 		}
 	}
 	if multi {
-		fmt.Fprintf(os.Stdout, "\n%d schedule(s) armed, %d refreshed, %d withdrawn, %d repo(s) with nothing to arm\n",
-			report.Armed, report.Refreshed, report.Withdrawn, report.NothingToDo)
+		fmt.Fprintf(os.Stdout, "\n%d schedule(s) armed, %d refreshed, %d withdrawn, %d for the controller, %d repo(s) with nothing to arm\n",
+			report.Armed, report.Refreshed, report.Withdrawn, report.Controller, report.NothingToDo)
 	}
 	switch {
 	case report.TimerError != "":
@@ -207,6 +277,7 @@ func runCronsUninstall(args []string) error {
 	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	fleet := fs.Bool("fleet", false, "disarm every registered repo")
 	outFmt := cronsOutputFlag(fs)
+	on := addCronsProfileFlag(fs)
 	if err := parseAndCheck(cmdCronsUninstall, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -216,9 +287,19 @@ func runCronsUninstall(args []string) error {
 	if *fleet && *repo != "" {
 		return errors.New("crons uninstall: --fleet disarms every registered repo; drop --repo or drop --fleet")
 	}
+	if *on != "" && *fleet {
+		return fmt.Errorf("crons uninstall: %w", errCronsProfileAndFleet)
+	}
 	format, err := resolveTTYAwareOutput(*outFmt, cmdCronsUninstall.Path)
 	if err != nil {
 		return err
+	}
+	if *on != "" {
+		roots, rerr := cronsTargetRoots(*repo, false)
+		if rerr != nil {
+			return fmt.Errorf("crons uninstall: %w", rerr)
+		}
+		return runCronsUninstallProfile(*on, roots[0], format)
 	}
 	session, release, err := openCrons("")
 	if err != nil {
@@ -237,7 +318,7 @@ func runCronsUninstall(args []string) error {
 		if _, seen := namesByRepo[r.RepoPath]; !seen {
 			armedRoots = append(armedRoots, r.RepoPath)
 		}
-		namesByRepo[r.RepoPath] = append(namesByRepo[r.RepoPath], r.Name)
+		namesByRepo[r.RepoPath] = append(namesByRepo[r.RepoPath], r.Display)
 	}
 	roots := armedRoots
 	if !*fleet {
@@ -249,7 +330,7 @@ func runCronsUninstall(args []string) error {
 
 	report := cronsUninstallReport{}
 	for _, root := range roots {
-		removed, derr := session.svc.Disarm(ctx, root)
+		removed, derr := session.svc.DisarmRepo(ctx, root)
 		if derr != nil {
 			return fmt.Errorf("crons uninstall: %w", derr)
 		}
@@ -339,27 +420,61 @@ func cronsTargetRoots(repo string, fleet bool) ([]string, error) {
 	return []string{root}, nil
 }
 
-// safety: a schedule fires unattended, so a pipeline that will not build is refused at arm time.
-func cronsProver(noProve bool) func(repoRoot, pipeline string) error {
+// safety: a schedule fires unattended, so a pipeline that will not build is
+// refused at arm time rather than at three in the morning, and the binary that
+// proved it is what the arm pins. Tests replace this with a stub compiler.
+var cronsProver = func(noProve bool) crons.Prover {
 	if noProve {
 		return nil
 	}
-	cache := map[string][]string{}
-	return func(repoRoot, pipeline string) error {
-		names, ok := cache[repoRoot]
+	names := map[string][]string{}
+	return func(ctx context.Context, repoRoot, pipeline string) (crons.Proof, error) {
+		proof, err := compileRepoPipelines(ctx, repoRoot)
+		if err != nil {
+			return crons.Proof{}, err
+		}
+		declared, ok := names[repoRoot]
 		if !ok {
-			var err error
-			names, err = repos.PipelineNamesForRepo(repoRoot)
-			if err != nil {
-				return err
+			if declared, err = repos.PipelineNamesForRepo(repoRoot); err != nil {
+				return crons.Proof{}, err
 			}
-			cache[repoRoot] = names
+			names[repoRoot] = declared
 		}
-		for _, n := range names {
+		for _, n := range declared {
 			if n == pipeline {
-				return nil
+				return proof, nil
 			}
 		}
-		return fmt.Errorf("the compiled pipeline binary does not name %q; `--no-prove` arms it anyway", pipeline)
+		return crons.Proof{}, fmt.Errorf(
+			"the compiled pipeline binary does not name %q; `--no-prove` arms it anyway", pipeline)
 	}
+}
+
+// safety: the cache lease is released before the arm copies the file, so a
+// prune landing between the two fails the arm on the missing path rather than
+// pinning a partial binary.
+func compileRepoPipelines(ctx context.Context, repoRoot string) (crons.Proof, error) {
+	sparkwingDir := filepath.Join(repoRoot, ".sparkwing")
+	if _, err := os.Stat(sparkwingDir); err != nil {
+		return crons.Proof{}, fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
+	}
+	key, err := bincache.PipelineCacheKey(sparkwingDir)
+	if err != nil {
+		return crons.Proof{}, fmt.Errorf("hash %s: %w", sparkwingDir, err)
+	}
+	entry, err := bincache.PipelineEntry(key)
+	if err != nil {
+		return crons.Proof{}, fmt.Errorf("cache entry: %w", err)
+	}
+	lease, _, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
+		return bincache.CompilePipeline(ctx, sparkwingDir, tempPath)
+	})
+	if err != nil {
+		return crons.Proof{}, fmt.Errorf("compile %s: %w", sparkwingDir, err)
+	}
+	path := lease.Path()
+	if rerr := lease.Release(); rerr != nil {
+		return crons.Proof{}, fmt.Errorf("release the pipeline cache lease: %w", rerr)
+	}
+	return crons.Proof{Binary: path}, nil
 }

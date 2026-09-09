@@ -16,6 +16,6 @@
 // entries. Each Pipeline carries [Triggers], [Guards], argument
 // defaults, a profile selector, and runner requirements. Triggers fan
 // out by source: [PushTrigger], [PullRequestTrigger],
-// [ScheduleTrigger], [WebhookTrigger], [PreHookTrigger],
+// [ScheduleTriggers], [WebhookTrigger], [PreHookTrigger],
 // [PostHookTrigger], and [PostCommitHookTrigger].
 package pipelines

@@ -72,6 +72,14 @@ type Server struct {
 	assistedRunID string
 	draining      atomic.Bool
 
+	// safety: names this process in the cron tick lease and on each recorded
+	// tick, so an operator can tell which controller evaluated.
+	cronHolder string
+
+	// safety: the cron evaluator's clock, so a test can resolve a due
+	// instant without waiting a minute for one. Nil reads time.Now.
+	cronNow func() time.Time
+
 	routeProbeOnce sync.Once
 	routeProbeMux  *http.ServeMux
 	routeProbePub  *http.ServeMux
@@ -154,6 +162,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		sessionMaxLifetime:  DefaultSessionMaxLifetime,
 		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
 		runnerHeadroom:      newRunnerHeadroomRegistry(),
+		cronHolder:          defaultCronHolder(),
 	}
 }
 
@@ -747,6 +756,17 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("DELETE /api/v1/runs/{id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteRun)))
 
+	mux.Handle("GET /api/v1/crons", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListCrons)))
+	mux.Handle("PUT /api/v1/crons/repos", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handlePutCronRepo)))
+	mux.Handle("DELETE /api/v1/crons/repos", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleDeleteCronRepo)))
+	mux.Handle("GET /api/v1/crons/{id}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetCron)))
+	mux.Handle("POST /api/v1/crons/{id}/pause", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handlePauseCron)))
+	mux.Handle("POST /api/v1/crons/{id}/resume", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleResumeCron)))
+	mux.Handle("POST /api/v1/crons/{id}/run", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRunCronNow)))
+	mux.Handle("POST /api/v1/crons/{id}/disarm", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleDisarmCron)))
+	mux.Handle("PUT /api/v1/crons/{id}/override", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleSetCronOverride)))
+	mux.Handle("DELETE /api/v1/crons/{id}/override", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleClearCronOverride)))
+
 	mux.Handle("POST /api/v1/maintenance/reconcile-orphans", requireScope(ScopeAdmin, http.HandlerFunc(s.handleReconcileOrphans)))
 
 	mux.Handle("POST /api/v1/concurrency/{key}/acquire", requireScope(ScopeAdmin, http.HandlerFunc(s.handleAcquireSlot)))
@@ -987,6 +1007,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	}
 
 	go s.runReaper(ctx, 10*time.Second)
+	go s.runCronTick(ctx, cronTickOffer)
 
 	if s.pool != nil {
 		go s.pool.run(ctx, s.logger)

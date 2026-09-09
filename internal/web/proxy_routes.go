@@ -29,6 +29,16 @@ var proxyRoutes = []proxyRoute{
 	{"POST /api/v1/runs/{id}/retry", controller.ScopeRunsWrite},
 	{"POST /api/v1/runs/{id}/nodes/{nodeID}/release", controller.ScopeRunsWrite},
 	{"POST /api/v1/runs/{id}/approvals/{nodeID}", controller.ScopeApprovalsWrite},
+	{"GET /api/v1/crons", controller.ScopeRunsRead},
+	{"GET /api/v1/crons/{id}", controller.ScopeRunsRead},
+	{"PUT /api/v1/crons/repos", controller.ScopeRunsWrite},
+	{"DELETE /api/v1/crons/repos", controller.ScopeRunsWrite},
+	{"POST /api/v1/crons/{id}/pause", controller.ScopeRunsWrite},
+	{"POST /api/v1/crons/{id}/resume", controller.ScopeRunsWrite},
+	{"POST /api/v1/crons/{id}/run", controller.ScopeRunsWrite},
+	{"POST /api/v1/crons/{id}/disarm", controller.ScopeRunsWrite},
+	{"PUT /api/v1/crons/{id}/override", controller.ScopeRunsWrite},
+	{"DELETE /api/v1/crons/{id}/override", controller.ScopeRunsWrite},
 	{"DELETE /api/v1/runs/{id}", controller.ScopeAdmin},
 }
 

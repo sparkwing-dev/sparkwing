@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
@@ -25,7 +26,21 @@ type Health struct {
 	Armed      int             `json:"armed"`
 	Paused     int             `json:"paused"`
 	Undeclared int             `json:"undeclared"`
-	Detail     string          `json:"detail"`
+	// Locked counts the schedules running a pinned pipeline binary, and
+	// Following the ones compiling the checkout on every fire.
+	Locked    int `json:"locked"`
+	Following int `json:"following"`
+	// Ahead counts the pinned schedules whose checkout has moved on, and
+	// MissingBinary the ones whose pinned binary is gone.
+	Ahead         int `json:"ahead"`
+	MissingBinary int `json:"missing_binary"`
+	// StaleOverride counts the schedules whose declaration moved under this
+	// host's override since it was set.
+	StaleOverride int    `json:"stale_override"`
+	Detail        string `json:"detail"`
+	// Remedy names what to run when the counts above want attention, empty
+	// when nothing does.
+	Remedy string `json:"remedy,omitempty"`
 }
 
 // Healthy reports whether this host is evaluating what it armed. A host with
@@ -54,14 +69,7 @@ func (s *Service) Health(ctx context.Context, timer crontimer.Host) (Health, err
 	}
 	health := Health{Schedules: len(rows)}
 	for _, r := range rows {
-		switch r.State {
-		case StateArmed:
-			health.Armed++
-		case StatePaused:
-			health.Paused++
-		case StateUndeclared:
-			health.Undeclared++
-		}
+		health.count(r)
 	}
 
 	tick, err := s.Store.GetCronTick(ctx)
@@ -81,7 +89,53 @@ func (s *Service) Health(ctx context.Context, timer crontimer.Host) (Health, err
 	now := s.now()
 	health.TickStale = (state.Enabled || !tick.At.IsZero()) && now.Sub(tick.At) > TickStaleAfter
 	health.Detail = health.describe(now)
+	health.Remedy = health.remedy()
 	return health, nil
+}
+
+func (h *Health) count(r Row) {
+	switch r.State {
+	case StateArmed:
+		h.Armed++
+	case StatePaused:
+		h.Paused++
+	case StateUndeclared:
+		h.Undeclared++
+	}
+	switch r.Lock.State {
+	case LockFollows:
+		h.Following++
+	case LockAhead:
+		h.Locked++
+		h.Ahead++
+	case LockMissing:
+		h.Locked++
+		h.MissingBinary++
+	default:
+		h.Locked++
+	}
+	if r.OverrideStale {
+		h.StaleOverride++
+	}
+}
+
+// safety: every drift here is answered by the same explicit act, because
+// re-arming is what moves a pin and re-bases an override.
+func (h Health) remedy() string {
+	var parts []string
+	if h.MissingBinary > 0 {
+		parts = append(parts, fmt.Sprintf("%d pinned binary/binaries are gone", h.MissingBinary))
+	}
+	if h.Ahead > 0 {
+		parts = append(parts, fmt.Sprintf("%d schedule(s) are pinned behind the checkout", h.Ahead))
+	}
+	if h.StaleOverride > 0 {
+		parts = append(parts, fmt.Sprintf("%d override(s) were set against a declaration that has moved", h.StaleOverride))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "; ") + "; re-run `sparkwing crons install` to pin the checkout as it stands"
 }
 
 func (h Health) describe(now time.Time) string {
