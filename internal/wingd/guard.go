@@ -369,7 +369,7 @@ func (daemon *Daemon) guardEmptyProbe() (func(wingwire.ProcessSession) (bool, er
 	return daemon.guardInspector.Empty, nil
 }
 
-// releaseGuardDurably returns the current completion recipient even on persistence failure.
+// SAFETY: Persistence errors retain the current recipient so the caller can close its connection.
 func (daemon *Daemon) releaseGuardDurably(leaseID admission.LeaseID, session wingwire.ProcessSession) ([]delivery, *guardRelease, error) {
 	daemon.persistMu.Lock()
 	defer daemon.persistMu.Unlock()
