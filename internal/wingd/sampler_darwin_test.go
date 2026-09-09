@@ -6,8 +6,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestDarwinFreeMemory_PressureIsNotMeasurement(t *testing.T) {
@@ -32,7 +37,11 @@ func TestDarwinFreeMemory_VMCounters(t *testing.T) {
 			stat := HostStat{TotalMemoryBytes: 16 << 30, FreeMemoryBytes: free, MemoryMeasured: measured}
 			reserve, external := memReserveAndExternal(stat, 0, DefaultHeadroomFraction)
 			available := headroomFromReserveExternal(stat.TotalMemoryBytes, reserve, external)
-			if available > free || (free > reserve && available != free-reserve) {
+			var wantAvailable uint64
+			if free > reserve {
+				wantAvailable = free - reserve
+			}
+			if available != wantAvailable {
 				t.Fatalf("admission granted %d bytes with %d free and %d reserved", available, free, reserve)
 			}
 		})
@@ -113,5 +122,63 @@ func BenchmarkDarwinHostSample(b *testing.B) {
 		if _, err := sampleHost(); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func TestDarwinMemorySample_QueuesUntilRecovery(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, DefaultHeadroomFraction)
+	inactive := uint64(245760)
+	var readErr error
+	d.sampler = hostSamplerFunc(func() (HostStat, error) {
+		stat, err := sampleDarwinHost(func(context.Context) ([]byte, error) {
+			return fmt.Appendf(nil, "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 4096.\nPages inactive: %d.\n", inactive), readErr
+		})
+		stat.TotalCores, stat.TotalMemoryBytes = 8, 16<<30
+		return stat, err
+	})
+	d.refreshHeadroom()
+	holder, _, err := d.ledger.Submit(admission.Request{ID: "small-worker", Cores: 0.1, MemoryBytes: 32 << 20})
+	if err != nil || holder.Kind != admission.DecisionGranted {
+		t.Fatalf("small worker: %s, %v", holder.Kind, err)
+	}
+
+	server, peer := net.Pipe()
+	defer server.Close()
+	defer peer.Close()
+	waiter := newConn(d, server)
+	waiter.runID, waiter.role = "memory-worker", roleWaiter
+	waiter.resources = wingwire.HostResources{MemoryBytes: 2 << 30}
+	d.byRun[waiter.runID] = waiter
+	decision, _, err := d.ledger.Submit(admission.Request{ID: waiter.runID, MemoryBytes: 2 << 30})
+	if err != nil || decision.Kind != admission.DecisionQueued {
+		t.Fatalf("memory worker under pressure: %s, %v", decision.Kind, err)
+	}
+
+	inactive = 524288
+	readErr = errors.New("memory read failed")
+	before := d.appliedMem
+	d.refreshHeadroom()
+	if d.appliedMem != before || waiter.role != roleWaiter || len(d.ledger.Snapshot().Waiters) != 1 {
+		t.Fatal("failed memory read changed headroom or admitted the waiter")
+	}
+
+	messages := make(chan wingwire.Message, 1)
+	go func() {
+		message, err := newConn(d, peer).readMessage()
+		if err != nil {
+			t.Errorf("read recovery grant: %v", err)
+		}
+		messages <- message
+	}()
+	readErr = nil
+	d.refreshHeadroom()
+	select {
+	case message := <-messages:
+		grant, ok := message.(*wingwire.Grant)
+		if !ok || grant.RunID != waiter.runID {
+			t.Fatalf("recovery delivered %T, want a grant for %s", message, waiter.runID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("memory recovery did not deliver a grant")
 	}
 }
