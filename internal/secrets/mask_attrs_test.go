@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -223,5 +224,76 @@ func TestMaskAttrs_MasksErrorByteAndUnknownAttrs(t *testing.T) {
 	}
 	if !strings.Contains(fmt.Sprint(attrs), "s3cr3t") {
 		t.Error("caller's attrs were mutated")
+	}
+}
+
+type maskedStringJSONPayload struct {
+	Token string `json:"token"`
+}
+
+func (maskedStringJSONPayload) String() string { return "credential" }
+func TestMaskAttrsMasksJSONRendering(t *testing.T) {
+	for _, secret := range []string{"s3cr3t", "token<>&\nvalue"} {
+		t.Run(secret, func(t *testing.T) {
+			attrs := map[string]any{"cred": maskedStringJSONPayload{Token: secret}}
+			output := newTestMasker(secret).MaskAttrs(attrs)
+			body, err := json.Marshal(output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(fmt.Sprint(decoded), secret) {
+				t.Fatalf("JSON attrs leaked registered value: %s", body)
+			}
+			if attrs["cred"].(maskedStringJSONPayload).Token != secret {
+				t.Fatal("mutated caller")
+			}
+		})
+	}
+}
+
+func TestMaskedErrorKeepsMessageInJSON(t *testing.T) {
+	output := newTestMasker("s3cr3t").MaskAttrs(map[string]any{"err": errors.New("failed s3cr3t")})
+	body, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != `{"err":"failed ***"}` {
+		t.Fatalf("JSON lost masked error: %s", body)
+	}
+}
+
+type jsonMaskError struct {
+	Token string `json:"token"`
+}
+
+func (jsonMaskError) Error() string { return "credential rejected" }
+func TestMaskAttrsMasksJSONErrorPayload(t *testing.T) {
+	original := jsonMaskError{Token: "s3cr3t"}
+	output := newTestMasker("s3cr3t").MaskAttrs(map[string]any{"error": original})
+	body, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "s3cr3t") {
+		t.Fatalf("JSON leaked error payload: %s", body)
+	}
+	if !errors.Is(output["error"].(error), original) {
+		t.Fatal("lost error chain")
+	}
+}
+
+func TestMaskAttrsJSONPreservesNumbers(t *testing.T) {
+	raw := json.RawMessage(`{"token":"s3cr3t","id":9007199254740993}`)
+	output := newTestMasker("s3cr3t").MaskAttrs(map[string]any{"raw": raw})
+	body, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"id":9007199254740993`) || strings.Contains(string(body), "s3cr3t") {
+		t.Fatalf("JSON changed numeric value or leaked: %s", body)
 	}
 }
