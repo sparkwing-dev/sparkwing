@@ -1179,7 +1179,7 @@ func walkHashable(dir string, keep fileFilter) ([]string, error) {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case "node_modules", ".git", ".claude-scratch", "web":
+			case "node_modules", ".git", ".claude-scratch":
 				return filepath.SkipDir
 			}
 			return nil

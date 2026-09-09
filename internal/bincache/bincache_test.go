@@ -462,3 +462,22 @@ func TestPipelineCacheKey_IgnoresMissingOverlay(t *testing.T) {
 		t.Fatalf("lone .resolved.sum should not error: %v", err)
 	}
 }
+
+func TestPipelineCacheKey_IncludesWebPackage(t *testing.T) {
+	dir := newPipelineDir(t)
+	web := filepath.Join(dir, "web")
+	if err := os.Mkdir(web, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(web, "serve.go")
+	if err := os.WriteFile(source, []byte("package web\nconst Value = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := mustKey(t, dir)
+	if err := os.WriteFile(source, []byte("package web\nconst Value = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if after := mustKey(t, dir); after == before {
+		t.Fatal("editing a web package reused the old binary cache key")
+	}
+}
