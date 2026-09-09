@@ -23,6 +23,11 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Runs logs:** Short, unfiltered local tails read from the end of the log
+  instead of loading its full history. Output and filter ordering are unchanged.
+
 ## [v0.47.0] - 2026-09-09
 ### Added
 
