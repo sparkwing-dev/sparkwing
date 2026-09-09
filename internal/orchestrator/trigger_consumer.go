@@ -472,6 +472,8 @@ func settleClaimedTriggerDispatch(
 			"trigger_id", trig.ID, "claimed_generation", trig.ClaimSeq, "current_generation", current)
 		return
 	}
+	// safety: the dispatched child may already have created this row, and the
+	// terminal write below is the one that has to land.
 	_ = st.CreateRun(book, store.Run{
 		ID:        trig.ID,
 		Pipeline:  trig.Pipeline,
@@ -492,6 +494,8 @@ func settleClaimedTriggerDispatch(
 }
 
 func finishCancelledClaimedTrigger(ctx context.Context, st *store.Store, trig *store.Trigger, logger *slog.Logger) {
+	// safety: the dispatched child may already have created this row, and the
+	// terminal write below is the one that has to land.
 	_ = st.CreateRun(ctx, store.Run{ID: trig.ID, Pipeline: trig.Pipeline, Status: "pending", StartedAt: time.Now()})
 	if _, finishErr := st.FinishRunAtGeneration(ctx, trig.ID, trig.ClaimSeq, "cancelled", "cancelled by operator"); finishErr != nil {
 		logger.Warn("record dispatch cancellation", "trigger_id", trig.ID, "err", finishErr)
@@ -518,6 +522,8 @@ func finishCancelledClaimedTrigger(ctx context.Context, st *store.Store, trig *s
 }
 
 func finishClaimedTriggerFailure(ctx context.Context, st *store.Store, trig *store.Trigger, logger *slog.Logger, err error) {
+	// safety: the dispatched child may already have created this row, and the
+	// terminal write below is the one that has to land.
 	_ = st.CreateRun(ctx, store.Run{ID: trig.ID, Pipeline: trig.Pipeline, Status: "failed", StartedAt: time.Now()})
 	if _, finishErr := st.FinishRunAtGeneration(ctx, trig.ID, trig.ClaimSeq, "failed", "local dispatch: "+err.Error()); finishErr != nil {
 		logger.Warn("record dispatch failure", "trigger_id", trig.ID, "err", finishErr)
@@ -539,13 +545,17 @@ func cancelClaimedTriggerIfRequested(
 	if err := DiscardSubmissionEnvironment(home, trig.ID); err != nil {
 		logger.Warn("discard submission environment", "trigger_id", trig.ID, "err", err)
 	}
+	// safety: the dispatched child may already have created this row, and the
+	// terminal write below is the one that has to land.
 	_ = st.CreateRun(ctx, store.Run{
 		ID:        trig.ID,
 		Pipeline:  trig.Pipeline,
 		Status:    "pending",
 		StartedAt: time.Now(),
 	})
-	_ = st.FinishRun(ctx, trig.ID, "cancelled", "cancelled before dispatch")
+	if err := st.FinishRun(ctx, trig.ID, "cancelled", "cancelled before dispatch"); err != nil {
+		noteLostStateWrite(ctx, "finish run", trig.ID, err)
+	}
 	_ = st.FinishTrigger(ctx, trig.ID)
 	return true
 }

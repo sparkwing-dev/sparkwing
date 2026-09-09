@@ -105,7 +105,9 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	finalStatus := res.Status
 	if cancelled.Load() {
 		finalStatus = "cancelled"
-		_ = stateClient.FinishRun(ctx, res.RunID, "cancelled", "cancelled by operator")
+		if err := stateClient.FinishRun(ctx, res.RunID, "cancelled", "cancelled by operator"); err != nil {
+			noteLostStateWrite(ctx, "finish run", res.RunID, err)
+		}
 
 		nodes, nerr := stateClient.ListNodes(ctx, res.RunID)
 		if nerr == nil {
@@ -113,8 +115,10 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 				if n.Status == "done" {
 					continue
 				}
-				_ = stateClient.FinishNode(ctx, res.RunID, n.NodeID,
-					string(sparkwing.Cancelled), "cancelled by operator", nil)
+				if err := stateClient.FinishNode(ctx, res.RunID, n.NodeID,
+					string(sparkwing.Cancelled), "cancelled by operator", nil); err != nil {
+					noteLostStateWrite(ctx, "finish node", res.RunID, err)
+				}
 			}
 		}
 	}
