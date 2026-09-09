@@ -930,23 +930,3 @@ CHANGELOG links here.
 - **Why:** Revoke and rotate are the operator's emergency tools, and neither
   should touch a token other than the one named.
 
-## Bounded discovery
-
-`commands` and `docs list` now return at most 40 records; `docs search`
-returns at most 20. JSON output ends with a `kind: "page"` record carrying
-`total`, `returned`, `limit`, `truncated`, and an optional `next_cursor`.
-Consumers must distinguish that record from command/topic/search metadata.
-Follow it with `--cursor <next_cursor>` and the same query/filter flags.
-Use the same binary version for continuation. `--limit 0` explicitly emits
-all remaining matches; plain mode leaves continuation on stderr.
-
-Replace `sparkwing commands | grep -i status` with
-`sparkwing commands --query status`. Command paths and synopses are searched
-before pagination; child counts still describe the full visible tree.
-
-Documentation search no longer includes full bodies in JSON by default.
-Read the selected hit with `sparkwing docs read --topic <slug> --section
-<start_line>`, or request `docs search --query <text> --body` for the selected
-page's bodies. Section selectors apply only to embedded topics, not `--web`
-or `--guide`. Explicit Markdown command exports remain exhaustive and
-reject query/pagination flags.
