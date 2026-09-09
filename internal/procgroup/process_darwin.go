@@ -50,7 +50,7 @@ func nativeProcessTable(withSessions bool) ([]Info, bool) {
 		if withSessions {
 			// safety: exit between sysctl and this call yields session zero, which
 			// callers treat as outside the guarded session.
-			sid, _ = unix.Getsid(pid)
+			sid, _ = processSessionID(pid)
 		}
 		processes = append(processes, Info{
 			PID:     pid,

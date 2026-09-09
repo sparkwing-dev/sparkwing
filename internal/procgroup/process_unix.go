@@ -18,6 +18,10 @@ import (
 
 const processTableTimeout = 2 * time.Second
 
+var processGroupSignal = syscall.Kill
+
+var processSessionID = unix.Getsid
+
 func platformSupport() error { return nil }
 
 func configure(cmd *exec.Cmd, session bool) error {
@@ -44,7 +48,11 @@ func psProcessTable(withSessions bool) ([]Info, error) {
 		}
 		return nil, err
 	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	return parsePSProcessTable(out, withSessions)
+}
+
+func parsePSProcessTable(output []byte, withSessions bool) ([]Info, error) {
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	processes := make([]Info, 0, len(lines))
 	for _, line := range lines {
 		fields := strings.Fields(line)
@@ -58,7 +66,7 @@ func psProcessTable(withSessions bool) ([]Info, error) {
 		}
 		sid := 0
 		if withSessions {
-			sid, _ = unix.Getsid(pid)
+			sid, _ = processSessionID(pid)
 		}
 		processes = append(processes, Info{PID: pid, Group: pgid, Session: sid, State: fields[2]})
 	}
@@ -86,7 +94,7 @@ func sendSignal(leader int, exited bool, sig syscall.Signal) error {
 	if err := validateAnchor(leader, exited); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return err
 	}
-	err := syscall.Kill(-leader, sig)
+	err := processGroupSignal(-leader, sig)
 	if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
 		return nil
 	}
@@ -141,7 +149,7 @@ func signalSession(leader int, sig syscall.Signal) error {
 		}
 	}
 	for group := range groups {
-		err := syscall.Kill(-group, sig)
+		err := processGroupSignal(-group, sig)
 		if err != nil && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
