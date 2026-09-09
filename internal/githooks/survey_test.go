@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -125,8 +126,8 @@ func TestSurvey_UndeclaredWhenNoPipelineAsksForAHook(t *testing.T) {
 	if got.State != githooks.GateUndeclared {
 		t.Errorf("State = %s, want %s", got.State, githooks.GateUndeclared)
 	}
-	if !got.Gated() {
-		t.Error("Gated() = false, want true: a repo that asks for no gate is not ungated")
+	if got.Gated() {
+		t.Error("Gated() = true, want false: a repo that declares no gate cannot refuse a commit")
 	}
 }
 
@@ -233,16 +234,22 @@ func TestSurveyFleet_MarksARepoWhoseDeclarationCannotBeReadBroken(t *testing.T) 
 
 func TestUngated_DropsTheRowsNoGateIsMissingFrom(t *testing.T) {
 	rows := []githooks.RepoGates{
-		{Repo: "armed", State: githooks.GateArmed},
+		{Repo: "armed", Declared: []string{"pre-commit"}, State: githooks.GateArmed},
 		{Repo: "quiet", State: githooks.GateUndeclared},
-		{Repo: "notifier", State: githooks.GateUninstalled, Missing: []string{"post-commit"}},
-		{Repo: "shadowed", State: githooks.GateShadowed, Shadowed: []string{"pre-commit"}},
-		{Repo: "bare", State: githooks.GateUninstalled, Missing: []string{"pre-push"}},
-		{Repo: "borrowed", State: githooks.GateBorrowed, Borrowed: []string{"pre-commit"}},
+		{Repo: "notifier", Declared: []string{"post-commit", "pre-commit"}, State: githooks.GateUninstalled, Missing: []string{"post-commit"}},
+		{Repo: "shadowed", Declared: []string{"pre-commit"}, State: githooks.GateShadowed, Shadowed: []string{"pre-commit"}},
+		{Repo: "bare", Declared: []string{"pre-commit", "pre-push"}, State: githooks.GateUninstalled, Missing: []string{"pre-push"}},
+		{Repo: "borrowed", Declared: []string{"pre-commit"}, State: githooks.GateBorrowed, Borrowed: []string{"pre-commit"}},
 	}
 	got := githooks.Ungated(rows)
-	if len(got) != 3 || got[0].Repo != "shadowed" || got[1].Repo != "bare" || got[2].Repo != "borrowed" {
-		t.Errorf("Ungated = %+v, want the shadowed, uninstalled and borrowed rows", got)
+	want := []string{"quiet", "shadowed", "bare", "borrowed"}
+	if len(got) != len(want) {
+		t.Fatalf("Ungated = %+v, want the %v rows", got, want)
+	}
+	for i, name := range want {
+		if got[i].Repo != name {
+			t.Errorf("Ungated[%d] = %s, want %s", i, got[i].Repo, name)
+		}
 	}
 }
 
@@ -299,7 +306,10 @@ func TestSurvey_BorrowedWhenTheGateThatFiresLivesInAnotherRepo(t *testing.T) {
 }
 
 func TestRepoGatesRemedy_ClearsTheOverrideBeforeInstallingForABorrowedGate(t *testing.T) {
-	r := githooks.RepoGates{Repo: "/code/sparkwing-platform", Borrowed: []string{"pre-commit"}, State: githooks.GateBorrowed}
+	r := githooks.RepoGates{
+		Repo: "/code/sparkwing-platform", Declared: []string{"pre-commit"},
+		Borrowed: []string{"pre-commit"}, State: githooks.GateBorrowed,
+	}
 	got := r.Remedy()
 	for _, want := range []string{"--unset core.hooksPath", "hooks install --repo /code/sparkwing-platform"} {
 		if !strings.Contains(got, want) {
@@ -310,7 +320,8 @@ func TestRepoGatesRemedy_ClearsTheOverrideBeforeInstallingForABorrowedGate(t *te
 
 func TestRepoGatesRemedy_ClearsALocalOverrideBeforeInstallingAShadowedGate(t *testing.T) {
 	r := githooks.RepoGates{
-		Repo: "/code/sparkwing", Scope: "local", Shadowed: []string{"pre-commit"}, State: githooks.GateShadowed,
+		Repo: "/code/sparkwing", Scope: "local", Declared: []string{"pre-commit"},
+		Shadowed: []string{"pre-commit"}, State: githooks.GateShadowed,
 	}
 	got := r.Remedy()
 	for _, want := range []string{"--unset core.hooksPath", "hooks install --repo /code/sparkwing"} {
@@ -356,5 +367,74 @@ func TestRepoGatesSummary_SaysNothingIsInstalledWhenNothingIs(t *testing.T) {
 	r := githooks.RepoGates{Repo: "/code/pulsewing", Missing: []string{"pre-commit"}, State: githooks.GateUninstalled}
 	if got := r.Summary(); !strings.Contains(got, "no gate is installed") {
 		t.Errorf("Summary = %q, want it to say no gate is installed", got)
+	}
+}
+
+func TestSurvey_UngatedWhenEveryDeclaredHookIsANotifier(t *testing.T) {
+	repo, _ := checkout(t, "post-commit")
+	got := githooks.Survey(stubGit("", ""), repo, []string{"post-commit"})
+	if got.State != githooks.GateArmed {
+		t.Errorf("State = %s, want %s: the hook the repo declares does fire", got.State, githooks.GateArmed)
+	}
+	if got.Gated() {
+		t.Error("Gated() = true, want false: a post-commit notifier cannot refuse a commit")
+	}
+	if got.Fires() == nil || got.Fires()[0] != "post-commit" {
+		t.Errorf("Fires() = %v, want [post-commit]", got.Fires())
+	}
+}
+
+func TestSurvey_FiresNamesOnlyTheDeclaredHooksGitRunsFromThisRepo(t *testing.T) {
+	repo, hooks := checkout(t, "pre-commit", "post-commit")
+	got := githooks.Survey(stubGit(hooks, ""), repo, []string{"post-commit", "pre-commit", "pre-push"})
+	if want := []string{"post-commit", "pre-commit"}; !slices.Equal(got.Fires(), want) {
+		t.Errorf("Fires() = %v, want %v", got.Fires(), want)
+	}
+}
+
+func TestSurvey_FiresDropsAHookThatOnlyRunsOutOfAnotherRepo(t *testing.T) {
+	repo, _ := checkout(t)
+	borrowed := filepath.Join(t.TempDir(), "hooks")
+	if err := os.MkdirAll(borrowed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "#!/bin/sh\n# " + githooks.Marker + "\nsparkwing run gate\n"
+	if err := os.WriteFile(filepath.Join(borrowed, "pre-commit"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := githooks.Survey(stubGit("", borrowed), repo, []string{"pre-commit"})
+	if len(got.Fires()) != 0 {
+		t.Errorf("Fires() = %v, want none: the gate that runs belongs to another repo", got.Fires())
+	}
+}
+
+func TestRepoGatesSummary_SaysNothingCanRefuseACommitWhenNoGateIsDeclared(t *testing.T) {
+	row := githooks.RepoGates{Repo: "/code/toolbox", State: githooks.GateUndeclared}
+	if !strings.Contains(row.Summary(), "nothing here can refuse a commit") {
+		t.Errorf("Summary = %q, want it to say a commit here cannot be refused", row.Summary())
+	}
+}
+
+func TestRepoGatesSummary_SaysSoWhenTheOnlyDeclaredHookIsANotifier(t *testing.T) {
+	row := githooks.RepoGates{
+		Repo:     "/code/toolbox",
+		Declared: []string{"post-commit"},
+		Firing:   []string{"post-commit"},
+		State:    githooks.GateArmed,
+	}
+	got := row.Summary()
+	if !strings.Contains(got, "nothing here can refuse a commit") {
+		t.Errorf("Summary = %q, want it to say a commit here cannot be refused", got)
+	}
+	if !strings.Contains(got, "post-commit") {
+		t.Errorf("Summary = %q, want it to name the hook that does fire", got)
+	}
+}
+
+func TestRepoGatesRemedy_AsksForAGateDeclarationRatherThanAnInstall(t *testing.T) {
+	row := githooks.RepoGates{Repo: "/code/toolbox", State: githooks.GateUndeclared}
+	got := row.Remedy()
+	if !strings.Contains(got, "declare a pre_commit trigger") {
+		t.Errorf("Remedy = %q, want it to ask for a declared gate: an install writes nothing here", got)
 	}
 }

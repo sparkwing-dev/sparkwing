@@ -35,7 +35,24 @@ unlock.
   slice of it, so one unanswering daemon leaves the rest of the report its
   budget, and a sweep that runs out prints what it reached alongside the error
 
+### Changed
+
+- **cli:** `pipeline hooks survey`, `doctor`, and the `hooks install --fleet`
+  summary count a repository as gated only where a declared `pre-commit` or
+  `pre-push` runs from that repository. A repository that declares no hook, or
+  only `post-commit`, was counted gated and is now listed among the ones
+  accepting ungated commits, with the remedy naming the trigger to declare
+  rather than an install that would write nothing. The `state` field of
+  `-o json` and `-o plain` keeps its existing values; the pretty STATE column
+  reads `no-gate` in place of `armed` for such a repository and a new FIRING
+  column names the declared hooks that do run
+
 ### Fixed
+
+- **cli:** `pipeline hooks survey` no longer closes with `every declared gate
+  fires` while a row reports a hook that does not; a repository that runs its
+  commit gate and is missing a `post-commit` notifier is now counted and named
+  separately from one that refuses nothing
 
 - **cli:** `sparkwing doctor` names a wedged admission daemon -- one that
   accepts connections and answers nothing -- and the commands that recover it,

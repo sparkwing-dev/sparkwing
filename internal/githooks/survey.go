@@ -58,6 +58,23 @@ func (r RepoGates) NotFiring() []string {
 
 var BlockingHooks = []string{"pre-commit", "pre-push"}
 
+// Fires names the declared hooks git runs out of this repository's own hook
+// directory. It is narrower than the Firing field, which counts every managed
+// gate in whichever directory git reads, declared here or not.
+func (r RepoGates) Fires() []string {
+	elsewhere := setOf(slices.Concat(r.Borrowed, r.Shadowed, r.Missing))
+	var out []string
+	for _, name := range r.Declared {
+		if !elsewhere[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// Gated reports whether a commit in this repository can be refused: a blocking
+// hook is declared, git runs it from this repository, and no declared blocking
+// hook is missing, shadowed or borrowed.
 func (r RepoGates) Gated() bool {
 	if r.State == GateBroken {
 		return false
@@ -67,7 +84,7 @@ func (r RepoGates) Gated() bool {
 			return false
 		}
 	}
-	return true
+	return containsBlocking(r.Declared)
 }
 
 func (r RepoGates) Summary() string {
@@ -75,6 +92,9 @@ func (r RepoGates) Summary() string {
 		return fmt.Sprintf("%s: %s", r.Repo, r.ConfigError)
 	}
 	var parts []string
+	if !containsBlocking(r.Declared) {
+		parts = append(parts, undeclaredGateSummary(r.Fires()))
+	}
 	if len(r.Borrowed) > 0 {
 		parts = append(parts, fmt.Sprintf("%s fires out of %s, which is not this repo's hook directory, so nothing here declares or keeps it",
 			strings.Join(r.Borrowed, ", "), r.ActiveDir))
@@ -92,12 +112,24 @@ func (r RepoGates) Summary() string {
 	return r.Repo + ": " + strings.Join(parts, "; ")
 }
 
+func undeclaredGateSummary(fires []string) string {
+	blocking := strings.Join(BlockingHooks, " or ")
+	if len(fires) == 0 {
+		return fmt.Sprintf("no pipeline declares %s, so nothing here can refuse a commit", blocking)
+	}
+	return fmt.Sprintf("%s fires, but no pipeline declares %s, so nothing here can refuse a commit",
+		strings.Join(fires, ", "), blocking)
+}
+
 func (r RepoGates) Remedy() string {
 	if r.State == GateBroken {
 		return fmt.Sprintf("fix the config, then sparkwing pipeline hooks install --repo %s", r.Repo)
 	}
 	if len(r.Borrowed) > 0 || (r.Scope == "local" && len(r.NotFiring()) > 0) {
 		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing pipeline hooks install --repo %s", r.Repo, r.Repo)
+	}
+	if !containsBlocking(r.Declared) {
+		return fmt.Sprintf("declare a pre_commit trigger on a gate pipeline in %s/.sparkwing, then sparkwing pipeline hooks install --repo %s", r.Repo, r.Repo)
 	}
 	return fmt.Sprintf("sparkwing pipeline hooks install --repo %s", r.Repo)
 }

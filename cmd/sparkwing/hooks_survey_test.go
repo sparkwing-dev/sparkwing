@@ -48,7 +48,7 @@ func TestRenderHooksSurvey_CountsAndNamesTheUngatedRepos(t *testing.T) {
 func TestRenderHooksSurvey_SaysSoWhenEveryGateFires(t *testing.T) {
 	rows := []githooks.RepoGates{
 		{Repo: "/code/xwing", Declared: []string{"pre-commit"}, State: githooks.GateArmed},
-		{Repo: "/code/toolbox", State: githooks.GateUndeclared},
+		{Repo: "/code/bitwing", Declared: []string{"pre-commit", "pre-push"}, State: githooks.GateArmed},
 	}
 	var buf bytes.Buffer
 	if err := renderHooksSurvey(&buf, rows, "pretty"); err != nil {
@@ -108,4 +108,54 @@ func TestRenderHooksSurvey_EmptyFleetTellsTheOperatorToRegisterOne(t *testing.T)
 	if got := buf.String(); !strings.Contains(got, "sparkwing configure xrepo add") {
 		t.Errorf("output = %q, want the registration hint", got)
 	}
+}
+
+func TestRenderHooksSurvey_DoesNotCallARepoArmedWhenNothingCanRefuseACommit(t *testing.T) {
+	rows := []githooks.RepoGates{
+		{Repo: "/code/toolbox", Declared: []string{"post-commit"}, Firing: []string{"post-commit"}, State: githooks.GateArmed},
+	}
+	var buf bytes.Buffer
+	if err := renderHooksSurvey(&buf, rows, "pretty"); err != nil {
+		t.Fatalf("renderHooksSurvey: %v", err)
+	}
+	row := rowFor(t, buf.String(), "toolbox")
+	if strings.Contains(row, "armed") {
+		t.Errorf("row = %q, want it not to read armed: a post-commit notifier refuses nothing", row)
+	}
+	if !strings.Contains(row, "post-commit") {
+		t.Errorf("row = %q, want it to name the hook that does fire", row)
+	}
+}
+
+func TestRenderHooksSurvey_DoesNotClaimEveryGateFiresWhileAHookIsMissing(t *testing.T) {
+	rows := []githooks.RepoGates{
+		{
+			Repo:     "/code/xwing",
+			Declared: []string{"post-commit", "pre-commit"},
+			Missing:  []string{"post-commit"},
+			State:    githooks.GateUninstalled,
+		},
+	}
+	var buf bytes.Buffer
+	if err := renderHooksSurvey(&buf, rows, "pretty"); err != nil {
+		t.Fatalf("renderHooksSurvey: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, "every declared gate fires") {
+		t.Errorf("output = %q, want no clean verdict while a declared hook is missing", got)
+	}
+	if !strings.Contains(got, "post-commit") {
+		t.Errorf("output = %q, want the footer to name the hook that does not fire", got)
+	}
+}
+
+func rowFor(t *testing.T, out, repo string) string {
+	t.Helper()
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.HasPrefix(line, repo) {
+			return line
+		}
+	}
+	t.Fatalf("no row for %s in:\n%s", repo, out)
+	return ""
 }
