@@ -64,9 +64,13 @@ func heldByLabel(holders []store.ConcurrencyHolder) string {
 }
 
 func (r *NodeExecutor) emitConcWaitLog(ctx context.Context, req runner.Request, detail string) {
-	if nlog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
-		nlog.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "concurrency_wait", Msg: detail})
-		_ = nlog.Close()
+	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
+		nodeLog.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "concurrency_wait", Msg: detail})
+		if err := nodeLog.Close(); err != nil {
+			slog.Error("close node log failed", "run", req.RunID, "node", req.Node.ID(), "err", err)
+		}
+	} else {
+		slog.Error("open node log failed", "run", req.RunID, "node", req.Node.ID(), "err", err)
 	}
 }
 
@@ -141,7 +145,7 @@ func ScopeLabelFromKey(key string) string {
 	}
 }
 
-type coordParams struct {
+type coordinationParameters struct {
 	key           string
 	capacity      int
 	cost          int
@@ -152,9 +156,9 @@ type coordParams struct {
 	queueTimeout  time.Duration
 }
 
-func concParamsFor(node *sparkwing.JobNode, g *sparkwing.ConcurrencyGroup, runID string) coordParams {
+func concurrencyParametersFor(node *sparkwing.JobNode, g *sparkwing.ConcurrencyGroup, runID string) coordinationParameters {
 	lim := g.Limit()
-	return coordParams{
+	return coordinationParameters{
 		key:           scopedGroupKey(g, runID),
 		capacity:      lim.Capacity,
 		cost:          node.ConcurrencyCost(),
@@ -164,8 +168,8 @@ func concParamsFor(node *sparkwing.JobNode, g *sparkwing.ConcurrencyGroup, runID
 	}
 }
 
-func memoParamsFor(cacheHash string, cacheTTL time.Duration) coordParams {
-	return coordParams{
+func memoParamsFor(cacheHash string, cacheTTL time.Duration) coordinationParameters {
+	return coordinationParameters{
 		key:       memoKeyFor(cacheHash),
 		capacity:  1,
 		cost:      1,
@@ -175,18 +179,18 @@ func memoParamsFor(cacheHash string, cacheTTL time.Duration) coordParams {
 	}
 }
 
-func (cp coordParams) acquireRequest(runID, nodeID string, bypassRead bool) store.AcquireSlotRequest {
+func (parameters coordinationParameters) acquireRequest(runID, nodeID string, bypassRead bool) store.AcquireSlotRequest {
 	return store.AcquireSlotRequest{
-		Key:           cp.key,
+		Key:           parameters.key,
 		HolderID:      runID + "/" + nodeID,
 		RunID:         runID,
 		NodeID:        nodeID,
-		Capacity:      cp.capacity,
-		Cost:          cp.cost,
-		Policy:        cp.policy,
-		CacheKeyHash:  cp.cacheHash,
-		CacheTTL:      cp.cacheTTL,
-		CancelTimeout: cp.cancelTimeout,
+		Capacity:      parameters.capacity,
+		Cost:          parameters.cost,
+		Policy:        parameters.policy,
+		CacheKeyHash:  parameters.cacheHash,
+		CacheTTL:      parameters.cacheTTL,
+		CancelTimeout: parameters.cancelTimeout,
 		BypassRead:    bypassRead,
 	}
 }
@@ -194,12 +198,16 @@ func (cp coordParams) acquireRequest(runID, nodeID string, bypassRead bool) stor
 func (r *NodeExecutor) runNodeWithCache(ctx context.Context, req runner.Request) (runner.Result, bool) {
 	node := req.Node
 	group := node.ConcurrencyGroupRef()
-	cacheCfg := node.MemoizeConfig()
-	if group == nil && cacheCfg == nil {
+	cacheConfig := node.MemoizeConfig()
+	if group == nil && cacheConfig == nil {
 		return runner.Result{}, false
 	}
 
-	cacheHash, cacheTTL := r.resolveCacheHash(ctx, node, cacheCfg)
+	cacheHash, cacheTTL, err := r.resolveCacheHash(ctx, node, cacheConfig)
+	if err != nil {
+		r.markFailedIfUnfinished(ctx, req.RunID, node.ID(), err)
+		return runner.Result{Outcome: sparkwing.Failed, Err: err}, true
+	}
 	hasMemo := cacheHash != ""
 
 	switch {
@@ -218,29 +226,25 @@ func (r *NodeExecutor) runUnderGroup(ctx context.Context, req runner.Request, gr
 	if la, _, _ := localAdmissionFromContext(ctx); la != nil && groupUsesLocalDaemon(group) {
 		return r.runNodeUnderDaemonSem(ctx, req, la, group)
 	}
-	return r.acquireAndRun(ctx, req, concParamsFor(req.Node, group, req.RunID))
+	return r.acquireAndRun(ctx, req, concurrencyParametersFor(req.Node, group, req.RunID))
 }
 
-func (r *NodeExecutor) resolveCacheHash(ctx context.Context, node *sparkwing.JobNode, cacheCfg *sparkwing.MemoizeConfig) (string, time.Duration) {
-	if cacheCfg == nil {
-		return "", 0
+func (r *NodeExecutor) resolveCacheHash(ctx context.Context, node *sparkwing.JobNode, cacheConfig *sparkwing.MemoizeConfig) (string, time.Duration, error) {
+	if cacheConfig == nil {
+		return "", 0, nil
 	}
-	k := safeCacheKey(ctx, cacheCfg.Key, node.ID())
-	switch {
-	case k == sparkwing.NoCache:
-		sparkwing.LoggerFromContext(ctx).Log("info",
-			fmt.Sprintf("Cache(%s) returned NoCache; memoization explicitly skipped", node.ID()))
-		return "", cacheCfg.TTL
-	case k == "":
-		sparkwing.LoggerFromContext(ctx).Log("warn",
-			fmt.Sprintf("Cache(%s) returned empty CacheKey; memoization skipped (treating as missing key -- return sparkwing.NoCache to opt out explicitly)", node.ID()))
-		return "", cacheCfg.TTL
-	default:
-		return string(k), cacheCfg.TTL
+	key, err := resolveCacheKey(ctx, cacheConfig.Key, node.ID())
+	if err != nil {
+		return "", 0, err
 	}
+	if key == sparkwing.NoCache {
+		sparkwing.LoggerFromContext(ctx).Log("info", fmt.Sprintf("Memoize(%s) returned NoCache; memoization skipped", node.ID()))
+		return "", cacheConfig.TTL, nil
+	}
+	return string(key), cacheConfig.TTL, nil
 }
 
-func (r *NodeExecutor) acquireAndRun(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
+func (r *NodeExecutor) acquireAndRun(ctx context.Context, req runner.Request, parameters coordinationParameters) runner.Result {
 	node := req.Node
 	holderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
 	wedgeBudget, err := storeWedgeBudget()
@@ -248,36 +252,36 @@ func (r *NodeExecutor) acquireAndRun(ctx context.Context, req runner.Request, cp
 		r.markFailed(ctx, req.RunID, node.ID(), err)
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
-	resp, err := r.backends.Concurrency.AcquireSlot(ctx, cp.acquireRequest(req.RunID, node.ID(), noCacheFromContext(ctx)))
+	resp, err := r.backends.Concurrency.AcquireSlot(ctx, parameters.acquireRequest(req.RunID, node.ID(), noCacheFromContext(ctx)))
 	if err != nil {
-		r.markFailed(ctx, req.RunID, node.ID(), fmt.Errorf("concurrency acquire(%q): %w", cp.key, err))
+		r.markFailed(ctx, req.RunID, node.ID(), fmt.Errorf("concurrency acquire(%q): %w", parameters.key, err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
 
 	if resp.DriftNote != "" {
 		payload, _ := json.Marshal(map[string]any{
-			"key":               cp.key,
+			"key":               parameters.key,
 			"previous_capacity": resp.PreviousCapacity,
-			"new_capacity":      cp.capacity,
+			"new_capacity":      parameters.capacity,
 			"note":              resp.DriftNote,
 		})
 		_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "concurrency_drift", payload)
-		slog.Default().Warn("concurrency drift", "key", cp.key, "prev", resp.PreviousCapacity, "new", cp.capacity)
+		slog.Default().Warn("concurrency drift", "key", parameters.key, "prev", resp.PreviousCapacity, "new", parameters.capacity)
 	}
 
 	switch resp.Kind {
 	case store.AcquireCached:
-		return r.applyCacheHit(ctx, req, cp, resp.OriginRunID, resp.OriginNodeID)
+		return r.applyCacheHit(ctx, req, parameters, resp.OriginRunID, resp.OriginNodeID)
 	case store.AcquireSkipped:
 		return r.applySkippedConcurrent(ctx, req)
 	case store.AcquireFailed:
-		err := fmt.Errorf("concurrency key %q slot full under OnLimit:Fail", cp.key)
+		err := fmt.Errorf("concurrency key %q slot full under OnLimit:Fail", parameters.key)
 		r.markFailed(ctx, req.RunID, node.ID(), err)
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	case store.AcquireGranted:
-		return r.runHeldSlot(ctx, req, cp, holderID, wedgeBudget)
+		return r.runHeldSlot(ctx, req, parameters, holderID, wedgeBudget)
 	case store.AcquireQueued, store.AcquireCoalesced, store.AcquireCancellingOthers:
-		return r.waitThenRun(ctx, req, cp, resp, wedgeBudget)
+		return r.waitThenRun(ctx, req, parameters, resp, wedgeBudget)
 	}
 
 	err = fmt.Errorf("concurrency acquire returned unknown kind %q", resp.Kind)
@@ -287,45 +291,45 @@ func (r *NodeExecutor) acquireAndRun(ctx context.Context, req runner.Request, cp
 
 func (r *NodeExecutor) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, cacheHash string, cacheTTL time.Duration) runner.Result {
 	node := req.Node
-	memoCP := memoParamsFor(cacheHash, cacheTTL)
+	memoParameters := memoParamsFor(cacheHash, cacheTTL)
 	memoHolderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
 	wedgeBudget, err := storeWedgeBudget()
 	if err != nil {
 		r.markFailed(ctx, req.RunID, node.ID(), err)
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
-	resp, err := r.backends.Concurrency.AcquireSlot(ctx, memoCP.acquireRequest(req.RunID, node.ID(), noCacheFromContext(ctx)))
+	resp, err := r.backends.Concurrency.AcquireSlot(ctx, memoParameters.acquireRequest(req.RunID, node.ID(), noCacheFromContext(ctx)))
 	if err != nil {
-		r.markFailed(ctx, req.RunID, node.ID(), fmt.Errorf("memo acquire(%q): %w", memoCP.key, err))
+		r.markFailed(ctx, req.RunID, node.ID(), fmt.Errorf("memo acquire(%q): %w", memoParameters.key, err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
 
 	switch resp.Kind {
 	case store.AcquireCached:
-		return r.applyCacheHit(ctx, req, memoCP, resp.OriginRunID, resp.OriginNodeID)
+		return r.applyCacheHit(ctx, req, memoParameters, resp.OriginRunID, resp.OriginNodeID)
 	case store.AcquireCoalesced:
-		return r.waitThenRun(ctx, req, memoCP, resp, wedgeBudget)
+		return r.waitThenRun(ctx, req, memoParameters, resp, wedgeBudget)
 	case store.AcquireQueued:
-		return r.waitThenRun(ctx, req, memoCP, resp, wedgeBudget)
+		return r.waitThenRun(ctx, req, memoParameters, resp, wedgeBudget)
 	case store.AcquireGranted:
 		execCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		var lost atomic.Bool
 		var lostWedge atomic.Pointer[string]
-		stopHB := r.startSlotHeartbeat(execCtx, memoCP.key, memoHolderID, memoCP.policy, &lost, &lostWedge, cancel, wedgeBudget)
+		stopHeartbeat := r.startSlotHeartbeat(execCtx, memoParameters.key, memoHolderID, memoParameters.policy, &lost, &lostWedge, cancel, wedgeBudget)
 
 		result := r.runUnderGroup(execCtx, req, group)
 
-		stopHB()
-		bg, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer bgCancel()
-		if err := r.backends.Concurrency.ReleaseSlot(bg, memoCP.key, memoHolderID,
+		stopHeartbeat()
+		releaseContext, cancelRelease := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancelRelease()
+		if err := r.backends.Concurrency.ReleaseSlot(releaseContext, memoParameters.key, memoHolderID,
 			storeOutcome(result), fmt.Sprintf("%s/%s", req.RunID, node.ID()), cacheHash, cacheTTL); err != nil {
-			slog.Warn("memo release failed; relying on reaper", "key", memoCP.key, "err", err)
+			slog.Warn("memo release failed; relying on reaper", "key", memoParameters.key, "err", err)
 		}
 		return result
 	default:
-		err := fmt.Errorf("memo acquire(%q) returned unexpected kind %q", memoCP.key, resp.Kind)
+		err := fmt.Errorf("memo acquire(%q) returned unexpected kind %q", memoParameters.key, resp.Kind)
 		r.markFailed(ctx, req.RunID, node.ID(), err)
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
@@ -344,7 +348,7 @@ func storeOutcome(res runner.Result) string {
 	}
 }
 
-func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, cp coordParams, originRun, originNode string) runner.Result {
+func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, parameters coordinationParameters, originRun, originNode string) runner.Result {
 	output, err := r.fetchCachedOutput(ctx, originRun, originNode)
 	if err != nil {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("cache hit: fetch output: %w", err))
@@ -353,8 +357,8 @@ func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, cp
 
 	_ = r.backends.State.StartNode(ctx, req.RunID, req.Node.ID())
 	payload, _ := json.Marshal(map[string]any{
-		"key":            cp.key,
-		"cache_key_hash": cp.cacheHash,
+		"key":            parameters.key,
+		"cache_key_hash": parameters.cacheHash,
 		"origin_run_id":  originRun,
 		"origin_node_id": originNode,
 	})
@@ -362,14 +366,18 @@ func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, cp
 	r.copyArtifactManifest(ctx, req.RunID, req.Node.ID(), originRun, originNode)
 	_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Cached), "", output)
 
-	if nlog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
-		nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
+	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
+		nodeLog = wrapNodeLogWithMasker(nodeLog, secrets.MaskerFromContext(ctx))
 		ts := time.Now()
-		nlog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start", Attrs: map[string]any{"cache_hit": true}})
-		nlog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_end", Attrs: map[string]any{
+		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start", Attrs: map[string]any{"cache_hit": true}})
+		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_end", Attrs: map[string]any{
 			"outcome": string(sparkwing.Cached), "duration_ms": int64(0), "cache_hit": true,
 		}})
-		_ = nlog.Close()
+		if err := nodeLog.Close(); err != nil {
+			slog.Error("close node log failed", "run", req.RunID, "node", req.Node.ID(), "err", err)
+		}
+	} else {
+		slog.Error("open node log failed", "run", req.RunID, "node", req.Node.ID(), "err", err)
 	}
 
 	return runner.Result{Outcome: sparkwing.Cached, Output: output}
@@ -380,34 +388,38 @@ func (r *NodeExecutor) applySkippedConcurrent(ctx context.Context, req runner.Re
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_skipped_concurrent", nil)
 	_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.SkippedConcurrent), "", nil)
 
-	if nlog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
-		nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
+	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
+		nodeLog = wrapNodeLogWithMasker(nodeLog, secrets.MaskerFromContext(ctx))
 		ts := time.Now()
-		nlog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start"})
-		nlog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_end", Attrs: map[string]any{
+		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start"})
+		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_end", Attrs: map[string]any{
 			"outcome": string(sparkwing.SkippedConcurrent), "duration_ms": int64(0),
 		}})
-		_ = nlog.Close()
+		if err := nodeLog.Close(); err != nil {
+			slog.Error("close node log failed", "run", req.RunID, "node", req.Node.ID(), "err", err)
+		}
+	} else {
+		slog.Error("open node log failed", "run", req.RunID, "node", req.Node.ID(), "err", err)
 	}
 	return runner.Result{Outcome: sparkwing.SkippedConcurrent}
 }
 
-func (r *NodeExecutor) runHeldSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string, wedgeBudget time.Duration) runner.Result {
+func (r *NodeExecutor) runHeldSlot(ctx context.Context, req runner.Request, parameters coordinationParameters, holderID string, wedgeBudget time.Duration) runner.Result {
 	execCtx, cancelExec := context.WithCancel(ctx)
 	var superseded atomic.Bool
 	var wedgeAbort atomic.Pointer[string]
-	stopHB := r.startSlotHeartbeat(execCtx, cp.key, holderID, cp.policy, &superseded, &wedgeAbort, cancelExec, wedgeBudget)
+	stopHeartbeat := r.startSlotHeartbeat(execCtx, parameters.key, holderID, parameters.policy, &superseded, &wedgeAbort, cancelExec, wedgeBudget)
 
 	defer func() {
-		stopHB()
+		stopHeartbeat()
 		cancelExec()
-		ctxBG, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctxBG, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		outcome := r.lastReleaseOutcomeFor(req.RunID, req.Node.ID())
 		outputRef := fmt.Sprintf("%s/%s", req.RunID, req.Node.ID())
-		if err := r.backends.Concurrency.ReleaseSlot(ctxBG, cp.key, holderID, outcome, outputRef, cp.cacheHash, cp.cacheTTL); err != nil {
+		if err := r.backends.Concurrency.ReleaseSlot(ctxBG, parameters.key, holderID, outcome, outputRef, parameters.cacheHash, parameters.cacheTTL); err != nil {
 			slog.Warn("concurrency release failed; relying on reaper",
-				"key", cp.key, "holder_id", holderID, "err", err)
+				"key", parameters.key, "holder_id", holderID, "err", err)
 		}
 	}()
 
@@ -425,7 +437,7 @@ func (r *NodeExecutor) runHeldSlot(ctx context.Context, req runner.Request, cp c
 		return runner.Result{Outcome: sparkwing.Failed, Err: werr}
 	}
 	if superseded.Load() {
-		err := fmt.Errorf("concurrency key %q: holder superseded by newer arrival", cp.key)
+		err := fmt.Errorf("concurrency key %q: holder superseded by newer arrival", parameters.key)
 		_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_superseded", []byte(err.Error()))
 		_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Superseded), err.Error(), nil)
 		r.recordReleaseOutcome(req.RunID, req.Node.ID(), string(sparkwing.Superseded))
@@ -537,7 +549,7 @@ func slotOwnershipLost(holder *store.ConcurrencyHolder, err error) bool {
 	return holder == nil || holder.Superseded
 }
 
-func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp coordParams, initial store.AcquireSlotResponse, wedgeBudget time.Duration) runner.Result {
+func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, parameters coordinationParameters, initial store.AcquireSlotResponse, wedgeBudget time.Duration) runner.Result {
 	wedge := newStoreWedgeGuard(wedgeBudget)
 	leaderRun, leaderNode := initial.LeaderRunID, initial.LeaderNodeID
 
@@ -546,7 +558,7 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp c
 		holders = append(holders, map[string]string{"run_id": h.RunID, "node_id": h.NodeID})
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"key":            cp.key,
+		"key":            parameters.key,
 		"kind":           string(initial.Kind),
 		"position":       initial.Position,
 		"queue_length":   initial.QueueLength,
@@ -556,38 +568,40 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp c
 	})
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_wait", payload)
 
-	lastDetail := concWaitDetail(cp.key, initial, leaderRun, leaderNode)
+	lastDetail := concWaitDetail(parameters.key, initial, leaderRun, leaderNode)
 	if lastDetail != "" {
 		_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), lastDetail)
 		r.emitConcWaitLog(ctx, req, lastDetail)
 	}
 	queueRefresh := initial.Kind == store.AcquireQueued
 
-	if initial.Kind == store.AcquireCancellingOthers && cp.cancelTimeout > 0 {
-		timer := time.AfterFunc(cp.cancelTimeout, func() {
-			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if initial.Kind == store.AcquireCancellingOthers && parameters.cancelTimeout > 0 {
+		timer := time.AfterFunc(parameters.cancelTimeout, func() {
+			cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			dropped, err := r.backends.Concurrency.ForceReleaseSuperseded(bg, cp.key)
+			dropped, err := r.backends.Concurrency.ForceReleaseSuperseded(cleanupContext, parameters.key)
 			if err != nil {
-				slog.Warn("force-release after cancel timeout failed", "key", cp.key, "err", err)
+				slog.Warn("force-release after cancel timeout failed", "key", parameters.key, "err", err)
 				return
 			}
 			if len(dropped) > 0 {
 				dropPayload, _ := json.Marshal(map[string]any{
-					"key":     cp.key,
+					"key":     parameters.key,
 					"count":   len(dropped),
 					"reason":  "cancel_timeout",
-					"timeout": cp.cancelTimeout.String(),
+					"timeout": parameters.cancelTimeout.String(),
 				})
-				_ = r.backends.State.AppendEvent(bg, req.RunID, req.Node.ID(), "concurrency_force_release", dropPayload)
+				if err := r.backends.State.AppendEvent(cleanupContext, req.RunID, req.Node.ID(), "concurrency_force_release", dropPayload); err != nil {
+					slog.Error("record forced concurrency release failed", "run", req.RunID, "node", req.Node.ID(), "key", parameters.key, "err", err)
+				}
 			}
 		})
 		defer timer.Stop()
 	}
 
 	var queueDeadline time.Time
-	if cp.queueTimeout > 0 && initial.Kind == store.AcquireQueued {
-		queueDeadline = time.Now().Add(cp.queueTimeout)
+	if parameters.queueTimeout > 0 && initial.Kind == store.AcquireQueued {
+		queueDeadline = time.Now().Add(parameters.queueTimeout)
 	}
 
 	if req.ReleaseWorkerSlot != nil {
@@ -601,10 +615,10 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp c
 	for {
 		select {
 		case <-ctx.Done():
-			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if _, err := r.backends.Concurrency.CancelWaiter(bg, cp.key, req.RunID, req.Node.ID()); err != nil {
+			cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			if _, err := r.backends.Concurrency.CancelWaiter(cleanupContext, parameters.key, req.RunID, req.Node.ID()); err != nil {
 				slog.Warn("cancel waiter on context cancellation failed; reaper will sweep it",
-					"key", cp.key, "run", req.RunID, "node", req.Node.ID(), "err", err)
+					"key", parameters.key, "run", req.RunID, "node", req.Node.ID(), "err", err)
 			}
 			cancel()
 			r.markFailed(ctx, req.RunID, req.Node.ID(), ctx.Err())
@@ -612,9 +626,9 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp c
 		case <-ticker.C:
 		}
 
-		res, err := r.backends.Concurrency.ResolveWaiter(ctx, cp.key, req.RunID, req.Node.ID(), cp.cacheHash, leaderRun, leaderNode, noCacheFromContext(ctx))
+		res, err := r.backends.Concurrency.ResolveWaiter(ctx, parameters.key, req.RunID, req.Node.ID(), parameters.cacheHash, leaderRun, leaderNode, noCacheFromContext(ctx))
 		if err != nil {
-			terminal := wedge.fail(fmt.Sprintf("concurrency key %q: resolve waiter", cp.key), err)
+			terminal := wedge.fail(fmt.Sprintf("concurrency key %q: resolve waiter", parameters.key), err)
 			if terminal == nil {
 				continue
 			}
@@ -626,10 +640,10 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp c
 		switch res.Status {
 		case store.WaiterStillWaiting:
 			if !queueDeadline.IsZero() && time.Now().After(queueDeadline) {
-				return r.failQueueTimeout(ctx, req, cp)
+				return r.failQueueTimeout(ctx, req, parameters)
 			}
 			if queueRefresh {
-				if d := concQueuedDetail(cp.key, res.Position, res.Holders); d != lastDetail {
+				if d := concQueuedDetail(parameters.key, res.Position, res.Holders); d != lastDetail {
 					lastDetail = d
 					_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), d)
 					r.emitConcWaitLog(ctx, req, d)
@@ -637,13 +651,13 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp c
 			}
 			continue
 		case store.WaiterPromoted:
-			return r.runPromotedSlot(ctx, req, cp, res.HolderID, wedgeBudget)
+			return r.runPromotedSlot(ctx, req, parameters, res.HolderID, wedgeBudget)
 		case store.WaiterCached:
-			return r.applyCacheHit(ctx, req, cp, res.OriginRunID, res.OriginNodeID)
+			return r.applyCacheHit(ctx, req, parameters, res.OriginRunID, res.OriginNodeID)
 		case store.WaiterLeaderFinished:
-			return r.inheritLeaderOutcome(ctx, req, cp, res.LeaderRunID, res.LeaderNodeID, res.LeaderOutcome, res.LeaderFailureReason)
+			return r.inheritLeaderOutcome(ctx, req, parameters, res.LeaderRunID, res.LeaderNodeID, res.LeaderOutcome, res.LeaderFailureReason)
 		case store.WaiterCancelled:
-			err := fmt.Errorf("concurrency key %q: waiter was cancelled or superseded", cp.key)
+			err := fmt.Errorf("concurrency key %q: waiter was cancelled or superseded", parameters.key)
 			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_cancelled", nil)
 			_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Superseded), err.Error(), nil)
 			return runner.Result{Outcome: sparkwing.Superseded, Err: err}
@@ -651,7 +665,7 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp c
 	}
 }
 
-func (r *NodeExecutor) runPromotedSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string, wedgeBudget time.Duration) runner.Result {
+func (r *NodeExecutor) runPromotedSlot(ctx context.Context, req runner.Request, parameters coordinationParameters, holderID string, wedgeBudget time.Duration) runner.Result {
 	// safety: promotion already granted this holder, and only
 	// runHeldSlot releases it, so every exit short of that hand-off
 	// gives the slot back here.
@@ -660,11 +674,11 @@ func (r *NodeExecutor) runPromotedSlot(ctx context.Context, req runner.Request, 
 		if handedOff {
 			return
 		}
-		bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := r.backends.Concurrency.ReleaseSlot(bg, cp.key, holderID, "cancelled", "", "", 0); err != nil {
+		if err := r.backends.Concurrency.ReleaseSlot(cleanupContext, parameters.key, holderID, "cancelled", "", "", 0); err != nil {
 			slog.Warn("promoted holder release failed; relying on reaper",
-				"key", cp.key, "holder_id", holderID, "err", err)
+				"key", parameters.key, "holder_id", holderID, "err", err)
 		}
 	}()
 
@@ -676,18 +690,18 @@ func (r *NodeExecutor) runPromotedSlot(ctx context.Context, req runner.Request, 
 	_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), "")
 
 	handedOff = true
-	return r.runHeldSlot(ctx, req, cp, holderID, wedgeBudget)
+	return r.runHeldSlot(ctx, req, parameters, holderID, wedgeBudget)
 }
 
-func (r *NodeExecutor) failQueueTimeout(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
-	if _, err := r.backends.Concurrency.CancelWaiter(ctx, cp.key, req.RunID, req.Node.ID()); err != nil {
+func (r *NodeExecutor) failQueueTimeout(ctx context.Context, req runner.Request, parameters coordinationParameters) runner.Result {
+	if _, err := r.backends.Concurrency.CancelWaiter(ctx, parameters.key, req.RunID, req.Node.ID()); err != nil {
 		slog.Warn("cancel waiter after queue timeout failed; reaper will sweep it",
-			"key", cp.key, "run", req.RunID, "node", req.Node.ID(), "err", err)
+			"key", parameters.key, "run", req.RunID, "node", req.Node.ID(), "err", err)
 	}
-	err := fmt.Errorf("concurrency key %q: queued %s without a slot under OnLimit:Queue", cp.key, cp.queueTimeout)
+	err := fmt.Errorf("concurrency key %q: queued %s without a slot under OnLimit:Queue", parameters.key, parameters.queueTimeout)
 	payload, _ := json.Marshal(map[string]any{
-		"key":           cp.key,
-		"queue_timeout": cp.queueTimeout.String(),
+		"key":           parameters.key,
+		"queue_timeout": parameters.queueTimeout.String(),
 	})
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_queue_timeout", payload)
 	_ = r.backends.State.FinishNodeWithReason(ctx, req.RunID, req.Node.ID(),
@@ -710,7 +724,7 @@ func followerOutcomeFromLeader(leaderOutcome string) sparkwing.Outcome {
 	}
 }
 
-func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Request, cp coordParams, leaderRunID, leaderNodeID, leaderOutcome, leaderFailureReason string) runner.Result {
+func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Request, parameters coordinationParameters, leaderRunID, leaderNodeID, leaderOutcome, leaderFailureReason string) runner.Result {
 	output, err := r.backends.State.GetNodeOutput(ctx, leaderRunID, leaderNodeID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("fetch leader output: %w", err))
@@ -719,7 +733,7 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 
 	_ = r.backends.State.StartNode(ctx, req.RunID, req.Node.ID())
 	payload, _ := json.Marshal(map[string]any{
-		"key":            cp.key,
+		"key":            parameters.key,
 		"leader_run_id":  leaderRunID,
 		"leader_node_id": leaderNodeID,
 		"leader_outcome": leaderOutcome,
@@ -734,17 +748,21 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 		_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(outcome), "", output)
 	}
 
-	if nlog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
-		nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
+	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
+		nodeLog = wrapNodeLogWithMasker(nodeLog, secrets.MaskerFromContext(ctx))
 		ts := time.Now()
-		nlog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start", Attrs: map[string]any{
+		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_start", Attrs: map[string]any{
 			"coalesced_from": fmt.Sprintf("%s/%s", leaderRunID, leaderNodeID),
 		}})
-		nlog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_end", Attrs: map[string]any{
+		nodeLog.Emit(sparkwing.LogRecord{TS: ts, Level: "info", Event: "node_end", Attrs: map[string]any{
 			"outcome": string(outcome), "duration_ms": int64(0),
 			"coalesced_from": fmt.Sprintf("%s/%s", leaderRunID, leaderNodeID),
 		}})
-		_ = nlog.Close()
+		if err := nodeLog.Close(); err != nil {
+			slog.Error("close node log failed", "run", req.RunID, "node", req.Node.ID(), "err", err)
+		}
+	} else {
+		slog.Error("open node log failed", "run", req.RunID, "node", req.Node.ID(), "err", err)
 	}
 	return runner.Result{Outcome: outcome, Output: output}
 }
@@ -774,7 +792,7 @@ func (i *inflightMap) set(runID, nodeID, outcome string) {
 	i.mu.Unlock()
 }
 
-func (i *inflightMap) get(runID, nodeID string) string {
+func (i *inflightMap) take(runID, nodeID string) string {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	outcome, ok := i.m[runID+"/"+nodeID]
@@ -790,5 +808,5 @@ func (r *NodeExecutor) recordReleaseOutcome(runID, nodeID, outcome string) {
 }
 
 func (r *NodeExecutor) lastReleaseOutcomeFor(runID, nodeID string) string {
-	return inflightOutcomes.get(runID, nodeID)
+	return inflightOutcomes.take(runID, nodeID)
 }

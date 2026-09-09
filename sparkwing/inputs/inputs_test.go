@@ -10,109 +10,127 @@ import (
 )
 
 func TestEnvDeterministicOrder(t *testing.T) {
-	t.Setenv("FOO", "1")
-	t.Setenv("BAR", "2")
+	t.Setenv("SAMPLE_FIRST_VALUE", "1")
+	t.Setenv("SAMPLE_SECOND_VALUE", "2")
 
-	a := Env("FOO", "BAR")(context.Background())
-	b := Env("BAR", "FOO")(context.Background())
-	if a != b || a == "" {
-		t.Fatalf("Env order should not affect hash: a=%q b=%q", a, b)
+	first := resolvedKey(t, Env("SAMPLE_FIRST_VALUE", "SAMPLE_SECOND_VALUE"))
+	second := resolvedKey(t, Env("SAMPLE_SECOND_VALUE", "SAMPLE_FIRST_VALUE"))
+	if first != second || first == "" {
+		t.Fatalf("Env order should not affect hash: a=%q b=%q", first, second)
 	}
 }
 
 func TestEnvUnsetVsEmpty(t *testing.T) {
-	t.Setenv("PRESENT_BUT_EMPTY", "")
-	os.Unsetenv("ABSENT_FOR_TEST_XYZ")
+	t.Setenv("SAMPLE_PRESENT_VALUE", "")
+	t.Setenv("SAMPLE_ABSENT_VALUE", "")
+	if err := os.Unsetenv("SAMPLE_ABSENT_VALUE"); err != nil {
+		t.Fatal(err)
+	}
 
-	present := Env("PRESENT_BUT_EMPTY")(context.Background())
-	absent := Env("ABSENT_FOR_TEST_XYZ")(context.Background())
+	present := resolvedKey(t, Env("SAMPLE_PRESENT_VALUE"))
+	absent := resolvedKey(t, Env("SAMPLE_ABSENT_VALUE"))
 	if present == absent {
 		t.Fatalf("set-but-empty and unset must hash differently: both=%q", present)
 	}
 }
 
 func TestEnvValueChangesHash(t *testing.T) {
-	t.Setenv("VAR", "one")
-	a := Env("VAR")(context.Background())
-	t.Setenv("VAR", "two")
-	b := Env("VAR")(context.Background())
-	if a == b {
-		t.Fatalf("changing var value should change hash: a=%q b=%q", a, b)
+	t.Setenv("SAMPLE_INPUT_VALUE", "one")
+	first := resolvedKey(t, Env("SAMPLE_INPUT_VALUE"))
+	t.Setenv("SAMPLE_INPUT_VALUE", "two")
+	second := resolvedKey(t, Env("SAMPLE_INPUT_VALUE"))
+	if first == second {
+		t.Fatalf("changing var value should change hash: a=%q b=%q", first, second)
 	}
 }
 
 func TestConst(t *testing.T) {
-	if Const("v1")(context.Background()) != "v1" {
-		t.Fatal("Const should return its arg verbatim")
+	if resolvedKey(t, Const("v1")) != "v1" {
+		t.Fatal("Const should return its supplied key")
 	}
-	if Const("v1")(context.Background()) == Const("v2")(context.Background()) {
+	if resolvedKey(t, Const("v1")) == resolvedKey(t, Const("v2")) {
 		t.Fatal("different Const values should differ")
 	}
 }
 
 func TestComposeShortCircuitsOnEmpty(t *testing.T) {
-	empty := sparkwing.CacheKeyFn(func(context.Context) sparkwing.CacheKey { return "" })
-	v := sparkwing.CacheKeyFn(func(context.Context) sparkwing.CacheKey { return "x" })
-	got := Compose(v, empty)(context.Background())
-	if got != "" {
-		t.Fatalf("Compose with any empty sub-fn must return empty, got %q", got)
+	empty := sparkwing.CacheKeyFn(func(context.Context) (sparkwing.CacheKey, error) { return "", nil })
+	value := sparkwing.CacheKeyFn(func(context.Context) (sparkwing.CacheKey, error) { return "x", nil })
+	key, err := Compose(value, empty)(t.Context())
+	if key != "" || err == nil || !strings.Contains(err.Error(), "empty key") {
+		t.Fatalf("empty input = (%q, %v)", key, err)
 	}
 }
 
 func TestCompilePattern_Basename(t *testing.T) {
-	m := compilePattern("*.md")
-	for _, p := range []string{"README.md", "docs/api.md", "deep/nested/x.md"} {
-		if !m(p) {
-			t.Errorf("expected basename match for %q", p)
+	matcher, err := compilePattern("*.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"README.md", "docs/api.md", "deep/nested/x.md"} {
+		if !matchPath(t, matcher, path) {
+			t.Errorf("expected basename match for %q", path)
 		}
 	}
-	for _, p := range []string{"src/foo.tsx", "Makefile", "x.mdx"} {
-		if m(p) {
-			t.Errorf("did not expect match for %q", p)
+	for _, path := range []string{"src/foo.tsx", "Makefile", "x.mdx"} {
+		if matchPath(t, matcher, path) {
+			t.Errorf("did not expect match for %q", path)
 		}
 	}
 }
 
 func TestCompilePattern_DirPrefix(t *testing.T) {
-	m := compilePattern("docs/")
-	for _, p := range []string{"docs/api.md", "docs/nested/foo.txt"} {
-		if !m(p) {
-			t.Errorf("expected dir-prefix match for %q", p)
+	matcher, err := compilePattern("docs/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"docs/api.md", "docs/nested/foo.txt"} {
+		if !matchPath(t, matcher, path) {
+			t.Errorf("expected directory prefix match for %q", path)
 		}
 	}
-	if m("documents/x") {
+	if matchPath(t, matcher, "documents/x") {
 		t.Error("docs/ should not match documents/")
 	}
-	if m("README.md") {
+	if matchPath(t, matcher, "README.md") {
 		t.Error("docs/ should not match top-level files")
 	}
 }
 
 func TestCompilePattern_DoubleStar(t *testing.T) {
-	m := compilePattern("docs/**/*.md")
-	if !m("docs/api.md") {
+	matcher, err := compilePattern("docs/**/*.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matchPath(t, matcher, "docs/api.md") {
 		t.Error("docs/**/*.md should match docs/api.md")
 	}
-	if !m("docs/sub/page.md") {
+	if !matchPath(t, matcher, "docs/sub/page.md") {
 		t.Error("docs/**/*.md should match docs/sub/page.md")
 	}
-	if m("src/api.md") {
+	if matchPath(t, matcher, "src/api.md") {
 		t.Error("docs/**/*.md should not match src/api.md")
 	}
 }
 
 func TestCompilePattern_ExactPath(t *testing.T) {
-	m := compilePattern("CI_TRADEOFFS.md")
-	if !m("CI_TRADEOFFS.md") {
+	matcher, err := compilePattern("sample-notes.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matchPath(t, matcher, "sample-notes.md") {
 		t.Error("expected exact match")
 	}
-	if !m("subdir/CI_TRADEOFFS.md") {
-		t.Error("basename match should reach into subdirs")
+	if !matchPath(t, matcher, "subdir/sample-notes.md") {
+		t.Error("basename match should reach into subdirectories")
 	}
 }
 
 func TestIgnoreMatcherDropsMatched(t *testing.T) {
-	keep := buildIgnoreMatcher([]string{"*.md", "docs/"})
+	keep, err := buildIgnoreMatcher([]string{"*.md", "docs/"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := map[string]bool{
 		"src/foo.tsx":       true,
 		"README.md":         false,
@@ -121,14 +139,17 @@ func TestIgnoreMatcherDropsMatched(t *testing.T) {
 		"docs/deep/img.png": false,
 	}
 	for path, want := range cases {
-		if got := keep(path); got != want {
+		if got := matchPath(t, keep, path); got != want {
 			t.Errorf("keep(%q) = %v, want %v", path, got, want)
 		}
 	}
 }
 
 func TestIncludeMatcherKeepsMatched(t *testing.T) {
-	keep := buildIncludeMatcher([]string{"src/**", "package.json"})
+	keep, err := buildIncludeMatcher([]string{"src/**", "package.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := map[string]bool{
 		"src/foo.tsx":  true,
 		"src/sub/x.ts": true,
@@ -137,25 +158,28 @@ func TestIncludeMatcherKeepsMatched(t *testing.T) {
 		"docs/api.md":  false,
 	}
 	for path, want := range cases {
-		if got := keep(path); got != want {
+		if got := matchPath(t, keep, path); got != want {
 			t.Errorf("keep(%q) = %v, want %v", path, got, want)
 		}
 	}
 }
 
 func TestGlobToRegexAnchored(t *testing.T) {
-	re := globToRegex("docs/api.md")
-	if re.MatchString("a-docs/api.md-suffix") {
+	expression := globToRegex("docs/api.md")
+	if expression.MatchString("a-docs/api.md-suffix") {
 		t.Error("glob should be anchored, not substring")
 	}
-	if !re.MatchString("docs/api.md") {
+	if !expression.MatchString("docs/api.md") {
 		t.Error("glob should match exact path")
 	}
 }
 
 func TestDirPrefixIsBoundaryAware(t *testing.T) {
-	m := compilePattern("doc/")
-	if m("docs/x") {
+	matcher, err := compilePattern("doc/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matchPath(t, matcher, "docs/x") {
 		t.Error("doc/ must not match docs/x")
 	}
 }
@@ -170,12 +194,30 @@ func TestSignatureIsCacheKeyFn(t *testing.T) {
 }
 
 func TestComposeIncorporatesAllParts(t *testing.T) {
-	a := Compose(Const("x"), Const("y"))(context.Background())
-	b := Compose(Const("x"), Const("z"))(context.Background())
-	if a == b {
+	first := resolvedKey(t, Compose(Const("x"), Const("y")))
+	second := resolvedKey(t, Compose(Const("x"), Const("z")))
+	if first == second {
 		t.Fatal("changing one Const should change Compose output")
 	}
-	if !strings.HasPrefix(string(a), "ck:") {
-		t.Errorf("Compose output should be sparkwing.Key prefix: %q", a)
+	if !strings.HasPrefix(string(first), "ck:") {
+		t.Errorf("Compose output should be sparkwing.Key prefix: %q", first)
 	}
+}
+
+func resolvedKey(t *testing.T, resolve sparkwing.CacheKeyFn) sparkwing.CacheKey {
+	t.Helper()
+	key, err := resolve(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+func matchPath(t *testing.T, matcher pathMatcher, path string) bool {
+	t.Helper()
+	matched, err := matcher(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return matched
 }

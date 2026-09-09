@@ -6,17 +6,11 @@ import (
 	"time"
 )
 
-// JobGroup is a handle to a set of nodes. Static groups (from
-// sparkwing.GroupJobs or sparkwing.JobFanOut) fix their members at
-// plan-construction; dynamic groups (from sparkwing.JobFanOutDynamic)
-// populate them at dispatch-time after the generator runs.
-//
-// Named groups render as a single collapsible cluster in the
-// dashboard DAG view. The empty name means "structural collection
-// only" -- still a Needs target, but no UI cluster.
-//
-// Downstream `.Needs(group)` expands eagerly for static groups and
-// waits on `<-group.Ready()` for dynamic ones.
+// JobGroup holds nodes for dependency wiring and dashboard grouping.
+// [GroupJobs] and [JobFanOut] fix membership during plan construction;
+// [JobFanOutDynamic] populates members after its source completes.
+// A named group renders under one dashboard header. An unnamed group
+// serves only as a dependency target.
 type JobGroup struct {
 	mu      sync.Mutex
 	name    string
@@ -41,12 +35,12 @@ func (g *JobGroup) Members() []*JobNode {
 }
 
 // Dynamic reports whether this group's membership is determined at
-// dispatch-time (ExpandFrom) rather than plan-construction (GroupJobs).
+// dispatch through [JobFanOutDynamic].
 func (g *JobGroup) Dynamic() bool { return g.dynamic }
 
 // Ready returns a channel that closes once a dynamic group's
-// expansion completes (success or failure). Static groups return a
-// pre-closed channel so callers can treat both uniformly.
+// expansion completes, including on failure. Static groups return
+// a closed channel.
 func (g *JobGroup) Ready() <-chan struct{} {
 	if g.ready == nil {
 		ch := make(chan struct{})
@@ -72,28 +66,8 @@ func (g *JobGroup) finalize(members []*JobNode, err error) {
 	close(g.ready)
 }
 
-// GroupJobs declares a named bundle of existing Plan nodes. The
-// returned *JobGroup is both a Needs target (downstream depends on
-// every member) and a dashboard cluster (rendered as a single visual
-// unit under the given name). An empty name means "structural
-// collection only" -- still a Needs target, but no UI cluster.
-//
-// The Work-layer mirror is sparkwing.GroupSteps; both follow the
-// noun-prefix convention so tab-complete on Group* surfaces every
-// grouping verb.
-//
-//	build := sw.Job(plan, "build", &Build{})
-//	checks := sw.GroupJobs(plan, "safety",
-//	    sw.Job(plan, "lint",     &Lint{}).Needs(build),
-//	    sw.Job(plan, "security", &Security{}).Needs(build),
-//	    sw.Job(plan, "test",     &Test{}).Needs(build),
-//	)
-//	sw.Job(plan, "deploy", &Deploy{}).Needs(checks)
-//
-// In the dashboard, lint+security+test collapse into a "safety"
-// cluster and a single arrow renders from the cluster to deploy.
-//
-// For an unnamed structural collection (no UI cluster), pass name="".
+// GroupJobs groups existing Plan nodes under name and returns a dependency
+// target covering every member. A non-empty name adds a dashboard group.
 func GroupJobs(p *Plan, name string, nodes ...*JobNode) *JobGroup {
 	if p == nil {
 		panic("sparkwing: GroupJobs: plan must be non-nil")
@@ -103,26 +77,10 @@ func GroupJobs(p *Plan, name string, nodes ...*JobNode) *JobGroup {
 	return g
 }
 
-// JobFanOut is the Plan-time static fan-out helper. items is in hand
-// at Plan() time; one Job is registered per element via sw.Job.
-// Returns a *JobGroup named `name`, suitable for `.Needs(group)` from
-// downstream consumers and for dashboard cluster rendering.
-//
-// items may be empty -- the returned *JobGroup has no members and
-// .Needs(group) becomes a no-op edge.
-//
-// The per-item fn's second return value accepts the same shapes as
-// sparkwing.Job's third arg (a Workable struct or a bare func(ctx)
-// error closure); the SDK coerces uniformly.
-//
-//	images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string, any) {
-//	    return "build-" + img.Name, &BuildImageJob{Image: img}
-//	}).Needs(webBuild, discover)
-//	sw.Job(plan, "artifact", &Artifact{}).Needs(images)
-//
-// Implemented as a free function because Go does not allow type
-// parameters on methods. For runtime fan-out (slice produced by an
-// upstream Job's typed output), use JobFanOutDynamic instead.
+// JobFanOut registers one job per item during plan construction.
+// The callback returns an ID and a job value accepted by [Job].
+// An empty items slice creates a group with no dependencies to satisfy.
+// Use [JobFanOutDynamic] for items produced by an upstream job.
 func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, any)) *JobGroup {
 	if p == nil {
 		panic("sparkwing: JobFanOut: plan must be non-nil")
@@ -140,29 +98,10 @@ func JobFanOut[T any](p *Plan, name string, items []T, fn func(T) (string, any))
 	return g
 }
 
-// JobFanOutDynamic is the runtime fan-out helper. source is a Job
-// whose typed output is []T; after source completes, fn runs once per
-// element and contributes a fresh child Job per item. Returns a
-// *JobGroup named `name`, suitable for `.Needs(group)` from downstream
-// consumers and for dashboard cluster rendering.
-//
-//	// DiscoverServices embeds sparkwing.Produces[[]string]
-//	discover := sw.Job(plan, "discover", &DiscoverServices{})
-//	builds   := sw.JobFanOutDynamic(plan, "service-builds", discover, func(svc string) (string, any) {
-//	    s := svc
-//	    return "build-" + s, func(ctx context.Context) error { return build(ctx, s) }
-//	})
-//	sw.Job(plan, "publish", &PublishJob{}).Needs(builds)
-//
-// The source must produce []T (the cardinality-many case): its job
-// must embed sparkwing.Produces[[]T] AND its Work must return a
-// sparkwing.Step whose fn signature is func(ctx) ([]T, error).
-// RefTo[[]T](source) Plan-time-validates the contract and panics with
-// a node-id-tagged message on mismatch. For Plan-time fan-out (slice
-// known at Plan() time), use JobFanOut.
-//
-// The per-item fn's second return value accepts the same shapes as
-// sparkwing.Job's third arg (Workable struct or func(ctx) error).
+// JobFanOutDynamic registers one child per item in source's []T output
+// after source completes. The callback returns an ID and a value accepted
+// by [Job]. The returned group is a dependency target for every child.
+// A source whose declared output differs from []T panics during planning.
 func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (string, any)) *JobGroup {
 	if p == nil {
 		panic("sparkwing: JobFanOutDynamic: plan must be non-nil")
@@ -204,7 +143,7 @@ func (g *JobGroup) Needs(deps ...Dep) *JobGroup {
 }
 
 // Retry configures every member to be re-attempted up to attempts
-// additional times on failure. See Job.Retry.
+// additional times on failure. See [JobNode.Retry].
 func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup {
 	for _, m := range g.Members() {
 		m.Retry(attempts, opts...)
@@ -212,7 +151,7 @@ func (g *JobGroup) Retry(attempts int, opts ...RetryOption) *JobGroup {
 	return g
 }
 
-// Timeout caps the per-attempt duration on every member. See Job.Timeout.
+// Timeout caps the per-attempt duration on every member. See [JobNode.Timeout].
 func (g *JobGroup) Timeout(d time.Duration) *JobGroup {
 	for _, m := range g.Members() {
 		m.Timeout(d)
@@ -221,7 +160,7 @@ func (g *JobGroup) Timeout(d time.Duration) *JobGroup {
 }
 
 // NoProgressTimeout sets the per-attempt inactivity timeout on every member.
-// See Job.NoProgressTimeout.
+// See [JobNode.NoProgressTimeout].
 func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup {
 	for _, m := range g.Members() {
 		m.NoProgressTimeout(d)
@@ -229,9 +168,7 @@ func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup {
 	return g
 }
 
-// Verify registers the same postcondition check on every member. Each
-// member runs the check after its action succeeds and fails at
-// StageVerify if the check returns an error. See Job.Verify.
+// Verify registers a postcondition check on every member. See [JobNode.Verify].
 func (g *JobGroup) Verify(fn VerifyFn) *JobGroup {
 	for _, m := range g.Members() {
 		m.Verify(fn)
@@ -240,9 +177,7 @@ func (g *JobGroup) Verify(fn VerifyFn) *JobGroup {
 }
 
 // Outputs declares the same artifact output globs on every member.
-// Each member runs in its own workspace, so a fan-out group's members
-// each emit their own copy at the declared relative paths. See
-// Job.Outputs.
+// See [JobNode.Outputs].
 func (g *JobGroup) Outputs(globs ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.Outputs(globs...)
@@ -252,7 +187,7 @@ func (g *JobGroup) Outputs(globs ...string) *JobGroup {
 
 // Consumes stages the given producer's artifacts into every member's
 // workspace before it runs, and implies Needs(producer) on each. See
-// Job.Consumes.
+// [JobNode.Consumes].
 func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup {
 	for _, m := range g.Members() {
 		m.Consumes(producer, opts...)
@@ -260,11 +195,9 @@ func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup 
 	return g
 }
 
-// Requires records label terms used to filter runner claims for every non-inline dispatched member.
-// An unmatched non-inline member remains queued until the
-// controller fails it with queue_timeout. Direct runs and inline jobs have no
-// runner claim step, so Requires does not select or reject their runner. See
-// Job.Requires.
+// Requires constrains runner claims for every non-inline dispatched member.
+// An unmatched member waits until the controller fails it with queue_timeout.
+// Direct runs and inline jobs have no runner claim step. See [JobNode.Requires].
 func (g *JobGroup) Requires(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.Requires(labels...)
@@ -272,11 +205,8 @@ func (g *JobGroup) Requires(labels ...string) *JobGroup {
 	return g
 }
 
-// Prefers records ordered runner-label preferences for every member in plan-snapshot metadata and gives matching enrolled-executor offers a small boost bounded by their priority ceiling; legacy claims ignore it.
-// Within one controller's enrolled-executor offer
-// round, matching a preference adds a small ordering boost bounded by each
-// executor's administrator-owned priority ceiling. It does not affect legacy
-// name-less runner claims. See Job.Prefers.
+// Prefers boosts matching enrolled-executor offers within their priority
+// ceiling for every member. See [JobNode.Prefers].
 func (g *JobGroup) Prefers(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.Prefers(labels...)
@@ -285,7 +215,7 @@ func (g *JobGroup) Prefers(labels ...string) *JobGroup {
 }
 
 // WhenRunner marks every member as conditional on the dispatching
-// runner advertising the listed labels. See Job.WhenRunner.
+// runner advertising the listed labels. See [JobNode.WhenRunner].
 func (g *JobGroup) WhenRunner(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.WhenRunner(labels...)
@@ -293,7 +223,7 @@ func (g *JobGroup) WhenRunner(labels ...string) *JobGroup {
 	return g
 }
 
-// SkipIf registers a predicate on every member. See Job.SkipIf.
+// SkipIf registers a predicate on every member. See [JobNode.SkipIf].
 func (g *JobGroup) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobGroup {
 	for _, m := range g.Members() {
 		m.SkipIf(fn, opts...)
@@ -309,7 +239,7 @@ func (g *JobGroup) Env(key, value string) *JobGroup {
 	return g
 }
 
-// Inline marks every member for in-process execution. See Job.Inline.
+// Inline places every member on the dispatcher's host. See [JobNode.Inline].
 func (g *JobGroup) Inline() *JobGroup {
 	for _, m := range g.Members() {
 		m.Inline()
@@ -318,7 +248,7 @@ func (g *JobGroup) Inline() *JobGroup {
 }
 
 // ContinueOnError marks every member so downstream dependents proceed
-// even on failure. See Job.ContinueOnError.
+// even on failure. See [JobNode.ContinueOnError].
 func (g *JobGroup) ContinueOnError() *JobGroup {
 	for _, m := range g.Members() {
 		m.ContinueOnError()
@@ -326,7 +256,7 @@ func (g *JobGroup) ContinueOnError() *JobGroup {
 	return g
 }
 
-// Optional marks every member as non-essential. See Job.Optional.
+// Optional marks every member as non-essential. See [JobNode.Optional].
 func (g *JobGroup) Optional() *JobGroup {
 	for _, m := range g.Members() {
 		m.Optional()
@@ -335,9 +265,7 @@ func (g *JobGroup) Optional() *JobGroup {
 }
 
 // CacheDir registers dependency-directory caches on every member.
-// Each member restores and saves independently under the shared key,
-// so the first member to succeed seeds the cache for later runs. See
-// [JobNode.CacheDir].
+// See [JobNode.CacheDir].
 func (g *JobGroup) CacheDir(caches ...DirCache) *JobGroup {
 	for _, m := range g.Members() {
 		m.CacheDir(caches...)
@@ -345,7 +273,7 @@ func (g *JobGroup) CacheDir(caches ...DirCache) *JobGroup {
 	return g
 }
 
-// BeforeRun registers a pre-run hook on every member. See Job.BeforeRun.
+// BeforeRun registers a pre-run hook on every member. See [JobNode.BeforeRun].
 func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup {
 	for _, m := range g.Members() {
 		m.BeforeRun(fn)
@@ -353,7 +281,7 @@ func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup {
 	return g
 }
 
-// AfterRun registers a post-run hook on every member. See Job.AfterRun.
+// AfterRun registers a post-run hook on every member. See [JobNode.AfterRun].
 func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup {
 	for _, m := range g.Members() {
 		m.AfterRun(fn)

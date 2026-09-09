@@ -39,7 +39,9 @@ type pgCacheReplayPipe struct{ sparkwing.Base }
 
 func (pgCacheReplayPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	node := sparkwing.Job(plan, "build", &pgCacheReplayJob{})
-	node.Memoize(func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("pg-integ", "replay-v1") })
+	node.Memoize(func(ctx context.Context) (sparkwing.CacheKey, error) {
+		return sparkwing.Key("pg-integ", "replay-v1"), nil
+	})
 	return nil
 }
 

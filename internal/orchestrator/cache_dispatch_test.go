@@ -167,7 +167,7 @@ func (cacheKeyedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwin
 		cacheCounter.inflight.Add(1)
 		return nil
 	}).Memoize(
-		func(ctx context.Context) sparkwing.CacheKey { return "v-pinned" },
+		func(ctx context.Context) (sparkwing.CacheKey, error) { return "v-pinned", nil },
 		sparkwing.TTL(time.Hour))
 	return nil
 }
@@ -1461,8 +1461,6 @@ func TestDispatchWatchdog_UnclaimedUnboundedChildStillTimesOutParent(t *testing.
 		if res == nil || res.Status != "failed" || res.Error == nil || !strings.Contains(res.Error.Error(), "dispatch_wait_timeout") {
 			t.Fatalf("result = %+v, want dispatch_wait_timeout for unclaimed unbounded child", res)
 		}
-	// safety: the 100 ms watchdog needs about 650 ms end to end under the race
-	// detector, so the budget proves the watchdog fired without timing it.
 	case <-time.After(5 * time.Second):
 		t.Fatal("unclaimed unbounded child disabled the parent dispatch watchdog")
 	}

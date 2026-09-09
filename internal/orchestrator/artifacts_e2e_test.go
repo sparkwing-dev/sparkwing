@@ -26,7 +26,7 @@ func (artifactProducerPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spar
 		return os.WriteFile(filepath.Join(dir, "out.txt"), []byte("artifact-bytes"), 0o644)
 	}).
 		Outputs("dist/**").
-		Memoize(func(_ context.Context) sparkwing.CacheKey { return sparkwing.Key("produce", "v1") })
+		Memoize(func(_ context.Context) (sparkwing.CacheKey, error) { return sparkwing.Key("produce", "v1"), nil })
 	return nil
 }
 
@@ -74,16 +74,16 @@ func TestArtifacts_CapturedThenReplayedOnCacheHit(t *testing.T) {
 	if err != nil || res1.Status != "success" {
 		t.Fatalf("run 1: status=%v err=%v", res1, err)
 	}
-	prod1 := findNode(t, st, res1.RunID, "produce")
-	if prod1.ArtifactManifest == "" {
+	firstProducer := findNode(t, st, res1.RunID, "produce")
+	if firstProducer.ArtifactManifest == "" {
 		t.Fatal("producer node recorded no artifact manifest")
 	}
 
-	m := readManifestFromStore(t, art, prod1.ArtifactManifest)
-	if len(m.Entries) != 1 || m.Entries[0].Path != "dist/out.txt" {
-		t.Fatalf("unexpected manifest entries: %+v", m.Entries)
+	manifest := readManifestFromStore(t, art, firstProducer.ArtifactManifest)
+	if len(manifest.Entries) != 1 || manifest.Entries[0].Path != "dist/out.txt" {
+		t.Fatalf("unexpected manifest entries: %+v", manifest.Entries)
 	}
-	if got := readBlob(t, art, m.Entries[0].Digest); got != "artifact-bytes" {
+	if got := readBlob(t, art, manifest.Entries[0].Digest); got != "artifact-bytes" {
 		t.Fatalf("blob content: got %q", got)
 	}
 
@@ -91,12 +91,12 @@ func TestArtifacts_CapturedThenReplayedOnCacheHit(t *testing.T) {
 	if err != nil || res2.Status != "success" {
 		t.Fatalf("run 2: status=%v err=%v", res2, err)
 	}
-	prod2 := findNode(t, st, res2.RunID, "produce")
-	if prod2.Outcome != string(sparkwing.Cached) {
-		t.Fatalf("run 2 producer outcome = %q, want cached", prod2.Outcome)
+	cachedProducer := findNode(t, st, res2.RunID, "produce")
+	if cachedProducer.Outcome != string(sparkwing.Cached) {
+		t.Fatalf("run 2 producer outcome = %q, want cached", cachedProducer.Outcome)
 	}
-	if prod2.ArtifactManifest != prod1.ArtifactManifest {
-		t.Fatalf("cache hit did not copy manifest: run2=%q run1=%q", prod2.ArtifactManifest, prod1.ArtifactManifest)
+	if cachedProducer.ArtifactManifest != firstProducer.ArtifactManifest {
+		t.Fatalf("cache hit did not copy manifest: run2=%q run1=%q", cachedProducer.ArtifactManifest, firstProducer.ArtifactManifest)
 	}
 }
 
@@ -116,11 +116,11 @@ func readManifestFromStore(t *testing.T, art storage.ArtifactStore, digest strin
 	}
 	defer func() { _ = rc.Close() }()
 	b, _ := io.ReadAll(rc)
-	var m e2eManifest
-	if err := json.Unmarshal(b, &m); err != nil {
+	var manifest e2eManifest
+	if err := json.Unmarshal(b, &manifest); err != nil {
 		t.Fatalf("unmarshal manifest: %v", err)
 	}
-	return m
+	return manifest
 }
 
 func readBlob(t *testing.T, art storage.ArtifactStore, digest string) string {

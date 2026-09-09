@@ -58,7 +58,7 @@ func BoxToolBudget(tool string, grantableCores float64, queueTimeout time.Durati
 type Cache = storage.ArtifactStore
 type CacheKey string
 func (k CacheKey) IsNoCache() bool
-type CacheKeyFn func(ctx context.Context) CacheKey
+type CacheKeyFn func(ctx context.Context) (CacheKey, error)
 const Cached Outcome = "cached"
 const CancelOthers OnLimit = "cancel_others"
 const Cancelled Outcome = "cancelled"

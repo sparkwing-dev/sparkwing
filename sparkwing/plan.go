@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Plan is the typed DAG a pipeline returns from its Plan method.
+// Plan holds the job graph populated by a pipeline's Plan method.
 // The orchestrator consumes it, snapshots the graph, and dispatches
 // [JobNode]s in dependency order. Build a Plan via [NewPlan] and
 // attach jobs with [Job], [JobApproval], or [JobSpawn]; chain
@@ -45,21 +45,11 @@ type LintWarning struct {
 	Msg    string
 }
 
-// NewPlan returns an empty Plan.
 func NewPlan() *Plan {
 	return &Plan{byID: map[string]*JobNode{}}
 }
 
-// Inputs returns the parsed Inputs value the orchestrator handed to
-// this pipeline's Plan() method, or nil for a Plan built directly
-// (outside the registration path). The orchestrator uses this at
-// dispatch time to install the value on each runner ctx via
-// internal/sparkwingruntime.WithInputs, so step bodies can call
-// sparkwing.Inputs[T].
-//
-// Type-erased on purpose -- Plan can't carry a generic type
-// parameter; the typed Inputs[T] accessor does the assertion at the
-// call site.
+// Inputs returns the parsed pipeline inputs, or nil for a Plan built directly.
 func (p *Plan) Inputs() any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -84,13 +74,7 @@ func (p *Plan) Nodes() []*JobNode {
 }
 
 // Job returns the node with the given ID, or nil if absent.
-//
-// A recovery node registered with [JobNode.OnFailure] is built
-// directly and never enters the id index, so a miss falls back to
-// scanning every node's recovery attachment. Any consumer that
-// resolves a node from its id alone -- a node executing in its own
-// process, replay, dependency inspection -- otherwise reports a
-// recovery node as absent from the plan that declares it.
+// Includes recovery nodes registered with [JobNode.OnFailure].
 func (p *Plan) Job(id string) *JobNode {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -105,7 +89,7 @@ func (p *Plan) Job(id string) *JobNode {
 	return nil
 }
 
-// Expansions returns the registered ExpandFrom generators. Used by
+// Expansions returns the registered JobFanOutDynamic generators. Used by
 // the orchestrator to drive dynamic fan-out.
 func (p *Plan) Expansions() []Expansion {
 	out := make([]Expansion, len(p.expansions))
@@ -113,7 +97,7 @@ func (p *Plan) Expansions() []Expansion {
 	return out
 }
 
-// ExpandGenerator is the closure signature for ExpandFrom. It runs
+// ExpandGenerator is the closure signature for JobFanOutDynamic. It runs
 // once after the source node completes, with typed upstream output
 // accessible via closure-captured Ref.Get(ctx). Return the list of
 // children to materialize; each will automatically depend on the
@@ -216,13 +200,8 @@ func newNode(caller, id string, job Workable) *JobNode {
 	return n
 }
 
-// NewDetachedNode builds a node with full Job-equivalent validation
-// but does not register it on a Plan. Pipeline authors should not
-// reach for this -- it exists for the orchestrator's SpawnNode
-// dispatch path, where the child node is created at runtime and
-// spliced in via the orchestrator's plan-insert plumbing after the
-// parent suspends. Use
-// sparkwing.Job from pipeline code.
+// NewDetachedNode validates a node for runtime insertion without registering it on a Plan.
+// Pipeline authors use [Job].
 func NewDetachedNode(id string, job Workable) *JobNode {
 	return newNode("NewDetachedNode", id, job)
 }
@@ -246,10 +225,10 @@ func (p *Plan) insertExpanded(source *JobNode, children []*JobNode) error {
 	defer p.mu.Unlock()
 	for _, child := range children {
 		if child == nil {
-			return fmt.Errorf("ExpandFrom(%s): nil child node", source.id)
+			return fmt.Errorf("JobFanOutDynamic(%s): nil child node", source.id)
 		}
 		if _, exists := p.byID[child.id]; exists {
-			return fmt.Errorf("ExpandFrom(%s): duplicate id %q", source.id, child.id)
+			return fmt.Errorf("JobFanOutDynamic(%s): duplicate id %q", source.id, child.id)
 		}
 		child.addNeed(source.id)
 		p.byID[child.id] = child
@@ -258,41 +237,11 @@ func (p *Plan) insertExpanded(source *JobNode, children []*JobNode) error {
 	return nil
 }
 
-// Job registers a Workable (or a bare func(ctx) error closure) under
-// id and returns the node handle for further configuration (Needs,
-// Env, etc.). For multi-step or typed pipelines, pass a struct that
-// implements Workable; for the single-closure case pass the closure
-// directly and the SDK wraps it. The inner DAG is materialized at
-// registration time so pipeline-explain / dashboard renderers /
-// cycle detection see the full graph before dispatch starts.
-//
-// The third parameter is typed `any` rather than Workable so the
-// closure form is accepted without an explicit wrapper. Wrong types
-// panic at register time with a typed message, matching how Step's
-// reflection-validated fn behaves. The accepted shapes are:
-//
-//	sparkwing.Workable
-//	func(ctx context.Context) error
-//
-// Output contract: a job that produces a typed value must embed
-// sparkwing.Produces[T] AND its Work must return a *WorkStep whose
-// step fn returns (T, error). Either marker or returned step on its
-// own is a Plan-time panic.
-//
-// For secrets, jobs call sparkwing.Secret(ctx, name) inside their step
-// closures.
-//
-// Panics if id is empty, already registered, or x is nil / wrong type.
-//
-//	sw.Job(plan, "test", func(ctx context.Context) error {
-//	    _, err := sparkwing.Bash(ctx, "go test ./...").Run()
-//	    return err
-//	})
-//
-//	sw.JobApproval(plan, "approve-prod", sparkwing.ApprovalConfig{
-//	    Message: "Promote build to prod?",
-//	    Timeout: 2 * time.Hour,
-//	}).Needs(integStg)
+// Job registers a [Workable] or func(context.Context) error under id.
+// The inner DAG is materialized at registration.
+// A typed-output job must embed [Produces] and return a WorkStep whose function
+// returns (T, error). Missing either part panics during registration.
+// Panics if the plan is nil, id is empty or registered, or the job has an invalid type.
 func Job(p *Plan, id string, x any) *JobNode {
 	if p == nil {
 		panic("sparkwing: Job: plan must be non-nil")
@@ -361,11 +310,8 @@ func materializeWork(id string, job Workable) (*Work, *WorkStep) {
 	return w, resultStep
 }
 
-// JobNode is a single entry in a [Plan]. It wraps a user-authored
-// [Workable] plus the Plan-layer modifiers (Needs, Retry, Timeout,
-// OnFailure, Cache, RunsOn, Inline, BeforeRun / AfterRun, Approval).
-// Returned by [Job], [JobApproval], and [JobSpawn]; modifier methods
-// chain off it. Inner-DAG modifiers live on [WorkStep] instead.
+// JobNode is a [Plan] entry wrapping a [Workable].
+// Inner-DAG modifiers belong to [WorkStep].
 type JobNode struct {
 	id         string
 	job        Workable
@@ -418,17 +364,7 @@ type JobNode struct {
 	consumes    []consumeEdge
 }
 
-// ApprovalConfig describes a manual approval gate. Authors fill it
-// out and pass it to sw.JobApproval; the orchestrator reads it back
-// via Job.ApprovalConfig when routing the gate to the approval-
-// waiter flow.
-//
-//	approve := sw.JobApproval(plan, "approve-prod", sparkwing.ApprovalConfig{
-//	    Message:  fmt.Sprintf("Promote %s to prod?", git.SHA),
-//	    Timeout:  2 * time.Hour,
-//	    OnExpiry: sparkwing.ApprovalFail,
-//	}).Needs(integStg)
-//	sw.Job(plan, "deploy-prod", &Deploy{Env: "prod"}).Needs(approve)
+// ApprovalConfig configures a manual approval gate.
 type ApprovalConfig struct {
 	// Message is the operator-facing prompt shown in the dashboard /
 	// CLI. Empty falls back to a generic "Approve <node>?" in the UI.
@@ -436,12 +372,8 @@ type ApprovalConfig struct {
 	// Timeout bounds how long the gate waits for a human answer. Zero
 	// means never time out.
 	Timeout time.Duration
-	// OnExpiry controls how an unanswered gate resolves once Timeout
-	// elapses. The zero value is ApprovalFail ("something went wrong,
-	// the gate wasn't answered"). ApprovalDeny treats no-answer as a
-	// soft "no" and ApprovalApprove as a soft "yes". Named OnExpiry
-	// rather than OnTimeout to avoid confusion with Job.Timeout(),
-	// which is unrelated (per-attempt execution budget).
+	// OnExpiry selects ApprovalFail, ApprovalDeny, or ApprovalApprove when the
+	// timeout expires. The zero value uses ApprovalFail.
 	OnExpiry ApprovalTimeoutPolicy
 }
 
@@ -464,7 +396,6 @@ const (
 	ApprovalApprove ApprovalTimeoutPolicy = "approve"
 )
 
-// IsApproval reports whether the node is an approval gate.
 func (n *JobNode) IsApproval() bool { return n.approval != nil }
 
 // ApprovalConfig returns the per-node approval configuration, or nil
@@ -473,38 +404,14 @@ func (n *JobNode) IsApproval() bool { return n.approval != nil }
 // call this.
 func (n *JobNode) ApprovalConfig() *ApprovalConfig { return n.approval }
 
-// ApprovalGate is the handle returned by sw.JobApproval. It exposes a
-// narrower modifier surface than *JobNode -- only the modifiers that
-// make sense for a human gate (Needs, NeedsOptional, OnFailure
-// recovery, BeforeRun/AfterRun hooks, SkipIf, Optional,
-// ContinueOnError). Modifiers that don't apply to gates -- Retry,
-// Timeout, Cache, Requires, Inline, Dynamic -- are physically absent
-// from this type, so authoring those mistakes is a compile error
-// rather than the previous mix of panics and silent no-ops.
+// ApprovalGate exposes the modifiers supported by manual approval gates.
 type ApprovalGate struct {
 	n *JobNode
 }
 
-// JobApproval registers a manual approval gate under id and returns
-// the gate handle for further configuration. The orchestrator routes
-// approval nodes through the approval-waiter flow rather than
-// dispatching Work; the gate pauses until a human (via the dashboard
-// or `sparkwing approve/deny`) resolves it. Denied / expired gates
-// resolve per cfg.OnExpiry.
-//
-// The verb is named JobApproval (not Approval) to keep the Job-prefix
-// convention: every Plan-layer verb that adds a Job carries the
-// Job- prefix so tab-complete on Job* surfaces the full set.
-//
-// Panics if id is empty or already registered, or if cfg.OnExpiry is
-// not one of the documented constants.
-//
-//	approve := sw.JobApproval(plan, "approve-prod", sparkwing.ApprovalConfig{
-//	    Message:  "Promote to prod?",
-//	    Timeout:  2 * time.Hour,
-//	    OnExpiry: sparkwing.ApprovalFail,
-//	}).Needs(integStg)
-//	sw.Job(plan, "deploy-prod", &Deploy{}).Needs(approve)
+// JobApproval registers a gate that waits for a human decision.
+// Denial fails the gate; expiration follows cfg.OnExpiry.
+// Panics if the plan is nil, id is empty or registered, or cfg.OnExpiry is invalid.
 func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate {
 	if p == nil {
 		panic("sparkwing: JobApproval: plan must be non-nil")
@@ -518,13 +425,8 @@ func JobApproval(p *Plan, id string, cfg ApprovalConfig) *ApprovalGate {
 	return &ApprovalGate{n: n}
 }
 
-// Job returns the underlying *JobNode. Pipeline authors should rarely
-// need this -- the gate's own methods cover the expected modifier
-// surface; this is the escape hatch for orchestrator-internal code
-// (or for the "I really want a Job-level modifier" case).
 func (g *ApprovalGate) Job() *JobNode { return g.n }
 
-// ID returns the gate's node id.
 func (g *ApprovalGate) ID() string { return g.n.id }
 
 // Needs declares hard upstream dependencies on the gate. Accepts any
@@ -601,36 +503,22 @@ type SkipPredicate func(ctx context.Context) bool
 // hashing.
 type CacheKey string
 
-// CacheKeyFn computes a cache key after upstream dependencies
-// complete. May read typed upstream output via Ref.Get(ctx).
-//
-// Return [NoCache] to explicitly opt this invocation out of
-// memoization; the run is logged as an explicit opt-out and proceeds
-// uncached. Returning the zero CacheKey ("") also bypasses caching
-// but is logged as a missing-key warning -- callers that intend to
-// skip caching should prefer NoCache so the operator-facing signal
-// is unambiguous.
-type CacheKeyFn func(ctx context.Context) CacheKey
+// CacheKeyFn computes a key after upstream dependencies complete.
+// An error, panic, or empty key fails the node before execution.
+// Return [NoCache] with a nil error to run without memoization.
+type CacheKeyFn func(ctx context.Context) (CacheKey, error)
 
 // BeforeRunFn runs once before the first Run attempt. A non-nil error
 // fails the node immediately; Run does not execute and Retry does
 // not apply.
 type BeforeRunFn func(ctx context.Context) error
 
-// AfterRunFn runs once after Run (including all retries) terminates.
-// err is the final Run error, or nil on success. The hook's return
-// value is logged but does not change the node's outcome.
+// AfterRunFn receives the final Run error after all retries, or nil on success.
+// A hook panic is logged and leaves the node’s outcome unchanged.
 type AfterRunFn func(ctx context.Context, err error)
 
-// Dep is the closed type set accepted by Plan-layer Needs and
-// NeedsOptional. The unexported marker method depID() means only
-// sparkwing-defined types can satisfy the interface, so passing an
-// arbitrary value (an int, a string, a Work-layer *WorkStep) is a
-// compile-time error.
-//
-// Implementations: [*JobNode], [*ApprovalGate], [*JobGroup]. By-name
-// references via a typed-string sentinel are intentionally not
-// supported -- store and pass the upstream's handle.
+// Dep accepts [JobNode], [ApprovalGate], and [JobGroup] handles as dependencies.
+// Pass the upstream handle to Needs or NeedsOptional.
 type Dep interface {
 	depID() string
 }
@@ -645,10 +533,8 @@ var (
 	_ Dep = (*JobGroup)(nil)
 )
 
-// ID returns the node's identifier.
 func (n *JobNode) ID() string { return n.id }
 
-// Job returns the underlying user-authored job struct.
 func (n *JobNode) Job() Workable { return n.job }
 
 // Work returns the materialized inner DAG for the node's job. Empty
@@ -688,7 +574,7 @@ func (n *JobNode) Needs(deps ...Dep) *JobNode {
 	return n
 }
 
-// NeedsGroups returns any dynamic groups (from ExpandFrom) this node
+// NeedsGroups returns any dynamic groups (from JobFanOutDynamic) this node
 // is waiting on.
 func (n *JobNode) NeedsGroups() []*JobGroup { return n.needsGroups }
 
@@ -843,9 +729,8 @@ func (n *JobNode) OnFailureNode() *JobNode { return n.onFailure }
 // SkipOption configures a SkipIf registration.
 type SkipOption func(*JobNode)
 
-// SkipBudget overrides the per-predicate evaluation budget. Zero
-// uses the orchestrator's default. The budget is per-node, not
-// per-predicate: the last SkipBudget on a node wins.
+// SkipBudget sets the timeout applied to each predicate on the node.
+// The last registration wins; zero uses the orchestrator’s timeout.
 func SkipBudget(d time.Duration) SkipOption {
 	return func(n *JobNode) {
 		if d < 0 {
@@ -887,7 +772,6 @@ func (n *JobNode) SkipIf(fn SkipPredicate, opts ...SkipOption) *JobNode {
 	return n
 }
 
-// SkipPredicates returns the node's registered skip predicates.
 func (n *JobNode) SkipPredicates() []SkipPredicate { return n.skipIf }
 
 // SkipIfBudget returns the configured per-predicate evaluation budget,
@@ -904,10 +788,8 @@ func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode {
 	return n
 }
 
-// AfterRun registers a hook to run once after Run terminates,
-// including after all retries. The hook receives the final error
-// (nil on success); its own failure is logged but does not change
-// the node's outcome.
+// AfterRun registers a hook invoked after Run and all retries finish.
+// A hook panic is logged and leaves the node’s outcome unchanged.
 func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode {
 	if fn != nil {
 		n.afterRun = append(n.afterRun, fn)
@@ -915,25 +797,10 @@ func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode {
 	return n
 }
 
-// Verify registers a postcondition checked after the node's action
-// succeeds. The action exited 0, but if fn returns a non-nil error the
-// node fails at [StageVerify] -- eligible for Retry (the action and the
-// check re-run together) and routed to OnFailure, exactly as an action
-// failure would be. Verify runs once per attempt.
-//
-// A failed Verify makes the node's own outcome Failed, so downstream
-// Needs() is correctly blocked and the dashboard shows the node red:
-// "the command succeeded but the result is bad" is a first-class outcome
-// on the node, not a hidden state encoded elsewhere.
-//
-//	sw.Job(plan, "deploy", &Deploy{}).
-//	    Verify(probe.HTTP(url).ExpectJSON("status", "ok").Check).
-//	    OnFailure("recover", recoverFn)
-//
-// On a node that also declares .Memoize(): a cache hit skips the action,
-// and the Verify with it -- the check is part of the cached unit. For a
-// health check that must run on every invocation, model it as its own
-// uncached node.
+// Verify checks a postcondition after each successful action attempt.
+// An error fails the node at [StageVerify] and follows Retry and OnFailure.
+// Retries repeat both the action and its check. A cache hit skips both.
+// A check that must run every time belongs in its own uncached node.
 func (n *JobNode) Verify(fn VerifyFn) *JobNode {
 	n.verify = fn
 	return n
@@ -942,10 +809,8 @@ func (n *JobNode) Verify(fn VerifyFn) *JobNode {
 // Verifier returns the node's Verify postcondition, or nil if none.
 func (n *JobNode) Verifier() VerifyFn { return n.verify }
 
-// BeforeRunHooks returns the node's registered pre-run hooks.
 func (n *JobNode) BeforeRunHooks() []BeforeRunFn { return n.beforeRun }
 
-// AfterRunHooks returns the node's registered post-run hooks.
 func (n *JobNode) AfterRunHooks() []AfterRunFn { return n.afterRun }
 
 // Requires records label terms used to filter runner claims for non-inline dispatched jobs.
@@ -974,30 +839,19 @@ func (n *JobNode) Requires(labels ...string) *JobNode {
 	return n
 }
 
-// RequiresLabels returns the terms declared via Requires.
 func (n *JobNode) RequiresLabels() []string {
 	return copyLabels(n.requires)
 }
 
-// Prefers records ordered runner-label preferences in plan-snapshot metadata and gives matching enrolled-executor offers a small boost bounded by their priority ceiling; legacy claims ignore it.
-// Within one controller's enrolled-executor offer round, the first preference
-// an eligible executor satisfies adds a small ordering boost, bounded by that
-// executor's administrator-owned priority ceiling. Prefers does not affect
-// legacy name-less runner claims. Each argument is one term with the same
-// comma-OR / AND semantics as Requires.
-//
-//	sw.Job(plan, "integration", &Integration{}).
-//	    Requires("os=linux").
-//	    Prefers("cloud-linux")
-//
-// Calling Prefers with no arguments clears any previously-set
-// preferences.
+// Prefers boosts enrolled-executor offers within their priority ceiling when runner labels match.
+// The first matched preference determines the boost.
+// Each argument uses the comma-OR and AND semantics of Requires.
+// Name-less runner claims ignore preferences. No arguments clears the preferences.
 func (n *JobNode) Prefers(labels ...string) *JobNode {
 	n.prefers = normalizeLabels(labels)
 	return n
 }
 
-// PrefersLabels returns the terms declared via Prefers.
 func (n *JobNode) PrefersLabels() []string {
 	return copyLabels(n.prefers)
 }
@@ -1028,7 +882,6 @@ func (n *JobNode) WhenRunner(labels ...string) *JobNode {
 	return n
 }
 
-// WhenRunnerLabels returns the terms declared via WhenRunner.
 func (n *JobNode) WhenRunnerLabels() []string {
 	return copyLabels(n.whenRunner)
 }
@@ -1059,33 +912,10 @@ func copyLabels(in []string) []string {
 	return out
 }
 
-// Inline marks the node to run on the dispatcher's own host rather
-// than being handed to the configured Runner. Useful for lightweight
-// glue work (setup checks, result aggregation) that would otherwise
-// force a multi-second runner boot.
-//
-// It says where the job runs, not what it shares. On the local model
-// an inline job is still its own process, with its own memory and its
-// own copy of every package variable, exactly like any other job; what
-// it skips is the cluster. Dispatched to a cluster runner, an inline
-// job runs inside the dispatcher itself.
-//
-// Constraints:
-//
-//   - Dispatched to a cluster runner, the job runs on the
-//     dispatcher's goroutine pool, where a long or CPU-heavy inline
-//     node delays other nodes: keep such jobs under a second or two.
-//     A local run spawns it like any other job, so its cost is only
-//     its own.
-//
-//   - Retry / Timeout / CacheKey still apply; only runner placement
-//     changes.
-//
-//   - Requires labels are ignored for inline nodes (there's no runner
-//     to match). Combining Inline() + Requires() is a config warning.
-//
-//     plan.Add("setup", &Setup{}).Inline()
-//     plan.Add("summarize", &Summarize{}).Needs(testBuckets).Inline()
+// Inline places the node on the dispatcher's host.
+// Local execution uses a separate process; cluster execution uses the dispatcher's
+// own goroutine pool, where CPU-heavy work delays other nodes.
+// Retry, timeout, and memoization still apply. Requires labels are ignored.
 func (n *JobNode) Inline() *JobNode {
 	if n.approval != nil {
 		panic(fmt.Sprintf("sparkwing: Job.Inline: approval gate %q cannot be inlined; approvals are long-lived by design", n.id))
@@ -1126,7 +956,7 @@ func (p *Plan) JobGroupNames(id string) []string {
 }
 
 // GroupSourceIDs returns the ids of the source nodes backing any
-// ExpandFrom Groups this node waits on via Needs(group). Returns nil
+// JobFanOutDynamic Groups this node waits on via Needs(group). Returns nil
 // when the node has no dynamic-group deps.
 func (p *Plan) GroupSourceIDs(id string) []string {
 	n := p.Job(id)
@@ -1146,9 +976,7 @@ func (p *Plan) GroupSourceIDs(id string) []string {
 	return out
 }
 
-// IsDynamicNode reports whether the node sources runtime-variable
-// downstream work -- i.e. it is the source of an ExpandFrom expansion
-// whose membership resolves at dispatch time rather than Plan time.
+// IsDynamicNode reports whether the node supplies a dynamic fan-out expansion.
 func (p *Plan) IsDynamicNode(id string) bool {
 	for _, exp := range p.expansions {
 		if exp.Source != nil && exp.Source.id == id {
@@ -1179,7 +1007,6 @@ func (n *JobNode) Optional() *JobNode {
 	return n
 }
 
-// IsOptional reports whether the node is marked non-essential.
 func (n *JobNode) IsOptional() bool { return n.optional }
 
 // NeedsOptional declares upstream dependencies that may or may not be
@@ -1205,7 +1032,6 @@ func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode {
 	return n
 }
 
-// OptionalDepIDs returns the IDs declared via NeedsOptional.
 func (n *JobNode) OptionalDepIDs() []string {
 	out := make([]string, len(n.needsOptional))
 	copy(out, n.needsOptional)

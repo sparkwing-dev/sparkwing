@@ -45,7 +45,7 @@ func isIdentifierByte(c byte) bool {
 func TestDocsMentionEnvVarDoesNotAllocatePerLookup(t *testing.T) {
 	mentioned := false
 	allocs := testing.AllocsPerRun(100, func() {
-		mentioned = docsMentionEnvVar("before SPARKWING_CACHE_TOKEN after", "SPARKWING_CACHE_TOKEN")
+		mentioned = docsMentionEnvVar("before SPARKWING_EXAMPLE_TOKEN after", "SPARKWING_EXAMPLE_TOKEN")
 	})
 	if !mentioned {
 		t.Fatal("environment variable token was not found")
@@ -56,7 +56,7 @@ func TestDocsMentionEnvVarDoesNotAllocatePerLookup(t *testing.T) {
 }
 
 func TestDocsMentionEnvVarRequiresWholeIdentifierToken(t *testing.T) {
-	const name = "SPARKWING_GITCACHE"
+	const name = "SPARKWING_EXAMPLE_CACHE"
 	for _, tc := range []struct {
 		documented string
 		want       bool
@@ -123,7 +123,7 @@ var userNamedEnvReads = map[string]string{
 	`internal/orchestrator/local_repo_resolver.go: "SPARKWING_REPO_" + envKeyForName(name)`: "one variable per repo, named after the repo",
 	"pkg/backends/backends.go: s.TokenEnv":                                                  "the backend config says which variable holds its token",
 	"pkg/storage/storeurl/spec.go: name":                                                    "a pipeline's url_source: names the variable holding its state URL",
-	"sparkwing/inputs/inputs.go: n":                                                         "a pipeline declares which variables its inputs read",
+	"sparkwing/inputs/inputs.go: name":                                                      "a pipeline declares which variables its inputs read",
 	"sparkwing/source_resolver.go: key":                                                     "a secret source's configured prefix plus the secret's name",
 }
 
@@ -134,10 +134,7 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 	}
 	for _, site := range dynamic {
 		if _, ok := userNamedEnvReads[site]; !ok {
-			t.Errorf("%s reads an environment variable through a non-literal name, "+
-				"so this check cannot tell whether it is documented. If the name comes "+
-				"from the user rather than from sparkwing, add it to userNamedEnvReads "+
-				"with the reason", site)
+			t.Errorf("%s computes an environment variable name; document a caller-selected name in userNamedEnvReads with its source", site)
 		}
 	}
 	for site := range userNamedEnvReads {
@@ -146,7 +143,7 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 		}
 	}
 	if len(names) == 0 {
-		t.Fatal("found no environment variable reads at all, so this check proves nothing")
+		t.Fatal("found no environment variable reads; source walk is incomplete")
 	}
 
 	documented := allDocsText(t)
@@ -176,7 +173,7 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 	}
 	for _, name := range undocumentedEnvVars {
 		if !read[name] {
-			t.Errorf("undocumentedEnvVars lists %s, which no non-test code reads any more; drop it", name)
+			t.Errorf("undocumentedEnvVars lists unread variable %s; remove the entry", name)
 		}
 	}
 }
@@ -263,8 +260,7 @@ func TestEnvVarWalkFollowsEnvHelpersToTheirCallSites(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(dynamic) != 0 {
-		t.Errorf("reported dynamic reads %v, want none: the helper's own read is the "+
-			"indirection, not a site that names anything", dynamic)
+		t.Errorf("reported dynamic reads %v, want helper reads resolved at their call sites", dynamic)
 	}
 	want := "SPARKWING_VIA_HELPER,SPARKWING_WEDGE"
 	if got := strings.Join(names, ","); got != want {
@@ -274,25 +270,25 @@ func TestEnvVarWalkFollowsEnvHelpersToTheirCallSites(t *testing.T) {
 
 func allDocsText(t *testing.T) string {
 	t.Helper()
-	var b strings.Builder
-	for _, e := range docs.List() {
-		if matchesAny(e.Slug, versionedPages) {
+	var documentText strings.Builder
+	for _, entry := range docs.List() {
+		if matchesAny(entry.Slug, versionedPages) {
 			continue
 		}
-		body, err := docs.ReadRaw(e.Slug)
+		body, err := docs.ReadRaw(entry.Slug)
 		if err != nil {
-			t.Fatalf("read %s: %v", e.Slug, err)
+			t.Fatalf("read %s: %v", entry.Slug, err)
 		}
-		b.WriteString(body)
-		b.WriteByte('\n')
+		documentText.WriteString(body)
+		documentText.WriteByte('\n')
 	}
-	return b.String()
+	return documentText.String()
 }
 
 func sourceDocsText(t *testing.T) string {
 	t.Helper()
 	root := filepath.FromSlash("../../docs")
-	var b strings.Builder
+	var documentText strings.Builder
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
 			return walkErr
@@ -308,14 +304,14 @@ func sourceDocsText(t *testing.T) string {
 		if readErr != nil {
 			return readErr
 		}
-		b.Write(body)
-		b.WriteByte('\n')
+		documentText.Write(body)
+		documentText.WriteByte('\n')
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("read %s: %v", root, err)
 	}
-	return b.String()
+	return documentText.String()
 }
 
 func envVarsRead(root string) (names, dynamic []string, err error) {
@@ -323,22 +319,22 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	fset := token.NewFileSet()
-	parsed := make(map[string]*ast.File, len(files))
+	fileSet := token.NewFileSet()
+	parsedFiles := make(map[string]*ast.File, len(files))
 	for _, path := range files {
-		file, parseErr := parser.ParseFile(fset, path, nil, 0)
+		file, parseErr := parser.ParseFile(fileSet, path, nil, 0)
 		if parseErr != nil {
 			return nil, nil, fmt.Errorf("parse %s: %w", path, parseErr)
 		}
-		parsed[path] = file
+		parsedFiles[path] = file
 	}
-	consts := stringConstants(parsed)
+	constantValues := stringConstants(parsedFiles)
 
-	helpers := envHelpers(parsed)
-	forwarded := forwardedReads(parsed)
+	helpers := envHelpers(parsedFiles)
+	forwardedSites := forwardedReads(parsedFiles)
 
-	seen := map[string]bool{}
-	for path, file := range parsed {
+	namesRead := map[string]bool{}
+	for path, file := range parsedFiles {
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			rel = path
@@ -348,26 +344,26 @@ func envVarsRead(root string) (names, dynamic []string, err error) {
 			if !ok || len(call.Args) == 0 {
 				return true
 			}
-			argIdx, ok := envReadArg(call.Fun, helpers)
-			if !ok || argIdx >= len(call.Args) {
+			argumentIndex, ok := envReadArg(call.Fun, helpers)
+			if !ok || argumentIndex >= len(call.Args) {
 				return true
 			}
-			if forwarded[call.Pos()] {
+			if forwardedSites[call.Pos()] {
 				return true
 			}
-			v, ok := staticString(call.Args[argIdx], consts)
+			v, ok := staticString(call.Args[argumentIndex], constantValues)
 			if !ok {
-				dynamic = append(dynamic, fmt.Sprintf("%s: %s", rel, exprText(fset, call.Args[argIdx])))
+				dynamic = append(dynamic, fmt.Sprintf("%s: %s", rel, exprText(fileSet, call.Args[argumentIndex])))
 				return true
 			}
 			if strings.HasPrefix(v, envPrefix) {
-				seen[v] = true
+				namesRead[v] = true
 			}
 			return true
 		})
 	}
 
-	for name := range seen {
+	for name := range namesRead {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -448,7 +444,7 @@ func stringConstants(files map[string]*ast.File) map[string]string {
 	return out
 }
 
-func staticString(arg ast.Expr, consts map[string]string) (string, bool) {
+func staticString(arg ast.Expr, constantValues map[string]string) (string, bool) {
 	switch e := arg.(type) {
 	case *ast.BasicLit:
 		if e.Kind != token.STRING {
@@ -457,10 +453,10 @@ func staticString(arg ast.Expr, consts map[string]string) (string, bool) {
 		v, err := strconv.Unquote(e.Value)
 		return v, err == nil
 	case *ast.Ident:
-		v, ok := consts[e.Name]
+		v, ok := constantValues[e.Name]
 		return v, ok
 	case *ast.SelectorExpr:
-		v, ok := consts[e.Sel.Name]
+		v, ok := constantValues[e.Sel.Name]
 		return v, ok
 	}
 	return "", false
@@ -532,20 +528,20 @@ func forwardedReads(files map[string]*ast.File) map[token.Pos]bool {
 	out := map[token.Pos]bool{}
 	for _, file := range files {
 		ast.Inspect(file, func(n ast.Node) bool {
-			var ftype *ast.FuncType
+			var functionType *ast.FuncType
 			var body *ast.BlockStmt
 			switch fn := n.(type) {
 			case *ast.FuncDecl:
-				ftype, body = fn.Type, fn.Body
+				functionType, body = fn.Type, fn.Body
 			case *ast.FuncLit:
-				ftype, body = fn.Type, fn.Body
+				functionType, body = fn.Type, fn.Body
 			default:
 				return true
 			}
 			if body == nil {
 				return true
 			}
-			params := paramNames(ftype)
+			params := paramNames(functionType)
 			ast.Inspect(body, func(inner ast.Node) bool {
 				call, ok := inner.(*ast.CallExpr)
 				if !ok || !isEnvRead(call.Fun) || len(call.Args) == 0 {
@@ -562,12 +558,12 @@ func forwardedReads(files map[string]*ast.File) map[token.Pos]bool {
 	return out
 }
 
-func paramNames(ftype *ast.FuncType) map[string]bool {
+func paramNames(functionType *ast.FuncType) map[string]bool {
 	out := map[string]bool{}
-	if ftype == nil || ftype.Params == nil {
+	if functionType == nil || functionType.Params == nil {
 		return out
 	}
-	for _, field := range ftype.Params.List {
+	for _, field := range functionType.Params.List {
 		for _, name := range field.Names {
 			out[name.Name] = true
 		}
@@ -575,9 +571,9 @@ func paramNames(ftype *ast.FuncType) map[string]bool {
 	return out
 }
 
-func exprText(fset *token.FileSet, e ast.Expr) string {
+func exprText(fileSet *token.FileSet, e ast.Expr) string {
 	var b strings.Builder
-	if err := printer.Fprint(&b, fset, e); err != nil {
+	if err := printer.Fprint(&b, fileSet, e); err != nil {
 		return "<unprintable>"
 	}
 	return b.String()

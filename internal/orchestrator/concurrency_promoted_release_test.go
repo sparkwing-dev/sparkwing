@@ -85,10 +85,10 @@ func TestWaitThenRunReleasesPromotedSlotWhenWorkerSlotReacquireFails(t *testing.
 		Node:                node,
 		ReacquireWorkerSlot: func() bool { return false },
 	}
-	cp := coordParams{key: key, capacity: 1, cost: 1, policy: store.OnLimitQueue}
+	parameters := coordinationParameters{key: key, capacity: 1, cost: 1, policy: store.OnLimitQueue}
 
 	r := &NodeExecutor{backends: LocalBackends(paths, st, nil)}
-	res := r.waitThenRun(ctx, req, cp, queued, time.Minute)
+	res := r.waitThenRun(ctx, req, parameters, queued, time.Minute)
 	if res.Outcome != sparkwing.Cancelled {
 		t.Fatalf("waitThenRun outcome = %q, want cancelled", res.Outcome)
 	}
