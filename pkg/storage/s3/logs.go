@@ -108,7 +108,7 @@ func (s *LogStore) ReadRun(ctx context.Context, runID string) ([]byte, error) {
 	byNode := map[string][]string{}
 	for _, k := range keys {
 		rest := strings.TrimPrefix(k, prefix)
-		slash := strings.Index(rest, "/")
+		slash := strings.LastIndex(rest, "/")
 		if slash < 0 {
 			continue
 		}
@@ -208,6 +208,9 @@ func (s *LogStore) listAndConcat(ctx context.Context, prefix string) ([]byte, er
 	}
 	var buf bytes.Buffer
 	for _, k := range keys {
+		if strings.Contains(strings.TrimPrefix(k, prefix), "/") {
+			continue
+		}
 		data, err := s.getObject(ctx, k)
 		if err != nil {
 			return nil, err
