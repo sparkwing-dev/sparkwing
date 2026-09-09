@@ -17,9 +17,8 @@ import (
 )
 
 // LogStore writes per-node logs as line-delimited JSON files under
-// Root/<runID>/<nodeID>.ndjson. Append uses O_APPEND so concurrent
-// writers from different processes interleave at line granularity
-// (POSIX guarantees writes < PIPE_BUF are atomic).
+// Root/<runID>/<nodeID>.ndjson. Append opens files with O_APPEND and
+// writes each payload and its trailing newline together.
 type LogStore struct {
 	Root string
 
@@ -93,14 +92,16 @@ func (s *LogStore) Append(_ context.Context, runID, nodeID string, data []byte) 
 		return err
 	}
 	defer f.Close()
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		line := make([]byte, len(data)+1)
+		copy(line, data)
+		line[len(data)] = '\n'
+		data = line
+	}
 	if _, err := f.Write(data); err != nil {
 		return err
 	}
-	if len(data) > 0 && data[len(data)-1] != '\n' {
-		if _, err := f.Write([]byte{'\n'}); err != nil {
-			return err
-		}
-	}
+
 	return nil
 }
 
