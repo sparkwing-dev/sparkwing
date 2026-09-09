@@ -3,6 +3,7 @@
 package procgroup
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 )
@@ -15,12 +16,12 @@ func configure(*exec.Cmd, bool) error { return errUnsupported }
 
 func ignoreTermination() {}
 
-func processTable(bool) ([]Info, error) { return nil, errUnsupported }
+func processTable(context.Context, bool) ([]Info, error) { return nil, errUnsupported }
 
 func waitLeaderExit(int) error { return errUnsupported }
 
-func signalTerminate(int, bool, bool) error { return errUnsupported }
+func signalTerminate(context.Context, int, bool, bool) error { return errUnsupported }
 
-func signalKill(int, bool, bool) error { return errUnsupported }
+func signalKill(context.Context, int, bool, bool) error { return errUnsupported }
 
-func descendantsEmpty(int, bool, bool) (bool, error) { return false, errUnsupported }
+func descendantsEmpty(context.Context, int, bool, bool) (bool, error) { return false, errUnsupported }

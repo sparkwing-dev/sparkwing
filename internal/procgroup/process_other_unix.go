@@ -2,4 +2,8 @@
 
 package procgroup
 
-func nativeProcessTable(bool) ([]Info, bool) { return nil, false }
+import "context"
+
+func processTable(ctx context.Context, withSessions bool) ([]Info, error) {
+	return psProcessTable(ctx, withSessions)
+}

@@ -3,6 +3,7 @@
 package procgroup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -17,19 +18,19 @@ import (
 func guardedSessionSupport() error { return nil }
 
 func sessionIdentity(pid int) (int, string, error) {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	statBytes, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return 0, "", fmt.Errorf("%w: process %d", ErrProcessAbsent, pid)
 		}
 		return 0, "", err
 	}
-	line := string(data)
-	rparen := strings.LastIndexByte(line, ')')
-	if rparen < 0 || rparen+2 >= len(line) {
+	line := string(statBytes)
+	commandEnd := strings.LastIndexByte(line, ')')
+	if commandEnd < 0 || commandEnd+2 >= len(line) {
 		return 0, "", fmt.Errorf("malformed process stat for %d", pid)
 	}
-	fields := strings.Fields(line[rparen+2:])
+	fields := strings.Fields(line[commandEnd+2:])
 	if len(fields) < 20 {
 		return 0, "", fmt.Errorf("short process stat for %d", pid)
 	}
@@ -37,11 +38,11 @@ func sessionIdentity(pid int) (int, string, error) {
 	if err != nil {
 		return 0, "", fmt.Errorf("process %d start time: %w", pid, err)
 	}
-	sid, err := unix.Getsid(pid)
+	sessionID, err := unix.Getsid(pid)
 	if err != nil {
 		return 0, "", err
 	}
-	return sid, strconv.FormatUint(start, 10), nil
+	return sessionID, strconv.FormatUint(start, 10), nil
 }
 
 func signalGuardSession(sessionID int, kill bool) error {
@@ -49,9 +50,9 @@ func signalGuardSession(sessionID int, kill bool) error {
 	if kill {
 		signal = syscall.SIGKILL
 	}
-	return signalSession(sessionID, signal)
+	return signalSession(context.Background(), sessionID, signal)
 }
 
 func signalDiagnosticSession(sessionID int) error {
-	return signalSession(sessionID, syscall.SIGQUIT)
+	return signalSession(context.Background(), sessionID, syscall.SIGQUIT)
 }
