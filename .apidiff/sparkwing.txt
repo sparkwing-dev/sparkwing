@@ -1,6 +1,5 @@
 # sparkwing
 
-func AcquireLintSlot(tool string) (*LintSlot, error)
 type AfterRunFn func(ctx context.Context, err error)
 func Always() Predicate
 func And(preds ...Predicate) Predicate
@@ -384,17 +383,6 @@ func KeyFromFile(path string) KeySource
 type KeySource struct {
 }
 func LintCacheBlobKey() string
-type LintSlot struct {
-	Path string
-
-	Cache string
-
-	Canonical bool
-}
-func (s *LintSlot) Configure(c *Cmd, cacheVar string) *Cmd
-func (s *LintSlot) ConfigureIn(c *Cmd, rel, cacheVar string) *Cmd
-func (s *LintSlot) Release()
-const LintSlotsEnv = "SPARKWING_LINT_SLOTS"
 type LintWarning struct {
 	NodeID string
 	Code   string

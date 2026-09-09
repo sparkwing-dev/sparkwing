@@ -472,7 +472,7 @@ infrastructure error.
 | `--wait` | Block until at least one match appears |
 | `--find-timeout DURATION` | Give up (nonzero exit) after this long when --wait is set (default: 2m) |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
-| `-q, --quiet` | Print only run ids, one per line (or a JSON array of ids with -o json) |
+| `-q, --quiet` | Print only run ids, one per line (JSON strings with -o json) |
 | `--profile NAME` | Profile name (cluster mode). Omit to search the local SQLite store. |
 
 ### Examples
@@ -628,7 +628,7 @@ shell piping:
 | `--finished-before DATE` | Only runs whose FinishedAt <= this (excludes still-running) |
 | `--limit N` | Maximum runs to show (default: 20) |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
-| `-q, --quiet` | Print only run ids, one per line (or JSON array of ids with -o json) |
+| `-q, --quiet` | Print only run ids, one per line (JSON strings with -o json) |
 | `--by-pipeline` | Pivot into one row per pipeline with a status sparkline of the last N runs |
 | `--sparkline N` | Sparkline length when --by-pipeline is set (default: 30) |
 | `--style STYLE` | Sparkline glyph style: ascii\|block\|dot (default: ascii) |
